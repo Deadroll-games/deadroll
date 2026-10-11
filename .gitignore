@@ -1,9 +1,24 @@
+# secrets and keys: never commit
 /private/
 .env
 .env.*
 *.keypair.json
+*-keypair.json
 id.json
+
+# build output
 target/
+**/target/
+dist/
+*.rs.bk
+
+# js
 node_modules/
+
+# local validators and anchor
 test-ledger/
 .anchor/
+.surfpool/
+
+# os
+.DS_Store

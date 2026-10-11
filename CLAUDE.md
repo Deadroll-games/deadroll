@@ -51,7 +51,8 @@ Every program and crate folder has its own `README.md` and a short `CLAUDE.md` w
 
 ## 2. Stack
 
-- **Anchor 1.0** (`avm install latest && avm use latest`), **Solana CLI 3.x** (Agave), Surfpool as local validator.
+- **Anchor 1.2.1** (`anchor-lang = "=1.2.1"`, pinned in the root `Cargo.toml`; CLI from the GitHub release or `avm install 1.2.1`), **Solana CLI 4.1.2** (Agave, Anchor 1.2 CI pairing), Rust `1.92.0` (`rust-toolchain.toml`), Surfpool as local validator.
+- Platform tools **v1.54** (`--tools-version v1.54`): cargo-build-sbf 4.1.0 panics on Windows for any non-default tools version, and Anchor 1.2.1 defaults to v1.57. Use the same flag on every OS so all builds match.
 - Program tests: LiteSVM (Rust) for single-program tests; `anchor test` for `tests/` integration.
 - TS: `@solana/kit` + Codama clients in `sdk/`.
 - MagicBlock: `ephemeral-vrf-sdk` (VRF), `session-keys` (Session Keys). Metaplex: `mpl-core`.
@@ -60,9 +61,9 @@ Every program and crate folder has its own `README.md` and a short `CLAUDE.md` w
 ## 3. Commands
 
 ```
-anchor build                         # all programs
-anchor build -p session              # one program
-anchor test                          # integration (tests/)
+anchor build --tools-version v1.54              # all programs
+anchor build --tools-version v1.54 -p session   # one program
+anchor test --skip-build                        # integration (tests/), after anchor build
 cargo test -p deadroll-combat        # one crate
 cargo build -p deadroll-render --target wasm32-unknown-unknown --release
 pnpm --filter sdk generate           # Codama after any IDL change

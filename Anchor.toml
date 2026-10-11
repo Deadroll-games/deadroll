@@ -1,0 +1,34 @@
+[toolchain]
+anchor_version = "1.2.1"
+package_manager = "pnpm"
+
+[features]
+resolution = true
+skip-lint = false
+
+[programs.devnet]
+deadroll_character = "9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL"
+deadroll_city = "2Cr5vB5awqDVx6XRcxtFFYQEG6Zy3aSAcKcqzh1xbVjS"
+deadroll_items = "48FtbrDegNrAUHFza9HdJzZAvUo3uUNqs1kNnZxFsqJS"
+deadroll_map = "2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH"
+deadroll_registry = "dZ1jraMfS3bAUTkRw2TA1ddg8UDGzgUdFQz5pmBxjoG"
+deadroll_render_program = "DgQCsXAe7Q7h8zdtToiTvk8XqNjjbXuD6xith2BmEiRB"
+deadroll_session = "3gzfih2WaBgXcYZ57jWokmZM3FDE6QHX5y4R9EvKZoNJ"
+
+[programs.localnet]
+deadroll_character = "9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL"
+deadroll_city = "2Cr5vB5awqDVx6XRcxtFFYQEG6Zy3aSAcKcqzh1xbVjS"
+deadroll_items = "48FtbrDegNrAUHFza9HdJzZAvUo3uUNqs1kNnZxFsqJS"
+deadroll_map = "2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH"
+deadroll_registry = "dZ1jraMfS3bAUTkRw2TA1ddg8UDGzgUdFQz5pmBxjoG"
+deadroll_render_program = "DgQCsXAe7Q7h8zdtToiTvk8XqNjjbXuD6xith2BmEiRB"
+deadroll_session = "3gzfih2WaBgXcYZ57jWokmZM3FDE6QHX5y4R9EvKZoNJ"
+
+[provider]
+cluster = "localnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "pnpm --filter tests test"
+
+[hooks]

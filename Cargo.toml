@@ -1,0 +1,42 @@
+[workspace]
+members = ["programs/*", "crates/*"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89.0"
+license = "MIT"
+publish = false
+
+[workspace.dependencies]
+# Pinned by L0. Changing a pin is a lead-lane PR (see agents/TASKS.md, dependency decision).
+anchor-lang = "=1.2.1"
+borsh = { version = "1.5.7", default-features = false, features = ["derive"] }
+# Same major as anchor-lang 1.2.1 (default `solana-v3` cohort), so `Pubkey` is one type everywhere.
+solana-pubkey = { version = "3", default-features = false, features = ["borsh"] }
+sha2 = { version = "0.10", default-features = false }
+
+deadroll-types = { path = "crates/types" }
+deadroll-combat = { path = "crates/combat" }
+deadroll-skillcheck = { path = "crates/skillcheck" }
+deadroll-mapcheck = { path = "crates/mapcheck" }
+deadroll-render = { path = "crates/render" }
+
+deadroll-registry = { path = "programs/registry", features = ["cpi"] }
+deadroll-render-program = { path = "programs/render", features = ["cpi"] }
+deadroll-character = { path = "programs/character", features = ["cpi"] }
+deadroll-items = { path = "programs/items", features = ["cpi"] }
+deadroll-map = { path = "programs/map", features = ["cpi"] }
+deadroll-session = { path = "programs/session", features = ["cpi"] }
+deadroll-city = { path = "programs/city", features = ["cpi"] }
+
+[profile.release]
+overflow-checks = true
+lto = "fat"
+codegen-units = 1
+
+[profile.release.build-override]
+opt-level = 3
+incremental = false
+codegen-units = 1

@@ -1,0 +1,9 @@
+{
+  "name": "@deadroll/tests",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node -e \"console.log('no integration tests yet (L8.2)')\""
+  }
+}
