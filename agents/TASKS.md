@@ -58,12 +58,12 @@ If a checkpoint slips by more than 2 hours, the lead moves the lowest P0 item to
 
 ## L2. Render crate + render program
 
-- [ ] **L2.1 (C)** `crates/render`: sprite DSL decoder (format in `crates/render/FORMAT.md`, from `docs/ART_DESCRIPTION.md`), rasterize commands, auto shading, outline, layer order, ramps -> RGBA.
-- [ ] **L2.2 (C)** PNG encoder (stored deflate blocks, CRC32, Adler32), integer scaling.
-- [ ] **L2.3 (C)** C ABI exports + `wasm32-unknown-unknown` build, size budget 60 KB after `wasm-opt -Oz`.
+- [ ] **L2.1 (C)** Claude (L2). `crates/render`: sprite DSL decoder (format in `crates/render/FORMAT.md`, from `docs/ART_DESCRIPTION.md`), rasterize commands, auto shading, outline, layer order, ramps -> RGBA.
+- [ ] **L2.2 (C)** Claude (L2). PNG encoder (stored deflate blocks, CRC32, Adler32), integer scaling.
+- [ ] **L2.3 (C)** Claude (L2). C ABI exports + `wasm32-unknown-unknown` build, size budget 60 KB after `wasm-opt -Oz`.
 - [ ] **L2.4 (G)** `tools/art`: CLI that renders a DSL file to PNG (x8) for preview; golden image tests.
-- [ ] **L2.5 (C)** `programs/render`: `init_rasterizer`, `write_chunk(offset, bytes)`, `finalize_rasterizer` (SHA-256, freeze, write to `GameConfig` via registry authority), `init_palette`, `write_sprites`.
-- [ ] **L2.6 (G)** `tools/scripts/upload-rasterizer.ts` and `upload-sprites.ts` (chunking, resume, verify hash).
+- [ ] **L2.5 (C)** Claude (L2). `programs/render`: `init_rasterizer`, `write_chunk(offset, bytes)`, `finalize_rasterizer` (SHA-256, freeze; no CPI, registry pulls, see L4.1), `init_palette`, `write_sprites`.
+- [ ] **L2.6 (G)** Claude (L2). `tools/scripts/upload-rasterizer.ts` and `upload-sprites.ts` (chunking, resume, verify hash).
 - [ ] P1 **L2.7** Tombstone and wound overlays.
 
 ## L3. Art (mostly Grok, short sessions)
@@ -79,7 +79,7 @@ Each task = one fresh Grok session, writes only in `assets/sprites/<name>.dsl`, 
 
 ## L4. Registry program
 
-- [ ] **L4.1 (C)** `init_config`, `set_programs`, `set_rasterizer` (callable only by render program PDA or authority), `set_uri_base`.
+- [ ] **L4.1 (C)** `init_config`, `set_programs`, `set_rasterizer`, `set_uri_base`. `set_rasterizer` is authority-only and pulls (no CPI from render, decided in L2): it takes the `RasterizerCode` account, checks `owner == GameConfig.programs[Render]` and `finalized`, then copies version, address and sha256 (header offsets in `programs/render/README.md`). Same pattern later for `Palette` and `SpriteBook`.
 - [ ] **L4.2 (C)** Tables: aspects, resonances, bestiary, tileset, prefabs (`write_table(kind, offset, bytes)`).
 - [ ] **L4.3 (G)** `assets/registry/*.json` from docs (aspects, resonance pairs, bestiary P0 monsters, prefab rooms) + `tools/scripts/seed-registry.ts`.
 
