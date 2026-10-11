@@ -32,9 +32,3 @@ wallet = "~/.config/solana/id.json"
 test = "pnpm --filter tests test"
 
 [hooks]
-
-# Registry GameConfig for local tests until registry `init_config` exists (L4.1).
-# Generate first: node tests/fixtures/make-config.mjs (writes the git-ignored .anchor/fixtures/).
-[[test.validator.account]]
-address = "HYGYnuyssMfrHr2gT3AC3hkQpD6xt37a5hrCc2Z97JHN"
-filename = ".anchor/fixtures/game_config.json"

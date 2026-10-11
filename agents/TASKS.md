@@ -18,28 +18,15 @@ Rules for the lanes:
 2. **VRF on localnet:** `programs/session` gets a cargo feature `mock-vrf`. With it, the `consume_randomness` signer check expects a fixed test keypair instead of the VRF identity; the rest of the callback is the **same** code path. Do not use `SlotHashesRoll` for tests. The devnet build must never enable `mock-vrf`: the deploy script (L8.3) fails if it is on. L8.3 adds one devnet smoke test with the real VRF oracle.
 3. **All lanes build with** `anchor build --tools-version v1.54` (cargo-build-sbf 4.1.0 panics on Windows with Anchor's default v1.57; one version everywhere keeps builds identical).
 
-## Decision: local validator tests on Windows (L2, 2026-10-11)
+## Decision: one shared local validator (H, 2026-10-11, written by L2)
 
-Native Windows `solana-test-validator` 4.1.2 cannot create its ledger (genesis unpack: "access denied", os error 5, even with Developer Mode), and `anchor test` cannot run the test script on Windows (its `bash` resolves to WSL's `System32\bash.exe`). LiteSVM is not used: its agave crates need rustc > 1.92 or clash with `wincode` versions. So: **the validator runs in WSL Ubuntu, builds and tests stay on Windows, one shot per run.**
+One shared local validator runs in WSL at `http://127.0.0.1:8899`, started by H. Session Keys and Metaplex Core are cloned from devnet into it; VRF uses the `mock-vrf` feature. (Native Windows `solana-test-validator` cannot create its ledger, and LiteSVM's agave crates need rustc > 1.92, so neither is used.)
 
-```
-anchor build --tools-version v1.54                      # all programs (the script loads every .so at genesis)
-node tests/fixtures/make-config.mjs                     # test wallet + registry GameConfig fixture (.anchor/, git-ignored)
-powershell -ExecutionPolicy Bypass -File tools/scripts/wsl-validator.ps1 -Port <lane port>
-# optional: -Test "pnpm --filter tests test" (default)  -Wallet .anchor/test-wallet.json (default)
-```
-
-`tools/scripts/wsl-validator.ps1` starts `solana-test-validator` in WSL Ubuntu with a fresh ledger in the Linux home (`~/ledger-<port>`, never `/mnt/d`), loads every `target/deploy/<program>.so` from `[programs.localnet]`, the `[[test.validator.account]]` and `[[test.genesis]]` fixtures at genesis, waits for RPC health, the websocket and the first slots, runs the tests with `ANCHOR_PROVIDER_URL`/`ANCHOR_WALLET` set, and **always stops the validator** (also on failure). Tests never deploy and never assume state from an earlier run.
-
-| Lane | Base port P |
-|---|---|
-| L2 | 8899 |
-| L4 | 8939 |
-| L5 | 8909 |
-| L6 | 8919 |
-| L7 | 8929 |
-
-Ports for base P: RPC P, websocket P+1, faucet P+2, gossip P+3, dynamic range `20000+(P-8899)*10` .. +59. Never run `anchor test` directly on Windows and never keep a validator running between runs. The `GameConfig` fixture in `Anchor.toml` goes away when registry `init_config` (L4.1) lands; tests then create the config themselves.
+1. **Never start, stop or reset a validator yourself.**
+2. **Deploy only your own program:** `anchor deploy -p <your_program> --provider.cluster localnet`. Never deploy other lanes' programs.
+3. **Run tests with** `anchor test --skip-local-validator --skip-deploy` (plus `-p <program>` / your test file).
+4. **Tests use fresh random keypairs for everything** and random ids for PDAs keyed by an id (versions, indices), so runs and lanes never collide. They must **tolerate singletons that already exist** (e.g. `GameConfig`): if it exists, read it instead of failing.
+5. If you need another lane's program that is not deployed yet, test what you can, skip the rest with a clear reason in the test output, and note it in the PR.
 
 Legend: **C** = Claude agent, **G** = Grok (via `delegate-to-grok`, reviewed by the lane's Claude), **H** = human (Ivan).
 Each lane works in its own worktree: `git worktree add ../deadroll-<lane> -b lane/<lane>`.

@@ -1,10 +1,14 @@
-// programs/render on a local validator: upload the real rasterizer WASM, palette and sprite book,
-// read them back, render with the on-chain WASM (demo step 1), and every rejection.
+// programs/render on the shared local validator (agents/TASKS.md, decision block): upload the real
+// rasterizer WASM, palette and sprite book, read them back, render with the on-chain WASM (demo
+// step 1), and every rejection.
 //
-// Before `anchor test --validator legacy --provider.wallet .anchor/test-wallet.json`:
-//   node tests/fixtures/make-config.mjs           (GameConfig fixture + test wallet)
+// Before `anchor test --skip-local-validator --skip-deploy`:
+//   anchor deploy -p deadroll_render_program --provider.cluster localnet
 //   bash crates/render/wasm/build.sh               (target/render-wasm/deadroll_render.wasm)
 //   cargo test -p deadroll-render --test golden    (target/render-golden: palette, book, expected hash)
+// Fresh random keypairs and random blob ids every run. `init_*` needs the signer to be
+// `GameConfig.authority`: the upload flows run only when the registry GameConfig exists and its
+// authority is the provider wallet; otherwise they are skipped with the reason (registry L4.1).
 // Instructions are encoded by hand until the Codama sdk exists (L8.1).
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -20,7 +24,7 @@ import {
   createSolanaRpcSubscriptions,
   createTransactionMessage,
   generateKeyPairSigner,
-  getAddressEncoder,
+  getAddressDecoder,
   getProgramDerivedAddress,
   lamports,
   pipe,
@@ -63,9 +67,46 @@ const rpcSubscriptions = createSolanaRpcSubscriptions(wsUrl.toString());
 const sendAndConfirm = sendAndConfirmTransactionFactory({ rpc, rpcSubscriptions });
 const airdrop = airdropFactory({ rpc, rpcSubscriptions });
 
-const walletPath = process.env.ANCHOR_WALLET ?? new URL(".anchor/test-wallet.json", root).pathname.slice(1);
-const authority = await createKeyPairSignerFromBytes(new Uint8Array(JSON.parse(readFileSync(walletPath, "utf8"))));
-await airdrop({ recipientAddress: authority.address, lamports: lamports(50_000_000_000n), commitment: "confirmed" });
+async function funded(sol = 5n) {
+  const k = await generateKeyPairSigner();
+  await airdrop({ recipientAddress: k.address, lamports: lamports(sol * 1_000_000_000n), commitment: "confirmed" });
+  return k;
+}
+
+// GameConfig is a registry singleton: read it, never create or overwrite it.
+// Data: 8-byte discriminator, version u8, authority at 9..41 (agents/CONTRACTS.md 4).
+async function gameConfigAuthority(): Promise<string | null> {
+  const { value } = await rpc.getAccountInfo(CONFIG, { encoding: "base64", commitment: "confirmed" }).send();
+  if (!value) return null;
+  const raw = Buffer.from(value.data[0], "base64");
+  return getAddressDecoder().decode(raw.subarray(9, 41));
+}
+
+// The provider wallet can upload only if it is GameConfig.authority; other keypairs are random.
+const walletPath = process.env.ANCHOR_WALLET;
+const configAuthority = await gameConfigAuthority();
+const wallet = walletPath
+  ? await createKeyPairSignerFromBytes(new Uint8Array(JSON.parse(readFileSync(walletPath, "utf8"))))
+  : null;
+const skipUploads =
+  configAuthority === null
+    ? "registry GameConfig is not on the validator yet (registry init_config, L4.1)"
+    : wallet === null || wallet.address !== configAuthority
+      ? `GameConfig.authority ${configAuthority} is not the provider wallet`
+      : false;
+const authority = skipUploads ? await funded(50n) : wallet!;
+if (!skipUploads) {
+  await airdrop({ recipientAddress: authority.address, lamports: lamports(50_000_000_000n), commitment: "confirmed" });
+}
+
+/** A random blob id whose PDA does not exist yet (shared validator: no fixed ids). */
+async function freshId(kind: Kind): Promise<number> {
+  for (;;) {
+    const id = 1 + Math.floor(Math.random() * 65535);
+    const { value } = await rpc.getAccountInfo(await pda(kind, id), { commitment: "confirmed" }).send();
+    if (!value) return id;
+  }
+}
 
 const sha256 = (b: Uint8Array) => new Uint8Array(createHash("sha256").update(b).digest());
 const disc = (name: string) => sha256(new TextEncoder().encode(`global:${name}`)).subarray(0, 8);
@@ -229,10 +270,21 @@ const wasm = new Uint8Array(read("target/render-wasm/deadroll_render.wasm"));
 const golden = goldenInput();
 const header = (d: Uint8Array) => ({ version: d[8], kind: d[9], finalized: d[10], len: new DataView(d.buffer).getUint32(12, true) });
 
-test("demo step 1: rasterizer, palette and sprite book from chain render the golden PNG", async () => {
-  const r = await upload("rasterizer", 1, wasm);
-  const p = await upload("palette", 1, golden.palette);
-  const b = await upload("sprite_book", 1, golden.book);
+/** Copy of a palette or sprite book body with its u16 version / book id (bytes 1..3) set to `id`. */
+function withId(body: Uint8Array, id: number) {
+  const b = body.slice();
+  b.set(u16(id), 1);
+  return b;
+}
+
+const uploads = { skip: skipUploads };
+if (skipUploads) console.log(`# render upload flows skipped: ${skipUploads}`);
+
+test("demo step 1: rasterizer, palette and sprite book from chain render the golden PNG", uploads, async () => {
+  const [rv, pv, bid] = [await freshId("rasterizer"), await freshId("palette"), await freshId("sprite_book")];
+  const r = await upload("rasterizer", rv, wasm);
+  const p = await upload("palette", pv, withId(golden.palette, pv));
+  const b = await upload("sprite_book", bid, withId(golden.book, bid));
 
   const rd = await data(r);
   assert.deepEqual(header(rd), { version: 1, kind: 1, finalized: 1, len: wasm.length });
@@ -242,31 +294,46 @@ test("demo step 1: rasterizer, palette and sprite book from chain render the gol
 
   const pal = (await data(p)).subarray(BODY_OFFSET);
   const book = (await data(b)).subarray(BODY_OFFSET);
-  const input = cat(u32(golden.request.length), golden.request, new Uint8Array(32), u32(pal.length), pal, u32(book.length), book);
+  const request = golden.request.slice();
+  request.set(u16(pv), 0); // RenderRequest.palette_version
+  const input = cat(u32(request.length), request, new Uint8Array(32), u32(pal.length), pal, u32(book.length), book);
   const png = renderWithWasm(chainWasm, input);
   assert.equal(Buffer.from(sha256(png)).toString("hex"), golden.expected);
 });
 
-test("init rejections", async () => {
-  const stranger = await generateKeyPairSigner();
-  await airdrop({ recipientAddress: stranger.address, lamports: lamports(2_000_000_000n), commitment: "confirmed" });
+test("rejections that need no GameConfig", async () => {
+  const payer = await funded();
   const h = sha256(wasm);
-  assert.equal(await fails(send(stranger, await ix.init("rasterizer", stranger, 20, 100, h))), E.Unauthorized);
-  // A program-owned account that is not the registry config.
-  assert.equal(await fails(send(authority, await ix.init("rasterizer", authority, 20, 100, h, await pda("rasterizer", 1)))), E.WrongConfig);
-  assert.equal(await fails(send(authority, await ix.init("rasterizer", authority, 20, 0, h))), E.InvalidLength);
-  assert.equal(await fails(send(authority, await ix.init("rasterizer", authority, 20, 128 * 1024 + 1, h))), E.InvalidLength);
-  assert.equal(await fails(send(authority, await ix.init("palette", authority, 20, 8 * 1024 + 1, h))), E.InvalidLength);
-  assert.equal(await fails(send(authority, await ix.init("sprite_book", authority, 20, 64 * 1024 + 1, h))), E.InvalidLength);
-  // Same version twice: the PDA already exists (system program error, not ours).
-  await send(authority, await ix.init("rasterizer", authority, 21, 100, h));
-  assert.notEqual(await fails(send(authority, await ix.init("rasterizer", authority, 21, 200, h))), undefined);
+  const id = await freshId("rasterizer");
+  // Length is checked before the config.
+  assert.equal(await fails(send(payer, await ix.init("rasterizer", payer, id, 0, h))), E.InvalidLength);
+  assert.equal(await fails(send(payer, await ix.init("rasterizer", payer, id, 128 * 1024 + 1, h))), E.InvalidLength);
+  assert.equal(await fails(send(payer, await ix.init("palette", payer, id, 8 * 1024 + 1, h))), E.InvalidLength);
+  assert.equal(await fails(send(payer, await ix.init("sprite_book", payer, id, 64 * 1024 + 1, h))), E.InvalidLength);
+  // A random address is not the registry config.
+  const notConfig = (await generateKeyPairSigner()).address;
+  assert.equal(await fails(send(payer, await ix.init("rasterizer", payer, id, 100, h, notConfig))), E.WrongConfig);
+  // Accounts that are not blobs of this program.
+  assert.equal(await fails(send(payer, ix.write(payer, payer.address, 0, new Uint8Array([1])))), E.WrongAccount);
+  assert.equal(await fails(send(payer, ix.extend(payer, payer.address))), E.WrongAccount);
 });
 
-test("extend and write rejections", async () => {
-  const stranger = await generateKeyPairSigner();
-  await airdrop({ recipientAddress: stranger.address, lamports: lamports(2_000_000_000n), commitment: "confirmed" });
-  const t = await init("rasterizer", 30, wasm);
+test("init rejections", uploads, async () => {
+  const stranger = await funded();
+  const h = sha256(wasm);
+  const id = await freshId("rasterizer");
+  assert.equal(await fails(send(stranger, await ix.init("rasterizer", stranger, id, 100, h))), E.Unauthorized);
+  // A program-owned account that is not the registry config.
+  const blob = await init("rasterizer", await freshId("rasterizer"), new Uint8Array(10).fill(1));
+  assert.equal(await fails(send(authority, await ix.init("rasterizer", authority, id, 100, h, blob))), E.WrongConfig);
+  // Same version twice: the PDA already exists (system program error, not ours).
+  await send(authority, await ix.init("rasterizer", authority, id, 100, h));
+  assert.notEqual(await fails(send(authority, await ix.init("rasterizer", authority, id, 200, h))), undefined);
+});
+
+test("extend and write rejections", uploads, async () => {
+  const stranger = await funded();
+  const t = await init("rasterizer", await freshId("rasterizer"), wasm);
   assert.equal((await data(t)).length, GROW_STEP, "init allocates one step");
   assert.equal(await fails(send(stranger, ix.extend(stranger, t))), E.Unauthorized);
   assert.equal(await fails(send(stranger, ix.write(stranger, t, 0, new Uint8Array([1])))), E.Unauthorized);
@@ -276,7 +343,7 @@ test("extend and write rejections", async () => {
   assert.equal(await fails(send(authority, ix.extend(authority, t))), E.AlreadyFullyAllocated);
   assert.equal(await fails(send(authority, ix.write(authority, t, wasm.length - 1, new Uint8Array([1, 2])))), E.OutOfBounds);
   assert.equal(await fails(send(authority, ix.write(authority, t, 0xffffffff, new Uint8Array([1])))), E.OutOfBounds);
-  // Not a blob of this program.
+  // The registry config is not a blob of this program.
   assert.equal(await fails(send(authority, ix.write(authority, CONFIG, 0, new Uint8Array([1])))), E.WrongAccount);
   // After finalize nothing writes or grows.
   await writeAll(t, wasm);
@@ -285,10 +352,9 @@ test("extend and write rejections", async () => {
   assert.equal(await fails(send(authority, ix.extend(authority, t))), E.AlreadyFinalized);
 });
 
-test("finalize rejections", async () => {
-  const stranger = await generateKeyPairSigner();
-  await airdrop({ recipientAddress: stranger.address, lamports: lamports(2_000_000_000n), commitment: "confirmed" });
-  const r = await init("rasterizer", 40, wasm);
+test("finalize rejections", uploads, async () => {
+  const stranger = await funded();
+  const r = await init("rasterizer", await freshId("rasterizer"), wasm);
   assert.equal(await fails(send(authority, ix.finalize("rasterizer", authority, r))), E.NotFullyAllocated);
   await grow(r, wasm.length);
   assert.equal(await fails(send(authority, ix.finalize("rasterizer", authority, r))), E.HashMismatch);
@@ -302,15 +368,19 @@ test("finalize rejections", async () => {
 
   // Hash matches, content is wrong for the kind.
   const notWasm = new Uint8Array(64).fill(9);
-  const t = await init("rasterizer", 41, notWasm);
+  const t = await init("rasterizer", await freshId("rasterizer"), notWasm);
   await writeAll(t, notWasm);
   assert.equal(await fails(send(authority, ix.finalize("rasterizer", authority, t))), E.InvalidBody);
-  // Palette body of version 1 stored as version 2.
-  const p = await init("palette", 2, golden.palette);
-  await writeAll(p, golden.palette);
+  // Palette body whose version differs from its PDA version.
+  const pv = await freshId("palette");
+  const pal = withId(golden.palette, pv === 65535 ? 1 : pv + 1);
+  const p = await init("palette", pv, pal);
+  await writeAll(p, pal);
   assert.equal(await fails(send(authority, ix.finalize("palette", authority, p))), E.InvalidBody);
-  // Sprite book with id 1 stored as book 5.
-  const b = await init("sprite_book", 5, golden.book);
-  await writeAll(b, golden.book);
+  // Sprite book whose id differs from its PDA id.
+  const bid = await freshId("sprite_book");
+  const book = withId(golden.book, bid === 65535 ? 1 : bid + 1);
+  const b = await init("sprite_book", bid, book);
+  await writeAll(b, book);
   assert.equal(await fails(send(authority, ix.finalize("sprite_book", authority, b))), E.InvalidBody);
 });
