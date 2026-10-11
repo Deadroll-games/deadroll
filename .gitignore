@@ -1,0 +1,9 @@
+/private/
+.env
+.env.*
+*.keypair.json
+id.json
+target/
+node_modules/
+test-ledger/
+.anchor/
