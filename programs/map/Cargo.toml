@@ -27,8 +27,9 @@ deadroll-types = { workspace = true, features = ["anchor"] }
 deadroll-mapcheck.workspace = true
 # `GameConfig` PDA address and owner only.
 deadroll-registry.workspace = true
-# `layout_hash` in `finalize_map` (Anchor 1.2 no longer re-exports `solana_program::hash`).
-sha2.workspace = true
+# `layout_hash` in `finalize_map`: the SHA-256 syscall (~141k CU less than the pure-Rust sha2).
+# Already in Cargo.lock at 3.1.0 through anchor-lang.
+solana-sha256-hasher = "3.1"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

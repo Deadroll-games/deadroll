@@ -193,17 +193,22 @@ fn check_tiles(width: u8, height: u8, layout: &MapLayoutData) -> Result<(), MapC
 
     let (mut entrances, mut exits) = (0u16, 0u16);
     let (mut entrance, mut exit) = (Cell::default(), Cell::default());
+    // Raw byte compares: this runs per cell on-chain.
+    const ENTRANCE: u8 = Tile::Entrance as u8;
+    const EXIT: u8 = Tile::Exit as u8;
     for y in 0..height {
-        for x in 0..width {
-            match Tile::try_from(layout.tiles[cell_index(x, y)]).map_err(|_| E::InvalidTile)? {
-                Tile::Entrance => {
+        let row = cell_index(0, y);
+        for (x, &byte) in layout.tiles[row..row + width as usize].iter().enumerate() {
+            match byte {
+                ENTRANCE => {
                     entrances += 1;
-                    entrance = Cell { x, y };
+                    entrance = Cell { x: x as u8, y };
                 }
-                Tile::Exit => {
+                EXIT => {
                     exits += 1;
-                    exit = Cell { x, y };
+                    exit = Cell { x: x as u8, y };
                 }
+                b if b as usize >= Tile::COUNT => return Err(E::InvalidTile),
                 _ => {}
             }
         }

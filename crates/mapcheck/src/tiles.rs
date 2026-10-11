@@ -19,9 +19,11 @@ pub const fn is_passable(tile: Tile) -> bool {
     step_cost(tile).is_some()
 }
 
-/// A raw tile byte that is a known passable `Tile`.
-pub fn byte_is_passable(byte: u8) -> bool {
-    Tile::try_from(byte).is_ok_and(is_passable)
+/// A raw tile byte that is a known passable `Tile`. Byte compares only: this runs per cell
+/// on-chain. `same_as_tile_rules` keeps it equal to `is_passable`.
+#[inline(always)]
+pub const fn byte_is_passable(byte: u8) -> bool {
+    (byte as usize) < Tile::COUNT && byte != Tile::Wall as u8
 }
 
 /// Index of `(x, y)` in `MapLayout.tiles` (row-major, `MAP_MAX` cells per row).
@@ -44,6 +46,14 @@ mod tests {
         }
         assert_eq!(step_cost(Tile::Water), Some(2));
         assert_eq!(step_cost(Tile::Floor), Some(1));
+    }
+
+    #[test]
+    fn same_as_tile_rules() {
+        for byte in 0..=u8::MAX {
+            let expected = Tile::try_from(byte).is_ok_and(is_passable);
+            assert_eq!(byte_is_passable(byte), expected, "byte {byte}");
+        }
     }
 
     #[test]

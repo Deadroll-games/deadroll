@@ -21,6 +21,13 @@ pub struct SetStatus<'info> {
 }
 
 /// `Finalized -> InSession` when a party opens, `InSession -> Finished` when it ends.
+pub fn transition_allowed(from: MapStatus, to: MapStatus) -> bool {
+    matches!(
+        (from, to),
+        (MapStatus::Finalized, MapStatus::InSession) | (MapStatus::InSession, MapStatus::Finished)
+    )
+}
+
 pub fn handler(ctx: Context<SetStatus>, status: MapStatus) -> Result<()> {
     trust::check_caller(
         &ctx.accounts.config,
@@ -29,11 +36,10 @@ pub fn handler(ctx: Context<SetStatus>, status: MapStatus) -> Result<()> {
     )?;
     let map = &mut ctx.accounts.map;
     let from = map.core.status;
-    let allowed = matches!(
-        (from, status),
-        (MapStatus::Finalized, MapStatus::InSession) | (MapStatus::InSession, MapStatus::Finished)
+    require!(
+        transition_allowed(from, status),
+        MapError::InvalidStatusTransition
     );
-    require!(allowed, MapError::InvalidStatusTransition);
     map.core.status = status;
 
     emit!(MapStatusChanged {
@@ -42,4 +48,23 @@ pub fn handler(ctx: Context<SetStatus>, status: MapStatus) -> Result<()> {
         to: status
     });
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_the_party_lifecycle_moves_forward() {
+        for &from in MapStatus::ALL {
+            for &to in MapStatus::ALL {
+                let expected = matches!(
+                    (from, to),
+                    (MapStatus::Finalized, MapStatus::InSession)
+                        | (MapStatus::InSession, MapStatus::Finished)
+                );
+                assert_eq!(transition_allowed(from, to), expected, "{from:?} -> {to:?}");
+            }
+        }
+    }
 }

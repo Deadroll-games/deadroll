@@ -1,6 +1,5 @@
-// Map program tests on a local validator:
-//   anchor build --tools-version v1.54
-//   anchor test --validator legacy --skip-build
+// Map program tests on a local validator: `anchor build --tools-version v1.54`, then run them
+// the way the decision block of agents/TASKS.md says (lane L6 port: 8919).
 // Instruction discriminators and error codes come from target/idl/deadroll_map.json.
 import { strict as assert } from "node:assert";
 import { createHash } from "node:crypto";
@@ -32,8 +31,13 @@ const MAP_PROGRAM = address(idl.address);
 const REGISTRY_PROGRAM = address("dZ1jraMfS3bAUTkRw2TA1ddg8UDGzgUdFQz5pmBxjoG");
 const SYSTEM_PROGRAM = address("11111111111111111111111111111111");
 
-const rpc = createSolanaRpc("http://127.0.0.1:8899");
-const rpcSubscriptions = createSolanaRpcSubscriptions("ws://127.0.0.1:8900");
+// `anchor test` passes the cluster; the websocket is the RPC port + 1.
+const rpcUrl = new URL(process.env.ANCHOR_PROVIDER_URL ?? "http://127.0.0.1:8899");
+const wsUrl = new URL(rpcUrl);
+wsUrl.protocol = "ws:";
+wsUrl.port = String(Number(rpcUrl.port) + 1);
+const rpc = createSolanaRpc(rpcUrl.toString());
+const rpcSubscriptions = createSolanaRpcSubscriptions(wsUrl.toString());
 const airdrop = airdropFactory({ rpc, rpcSubscriptions });
 const sendAndConfirm = sendAndConfirmTransactionFactory({ rpc, rpcSubscriptions });
 const enc = getAddressEncoder();
@@ -175,7 +179,13 @@ async function send(payer: Signer, ixs: any[]): Promise<number> {
     (m) => appendTransactionMessageInstructions(ixs, m),
   );
   const tx = await signTransactionMessageWithSigners(msg);
-  await sendAndConfirm(tx as any, { commitment: "confirmed" });
+  try {
+    await sendAndConfirm(tx as any, { commitment: "confirmed" });
+  } catch (e: any) {
+    // Keep the original as `cause` (error codes are read from it), surface the program logs.
+    const logs: string[] = e?.context?.logs ?? [];
+    throw new Error(`${e.message}\n${logs.join("\n")}`, { cause: e });
+  }
   const sig = getSignatureFromTransaction(tx);
   const info = await rpc
     .getTransaction(sig, { commitment: "confirmed", maxSupportedTransactionVersion: 0 })
@@ -496,14 +506,18 @@ describe("map: finalize_map", () => {
 });
 
 // The happy path (session authority PDA via CPI, trusted in GameConfig) needs the registry
-// and session programs: covered by the cross-program tests (L7 open_session, L8.2).
+// and session programs: covered by the cross-program tests (L7 open_session, L8.2). The trust
+// check itself is unit-tested in programs/map/src/trust.rs.
 describe("map: set_status", () => {
-  it("rejects a caller when the registry GameConfig is missing or foreign", async () => {
+  it("rejects a wallet signing as the session authority", async () => {
     const dm = await funded();
     const { map } = await demoFinal(dm);
-    // The DM signs as "session authority"; the config PDA is not a registry account here.
-    const ix = setStatusIx(map, dm, await configAddress(), STATUS.InSession);
-    await expectErr(send(dm, [ix]), err("InvalidConfig"));
+    const config = await configAddress();
+    // GameConfig is a shared singleton: read it if it exists instead of assuming either way.
+    const { value } = await rpc.getAccountInfo(config, { encoding: "base64", commitment: "confirmed" }).send();
+    const registryConfig = value?.owner === REGISTRY_PROGRAM;
+    const ix = setStatusIx(map, dm, config, STATUS.InSession);
+    await expectErr(send(dm, [ix]), err(registryConfig ? "UntrustedCaller" : "InvalidConfig"));
     assert.equal((await readMap(map)).status, STATUS.Finalized);
   });
 

@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use deadroll_mapcheck::{check_map, roster::p0_role};
 use deadroll_types::{seeds, MapLayoutData, MapStatus};
-use sha2::{Digest, Sha256};
+use solana_sha256_hasher::hash;
 
 use crate::{
     errors::MapError,
@@ -41,7 +41,7 @@ pub fn handler(ctx: Context<FinalizeMap>, secrets_root: [u8; 32]) -> Result<()> 
     let layout_hash: [u8; 32] = {
         let info = ctx.accounts.layout.to_account_info();
         let data = info.try_borrow_data()?;
-        Sha256::digest(&data[8..8 + MapLayoutData::SIZE]).into()
+        hash(&data[8..8 + MapLayoutData::SIZE]).to_bytes()
     };
     map.core.layout_hash = layout_hash;
     // TODO(post-demo): declared secret counts with the commit-reveal trap (L6.5).

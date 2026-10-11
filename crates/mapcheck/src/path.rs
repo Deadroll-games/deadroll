@@ -42,38 +42,62 @@ impl Reach {
     }
 }
 
+// Row stride is a power of two: `index >> ROW_SHIFT` is the row, `index & ROW_MASK` the column.
+const ROW_SHIFT: u32 = MAP_MAX.trailing_zeros();
+const ROW_MASK: usize = MAP_MAX - 1;
+const _: () = assert!(MAP_MAX.is_power_of_two());
+
 /// Every cell reachable from `start` through passable in-bounds cells, `start` included.
 /// An impassable or out-of-bounds `start` reaches nothing.
+///
+/// Hot loop on-chain (`finalize_map`): `closed` holds visited and impassable cells together,
+/// so each neighbor costs one bit test.
 #[inline(never)]
 pub fn reachable_from(tiles: &[u8; MAP_CELLS], width: u8, height: u8, start: Cell) -> Reach {
     let mut reach = Reach::empty();
     if !in_bounds(start, width, height) || !byte_is_passable(tiles[cell_index(start.x, start.y)]) {
         return reach;
     }
+    let (w, h) = (width as usize, height as usize);
+    let mut closed = Reach::empty();
+    for y in 0..h {
+        let row = y << ROW_SHIFT;
+        for (i, &byte) in tiles[row..row + w].iter().enumerate() {
+            if !byte_is_passable(byte) {
+                closed.set(row + i);
+            }
+        }
+    }
     // Every cell enters the queue at most once, so a plain array never overflows.
     let mut queue = [0u16; MAP_CELLS];
     let (mut head, mut tail) = (0usize, 0usize);
-    let start_index = cell_index(start.x, start.y);
-    reach.set(start_index);
-    queue[tail] = start_index as u16;
-    tail += 1;
-    while head < tail {
-        let index = queue[head] as usize;
-        head += 1;
-        let (x, y) = ((index % MAP_MAX) as u8, (index / MAP_MAX) as u8);
-        let neighbors = [
-            (y > 0).then(|| (x, y - 1)),
-            (x + 1 < width).then(|| (x + 1, y)),
-            (y + 1 < height).then(|| (x, y + 1)),
-            (x > 0).then(|| (x - 1, y)),
-        ];
-        for (nx, ny) in neighbors.into_iter().flatten() {
-            let next = cell_index(nx, ny);
-            if !reach.get(next) && byte_is_passable(tiles[next]) {
+    macro_rules! push {
+        ($next:expr) => {{
+            let next = $next;
+            if !closed.get(next) {
+                closed.set(next);
                 reach.set(next);
                 queue[tail] = next as u16;
                 tail += 1;
             }
+        }};
+    }
+    push!(cell_index(start.x, start.y));
+    while head < tail {
+        let index = queue[head] as usize;
+        head += 1;
+        let (x, y) = (index & ROW_MASK, index >> ROW_SHIFT);
+        if y > 0 {
+            push!(index - MAP_MAX);
+        }
+        if x + 1 < w {
+            push!(index + 1);
+        }
+        if y + 1 < h {
+            push!(index + MAP_MAX);
+        }
+        if x > 0 {
+            push!(index - 1);
         }
     }
     reach
