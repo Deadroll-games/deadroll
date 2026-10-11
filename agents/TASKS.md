@@ -61,7 +61,7 @@ If a checkpoint slips by more than 2 hours, the lead moves the lowest P0 item to
 - [ ] **L2.1 (C)** `crates/render`: sprite DSL decoder (format in `crates/render/FORMAT.md`, from `docs/ART_DESCRIPTION.md`), rasterize commands, auto shading, outline, layer order, ramps -> RGBA.
 - [ ] **L2.2 (C)** PNG encoder (stored deflate blocks, CRC32, Adler32), integer scaling.
 - [ ] **L2.3 (C)** C ABI exports + `wasm32-unknown-unknown` build, size budget 60 KB after `wasm-opt -Oz`.
-- [ ] **L2.4 (G)** `tools/art`: CLI that renders a DSL file to PNG (x8) for preview; golden image tests.
+- [ ] **L2.4 (G)** Claude (lane L3). `tools/art`: CLI that renders a DSL file to PNG (x8) for preview; golden image tests.
 - [ ] **L2.5 (C)** `programs/render`: `init_rasterizer`, `write_chunk(offset, bytes)`, `finalize_rasterizer` (SHA-256, freeze, write to `GameConfig` via registry authority), `init_palette`, `write_sprites`.
 - [ ] **L2.6 (G)** `tools/scripts/upload-rasterizer.ts` and `upload-sprites.ts` (chunking, resume, verify hash).
 - [ ] P1 **L2.7** Tombstone and wound overlays.
@@ -69,13 +69,13 @@ If a checkpoint slips by more than 2 hours, the lead moves the lowest P0 item to
 ## L3. Art (mostly Grok, short sessions)
 
 Each task = one fresh Grok session, writes only in `assets/sprites/<name>.dsl`, validated by `tools/art`.
-- [ ] **L3.1 (G)** Body human, body forest elf (skin and hair ramps).
-- [ ] **L3.2 (G)** Warrior kit: helmet, armor, pants, boots, sword, shield.
-- [ ] **L3.3 (G)** Mage kit: hood, robe, staff with element core.
-- [ ] **L3.4 (G)** Support kit.
-- [ ] **L3.5 (G)** Monsters: wolf, goblin, goblin chief (boss), tombstone.
-- [ ] **L3.6 (G)** Tiles: floor, wall, water, door, entrance, exit, trap.
-- [ ] **L3.7 (C)** Review pass: silhouettes, anchors, consistency.
+- [ ] **L3.1 (G)** Claude (lane L3). Body human, body forest elf (skin and hair ramps).
+- [ ] **L3.2 (G)** Claude (lane L3). Warrior kit: helmet, armor, pants, boots, sword, shield.
+- [ ] **L3.3 (G)** Claude (lane L3). Mage kit: hood, robe, staff with element core.
+- [ ] **L3.4 (G)** Claude (lane L3). Support kit.
+- [ ] **L3.5 (G)** Claude (lane L3). Monsters: wolf, goblin, goblin chief (boss), tombstone.
+- [ ] **L3.6 (G)** Claude (lane L3). Tiles: floor, wall, water, door, entrance, exit, trap.
+- [ ] **L3.7 (C)** Claude (lane L3). Review pass: silhouettes, anchors, consistency.
 
 ## L4. Registry program
 
