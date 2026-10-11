@@ -95,10 +95,10 @@ Each task = one fresh Grok session, writes only in `assets/sprites/<name>.dsl`, 
 
 ## L5. Character program + skillcheck
 
-- [ ] **L5.1 (C)** `create_profile`, `create_character` (race, class, predisposition, stats, preset skills, appearance) + Core NFT mint via CPI (feature `nft`).
-- [ ] **L5.2 (C)** CPI targets from `CONTRACTS.md` section 5 with session PDA check.
-- [ ] **L5.3 (C)** `crates/skillcheck`: preset skills valid, class restriction on starting skills.
-- [ ] **L5.4 (G)** Tests for skillcheck rejections.
+- [ ] **L5.1 (C)** Claude (lane L5). `create_profile`, `create_character` (race, class, predisposition, stats, preset skills, appearance) + Core NFT mint via CPI (feature `nft`).
+- [ ] **L5.2 (C)** Claude (lane L5). CPI targets from `CONTRACTS.md` section 5 with session PDA check.
+- [ ] **L5.3 (C)** Claude (lane L5). `crates/skillcheck`: preset skills valid, class restriction on starting skills.
+- [ ] **L5.4 (G)** Grok, reviewed by Claude (lane L5). Tests for skillcheck rejections.
 - [ ] P1 **L5.5** NFT `uri` update with `state_version`. P2 skill builder instructions, lenses.
 
 ## L6. Map program + mapcheck
