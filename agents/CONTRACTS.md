@@ -65,9 +65,25 @@ StateKind   Burning, Chill, Freeze, Bleeding, Shock, Stun   (P0 uses Burning, Ch
 Tile        Floor, Wall, Water, Door, Entrance, Exit, Trap
 Tier        u8 in 1..=14 (1 is best)
 SessionStatus  Lobby, Active, Victory, Wiped, Fled, Abandoned
+MapStatus   Draft, Finalized, InSession, Finished
+Stat        Strength, Dexterity, Intelligence, Endurance      (index into Character.stats)
+ProgramIdx  Registry, Render, Character, Items, Map, Session, City   (index into GameConfig.programs)
 ```
 
+Discriminants are sequential from 0 in the listed order and are part of the on-chain format: append only.
+`Tier` is a validation type (`Tier::new(u8)`), not serialized; accounts and args carry a raw `u8`.
+
 Constants: `BP = 10_000`, `MAP_MAX = 32`, `PARTY_MAX = 4`, `MONSTERS_MAX = 24`, `SKILL_SLOTS_ACTIVE = 4`, `BAG_SLOTS = 20`.
+Added at L0: `MAP_CELLS = 1024`, `SPAWNS_MAX = 24`, `TURN_ORDER_MAX = 28`, `STATES_MAX = 6`, `LAYERS_MAX = 20`, `PROGRAMS_COUNT = 7`, `STATS_COUNT = 4`, `URI_BASE_LEN = 64`.
+PDA seed prefixes from section 2 are constants in `deadroll_types::seeds` (`seeds::CHARACTER`, ...). Use them, never string literals.
+
+Small structs (added at L0):
+```
+Cell          { x: u8, y: u8 }                                   (Anchor IDL has no tuples)
+ActiveState   { kind: StateKind, turns: u8 (0 = empty slot), power: u32, source: u8 (turn-order slot) }
+Monster       { bestiary_id: u8, level: u8, x: u8, y: u8, hp: u32, hp_max: u32, action_points: u8,
+                alive: bool, pack: u8, flags: u8, states: [ActiveState; 6] }
+```
 
 Sprite render input (also used by `crates/render`):
 ```
@@ -86,15 +102,33 @@ Character       { version, owner, index, nft: Option<Pubkey>, race, class, level
                   state_version: u32, bump }
 Map             { version, dm, index, width: u8, height: u8, status: Draft|Finalized|InSession|Finished,
                   layout_hash: [u8; 32], secrets_root: [u8; 32], bump }
-MapLayout       { version, map, tiles: [u8; 1024], spawns: [Spawn; 24], spawn_count: u8, entrance: (u8,u8), exit: (u8,u8) }
+MapLayout       { version, map, tiles: [u8; 1024], spawns: [Spawn; 24], spawn_count: u8, entrance: Cell, exit: Cell, bump }
 Spawn           { bestiary_id: u8, x: u8, y: u8, level: u8, skills: u16, flags: u8, aspects: u8, pack: u8 }
 GameSession     { version, map, dm, status, price_lamports: u64, players: [Pubkey; 4], player_count: u8,
                   turn_order: [u8; 28], turn_index: u8, round: u16, action_counter: u32,
                   pending_vrf: bool, last_seed: [u8; 32], bump }
 Participation   { version, session, character, actor: Pubkey, slot: u8, x: u8, y: u8, hp: u32,
                   action_points: u8, states: [ActiveState; 6], ready: bool, bump }
-MonsterState    { version, session, monsters: [Monster; 24], count: u8 }
+MonsterState    { version, session, monsters: [Monster; 24], count: u8, bump }
 ```
+
+### 4.1 How programs use these layouts
+
+`crates/types` holds each layout above as `<Name>Data` (`CharacterData`, `GameSessionData`, ...) with the fields in exactly this order, plus a `SIZE` constant (max borsh size, `Option` counted as `Some`). The owning program wraps it and appends its own fields after it:
+
+```rust
+use deadroll_types::CharacterData;
+
+#[account]
+#[derive(InitSpace)]
+pub struct Character {
+    pub core: CharacterData, // frozen contract, first after the discriminator
+    // lane-specific fields, appended only
+}
+// space = 8 + Character::INIT_SPACE
+```
+
+Borsh adds no bytes for the wrapper, so `version` stays the first byte after the discriminator and owner fields keep fixed offsets for RPC `memcmp` filters. Programs depend on `deadroll-types` with `features = ["anchor"]` and forward `idl-build`, so the types appear in the IDL and the Codama sdk. Large accounts (`MapLayout`, `MonsterState`) should be `Box<Account<...>>` in instruction contexts.
 
 ## 5. CPI surface (only these, P0)
 
