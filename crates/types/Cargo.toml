@@ -1,0 +1,22 @@
+[package]
+name = "deadroll-types"
+description = "Deadroll shared types: enums, constants, PDA seeds, account layouts (agents/CONTRACTS.md)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+default = []
+std = ["borsh/std", "solana-pubkey/std"]
+# Derive Anchor traits (AnchorSerialize/AnchorDeserialize/InitSpace) instead of plain borsh,
+# so programs can embed these types in `#[account]` structs.
+anchor = ["dep:anchor-lang", "std"]
+# Put the types into program IDLs (and so into the Codama sdk).
+idl-build = ["anchor", "anchor-lang/idl-build"]
+
+[dependencies]
+borsh.workspace = true
+solana-pubkey.workspace = true
+anchor-lang = { workspace = true, optional = true }

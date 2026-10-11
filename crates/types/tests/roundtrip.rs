@@ -1,0 +1,320 @@
+use borsh::{BorshDeserialize, BorshSerialize};
+use deadroll_types::*;
+
+fn pk(n: u8) -> Pubkey {
+    Pubkey::new_from_array([n; 32])
+}
+
+/// Borsh round-trip; the encoding of `value` must be exactly `size` bytes.
+fn check<T>(value: &T, size: usize) -> Vec<u8>
+where
+    T: BorshSerialize + BorshDeserialize + PartialEq + core::fmt::Debug,
+{
+    let bytes = borsh::to_vec(value).unwrap();
+    assert_eq!(bytes.len(), size, "encoded size of {value:?}");
+    let back = T::try_from_slice(&bytes).unwrap();
+    assert_eq!(&back, value);
+    bytes
+}
+
+fn last<T: Copy>(all: &[T]) -> T {
+    *all.last().unwrap()
+}
+
+fn layer_max() -> LayerRef {
+    LayerRef {
+        sprite_id: u16::MAX,
+        material_ramp: u8::MAX,
+        accent_ramp: u8::MAX,
+        element_ramp: u8::MAX,
+    }
+}
+
+fn state_max() -> ActiveState {
+    ActiveState {
+        kind: last(StateKind::ALL),
+        turns: u8::MAX,
+        power: u32::MAX,
+        source: u8::MAX,
+    }
+}
+
+fn spawn_max() -> Spawn {
+    Spawn {
+        bestiary_id: u8::MAX,
+        x: u8::MAX,
+        y: u8::MAX,
+        level: u8::MAX,
+        skills: u16::MAX,
+        flags: u8::MAX,
+        aspects: u8::MAX,
+        pack: u8::MAX,
+    }
+}
+
+fn monster_max() -> Monster {
+    Monster {
+        bestiary_id: u8::MAX,
+        level: u8::MAX,
+        x: u8::MAX,
+        y: u8::MAX,
+        hp: u32::MAX,
+        hp_max: u32::MAX,
+        action_points: u8::MAX,
+        alive: true,
+        pack: u8::MAX,
+        flags: u8::MAX,
+        states: [state_max(); STATES_MAX],
+    }
+}
+
+fn game_config(version: u8) -> GameConfigData {
+    GameConfigData {
+        version,
+        authority: pk(1),
+        programs: [pk(2); PROGRAMS_COUNT],
+        rasterizer_version: u16::MAX,
+        rasterizer: pk(3),
+        rasterizer_sha256: [0xAB; 32],
+        palette: pk(4),
+        uri_base: [b'x'; URI_BASE_LEN],
+        bump: u8::MAX,
+    }
+}
+
+fn character(version: u8, nft: Option<Pubkey>, in_session: Option<Pubkey>) -> CharacterData {
+    CharacterData {
+        version,
+        owner: pk(5),
+        index: u8::MAX,
+        nft,
+        race: last(Race::ALL),
+        class: last(Class::ALL),
+        level: u16::MAX,
+        xp: u32::MAX,
+        stats: [u16::MAX; STATS_COUNT],
+        predisposition: last(Aspect::ALL),
+        predisposition_tier: Tier::WORST.get(),
+        hp_max: u32::MAX,
+        alive: true,
+        in_session,
+        appearance: [layer_max(); LAYERS_MAX],
+        state_version: u32::MAX,
+        bump: u8::MAX,
+    }
+}
+
+fn map(version: u8) -> MapData {
+    MapData {
+        version,
+        dm: pk(6),
+        index: u32::MAX,
+        width: MAP_MAX as u8,
+        height: MAP_MAX as u8,
+        status: last(MapStatus::ALL),
+        layout_hash: [0xCD; 32],
+        secrets_root: [0xEF; 32],
+        bump: u8::MAX,
+    }
+}
+
+fn map_layout(version: u8) -> MapLayoutData {
+    MapLayoutData {
+        version,
+        map: pk(7),
+        tiles: [Tile::Trap as u8; MAP_CELLS],
+        spawns: [spawn_max(); SPAWNS_MAX],
+        spawn_count: SPAWNS_MAX as u8,
+        entrance: Cell { x: 0, y: 1 },
+        exit: Cell { x: 31, y: 31 },
+        bump: u8::MAX,
+    }
+}
+
+fn game_session(version: u8) -> GameSessionData {
+    GameSessionData {
+        version,
+        map: pk(8),
+        dm: pk(9),
+        status: last(SessionStatus::ALL),
+        price_lamports: u64::MAX,
+        players: [pk(10); PARTY_MAX],
+        player_count: PARTY_MAX as u8,
+        turn_order: [u8::MAX; TURN_ORDER_MAX],
+        turn_index: u8::MAX,
+        round: u16::MAX,
+        action_counter: u32::MAX,
+        pending_vrf: true,
+        last_seed: [0x11; 32],
+        bump: u8::MAX,
+    }
+}
+
+fn participation(version: u8) -> ParticipationData {
+    ParticipationData {
+        version,
+        session: pk(11),
+        character: pk(12),
+        actor: pk(13),
+        slot: u8::MAX,
+        x: u8::MAX,
+        y: u8::MAX,
+        hp: u32::MAX,
+        action_points: u8::MAX,
+        states: [state_max(); STATES_MAX],
+        ready: true,
+        bump: u8::MAX,
+    }
+}
+
+fn monster_state(version: u8) -> MonsterStateData {
+    MonsterStateData {
+        version,
+        session: pk(14),
+        monsters: [monster_max(); MONSTERS_MAX],
+        count: MONSTERS_MAX as u8,
+        bump: u8::MAX,
+    }
+}
+
+macro_rules! enum_tests {
+    ($($test:ident: $ty:ty, $count:expr;)*) => {$(
+        #[test]
+        fn $test() {
+            assert_eq!(<$ty>::COUNT, $count);
+            for (i, v) in <$ty>::ALL.iter().enumerate() {
+                assert_eq!(u8::from(*v) as usize, i);
+                assert_eq!(<$ty>::try_from(i as u8), Ok(*v));
+                assert_eq!(check(v, <$ty>::SIZE), vec![i as u8]);
+            }
+            for bad in [<$ty>::COUNT as u8, u8::MAX] {
+                assert_eq!(<$ty>::try_from(bad), Err(InvalidValue(bad)));
+                assert!(<$ty>::try_from_slice(&[bad]).is_err());
+            }
+        }
+    )*};
+}
+
+enum_tests! {
+    aspect: Aspect, 6;
+    family: Family, 4;
+    race: Race, 2;
+    class: Class, 3;
+    source: Source, 2;
+    form: Form, 2;
+    time_tag: TimeTag, 2;
+    state_kind: StateKind, 6;
+    tile: Tile, 7;
+    session_status: SessionStatus, 6;
+    map_status: MapStatus, 4;
+    stat: Stat, STATS_COUNT;
+    program_idx: ProgramIdx, PROGRAMS_COUNT;
+}
+
+#[test]
+fn enum_discriminants_match_contract_order() {
+    assert_eq!(Aspect::Piercing as u8, 5);
+    assert_eq!(Race::ForestElf as u8, 1);
+    assert_eq!(StateKind::Bleeding as u8, 3);
+    assert_eq!(Tile::Trap as u8, 6);
+    assert_eq!(SessionStatus::Abandoned as u8, 5);
+    assert_eq!(MapStatus::Finished as u8, 3);
+    assert_eq!(ProgramIdx::Session as usize, 5);
+}
+
+#[test]
+fn tier_bounds() {
+    assert_eq!(Tier::new(0), Err(InvalidValue(0)));
+    assert_eq!(Tier::new(1).map(Tier::get), Ok(1));
+    assert_eq!(Tier::new(14).map(Tier::get), Ok(14));
+    assert_eq!(Tier::new(15), Err(InvalidValue(15)));
+    assert_eq!(Tier::try_from(u8::MAX), Err(InvalidValue(u8::MAX)));
+    assert!(Tier::BEST < Tier::WORST);
+}
+
+#[test]
+fn small_structs() {
+    check(&layer_max(), LayerRef::SIZE);
+    check(&LayerRef::EMPTY, LayerRef::SIZE);
+    assert!(LayerRef::EMPTY.is_empty() && !layer_max().is_empty());
+    check(&state_max(), ActiveState::SIZE);
+    assert!(ActiveState::default().is_empty());
+    check(&spawn_max(), Spawn::SIZE);
+    check(&Cell { x: 3, y: 4 }, Cell::SIZE);
+    check(&monster_max(), Monster::SIZE);
+    check(&Monster::default(), Monster::SIZE);
+    let request = RenderRequest {
+        palette_version: u16::MAX,
+        layers: [layer_max(); LAYERS_MAX],
+        flags: u32::MAX,
+    };
+    check(&request, RenderRequest::SIZE);
+}
+
+#[test]
+fn account_sizes_and_version_first() {
+    let v = 0x7E;
+    assert_eq!(check(&game_config(v), GameConfigData::SIZE)[0], v);
+    assert_eq!(check(&map(v), MapData::SIZE)[0], v);
+    assert_eq!(check(&map_layout(v), MapLayoutData::SIZE)[0], v);
+    assert_eq!(check(&game_session(v), GameSessionData::SIZE)[0], v);
+    assert_eq!(check(&participation(v), ParticipationData::SIZE)[0], v);
+    assert_eq!(check(&monster_state(v), MonsterStateData::SIZE)[0], v);
+    let full = character(v, Some(pk(20)), Some(pk(21)));
+    assert_eq!(check(&full, CharacterData::SIZE)[0], v);
+}
+
+#[test]
+fn character_options_shrink_encoding_but_size_is_max() {
+    let empty = character(1, None, None);
+    let bytes = borsh::to_vec(&empty).unwrap();
+    assert_eq!(bytes.len(), CharacterData::SIZE - 2 * 32);
+    assert_eq!(CharacterData::try_from_slice(&bytes).unwrap(), empty);
+}
+
+#[test]
+fn owner_follows_version() {
+    // RPC memcmp filters rely on these offsets (8-byte discriminator not included).
+    let c = character(1, None, None);
+    assert_eq!(&borsh::to_vec(&c).unwrap()[1..33], pk(5).as_ref());
+    let m = map(1);
+    assert_eq!(&borsh::to_vec(&m).unwrap()[1..33], pk(6).as_ref());
+}
+
+#[test]
+fn invalid_enum_byte_in_account_is_rejected() {
+    let mut bytes = borsh::to_vec(&map(1)).unwrap();
+    let status_offset = 1 + 32 + 4 + 1 + 1;
+    assert_eq!(bytes[status_offset], MapStatus::Finished as u8);
+    bytes[status_offset] = MapStatus::COUNT as u8;
+    assert!(MapData::try_from_slice(&bytes).is_err());
+}
+
+#[test]
+fn seeds_match_contract() {
+    assert_eq!(seeds::CONFIG, b"config");
+    assert_eq!(seeds::AUTHORITY, b"authority");
+    assert_eq!(seeds::CHARACTER, b"character");
+    assert_eq!(seeds::PARTICIPATION, b"participation");
+    assert_eq!(seeds::MONSTERS, b"monsters");
+}
+
+#[cfg(feature = "anchor")]
+#[test]
+fn size_matches_anchor_init_space() {
+    use anchor_lang::Space;
+    assert_eq!(LayerRef::SIZE, LayerRef::INIT_SPACE);
+    assert_eq!(RenderRequest::SIZE, RenderRequest::INIT_SPACE);
+    assert_eq!(Cell::SIZE, Cell::INIT_SPACE);
+    assert_eq!(ActiveState::SIZE, ActiveState::INIT_SPACE);
+    assert_eq!(Spawn::SIZE, Spawn::INIT_SPACE);
+    assert_eq!(Monster::SIZE, Monster::INIT_SPACE);
+    assert_eq!(Aspect::SIZE, Aspect::INIT_SPACE);
+    assert_eq!(GameConfigData::SIZE, GameConfigData::INIT_SPACE);
+    assert_eq!(CharacterData::SIZE, CharacterData::INIT_SPACE);
+    assert_eq!(MapData::SIZE, MapData::INIT_SPACE);
+    assert_eq!(MapLayoutData::SIZE, MapLayoutData::INIT_SPACE);
+    assert_eq!(GameSessionData::SIZE, GameSessionData::INIT_SPACE);
+    assert_eq!(ParticipationData::SIZE, ParticipationData::INIT_SPACE);
+    assert_eq!(MonsterStateData::SIZE, MonsterStateData::INIT_SPACE);
+}

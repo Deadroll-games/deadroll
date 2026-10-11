@@ -1,0 +1,48 @@
+//! PDA seed prefixes (agents/CONTRACTS.md, section 2). Numbers in seeds are little-endian.
+
+/// `["config"]` in registry.
+pub const CONFIG: &[u8] = b"config";
+/// `["aspects"]` in registry.
+pub const ASPECTS: &[u8] = b"aspects";
+/// `["resonances"]` in registry.
+pub const RESONANCES: &[u8] = b"resonances";
+/// `["bestiary"]` in registry.
+pub const BESTIARY: &[u8] = b"bestiary";
+/// `["tileset"]` in registry.
+pub const TILESET: &[u8] = b"tileset";
+/// `["prefabs"]` in registry.
+pub const PREFABS: &[u8] = b"prefabs";
+/// `["authority"]` in every program: the signer for CPI into other game programs.
+pub const AUTHORITY: &[u8] = b"authority";
+/// `["rasterizer", version: u16]` in render.
+pub const RASTERIZER: &[u8] = b"rasterizer";
+/// `["palette", version: u16]` in render.
+pub const PALETTE: &[u8] = b"palette";
+/// `["sprites", book_id: u16]` in render.
+pub const SPRITES: &[u8] = b"sprites";
+/// `["profile", owner]` in character.
+pub const PROFILE: &[u8] = b"profile";
+/// `["character", owner, index: u8]` in character.
+pub const CHARACTER: &[u8] = b"character";
+/// `["skills", character]` in character.
+pub const SKILLS: &[u8] = b"skills";
+/// `["bag", character]` in character.
+pub const BAG: &[u8] = b"bag";
+/// `["item", asset]` in items.
+pub const ITEM: &[u8] = b"item";
+/// `["map", dm, map_index: u32]` in map.
+pub const MAP: &[u8] = b"map";
+/// `["layout", map]` in map.
+pub const LAYOUT: &[u8] = b"layout";
+/// `["session", map]` in session.
+pub const SESSION: &[u8] = b"session";
+/// `["participation", session, character]` in session.
+pub const PARTICIPATION: &[u8] = b"participation";
+/// `["monsters", session]` in session.
+pub const MONSTERS: &[u8] = b"monsters";
+/// `["escrow", session]` in session.
+pub const ESCROW: &[u8] = b"escrow";
+/// `["stash", session, character]` in session.
+pub const STASH: &[u8] = b"stash";
+/// `["city"]` in city.
+pub const CITY: &[u8] = b"city";
