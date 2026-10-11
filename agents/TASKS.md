@@ -21,6 +21,16 @@ Rules for the lanes:
    `cd tests && ANCHOR_PROVIDER_URL=http://127.0.0.1:8899 ANCHOR_WALLET=<funded keypair json> node --import tsx --test --test-concurrency=1 <program>.test.ts`
    Import Anchor as `import anchor from "@anchor-lang/core"` (named ESM imports such as `BN` fail on its CJS build).
 
+## Decision: one shared local validator (H, 2026-10-11, written by L2)
+
+One shared local validator runs in WSL at `http://127.0.0.1:8899`, started by H. Session Keys and Metaplex Core are cloned from devnet into it; VRF uses the `mock-vrf` feature. (Native Windows `solana-test-validator` cannot create its ledger, and LiteSVM's agave crates need rustc > 1.92, so neither is used.)
+
+1. **Never start, stop or reset a validator yourself.**
+2. **Deploy only your own program:** `anchor deploy -p <your_program> --provider.cluster localnet`. Never deploy other lanes' programs.
+3. **Run tests with** `anchor test --skip-local-validator --skip-deploy` (plus `-p <program>` / your test file).
+4. **Tests use fresh random keypairs for everything** and random ids for PDAs keyed by an id (versions, indices), so runs and lanes never collide. They must **tolerate singletons that already exist** (e.g. `GameConfig`): if it exists, read it instead of failing.
+5. If you need another lane's program that is not deployed yet, test what you can, skip the rest with a clear reason in the test output, and note it in the PR.
+
 Legend: **C** = Claude agent, **G** = Grok (via `delegate-to-grok`, reviewed by the lane's Claude), **H** = human (Ivan).
 Each lane works in its own worktree: `git worktree add ../deadroll-<lane> -b lane/<lane>`.
 Write your name next to a task when you take it. Tick when merged to `main`.
@@ -61,12 +71,12 @@ If a checkpoint slips by more than 2 hours, the lead moves the lowest P0 item to
 
 ## L2. Render crate + render program
 
-- [ ] **L2.1 (C)** `crates/render`: sprite DSL decoder (format in `crates/render/FORMAT.md`, from `docs/ART_DESCRIPTION.md`), rasterize commands, auto shading, outline, layer order, ramps -> RGBA.
-- [ ] **L2.2 (C)** PNG encoder (stored deflate blocks, CRC32, Adler32), integer scaling.
-- [ ] **L2.3 (C)** C ABI exports + `wasm32-unknown-unknown` build, size budget 60 KB after `wasm-opt -Oz`.
+- [ ] **L2.1 (C)** Claude (L2). `crates/render`: sprite DSL decoder (format in `crates/render/FORMAT.md`, from `docs/ART_DESCRIPTION.md`), rasterize commands, auto shading, outline, layer order, ramps -> RGBA.
+- [ ] **L2.2 (C)** Claude (L2). PNG encoder (stored deflate blocks, CRC32, Adler32), integer scaling.
+- [ ] **L2.3 (C)** Claude (L2). C ABI exports + `wasm32-unknown-unknown` build, size budget 60 KB after `wasm-opt -Oz`.
 - [ ] **L2.4 (G)** `tools/art`: CLI that renders a DSL file to PNG (x8) for preview; golden image tests.
-- [ ] **L2.5 (C)** `programs/render`: `init_rasterizer`, `write_chunk(offset, bytes)`, `finalize_rasterizer` (SHA-256, freeze, write to `GameConfig` via registry authority), `init_palette`, `write_sprites`.
-- [ ] **L2.6 (G)** `tools/scripts/upload-rasterizer.ts` and `upload-sprites.ts` (chunking, resume, verify hash).
+- [ ] **L2.5 (C)** Claude (L2). `programs/render`: `init_rasterizer`, `write_chunk(offset, bytes)`, `finalize_rasterizer` (SHA-256, freeze; no CPI, registry pulls, see L4.1), `init_palette`, `write_sprites`.
+- [ ] **L2.6 (G)** Claude (L2). `tools/scripts/upload-rasterizer.ts` and `upload-sprites.ts` (chunking, resume, verify hash).
 - [ ] P1 **L2.7** Tombstone and wound overlays.
 
 ## L3. Art (mostly Grok, short sessions)
@@ -82,24 +92,24 @@ Each task = one fresh Grok session, writes only in `assets/sprites/<name>.dsl`, 
 
 ## L4. Registry program
 
-- [ ] **L4.1 (C)** `init_config`, `set_programs`, `set_rasterizer` (callable only by render program PDA or authority), `set_uri_base`.
+- [ ] **L4.1 (C)** `init_config`, `set_programs`, `set_rasterizer`, `set_uri_base`. `set_rasterizer` is authority-only and pulls (no CPI from render, decided in L2): it takes the `RasterizerCode` account, checks `owner == GameConfig.programs[Render]` and `finalized`, then copies version, address and sha256 (header offsets in `programs/render/README.md`). Same pattern later for `Palette` and `SpriteBook`.
 - [ ] **L4.2 (C)** Tables: aspects, resonances, bestiary, tileset, prefabs (`write_table(kind, offset, bytes)`).
 - [ ] **L4.3 (G)** `assets/registry/*.json` from docs (aspects, resonance pairs, bestiary P0 monsters, prefab rooms) + `tools/scripts/seed-registry.ts`.
 
 ## L5. Character program + skillcheck
 
-- [ ] **L5.1 (C)** `create_profile`, `create_character` (race, class, predisposition, stats, preset skills, appearance) + Core NFT mint via CPI (feature `nft`).
-- [ ] **L5.2 (C)** CPI targets from `CONTRACTS.md` section 5 with session PDA check.
-- [ ] **L5.3 (C)** `crates/skillcheck`: preset skills valid, class restriction on starting skills.
-- [ ] **L5.4 (G)** Tests for skillcheck rejections.
+- [ ] **L5.1 (C)** Claude (lane L5). `create_profile`, `create_character` (race, class, predisposition, stats, preset skills, appearance) + Core NFT mint via CPI (feature `nft`).
+- [ ] **L5.2 (C)** Claude (lane L5). CPI targets from `CONTRACTS.md` section 5 with session PDA check.
+- [ ] **L5.3 (C)** Claude (lane L5). `crates/skillcheck`: preset skills valid, class restriction on starting skills.
+- [ ] **L5.4 (G)** Grok, reviewed by Claude (lane L5). Tests for skillcheck rejections.
 - [ ] P1 **L5.5** NFT `uri` update with `state_version`. P2 skill builder instructions, lenses.
 
 ## L6. Map program + mapcheck
 
-- [ ] **L6.1 (C)** `crates/mapcheck`: bounds, entrance/exit, spawns on walkable cells, path entrance -> exit (BFS), packs.
-- [ ] **L6.2 (G)** BFS + tests in `crates/mapcheck/src/path.rs` only.
-- [ ] **L6.3 (C)** `programs/map`: `create_map`, `write_layout`, `finalize_map` (runs mapcheck, stores hash), `set_status` (session PDA only).
-- [ ] **L6.4 (G)** `assets/registry/maps/demo_16x16.json` preset (wolves pack, goblins pack, goblin chief + helpers).
+- [ ] **L6.1 (C)** Claude (lane L6). `crates/mapcheck`: bounds, entrance/exit, spawns on walkable cells, path entrance -> exit (BFS), packs.
+- [ ] **L6.2 (G)** Grok, reviewed by Claude (lane L6). BFS + tests in `crates/mapcheck/src/path.rs` only.
+- [ ] **L6.3 (C)** Claude (lane L6). `programs/map`: `create_map`, `write_layout`, `finalize_map` (runs mapcheck, stores hash), `set_status` (session PDA only).
+- [ ] **L6.4 (G)** Grok, reviewed by Claude (lane L6). `assets/registry/maps/demo_16x16.json` preset (wolves pack, goblins pack, goblin chief + helpers).
 - [ ] P1 **L6.5** Commit-reveal trap (`docs/MAP_DESCRIPTION.md`, section 8).
 
 ## L7. Session program (critical path)
