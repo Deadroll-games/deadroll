@@ -47,13 +47,13 @@ If a checkpoint slips by more than 2 hours, the lead moves the lowest P0 item to
 
 ## L1. Combat crate (`crates/combat`)
 
-- [ ] **L1.1 (C)** `rng.rs`: `RollSource`, `SeededRoll`, `VrfRoll(seed: [u8;32])` with `hash(seed ‖ index)`, `d20`, `d100`, `chance`.
-- [ ] **L1.2 (C)** Modifiers, packets, conversion by shares, armor, resistances, counterweights.
-- [ ] **L1.3 (C)** States P0 (burning, chill -> freeze, bleeding), one instance per kind.
-- [ ] **L1.4 (C)** Resonance pairs (d100 per tint per skill aspect, no cap).
-- [ ] **L1.5 (C)** `resolve_hit -> HitResult` + golden test.
-- [ ] **L1.6 (G)** Property tests and edge-case tests (only `crates/combat/tests/**`).
-- [ ] **L1.7 (C)** WASM bindings `crates/combat/wasm` (C ABI or wasm-bindgen, lead's choice) for the app.
+- [ ] **L1.1 (C)** Claude (lane L1). `rng.rs`: `RollSource`, `SeededRoll`, `VrfRoll(seed: [u8;32])` with `hash(seed ‖ index)`, `d20`, `d100`, `chance`.
+- [ ] **L1.2 (C)** Claude (lane L1). Modifiers, packets, conversion by shares, armor, resistances, counterweights.
+- [ ] **L1.3 (C)** Claude (lane L1). States P0 (burning, chill -> freeze, bleeding), one instance per kind.
+- [ ] **L1.4 (C)** Claude (lane L1). Resonance pairs (d100 per tint per skill aspect, no cap).
+- [ ] **L1.5 (C)** Claude (lane L1). `resolve_hit -> HitResult` + golden test.
+- [ ] **L1.6 (G)** Grok, reviewed by Claude (lane L1). Property tests and edge-case tests (only `crates/combat/tests/**`).
+- [ ] **L1.7 (C)** Claude (lane L1). WASM bindings `crates/combat/wasm` (C ABI or wasm-bindgen, lead's choice) for the app.
 - [ ] P1 **L1.8** Alloys, collisions, reactions. P2 triples.
 
 ## L2. Render crate + render program
