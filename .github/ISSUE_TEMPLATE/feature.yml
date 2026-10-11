@@ -1,0 +1,105 @@
+name: Feature
+description: A task to implement (program instruction, crate module, app screen, tool).
+title: "[feat] "
+labels: ["type:feature"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        One issue = one finished task that can be checked by tests.
+        Write it so that a person or an AI agent can do it without asking questions.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of the repository this task touches. Also add the matching `area:` label.
+      options:
+        - registry
+        - character
+        - items
+        - map
+        - session
+        - city
+        - render
+        - crates
+        - app
+        - sdk
+        - worker
+        - tools
+        - docs
+        - art
+    validations:
+      required: true
+
+  - type: input
+    id: doc
+    attributes:
+      label: Design doc section
+      description: Link to the section of docs/ this task implements.
+      placeholder: "docs/COMBAT_MATH.md, section 6.4"
+    validations:
+      required: true
+
+  - type: textarea
+    id: task
+    attributes:
+      label: What to do
+      description: The task itself. Be specific about behaviour, inputs and outputs.
+      placeholder: |
+        Implement the `move_character` instruction:
+        - the character moves 1 cell (direction u8: 0-3);
+        - cannot leave the map or move outside its own turn;
+        - signer: owner or session key (docs/GAME_COMISSIONS.md, sections 4-5).
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Files and boundaries
+      description: Which files to create or change, and what must NOT be touched.
+      placeholder: |
+        Create: programs/session/src/instructions/move_character.rs
+        Change: programs/session/src/lib.rs
+        Do not touch: other programs, docs/
+    validations:
+      required: false
+
+  - type: textarea
+    id: verify
+    attributes:
+      label: How to verify
+      description: Tests to write and commands to run.
+      placeholder: |
+        Tests:
+        - successful move;
+        - move out of the map fails;
+        - move on someone else's turn fails;
+        - session key from another party fails.
+        Command: anchor test
+    validations:
+      required: true
+
+  - type: textarea
+    id: done
+    attributes:
+      label: Definition of done
+      value: |
+        - [ ] Code follows ARCHITECTURE.md conventions
+        - [ ] Tests added and passing
+        - [ ] CI is green
+        - [ ] Docs updated if behaviour changed
+    validations:
+      required: true
+
+  - type: dropdown
+    id: size
+    attributes:
+      label: Size
+      options:
+        - "S: a few hours"
+        - "M: about a day"
+        - "L: several days, consider splitting"
+    validations:
+      required: false

@@ -1,0 +1,51 @@
+name: Design decision
+description: A game design or architecture question that needs a decision before code.
+title: "[design] "
+labels: ["type:design"]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: What needs to be decided.
+      placeholder: "Can the base attack and an active skill be used in the same turn?"
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Related doc sections and why the question came up.
+      placeholder: "docs/PARTY_AND_TURNS.md, section 5.1"
+    validations:
+      required: true
+
+  - type: textarea
+    id: options
+    attributes:
+      label: Options
+      description: Possible answers with their pros and cons.
+      placeholder: |
+        A. Both, if action points allow. Pro: ... Con: ...
+        B. Only one of them. Pro: ... Con: ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: decision
+    attributes:
+      label: Decision
+      description: Fill in when decided. Leave empty while the question is open.
+    validations:
+      required: false
+
+  - type: textarea
+    id: docs
+    attributes:
+      label: Documents to update
+      placeholder: |
+        - [ ] docs/PARTY_AND_TURNS.md, section 5.1
+        - [ ] docs/SKILL_BUILDER.md, section 3.1
+    validations:
+      required: false
