@@ -11,13 +11,13 @@ Filled at L0 from `anchor keys list` and committed to `Anchor.toml` (keypairs st
 
 | Program | Crate name | ID |
 |---|---|---|
-| registry | `deadroll_registry` | `<fill at L0>` |
-| render | `deadroll_render_program` | `<fill at L0>` |
-| character | `deadroll_character` | `<fill at L0>` |
-| items | `deadroll_items` | `<fill at L0>` |
-| map | `deadroll_map` | `<fill at L0>` |
-| session | `deadroll_session` | `<fill at L0>` |
-| city | `deadroll_city` | `<fill at L0>` |
+| registry | `deadroll_registry` | `dZ1jraMfS3bAUTkRw2TA1ddg8UDGzgUdFQz5pmBxjoG` |
+| render | `deadroll_render_program` | `DgQCsXAe7Q7h8zdtToiTvk8XqNjjbXuD6xith2BmEiRB` |
+| character | `deadroll_character` | `9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL` |
+| items | `deadroll_items` | `48FtbrDegNrAUHFza9HdJzZAvUo3uUNqs1kNnZxFsqJS` |
+| map | `deadroll_map` | `2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH` |
+| session | `deadroll_session` | `3gzfih2WaBgXcYZ57jWokmZM3FDE6QHX5y4R9EvKZoNJ` |
+| city | `deadroll_city` | `2Cr5vB5awqDVx6XRcxtFFYQEG6Zy3aSAcKcqzh1xbVjS` |
 
 Every program exposes `pub const ID` and a `cpi` feature so other programs can depend on it (`features = ["cpi"]`).
 
