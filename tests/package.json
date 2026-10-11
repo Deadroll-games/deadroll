@@ -4,6 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node -e \"console.log('no integration tests yet (L8.2)')\""
+    "test": "node -e \"console.log('no integration tests yet (L8.2)')\"",
+    "test:character": "node --import tsx --test character.test.ts"
+  },
+  "devDependencies": {
+    "@anchor-lang/core": "1.2.1",
+    "@solana/web3.js": "1",
+    "@types/node": "22",
+    "tsx": "4"
   }
 }

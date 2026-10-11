@@ -12,18 +12,25 @@ crate-type = ["cdylib", "lib"]
 name = "deadroll_character"
 
 [features]
-default = []
+# `nft` is the target design (Core NFT per character). Building with `--no-default-features`
+# is the FALLBACK(nft) seam: PDA only, `nft = None`.
+default = ["nft"]
 cpi = ["no-entrypoint"]
 no-entrypoint = []
 no-log-ix-name = []
-idl-build = ["anchor-lang/idl-build", "deadroll-types/idl-build"]
+idl-build = ["anchor-lang/idl-build", "deadroll-types/idl-build", "deadroll-skillcheck/idl-build"]
 anchor-debug = []
 custom-heap = []
 custom-panic = []
+nft = ["dep:mpl-core"]
 
 [dependencies]
 anchor-lang.workspace = true
 deadroll-types = { workspace = true, features = ["anchor"] }
+deadroll-skillcheck = { workspace = true, features = ["anchor"] }
+# Program id only (owner of `GameConfig`).
+deadroll-registry.workspace = true
+mpl-core = { workspace = true, optional = true }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }
