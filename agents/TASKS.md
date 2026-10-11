@@ -43,7 +43,7 @@ If a checkpoint slips by more than 2 hours, the lead moves the lowest P0 item to
 - [x] **L0.3 (C)** Claude (lead L0). `crates/types` exactly as `CONTRACTS.md` section 3-4, with Borsh + `InitSpace`-compatible sizes and round-trip tests.
 - [x] **L0.4 (C) Dependency spike, 60 min max** Claude (lead L0): a throwaway program that compiles with Anchor 1.0 + `ephemeral-vrf-sdk` + `session-keys` + `mpl-core`. Report per crate: OK / needs pin / fallback. Lead decides and writes the decision at the top of this file.
 - [ ] **L0.5 (G)** Zone `README.md` + `CLAUDE.md` stubs in every program and crate folder from the template in `agents/zone-claude-template.md`.
-- [ ] **L0.6 (C)** CI skeleton: `crates.yml` (fmt, clippy, test). Others later.
+- [x] **L0.6 (C)** Claude (lead L0). CI skeleton: `crates.yml` (fmt, clippy, test). Others later.
 
 ## L1. Combat crate (`crates/combat`)
 

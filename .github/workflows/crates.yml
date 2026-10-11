@@ -1,0 +1,59 @@
+name: crates
+
+# Shared Rust crates only (docs/ARCHITECTURE.md, section 9). Programs get programs.yml later.
+on:
+  pull_request:
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/crates.yml"
+  push:
+    branches: [main]
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/crates.yml"
+
+concurrency:
+  group: crates-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CRATES: -p deadroll-types -p deadroll-combat -p deadroll-skillcheck -p deadroll-mapcheck -p deadroll-render
+
+jobs:
+  crates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: fmt
+        run: cargo fmt --all --check
+
+      - name: clippy
+        run: cargo clippy $CRATES --all-targets -- -D warnings
+
+      - name: clippy (types with anchor)
+        run: cargo clippy -p deadroll-types --all-targets --features anchor -- -D warnings
+
+      - name: test
+        run: cargo test $CRATES
+
+      - name: test (types with anchor)
+        run: cargo test -p deadroll-types --features anchor
+
+      - name: no_std build for wasm32
+        run: cargo build $CRATES --target wasm32-unknown-unknown --release
