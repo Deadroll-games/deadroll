@@ -139,10 +139,9 @@ pub fn build_packets(weapon: DamageRange, skill: &Skill, added: &[DamageRange]) 
         );
     } else {
         let (aspects, count) = skill.bases(weapon.aspect);
-        for i in 0..count {
-            let share = skill.shares_bp[i];
+        for (&aspect, &share) in aspects.iter().zip(&skill.shares_bp).take(count) {
             packets.add(
-                aspects[i],
+                aspect,
                 scale(w_min, skill.power_bp, share),
                 scale(w_max, skill.power_bp, share),
             );
