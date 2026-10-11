@@ -7,4 +7,15 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+default = []
+# Borsh derives on the input and result types (used by the WASM bindings).
+borsh = ["dep:borsh"]
+
 [dependencies]
+deadroll-types.workspace = true
+sha2.workspace = true
+borsh = { workspace = true, optional = true }
+
+[dev-dependencies]
+proptest = "1"

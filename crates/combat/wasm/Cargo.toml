@@ -1,0 +1,18 @@
+[package]
+name = "deadroll-combat-wasm"
+description = "C ABI over deadroll-combat for the website: resolve and replay hits from a VRF seed."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+deadroll-combat = { workspace = true, features = ["borsh"] }
+borsh.workspace = true
+
+[dev-dependencies]
+deadroll-types.workspace = true
