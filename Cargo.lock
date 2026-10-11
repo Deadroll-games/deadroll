@@ -546,6 +546,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "deadroll-combat-wasm"
+version = "0.1.0"
+dependencies = [
+ "borsh",
+ "deadroll-combat",
+ "deadroll-types",
+]
+
+[[package]]
 name = "deadroll-items"
 version = "0.1.0"
 dependencies = [
