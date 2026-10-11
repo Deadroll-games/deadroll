@@ -1,0 +1,35 @@
+# Demo palette, version 1 (crates/render/FORMAT.md 3.2.1).
+# Ramp and material indices are positions in this file: append only.
+palette 1
+outline #120c16
+
+# ramps, dark -> light. Ramp 0 must be the neutral gray.
+ramp gray      #2e2e34 #56565e #8a8a92 #c4c4cc
+ramp steel     #3a4250 #5c6676 #8a94a4 #c8d0dc
+ramp skin      #7a4a32 #a86c4a #d09268 #ecbc92
+ramp skin_elf  #8a6a52 #b89070 #dcb894 #f4dcc0
+ramp hair      #2a1a10 #4a2e1a #6e4a2a #94683c
+ramp hair_elf  #6e5a20 #a88a34 #d8bc58 #f4e08c
+ramp robe      #1e1638 #2e2257 #43337f #5c48a8
+ramp green     #14321e #1f4d2c #2f6e3e #4a9455
+ramp leather   #3a2416 #5e3c24 #86583a #a8764e
+ramp gold      #5e3e0a #8a5e10 #d9a832 #f6e08a
+ramp cold      #1d3f63 #2a5f8a #4f8fc0 #cfe8ff
+ramp fire      #5a1208 #a8300c #e8741c #ffd860
+ramp dark      #1a0e14 #2c1820 #40222c #56303a
+ramp eyes      #10101a #202848 #3c5c9c #a0c4ff
+ramp cape_red  #3a0c10 #5e1418 #8a2024 #b8383a
+ramp fur       #3a3430 #5a524a #827868 #aea08c
+
+dark dark
+
+# materials: primary ramp, secondary ramp
+material steel      steel    leather
+material human      skin     hair
+material elf        skin_elf hair_elf
+material robe       robe     leather
+material leather    leather  leather
+material cape       cape_red leather
+material wolf       fur      fur
+material goblin     green    leather
+material stone      gray     gray
