@@ -56,7 +56,7 @@ size 48 48
 layer monster
 # left horn with a flat tip, ridge, and ear; mirror builds the right side
 POLY H 13 17 21 16 19 5 15 5 12 9
-POLY R 16 15 19 14 18 7 16 7
+POLY H 16 15 19 14 18 7 16 7
 POLY K 8 18 14 15 14 24 8 23
 MIRROR_X 48
 # heavy head
@@ -65,7 +65,7 @@ ELLIPSE 16 12 16 12 K
 POLY K 16 34 7 25 16 22 32 22 41 25 32 34
 # crown band over the horn bases
 RECT 18 14 12 3 H
-RECT 22 15 4 2 R
+RECT 22 15 4 2 H
 # brow, eyes, snarl
 RECT 19 17 12 2 D
 PIXEL 22 19 Y
