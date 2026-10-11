@@ -17,6 +17,9 @@ Rules for the lanes:
 1. **Character lane:** never deserialize a Core `Asset` (or `Collection`) on-chain: mpl-core's deserializers overflow the 4 KB stack frame. Death freeze = plugin update CPI only.
 2. **VRF on localnet:** `programs/session` gets a cargo feature `mock-vrf`. With it, the `consume_randomness` signer check expects a fixed test keypair instead of the VRF identity; the rest of the callback is the **same** code path. Do not use `SlotHashesRoll` for tests. The devnet build must never enable `mock-vrf`: the deploy script (L8.3) fails if it is on. L8.3 adds one devnet smoke test with the real VRF oracle.
 3. **All lanes build with** `anchor build --tools-version v1.54` (cargo-build-sbf 4.1.0 panics on Windows with Anchor's default v1.57; one version everywhere keeps builds identical).
+4. **TS tests** (`tests/<program>.test.ts`, shared validator; on Windows `anchor test` cannot run its script, so call node directly). After `anchor build -p <program>` (IDL + `target/types`) and `anchor deploy -p <program> --provider.cluster localnet`:
+   `cd tests && ANCHOR_PROVIDER_URL=http://127.0.0.1:8899 ANCHOR_WALLET=<funded keypair json> node --import tsx --test --test-concurrency=1 <program>.test.ts`
+   Import Anchor as `import anchor from "@anchor-lang/core"` (named ESM imports such as `BN` fail on its CJS build).
 
 Legend: **C** = Claude agent, **G** = Grok (via `delegate-to-grok`, reviewed by the lane's Claude), **H** = human (Ivan).
 Each lane works in its own worktree: `git worktree add ../deadroll-<lane> -b lane/<lane>`.
@@ -101,9 +104,9 @@ Each task = one fresh Grok session, writes only in `assets/sprites/<name>.dsl`, 
 
 ## L7. Session program (critical path)
 
-- [ ] **L7.1 (C)** Accounts + `open_session`, `join_session` (escrow), `set_ready`, `start_session`.
-- [ ] **L7.2 (C)** `auth::check_actor`: Session Keys token or fallback actor.
-- [ ] **L7.3 (C)** Turn order (round-robin first, initiative timeline P1), action points from speed, `move`, `end_turn`.
+- [ ] **L7.1 (C)** Claude (lane L7). Accounts + `open_session`, `join_session` (escrow), `set_ready`, `start_session`.
+- [ ] **L7.2 (C)** Claude (lane L7). `auth::check_actor`: Session Keys token or fallback actor.
+- [ ] **L7.3 (C)** Claude (lane L7). Turn order (round-robin first, initiative timeline P1), action points from speed, `move`, `end_turn`.
 - [ ] **L7.4 (C)** `act` / `monster_act` -> VRF request; `consume_randomness` callback -> `deadroll_combat::resolve_hit` -> apply HP, states, death CPI, boss victory.
 - [ ] **L7.5 (C)** Outcomes: victory rewards CPI, wipe, flee by unanimity, DM claims escrow.
 - [ ] **L7.6 (G)** Rejection tests (wrong actor, wrong turn, dead, out of AP, not adjacent, ended session).
