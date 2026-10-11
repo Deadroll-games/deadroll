@@ -7,4 +7,17 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+default = []
+# Text DSL and palette text compilers (crates/render/FORMAT.md 1, 3.2.1). Tools only, never in WASM.
+text = []
+
 [dependencies]
+
+[dev-dependencies]
+png = "0.17"
+sha2 = { workspace = true, features = ["std"] }
+borsh = { workspace = true, features = ["std"] }
+# Host-only: checks the local RenderRequest has the same Borsh bytes (tests/types_layout.rs).
+deadroll-types = { workspace = true, features = ["std"] }
+deadroll-render = { path = ".", features = ["text"] }
