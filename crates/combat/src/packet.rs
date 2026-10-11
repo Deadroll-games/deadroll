@@ -75,7 +75,10 @@ impl Skill {
         if self.aspect_count == 0 {
             ([weapon; SKILL_ASPECTS_MAX], 1)
         } else {
-            (self.aspects, (self.aspect_count as usize).min(SKILL_ASPECTS_MAX))
+            (
+                self.aspects,
+                (self.aspect_count as usize).min(SKILL_ASPECTS_MAX),
+            )
         }
     }
 }
@@ -182,7 +185,14 @@ mod tests {
         let w = DamageRange::new(Aspect::Piercing, 4, 7);
         let p = build_packets(w, &Skill::basic(Source::Combat, Form::Strike, 0), &[]);
         assert_eq!(p.count, 1);
-        assert_eq!(p.list[0], Packet { aspect: Aspect::Piercing, min: 40_000, max: 70_000 });
+        assert_eq!(
+            p.list[0],
+            Packet {
+                aspect: Aspect::Piercing,
+                min: 40_000,
+                max: 70_000
+            }
+        );
     }
 
     #[test]
@@ -192,8 +202,22 @@ mod tests {
         let s = skill(&[Aspect::Cold, Aspect::Lightning], &[6_000, 4_000], 20_000);
         let p = build_packets(w, &s, &[]);
         assert_eq!(p.count, 2);
-        assert_eq!(p.list[0], Packet { aspect: Aspect::Cold, min: 60_000, max: 96_000 });
-        assert_eq!(p.list[1], Packet { aspect: Aspect::Lightning, min: 40_000, max: 64_000 });
+        assert_eq!(
+            p.list[0],
+            Packet {
+                aspect: Aspect::Cold,
+                min: 60_000,
+                max: 96_000
+            }
+        );
+        assert_eq!(
+            p.list[1],
+            Packet {
+                aspect: Aspect::Lightning,
+                min: 40_000,
+                max: 64_000
+            }
+        );
         // Fractions are kept: 5 * 2 * 0.6 = 6.0, 8 * 2 * 0.4 = 6.4.
         assert_eq!(p.total_range(), (100_000, 160_000));
     }
@@ -203,7 +227,14 @@ mod tests {
         let w = DamageRange::new(Aspect::Piercing, 3, 3);
         let s = skill(&[Aspect::Fire], &[BP], BP);
         let p = build_packets(w, &s, &[]);
-        assert_eq!(p.as_slice(), &[Packet { aspect: Aspect::Fire, min: 30_000, max: 30_000 }]);
+        assert_eq!(
+            p.as_slice(),
+            &[Packet {
+                aspect: Aspect::Fire,
+                min: 30_000,
+                max: 30_000
+            }]
+        );
     }
 
     #[test]
@@ -217,8 +248,22 @@ mod tests {
         ];
         let p = build_packets(w, &s, &added);
         assert_eq!(p.count, 2);
-        assert_eq!(p.list[0], Packet { aspect: Aspect::Cold, min: 30_000, max: 60_000 });
-        assert_eq!(p.list[1], Packet { aspect: Aspect::Piercing, min: 10_000, max: 30_000 });
+        assert_eq!(
+            p.list[0],
+            Packet {
+                aspect: Aspect::Cold,
+                min: 30_000,
+                max: 60_000
+            }
+        );
+        assert_eq!(
+            p.list[1],
+            Packet {
+                aspect: Aspect::Piercing,
+                min: 10_000,
+                max: 30_000
+            }
+        );
     }
 
     #[test]
@@ -232,7 +277,11 @@ mod tests {
     #[test]
     fn duplicate_skill_aspects_merge_and_overflow_saturates() {
         let w = DamageRange::new(Aspect::Fire, u32::MAX, u32::MAX);
-        let s = skill(&[Aspect::Fire, Aspect::Fire], &[u32::MAX, u32::MAX], u32::MAX);
+        let s = skill(
+            &[Aspect::Fire, Aspect::Fire],
+            &[u32::MAX, u32::MAX],
+            u32::MAX,
+        );
         let p = build_packets(w, &s, &[]);
         assert_eq!(p.count, 1);
         assert_eq!(p.list[0].max, u64::MAX);
