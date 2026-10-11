@@ -78,6 +78,10 @@ fn warrior_png_is_stable() {
     std::fs::write(dir.join("input.bin"), &input).unwrap();
     std::fs::write(dir.join("expected.sha256"), &sha).unwrap();
     std::fs::write(dir.join("warrior.png"), &out.bytes).unwrap();
+    // Palette and sprite book bodies, as uploaded on-chain (tools/scripts/upload-*.ts dry runs).
+    let parts = deadroll_render::parse_input(&input).unwrap();
+    std::fs::write(dir.join("palette.bin"), parts.palette).unwrap();
+    std::fs::write(dir.join("book.bin"), parts.books[0]).unwrap();
 
     // Deterministic: same bytes on a second run.
     assert_eq!(render(&input, OUT_PNG, 8).unwrap(), out);
