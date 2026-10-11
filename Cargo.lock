@@ -605,6 +605,11 @@ dependencies = [
 [[package]]
 name = "deadroll-skillcheck"
 version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "borsh",
+ "deadroll-types",
+]
 
 [[package]]
 name = "deadroll-types"
