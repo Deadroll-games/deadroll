@@ -16,6 +16,12 @@ borsh = { version = "1.5.7", default-features = false, features = ["derive"] }
 # Same major as anchor-lang 1.2.1 (default `solana-v3` cohort), so `Pubkey` is one type everywhere.
 solana-pubkey = { version = "3", default-features = false, features = ["borsh"] }
 sha2 = { version = "0.10", default-features = false }
+# External program crates, pinned by the L0.4 spike decision (agents/TASKS.md). Use `.workspace = true`.
+ephemeral-vrf-sdk = { version = "=0.17.3", features = ["anchor"] }
+# A program using it forwards `idl-build = [..., "session-keys/idl-build"]`.
+session-keys = { version = "=3.1.1", features = ["no-entrypoint"] }
+# Default features only: its `anchor` feature targets Anchor 0.31/0.32.
+mpl-core = "=0.12.1"
 
 deadroll-types = { path = "crates/types" }
 deadroll-combat = { path = "crates/combat" }

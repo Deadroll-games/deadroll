@@ -13,11 +13,13 @@ Owner lane: <L7>. Read the root CLAUDE.md first.
 ## Rules for this zone
 - Docs: <docs/... sections>
 - Accounts owned here: <list from agents/CONTRACTS.md>
-- CPI out: <list> / CPI in (who may call us): <list>
+- CPI out: <list> (wrappers in `src/cpi_out/`, never `src/cpi/`) / CPI in (who may call us): <list>
 - Forbidden: editing other zones, crates/types, agents/CONTRACTS.md
 
 ## Commands
-<build and test commands for this zone only>
+<build and test commands for this zone only. Programs always build with the flag:
+ anchor build --tools-version v1.54 -p <program_lib_name>
+ cargo test -p <package>
 
 ## Done means
 - builds, all tests green, clippy clean

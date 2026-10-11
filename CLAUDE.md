@@ -47,6 +47,9 @@ agents/     TASKS.md, CONTRACTS.md, GROK_FOR_CLAUDE.md
 docs/       design docs (read-only for agents unless the task says otherwise)
 ```
 
+Inside a program: `src/lib.rs`, `src/state/`, `src/instructions/`, `src/cpi_out/` (outgoing CPI wrappers), `src/errors.rs`, `tests/`.
+The CPI folder is `cpi_out`, not `cpi`: `#[program]` generates a crate-level `cpi` module, and Anchor's IDL build does not follow `#[path]`.
+
 Every program and crate folder has its own `README.md` and a short `CLAUDE.md` with zone rules. Read the zone `CLAUDE.md` before touching the zone.
 
 ## 2. Stack

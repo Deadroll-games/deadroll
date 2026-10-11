@@ -14,7 +14,7 @@ description: Use when adding or changing an instruction in any Deadroll Anchor p
 5. Errors in `src/errors.rs`, one variant per distinct failure, clear message.
 6. `emit!` an event for every state change (names from `CONTRACTS.md` section 7).
 7. Tests: happy path + one per rejection. LiteSVM for single-program tests; cross-program flows go to `tests/`.
-8. `anchor build -p <program>` and tests until green. If the IDL changed, regenerate `sdk/`.
+8. `anchor build --tools-version v1.54 -p <program>` and tests until green (always pass the flag, see root `CLAUDE.md`, section 2). If the IDL changed, regenerate `sdk/`.
 
 ## Accounts
 
@@ -40,6 +40,7 @@ pub config: Account<'info, GameConfig>, // read from registry, no CPI needed
 
 The caller signs with `CpiContext::new_with_signer(..., &[&[b"authority", &[bump]]])`.
 CPI only through the callee crate with `features = ["cpi"]`, only the instructions in `CONTRACTS.md` section 5. Max depth: user -> program -> program.
+Wrappers for outgoing CPI live in `src/cpi_out/` (not `src/cpi/`: `#[program]` generates a crate-level `cpi` module, and Anchor's IDL build does not follow `#[path]`).
 
 Reading another program's account needs no CPI: deserialize with the owner check (`Account<'info, T>` from the other crate, or `AccountLoader` + `owner = other::ID`).
 
@@ -60,7 +61,8 @@ auth::check_actor(&ctx.accounts.signer, &ctx.accounts.participation, ctx.account
 - `act` / `monster_act` store a `PendingAction` in `GameSession`, set `pending_vrf = true` and CPI the MagicBlock VRF request with the callback = `consume_randomness`.
 - `consume_randomness` checks the VRF identity signer, builds `VrfRoll(randomness)`, calls `deadroll_combat::resolve_hit`, applies results, clears `pending_vrf`, `action_counter += 1`.
 - No other action is accepted while `pending_vrf` is true.
-- Fallback `SlotHashesRoll`: same callback body called inline. Mark with `// FALLBACK(vrf)`.
+- Local tests: cargo feature `mock-vrf` in `programs/session` swaps the callback signer check from the VRF identity to a fixed test keypair. Everything else in `consume_randomness` stays the same code path. Never use `SlotHashesRoll` for tests. The devnet build must never enable `mock-vrf` (the deploy script fails if it is on).
+- Production fallback `SlotHashesRoll` (only if the lead switches VRF to its fallback): same callback body called inline. Mark with `// FALLBACK(vrf)`.
 - Check the installed `ephemeral-vrf-sdk` for exact names (request builder, identity constant, callback account metas). Do not guess.
 
 ## Rules

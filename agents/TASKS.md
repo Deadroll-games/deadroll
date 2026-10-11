@@ -1,5 +1,23 @@
 # TASKS: board for parallel agents
 
+## Decision: dependencies and toolchain (L0.4, 2026-10-11, lead)
+
+Spike result: Anchor 1.2.1 + all three external crates compile to SBF and produce a correct IDL. **No fallbacks.**
+
+| Crate | Pin (root `Cargo.toml`, `[workspace.dependencies]`) |
+|---|---|
+| anchor-lang | `=1.2.1` (default `solana-v3`) |
+| ephemeral-vrf-sdk | `=0.17.3`, feature `anchor` |
+| session-keys | `=3.1.1`, features `no-entrypoint`, `idl-build` (forward `session-keys/idl-build` from the program's `idl-build`) |
+| mpl-core | `=0.12.1`, default features (never its `anchor` feature) |
+
+Toolchain: Solana CLI 4.1.2, Anchor CLI 1.2.1, Rust 1.92.0, platform tools v1.54. Outgoing CPI wrappers live in `src/cpi_out/`.
+
+Rules for the lanes:
+1. **Character lane:** never deserialize a Core `Asset` (or `Collection`) on-chain: mpl-core's deserializers overflow the 4 KB stack frame. Death freeze = plugin update CPI only.
+2. **VRF on localnet:** `programs/session` gets a cargo feature `mock-vrf`. With it, the `consume_randomness` signer check expects a fixed test keypair instead of the VRF identity; the rest of the callback is the **same** code path. Do not use `SlotHashesRoll` for tests. The devnet build must never enable `mock-vrf`: the deploy script (L8.3) fails if it is on. L8.3 adds one devnet smoke test with the real VRF oracle.
+3. **All lanes build with** `anchor build --tools-version v1.54` (cargo-build-sbf 4.1.0 panics on Windows with Anchor's default v1.57; one version everywhere keeps builds identical).
+
 Legend: **C** = Claude agent, **G** = Grok (via `delegate-to-grok`, reviewed by the lane's Claude), **H** = human (Ivan).
 Each lane works in its own worktree: `git worktree add ../deadroll-<lane> -b lane/<lane>`.
 Write your name next to a task when you take it. Tick when merged to `main`.
@@ -20,10 +38,10 @@ If a checkpoint slips by more than 2 hours, the lead moves the lowest P0 item to
 
 ## L0. Lead: contracts and scaffold (sequential, blocks everyone)
 
-- [ ] **L0.1 (C)** Workspace: `Anchor.toml` with 7 programs, root `Cargo.toml` workspace, `rust-toolchain.toml`, pnpm workspace (`sdk`, `app`, `tests`, `tools/scripts`), `.gitignore` (keys, `target/`, `node_modules/`, `.env`, `test-ledger/`, `.anchor/`). Empty programs build.
-- [ ] **L0.2 (C)** Fill program IDs in `agents/CONTRACTS.md` and `Anchor.toml`. Keypairs stay local; tell H to back them up.
-- [ ] **L0.3 (C)** `crates/types` exactly as `CONTRACTS.md` section 3-4, with Borsh + `InitSpace`-compatible sizes and round-trip tests.
-- [ ] **L0.4 (C) Dependency spike, 60 min max**: a throwaway program that compiles with Anchor 1.0 + `ephemeral-vrf-sdk` + `session-keys` + `mpl-core`. Report per crate: OK / needs pin / fallback. Lead decides and writes the decision at the top of this file.
+- [x] **L0.1 (C)** Claude (lead L0). Workspace: `Anchor.toml` with 7 programs, root `Cargo.toml` workspace, `rust-toolchain.toml`, pnpm workspace (`sdk`, `app`, `tests`, `tools/scripts`), `.gitignore` (keys, `target/`, `node_modules/`, `.env`, `test-ledger/`, `.anchor/`). Empty programs build.
+- [x] **L0.2 (C)** Claude (lead L0). Fill program IDs in `agents/CONTRACTS.md` and `Anchor.toml`. Keypairs stay local; tell H to back them up.
+- [x] **L0.3 (C)** Claude (lead L0). `crates/types` exactly as `CONTRACTS.md` section 3-4, with Borsh + `InitSpace`-compatible sizes and round-trip tests.
+- [x] **L0.4 (C) Dependency spike, 60 min max** Claude (lead L0): a throwaway program that compiles with Anchor 1.0 + `ephemeral-vrf-sdk` + `session-keys` + `mpl-core`. Report per crate: OK / needs pin / fallback. Lead decides and writes the decision at the top of this file.
 - [ ] **L0.5 (G)** Zone `README.md` + `CLAUDE.md` stubs in every program and crate folder from the template in `agents/zone-claude-template.md`.
 - [ ] **L0.6 (C)** CI skeleton: `crates.yml` (fmt, clippy, test). Others later.
 
