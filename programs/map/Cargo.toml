@@ -24,6 +24,11 @@ custom-panic = []
 [dependencies]
 anchor-lang.workspace = true
 deadroll-types = { workspace = true, features = ["anchor"] }
+deadroll-mapcheck.workspace = true
+# `GameConfig` PDA address and owner only.
+deadroll-registry.workspace = true
+# `layout_hash` in `finalize_map` (Anchor 1.2 no longer re-exports `solana_program::hash`).
+sha2.workspace = true
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

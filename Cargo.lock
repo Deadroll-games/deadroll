@@ -567,12 +567,19 @@ name = "deadroll-map"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
+ "deadroll-mapcheck",
+ "deadroll-registry",
  "deadroll-types",
+ "sha2 0.10.9",
 ]
 
 [[package]]
 name = "deadroll-mapcheck"
 version = "0.1.0"
+dependencies = [
+ "deadroll-types",
+ "serde_json",
+]
 
 [[package]]
 name = "deadroll-registry"
