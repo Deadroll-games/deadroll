@@ -16,14 +16,21 @@ default = []
 cpi = ["no-entrypoint"]
 no-entrypoint = []
 no-log-ix-name = []
-idl-build = ["anchor-lang/idl-build", "deadroll-types/idl-build"]
+idl-build = ["anchor-lang/idl-build", "deadroll-types/idl-build", "session-keys/idl-build"]
 anchor-debug = []
 custom-heap = []
 custom-panic = []
 
 [dependencies]
-anchor-lang.workspace = true
+# `lazy-account`: MonsterState is too big to Borsh-decode on-chain (see state/monster_state.rs).
+anchor-lang = { workspace = true, features = ["lazy-account"] }
 deadroll-types = { workspace = true, features = ["anchor"] }
+session-keys.workspace = true
+# Program ids only for now; CPI goes through the stubs in src/cpi_out until L5/L6 add the instructions.
+deadroll-character.workspace = true
+deadroll-map.workspace = true
+# GameConfig PDA address only.
+deadroll-registry.workspace = true
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }
