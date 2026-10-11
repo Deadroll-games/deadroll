@@ -4,4 +4,42 @@ use anchor_lang::prelude::*;
 pub enum CharacterError {
     #[msg("Caller is not authorized for this instruction")]
     Unauthorized,
+    #[msg("Name must be printable ASCII, not empty, zero-padded")]
+    InvalidName,
+    #[msg("Predisposition not allowed for this race")]
+    PredispositionNotAllowed,
+    #[msg("Stats must start at the base and spend exactly the starting points")]
+    InvalidStats,
+    #[msg("Too many starting skills")]
+    TooManySkills,
+    #[msg("Skill rejected by the builder rules")]
+    InvalidSkill,
+    #[msg("Profile has no free character index")]
+    TooManyCharacters,
+    #[msg("Not the registry GameConfig account")]
+    InvalidConfig,
+    #[msg("Caller is not the trusted game program")]
+    UntrustedCaller,
+    #[msg("Signer does not own this character")]
+    NotOwner,
+    #[msg("Character is dead")]
+    CharacterDead,
+    #[msg("Character is already locked in a session")]
+    AlreadyLocked,
+    #[msg("Character is not locked in a session")]
+    NotLocked,
+    #[msg("Character is still alive")]
+    StillAlive,
+    #[msg("Character has no NFT")]
+    NoNft,
+    #[msg("Asset is not this character's NFT")]
+    AssetMismatch,
+    #[msg("Tombstone NFT is already frozen")]
+    AlreadyFrozen,
+    #[msg("NFT accounts missing: asset and mpl-core program are required")]
+    NftAccountsMissing,
+    #[msg("This build has no NFT support (FALLBACK nft)")]
+    NftDisabled,
+    #[msg("Arithmetic overflow")]
+    MathOverflow,
 }
