@@ -623,6 +623,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "deadroll-render-wasm"
+version = "0.1.0"
+dependencies = [
+ "deadroll-render",
+ "dlmalloc",
+]
+
+[[package]]
 name = "deadroll-session"
 version = "0.1.0"
 dependencies = [
@@ -662,6 +670,17 @@ dependencies = [
  "block-buffer 0.12.1",
  "const-oid",
  "crypto-common 0.2.2",
+]
+
+[[package]]
+name = "dlmalloc"
+version = "0.2.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad5208a115eaba24916f7456929832e310a81518c641f93fee4f89aa93aa3675"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "windows-sys",
 ]
 
 [[package]]
