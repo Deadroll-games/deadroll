@@ -103,10 +103,10 @@ Each task = one fresh Grok session, writes only in `assets/sprites/<name>.dsl`, 
 
 ## L6. Map program + mapcheck
 
-- [ ] **L6.1 (C)** `crates/mapcheck`: bounds, entrance/exit, spawns on walkable cells, path entrance -> exit (BFS), packs.
-- [ ] **L6.2 (G)** BFS + tests in `crates/mapcheck/src/path.rs` only.
-- [ ] **L6.3 (C)** `programs/map`: `create_map`, `write_layout`, `finalize_map` (runs mapcheck, stores hash), `set_status` (session PDA only).
-- [ ] **L6.4 (G)** `assets/registry/maps/demo_16x16.json` preset (wolves pack, goblins pack, goblin chief + helpers).
+- [ ] **L6.1 (C)** Claude (lane L6). `crates/mapcheck`: bounds, entrance/exit, spawns on walkable cells, path entrance -> exit (BFS), packs.
+- [ ] **L6.2 (G)** Grok, reviewed by Claude (lane L6). BFS + tests in `crates/mapcheck/src/path.rs` only.
+- [ ] **L6.3 (C)** Claude (lane L6). `programs/map`: `create_map`, `write_layout`, `finalize_map` (runs mapcheck, stores hash), `set_status` (session PDA only).
+- [ ] **L6.4 (G)** Grok, reviewed by Claude (lane L6). `assets/registry/maps/demo_16x16.json` preset (wolves pack, goblins pack, goblin chief + helpers).
 - [ ] P1 **L6.5** Commit-reveal trap (`docs/MAP_DESCRIPTION.md`, section 8).
 
 ## L7. Session program (critical path)

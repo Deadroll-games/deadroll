@@ -713,12 +713,19 @@ name = "deadroll-map"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
+ "deadroll-mapcheck",
+ "deadroll-registry",
  "deadroll-types",
+ "solana-sha256-hasher",
 ]
 
 [[package]]
 name = "deadroll-mapcheck"
 version = "0.1.0"
+dependencies = [
+ "deadroll-types",
+ "serde_json",
+]
 
 [[package]]
 name = "deadroll-registry"
