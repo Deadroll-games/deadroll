@@ -18,7 +18,11 @@ importers:
         specifier: 8.4.0
         version: 8.4.0
 
-  tools/scripts: {}
+  tools/scripts:
+    devDependencies:
+      '@solana/kit':
+        specifier: 8.4.0
+        version: 8.4.0
 
 packages:
 

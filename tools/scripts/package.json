@@ -2,5 +2,13 @@
   "name": "@deadroll/scripts",
   "version": "0.0.0",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "scripts": {
+    "upload-rasterizer": "node --experimental-strip-types --no-warnings upload-rasterizer.ts",
+    "upload-sprites": "node --experimental-strip-types --no-warnings upload-sprites.ts",
+    "test": "node --experimental-strip-types --no-warnings --test lib/render-program.test.ts"
+  },
+  "devDependencies": {
+    "@solana/kit": "8.4.0"
+  }
 }
