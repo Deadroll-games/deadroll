@@ -13,7 +13,9 @@ origin top left, `x` to the right, `y` down.
 ## 1. Text DSL (`assets/sprites/<name>.dsl`)
 
 One file holds one or more sprites. Line based, one statement per line, tokens separated by spaces.
-`#` starts a comment until the end of the line. Empty lines are ignored. Keywords are case-sensitive.
+A comment is a `#` at the start of a token followed by a space or the end of the line; it runs to
+the end of the line (so `#120c16` in a palette is a color, not a comment). Empty lines are ignored.
+Keywords are case-sensitive.
 
 ```
 # Warrior one-handed sword, held in the front hand
