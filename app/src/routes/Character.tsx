@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import type { Address } from "@solana/kit";
 import { CharacterForm } from "../components/forms/CharacterForm";
 import type { CharacterDraft } from "../components/forms/types";
@@ -17,7 +18,7 @@ import {
 import { aspectName, className, raceName } from "../chain/names";
 import { Aspect, Class, Race } from "../chain/types";
 import { useTx } from "../chain/useTx";
-import { DATA_SOURCE, explorerUrl } from "../config";
+import { DATA_SOURCE } from "../config";
 import { useRasterizer, useRenderImage } from "../raster/RasterizerProvider";
 import { SpriteCanvas } from "../raster/SpriteCanvas";
 import { useAppWallet } from "../wallet/AppWallet";
@@ -113,31 +114,22 @@ export function CharacterCard({ address, c }: { address: Address; c: CharacterAc
   const race = enumIndex(c.core.race, RACE_KEYS) as Race;
   const cls = enumIndex(c.core.class, CLASS_KEYS) as Class;
   const pred = enumIndex(c.core.predisposition, ASPECT_KEYS) as Aspect;
+  // The whole card opens the detail view; explorer links (PDA, Core NFT) live there.
   return (
-    <figure className={`panel char-card${dead ? " dead" : ""}`}>
-      <SpriteCanvas image={img.image} scale={3} label={bytesText(c.name)} />
-      <figcaption>
-        <b>{bytesText(c.name)}</b>
-        <span className="muted">
-          {raceName(race)} {className(cls)} · {aspectName(pred)} · lvl {c.core.level} · {c.core.xp} xp
-        </span>
-        <span className={dead ? "error" : "ok"}>
-          {dead ? `Tombstone${c.nftFrozen ? " · NFT frozen" : " · freeze pending"}` : c.core.inSession ? "In a party" : "Alive"}
-        </span>
-        <span className="mono">
-          <a href={explorerUrl("address", address)} target="_blank" rel="noreferrer">
-            PDA
-          </a>
-          {c.core.nft && (
-            <>
-              {" · "}
-              <a href={explorerUrl("address", c.core.nft)} target="_blank" rel="noreferrer">
-                Core NFT
-              </a>
-            </>
-          )}
-        </span>
-      </figcaption>
-    </figure>
+    <Link to={`/character/${address}`} className="char-card-link" aria-label={`Open ${bytesText(c.name)}`}>
+      <figure className={`panel char-card${dead ? " dead" : ""}`}>
+        <SpriteCanvas image={img.image} scale={3} label={bytesText(c.name)} />
+        <figcaption>
+          <b>{bytesText(c.name)}</b>
+          <span className="muted">
+            {raceName(race)} {className(cls)} · {aspectName(pred)} · lvl {c.core.level} · {c.core.xp} xp
+          </span>
+          <span className={dead ? "error" : "ok"}>
+            {dead ? `Tombstone${c.nftFrozen ? " · NFT frozen" : " · freeze pending"}` : c.core.inSession ? "In a party" : "Alive"}
+          </span>
+          <span className="muted">Details →</span>
+        </figcaption>
+      </figure>
+    </Link>
   );
 }

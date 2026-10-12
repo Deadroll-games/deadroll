@@ -43,6 +43,7 @@ import {
   status,
   type Actor,
   type CharacterAcc,
+  type SkillSetAcc,
   type GameSessionAcc,
   type MapAcc,
   type Party,
@@ -240,7 +241,7 @@ function PartyView({ address }: { address: Address }) {
     if (!party) return;
     void Promise.all(
       party.players.map(async (p) => {
-        const set = await getAccount<{ count: number; skills: { name: Uint8Array; blocks: { category: Record<string, unknown> } }[] }>(
+        const set = await getAccount<SkillSetAcc>(
           "character",
           "SkillSet",
           await skillSetPda(p.character),
