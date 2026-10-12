@@ -92,8 +92,8 @@ Each task = one fresh Grok session, writes only in `assets/sprites/<name>.dsl`, 
 
 ## L4. Registry program
 
-- [ ] **L4.1 (C)** `init_config`, `set_programs`, `set_rasterizer`, `set_uri_base`. `set_rasterizer` is authority-only and pulls (no CPI from render, decided in L2): it takes the `RasterizerCode` account, checks `owner == GameConfig.programs[Render]` and `finalized`, then copies version, address and sha256 (header offsets in `programs/render/README.md`). Same pattern later for `Palette` and `SpriteBook`.
-- [ ] **L4.2 (C)** Tables: aspects, resonances, bestiary, tileset, prefabs (`write_table(kind, offset, bytes)`).
+- [x] **L4.1 (C)** Claude (lane L4). `init_config`, `set_programs`, `set_rasterizer`, `set_uri_base`. `set_rasterizer` is authority-only and pulls (no CPI from render, decided in L2): it takes the `RasterizerCode` account, checks `owner == GameConfig.programs[Render]` and `finalized`, then copies version, address and sha256 (header offsets in `programs/render/README.md`). Same pattern later for `Palette` and `SpriteBook`.
+- [x] **L4.2 (C)** Claude (lane L4). Tables: aspects, resonances, bestiary, tileset, prefabs (`write_table(kind, offset, bytes)`).
 - [ ] **L4.3 (G)** `assets/registry/*.json` from docs (aspects, resonance pairs, bestiary P0 monsters, prefab rooms) + `tools/scripts/seed-registry.ts`.
 
 ## L5. Character program + skillcheck
