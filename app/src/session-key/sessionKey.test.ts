@@ -26,7 +26,7 @@ describe("create_session_v2", () => {
     const enc = getAddressEncoder();
     const [expected] = await getProgramDerivedAddress({
       programAddress: SESSION_KEYS_PROGRAM,
-      seeds: [new TextEncoder().encode("session_token"), enc.encode(PROGRAMS.session), enc.encode(burner.address), enc.encode(addrOf(1))],
+      seeds: [new TextEncoder().encode("session_token_v2"), enc.encode(PROGRAMS.session), enc.encode(burner.address), enc.encode(addrOf(1))],
     });
     expect(sessionToken).toBe(expected);
     expect(instruction.programAddress).toBe("KeyspM2ssCJbqUhQ4k7sveSiY4WjnYsrXkC8oDbwde5");

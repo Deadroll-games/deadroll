@@ -40,3 +40,18 @@ main { padding: 20px; max-width: 1200px; margin: 0 auto; }
 .wallet-list li + li { margin-top: 4px; }
 .wallet-list .btn { width: 100%; text-align: left; display: flex; gap: 8px; align-items: center; }
 canvas.pixel { image-rendering: pixelated; }
+
+/* L9.6 chain screens */
+.char-list { display: flex; flex-wrap: wrap; gap: 12px; }
+.char-card { display: flex; gap: 12px; align-items: center; margin: 0; }
+.char-card figcaption { display: grid; gap: 2px; font-size: 13px; }
+.char-card.dead { opacity: 0.85; border-color: var(--bad); }
+.badge.dev { color: var(--accent); border-color: var(--accent); }
+.dev-wallet { display: inline-flex; gap: 6px; align-items: center; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.log { max-height: 280px; overflow: auto; font-size: 12px; display: grid; gap: 2px; margin: 0; padding-left: 36px; }
+.log a { color: var(--muted); }
+.turn-banner { font-size: 15px; }
+.turn-banner b.me { color: var(--accent); }
+.skills { display: flex; flex-wrap: wrap; gap: 6px; }
+.skills .btn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }

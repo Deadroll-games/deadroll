@@ -37,9 +37,9 @@ function character(alive: boolean, frozen: boolean): Uint8Array {
 const ev: CharacterDied = { character: addrOf(1), owner: addrOf(2), session: addrOf(3), nft: addrOf(4), stateVersion: 1 };
 const payer = { address: addrOf(9) } as never;
 
-function run(opts: { me: Address | null; account: Uint8Array | null; nft?: Address | null; sendFails?: boolean }) {
+function run(opts: { me: Address | null; account: Uint8Array | null; nft?: Address | null; sendFails?: string }) {
   const send = vi.fn(async () => {
-    if (opts.sendFails) throw new Error("AlreadyFrozen");
+    if (opts.sendFails) throw new Error(opts.sendFails);
     return "sig1";
   });
   const sleep = vi.fn(async () => {});
@@ -86,9 +86,28 @@ describe("handleCharacterDied", () => {
   });
 
   it("reports a failed send", async () => {
-    expect(await run({ me: ev.owner, account: character(false, false), sendFails: true }).result).toMatchObject({
+    expect(await run({ me: ev.owner, account: character(false, false), sendFails: "Blockhash not found" }).result).toMatchObject({
       status: "failed",
-      detail: "AlreadyFrozen",
+      detail: "Blockhash not found",
     });
+  });
+
+  it("treats AlreadyFrozen as another app winning the race", async () => {
+    expect(await run({ me: ev.owner, account: character(false, false), sendFails: "AlreadyFrozen: Tombstone NFT is already frozen" }).result).toMatchObject({
+      status: "skipped",
+      detail: "frozen",
+    });
+  });
+
+  it("re-reads a stale alive character before giving up", async () => {
+    const dead = character(false, false);
+    const alive = character(true, false);
+    let reads = 0;
+    const accounts = { label: "mock" as const, get: vi.fn(async () => (++reads < 3 ? alive : dead)) };
+    const send = vi.fn(async () => "sig1");
+    const sleep = vi.fn(async () => {});
+    const out = await handleCharacterDied({ ev, me: ev.owner, payer, accounts, send, sleep });
+    expect(out).toMatchObject({ status: "sent", detail: "sig1" });
+    expect(accounts.get).toHaveBeenCalledTimes(3);
   });
 });

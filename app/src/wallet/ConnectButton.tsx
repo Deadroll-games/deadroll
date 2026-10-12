@@ -1,12 +1,36 @@
 import { useConnect, useConnectedWallet, useDisconnect, useWallets } from "@solana/kit-plugin-wallet/react";
 import { useState } from "react";
 import { client } from "./client";
+import { useAppWallet } from "./AppWallet";
 
 export function shortAddress(a: string): string {
   return a.length > 10 ? `${a.slice(0, 4)}..${a.slice(-4)}` : a;
 }
 
+export function formatSol(lamports: bigint | null): string {
+  if (lamports === null) return "...";
+  return `${(Number(lamports) / 1e9).toFixed(2)} SOL`;
+}
+
 export function ConnectButton() {
+  const w = useAppWallet();
+  if (w.devMode) {
+    return (
+      <span className="dev-wallet">
+        <span className="badge dev" title={`Dev wallet for this tab: ${w.address ?? "..."}`}>
+          dev {w.address ? shortAddress(w.address) : "..."} · {formatSol(w.balance)}
+        </span>{" "}
+        <button className="btn" onClick={() => void w.airdrop()} title="Airdrop 5 SOL from the local validator">
+          Airdrop
+        </button>
+        {w.error && <span className="error"> {w.error}</span>}
+      </span>
+    );
+  }
+  return <WalletStandardButton />;
+}
+
+function WalletStandardButton() {
   const wallets = useWallets(client);
   const connected = useConnectedWallet(client);
   const connect = useConnect(client);

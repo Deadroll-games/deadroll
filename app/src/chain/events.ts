@@ -31,3 +31,33 @@ export function eventsFromLogs(logs: readonly string[], program: Address): Uint8
   }
   return out;
 }
+
+export type ChainEvent = { program: "session" | "character" | "map"; name: string; data: any };
+
+/** Every session, character and map event in a transaction's logs, in log order. */
+export function decodeEvents(logs: readonly string[], coders: Record<ChainEvent["program"], { decodeEvent(p: Uint8Array): { name: string; data: any } | null }>, ids: Record<ChainEvent["program"], Address>): ChainEvent[] {
+  const out: ChainEvent[] = [];
+  const stack: string[] = [];
+  const byId = new Map(Object.entries(ids).map(([k, v]) => [v as string, k as ChainEvent["program"]]));
+  for (const line of logs) {
+    const inv = INVOKE.exec(line);
+    if (inv) {
+      stack.push(inv[1]!);
+      continue;
+    }
+    if (DONE.test(line)) {
+      stack.pop();
+      continue;
+    }
+    if (!line.startsWith(DATA)) continue;
+    const program = byId.get(stack[stack.length - 1] ?? "");
+    if (!program) continue;
+    try {
+      const ev = coders[program].decodeEvent(fromBase64(line.slice(DATA.length).trim()));
+      if (ev) out.push({ program, ...ev });
+    } catch {
+      // not base64: ignore
+    }
+  }
+  return out;
+}

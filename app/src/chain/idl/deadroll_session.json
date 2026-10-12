@@ -1,0 +1,3974 @@
+{
+  "address": "3gzfih2WaBgXcYZ57jWokmZM3FDE6QHX5y4R9EvKZoNJ",
+  "metadata": {
+    "name": "deadroll_session",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Deadroll session: party, turns, combat, VRF callback, escrow."
+  },
+  "instructions": [
+    {
+      "name": "act",
+      "docs": [
+        "Player attacks a monster with a skill slot (`0xFF` = weapon): spends AP, requests VRF."
+      ],
+      "discriminator": [
+        114,
+        158,
+        229,
+        112,
+        242,
+        50,
+        227,
+        5
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "docs": [
+            "Main wallet or the participation's session key; pays the VRF fee."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.core.map",
+                "account": "GameSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "participation",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  114,
+                  116,
+                  105,
+                  99,
+                  105,
+                  112,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              },
+              {
+                "kind": "account",
+                "path": "participation.core.character",
+                "account": "Participation"
+              }
+            ]
+          }
+        },
+        {
+          "name": "character"
+        },
+        {
+          "name": "skill_set"
+        },
+        {
+          "name": "monsters",
+          "docs": [
+            "Read-only, never Borsh-decoded: owner and discriminator checked here, session in `Monsters`."
+          ]
+        },
+        {
+          "name": "session_token",
+          "optional": true
+        },
+        {
+          "name": "program_identity",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "oracle_queue",
+          "writable": true,
+          "address": "Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh"
+        },
+        {
+          "name": "vrf_program",
+          "address": "Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz"
+        },
+        {
+          "name": "slot_hashes",
+          "address": "SysvarS1otHashes111111111111111111111111111"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "skill_slot",
+          "type": "u8"
+        },
+        {
+          "name": "target",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "claim_escrow",
+      "docs": [
+        "After the party ended: the DM takes the escrow and the map goes `Finished`."
+      ],
+      "discriminator": [
+        200,
+        80,
+        182,
+        159,
+        61,
+        75,
+        9,
+        205
+      ],
+      "accounts": [
+        {
+          "name": "dm",
+          "docs": [
+            "DM main wallet only: this moves lamports (docs/GAME_COMMISSIONS.md, section 4)."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "session",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.core.map",
+                "account": "GameSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              }
+            ]
+          }
+        },
+        {
+          "name": "map",
+          "writable": true
+        },
+        {
+          "name": "session_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                9,
+                93,
+                27,
+                37,
+                218,
+                79,
+                221,
+                125,
+                83,
+                7,
+                123,
+                151,
+                252,
+                231,
+                65,
+                177,
+                65,
+                225,
+                242,
+                116,
+                20,
+                215,
+                178,
+                225,
+                173,
+                88,
+                9,
+                192,
+                113,
+                184,
+                209,
+                219
+              ]
+            }
+          }
+        },
+        {
+          "name": "map_program",
+          "address": "2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "claim_rewards",
+      "docs": [
+        "After the party ended: rewards and unlock for one character (permissionless)."
+      ],
+      "discriminator": [
+        4,
+        144,
+        132,
+        71,
+        116,
+        23,
+        151,
+        80
+      ],
+      "accounts": [
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.core.map",
+                "account": "GameSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "participation",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  114,
+                  116,
+                  105,
+                  99,
+                  105,
+                  112,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              },
+              {
+                "kind": "account",
+                "path": "character"
+              }
+            ]
+          }
+        },
+        {
+          "name": "stash",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  115,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              },
+              {
+                "kind": "account",
+                "path": "character"
+              }
+            ]
+          }
+        },
+        {
+          "name": "character",
+          "writable": true
+        },
+        {
+          "name": "bag",
+          "writable": true
+        },
+        {
+          "name": "session_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                9,
+                93,
+                27,
+                37,
+                218,
+                79,
+                221,
+                125,
+                83,
+                7,
+                123,
+                151,
+                252,
+                231,
+                65,
+                177,
+                65,
+                225,
+                242,
+                116,
+                20,
+                215,
+                178,
+                225,
+                173,
+                88,
+                9,
+                192,
+                113,
+                184,
+                209,
+                219
+              ]
+            }
+          }
+        },
+        {
+          "name": "character_program",
+          "address": "9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "consume_randomness",
+      "docs": [
+        "VRF callback: resolves the pending attack through `deadroll_combat`, applies HP and",
+        "states, death (`character.mark_dead`), boss victory and wipe."
+      ],
+      "discriminator": [
+        190,
+        217,
+        49,
+        162,
+        99,
+        26,
+        73,
+        234
+      ],
+      "accounts": [
+        {
+          "name": "vrf_program_identity",
+          "docs": [
+            "The VRF program's identity for this program (`mock-vrf`: the fixed test identity)."
+          ],
+          "signer": true,
+          "address": "5RotSMue7vx9xBPp3L8iQEKbKSc3ezbY4GqiJxDEe6sN"
+        },
+        {
+          "name": "session",
+          "docs": [
+            "State checks run here, before the pending-accounts checks below: once a roll is resolved",
+            "`pending` is cleared, and a late callback must read `NoRollPending`, not a wrong account."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.core.map",
+                "account": "GameSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "monsters",
+          "writable": true
+        },
+        {
+          "name": "participation",
+          "docs": [
+            "The player side of the hit, the one recorded by `act` / `monster_act`."
+          ],
+          "writable": true
+        },
+        {
+          "name": "character",
+          "docs": [
+            "`character::mark_dead`."
+          ],
+          "writable": true
+        },
+        {
+          "name": "skill_set"
+        },
+        {
+          "name": "session_authority",
+          "address": "3o8dkZ2aXofZQpeTjHHDvWNCahXrfqvY3GodqKtVMomB"
+        },
+        {
+          "name": "config",
+          "address": "HYGYnuyssMfrHr2gT3AC3hkQpD6xt37a5hrCc2Z97JHN"
+        },
+        {
+          "name": "character_program",
+          "address": "9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL"
+        }
+      ],
+      "args": [
+        {
+          "name": "randomness",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "end_turn",
+      "docs": [
+        "Ends the current unit's turn and starts the next living unit's."
+      ],
+      "discriminator": [
+        34,
+        247,
+        56,
+        118,
+        182,
+        41,
+        186,
+        237
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "docs": [
+            "On a player's turn: their main wallet or session key. On a monster's turn: the DM's."
+          ],
+          "signer": true
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.core.map",
+                "account": "GameSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "monsters",
+          "docs": [
+            "mutable `LazyAccount` would re-serialize the whole account on exit)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "participation",
+          "docs": [
+            "Required on a player's turn: the participation whose turn it is."
+          ],
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  114,
+                  116,
+                  105,
+                  99,
+                  105,
+                  112,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              },
+              {
+                "kind": "account",
+                "path": "participation.core.character",
+                "account": "Participation"
+              }
+            ]
+          }
+        },
+        {
+          "name": "session_token",
+          "optional": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "flee",
+      "docs": [
+        "Player chooses \"Escape\" on their turn; the party flees when every living player did."
+      ],
+      "discriminator": [
+        148,
+        62,
+        111,
+        149,
+        72,
+        233,
+        248,
+        19
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "docs": [
+            "Main wallet or the participation's session key."
+          ],
+          "signer": true
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.core.map",
+                "account": "GameSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "monsters",
+          "writable": true
+        },
+        {
+          "name": "participation",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  114,
+                  116,
+                  105,
+                  99,
+                  105,
+                  112,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              },
+              {
+                "kind": "account",
+                "path": "participation.core.character",
+                "account": "Participation"
+              }
+            ]
+          }
+        },
+        {
+          "name": "session_token",
+          "optional": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "join_session",
+      "docs": [
+        "Player joins with a character, pays a share of the price into escrow, locks the character."
+      ],
+      "discriminator": [
+        23,
+        92,
+        4,
+        160,
+        155,
+        56,
+        164,
+        253
+      ],
+      "accounts": [
+        {
+          "name": "player",
+          "docs": [
+            "Main wallet that owns the character. Pays the contribution and the account rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.core.map",
+                "account": "GameSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "character",
+          "docs": [
+            "the character CPI."
+          ],
+          "writable": true
+        },
+        {
+          "name": "participation",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  114,
+                  116,
+                  105,
+                  99,
+                  105,
+                  112,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              },
+              {
+                "kind": "account",
+                "path": "character"
+              }
+            ]
+          }
+        },
+        {
+          "name": "stash",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  115,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              },
+              {
+                "kind": "account",
+                "path": "character"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              }
+            ]
+          }
+        },
+        {
+          "name": "session_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                9,
+                93,
+                27,
+                37,
+                218,
+                79,
+                221,
+                125,
+                83,
+                7,
+                123,
+                151,
+                252,
+                231,
+                65,
+                177,
+                65,
+                225,
+                242,
+                116,
+                20,
+                215,
+                178,
+                225,
+                173,
+                88,
+                9,
+                192,
+                113,
+                184,
+                209,
+                219
+              ]
+            }
+          }
+        },
+        {
+          "name": "character_program",
+          "address": "9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "contribution",
+          "type": "u64"
+        },
+        {
+          "name": "actor",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "monster_act",
+      "docs": [
+        "DM: the current monster attacks a player slot; same VRF path as `act`."
+      ],
+      "discriminator": [
+        23,
+        161,
+        226,
+        80,
+        154,
+        123,
+        9,
+        112
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "docs": [
+            "DM main wallet or the DM's session key; pays the VRF fee."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.core.map",
+                "account": "GameSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "monsters",
+          "writable": true
+        },
+        {
+          "name": "participation",
+          "docs": [
+            "The target player's participation."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  114,
+                  116,
+                  105,
+                  99,
+                  105,
+                  112,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              },
+              {
+                "kind": "account",
+                "path": "participation.core.character",
+                "account": "Participation"
+              }
+            ]
+          }
+        },
+        {
+          "name": "character"
+        },
+        {
+          "name": "session_token",
+          "optional": true
+        },
+        {
+          "name": "program_identity",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "oracle_queue",
+          "writable": true,
+          "address": "Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh"
+        },
+        {
+          "name": "vrf_program",
+          "address": "Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz"
+        },
+        {
+          "name": "slot_hashes",
+          "address": "SysvarS1otHashes111111111111111111111111111"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "monster",
+          "type": "u8"
+        },
+        {
+          "name": "action",
+          "type": "u8"
+        },
+        {
+          "name": "target",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "monster_move",
+      "docs": [
+        "DM moves a monster along a path on that monster's turn."
+      ],
+      "discriminator": [
+        89,
+        217,
+        46,
+        212,
+        219,
+        241,
+        41,
+        78
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "docs": [
+            "DM main wallet or the DM's session key."
+          ],
+          "signer": true
+        },
+        {
+          "name": "session",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.core.map",
+                "account": "GameSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "monsters",
+          "docs": [
+            "mutable `LazyAccount` would re-serialize the whole account on exit)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "layout"
+        },
+        {
+          "name": "session_token",
+          "optional": true
+        }
+      ],
+      "args": [
+        {
+          "name": "monster",
+          "type": "u8"
+        },
+        {
+          "name": "steps",
+          "type": {
+            "array": [
+              "u8",
+              16
+            ]
+          }
+        },
+        {
+          "name": "len",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "move_unit",
+      "docs": [
+        "Player moves along a path of grid steps on their turn."
+      ],
+      "discriminator": [
+        145,
+        126,
+        36,
+        232,
+        217,
+        195,
+        127,
+        23
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "docs": [
+            "Main wallet or the participation's session key."
+          ],
+          "signer": true
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.core.map",
+                "account": "GameSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "participation",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  114,
+                  116,
+                  105,
+                  99,
+                  105,
+                  112,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              },
+              {
+                "kind": "account",
+                "path": "participation.core.character",
+                "account": "Participation"
+              }
+            ]
+          }
+        },
+        {
+          "name": "monsters",
+          "docs": [
+            "Read-only, never Borsh-decoded: owner and discriminator checked here, session in `Monsters`."
+          ]
+        },
+        {
+          "name": "layout"
+        },
+        {
+          "name": "session_token",
+          "optional": true
+        }
+      ],
+      "args": [
+        {
+          "name": "steps",
+          "type": {
+            "array": [
+              "u8",
+              16
+            ]
+          }
+        },
+        {
+          "name": "len",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "open_session",
+      "docs": [
+        "DM opens a party on a finalized map: session, monsters and escrow; map goes `InSession`."
+      ],
+      "discriminator": [
+        130,
+        54,
+        124,
+        7,
+        236,
+        20,
+        104,
+        104
+      ],
+      "accounts": [
+        {
+          "name": "dm",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "map",
+          "writable": true
+        },
+        {
+          "name": "layout"
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "map"
+              }
+            ]
+          }
+        },
+        {
+          "name": "monsters",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  111,
+                  110,
+                  115,
+                  116,
+                  101,
+                  114,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              }
+            ]
+          }
+        },
+        {
+          "name": "session_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                9,
+                93,
+                27,
+                37,
+                218,
+                79,
+                221,
+                125,
+                83,
+                7,
+                123,
+                151,
+                252,
+                231,
+                65,
+                177,
+                65,
+                225,
+                242,
+                116,
+                20,
+                215,
+                178,
+                225,
+                173,
+                88,
+                9,
+                192,
+                113,
+                184,
+                209,
+                219
+              ]
+            }
+          }
+        },
+        {
+          "name": "bestiary",
+          "address": "3uJyWiz7NeVekP4w1iZkKxKnJ5pMbxC6ciz7kxN3MZtM"
+        },
+        {
+          "name": "tileset",
+          "address": "GqzUadKRKmJNT2RQAhrTz31qdoMfTGmya3Cfz2vAhXHu"
+        },
+        {
+          "name": "map_program",
+          "address": "2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "price_lamports",
+          "type": "u64"
+        },
+        {
+          "name": "dm_actor",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "set_ready",
+      "docs": [
+        "Player marks (or unmarks) ready in the lobby. Main wallet only."
+      ],
+      "discriminator": [
+        105,
+        78,
+        7,
+        162,
+        181,
+        167,
+        186,
+        43
+      ],
+      "accounts": [
+        {
+          "name": "player",
+          "docs": [
+            "Main wallet only: readiness is not a game move (docs/PARTY_AND_TURNS.md, section 2.1)."
+          ],
+          "signer": true
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.core.map",
+                "account": "GameSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "participation",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  114,
+                  116,
+                  105,
+                  99,
+                  105,
+                  112,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              },
+              {
+                "kind": "account",
+                "path": "participation.core.character",
+                "account": "Participation"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "ready",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "start_session",
+      "docs": [
+        "DM starts the party once everyone is ready and the price is collected: requests the",
+        "initiative roll; `consume_randomness` writes the turn order."
+      ],
+      "discriminator": [
+        23,
+        227,
+        111,
+        142,
+        212,
+        230,
+        3,
+        175
+      ],
+      "accounts": [
+        {
+          "name": "dm",
+          "docs": [
+            "DM main wallet; pays the VRF fee of the initiative roll."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.core.map",
+                "account": "GameSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "monsters",
+          "docs": [
+            "Read-only, never Borsh-decoded: owner and discriminator checked here, session in",
+            "`Monsters`; passed on to the callback."
+          ]
+        },
+        {
+          "name": "escrow",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              }
+            ]
+          }
+        },
+        {
+          "name": "program_identity",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "oracle_queue",
+          "writable": true,
+          "address": "Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh"
+        },
+        {
+          "name": "vrf_program",
+          "address": "Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz"
+        },
+        {
+          "name": "slot_hashes",
+          "address": "SysvarS1otHashes111111111111111111111111111"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Escrow",
+      "discriminator": [
+        31,
+        213,
+        123,
+        187,
+        186,
+        22,
+        218,
+        155
+      ]
+    },
+    {
+      "name": "GameSession",
+      "discriminator": [
+        150,
+        116,
+        20,
+        197,
+        205,
+        121,
+        220,
+        240
+      ]
+    },
+    {
+      "name": "MonsterState",
+      "discriminator": [
+        174,
+        218,
+        103,
+        204,
+        222,
+        46,
+        232,
+        24
+      ]
+    },
+    {
+      "name": "Participation",
+      "discriminator": [
+        237,
+        154,
+        142,
+        46,
+        143,
+        63,
+        189,
+        18
+      ]
+    },
+    {
+      "name": "TempStash",
+      "discriminator": [
+        151,
+        121,
+        12,
+        93,
+        150,
+        184,
+        160,
+        251
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "ActionRequested",
+      "discriminator": [
+        228,
+        59,
+        153,
+        181,
+        221,
+        81,
+        55,
+        62
+      ]
+    },
+    {
+      "name": "EscrowClaimed",
+      "discriminator": [
+        32,
+        116,
+        46,
+        229,
+        165,
+        72,
+        108,
+        78
+      ]
+    },
+    {
+      "name": "FleeVoted",
+      "discriminator": [
+        206,
+        183,
+        123,
+        242,
+        127,
+        42,
+        31,
+        183
+      ]
+    },
+    {
+      "name": "HitResolved",
+      "discriminator": [
+        187,
+        125,
+        116,
+        67,
+        13,
+        210,
+        247,
+        15
+      ]
+    },
+    {
+      "name": "InitiativeRolled",
+      "discriminator": [
+        99,
+        73,
+        217,
+        54,
+        154,
+        179,
+        127,
+        28
+      ]
+    },
+    {
+      "name": "MonsterKilled",
+      "discriminator": [
+        134,
+        92,
+        182,
+        2,
+        208,
+        201,
+        150,
+        11
+      ]
+    },
+    {
+      "name": "Moved",
+      "discriminator": [
+        114,
+        50,
+        71,
+        164,
+        81,
+        115,
+        48,
+        128
+      ]
+    },
+    {
+      "name": "PlayerDied",
+      "discriminator": [
+        127,
+        145,
+        10,
+        55,
+        154,
+        3,
+        98,
+        235
+      ]
+    },
+    {
+      "name": "PlayerJoined",
+      "discriminator": [
+        39,
+        144,
+        49,
+        106,
+        108,
+        210,
+        183,
+        38
+      ]
+    },
+    {
+      "name": "PlayerReady",
+      "discriminator": [
+        91,
+        36,
+        30,
+        206,
+        51,
+        189,
+        35,
+        91
+      ]
+    },
+    {
+      "name": "RewardsClaimed",
+      "discriminator": [
+        75,
+        98,
+        88,
+        18,
+        219,
+        112,
+        88,
+        121
+      ]
+    },
+    {
+      "name": "SessionEnded",
+      "discriminator": [
+        58,
+        51,
+        229,
+        78,
+        240,
+        232,
+        236,
+        18
+      ]
+    },
+    {
+      "name": "SessionOpened",
+      "discriminator": [
+        34,
+        79,
+        77,
+        95,
+        195,
+        207,
+        104,
+        223
+      ]
+    },
+    {
+      "name": "TurnStarted",
+      "discriminator": [
+        191,
+        141,
+        29,
+        203,
+        188,
+        149,
+        147,
+        41
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "Unauthorized",
+      "msg": "Caller is not authorized for this instruction"
+    },
+    {
+      "code": 6001,
+      "name": "SessionTokenMissing",
+      "msg": "Session key used without a session token"
+    },
+    {
+      "code": 6002,
+      "name": "InvalidSessionToken",
+      "msg": "Session token is not valid for this signer, wallet or program"
+    },
+    {
+      "code": 6003,
+      "name": "SessionTokenExpired",
+      "msg": "Session token has expired"
+    },
+    {
+      "code": 6004,
+      "name": "NotDm",
+      "msg": "Only the DM of this session can do this"
+    },
+    {
+      "code": 6005,
+      "name": "NotPlayer",
+      "msg": "Only the player who joined with this character can do this"
+    },
+    {
+      "code": 6006,
+      "name": "InvalidMap",
+      "msg": "Account is not a Deadroll map"
+    },
+    {
+      "code": 6007,
+      "name": "InvalidLayout",
+      "msg": "Account is not the layout of this map"
+    },
+    {
+      "code": 6008,
+      "name": "InvalidCharacter",
+      "msg": "Account is not a Deadroll character"
+    },
+    {
+      "code": 6009,
+      "name": "MapNotFinalized",
+      "msg": "Map is not finalized"
+    },
+    {
+      "code": 6010,
+      "name": "PriceTooLow",
+      "msg": "Party price is below the minimum"
+    },
+    {
+      "code": 6011,
+      "name": "NotInLobby",
+      "msg": "Session is not in the lobby"
+    },
+    {
+      "code": 6012,
+      "name": "NotActive",
+      "msg": "Session is not active"
+    },
+    {
+      "code": 6013,
+      "name": "PartyFull",
+      "msg": "Party is full"
+    },
+    {
+      "code": 6014,
+      "name": "NotCharacterOwner",
+      "msg": "Character does not belong to the signer"
+    },
+    {
+      "code": 6015,
+      "name": "CharacterDead",
+      "msg": "Character is dead"
+    },
+    {
+      "code": 6016,
+      "name": "CharacterBusy",
+      "msg": "Character is already in a session"
+    },
+    {
+      "code": 6017,
+      "name": "NoPlayers",
+      "msg": "Party has no players"
+    },
+    {
+      "code": 6018,
+      "name": "NotAllReady",
+      "msg": "Not every player is ready"
+    },
+    {
+      "code": 6019,
+      "name": "PriceNotCollected",
+      "msg": "Party price is not collected yet"
+    },
+    {
+      "code": 6020,
+      "name": "RollPending",
+      "msg": "Waiting for a dice roll"
+    },
+    {
+      "code": 6021,
+      "name": "NotYourTurn",
+      "msg": "It is not this unit's turn"
+    },
+    {
+      "code": 6022,
+      "name": "UnitDead",
+      "msg": "Unit is dead"
+    },
+    {
+      "code": 6023,
+      "name": "InvalidMonsterState",
+      "msg": "Account is not the monster state of this session"
+    },
+    {
+      "code": 6024,
+      "name": "InvalidMonster",
+      "msg": "No such monster"
+    },
+    {
+      "code": 6025,
+      "name": "ParticipationMissing",
+      "msg": "Participation account is required on a player's turn"
+    },
+    {
+      "code": 6026,
+      "name": "InvalidPathLength",
+      "msg": "Path is empty or too long"
+    },
+    {
+      "code": 6027,
+      "name": "InvalidDirection",
+      "msg": "Unknown step direction"
+    },
+    {
+      "code": 6028,
+      "name": "OutOfBounds",
+      "msg": "Step leaves the map"
+    },
+    {
+      "code": 6029,
+      "name": "InvalidTile",
+      "msg": "Unknown tile in the layout"
+    },
+    {
+      "code": 6030,
+      "name": "CellBlocked",
+      "msg": "Cell cannot be entered"
+    },
+    {
+      "code": 6031,
+      "name": "CellOccupied",
+      "msg": "Cell is occupied"
+    },
+    {
+      "code": 6032,
+      "name": "NotEnoughActionPoints",
+      "msg": "Not enough action points"
+    },
+    {
+      "code": 6033,
+      "name": "InvalidTarget",
+      "msg": "Target is not a living enemy"
+    },
+    {
+      "code": 6034,
+      "name": "OutOfRange",
+      "msg": "Target is out of range"
+    },
+    {
+      "code": 6035,
+      "name": "InvalidSkill",
+      "msg": "Skill cannot be used as an attack"
+    },
+    {
+      "code": 6036,
+      "name": "InvalidSkillSet",
+      "msg": "Account is not the skill set of this character"
+    },
+    {
+      "code": 6037,
+      "name": "InvalidAction",
+      "msg": "Unknown monster action"
+    },
+    {
+      "code": 6038,
+      "name": "NoRollPending",
+      "msg": "No dice roll is pending"
+    },
+    {
+      "code": 6039,
+      "name": "InvalidPendingAccounts",
+      "msg": "Callback accounts do not match the pending action"
+    },
+    {
+      "code": 6040,
+      "name": "NotFinished",
+      "msg": "Party has not ended"
+    },
+    {
+      "code": 6041,
+      "name": "AlreadySettled",
+      "msg": "Rewards of this character are already settled"
+    },
+    {
+      "code": 6042,
+      "name": "AlreadyClaimed",
+      "msg": "Escrow is already claimed"
+    },
+    {
+      "code": 6043,
+      "name": "Overflow",
+      "msg": "Arithmetic overflow"
+    },
+    {
+      "code": 6044,
+      "name": "InvalidRegistryTable",
+      "msg": "Account is not the expected registry table"
+    },
+    {
+      "code": 6045,
+      "name": "UnknownMonster",
+      "msg": "Monster is not in the registry bestiary"
+    }
+  ],
+  "types": [
+    {
+      "name": "ActionRequested",
+      "docs": [
+        "An attack waits for its VRF value."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "action",
+            "docs": [
+              "`GameSession.action_counter` of this action; `HitResolved` carries the same number."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "attacker",
+            "type": "u8"
+          },
+          {
+            "name": "target",
+            "type": "u8"
+          },
+          {
+            "name": "skill_slot",
+            "docs": [
+              "Player skill slot (`0xFF` = weapon), or the monster action."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "action_points",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ActiveState",
+      "docs": [
+        "A state on a unit. `turns == 0` marks an empty slot."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "kind",
+            "type": {
+              "defined": {
+                "name": "StateKind"
+              }
+            }
+          },
+          {
+            "name": "turns",
+            "type": "u8"
+          },
+          {
+            "name": "power",
+            "docs": [
+              "Strength of the state (damage per turn for DoT, basis points for slows)."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "source",
+            "docs": [
+              "Turn-order slot of the unit that applied it."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Applied",
+      "docs": [
+        "`deadroll_combat::Applied`."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "None"
+          },
+          {
+            "name": "Added"
+          },
+          {
+            "name": "Refreshed"
+          },
+          {
+            "name": "Froze"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Aspect",
+      "docs": [
+        "Damage aspect (docs/DAMAGE_TYPES_AND_MIXES.md)."
+      ],
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Fire"
+          },
+          {
+            "name": "Cold"
+          },
+          {
+            "name": "Lightning"
+          },
+          {
+            "name": "Blood"
+          },
+          {
+            "name": "Blunt"
+          },
+          {
+            "name": "Piercing"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Carrier",
+      "docs": [
+        "`deadroll_combat::Carrier`."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Race"
+          },
+          {
+            "name": "Class"
+          },
+          {
+            "name": "Item"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Cell",
+      "docs": [
+        "A map cell coordinate."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "x",
+            "type": "u8"
+          },
+          {
+            "name": "y",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Escrow",
+      "docs": [
+        "`[\"escrow\", session]`: holds the party price contributions as lamports above rent."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "collected",
+            "docs": [
+              "Contributions received so far."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "claimed",
+            "docs": [
+              "The DM took `collected` (`claim_escrow`)."
+            ],
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "EscrowClaimed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "dm",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FleeVoted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "slot",
+            "type": "u8"
+          },
+          {
+            "name": "flee_mask",
+            "type": "u8"
+          },
+          {
+            "name": "alive_mask",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GameSession",
+      "docs": [
+        "`[\"session\", map]`: one party on one map."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "core",
+            "docs": [
+              "Frozen contract, first after the discriminator."
+            ],
+            "type": {
+              "defined": {
+                "name": "GameSessionData"
+              }
+            }
+          },
+          {
+            "name": "layout",
+            "docs": [
+              "The map's `MapLayout`, read on every move."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "width",
+            "type": "u8"
+          },
+          {
+            "name": "height",
+            "type": "u8"
+          },
+          {
+            "name": "entrance",
+            "docs": [
+              "Players are placed here when they join."
+            ],
+            "type": {
+              "defined": {
+                "name": "Cell"
+              }
+            }
+          },
+          {
+            "name": "dm_actor",
+            "docs": [
+              "DM session key allowed to move monsters and end their turns (`Pubkey::default()` = none)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "turn_order_len",
+            "docs": [
+              "Used entries in `core.turn_order`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "turn_seq",
+            "docs": [
+              "Bumped on every turn start; action points are granted lazily per `turn_seq`."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "turn_started_at",
+            "docs": [
+              "Unix time the current turn started (turn timeout, P1)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "player_pos",
+            "docs": [
+              "Mirror of each player's `Participation` position, for occupancy checks."
+            ],
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "Cell"
+                  }
+                },
+                4
+              ]
+            }
+          },
+          {
+            "name": "alive_mask",
+            "docs": [
+              "Bit per player slot: alive."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "ready_mask",
+            "docs": [
+              "Bit per player slot: ready in the lobby."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "pending",
+            "docs": [
+              "Valid while `core.pending_vrf`."
+            ],
+            "type": {
+              "defined": {
+                "name": "PendingAction"
+              }
+            }
+          },
+          {
+            "name": "flee_mask",
+            "docs": [
+              "Bit per player slot: chose \"Escape\" and nobody took another action since",
+              "(docs/PARTY_AND_TURNS.md, section 7.3)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "settled_mask",
+            "docs": [
+              "Bit per player slot: `claim_rewards` done after the party ended."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "xp_pool",
+            "docs": [
+              "Experience from killed monsters; every living player gets all of it on victory."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "victory_seed",
+            "docs": [
+              "VRF value of the boss kill; the reward rolls derive from it."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "monster_speed",
+            "docs": [
+              "Bestiary speed (action points per turn) of each monster, by monster index."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                24
+              ]
+            }
+          },
+          {
+            "name": "monster_initiative",
+            "docs": [
+              "Bestiary initiative of each monster, by monster index."
+            ],
+            "type": {
+              "array": [
+                "u16",
+                24
+              ]
+            }
+          },
+          {
+            "name": "player_initiative",
+            "docs": [
+              "Initiative of each player slot, set at `join_session`."
+            ],
+            "type": {
+              "array": [
+                "u16",
+                4
+              ]
+            }
+          },
+          {
+            "name": "tile_cost",
+            "docs": [
+              "Step cost in action points per `Tile`, 0 = cannot be entered (registry `Tileset`)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                7
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "GameSessionData",
+      "docs": [
+        "session `[\"session\", map]`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "map",
+            "type": "pubkey"
+          },
+          {
+            "name": "dm",
+            "type": "pubkey"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "SessionStatus"
+              }
+            }
+          },
+          {
+            "name": "price_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "players",
+            "type": {
+              "array": [
+                "pubkey",
+                4
+              ]
+            }
+          },
+          {
+            "name": "player_count",
+            "type": "u8"
+          },
+          {
+            "name": "turn_order",
+            "type": {
+              "array": [
+                "u8",
+                28
+              ]
+            }
+          },
+          {
+            "name": "turn_index",
+            "type": "u8"
+          },
+          {
+            "name": "round",
+            "type": "u16"
+          },
+          {
+            "name": "action_counter",
+            "type": "u32"
+          },
+          {
+            "name": "pending_vrf",
+            "type": "bool"
+          },
+          {
+            "name": "last_seed",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "HitOutcome",
+      "docs": [
+        "`deadroll_combat::Outcome`."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Miss"
+          },
+          {
+            "name": "Hit"
+          },
+          {
+            "name": "Immune"
+          }
+        ]
+      }
+    },
+    {
+      "name": "HitResolved",
+      "docs": [
+        "One resolved attack, in the shape the website reads (app/src/chain/types.ts). `result` is",
+        "the full `deadroll_combat::HitResult` (every roll and per-packet step, Borsh layout of",
+        "crates/combat/wasm/README.md); the website can replay it from `seed`. Written by",
+        "`hit_event::emit_hit_resolved`, never built on the stack."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "attacker",
+            "docs": [
+              "Turn-order ids: `0..4` player slot, `4 + i` monster `i`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "target",
+            "type": "u8"
+          },
+          {
+            "name": "seed",
+            "docs": [
+              "The VRF value of this action."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "action_counter",
+            "docs": [
+              "`GameSession.action_counter` of this action, the same number as its `ActionRequested`."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "result",
+            "type": {
+              "defined": {
+                "name": "HitResultData"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "HitResultData",
+      "docs": [
+        "`deadroll_combat::HitResult`: every roll and per-packet step, in roll order. Arrays are full",
+        "size; `tint_roll_count` / `packet_count` say how many entries are used."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "outcome",
+            "type": {
+              "defined": {
+                "name": "HitOutcome"
+              }
+            }
+          },
+          {
+            "name": "d20",
+            "type": "u8"
+          },
+          {
+            "name": "attack_total",
+            "type": "u32"
+          },
+          {
+            "name": "defense",
+            "type": "u32"
+          },
+          {
+            "name": "crit",
+            "type": "bool"
+          },
+          {
+            "name": "crit_roll",
+            "type": {
+              "option": "u16"
+            }
+          },
+          {
+            "name": "tint_rolls",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "TintRollData"
+                  }
+                },
+                12
+              ]
+            }
+          },
+          {
+            "name": "tint_roll_count",
+            "type": "u8"
+          },
+          {
+            "name": "resonances",
+            "type": {
+              "array": [
+                {
+                  "option": {
+                    "defined": {
+                      "name": "ResonanceData"
+                    }
+                  }
+                },
+                3
+              ]
+            }
+          },
+          {
+            "name": "d100",
+            "type": "u8"
+          },
+          {
+            "name": "packets",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "PacketResultData"
+                  }
+                },
+                6
+              ]
+            }
+          },
+          {
+            "name": "packet_count",
+            "type": "u8"
+          },
+          {
+            "name": "resonance_states",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "StateRollData"
+                  }
+                },
+                3
+              ]
+            }
+          },
+          {
+            "name": "states",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "ActiveState"
+                  }
+                },
+                6
+              ]
+            }
+          },
+          {
+            "name": "damage",
+            "type": "u32"
+          },
+          {
+            "name": "rolls_used",
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "InitiativeRolled",
+      "docs": [
+        "The turn order, rolled once from the VRF value of `start_session`: per unit `d20 +",
+        "initiative`, higher first (ties: higher initiative, then lower unit id). The first `len`",
+        "entries are used. `TurnStarted` for the first unit follows."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "seed",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "action_counter",
+            "type": "u32"
+          },
+          {
+            "name": "len",
+            "type": "u8"
+          },
+          {
+            "name": "order",
+            "docs": [
+              "Turn-order ids, in turn order."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                28
+              ]
+            }
+          },
+          {
+            "name": "d20",
+            "docs": [
+              "The d20 of `order[i]`."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                28
+              ]
+            }
+          },
+          {
+            "name": "initiative",
+            "docs": [
+              "The initiative bonus of `order[i]`."
+            ],
+            "type": {
+              "array": [
+                "u16",
+                28
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Monster",
+      "docs": [
+        "A live monster in a session."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bestiary_id",
+            "type": "u8"
+          },
+          {
+            "name": "level",
+            "type": "u8"
+          },
+          {
+            "name": "x",
+            "type": "u8"
+          },
+          {
+            "name": "y",
+            "type": "u8"
+          },
+          {
+            "name": "hp",
+            "type": "u32"
+          },
+          {
+            "name": "hp_max",
+            "type": "u32"
+          },
+          {
+            "name": "action_points",
+            "type": "u8"
+          },
+          {
+            "name": "alive",
+            "type": "bool"
+          },
+          {
+            "name": "pack",
+            "type": "u8"
+          },
+          {
+            "name": "flags",
+            "type": "u8"
+          },
+          {
+            "name": "states",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "ActiveState"
+                  }
+                },
+                6
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "MonsterKilled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "monster",
+            "type": "u8"
+          },
+          {
+            "name": "bestiary_id",
+            "type": "u8"
+          },
+          {
+            "name": "by",
+            "type": "u8"
+          },
+          {
+            "name": "xp",
+            "type": "u32"
+          },
+          {
+            "name": "boss",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MonsterState",
+      "docs": [
+        "`[\"monsters\", session]`: every monster of the party, spawned from the map layout.",
+        "",
+        "On-chain it is never Borsh-decoded as a whole: `[Monster; 24]` (~1.3 KB) decoded by",
+        "`Account<MonsterState>` overflows the 4 KB SBPF v3 stack frame. Contexts take it as",
+        "`LazyAccount` (owner + discriminator check, IDL entry) and instructions go through",
+        "[`Monsters`], which reads and writes one monster at a time in place. `cargo-build-sbf` still",
+        "warns about the generated `try_deserialize_unchecked`; nothing calls it."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "core",
+            "docs": [
+              "Frozen contract, first after the discriminator."
+            ],
+            "type": {
+              "defined": {
+                "name": "MonsterStateData"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "MonsterStateData",
+      "docs": [
+        "session `[\"monsters\", session]`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "monsters",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "Monster"
+                  }
+                },
+                24
+              ]
+            }
+          },
+          {
+            "name": "count",
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Moved",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "unit",
+            "type": "u8"
+          },
+          {
+            "name": "x",
+            "type": "u8"
+          },
+          {
+            "name": "y",
+            "type": "u8"
+          },
+          {
+            "name": "action_points",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PacketResultData",
+      "docs": [
+        "`deadroll_combat::PacketResult`. Damage values are scaled x10_000."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "aspect",
+            "type": {
+              "defined": {
+                "name": "Aspect"
+              }
+            }
+          },
+          {
+            "name": "immune",
+            "type": "bool"
+          },
+          {
+            "name": "base_min",
+            "type": "u64"
+          },
+          {
+            "name": "base_max",
+            "type": "u64"
+          },
+          {
+            "name": "increased_bp",
+            "type": "u32"
+          },
+          {
+            "name": "more_bp",
+            "type": "u32"
+          },
+          {
+            "name": "weaken_bp",
+            "type": "u32"
+          },
+          {
+            "name": "min",
+            "type": "u64"
+          },
+          {
+            "name": "max",
+            "type": "u64"
+          },
+          {
+            "name": "rolled",
+            "type": "u64"
+          },
+          {
+            "name": "armor",
+            "type": "u32"
+          },
+          {
+            "name": "resist_bp",
+            "type": "u32"
+          },
+          {
+            "name": "vuln_bp",
+            "type": "u32"
+          },
+          {
+            "name": "after_defense",
+            "type": "u64"
+          },
+          {
+            "name": "state",
+            "type": {
+              "defined": {
+                "name": "StateRollData"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Participation",
+      "docs": [
+        "`[\"participation\", session, character]`: one character in one party."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "core",
+            "docs": [
+              "Frozen contract, first after the discriminator."
+            ],
+            "type": {
+              "defined": {
+                "name": "ParticipationData"
+              }
+            }
+          },
+          {
+            "name": "player",
+            "docs": [
+              "Main wallet (character owner) that joined and paid."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "max_ap",
+            "docs": [
+              "Action points granted at the start of each own turn (from speed)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "ap_seq",
+            "docs": [
+              "`GameSession.turn_seq` when `core.action_points` was last granted."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "contribution",
+            "docs": [
+              "Lamports paid into the escrow, for refunds."
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ParticipationData",
+      "docs": [
+        "session `[\"participation\", session, character]`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "character",
+            "type": "pubkey"
+          },
+          {
+            "name": "actor",
+            "docs": [
+              "Session key or burner allowed to act for this character."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "slot",
+            "type": "u8"
+          },
+          {
+            "name": "x",
+            "type": "u8"
+          },
+          {
+            "name": "y",
+            "type": "u8"
+          },
+          {
+            "name": "hp",
+            "type": "u32"
+          },
+          {
+            "name": "action_points",
+            "type": "u8"
+          },
+          {
+            "name": "states",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "ActiveState"
+                  }
+                },
+                6
+              ]
+            }
+          },
+          {
+            "name": "ready",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PendingAction",
+      "docs": [
+        "The roll waiting for its VRF value (`core.pending_vrf`), resolved by `consume_randomness`:",
+        "an attack, or the initiative roll of `start_session` ([`PendingAction::initiative`])."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "attacker",
+            "docs": [
+              "Turn-order id of the attacker."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "target",
+            "docs": [
+              "Turn-order id of the target."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "skill_slot",
+            "docs": [
+              "Skill slot of a player attack, `rules::BASE_ATTACK` for the weapon; monsters: the action."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "participation",
+            "docs": [
+              "The player side of the hit (attacker or target): the callback must receive exactly it.",
+              "For the initiative roll: player slot 0 (the callback's account list is fixed)."
+            ],
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PlayerDied",
+      "docs": [
+        "A player's character reached 0 HP; `character.mark_dead` ran in the same callback."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "character",
+            "type": "pubkey"
+          },
+          {
+            "name": "slot",
+            "type": "u8"
+          },
+          {
+            "name": "by",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PlayerJoined",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "character",
+            "type": "pubkey"
+          },
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "slot",
+            "type": "u8"
+          },
+          {
+            "name": "contribution",
+            "type": "u64"
+          },
+          {
+            "name": "collected",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PlayerReady",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "slot",
+            "type": "u8"
+          },
+          {
+            "name": "ready",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ResonanceData",
+      "docs": [
+        "`deadroll_combat::Resonance`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "base",
+            "type": {
+              "defined": {
+                "name": "Aspect"
+              }
+            }
+          },
+          {
+            "name": "tint",
+            "type": {
+              "defined": {
+                "name": "Aspect"
+              }
+            }
+          },
+          {
+            "name": "tier",
+            "type": "u8"
+          },
+          {
+            "name": "carrier",
+            "type": {
+              "defined": {
+                "name": "Carrier"
+              }
+            }
+          },
+          {
+            "name": "id",
+            "docs": [
+              "`base * 6 + tint`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "active",
+            "type": "bool"
+          },
+          {
+            "name": "second_tint",
+            "type": {
+              "option": {
+                "defined": {
+                  "name": "Aspect"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "RewardsClaimed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "character",
+            "type": "pubkey"
+          },
+          {
+            "name": "slot",
+            "type": "u8"
+          },
+          {
+            "name": "xp",
+            "type": "u32"
+          },
+          {
+            "name": "resources",
+            "type": {
+              "array": [
+                "u32",
+                8
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "SessionEnded",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "SessionStatus"
+              }
+            }
+          },
+          {
+            "name": "round",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SessionOpened",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "map",
+            "type": "pubkey"
+          },
+          {
+            "name": "dm",
+            "type": "pubkey"
+          },
+          {
+            "name": "price_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "monsters",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SessionStatus",
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Lobby"
+          },
+          {
+            "name": "Active"
+          },
+          {
+            "name": "Victory"
+          },
+          {
+            "name": "Wiped"
+          },
+          {
+            "name": "Fled"
+          },
+          {
+            "name": "Abandoned"
+          }
+        ]
+      }
+    },
+    {
+      "name": "StateKind",
+      "docs": [
+        "P0 uses Burning, Chill, Freeze, Bleeding."
+      ],
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Burning"
+          },
+          {
+            "name": "Chill"
+          },
+          {
+            "name": "Freeze"
+          },
+          {
+            "name": "Bleeding"
+          },
+          {
+            "name": "Shock"
+          },
+          {
+            "name": "Stun"
+          }
+        ]
+      }
+    },
+    {
+      "name": "StateRollData",
+      "docs": [
+        "`deadroll_combat::StateRoll`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "kind",
+            "type": {
+              "defined": {
+                "name": "StateKind"
+              }
+            }
+          },
+          {
+            "name": "rolled",
+            "type": "bool"
+          },
+          {
+            "name": "chance_bp",
+            "type": "u32"
+          },
+          {
+            "name": "roll",
+            "type": "u16"
+          },
+          {
+            "name": "success",
+            "type": "bool"
+          },
+          {
+            "name": "applied",
+            "type": {
+              "defined": {
+                "name": "Applied"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "TempStash",
+      "docs": [
+        "`[\"stash\", session, character]`: experience and rewards that become the character's only on",
+        "victory or peaceful exit (docs/PARTY_AND_TURNS.md, section 8)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "character",
+            "type": "pubkey"
+          },
+          {
+            "name": "xp",
+            "type": "u32"
+          },
+          {
+            "name": "resources",
+            "type": {
+              "array": [
+                "u32",
+                8
+              ]
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TintRollData",
+      "docs": [
+        "`deadroll_combat::TintRoll`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "base",
+            "type": {
+              "defined": {
+                "name": "Aspect"
+              }
+            }
+          },
+          {
+            "name": "tint",
+            "type": {
+              "defined": {
+                "name": "Aspect"
+              }
+            }
+          },
+          {
+            "name": "carrier",
+            "type": {
+              "defined": {
+                "name": "Carrier"
+              }
+            }
+          },
+          {
+            "name": "tier",
+            "type": "u8"
+          },
+          {
+            "name": "chance_bp",
+            "type": "u32"
+          },
+          {
+            "name": "roll",
+            "type": "u16"
+          },
+          {
+            "name": "success",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TurnStarted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "unit",
+            "docs": [
+              "Turn-order id: `0..4` player slot, `4 + i` monster `i`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "round",
+            "type": "u16"
+          },
+          {
+            "name": "turn_seq",
+            "type": "u32"
+          }
+        ]
+      }
+    }
+  ]
+}
