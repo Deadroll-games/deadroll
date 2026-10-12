@@ -1,0 +1,1671 @@
+{
+  "address": "9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL",
+  "metadata": {
+    "name": "deadroll_character",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Deadroll character: player profiles, characters, skills, bag."
+  },
+  "instructions": [
+    {
+      "name": "create_character",
+      "docs": [
+        "Race, class, predisposition, stats, appearance and up to 6 starting skills, plus the Core",
+        "NFT (feature `nft`). Creates `Character`, `SkillSet` and `Bag`."
+      ],
+      "discriminator": [
+        94,
+        208,
+        60,
+        158,
+        114,
+        52,
+        154,
+        50
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "docs": [
+            "The player: pays rent and owns the character and its NFT."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "profile",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  102,
+                  105,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "character",
+          "writable": true
+        },
+        {
+          "name": "skill_set",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  107,
+                  105,
+                  108,
+                  108,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "character"
+              }
+            ]
+          }
+        },
+        {
+          "name": "bag",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  97,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "character"
+              }
+            ]
+          }
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "asset",
+          "docs": [
+            "New keypair for the Core asset. Required with the `nft` feature."
+          ],
+          "writable": true,
+          "signer": true,
+          "optional": true
+        },
+        {
+          "name": "mpl_core_program",
+          "optional": true,
+          "address": "CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "CreateCharacterArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "create_profile",
+      "docs": [
+        "One profile per wallet; it hands out character indexes."
+      ],
+      "discriminator": [
+        225,
+        205,
+        234,
+        143,
+        17,
+        186,
+        50,
+        220
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "profile",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  102,
+                  105,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "freeze_tombstone",
+      "docs": [
+        "Permissionless: freezes the Core NFT of a dead character."
+      ],
+      "discriminator": [
+        159,
+        37,
+        58,
+        161,
+        204,
+        218,
+        67,
+        141
+      ],
+      "accounts": [
+        {
+          "name": "character",
+          "writable": true
+        },
+        {
+          "name": "asset",
+          "docs": [
+            "deserialized (mpl-core's deserializers overflow the stack frame)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "mpl_core_program",
+          "address": "CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "grant_rewards",
+      "docs": [
+        "Session only: adds XP (level-ups) and resources to a locked, living character."
+      ],
+      "discriminator": [
+        168,
+        49,
+        33,
+        137,
+        253,
+        107,
+        112,
+        24
+      ],
+      "accounts": [
+        {
+          "name": "character",
+          "writable": true
+        },
+        {
+          "name": "session_authority",
+          "docs": [
+            "The session program's `[\"authority\"]` PDA, checked against `GameConfig`."
+          ],
+          "signer": true
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "bag",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  97,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "character"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "xp",
+          "type": "u32"
+        },
+        {
+          "name": "resources",
+          "type": {
+            "array": [
+              "u32",
+              8
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "lock_for_session",
+      "docs": [
+        "Session only (CPI at `join_session`): locks a living character into `session`."
+      ],
+      "discriminator": [
+        236,
+        126,
+        127,
+        83,
+        246,
+        11,
+        162,
+        192
+      ],
+      "accounts": [
+        {
+          "name": "character",
+          "writable": true
+        },
+        {
+          "name": "session_authority",
+          "docs": [
+            "The session program's `[\"authority\"]` PDA, checked against `GameConfig`."
+          ],
+          "signer": true
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "owner",
+          "docs": [
+            "The player, signer of `join_session`: a session cannot lock someone else's character."
+          ],
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "session",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "mark_dead",
+      "docs": [
+        "Session only: the character dies and becomes a tombstone. No outgoing CPI."
+      ],
+      "discriminator": [
+        168,
+        12,
+        114,
+        107,
+        70,
+        201,
+        87,
+        36
+      ],
+      "accounts": [
+        {
+          "name": "character",
+          "writable": true
+        },
+        {
+          "name": "session_authority",
+          "docs": [
+            "The session program's `[\"authority\"]` PDA, checked against `GameConfig`."
+          ],
+          "signer": true
+        },
+        {
+          "name": "config"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "unlock",
+      "docs": [
+        "Session only: releases the character from its session."
+      ],
+      "discriminator": [
+        101,
+        155,
+        40,
+        21,
+        158,
+        189,
+        56,
+        203
+      ],
+      "accounts": [
+        {
+          "name": "character",
+          "writable": true
+        },
+        {
+          "name": "session_authority",
+          "docs": [
+            "The session program's `[\"authority\"]` PDA, checked against `GameConfig`."
+          ],
+          "signer": true
+        },
+        {
+          "name": "config"
+        }
+      ],
+      "args": []
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Bag",
+      "discriminator": [
+        209,
+        73,
+        132,
+        189,
+        4,
+        169,
+        188,
+        103
+      ]
+    },
+    {
+      "name": "Character",
+      "discriminator": [
+        140,
+        115,
+        165,
+        36,
+        241,
+        153,
+        102,
+        84
+      ]
+    },
+    {
+      "name": "PlayerProfile",
+      "discriminator": [
+        82,
+        226,
+        99,
+        87,
+        164,
+        130,
+        181,
+        80
+      ]
+    },
+    {
+      "name": "SkillSet",
+      "discriminator": [
+        151,
+        30,
+        241,
+        242,
+        185,
+        91,
+        73,
+        172
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "CharacterCreated",
+      "discriminator": [
+        83,
+        204,
+        181,
+        96,
+        17,
+        147,
+        235,
+        145
+      ]
+    },
+    {
+      "name": "CharacterDied",
+      "discriminator": [
+        0,
+        143,
+        188,
+        194,
+        222,
+        85,
+        193,
+        234
+      ]
+    },
+    {
+      "name": "CharacterLocked",
+      "discriminator": [
+        99,
+        5,
+        166,
+        251,
+        18,
+        92,
+        61,
+        47
+      ]
+    },
+    {
+      "name": "CharacterUnlocked",
+      "discriminator": [
+        167,
+        126,
+        28,
+        149,
+        181,
+        179,
+        92,
+        104
+      ]
+    },
+    {
+      "name": "ProfileCreated",
+      "discriminator": [
+        134,
+        233,
+        199,
+        153,
+        77,
+        206,
+        128,
+        94
+      ]
+    },
+    {
+      "name": "RewardsGranted",
+      "discriminator": [
+        199,
+        148,
+        38,
+        34,
+        144,
+        29,
+        160,
+        92
+      ]
+    },
+    {
+      "name": "TombstoneFrozen",
+      "discriminator": [
+        29,
+        241,
+        31,
+        244,
+        96,
+        108,
+        36,
+        248
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "Unauthorized",
+      "msg": "Caller is not authorized for this instruction"
+    },
+    {
+      "code": 6001,
+      "name": "InvalidName",
+      "msg": "Name must be printable ASCII, not empty, zero-padded"
+    },
+    {
+      "code": 6002,
+      "name": "PredispositionNotAllowed",
+      "msg": "Predisposition not allowed for this race"
+    },
+    {
+      "code": 6003,
+      "name": "InvalidStats",
+      "msg": "Stats must start at the base and spend exactly the starting points"
+    },
+    {
+      "code": 6004,
+      "name": "TooManySkills",
+      "msg": "Too many starting skills"
+    },
+    {
+      "code": 6005,
+      "name": "InvalidSkill",
+      "msg": "Skill rejected by the builder rules"
+    },
+    {
+      "code": 6006,
+      "name": "TooManyCharacters",
+      "msg": "Profile has no free character index"
+    },
+    {
+      "code": 6007,
+      "name": "InvalidConfig",
+      "msg": "Not the registry GameConfig account"
+    },
+    {
+      "code": 6008,
+      "name": "UntrustedCaller",
+      "msg": "Caller is not the trusted game program"
+    },
+    {
+      "code": 6009,
+      "name": "NotOwner",
+      "msg": "Signer does not own this character"
+    },
+    {
+      "code": 6010,
+      "name": "CharacterDead",
+      "msg": "Character is dead"
+    },
+    {
+      "code": 6011,
+      "name": "AlreadyLocked",
+      "msg": "Character is already locked in a session"
+    },
+    {
+      "code": 6012,
+      "name": "NotLocked",
+      "msg": "Character is not locked in a session"
+    },
+    {
+      "code": 6013,
+      "name": "StillAlive",
+      "msg": "Character is still alive"
+    },
+    {
+      "code": 6014,
+      "name": "NoNft",
+      "msg": "Character has no NFT"
+    },
+    {
+      "code": 6015,
+      "name": "AssetMismatch",
+      "msg": "Asset is not this character's NFT"
+    },
+    {
+      "code": 6016,
+      "name": "AlreadyFrozen",
+      "msg": "Tombstone NFT is already frozen"
+    },
+    {
+      "code": 6017,
+      "name": "NftAccountsMissing",
+      "msg": "NFT accounts missing: asset and mpl-core program are required"
+    },
+    {
+      "code": 6018,
+      "name": "NftDisabled",
+      "msg": "This build has no NFT support (FALLBACK nft)"
+    },
+    {
+      "code": 6019,
+      "name": "MathOverflow",
+      "msg": "Arithmetic overflow"
+    }
+  ],
+  "types": [
+    {
+      "name": "Aspect",
+      "docs": [
+        "Damage aspect (docs/DAMAGE_TYPES_AND_MIXES.md)."
+      ],
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Fire"
+          },
+          {
+            "name": "Cold"
+          },
+          {
+            "name": "Lightning"
+          },
+          {
+            "name": "Blood"
+          },
+          {
+            "name": "Blunt"
+          },
+          {
+            "name": "Piercing"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Bag",
+      "docs": [
+        "`[\"bag\", character]`: created with the character, because game moves never create accounts."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "character",
+            "type": "pubkey"
+          },
+          {
+            "name": "resources",
+            "docs": [
+              "Amount per resource kind."
+            ],
+            "type": {
+              "array": [
+                "u32",
+                8
+              ]
+            }
+          },
+          {
+            "name": "items",
+            "docs": [
+              "Item assets (lane items, P1). Slot `i < item_count` is used."
+            ],
+            "type": {
+              "array": [
+                "pubkey",
+                20
+              ]
+            }
+          },
+          {
+            "name": "item_count",
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Category",
+      "docs": [
+        "Section 3: active (4 slots), reactive (1), passive (1)."
+      ],
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Active"
+          },
+          {
+            "name": "Reactive"
+          },
+          {
+            "name": "Passive"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Character",
+      "docs": [
+        "`[\"character\", owner, index]`. The frozen core comes first (CONTRACTS.md, section 4.1), so",
+        "other programs read it as `CharacterData` right after the discriminator."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "core",
+            "type": {
+              "defined": {
+                "name": "CharacterData"
+              }
+            }
+          },
+          {
+            "name": "name",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "unspent_points",
+            "docs": [
+              "Stat points from level-ups, not spent yet."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "nft_frozen",
+            "docs": [
+              "The Core NFT got its permanent freeze after death (`freeze_tombstone`)."
+            ],
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CharacterCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "character",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "index",
+            "type": "u8"
+          },
+          {
+            "name": "race",
+            "type": {
+              "defined": {
+                "name": "Race"
+              }
+            }
+          },
+          {
+            "name": "class",
+            "type": {
+              "defined": {
+                "name": "Class"
+              }
+            }
+          },
+          {
+            "name": "predisposition",
+            "type": {
+              "defined": {
+                "name": "Aspect"
+              }
+            }
+          },
+          {
+            "name": "nft",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "skill_count",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CharacterData",
+      "docs": [
+        "character `[\"character\", owner, index]`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "index",
+            "type": "u8"
+          },
+          {
+            "name": "nft",
+            "docs": [
+              "Core NFT asset; `None` under the `nft` fallback."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "race",
+            "type": {
+              "defined": {
+                "name": "Race"
+              }
+            }
+          },
+          {
+            "name": "class",
+            "type": {
+              "defined": {
+                "name": "Class"
+              }
+            }
+          },
+          {
+            "name": "level",
+            "type": "u16"
+          },
+          {
+            "name": "xp",
+            "type": "u32"
+          },
+          {
+            "name": "stats",
+            "docs": [
+              "Indexed by `Stat`."
+            ],
+            "type": {
+              "array": [
+                "u16",
+                4
+              ]
+            }
+          },
+          {
+            "name": "predisposition",
+            "type": {
+              "defined": {
+                "name": "Aspect"
+              }
+            }
+          },
+          {
+            "name": "predisposition_tier",
+            "docs": [
+              "`1..=14`, see `Tier`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "hp_max",
+            "type": "u32"
+          },
+          {
+            "name": "alive",
+            "type": "bool"
+          },
+          {
+            "name": "in_session",
+            "docs": [
+              "The session that locked this character."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "appearance",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "LayerRef"
+                  }
+                },
+                20
+              ]
+            }
+          },
+          {
+            "name": "state_version",
+            "docs": [
+              "Bumped on every visible change (NFT uri cache key)."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CharacterDied",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "character",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "nft",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "state_version",
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CharacterLocked",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "character",
+            "type": "pubkey"
+          },
+          {
+            "name": "session",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CharacterUnlocked",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "character",
+            "type": "pubkey"
+          },
+          {
+            "name": "session",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Class",
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Warrior"
+          },
+          {
+            "name": "Mage"
+          },
+          {
+            "name": "Support"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CreateCharacterArgs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "name",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "race",
+            "type": {
+              "defined": {
+                "name": "Race"
+              }
+            }
+          },
+          {
+            "name": "class",
+            "type": {
+              "defined": {
+                "name": "Class"
+              }
+            }
+          },
+          {
+            "name": "predisposition",
+            "docs": [
+              "Human: Piercing, Blunt or Blood. Forest elf: Fire, Cold or Lightning."
+            ],
+            "type": {
+              "defined": {
+                "name": "Aspect"
+              }
+            }
+          },
+          {
+            "name": "stats",
+            "docs": [
+              "Indexed by `Stat`: `STAT_BASE` each plus exactly `STAT_POINTS_START` spent."
+            ],
+            "type": {
+              "array": [
+                "u16",
+                4
+              ]
+            }
+          },
+          {
+            "name": "appearance",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "LayerRef"
+                  }
+                },
+                20
+              ]
+            }
+          },
+          {
+            "name": "skills",
+            "docs": [
+              "Up to 6: at most 4 active, 1 reactive, 1 passive, limited by class."
+            ],
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "NewSkill"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Effect",
+      "docs": [
+        "Section 6. `None` only for pure damage. Debuffs and hard control first, then buffs."
+      ],
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "None"
+          },
+          {
+            "name": "Weakening"
+          },
+          {
+            "name": "Slow"
+          },
+          {
+            "name": "Vulnerability"
+          },
+          {
+            "name": "Stun"
+          },
+          {
+            "name": "Freeze"
+          },
+          {
+            "name": "Haste"
+          },
+          {
+            "name": "Empowerment"
+          },
+          {
+            "name": "Protection"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Form",
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Strike"
+          },
+          {
+            "name": "Projectile"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LayerRef",
+      "docs": [
+        "One sprite layer. `sprite_id == 0` means an empty layer."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "sprite_id",
+            "type": "u16"
+          },
+          {
+            "name": "material_ramp",
+            "type": "u8"
+          },
+          {
+            "name": "accent_ramp",
+            "type": "u8"
+          },
+          {
+            "name": "element_ramp",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "NewSkill",
+      "docs": [
+        "A starting skill: the blocks (usually a preset from `deadroll_skillcheck::presets`) and the",
+        "player's name for it."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "blocks",
+            "type": {
+              "defined": {
+                "name": "SkillBlocks"
+              }
+            }
+          },
+          {
+            "name": "name",
+            "type": {
+              "array": [
+                "u8",
+                24
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "PlayerProfile",
+      "docs": [
+        "`[\"profile\", owner]`: one per wallet, hands out character indexes."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "character_count",
+            "docs": [
+              "Characters created so far; the next character gets this index."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProfileCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Purpose",
+      "docs": [
+        "Buff targets self or an ally, debuff targets an enemy."
+      ],
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Damage"
+          },
+          {
+            "name": "Buff"
+          },
+          {
+            "name": "Debuff"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Race",
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Human"
+          },
+          {
+            "name": "ForestElf"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RewardsGranted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "character",
+            "type": "pubkey"
+          },
+          {
+            "name": "xp",
+            "type": "u32"
+          },
+          {
+            "name": "resources",
+            "type": {
+              "array": [
+                "u32",
+                8
+              ]
+            }
+          },
+          {
+            "name": "level",
+            "type": "u16"
+          },
+          {
+            "name": "total_xp",
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SkillBlocks",
+      "docs": [
+        "Everything that gives a skill its mechanics. Text (name, description) is not here."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "category",
+            "type": {
+              "defined": {
+                "name": "Category"
+              }
+            }
+          },
+          {
+            "name": "purpose",
+            "type": {
+              "defined": {
+                "name": "Purpose"
+              }
+            }
+          },
+          {
+            "name": "source",
+            "docs": [
+              "Power source tag. One value, so magical and martial never mix."
+            ],
+            "type": {
+              "defined": {
+                "name": "Source"
+              }
+            }
+          },
+          {
+            "name": "form",
+            "docs": [
+              "Form tag. One value, so strike and projectile never mix."
+            ],
+            "type": {
+              "defined": {
+                "name": "Form"
+              }
+            }
+          },
+          {
+            "name": "target",
+            "type": {
+              "defined": {
+                "name": "Target"
+              }
+            }
+          },
+          {
+            "name": "aspects",
+            "docs": [
+              "In order: the first is the main one (largest share). Only `aspect_count` are used;",
+              "unused slots must stay at the default value."
+            ],
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "Aspect"
+                  }
+                },
+                3
+              ]
+            }
+          },
+          {
+            "name": "aspect_count",
+            "type": "u8"
+          },
+          {
+            "name": "effect",
+            "type": {
+              "defined": {
+                "name": "Effect"
+              }
+            }
+          },
+          {
+            "name": "trigger",
+            "type": {
+              "defined": {
+                "name": "Trigger"
+              }
+            }
+          },
+          {
+            "name": "aura_radius",
+            "docs": [
+              "Aura radius in cells, `0` = not an aura (section 3.5)."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SkillRecord",
+      "docs": [
+        "One skill: blocks plus values computed once at creation (`deadroll_skillcheck::derive`)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "blocks",
+            "type": {
+              "defined": {
+                "name": "SkillBlocks"
+              }
+            }
+          },
+          {
+            "name": "shares_bp",
+            "docs": [
+              "Share of the converted weapon base per aspect, bp; sums to `BP`."
+            ],
+            "type": {
+              "array": [
+                "u32",
+                3
+              ]
+            }
+          },
+          {
+            "name": "power_bp",
+            "type": "u32"
+          },
+          {
+            "name": "fusion",
+            "docs": [
+              "`deadroll_skillcheck::fusion_id` of the first two aspects, `0` = none."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "cooldown",
+            "docs": [
+              "In the character's turns, `0` = none."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "name",
+            "type": {
+              "array": [
+                "u8",
+                24
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "SkillSet",
+      "docs": [
+        "`[\"skills\", character]`: every skill of a character; slot `i < count` is used."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "character",
+            "type": "pubkey"
+          },
+          {
+            "name": "count",
+            "type": "u8"
+          },
+          {
+            "name": "skills",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "SkillRecord"
+                  }
+                },
+                16
+              ]
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Source",
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Magical"
+          },
+          {
+            "name": "Combat"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Target",
+      "docs": [
+        "Area comes later (append)."
+      ],
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Single"
+          },
+          {
+            "name": "Line"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TombstoneFrozen",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "character",
+            "type": "pubkey"
+          },
+          {
+            "name": "asset",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Trigger",
+      "docs": [
+        "Section 3.2, reactive skills only."
+      ],
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "None"
+          },
+          {
+            "name": "Hit"
+          },
+          {
+            "name": "CritHit"
+          },
+          {
+            "name": "HpBelow"
+          },
+          {
+            "name": "AllyHpBelow"
+          },
+          {
+            "name": "Controlled"
+          },
+          {
+            "name": "EnemyAdjacent"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -89,6 +89,8 @@ export type PartyLobbyProps = {
   /** Characters the viewer can join with (role guest). */
   myCharacters: { address: string; name: string }[];
   onJoin: (characterAddress: string) => void;
+  /** What Join pays (the player's share); defaults to the full price. */
+  joinLamports?: bigint;
   onReady: (ready: boolean) => void;
   /** DM only; enabled when every player is ready and there is at least one. */
   onStart: () => void;

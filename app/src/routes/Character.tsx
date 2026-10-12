@@ -1,22 +1,30 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import type { Address } from "@solana/kit";
 import { CharacterForm } from "../components/forms/CharacterForm";
 import type { CharacterDraft } from "../components/forms/types";
+import { characterAppearance, renderRequest, TOMBSTONE } from "../chain/appearance";
+import {
+  ASPECT_KEYS,
+  CLASS_KEYS,
+  RACE_KEYS,
+  RACE_PREDISPOSITIONS,
+  bytesText,
+  createCharacterIxs,
+  enumIndex,
+  myCharacters,
+  type CharacterAcc,
+} from "../chain/game";
 import { aspectName, className, raceName } from "../chain/names";
 import { Aspect, Class, Race } from "../chain/types";
-import { DATA_SOURCE } from "../config";
+import { useTx } from "../chain/useTx";
+import { DATA_SOURCE, explorerUrl } from "../config";
 import { useRasterizer, useRenderImage } from "../raster/RasterizerProvider";
 import { SpriteCanvas } from "../raster/SpriteCanvas";
+import { useAppWallet } from "../wallet/AppWallet";
 
+/** programs/character rules.rs: STAT_BASE and STAT_POINTS_START. */
 const STAT_MIN = 5;
-const STAT_POINTS = 6;
-const ALL = Object.values(Aspect);
-
-// TODO(L9.6): the allowed set per class comes from the registry tables once they are on chain.
-function allowedFor(c: Class): Aspect[] {
-  if (c === Class.Mage) return [Aspect.Fire, Aspect.Cold, Aspect.Lightning];
-  if (c === Class.Support) return [Aspect.Blood, Aspect.Blunt, Aspect.Piercing];
-  return ALL;
-}
+const STAT_POINTS = 10;
 
 export function CharacterPage() {
   const [draft, setDraft] = useState<CharacterDraft>({
@@ -26,15 +34,42 @@ export function CharacterPage() {
     predisposition: Aspect.Piercing,
     stats: [STAT_MIN, STAT_MIN, STAT_MIN, STAT_MIN],
   });
-  const [created, setCreated] = useState<CharacterDraft | null>(null);
+  const [mockCreated, setMockCreated] = useState<CharacterDraft | null>(null);
   const raster = useRasterizer();
-  // TODO(L9.6): build Character.appearance from race/class presets once the art books are uploaded;
-  // until then the preview is the reference sprite from the loaded book.
-  const preview = useRenderImage(raster.status === "ready" ? raster.sample : null);
+  const chainPreview = DATA_SOURCE === "chain" ? renderRequest(characterAppearance(draft.race, draft.class, draft.predisposition)) : null;
+  const preview = useRenderImage(chainPreview ?? (raster.status === "ready" ? raster.sample : null));
+  const wallet = useAppWallet();
+  const { send, busy } = useTx();
+  const [mine, setMine] = useState<{ address: Address; data: CharacterAcc }[]>([]);
 
+  const refresh = useCallback(async () => {
+    if (DATA_SOURCE !== "chain" || !wallet.address) return setMine([]);
+    try {
+      setMine(await myCharacters(wallet.address));
+    } catch {
+      // shown as an empty list
+    }
+  }, [wallet.address]);
+  useEffect(() => void refresh(), [refresh]);
+
+  const allowed = RACE_PREDISPOSITIONS[draft.race];
   const onChange = (next: CharacterDraft) => {
-    const allowed = allowedFor(next.class);
-    setDraft(allowed.includes(next.predisposition) ? next : { ...next, predisposition: allowed[0]! });
+    const ok = RACE_PREDISPOSITIONS[next.race];
+    setDraft(ok.includes(next.predisposition) ? next : { ...next, predisposition: ok[0]! });
+  };
+
+  const create = async (d: CharacterDraft) => {
+    if (DATA_SOURCE === "mock") return setMockCreated(d);
+    const owner = wallet.signer;
+    if (!owner) return void (await send("create_character", null, []));
+    const c = await createCharacterIxs(owner, { name: d.name, race: d.race, class: d.class, predisposition: d.predisposition, stats: [...d.stats] });
+    if (c.profileIx && !(await send("create_profile", owner, [c.profileIx]))) return;
+    const res = await send(`create_character ${d.name} (Core NFT)`, owner, [c.ix]);
+    if (res) {
+      setDraft((x) => ({ ...x, name: "" }));
+      await refresh();
+      void wallet.refreshBalance();
+    }
   };
 
   return (
@@ -43,19 +78,66 @@ export function CharacterPage() {
       <CharacterForm
         value={draft}
         onChange={onChange}
-        onSubmit={(d) => setCreated(d)}
+        onSubmit={(d) => void create(d)}
         statPoints={STAT_POINTS}
         statMin={STAT_MIN}
-        allowedPredispositions={allowedFor(draft.class)}
+        allowedPredispositions={allowed}
+        busy={busy !== null}
         preview={<SpriteCanvas image={preview.image} scale={6} label="character preview" />}
       />
-      {created && (
+      {mockCreated && (
         <p className="ok">
-          {DATA_SOURCE === "mock" ? "Mock: " : ""}
-          {created.name}, {raceName(created.race)} {className(created.class)} with {aspectName(created.predisposition)}{" "}
-          predisposition. {DATA_SOURCE === "mock" ? "create_character is sent in L9.6." : ""}
+          Mock: {mockCreated.name}, {raceName(mockCreated.race)} {className(mockCreated.class)} with {aspectName(mockCreated.predisposition)} predisposition.
         </p>
       )}
+      {DATA_SOURCE === "chain" && (
+        <>
+          <h2>My characters</h2>
+          {!wallet.address && <p className="muted">Connect a wallet, or open the app with ?dev=1 on localnet.</p>}
+          {wallet.address && mine.length === 0 && <p className="muted">None yet.</p>}
+          <div className="char-list">
+            {mine.map((c) => (
+              <CharacterCard key={c.address} address={c.address} c={c.data} />
+            ))}
+          </div>
+        </>
+      )}
     </section>
+  );
+}
+
+export function CharacterCard({ address, c }: { address: Address; c: CharacterAcc }) {
+  const dead = !c.core.alive;
+  const req = dead ? TOMBSTONE : renderRequest(c.core.appearance, false);
+  const img = useRenderImage(req);
+  const race = enumIndex(c.core.race, RACE_KEYS) as Race;
+  const cls = enumIndex(c.core.class, CLASS_KEYS) as Class;
+  const pred = enumIndex(c.core.predisposition, ASPECT_KEYS) as Aspect;
+  return (
+    <figure className={`panel char-card${dead ? " dead" : ""}`}>
+      <SpriteCanvas image={img.image} scale={3} label={bytesText(c.name)} />
+      <figcaption>
+        <b>{bytesText(c.name)}</b>
+        <span className="muted">
+          {raceName(race)} {className(cls)} · {aspectName(pred)} · lvl {c.core.level} · {c.core.xp} xp
+        </span>
+        <span className={dead ? "error" : "ok"}>
+          {dead ? `Tombstone${c.nftFrozen ? " · NFT frozen" : " · freeze pending"}` : c.core.inSession ? "In a party" : "Alive"}
+        </span>
+        <span className="mono">
+          <a href={explorerUrl("address", address)} target="_blank" rel="noreferrer">
+            PDA
+          </a>
+          {c.core.nft && (
+            <>
+              {" · "}
+              <a href={explorerUrl("address", c.core.nft)} target="_blank" rel="noreferrer">
+                Core NFT
+              </a>
+            </>
+          )}
+        </span>
+      </figcaption>
+    </figure>
   );
 }

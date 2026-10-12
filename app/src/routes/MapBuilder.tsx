@@ -1,4 +1,6 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import type { Address } from "@solana/kit";
 import { Grid } from "../components/grid/Grid";
 import type { GridUnit } from "../components/grid/types";
 import { MapPalette } from "../components/forms/MapPalette";
@@ -6,6 +8,10 @@ import type { BuilderTool } from "../components/forms/types";
 import { MAP_PRESETS, presetToLayout } from "../chain/mock";
 import { BESTIARY_NAMES, bestiaryName } from "../chain/names";
 import { SPAWNS_MAX, Tile, cellIndex, type Cell, type Spawn } from "../chain/types";
+import { buildMapIxs, mapStatus, mapsOf, type MapAcc } from "../chain/game";
+import { useTx } from "../chain/useTx";
+import { DATA_SOURCE, explorerUrl } from "../config";
+import { useAppWallet } from "../wallet/AppWallet";
 
 const BESTIARY = Object.entries(BESTIARY_NAMES).map(([id, name]) => ({ id: Number(id), name }));
 const PRESETS = MAP_PRESETS.map((p) => ({ name: p.name, width: p.width, height: p.height }));
@@ -43,6 +49,35 @@ export function MapBuilderPage() {
   const [errors, setErrors] = useState<string[]>([]);
   const [validated, setValidated] = useState(false);
   const [finalized, setFinalized] = useState(false);
+  const [tier, setTier] = useState(first.tier ?? 1);
+  const wallet = useAppWallet();
+  const { send, busy } = useTx();
+  const [built, setBuilt] = useState<Address | null>(null);
+  const [myMaps, setMyMaps] = useState<{ address: Address; data: MapAcc }[]>([]);
+  const refreshMaps = useCallback(async () => {
+    if (DATA_SOURCE !== "chain" || !wallet.address) return setMyMaps([]);
+    try {
+      setMyMaps(await mapsOf(wallet.address));
+    } catch {
+      setMyMaps([]);
+    }
+  }, [wallet.address]);
+  useEffect(() => void refreshMaps(), [refreshMaps]);
+
+  // create_map, write_layout, write_spawns, finalize_map: the chain runs crates/mapcheck in finalize_map.
+  const finalizeOnChain = async () => {
+    const dm = wallet.signer;
+    if (!dm) return void (await send("finalize_map", null, []));
+    const b = await buildMapIxs(dm, { width: size.width, height: size.height, tier, ...layout });
+    const names = ["create_map", "write_layout", "write_spawns", "finalize_map"];
+    for (const [i, ix] of b.ixs.entries()) {
+      if (!(await send(names[i]!, dm, [ix], { quiet: i < b.ixs.length - 1 }))) return;
+    }
+    setBuilt(b.map);
+    setFinalized(true);
+    await refreshMaps();
+    void wallet.refreshBalance();
+  };
 
   const edit = (next: { tiles: Uint8Array; spawns: Spawn[] }) => {
     setLayout(next);
@@ -93,6 +128,7 @@ export function MapBuilderPage() {
               const p = MAP_PRESETS.find((m) => m.name === name);
               if (!p) return;
               setSize({ width: p.width, height: p.height });
+              setTier(p.tier ?? 1);
               edit(presetToLayout(p));
             }}
             spawns={layout.spawns}
@@ -103,10 +139,39 @@ export function MapBuilderPage() {
               setErrors(e);
               setValidated(e.length === 0);
             }}
-            canFinalize={validated && !finalized}
-            onFinalize={() => setFinalized(true)}
+            canFinalize={validated && !finalized && busy === null}
+            onFinalize={() => (DATA_SOURCE === "chain" ? void finalizeOnChain() : setFinalized(true))}
+            busy={busy !== null}
           />
-          {finalized && <p className="ok">Mock: map finalized. create_map, write_layout, write_spawns and finalize_map are sent in L9.6.</p>}
+          {busy && <p className="muted">Sending {busy}...</p>}
+          {finalized && DATA_SOURCE === "mock" && <p className="ok">Mock: map finalized.</p>}
+          {built && (
+            <p className="ok">
+              Map finalized on chain:{" "}
+              <a href={explorerUrl("address", built)} target="_blank" rel="noreferrer" className="mono">
+                {built.slice(0, 8)}..
+              </a>{" "}
+              · <Link to={`/party?map=${built}`}>Open a party on it</Link>
+            </p>
+          )}
+          {DATA_SOURCE === "chain" && myMaps.length > 0 && (
+            <div className="panel">
+              <h3>My maps</h3>
+              <ul className="mono">
+                {myMaps.map((m) => (
+                  <li key={m.address}>
+                    {m.address.slice(0, 8)}.. {m.data.core.width}x{m.data.core.height} · {mapStatus(m.data)}
+                    {mapStatus(m.data) === "finalized" && (
+                      <>
+                        {" "}
+                        · <Link to={`/party?map=${m.address}`}>open a party</Link>
+                      </>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       </div>
     </section>

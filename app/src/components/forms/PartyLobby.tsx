@@ -78,7 +78,7 @@ export function PartyLobby(p: PartyLobbyProps) {
               disabled={locked || p.myCharacters.length === 0 || full || selected.length === 0}
               onClick={() => p.onJoin(selected)}
             >
-              Join and pay {formatSol(p.priceLamports)} SOL
+              Join and pay {formatSol(p.joinLamports ?? p.priceLamports)} SOL
             </button>
           </div>
         ) : null}

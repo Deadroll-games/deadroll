@@ -31,6 +31,8 @@ export type MapPresetData = {
   name: string;
   width: number;
   height: number;
+  /** Map tier (monster levels and limits); 1 when absent. */
+  tier?: number;
   rows: string[];
   spawns: {
     bestiary_id: number;

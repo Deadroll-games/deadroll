@@ -1,18 +1,33 @@
 // Runtime config from Vite env (app/.env.local). Program ids: agents/CONTRACTS.md, section 1.
+// `vite --mode localnet` (pnpm dev:localnet) defaults everything to the shared local validator.
 import { address } from "@solana/kit";
 
 export type DataSource = "mock" | "chain";
 
-export const DATA_SOURCE: DataSource = import.meta.env.VITE_DATA === "chain" ? "chain" : "mock";
-export const RPC_URL: string = import.meta.env.VITE_RPC_URL ?? "http://127.0.0.1:8899";
-export const RPC_WS_URL: string | undefined = import.meta.env.VITE_RPC_WS_URL;
+const env = import.meta.env;
+const LOCALNET_MODE = env.MODE === "localnet";
+
+export const DATA_SOURCE: DataSource = (env.VITE_DATA ?? (LOCALNET_MODE ? "chain" : "mock")) === "chain" ? "chain" : "mock";
+export const RPC_URL: string = env.VITE_RPC_URL ?? "http://127.0.0.1:8899";
+export const RPC_WS_URL: string | undefined = env.VITE_RPC_WS_URL;
 /** Wallet Standard chain id. */
-export const CHAIN = (import.meta.env.VITE_CHAIN ?? "solana:devnet") as `${string}:${string}`;
+export const CHAIN = (env.VITE_CHAIN ?? (LOCALNET_MODE ? "solana:localnet" : "solana:devnet")) as `${string}:${string}`;
 /** Sprite book ids to load, comma separated (FORMAT.md 3.3). */
-export const SPRITE_BOOK_IDS: number[] = (import.meta.env.VITE_SPRITE_BOOKS ?? "1")
+export const SPRITE_BOOK_IDS: number[] = (env.VITE_SPRITE_BOOKS ?? "1")
   .split(",")
   .map((s: string) => Number(s.trim()))
   .filter((n: number) => Number.isInteger(n) && n >= 0 && n <= 0xffff);
+/** Palette version the characters are drawn with (`palette 1` in assets/palette). */
+export const PALETTE_VERSION = Number(env.VITE_PALETTE_VERSION ?? "1");
+
+/** The RPC is a validator on this machine (airdrops, the mock VRF oracle). */
+export const IS_LOCALNET = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?\/?$/.test(RPC_URL);
+
+/**
+ * Localnet only: the app plays the VRF oracle for a session program built with `mock-vrf`
+ * (agents/TASKS.md decision block, rule 2). Never on for a non-local RPC.
+ */
+export const MOCK_VRF: boolean = IS_LOCALNET && (env.VITE_MOCK_VRF ?? (LOCALNET_MODE ? "1" : "0")) === "1";
 
 export const PROGRAMS = {
   registry: address("dZ1jraMfS3bAUTkRw2TA1ddg8UDGzgUdFQz5pmBxjoG"),
@@ -26,3 +41,20 @@ export const PROGRAMS = {
 
 export const MPL_CORE_PROGRAM = address("CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d");
 export const SYSTEM_PROGRAM = address("11111111111111111111111111111111");
+
+/** MagicBlock VRF accounts (ephemeral-vrf-sdk consts); under mock-vrf they only pass address checks. */
+export const VRF = {
+  program: address("Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz"),
+  oracleQueue: address("Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh"),
+  slotHashes: address("SysvarS1otHashes111111111111111111111111111"),
+} as const;
+
+/** Explorer link for a transaction or account on the configured cluster. */
+export function explorerUrl(kind: "tx" | "address", id: string): string {
+  const cluster = IS_LOCALNET
+    ? `cluster=custom&customUrl=${encodeURIComponent(RPC_URL)}`
+    : RPC_URL.includes("devnet")
+      ? "cluster=devnet"
+      : `cluster=custom&customUrl=${encodeURIComponent(RPC_URL)}`;
+  return `https://explorer.solana.com/${kind}/${id}?${cluster}`;
+}

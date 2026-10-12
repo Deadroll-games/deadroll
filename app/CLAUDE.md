@@ -12,6 +12,8 @@ The Vite + React + TypeScript website: wallet, session key, rasterizer loader, C
 - Components in `src/components/*` are pure UI over the props in their `types.ts` (no chain calls). Changing a `types.ts` is the lane owner's call.
 - Pixel art: integer scale, `imageSmoothingEnabled = false`, class `pixel`.
 - After `CharacterDied` the app sends `character.freeze_tombstone` (`src/chain/tombstone.ts`).
+- Instruction builders go through the IDL snapshot in `src/chain/idl/` (`programs.ts` `buildInstruction`); mirror `tests/demo.test.ts` account lists. After an IDL change, copy `target/idl/deadroll_{session,character,map}.json` here and run the tests.
+- The mock VRF oracle (`MOCK_VRF`) and the dev wallet (`?dev=1`) are gated on a localhost RPC. Never relax that gate.
 - Forbidden: editing other zones, crates/types, agents/CONTRACTS.md, sdk/ by hand.
 
 ## Commands

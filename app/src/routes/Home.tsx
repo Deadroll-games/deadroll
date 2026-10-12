@@ -17,11 +17,11 @@ export function Home() {
         <div style={{ display: "flex", gap: 24, marginTop: 16, alignItems: "end" }}>
           <figure>
             <SpriteCanvas image={alive.image} scale={6} label="reference warrior" />
-            <figcaption className="muted">Reference warrior</figcaption>
+            <figcaption className="muted">Human warrior</figcaption>
           </figure>
           <figure>
             <SpriteCanvas image={dead.image} scale={6} label="reference warrior, dead" />
-            <figcaption className="muted">GRAY flag (tombstone)</figcaption>
+            <figcaption className="muted">GRAY flag (dead)</figcaption>
           </figure>
           {(alive.error || dead.error) && <p className="error">{alive.error ?? dead.error}</p>}
         </div>
