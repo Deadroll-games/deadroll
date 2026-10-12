@@ -84,6 +84,8 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
         session.player_alive(slot) && participation.core.hp > 0,
         SessionError::UnitDead
     );
+    // One attack or active skill per turn; movement spends what AP are left (PARTY_AND_TURNS 5.1).
+    require!(!session.acted(), SessionError::AlreadyActed);
 
     let monsters = Monsters::load(accounts.monsters.as_ref(), &session.key())?;
     require!(target < monsters.count()?, SessionError::InvalidTarget);
@@ -135,6 +137,7 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
         participation: participation.key(),
     };
     session.core.pending_vrf = true;
+    session.acted_seq = session.turn_seq;
 
     let session_key = session.key();
     vrf::request(

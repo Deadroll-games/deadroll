@@ -623,6 +623,17 @@ interface Player {
   bag: PublicKey;
 }
 
+const cheb = (a: any, b: any) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
+/** A living player slot monster `m` can strike from where it stands (shamans shoot, range 6). */
+function targetInRange(s: any, m: any): number | undefined {
+  const range = m.bestiaryId === SHAMAN ? 6 : 1;
+  for (let slot = 0; slot < s.core.playerCount; slot++) {
+    const d = cheb(m, s.playerPos[slot]);
+    if (s.aliveMask & (1 << slot) && d >= 1 && d <= range) return slot;
+  }
+  return undefined;
+}
+
 /** One party on a fresh demo map, with helpers for every session instruction. */
 class Party {
   dm!: Keypair;
@@ -862,9 +873,8 @@ class Party {
     huntSlot?: number;
     passive?: boolean;
     steps?: number;
-    until?: (s: any) => boolean;
+    until?: (s: any, monsters: any[]) => boolean;
   }) {
-    const cheb = (a: any, b: any) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
     const dirs = [
       [N, 0, -1],
       [E, 1, 0],
@@ -873,16 +883,18 @@ class Party {
     ];
     for (let step = 0; step < (opts.steps ?? 400); step++) {
       const s = await this.state();
-      if (!s.core.status.active || opts.until?.(s)) return s;
-      const unit = s.core.turnOrder[s.core.turnIndex];
       const all = (await this.monsters()).core;
       const ms = all.monsters.slice(0, all.count);
+      if (!s.core.status.active || opts.until?.(s, ms)) return s;
+      const unit = s.core.turnOrder[s.core.turnIndex];
+      // One attack or active skill per turn: after it, the unit ends its turn.
+      const acted = s.actedSeq === s.turnSeq;
       if (unit < MONSTER_BASE) {
         const pl = await this.part(unit);
         const ap = pl.apSeq === s.turnSeq ? pl.core.actionPoints : pl.maxAp;
         const living = ms.map((m: any, i: number) => ({ ...m, i })).filter((m: any) => m.alive);
         const target = living.sort((a: any, b: any) => cheb(pl.core, a) - cheb(pl.core, b))[0];
-        if (opts.passive || !target || ap < 1) {
+        if (opts.passive || !target || ap < 1 || acted) {
           await this.endTurn(this.players[unit].wallet, unit);
         } else if (cheb(pl.core, target) <= 6 && cheb(pl.core, target) >= 1 && ap >= 2) {
           await this.act(unit, this.players[unit].wallet, RANGED_SLOT[this.players[unit].kind], target.i);
@@ -897,7 +909,9 @@ class Party {
         const slot = opts.huntSlot !== undefined && alive.includes(opts.huntSlot) ? opts.huntSlot : alive[0];
         const pos = s.playerPos[slot];
         const range = m.bestiaryId === SHAMAN ? 6 : 1;
-        if (cheb(m, pos) <= range && m.actionPoints >= 2) {
+        if (acted) {
+          await this.endTurn(this.dm, null);
+        } else if (cheb(m, pos) <= range && m.actionPoints >= 2) {
           await this.monsterAct(this.dm, mi, slot);
           await this.consume(slot, opts.monsterSeed(slot));
         } else if (m.actionPoints >= 1 && (await this.stepToward(null, m, pos, dirs, cheb, mi))) {
@@ -1092,22 +1106,32 @@ describe("deadroll_session: combat, death, victory and payouts", { skip: SKIP_PA
     await rejects(party.consume(0, CRIT), "NoRollPending");
   });
 
-  it("a miss deals nothing", async () => {
+  it("one attack or active skill per turn; moving spends the AP left", async () => {
     const p0 = party.players[0];
+    await rejects(party.act(0, p0.wallet, RANGED_SLOT.warrior, 0), "AlreadyActed");
+    await rejects(party.act(0, p0.wallet, BASE_ATTACK, 0), "AlreadyActed");
+    await rejects(party.act(0, p0.wallet, 0, 0), "AlreadyActed");
+    await party.move(0, p0.wallet, [S]);
+    const p = await party.part(0);
+    assert.deepEqual([p.core.x, p.core.y, p.core.actionPoints], [1, 2, p.maxAp - 3]);
+    assert.equal((await party.state()).actedSeq, (await party.state()).turnSeq);
+    await party.endTurn(p0.wallet, 0);
+  });
+
+  it("a miss deals nothing; the next unit may act again", async () => {
+    const p1 = party.players[1];
     const before = (await party.monsters()).core.monsters[0];
-    if (!before.alive) return;
-    await party.act(0, p0.wallet, RANGED_SLOT.warrior, 0);
-    const sig = await party.consume(0, MISS);
+    await party.act(1, p1.wallet, RANGED_SLOT.mage, 0); // Frost Bolt, wolf at distance 5
+    const sig = await party.consume(1, MISS);
     const hit = await eventOf(sig, "hitResolved");
     assert.ok(hit.result.outcome.miss);
     assert.deepEqual([hit.result.d20, hit.result.damage], [1, 0]);
     assert.equal((await party.monsters()).core.monsters[0].hp, before.hp);
-    await rejects(party.act(0, p0.wallet, RANGED_SLOT.warrior, 0), "NotEnoughActionPoints");
+    await rejects(party.act(1, p1.wallet, BASE_ATTACK, 0), "AlreadyActed");
   });
 
   it("monster_act: DM on that monster's turn, target in range", async () => {
     const [p0, p1] = party.players;
-    await party.endTurn(p0.wallet, 0);
     await rejects(party.monsterAct(party.dm, 0, 0), "NotYourTurn");
     await party.endTurn(p1.wallet, 1);
     const s = await party.state();
@@ -1115,6 +1139,26 @@ describe("deadroll_session: combat, death, victory and payouts", { skip: SKIP_PA
     await rejects(party.monsterAct(p0.wallet, wolfTurn, 0), "Unauthorized");
     await rejects(party.monsterAct(party.dm, wolfTurn, 0, null, 7), "InvalidAction");
     await rejects(party.monsterAct(party.dm, wolfTurn, 0), "OutOfRange");
+  });
+
+  it("a monster attacks once per turn too", async () => {
+    const s = await party.play({
+      playerSeed: MISS,
+      monsterSeed: () => MISS,
+      passive: true,
+      until: (st, ms) => {
+        const unit = st.core.turnOrder[st.core.turnIndex];
+        if (unit < MONSTER_BASE || st.actedSeq === st.turnSeq) return false;
+        const m = ms[unit - MONSTER_BASE];
+        return m.actionPoints >= 2 && targetInRange(st, m) !== undefined;
+      },
+    });
+    const mi = s.core.turnOrder[s.core.turnIndex] - MONSTER_BASE;
+    const slot = targetInRange(s, (await party.monsters()).core.monsters[mi])!;
+    await party.monsterAct(party.dm, mi, slot);
+    await party.consume(slot, MISS);
+    await rejects(party.monsterAct(party.dm, mi, slot), "AlreadyActed");
+    await party.endTurn(party.dm, null);
   });
 
   it("monsters kill the mage: tombstone through character.mark_dead", async () => {

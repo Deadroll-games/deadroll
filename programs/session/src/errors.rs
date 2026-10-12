@@ -94,4 +94,6 @@ pub enum SessionError {
     InvalidRegistryTable,
     #[msg("Monster is not in the registry bestiary")]
     UnknownMonster,
+    #[msg("Only one attack or active skill per turn")]
+    AlreadyActed,
 }
