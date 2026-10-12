@@ -24,6 +24,12 @@ custom-panic = []
 [dependencies]
 anchor-lang.workspace = true
 deadroll-types = { workspace = true, features = ["anchor"] }
+# Required by `#[account(zero_copy)]` (the table accounts).
+bytemuck = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+# Discriminator checks in tests; already in Cargo.lock through anchor-lang.
+solana-sha256-hasher = "3.1"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

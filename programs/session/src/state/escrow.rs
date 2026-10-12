@@ -9,4 +9,6 @@ pub struct Escrow {
     /// Contributions received so far.
     pub collected: u64,
     pub bump: u8,
+    /// The DM took `collected` (`claim_escrow`).
+    pub claimed: bool,
 }

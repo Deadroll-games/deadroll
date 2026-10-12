@@ -68,6 +68,26 @@ pub enum SessionError {
     CellOccupied,
     #[msg("Not enough action points")]
     NotEnoughActionPoints,
+    #[msg("Target is not a living enemy")]
+    InvalidTarget,
+    #[msg("Target is out of range")]
+    OutOfRange,
+    #[msg("Skill cannot be used as an attack")]
+    InvalidSkill,
+    #[msg("Account is not the skill set of this character")]
+    InvalidSkillSet,
+    #[msg("Unknown monster action")]
+    InvalidAction,
+    #[msg("No dice roll is pending")]
+    NoRollPending,
+    #[msg("Callback accounts do not match the pending action")]
+    InvalidPendingAccounts,
+    #[msg("Party has not ended")]
+    NotFinished,
+    #[msg("Rewards of this character are already settled")]
+    AlreadySettled,
+    #[msg("Escrow is already claimed")]
+    AlreadyClaimed,
     #[msg("Arithmetic overflow")]
     Overflow,
 }

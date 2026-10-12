@@ -1,0 +1,19 @@
+[package]
+name = "art"
+description = "Deadroll sprite tool: validate .dsl files (FORMAT.md section 6) and render PNG previews through deadroll-render."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "art"
+path = "src/lib.rs"
+
+[[bin]]
+name = "art"
+path = "src/main.rs"
+
+[dependencies]
+deadroll-render = { workspace = true, features = ["text"] }
