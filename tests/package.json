@@ -8,7 +8,8 @@
     "test:character": "node --import tsx --test character.test.ts",
     "test:render": "node --import tsx --test render.test.ts",
     "test:map": "node --import tsx --test map.test.ts",
-    "test:session": "node --import tsx --test session.test.ts"
+    "test:session": "node --import tsx --test session.test.ts",
+    "test:demo": "node --import tsx --test demo.test.ts"
   },
   "devDependencies": {
     "@anchor-lang/core": "1.2.1",
