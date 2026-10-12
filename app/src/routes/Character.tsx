@@ -63,7 +63,14 @@ export function CharacterPage() {
     if (DATA_SOURCE === "mock") return setMockCreated(d);
     const owner = wallet.signer;
     if (!owner) return void (await send("create_character", null, []));
-    const c = await createCharacterIxs(owner, { name: d.name, race: d.race, class: d.class, predisposition: d.predisposition, stats: [...d.stats] });
+    const c = await createCharacterIxs(owner, {
+      name: d.name,
+      race: d.race,
+      class: d.class,
+      predisposition: d.predisposition,
+      stats: [...d.stats],
+      ...(d.skills ? { skills: d.skills } : {}),
+    });
     if (c.profileIx && !(await send("create_profile", owner, [c.profileIx]))) return;
     const res = await send(`create_character ${d.name} (Core NFT)`, owner, [c.ix]);
     if (res) {
