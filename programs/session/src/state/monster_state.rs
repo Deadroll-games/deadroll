@@ -20,7 +20,14 @@ use crate::{errors::SessionError, state::ACCOUNT_VERSION};
 pub struct MonsterState {
     /// Frozen contract, first after the discriminator.
     pub core: MonsterStateData,
+    /// Per monster, per skill: own turn starts until usable, 0 = usable (like
+    /// `Participation.cooldowns`). Counted down by `start_turn`; nothing sets them in P0: the
+    /// natural attack has no cooldown. TODO(post-demo): monster skills from the spawn's pool.
+    pub cooldowns: [[u8; MONSTER_SKILLS_MAX]; MONSTERS_MAX],
 }
+
+/// Cooldown slots per monster.
+pub const MONSTER_SKILLS_MAX: usize = 4;
 
 /// `sha256("account:MonsterState")[..8]`, Anchor's discriminator for [`MonsterState`].
 pub const MONSTER_STATE_DISCRIMINATOR: [u8; 8] = [0xae, 0xda, 0x67, 0xcc, 0xde, 0x2e, 0xe8, 0x18];
@@ -36,6 +43,7 @@ mod off {
     pub const MONSTERS: usize = SESSION + 32;
     pub const COUNT: usize = MONSTERS + MONSTERS_MAX * Monster::SIZE;
     pub const BUMP: usize = COUNT + 1;
+    pub const COOLDOWNS: usize = BUMP + 1;
 }
 
 /// In-place access to a `MonsterState` account.
@@ -158,6 +166,30 @@ impl<'a, 'info> Monsters<'a, 'info> {
             .map_err(|_| error!(SessionError::InvalidMonsterState))
     }
 
+    /// Cooldowns of monster `index`.
+    pub fn cooldowns(&self, index: u8) -> Result<[u8; MONSTER_SKILLS_MAX]> {
+        let start = Self::cooldown_slot(index)?;
+        let data = self.info.try_borrow_data()?;
+        let mut out = [0u8; MONSTER_SKILLS_MAX];
+        out.copy_from_slice(&data[start..start + MONSTER_SKILLS_MAX]);
+        Ok(out)
+    }
+
+    pub fn set_cooldowns(&self, index: u8, cooldowns: &[u8; MONSTER_SKILLS_MAX]) -> Result<()> {
+        let start = Self::cooldown_slot(index)?;
+        self.info.try_borrow_mut_data()?[start..start + MONSTER_SKILLS_MAX]
+            .copy_from_slice(cooldowns);
+        Ok(())
+    }
+
+    fn cooldown_slot(index: u8) -> Result<usize> {
+        require!(
+            (index as usize) < MONSTERS_MAX,
+            SessionError::InvalidMonster
+        );
+        Ok(off::COOLDOWNS + index as usize * MONSTER_SKILLS_MAX)
+    }
+
     fn slot(index: u8) -> Result<usize> {
         require!(
             (index as usize) < MONSTERS_MAX,
@@ -183,7 +215,11 @@ mod tests {
     #[test]
     fn discriminator_and_size_are_anchors() {
         assert_eq!(MONSTER_STATE_DISCRIMINATOR, *MonsterState::DISCRIMINATOR);
-        assert_eq!(MONSTER_STATE_SPACE, 8 + MonsterStateData::SIZE);
+        assert_eq!(
+            MONSTER_STATE_SPACE,
+            8 + MonsterStateData::SIZE + MONSTERS_MAX * MONSTER_SKILLS_MAX
+        );
+        assert_eq!(off::COOLDOWNS, 8 + MonsterStateData::SIZE);
     }
 
     #[test]
@@ -202,6 +238,9 @@ mod tests {
             view.set(0, &m).unwrap();
             view.set(2, &monster(7, 7)).unwrap();
             view.set_count(3).unwrap();
+            assert_eq!(view.cooldowns(2).unwrap(), [0; MONSTER_SKILLS_MAX]);
+            view.set_cooldowns(2, &[1, 0, 3, 0]).unwrap();
+            view.set_cooldowns(MONSTERS_MAX as u8 - 1, &[9; 4]).unwrap();
         }
         let state = MonsterState::try_deserialize(&mut &account.data[..]).unwrap();
         assert_eq!(state.core.count, 3);
@@ -214,6 +253,9 @@ mod tests {
         assert_eq!(state.core.monsters[1], monster(6, 5));
         assert_eq!(state.core.monsters[2], monster(7, 7));
         assert_eq!(state.core.bump, 254);
+        assert_eq!(state.cooldowns[2], [1, 0, 3, 0]);
+        assert_eq!(state.cooldowns[MONSTERS_MAX - 1], [9; 4]);
+        assert_eq!(state.cooldowns[0], [0; MONSTER_SKILLS_MAX]);
     }
 
     #[test]
@@ -248,5 +290,7 @@ mod tests {
         assert!(view.get(MONSTERS_MAX as u8).is_err());
         assert!(view.set(MONSTERS_MAX as u8, &monster(0, 0)).is_err());
         assert!(view.set_count(MONSTERS_MAX as u8 + 1).is_err());
+        assert!(view.cooldowns(MONSTERS_MAX as u8).is_err());
+        assert!(view.set_cooldowns(MONSTERS_MAX as u8, &[0; 4]).is_err());
     }
 }

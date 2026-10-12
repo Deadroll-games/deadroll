@@ -5,8 +5,8 @@ use crate::{
     auth,
     combat_input::{player_form, skill_use, SkillUse},
     errors::SessionError,
-    events::ActionRequested,
-    rules::{in_range, Unit, ACT_AP, BASE_ATTACK},
+    events::{ActionRequested, SkillUsed},
+    rules::{cooldown_after_use, in_range, Unit, ACT_AP, BASE_ATTACK},
     state::{
         external::read_skill, GameSession, MonsterState, Monsters, Participation, PendingAction,
     },
@@ -104,6 +104,11 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
             skill_use(&skill) == SkillUse::Ok,
             SessionError::InvalidSkill
         );
+        // `read_skill` checked `skill_slot < SKILLS_MAX`. The weapon has no cooldown.
+        require!(
+            participation.cooldowns[skill_slot as usize] == 0,
+            SessionError::SkillOnCooldown
+        );
         Some(skill)
     };
     let from = Cell {
@@ -138,6 +143,9 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
     };
     session.core.pending_vrf = true;
     session.acted_seq = session.turn_seq;
+    if let Some(skill) = &skill {
+        participation.cooldowns[skill_slot as usize] = cooldown_after_use(skill.cooldown);
+    }
 
     let session_key = session.key();
     vrf::request(
@@ -159,6 +167,15 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
         },
     )?;
 
+    if let Some(skill) = &skill {
+        emit!(SkillUsed {
+            session: session_key,
+            unit: attacker,
+            skill_slot,
+            cooldown: skill.cooldown,
+            cooldowns: participation.cooldowns,
+        });
+    }
     emit!(ActionRequested {
         session: session_key,
         action: session.core.action_counter,

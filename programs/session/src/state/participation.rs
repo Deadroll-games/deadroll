@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use deadroll_character::state::SKILLS_MAX;
 use deadroll_types::ParticipationData;
 
 /// `["participation", session, character]`: one character in one party.
@@ -15,6 +16,9 @@ pub struct Participation {
     pub ap_seq: u32,
     /// Lamports paid into the escrow, for refunds.
     pub contribution: u64,
+    /// Per `SkillSet` slot: own turn starts until the skill is usable again, 0 = usable
+    /// (`rules::cooldown_after_use`; `start_turn` counts them down).
+    pub cooldowns: [u8; SKILLS_MAX],
 }
 
 impl Participation {

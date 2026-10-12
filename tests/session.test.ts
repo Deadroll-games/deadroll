@@ -894,10 +894,13 @@ class Party {
         const ap = pl.apSeq === s.turnSeq ? pl.core.actionPoints : pl.maxAp;
         const living = ms.map((m: any, i: number) => ({ ...m, i })).filter((m: any) => m.alive);
         const target = living.sort((a: any, b: any) => cheb(pl.core, a) - cheb(pl.core, b))[0];
+        // The ranged skill when it is off cooldown, else the weapon (a strike) from next to the target.
+        const ranged = RANGED_SLOT[this.players[unit].kind];
+        const [slot, reach] = pl.cooldowns[ranged] === 0 ? [ranged, 6] : [BASE_ATTACK, 1];
         if (opts.passive || !target || ap < 1 || acted) {
           await this.endTurn(this.players[unit].wallet, unit);
-        } else if (cheb(pl.core, target) <= 6 && cheb(pl.core, target) >= 1 && ap >= 2) {
-          await this.act(unit, this.players[unit].wallet, RANGED_SLOT[this.players[unit].kind], target.i);
+        } else if (cheb(pl.core, target) <= reach && cheb(pl.core, target) >= 1 && ap >= 2) {
+          await this.act(unit, this.players[unit].wallet, slot, target.i);
           await this.consume(unit, opts.playerSeed);
         } else if (!(await this.stepToward(unit, pl.core, target, dirs, cheb))) {
           await this.endTurn(this.players[unit].wallet, unit);

@@ -1,6 +1,7 @@
 //! Events (CONTRACTS.md, section 7). `PlayerReady`, `InitiativeRolled`, `PlayerDied`,
 //! `FleeVoted`, `RewardsClaimed` and `EscrowClaimed` are session-local.
 use anchor_lang::prelude::*;
+use deadroll_character::state::SKILLS_MAX;
 use deadroll_types::{SessionStatus, TURN_ORDER_MAX};
 
 use crate::hit_event::HitResultData;
@@ -60,6 +61,19 @@ pub struct ActionRequested {
     /// Player skill slot (`0xFF` = weapon), or the monster action.
     pub skill_slot: u8,
     pub action_points: u8,
+}
+
+/// A player used an active skill (`act`); it is now on cooldown.
+#[event]
+pub struct SkillUsed {
+    pub session: Pubkey,
+    /// Turn-order id of the player.
+    pub unit: u8,
+    pub skill_slot: u8,
+    /// The skill's cooldown: it misses this many of the player's next own turns.
+    pub cooldown: u8,
+    /// `Participation.cooldowns` after the use: own turn starts until each slot is usable.
+    pub cooldowns: [u8; SKILLS_MAX],
 }
 
 /// One resolved attack, in the shape the website reads (app/src/chain/types.ts). `result` is

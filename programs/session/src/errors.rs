@@ -96,4 +96,6 @@ pub enum SessionError {
     UnknownMonster,
     #[msg("Only one attack or active skill per turn")]
     AlreadyActed,
+    #[msg("Skill is on cooldown")]
+    SkillOnCooldown,
 }

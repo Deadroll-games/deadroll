@@ -105,6 +105,7 @@ pub fn monsters_account(session: Pubkey, monsters: &[Monster]) -> TestAccount {
             count: monsters.len() as u8,
             bump: 254,
         },
+        cooldowns: [[0; super::MONSTER_SKILLS_MAX]; MONSTERS_MAX],
     };
     let mut data = Vec::new();
     state.try_serialize(&mut data).unwrap();
