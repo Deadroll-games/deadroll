@@ -6,6 +6,7 @@ import type { Address, KeyPairSigner, TransactionSigner } from "@solana/kit";
 import { useConnectedWallet } from "@solana/kit-plugin-wallet/react";
 import { DATA_SOURCE } from "../config";
 import { client } from "./client";
+import { TX_SENT_EVENT } from "../chain/txEvents";
 import { devModeRequested, ensureDevFunds, loadDevSigner } from "./devWallet";
 
 export type AppWallet = {
@@ -19,6 +20,8 @@ export type AppWallet = {
   refreshBalance: () => Promise<void>;
   error: string | null;
 };
+
+export const BALANCE_POLL_MS = 30_000;
 
 const Ctx = createContext<AppWallet | null>(null);
 
@@ -71,8 +74,16 @@ export function AppWalletProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void refreshBalance();
     // Payouts (escrow, rewards) arrive from other windows' transactions: keep the badge current.
-    const t = setInterval(() => void refreshBalance(), 5_000);
-    return () => clearInterval(t);
+    // Slow poll (30 s, visible tab only) plus a read after every transaction this tab sends.
+    const t = setInterval(() => {
+      if (!document.hidden) void refreshBalance();
+    }, BALANCE_POLL_MS);
+    const onSent = () => void refreshBalance();
+    window.addEventListener(TX_SENT_EVENT, onSent);
+    return () => {
+      clearInterval(t);
+      window.removeEventListener(TX_SENT_EVENT, onSent);
+    };
   }, [refreshBalance]);
 
   const value = useMemo<AppWallet>(

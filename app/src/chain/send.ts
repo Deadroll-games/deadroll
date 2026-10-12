@@ -23,6 +23,7 @@ import {
 import { client } from "../wallet/client";
 import { coders } from "./programs";
 import { PROGRAMS } from "../config";
+import { TX_SENT_EVENT } from "./txEvents";
 
 export type Sent = { signature: Signature; logs: string[] };
 
@@ -59,6 +60,7 @@ export async function sendTx(payer: TransactionSigner, instructions: Instruction
       await sendAndConfirm(tx as Parameters<typeof sendAndConfirm>[0], { commitment: "confirmed" });
       signature = getSignatureFromTransaction(tx);
     }
+    window.dispatchEvent(new Event(TX_SENT_EVENT));
     return { signature, logs: await logsOf(signature) };
   } catch (e) {
     if (e instanceof TxError) throw e;
