@@ -75,3 +75,10 @@ Open `http://localhost:5173/?dev=1` in three tabs or windows: DM, warrior, mage.
 5. `WebAssembly.instantiate`, then render with `Rasterizer.render(request, palette, books)`.
 
 `src/raster/raster.test.ts` renders the reference warrior through this path and compares the PNG SHA-256 with the native renderer.
+
+## RPC policy
+
+- Hosted builds use the public devnet RPC and WebSocket (`https://api.devnet.solana.com`). `vite build` refuses a `VITE_RPC_URL` or `VITE_RPC_WS_URL` that points anywhere else, so a provider key can never be bundled.
+- Settings > RPC (header) sets a Custom RPC in this browser's localStorage; it overrides everything else. For local runs a private URL may live in an untracked `app/.env.devnet.local` (`pnpm --filter @deadroll/app dev:devnet` with `--mode devnet`).
+- The party view refreshes on the `logsNotifications` stream. The poll is a fallback: every 10 s while the stream is live, every 3 s while it is down, paused in a hidden tab. A refresh is one `getMultipleAccounts` call once the roster is known.
+- HTTP 429 is retried with backoff (1 s, 2 s, 4 s ..., or `Retry-After`) and the header shows "network busy, retrying".

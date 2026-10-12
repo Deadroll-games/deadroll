@@ -1,15 +1,22 @@
 // Runtime config from Vite env (app/.env.local). Program ids: agents/CONTRACTS.md, section 1.
 // `vite --mode localnet` (pnpm dev:localnet) defaults everything to the shared local validator.
 import { address } from "@solana/kit";
+import { loadCustomRpc, PUBLIC_DEVNET_RPC, PUBLIC_DEVNET_WS } from "./rpcSettings";
 
 export type DataSource = "mock" | "chain";
 
 const env = import.meta.env;
 const LOCALNET_MODE = env.MODE === "localnet";
 
-export const DATA_SOURCE: DataSource = (env.VITE_DATA ?? (LOCALNET_MODE ? "chain" : "mock")) === "chain" ? "chain" : "mock";
-export const RPC_URL: string = env.VITE_RPC_URL ?? "http://127.0.0.1:8899";
-export const RPC_WS_URL: string | undefined = env.VITE_RPC_WS_URL;
+// A hosted (production) build reads the chain over the public devnet RPC. No provider key is ever bundled:
+// vite.config.ts refuses to build with one. Dev runs may use VITE_RPC_URL from an untracked .env.*.local.
+const HOSTED = env.PROD && !env.VITE_RPC_URL;
+const custom = loadCustomRpc();
+export const DATA_SOURCE: DataSource = (env.VITE_DATA ?? (LOCALNET_MODE || env.PROD ? "chain" : "mock")) === "chain" ? "chain" : "mock";
+/** Settings > Custom RPC (localStorage) wins over the build/env value. */
+export const CUSTOM_RPC = custom;
+export const RPC_URL: string = custom?.url ?? env.VITE_RPC_URL ?? (HOSTED ? PUBLIC_DEVNET_RPC : "http://127.0.0.1:8899");
+export const RPC_WS_URL: string | undefined = custom ? custom.ws : (env.VITE_RPC_WS_URL ?? (HOSTED ? PUBLIC_DEVNET_WS : undefined));
 /** Wallet Standard chain id. */
 export const CHAIN = (env.VITE_CHAIN ?? (LOCALNET_MODE ? "solana:localnet" : "solana:devnet")) as `${string}:${string}`;
 /** Sprite book ids to load, comma separated (FORMAT.md 3.3). */

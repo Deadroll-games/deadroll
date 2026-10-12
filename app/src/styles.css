@@ -79,3 +79,7 @@ canvas.pixel { image-rendering: pixelated; }
 .char-skills th { color: var(--muted); font-weight: 600; }
 .equip-grid { list-style: none; padding: 0; margin: 0 0 8px; display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
 .equip-slot { border: 1px dashed var(--border); border-radius: 6px; padding: 14px 8px; text-align: center; color: var(--muted); font-size: 13px; }
+
+.rpc-settings { position: relative; }
+.rpc-form { position: absolute; right: 0; top: 100%; z-index: 20; display: grid; gap: 8px; min-width: 300px; padding: 12px; background: var(--panel, #1b1b22); border: 1px solid #444; }
+.rpc-form label { display: grid; gap: 4px; }
