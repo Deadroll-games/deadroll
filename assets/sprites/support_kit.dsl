@@ -7,10 +7,10 @@ layer helmet
 # cloth cowl over the hair, circlet band, face open
 RECT 13 2 6 2 P
 RECT 12 4 8 2 P
-RECT 11 8 3 6 P
-RECT 18 8 3 5 P
-RECT 10 12 3 4 P
 RECT 12 6 8 2 A
+RECT 10 8 2 6 P
+RECT 18 13 3 2 P
+RECT 10 12 3 4 P
 
 sprite 301 support_tabard
 size 32 32
@@ -47,12 +47,11 @@ RECT 22 23 2 2 P
 sprite 304 support_bag
 size 32 32
 layer back_item
-# shoulder bag hanging from the back
-RECT 7 15 6 2 S
-RECT 6 16 3 6 S
-RECT 4 21 8 7 P
-RECT 4 21 8 2 S
-RECT 6 24 3 2 A
+# small shoulder bag, strap runs diagonally over the back
+LINE 12 16 8 20 S
+RECT 6 21 5 5 P
+RECT 6 21 5 2 S
+RECT 8 24 2 1 A
 
 sprite 305 support_amulet
 size 32 32

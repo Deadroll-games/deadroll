@@ -56,6 +56,6 @@ sprite 205 mage_satchel
 size 32 32
 layer back_item
 # small pouch on the back hip, diagonal strap from the shoulder
-LINE 12 16 9 19 S
-RECT 9 20 3 4 P
-RECT 9 20 3 1 S
+LINE 9 17 6 20 S
+RECT 6 21 3 5 P
+RECT 6 21 3 1 S

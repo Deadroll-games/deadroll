@@ -29,60 +29,51 @@ RECT 24 18 4 2 D
 sprite 401 goblin
 size 32 32
 layer monster
-# pointed ears, far then near, clear of the club
-POLY K 7 15 11 14 12 20 8 21
-POLY K 15 15 19 9 17 15 16 20
-# big head, short torso
-ELLIPSE 11 15 10 9 K
-ELLIPSE 12 22 8 6 K
-# arms, the near one reaches the club
-RECT 8 22 3 6 K
-RECT 18 20 6 6 K
-# short legs, feet on y=30
-RECT 12 24 3 7 K
-RECT 16 24 3 7 K
+# big pointed ears first, head on top of them
+POLY K 8 12 12 14 12 18
+POLY K 24 12 20 14 20 18
+ELLIPSE 11 11 10 9 K
+# body, arms, legs with feet on y=30
+RECT 12 19 8 7 K
+RECT 9 20 3 5 K
+RECT 20 20 4 3 K
+RECT 12 25 3 6 K
+RECT 17 25 3 6 K
 # rags
-RECT 10 22 12 4 H
-# club: haft in the hand, round head above and to the right
-RECT 23 12 3 12 H
-ELLIPSE 22 7 8 7 H
+RECT 12 21 8 4 H
+# club: haft in the near hand, knob above
+RECT 24 14 2 12 H
+ELLIPSE 22 8 6 7 H
 # eyes and mouth
-PIXEL 14 18 Y
-PIXEL 17 18 Y
-RECT 14 20 4 2 D
+PIXEL 14 14 Y
+PIXEL 17 14 Y
+RECT 14 17 4 1 D
 
 sprite 402 goblin_chief
 size 48 48
 layer monster
-# left horn with a flat tip, ridge, and ear; mirror builds the right side
-POLY H 13 17 21 16 19 5 15 5 12 9
-POLY H 16 15 19 14 18 7 16 7
-POLY K 8 18 14 15 14 24 8 23
+# left horn, mirror builds the right one
+POLY H 12 14 19 14 17 6 14 3 12 7
 MIRROR_X 48
-# heavy head
-ELLIPSE 16 12 16 12 K
-# wide shoulders, narrower waist
-POLY K 16 34 7 25 16 22 32 22 41 25 32 34
-# crown band over the horn bases
-RECT 18 14 12 3 H
-RECT 22 15 4 2 H
-# brow, eyes, snarl
-RECT 19 17 12 2 D
-PIXEL 22 19 Y
-PIXEL 28 19 Y
-RECT 21 21 8 2 D
-# hip rags
-RECT 15 31 18 5 H
-# legs centered, forward foot, soles on y=46
-RECT 14 33 6 14 K
-RECT 24 33 6 14 K
-RECT 29 43 5 4 K
-# far arm and the axe arm
-RECT 4 24 8 12 K
-RECT 33 22 8 12 K
-# haft and a wide dark axe head
-RECT 39 18 4 14 H
-POLY D 34 12 46 8 46 20 36 22
+# head over the horn bases, crown band on top
+ELLIPSE 15 10 18 14 K
+RECT 20 9 8 2 H
+# wide shoulders, arms, belt, legs, forward foot (soles on y=46)
+POLY K 12 36 9 26 15 23 33 23 39 26 36 36
+RECT 5 26 5 12 K
+RECT 38 26 5 12 K
+RECT 15 33 18 5 H
+RECT 15 36 7 11 K
+RECT 26 36 7 11 K
+RECT 31 44 5 3 K
+# brow, eyes, mouth
+RECT 18 15 12 2 D
+PIXEL 20 17 Y
+PIXEL 27 17 Y
+RECT 20 20 8 2 D
+# axe: haft in the right hand, dark blade
+RECT 40 12 3 26 H
+POLY D 43 9 46 12 46 21 43 24
 
 sprite 403 tombstone
 size 32 32

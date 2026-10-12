@@ -3,10 +3,10 @@
 sprite 100 warrior_cape
 size 32 32
 layer back_item
-# hangs to y=29 and flares left so it shows under the shield
+# hangs to y=29, flares left under the shield
 RECT 10 15 5 2 P
 RECT 8 17 7 10 P
-RECT 7 27 7 3 P
+RECT 5 27 9 3 P
 
 sprite 101 warrior_shield
 size 32 32
