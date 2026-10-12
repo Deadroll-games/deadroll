@@ -26,10 +26,14 @@ pub struct ConsumeRandomness<'info> {
     /// The VRF program's identity for this program (`mock-vrf`: the fixed test identity).
     #[account(address = vrf::identity())]
     pub vrf_program_identity: Signer<'info>,
+    /// State checks run here, before the pending-accounts checks below: once a roll is resolved
+    /// `pending` is cleared, and a late callback must read `NoRollPending`, not a wrong account.
     #[account(
         mut,
         seeds = [seeds::SESSION, session.core.map.as_ref()],
         bump = session.core.bump,
+        constraint = session.core.status == SessionStatus::Active @ SessionError::NotActive,
+        constraint = session.core.pending_vrf @ SessionError::NoRollPending,
     )]
     pub session: Box<Account<'info, GameSession>>,
     /// CHECK: `MonsterState` of this session, checked by `Monsters::load` (written in place).
@@ -59,11 +63,6 @@ pub fn handler(ctx: Context<ConsumeRandomness>, randomness: [u8; 32]) -> Result<
     let accounts = ctx.accounts;
     let session = &mut accounts.session;
     let session_key = session.key();
-    require!(
-        session.core.status == SessionStatus::Active,
-        SessionError::NotActive
-    );
-    require!(session.core.pending_vrf, SessionError::NoRollPending);
     let pending = session.pending;
     let monsters = Monsters::load(&accounts.monsters, &session_key)?;
 

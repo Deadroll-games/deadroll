@@ -125,8 +125,8 @@ Each task = one fresh Grok session, writes only in `assets/sprites/<name>.dsl`, 
 ## L8. SDK + integration
 
 - [ ] **L8.1 (C)** Codama generation script for all IDLs into `sdk/`.
-- [ ] **L8.2 (C)** `tests/demo.spec.ts`: the full demo script on local validator with cloned MagicBlock programs.
-- [ ] **L8.3 (G)** `tools/scripts/deploy-devnet.sh` + `seed-devnet.ts` (registry, rasterizer, sprites, demo map).
+- [ ] **L8.2 (C)** Claude (lane L8). `tests/demo.test.ts`: the full demo script on local validator with cloned MagicBlock programs; `tools/scripts/deploy-local.ts` sets the stack up.
+- [ ] **L8.3 (C)** Claude (lane L8). `tools/scripts/deploy-devnet.ts` (programs without mock-vrf, registry, rasterizer, sprites, demo map; cost estimate first). Devnet smoke test with the real VRF oracle: open.
 
 ## L9. App
 
