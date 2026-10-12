@@ -7,7 +7,7 @@ use deadroll_types::{
 };
 
 use crate::{
-    cpi_out::{self, TrustedCall},
+    cpi_out::{self, SessionSigner},
     errors::SessionError,
     events::PlayerJoined,
     rules::player_ap,
@@ -150,13 +150,13 @@ pub fn handler(ctx: Context<JoinSession>, contribution: u64, actor: Pubkey) -> R
     stash.bump = ctx.bumps.stash;
 
     cpi_out::character::lock_for_session(
-        TrustedCall {
-            program: &accounts.character_program,
-            target: &accounts.character,
+        &SessionSigner {
             session_authority: &accounts.session_authority,
             config: &accounts.config,
-            authority_bump: ctx.bumps.session_authority,
+            bump: ctx.bumps.session_authority,
         },
+        &accounts.character,
+        &accounts.player,
         session_key,
     )?;
 

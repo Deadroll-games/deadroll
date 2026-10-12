@@ -117,8 +117,8 @@ Each task = one fresh Grok session, writes only in `assets/sprites/<name>.dsl`, 
 - [ ] **L7.1 (C)** Claude (lane L7). Accounts + `open_session`, `join_session` (escrow), `set_ready`, `start_session`.
 - [ ] **L7.2 (C)** Claude (lane L7). `auth::check_actor`: Session Keys token or fallback actor.
 - [ ] **L7.3 (C)** Claude (lane L7). Turn order (round-robin first, initiative timeline P1), action points from speed, `move`, `end_turn`.
-- [ ] **L7.4 (C)** `act` / `monster_act` -> VRF request; `consume_randomness` callback -> `deadroll_combat::resolve_hit` -> apply HP, states, death CPI, boss victory.
-- [ ] **L7.5 (C)** Outcomes: victory rewards CPI, wipe, flee by unanimity, DM claims escrow.
+- [ ] **L7.4 (C)** Claude (lane L7). `act` / `monster_act` -> VRF request; `consume_randomness` callback -> `deadroll_combat::resolve_hit` -> apply HP, states, death CPI, boss victory.
+- [ ] **L7.5 (C)** Claude (lane L7). Outcomes: victory rewards CPI, wipe, flee by unanimity, DM claims escrow.
 - [ ] **L7.6 (G)** Rejection tests (wrong actor, wrong turn, dead, out of AP, not adjacent, ended session).
 - [ ] P1 **L7.7** Initiative timeline, temp stash loot, exit penalty.
 

@@ -5,7 +5,7 @@ use deadroll_types::{
 };
 
 use crate::{
-    cpi_out::{self, TrustedCall},
+    cpi_out::{self, SessionSigner},
     errors::SessionError,
     events::SessionOpened,
     rules::{monster_hp, EMPTY_UNIT, MIN_PRICE_LAMPORTS},
@@ -143,15 +143,15 @@ pub fn handler(ctx: Context<OpenSession>, price_lamports: u64, dm_actor: Pubkey)
     escrow.session = session_key;
     escrow.collected = 0;
     escrow.bump = ctx.bumps.escrow;
+    escrow.claimed = false;
 
     cpi_out::map::set_status(
-        TrustedCall {
-            program: &accounts.map_program,
-            target: &accounts.map,
+        &SessionSigner {
             session_authority: &accounts.session_authority,
             config: &accounts.config,
-            authority_bump: ctx.bumps.session_authority,
+            bump: ctx.bumps.session_authority,
         },
+        &accounts.map,
         MapStatus::InSession,
     )?;
 
