@@ -35,7 +35,8 @@ pub fn walk_path(
     for &dir in &path.steps[..path.len as usize] {
         require!(dir < DIRECTIONS, SessionError::InvalidDirection);
         at = step(at, dir, session.width, session.height)?;
-        let cost = step_cost(layout.tile(at.x, at.y)?).ok_or(SessionError::CellBlocked)?;
+        let cost = step_cost(layout.tile(at.x, at.y)?, &session.tile_cost)
+            .ok_or(SessionError::CellBlocked)?;
         require!(
             !occupied(session, monsters, mover, at)?,
             SessionError::CellOccupied

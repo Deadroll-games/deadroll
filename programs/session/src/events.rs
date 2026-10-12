@@ -1,7 +1,9 @@
-//! Events (CONTRACTS.md, section 7). `PlayerReady`, `PlayerDied`, `FleeVoted`, `RewardsClaimed`
-//! and `EscrowClaimed` are session-local.
+//! Events (CONTRACTS.md, section 7). `PlayerReady`, `InitiativeRolled`, `PlayerDied`,
+//! `FleeVoted`, `RewardsClaimed` and `EscrowClaimed` are session-local.
 use anchor_lang::prelude::*;
-use deadroll_types::{ActiveState, SessionStatus, STATES_MAX};
+use deadroll_types::{SessionStatus, TURN_ORDER_MAX};
+
+use crate::hit_event::HitResultData;
 
 #[event]
 pub struct SessionOpened {
@@ -60,31 +62,38 @@ pub struct ActionRequested {
     pub action_points: u8,
 }
 
-/// One resolved attack. `breakdown` is the Borsh-encoded `deadroll_combat::HitResult` (every
-/// roll and per-packet step); the website decodes it with the combat WASM and can replay it
-/// from `seed`.
+/// One resolved attack, in the shape the website reads (app/src/chain/types.ts). `result` is
+/// the full `deadroll_combat::HitResult` (every roll and per-packet step, Borsh layout of
+/// crates/combat/wasm/README.md); the website can replay it from `seed`. Written by
+/// `hit_event::emit_hit_resolved`, never built on the stack.
 #[event]
 pub struct HitResolved {
     pub session: Pubkey,
-    pub action: u32,
+    /// Turn-order ids: `0..4` player slot, `4 + i` monster `i`.
     pub attacker: u8,
     pub target: u8,
-    pub skill_slot: u8,
     /// The VRF value of this action.
     pub seed: [u8; 32],
-    /// `deadroll_combat::Outcome`: 0 miss, 1 hit, 2 immune.
-    pub outcome: u8,
-    pub d20: u8,
-    pub crit: bool,
-    pub d100: u8,
-    pub damage: u32,
-    /// Resonance id per skill base, `0xFF` = none triggered.
-    pub resonance: [u8; 3],
-    /// Target states after the hit.
-    pub states: [ActiveState; STATES_MAX],
-    pub target_hp: u32,
-    pub killed: bool,
-    pub breakdown: Vec<u8>,
+    /// `GameSession.action_counter` of this action, the same number as its `ActionRequested`.
+    pub action_counter: u32,
+    pub result: HitResultData,
+}
+
+/// The turn order, rolled once from the VRF value of `start_session`: per unit `d20 +
+/// initiative`, higher first (ties: higher initiative, then lower unit id). The first `len`
+/// entries are used. `TurnStarted` for the first unit follows.
+#[event]
+pub struct InitiativeRolled {
+    pub session: Pubkey,
+    pub seed: [u8; 32],
+    pub action_counter: u32,
+    pub len: u8,
+    /// Turn-order ids, in turn order.
+    pub order: [u8; TURN_ORDER_MAX],
+    /// The d20 of `order[i]`.
+    pub d20: [u8; TURN_ORDER_MAX],
+    /// The initiative bonus of `order[i]`.
+    pub initiative: [u16; TURN_ORDER_MAX],
 }
 
 #[event]

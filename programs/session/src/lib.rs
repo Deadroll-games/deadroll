@@ -7,6 +7,7 @@ pub mod combat_input;
 pub mod cpi_out;
 pub mod errors;
 pub mod events;
+pub mod hit_event;
 pub mod instructions;
 pub mod movement;
 pub mod rules;
@@ -42,7 +43,8 @@ pub mod deadroll_session {
         set_ready::handler(ctx, ready)
     }
 
-    /// DM starts the party once everyone is ready and the price is collected.
+    /// DM starts the party once everyone is ready and the price is collected: requests the
+    /// initiative roll; `consume_randomness` writes the turn order.
     pub fn start_session(ctx: Context<StartSession>) -> Result<()> {
         start_session::handler(ctx)
     }

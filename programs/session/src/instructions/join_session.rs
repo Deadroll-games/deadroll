@@ -10,7 +10,7 @@ use crate::{
     cpi_out::{self, SessionSigner},
     errors::SessionError,
     events::PlayerJoined,
-    rules::player_ap,
+    rules::{player_ap, player_initiative},
     state::{
         external::read_character, Escrow, GameSession, Participation, TempStash, ACCOUNT_VERSION,
         STASH_RESOURCES,
@@ -116,6 +116,7 @@ pub fn handler(ctx: Context<JoinSession>, contribution: u64, actor: Pubkey) -> R
     session.core.player_count = slot + 1;
     session.player_pos[slot as usize] = session.entrance;
     session.alive_mask |= 1 << slot;
+    session.player_initiative[slot as usize] = player_initiative(&character.stats);
 
     let participation = &mut accounts.participation;
     participation.core = ParticipationData {
