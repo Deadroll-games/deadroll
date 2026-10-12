@@ -199,3 +199,34 @@ fn all_repo_sprites_are_valid_and_render_deterministically() {
         assert!(img.w == 32 && img.h == 32, "{name}");
     }
 }
+
+#[test]
+fn tiles_use_tile_materials_and_support_is_leather() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let pal =
+        Pal::load(&std::fs::read_to_string(root.join("assets/palette/palette_1.pal")).unwrap())
+            .unwrap();
+    for (name, want) in [
+        ("tile_wall", "tile_wall"),
+        ("tile_water", "tile_water"),
+        ("tile_door", "tile_door"),
+        ("tile_floor", "tile_floor"),
+        ("tile_trap", "tile_floor"),
+    ] {
+        let look = preview::default_look(name, 20);
+        assert_eq!(look.material, want, "{name}");
+        assert!(
+            pal.src.material(look.material).is_some(),
+            "{want} missing in palette"
+        );
+    }
+    let (_, layers) = preview::characters()
+        .into_iter()
+        .find(|c| c.0 == "human_support")
+        .unwrap();
+    for (ty, id, look) in layers {
+        if id >= 300 {
+            assert_eq!(look.material, "leather", "layer {ty} sprite {id}");
+        }
+    }
+}

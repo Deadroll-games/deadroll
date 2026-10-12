@@ -14,4 +14,6 @@ cargo run -p art -- sheet contact --scale 4 --out target/art/all.png            
 Options: `--palette <file.pal>` (default `assets/palette/palette_1.pal`), `--material <name>`,
 `--bg #rrggbb` (background under transparent pixels; sheets default to gray).
 
+Preview colors: tiles use the palette materials `tile_wall`, `tile_floor`, `tile_water`, `tile_door`; the support kit uses `leather`.
+
 The validator implements `crates/render/FORMAT.md` section 6.

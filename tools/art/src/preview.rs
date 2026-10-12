@@ -75,7 +75,14 @@ pub fn default_look(name: &str, layer_type: u8) -> Look {
         }
     } else if name.starts_with("support_") {
         "leather"
-    } else if name.starts_with("tile_") || name.contains("tombstone") {
+    } else if name.starts_with("tile_") {
+        match name {
+            "tile_wall" => "tile_wall",
+            "tile_water" => "tile_water",
+            "tile_door" => "tile_door",
+            _ => "tile_floor",
+        }
+    } else if name.contains("tombstone") {
         "stone"
     } else if layer::is_body(layer_type) {
         "human"
@@ -88,6 +95,8 @@ pub fn default_look(name: &str, layer_type: u8) -> Look {
             EYES
         } else if name == "tile_water" {
             COLD
+        } else if name == "tile_door" {
+            GOLD
         } else if layer_type == layer::TILE {
             "steel"
         } else {
@@ -207,13 +216,13 @@ pub fn characters() -> Vec<(&'static str, Vec<Entry>)> {
         body_h(5, 3),
         (7, 302, lk("leather", GOLD)),
         body_h(8, 4),
-        (9, 301, lk("steel", GOLD)),
-        (10, 305, lk("steel", GOLD)),
+        (9, 301, lk("leather", GOLD)),
+        (10, 305, lk("leather", GOLD)),
         body_h(11, 5),
         body_h(12, 6),
-        (13, 300, lk("steel", GOLD)),
+        (13, 300, lk("leather", GOLD)),
         body_h(14, 7),
-        (16, 303, lk("steel", GOLD)),
+        (16, 303, lk("leather", GOLD)),
     ];
     vec![
         ("human_warrior", warrior),
