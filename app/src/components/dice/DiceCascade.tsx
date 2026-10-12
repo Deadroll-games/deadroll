@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { HitResult } from "../../chain/types";
 import { cascadeSteps, type CascadeStep } from "./cascade";
+import { RollBar } from "./RollBar";
 import type { DiceCascadeProps } from "./types";
 import "./dice.css";
 
@@ -60,8 +61,9 @@ export function DiceCascade({
   stepMs = 450,
   instant = false,
   onDone,
+  critChanceBp,
 }: DiceCascadeProps) {
-  const steps = useMemo(() => cascadeSteps(hit), [hit]);
+  const steps = useMemo(() => cascadeSteps(hit, critChanceBp), [hit, critChanceBp]);
   const showAll = instant || prefersReducedMotion();
   const finishedHit = useRef<HitResult | null>(null);
   const [view, setView] = useState<View>(() => ({
@@ -119,14 +121,15 @@ export function DiceCascade({
       </p>
       <ol className="dice-steps" aria-live="polite">
         {visible.map((step) => (
-          <li key={step.key} className="dice-step" data-kind={step.kind}>
+          <li key={step.key} className="dice-step" data-kind={step.kind} title={step.title}>
             <span className="dice-label">{step.label}</span>
             <StepValue step={step} animate={!showAll} />
             <span className="dice-meta">
               {step.target != null ? <span className="dice-target">{step.target}</span> : null}
-              {step.success === true ? <span className="dice-flag dice-good">pass</span> : null}
-              {step.success === false ? <span className="dice-flag dice-bad">fail</span> : null}
+              {step.success === true ? <span className="dice-flag dice-good">{step.flag ?? "pass"}</span> : null}
+              {step.success === false ? <span className="dice-flag dice-bad">{step.flag ?? "fail"}</span> : null}
             </span>
+            {step.bar != null ? <RollBar bar={step.bar} /> : null}
           </li>
         ))}
       </ol>

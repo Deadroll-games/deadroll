@@ -49,7 +49,7 @@ import {
   type SeedKind,
 } from "../chain/game";
 import { toHitResolved } from "../chain/hit";
-import { bestiaryName } from "../chain/names";
+import { bestiaryName, playerCritChanceBp } from "../chain/names";
 import { skillSetPda } from "../chain/pda";
 import { affordable, cheb, reachable, route, type Step } from "../chain/route";
 import { useAutoFreezeTombstone } from "../chain/useAutoFreezeTombstone";
@@ -180,7 +180,7 @@ function PartyPicker({ map }: { map: Address | null }) {
 // ---------------------------------------------------------------------------------------------
 // one party
 
-type Hit = { result: HitResult; attacker: string; target: string; key: string };
+type Hit = { result: HitResult; attacker: string; target: string; key: string; critChanceBp?: number };
 
 function PartyView({ address }: { address: Address }) {
   const wallet = useAppWallet();
@@ -258,8 +258,11 @@ function PartyView({ address }: { address: Address }) {
     if (!ev || ev.signature === lastHitSig.current) return;
     lastHitSig.current = ev.signature;
     const h = toHitResolved(ev.data);
-    setHit({ result: h.result, attacker: label(h.attacker), target: label(h.target), key: ev.signature });
-  }, [events, label]);
+    // Crit chance is not in the event; players derive it from Dexterity, monsters never roll crit.
+    const dex = h.attacker < MONSTER_BASE ? party?.players.find((p) => p.slot === h.attacker)?.char.core.stats[1] : undefined;
+    const critChanceBp = dex == null ? undefined : playerCritChanceBp(dex);
+    setHit({ result: h.result, attacker: label(h.attacker), target: label(h.target), key: ev.signature, critChanceBp });
+  }, [events, label, party]);
 
   // ---- the localnet VRF oracle (mock-vrf build): answers the pending roll of this party.
   const consume = useCallback(
@@ -690,8 +693,8 @@ function PartyView({ address }: { address: Address }) {
           )}
           {hit && (
             <>
-              <DiceCascade key={hit.key} hit={hit.result} attackerLabel={hit.attacker} targetLabel={hit.target} />
-              <HitBreakdown hit={hit.result} defaultOpen={false} />
+              <DiceCascade key={hit.key} hit={hit.result} attackerLabel={hit.attacker} targetLabel={hit.target} critChanceBp={hit.critChanceBp} />
+              <HitBreakdown hit={hit.result} defaultOpen={false} critChanceBp={hit.critChanceBp} />
             </>
           )}
           {ended && <Claims party={party} isDm={isDm} payer={wallet.signer} send={send} ingest={ingest} busy={busy} />}
