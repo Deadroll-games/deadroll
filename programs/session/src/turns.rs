@@ -1,11 +1,14 @@
-//! Turn changes shared by `end_turn` and `flee`, and the escape rule.
+//! Turn changes: the first turn after the initiative roll, the advance shared by `end_turn` and
+//! `flee`, and the escape rule.
 use anchor_lang::prelude::*;
+use deadroll_types::TURN_ORDER_MAX;
 
 use crate::{
     errors::SessionError,
-    events::TurnStarted,
-    rules::{monster_ap, Unit},
+    events::{InitiativeRolled, TurnStarted},
+    rules::{monster_ap, roll_initiative, Unit},
     state::{GameSession, Monsters},
+    vrf::SyscallRoll,
 };
 
 /// Starts the next living unit's turn; passing the end of the order starts a new round. Unspent
@@ -41,10 +44,70 @@ pub fn advance(session: &mut GameSession, session_key: Pubkey, monsters: &Monste
     let unit = session.core.turn_order[index as usize];
     if let Some(Unit::Monster(i)) = Unit::from_id(unit) {
         let mut monster = monsters.get(i)?;
-        monster.action_points = monster_ap(monster.bestiary_id);
+        monster.action_points = monster_ap(session.monster_speed[i as usize]);
         monsters.set(i, &monster)?;
     }
 
+    emit!(TurnStarted {
+        session: session_key,
+        unit,
+        round: session.core.round,
+        turn_seq: session.turn_seq,
+    });
+    Ok(())
+}
+
+/// Writes the turn order rolled from the initiative VRF value (`start_session`'s request) and
+/// starts the first turn. Players by slot, then living monsters by index, roll in that order.
+pub fn begin(
+    session: &mut GameSession,
+    session_key: Pubkey,
+    monsters: &Monsters,
+    seed: [u8; 32],
+) -> Result<()> {
+    let mut units = [(0u8, 0u16); TURN_ORDER_MAX];
+    let mut len = 0usize;
+    for slot in 0..session.core.player_count {
+        units[len] = (
+            Unit::Player(slot).id(),
+            session.player_initiative[slot as usize],
+        );
+        len += 1;
+    }
+    for index in 0..monsters.count()? {
+        if monsters.get(index)?.alive {
+            units[len] = (
+                Unit::Monster(index).id(),
+                session.monster_initiative[index as usize],
+            );
+            len += 1;
+        }
+    }
+    let rolled = roll_initiative(&units[..len], &mut SyscallRoll::new(seed));
+    session.core.turn_order = rolled.order;
+    session.turn_order_len = rolled.len;
+    session.core.turn_index = 0;
+    session.core.round = 1;
+    session.turn_seq = 1;
+    session.turn_started_at = Clock::get()?.unix_timestamp;
+
+    emit!(InitiativeRolled {
+        session: session_key,
+        seed,
+        action_counter: session.core.action_counter,
+        len: rolled.len,
+        order: rolled.order,
+        d20: rolled.d20,
+        initiative: rolled.initiative,
+    });
+
+    // Players get AP lazily on their first action; a monster that goes first gets them here.
+    let unit = session.core.turn_order[0];
+    if let Some(Unit::Monster(i)) = Unit::from_id(unit) {
+        let mut monster = monsters.get(i)?;
+        monster.action_points = monster_ap(session.monster_speed[i as usize]);
+        monsters.set(i, &monster)?;
+    }
     emit!(TurnStarted {
         session: session_key,
         unit,

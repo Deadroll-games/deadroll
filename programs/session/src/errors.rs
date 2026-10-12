@@ -90,4 +90,8 @@ pub enum SessionError {
     AlreadyClaimed,
     #[msg("Arithmetic overflow")]
     Overflow,
+    #[msg("Account is not the expected registry table")]
+    InvalidRegistryTable,
+    #[msg("Monster is not in the registry bestiary")]
+    UnknownMonster,
 }

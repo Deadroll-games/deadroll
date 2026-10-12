@@ -115,7 +115,7 @@ pub fn take_damage(hp: u32, damage: u32) -> (u32, bool) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use deadroll_combat::{preview_range, resolve_hit, Balance, HitInput, Outcome, SeededRoll};
     use deadroll_mapcheck::roster::ids;
@@ -163,6 +163,39 @@ mod tests {
             alive: true,
             ..Monster::default()
         }
+    }
+
+    /// Every demo hit shape: both demo characters (weapon and each usable preset skill) against
+    /// all 5 P0 monsters, and each monster's natural attack against the warrior.
+    pub(crate) fn preset_inputs() -> Vec<HitInput> {
+        let warrior = character(Race::Human, Class::Warrior, Aspect::Piercing);
+        let mage = character(Race::ForestElf, Class::Mage, Aspect::Cold);
+        let mut out = Vec::new();
+        for (c, class) in [(&warrior, Class::Warrior), (&mage, Class::Mage)] {
+            let mut skills = vec![None];
+            for preset in presets::for_class(class) {
+                let skill = record(preset.blocks);
+                if skill_use(&skill) == SkillUse::Ok {
+                    skills.push(Some(skill));
+                }
+            }
+            for skill in &skills {
+                for id in 0..=4 {
+                    out.push(HitInput {
+                        attacker: player_attacker(0, c, skill.as_ref()),
+                        defender: monster_defender(&monster(id)).unwrap(),
+                    });
+                }
+            }
+        }
+        let target = player_defender(&warrior, &[ActiveState::default(); STATES_MAX]);
+        for id in 0..=4 {
+            out.push(HitInput {
+                attacker: monster_attacker(4, &monster(id)).unwrap(),
+                defender: target,
+            });
+        }
+        out
     }
 
     #[test]

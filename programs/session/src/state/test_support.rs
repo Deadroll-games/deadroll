@@ -148,5 +148,12 @@ pub fn session(players: &[Cell]) -> GameSession {
         settled_mask: 0,
         xp_pool: 0,
         victory_seed: [0; 32],
+        monster_speed: [4; MONSTERS_MAX],
+        monster_initiative: [0; MONSTERS_MAX],
+        player_initiative: [0; PARTY_MAX],
+        tile_cost: TILE_COST,
     }
 }
+
+/// `assets/registry/tileset.json` in `Tile` order: Floor, Wall, Water, Door, Entrance, Exit, Trap.
+pub const TILE_COST: [u8; Tile::COUNT] = [1, 0, 2, 1, 1, 1, 1];
