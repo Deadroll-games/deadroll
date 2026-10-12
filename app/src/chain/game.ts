@@ -35,6 +35,7 @@ import {
   tilesetPda,
 } from "./pda";
 import { pathArgs, type Step } from "./route";
+import { PRESETS, SKILL_NAME_LEN, type NamedSkill } from "./skillcheck";
 import { Aspect, Class, MAP_CELLS, MAP_MAX, Race, Tile, type Cell, type Spawn } from "./types";
 
 // ---------------------------------------------------------------------------------------------
@@ -235,50 +236,8 @@ function base64(bytes: Uint8Array): string {
 // ---------------------------------------------------------------------------------------------
 // characters
 
-export type SkillPreset = { name: string; blocks: Record<string, unknown> };
-
-function blocks(category: string, purpose: string, source: string, form: string, aspects: string[], o: { line?: boolean; effect?: string; trigger?: string; aura?: number } = {}) {
-  return {
-    category,
-    purpose,
-    source,
-    form,
-    target: o.line ? "line" : "single",
-    aspects: [...aspects, "fire", "fire"].slice(0, 3),
-    aspectCount: aspects.length,
-    effect: o.effect ?? "none",
-    trigger: o.trigger ?? "none",
-    auraRadius: o.aura ?? 0,
-  };
-}
-
-/** crates/skillcheck presets, the starting sets the program accepts per class. */
-export const SKILL_PRESETS: Record<Class, SkillPreset[]> = {
-  [Class.Warrior]: [
-    { name: "Piercing Thrust", blocks: blocks("active", "damage", "combat", "strike", ["piercing"]) },
-    { name: "Shield Bash", blocks: blocks("active", "damage", "combat", "strike", ["blunt"], { effect: "stun" }) },
-    { name: "Javelin", blocks: blocks("active", "damage", "combat", "projectile", ["piercing"]) },
-    { name: "Bleeding Cleave", blocks: blocks("active", "damage", "combat", "strike", ["blood", "piercing"], { line: true }) },
-    { name: "Riposte", blocks: blocks("reactive", "damage", "combat", "strike", ["piercing"], { trigger: "hit" }) },
-    { name: "Iron Skin", blocks: blocks("passive", "buff", "combat", "strike", ["blunt"], { effect: "protection" }) },
-  ],
-  [Class.Mage]: [
-    { name: "Frost Bolt", blocks: blocks("active", "damage", "magical", "projectile", ["cold"]) },
-    { name: "Frost Burn", blocks: blocks("active", "damage", "magical", "projectile", ["cold", "fire"]) },
-    { name: "Ice Prison", blocks: blocks("active", "damage", "magical", "projectile", ["cold"], { effect: "freeze" }) },
-    { name: "Arc", blocks: blocks("active", "damage", "magical", "strike", ["lightning"], { line: true }) },
-    { name: "Cold Snap", blocks: blocks("reactive", "debuff", "magical", "strike", ["cold"], { effect: "slow", trigger: "enemyAdjacent" }) },
-    { name: "Cold Mind", blocks: blocks("passive", "buff", "magical", "projectile", ["cold"], { effect: "empowerment" }) },
-  ],
-  [Class.Support]: [
-    { name: "Quicken", blocks: blocks("active", "buff", "magical", "projectile", ["lightning"], { effect: "haste" }) },
-    { name: "Sap", blocks: blocks("active", "debuff", "magical", "projectile", ["blood"], { effect: "weakening" }) },
-    { name: "Expose", blocks: blocks("active", "debuff", "magical", "projectile", ["fire"], { effect: "vulnerability" }) },
-    { name: "Shelter", blocks: blocks("active", "buff", "combat", "strike", ["blunt"], { effect: "protection" }) },
-    { name: "Last Stand", blocks: blocks("reactive", "buff", "combat", "strike", ["blunt"], { effect: "protection", trigger: "hpBelow", aura: 2 }) },
-    { name: "Cold Ward", blocks: blocks("passive", "buff", "magical", "strike", ["cold"], { effect: "protection", aura: 2 }) },
-  ],
-};
+/** crates/skillcheck presets, the starting sets the program accepts per class (typed mirror in ./skillcheck). */
+export const SKILL_PRESETS: Record<Class, NamedSkill[]> = PRESETS;
 
 /** Predispositions by race (create_character doc: human physical, forest elf elemental). */
 export const RACE_PREDISPOSITIONS: Record<Race, Aspect[]> = {
@@ -286,7 +245,8 @@ export const RACE_PREDISPOSITIONS: Record<Race, Aspect[]> = {
   [Race.ForestElf]: [Aspect.Fire, Aspect.Cold, Aspect.Lightning],
 };
 
-export type NewCharacter = { name: string; race: Race; class: Class; predisposition: Aspect; stats: number[] };
+/** `skills` defaults to the class presets. */
+export type NewCharacter = { name: string; race: Race; class: Class; predisposition: Aspect; stats: number[]; skills?: NamedSkill[] };
 
 export function createProfileIx(owner: TransactionSigner, profile: Address): Instruction {
   return buildInstruction("character", "create_profile", {}, { owner, profile, systemProgram: SYSTEM_PROGRAM });
@@ -310,7 +270,7 @@ export async function createCharacterIxs(
       predisposition: ASPECT_KEYS[c.predisposition],
       stats: c.stats,
       appearance: characterAppearance(c.race, c.class, c.predisposition),
-      skills: SKILL_PRESETS[c.class].map((s) => ({ blocks: s.blocks, name: textBytes(s.name, 24) })),
+      skills: (c.skills ?? SKILL_PRESETS[c.class]).map((s) => ({ blocks: s.blocks, name: textBytes(s.name, SKILL_NAME_LEN) })),
     },
   };
   const ix = buildInstruction("character", "create_character", args, {
