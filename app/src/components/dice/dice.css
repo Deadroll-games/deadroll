@@ -241,3 +241,49 @@
     justify-content: flex-start;
   }
 }
+
+/* Chance roll bar: success zone at the top end, marker at the shown roll. */
+.dice-bar {
+  grid-column: 1 / -1;
+  position: relative;
+  display: block;
+  height: 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.dice-bar-zone {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  background: var(--good);
+  opacity: 0.35;
+}
+
+.dice-bar-mark {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  width: 3px;
+  margin-left: -1px;
+}
+
+.dice-bar-good {
+  background: var(--good);
+}
+
+.dice-bar-bad {
+  background: var(--bad);
+}
+
+.dice-roll-line {
+  display: block;
+}
+
+.dice-roll-line .dice-bar {
+  margin-top: 4px;
+  max-width: 320px;
+}

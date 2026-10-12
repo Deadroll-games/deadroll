@@ -43,3 +43,30 @@ export function formatScaled(v: bigint): string {
 export function formatBp(bp: number): string {
   return `${Number.isInteger(bp / 100) ? bp / 100 : (bp / 100).toFixed(2)}%`;
 }
+
+/** Hundredths with two decimals, e.g. 8_104 -> "81.04". */
+export function formatHundredths(v: number): string {
+  return (v / 100).toFixed(2);
+}
+
+/*
+ * Chance rolls are shown "high roll wins", like the d20. On-chain a raw roll in 0..9_999 passes when
+ * raw < chance (crates/combat/src/rng.rs). Shown = 9_999 - raw and needed = 10_000 - chance, so
+ * shown >= needed exactly when raw < chance.
+ */
+export const shownRoll = (raw: number): number => 9_999 - raw;
+export const neededRoll = (chanceBp: number): number => 10_000 - chanceBp;
+
+/** Tooltip with the raw on-chain numbers behind a shown chance roll. */
+export function rollTitle(raw: number, chanceBp: number | null): string {
+  const pass = chanceBp == null ? "" : `, passes when raw < ${formatHundredths(chanceBp)}%`;
+  return `on-chain raw roll ${formatHundredths(raw)}%, shown as 99.99 - raw${pass}`;
+}
+
+/**
+ * Player crit chance: Dexterity x 20 bp (programs/session/src/rules.rs player_crit_bp), clamped into
+ * Balance::DEFAULT [chance_min_bp, chance_max_bp] = [500, 9_500] (crates/combat/src/balance.rs).
+ */
+export function playerCritChanceBp(dexterity: number): number {
+  return Math.min(9_500, Math.max(500, dexterity * 20));
+}

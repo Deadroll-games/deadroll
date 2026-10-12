@@ -2,7 +2,10 @@
 import { createClient } from "@solana/kit";
 import { solanaRpc } from "@solana/kit-plugin-rpc";
 import { walletSigner } from "@solana/kit-plugin-wallet";
+import { installRpcRetry } from "../chain/rpcRetry";
 import { CHAIN, RPC_URL, RPC_WS_URL } from "../config";
+
+installRpcRetry(RPC_URL);
 
 export const client = createClient()
   .use(walletSigner({ chain: CHAIN, autoConnect: true }))

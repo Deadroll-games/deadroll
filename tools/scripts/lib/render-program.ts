@@ -285,11 +285,17 @@ export function setComputeUnitLimitInstruction(units: number) {
   };
 }
 
-/** RPC URL with the ws: protocol and the port plus one (local validator subscriptions). */
+/** Subscription URL: a local validator uses ws: on the port plus one; a remote RPC uses wss: on the same host and port. */
 export function wsUrl(rpcUrl: string): string {
+  // Some providers (Alchemy) lack signatureSubscribe; DEADROLL_WS_URL points subscriptions elsewhere.
+  if (process.env.DEADROLL_WS_URL) return process.env.DEADROLL_WS_URL;
   const url = new URL(rpcUrl);
-  url.protocol = "ws:";
-  url.port = String(Number(url.port || 8899) + 1);
+  if (url.hostname === "127.0.0.1" || url.hostname === "localhost") {
+    url.protocol = "ws:";
+    url.port = String(Number(url.port || 8899) + 1);
+  } else {
+    url.protocol = url.protocol === "http:" ? "ws:" : "wss:";
+  }
   return url.toString();
 }
 

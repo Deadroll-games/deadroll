@@ -1,10 +1,13 @@
 import { lazy, Suspense } from "react";
 import { NavLink, Route, Routes } from "react-router-dom";
 import { DATA_SOURCE } from "./config";
+import { NetworkBusy } from "./components/NetworkBusy";
+import { RpcSettings } from "./components/RpcSettings";
 import { ConnectButton } from "./wallet/ConnectButton";
 import { SessionKeyButton } from "./session-key/SessionKeyProvider";
 import { Home } from "./routes/Home";
 import { CharacterPage } from "./routes/Character";
+import { CharacterDetailPage } from "./routes/CharacterDetail";
 import { MapBuilderPage } from "./routes/MapBuilder";
 import { PartyPage } from "./routes/Party";
 
@@ -25,6 +28,8 @@ export function App() {
           <NavLink to="/party">Party</NavLink>
         </nav>
         <span className={`badge ${DATA_SOURCE}`}>{DATA_SOURCE === "mock" ? "mock data" : "chain"}</span>
+        <RpcSettings />
+        <NetworkBusy />
         <SessionKeyButton />
         <ConnectButton />
       </header>
@@ -33,6 +38,7 @@ export function App() {
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/character" element={<CharacterPage />} />
+            <Route path="/character/:address" element={<CharacterDetailPage />} />
             <Route path="/map" element={<MapBuilderPage />} />
             <Route path="/party" element={<PartyPage />} />
             <Route path="/dev/grid" element={<GridDemo />} />

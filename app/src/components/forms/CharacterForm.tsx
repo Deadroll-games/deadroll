@@ -1,6 +1,8 @@
 import { ASPECT_NAMES, CLASS_NAMES, RACE_NAMES, STAT_NAMES } from "../../chain/names";
 import type { Aspect, Class, Race } from "../../chain/types";
+import { PRESETS } from "../../chain/skillcheck";
 import { nameBytes, nameValid, pointsLeft } from "./format";
+import { checkSkills, SkillBuilder } from "./SkillBuilder";
 import type { CharacterDraft, CharacterFormProps } from "./types";
 import "./forms.css";
 
@@ -14,7 +16,9 @@ export function CharacterForm(p: CharacterFormProps) {
   const left = pointsLeft(p.value.stats, p.statMin, p.statPoints);
   const predOk = p.allowedPredispositions.includes(p.value.predisposition);
   const locked = Boolean(p.busy);
-  const canSubmit = nameOk && left === 0 && predOk && !locked;
+  const skills = p.value.skills ?? PRESETS[p.value.class];
+  const skillsOk = checkSkills(skills, p.value.class).ok;
+  const canSubmit = nameOk && left === 0 && predOk && skillsOk && !locked;
 
   function update(next: CharacterDraft) {
     p.onChange(next);
@@ -140,6 +144,9 @@ export function CharacterForm(p: CharacterFormProps) {
           })}
           <p>Points left: {left}</p>
         </div>
+
+        <SkillBuilder cls={p.value.class} skills={skills} disabled={locked} onChange={(next) => update({ ...p.value, skills: next })} />
+        {!skillsOk && <p className="error">Fix the skills above to create the character.</p>}
 
         {p.error ? <p className="error">{p.error}</p> : null}
 

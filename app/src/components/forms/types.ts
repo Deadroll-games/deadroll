@@ -1,6 +1,7 @@
 // Props contracts for the character form, map builder palette and party lobby (L9.5).
 // Pure UI: values in, callbacks out. No chain calls inside the components.
 import type { ReactNode } from "react";
+import type { NamedSkill } from "../../chain/skillcheck";
 import type { Aspect, Cell, Class, Race, Spawn, Tile } from "../../chain/types";
 
 // ---- Character creation ----
@@ -13,6 +14,8 @@ export type CharacterDraft = {
   predisposition: Aspect;
   /** Strength, Dexterity, Intelligence, Endurance. */
   stats: [number, number, number, number];
+  /** Starting skills (at most 6). Unset = the class presets, following the class. */
+  skills?: NamedSkill[];
 };
 
 export type CharacterFormProps = {
@@ -89,6 +92,8 @@ export type PartyLobbyProps = {
   /** Characters the viewer can join with (role guest). */
   myCharacters: { address: string; name: string }[];
   onJoin: (characterAddress: string) => void;
+  /** What Join pays (the player's share); defaults to the full price. */
+  joinLamports?: bigint;
   onReady: (ready: boolean) => void;
   /** DM only; enabled when every player is ready and there is at least one. */
   onStart: () => void;

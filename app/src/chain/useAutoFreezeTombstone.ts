@@ -7,6 +7,7 @@ import { rpcAccountSource } from "./accounts";
 import { eventsFromLogs } from "./events";
 import { decodeCharacterDied } from "./layouts";
 import { sendWithPayer } from "./send";
+import { openProgramLogs, recentLogs, subscribeResilient } from "./subscribe";
 import { handleCharacterDied, type TombstoneLog } from "./tombstone";
 
 /**
@@ -23,23 +24,24 @@ export function useAutoFreezeTombstone(payer: TransactionSigner | null, me: Addr
     const accounts = rpcAccountSource(client.rpc);
     const push = (entry: TombstoneLog) => setLog((l) => [entry, ...l].slice(0, 20));
 
-    (async () => {
-      const stream = await client.rpcSubscriptions
-        .logsNotifications({ mentions: [PROGRAMS.character] }, { commitment: "confirmed" })
-        .subscribe({ abortSignal: abort.signal });
-      for await (const note of stream) {
-        if (note.value.err) continue;
-        for (const raw of eventsFromLogs(note.value.logs, PROGRAMS.character)) {
-          const ev = decodeCharacterDied(raw);
-          if (!ev || seen.current.has(ev.character)) continue;
-          seen.current.add(ev.character);
-          push({ character: ev.character, status: "seen", detail: "CharacterDied" });
-          void handleCharacterDied({ ev, me, payer, accounts, send: sendWithPayer, signal: abort.signal }).then(push);
-        }
+    const onLogs = (logs: readonly string[]) => {
+      for (const raw of eventsFromLogs(logs, PROGRAMS.character)) {
+        const ev = decodeCharacterDied(raw);
+        if (!ev || seen.current.has(ev.character)) continue;
+        seen.current.add(ev.character);
+        push({ character: ev.character, status: "seen", detail: "CharacterDied" });
+        void handleCharacterDied({ ev, me, payer, accounts, send: sendWithPayer, signal: abort.signal }).then(push);
       }
-    })().catch((e: unknown) => {
-      if (!abort.signal.aborted) push({ character: "" as Address, status: "failed", detail: `log subscription: ${String(e)}` });
-    });
+    };
+    // After a WebSocket gap, replay recent character program transactions so a missed death still freezes.
+    const resync = () => void recentLogs(PROGRAMS.character).then((txs) => txs.forEach((t) => onLogs(t.logs)), () => undefined);
+    void subscribeResilient(
+      openProgramLogs(PROGRAMS.character),
+      (note) => {
+        if (!note.err) onLogs(note.logs);
+      },
+      { signal: abort.signal, onReconnect: resync },
+    );
     return () => abort.abort();
   }, [payer, me]);
 

@@ -40,3 +40,46 @@ main { padding: 20px; max-width: 1200px; margin: 0 auto; }
 .wallet-list li + li { margin-top: 4px; }
 .wallet-list .btn { width: 100%; text-align: left; display: flex; gap: 8px; align-items: center; }
 canvas.pixel { image-rendering: pixelated; }
+
+/* L9.6 chain screens */
+.char-list { display: flex; flex-wrap: wrap; gap: 12px; }
+.char-card { display: flex; gap: 12px; align-items: center; margin: 0; }
+.char-card figcaption { display: grid; gap: 2px; font-size: 13px; }
+.char-card.dead { opacity: 0.85; border-color: var(--bad); }
+.badge.dev { color: var(--accent); border-color: var(--accent); }
+.dev-wallet { display: inline-flex; gap: 6px; align-items: center; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.log { max-height: 280px; overflow: auto; font-size: 12px; display: grid; gap: 2px; margin: 0; padding-left: 36px; }
+.log a { color: var(--muted); }
+.turn-banner { font-size: 15px; }
+.turn-banner b.me { color: var(--accent); }
+.skills { display: flex; flex-wrap: wrap; gap: 6px; }
+.skills .btn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.badge.reconnecting { color: var(--accent); border-color: var(--accent); }
+
+/* Character cards open the detail view. */
+.char-card-link { color: inherit; text-decoration: none; border-radius: 8px; }
+.char-card-link:hover .char-card, .char-card-link:focus-visible .char-card { border-color: var(--accent); }
+.char-card-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Character detail */
+.char-detail { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.char-detail h1, .char-detail h2 { margin-top: 0; }
+.char-detail p { margin: 4px 0; }
+.char-detail-head { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+.char-detail-head.dead { border-color: var(--bad); }
+.char-detail-wide { grid-column: 1 / -1; }
+.char-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; margin: 0; }
+.char-stats div { background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; }
+.char-stats dt { color: var(--muted); font-size: 12px; }
+.char-stats dd { margin: 0; font-size: 18px; font-variant-numeric: tabular-nums; }
+.table-scroll { overflow-x: auto; }
+.char-skills { border-collapse: collapse; width: 100%; font-size: 13px; }
+.char-skills th, .char-skills td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.char-skills th { color: var(--muted); font-weight: 600; }
+.equip-grid { list-style: none; padding: 0; margin: 0 0 8px; display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
+.equip-slot { border: 1px dashed var(--border); border-radius: 6px; padding: 14px 8px; text-align: center; color: var(--muted); font-size: 13px; }
+
+.rpc-settings { position: relative; }
+.rpc-form { position: absolute; right: 0; top: 100%; z-index: 20; display: grid; gap: 8px; min-width: 300px; padding: 12px; background: var(--panel, #1b1b22); border: 1px solid #444; }
+.rpc-form label { display: grid; gap: 4px; }

@@ -1,8 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Address, KeyPairSigner } from "@solana/kit";
-import { useConnectedWallet } from "@solana/kit-plugin-wallet/react";
 import { DATA_SOURCE, PROGRAMS } from "../config";
-import { client } from "../wallet/client";
+import { sendTx } from "../chain/send";
+import { useAppWallet } from "../wallet/AppWallet";
 import {
   SESSION_VALIDITY_SECS,
   clearSessionKey,
@@ -21,25 +21,32 @@ export type SessionKeyState = {
   validUntil: number | null;
   status: "idle" | "starting" | "active" | "error";
   error: string | null;
-  start: () => Promise<void>;
+  /** Starts a key (one wallet signature on chain) and returns it, or null on failure. */
+  start: () => Promise<KeyPairSigner | null>;
   stop: () => void;
 };
 
 const Ctx = createContext<SessionKeyState | null>(null);
 
 export function SessionKeyProvider({ children }: { children: ReactNode }) {
-  const connected = useConnectedWallet(client);
+  const wallet = useAppWallet();
   const [signer, setSigner] = useState<KeyPairSigner | null>(null);
   const [token, setToken] = useState<Address | null>(null);
   const [validUntil, setValidUntil] = useState<number | null>(null);
   const [status, setStatus] = useState<SessionKeyState["status"]>("idle");
   const [error, setError] = useState<string | null>(null);
-  const authority = connected?.account.address ?? null;
+  const authority = wallet.address;
 
-  // Restore a key started earlier in this tab for the same wallet.
+  // Restore a key started earlier in this tab for the same wallet; drop it on a wallet change.
   useEffect(() => {
     const saved = loadSessionKey();
-    if (!saved || (DATA_SOURCE === "chain" && saved.authority !== authority)) return;
+    if (!saved || (DATA_SOURCE === "chain" && saved.authority !== authority)) {
+      setSigner(null);
+      setToken(null);
+      setValidUntil(null);
+      setStatus("idle");
+      return;
+    }
     void signerFromSeed(saved.seed).then((s) => {
       setSigner(s);
       setToken(saved.token as Address | null);
@@ -48,7 +55,7 @@ export function SessionKeyProvider({ children }: { children: ReactNode }) {
     });
   }, [authority]);
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (): Promise<KeyPairSigner | null> => {
     setStatus("starting");
     setError(null);
     try {
@@ -57,7 +64,7 @@ export function SessionKeyProvider({ children }: { children: ReactNode }) {
       const until = Math.floor(Date.now() / 1000) + SESSION_VALIDITY_SECS;
       let tokenAddr: Address | null = null;
       if (DATA_SOURCE === "chain") {
-        const walletSigner = connected?.signer;
+        const walletSigner = wallet.signer;
         if (!walletSigner) throw new Error("Connect a wallet first");
         const { instruction, sessionToken } = await createSessionV2Instruction({
           authority: walletSigner,
@@ -65,19 +72,22 @@ export function SessionKeyProvider({ children }: { children: ReactNode }) {
           targetProgram: PROGRAMS.session,
           validUntil: BigInt(until),
         });
-        await client.sendTransaction([instruction]);
+        await sendTx(walletSigner, [instruction]);
         tokenAddr = sessionToken;
+        void wallet.refreshBalance();
       }
       saveSessionKey({ seed, authority: authority ?? "mock", validUntil: until, token: tokenAddr });
       setSigner(burner);
       setToken(tokenAddr);
       setValidUntil(until);
       setStatus("active");
+      return burner;
     } catch (e) {
       setStatus("error");
       setError(e instanceof Error ? e.message : String(e));
+      return null;
     }
-  }, [connected, authority]);
+  }, [wallet, authority]);
 
   const stop = useCallback(() => {
     // TODO(post-demo): revoke_session_v2 to return the token rent; the token expires on its own.

@@ -31,14 +31,38 @@ VITE_SPRITE_BOOKS=1                     # sprite book ids to load
 ```
 This needs the registry `GameConfig` and the finalized render blobs (`tools/scripts/upload-rasterizer.ts`, `upload-sprites.ts`).
 
+### Localnet demo (DM + 2 players in one browser)
+
+After `tools/scripts/deploy-local.ts` (all 7 programs, session built with `mock-vrf`):
+
+```
+pnpm --filter @deadroll/app dev:localnet      # vite --mode localnet: chain data, 127.0.0.1:8899, book 1, mock VRF oracle
+```
+
+Open `http://localhost:5173/?dev=1` in three tabs or windows: DM, warrior, mage.
+
+- `?dev=1` (localnet RPC only) gives each tab its own keypair in `sessionStorage` and airdrops 5 SOL. No wallet extension, no popups. Without it, the normal Wallet Standard connect is used.
+- **Character**: create a character. It mints a Core NFT; the predisposition depends on race, and you spend 10 stat points.
+- **Map builder** (DM): Validate, then Finalize. This sends `create_map`, `write_layout`, `write_spawns` and `finalize_map`, then links to "Open a party on it". A party needs a map the DM owns (`open_session` checks `map.dm`), so the deployer's demo map is not used from the browser.
+- **Party**: the DM sets a price and opens the party, which starts the DM session key. Players open the party link (or pick it from the list), join (pay half into escrow, binding their session key) and press Ready. The DM starts.
+- **Battle**: click a cell to move and a monster to attack with the selected skill; then End turn. The DM moves monsters by clicking, uses "Auto monster turn", or ticks "auto-play monsters". Every `HitResolved` plays the dice cascade in all windows, and every event links its transaction.
+- **Localnet VRF oracle**: the `mock-vrf` build skips the VRF request. The acting window signs `consume_randomness` with the fixed mock identity, and the DM window answers any roll left pending for more than 3.5 s. "Next seed" picks a random seed, a natural 20 or 1, or a crit with a successful tint roll (a resonance), the same seeds as `tests/demo.test.ts`. It is never enabled for a non-local RPC.
+- **Death**: `CharacterDied` makes the owner's window send `freeze_tombstone`. Other windows send it after 8 to 14 s if the NFT is still not frozen.
+- **End**: Claim rewards (anyone may send it), then Claim escrow (DM).
+
+`src/chain/localnet.e2e.test.ts` plays the same script through the app's builders without a browser:
+`DEADROLL_LOCALNET=1 pnpm --filter @deadroll/app exec vitest run src/chain/localnet.e2e.test.ts`.
+
 ## Layout
 
 | Path | What |
 |---|---|
 | `src/chain/` | types, decoders, PDAs, instruction builders, log/event parsing, tombstone watcher (thin wrapper until `sdk/`) |
+| `src/chain/idl/` | snapshot of `target/idl` for session, character, map; `coder.ts` encodes and decodes with it (Anchor TS conventions) |
+| `src/chain/game.ts` | the demo calls of `tests/demo.test.ts` as instruction builders and reads; `useParty.ts` live party state + events |
 | `src/raster/` | rasterizer loader (GameConfig -> RasterizerCode -> SHA-256 -> IndexedDB -> WASM), C ABI wrapper, `SpriteCanvas` |
 | `src/session-key/` | MagicBlock Session Keys `create_session_v2`, burner key for the tab |
-| `src/wallet/` | kit client (wallet signer + RPC), connect button |
+| `src/wallet/` | kit client (wallet signer + RPC), `AppWallet` (Wallet Standard or `?dev=1` keypair), connect button |
 | `src/components/` | grid, dice cascade + hit breakdown, forms; pure UI over `types.ts` props |
 | `src/routes/` | Home, Character, Map builder, Party |
 
@@ -51,3 +75,10 @@ This needs the registry `GameConfig` and the finalized render blobs (`tools/scri
 5. `WebAssembly.instantiate`, then render with `Rasterizer.render(request, palette, books)`.
 
 `src/raster/raster.test.ts` renders the reference warrior through this path and compares the PNG SHA-256 with the native renderer.
+
+## RPC policy
+
+- Hosted builds use the public devnet RPC and WebSocket (`https://api.devnet.solana.com`). `vite build` refuses a `VITE_RPC_URL` or `VITE_RPC_WS_URL` that points anywhere else, so a provider key can never be bundled.
+- Settings > RPC (header) sets a Custom RPC in this browser's localStorage; it overrides everything else. For local runs a private URL may live in an untracked `app/.env.devnet.local` (`pnpm --filter @deadroll/app dev:devnet` with `--mode devnet`).
+- The party view refreshes on the `logsNotifications` stream. The poll is a fallback: every 10 s while the stream is live, every 3 s while it is down, paused in a hidden tab. A refresh is one `getMultipleAccounts` call once the roster is known.
+- HTTP 429 is retried with backoff (1 s, 2 s, 4 s ..., or `Retry-After`) and the header shows "network busy, retrying".

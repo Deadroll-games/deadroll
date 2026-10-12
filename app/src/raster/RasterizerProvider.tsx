@@ -6,6 +6,8 @@ import { client } from "../wallet/client";
 import { idbWasmCache } from "./idb";
 import { loadRender, type LoadedRender } from "./loader";
 import { mockRenderSource } from "./mockSource";
+import { characterAppearance, renderRequest } from "../chain/appearance";
+import { Aspect, Class, Race } from "../chain/types";
 
 export type RasterizerState =
   | { status: "loading" }
@@ -20,7 +22,8 @@ async function load(): Promise<{ render: LoadedRender; sample: RenderRequest | n
     return { render: await loadRender(source, { cache: idbWasmCache, bookIds }), sample };
   }
   const render = await loadRender(rpcAccountSource(client.rpc), { cache: idbWasmCache, bookIds: SPRITE_BOOK_IDS });
-  return { render, sample: null };
+  // The demo warrior from sprite book 1, as tools/art draws it.
+  return { render, sample: renderRequest(characterAppearance(Race.Human, Class.Warrior, Aspect.Piercing)) };
 }
 
 export function RasterizerProvider({ children }: { children: ReactNode }) {

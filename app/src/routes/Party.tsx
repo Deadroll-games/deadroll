@@ -16,6 +16,7 @@ import { PARTY_MAX, type HitResult } from "../chain/types";
 import { DATA_SOURCE } from "../config";
 import { useSessionKey } from "../session-key/SessionKeyProvider";
 import { client } from "../wallet/client";
+import { PartyChain } from "./PartyChain";
 
 const PRICE = 100_000_000n;
 const DM = "DMw4Ns7ZqX5o8b2bJm1yQe3kV9tRgHc6uLpAa1dF2sKe";
@@ -38,6 +39,11 @@ function initialUnits(): GridUnit[] {
 }
 
 export function PartyPage() {
+  return DATA_SOURCE === "chain" ? <PartyChain /> : <MockParty />;
+}
+
+/** Mock mode (VITE_DATA=mock): the lobby and battle on synthetic data. */
+function MockParty() {
   const connected = useConnectedWallet(client);
   const sessionKey = useSessionKey();
   const payer = sessionKey.signer ?? connected?.signer ?? null;

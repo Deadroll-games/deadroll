@@ -169,3 +169,85 @@ canvas.forms-preview {
 .forms-seg .btn {
   transition: border-color 120ms linear;
 }
+
+/* Skill builder */
+.skill-builder-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.skill-builder-head > span {
+  flex: 1 1 14rem;
+}
+
+.skill-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.skill-card {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.skill-card.invalid {
+  border-color: var(--bad);
+}
+
+.skill-card-head {
+  display: flex;
+  gap: 8px;
+  align-items: end;
+}
+
+.skill-name {
+  flex: 1;
+}
+
+.skill-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 8px;
+}
+
+.skill-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.skill-pick select,
+.skill-pick input {
+  min-width: 0;
+  width: 100%;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 6px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.skill-preview {
+  font-size: 12px;
+}
+
+.skill-problems {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+}

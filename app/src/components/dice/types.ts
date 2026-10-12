@@ -15,10 +15,14 @@ export type DiceCascadeProps = {
   instant?: boolean;
   /** Called once after the last step. */
   onDone?: () => void;
+  /** Attacker crit chance in bp. Not in the event; shown as "?" when unknown. */
+  critChanceBp?: number;
 };
 
 export type HitBreakdownProps = {
   hit: HitResult;
+  /** Attacker crit chance in bp. Not in the event; shown as "?" when unknown. */
+  critChanceBp?: number;
   /** Expanded by default. */
   defaultOpen?: boolean;
 };
