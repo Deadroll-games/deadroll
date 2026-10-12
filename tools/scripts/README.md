@@ -20,9 +20,11 @@ pnpm --filter @deadroll/scripts run deploy:devnet           # https://api.devnet
 
 Steps (each one skips itself when done):
 1. preflight: RPC, wallet, `target/deploy/*-keypair.json` match `Anchor.toml` (keypairs are never generated);
-2. build: `anchor build --tools-version v1.54` (local: session again with `--features mock-vrf`),
+2. build: `anchor build --tools-version v1.54 -p <program>` for each program (local: session with `--features mock-vrf`),
    `crates/render/wasm/build.sh`, `cargo run -p art -- pack` (palette + sprite book 1 from `assets/`);
-3. `solana program deploy` for the 7 programs whose on-chain bytes differ from `target/deploy/*.so`;
+3. `solana program deploy` for the 7 programs whose on-chain bytes differ from the build. Each program is
+   copied to `target/deploy-stage/` right after its own `anchor build -p`: a later `-p` build overwrites the
+   programs it depends on in `target/deploy/` with their `cpi` builds (no entrypoint);
 4. `init_config` (first caller becomes the authority) or `set_programs` if the list changed;
 5. `seed-registry.ts`, `upload-rasterizer.ts`, `upload-sprites.ts`, then `set_rasterizer` / `set_palette`;
 6. demo map from `assets/registry/maps/demo_16x16.json`, DM = the wallet, `["map", wallet, --map-index]`;

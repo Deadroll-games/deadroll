@@ -68,7 +68,7 @@ async function main() {
   if (f["--check-build"]) {
     if (!f["--skip-build"]) build(resolveBins(), false);
     const mode = sessionVrfMode();
-    console.log(`target/deploy/deadroll_session.so: ${mode} VRF build`);
+    console.log(`target/deploy-stage/deadroll_session.so: ${mode} VRF build`);
     if (mode !== "real") throw new Error("refusing: the session build is not the real-VRF build");
     return;
   }

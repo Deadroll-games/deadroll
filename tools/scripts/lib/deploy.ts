@@ -3,7 +3,7 @@
 // already on chain and finishes what is not.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,6 +32,8 @@ const SYSTEM_PROGRAM = address("11111111111111111111111111111111");
 const BPF_UPGRADEABLE = "BPFLoaderUpgradeab1e11111111111111111111111";
 /** UpgradeableLoaderState::ProgramData header before the program bytes. */
 const PROGRAMDATA_HEADER = 45;
+/** Below this a `.so` is a `no-entrypoint` build, not a program (the smallest real one is ~48 KB). */
+const MIN_PROGRAM_SIZE = 16 * 1024;
 
 /** `ProgramIdx` order (crates/types): the order `init_config` expects. */
 export const PROGRAMS = [
@@ -198,7 +200,13 @@ export function anchorIds(cluster: Cluster): Record<string, string> {
   return ids;
 }
 
-const soPath = (name: string) => join(ROOT, "target/deploy", `${name}.so`);
+/**
+ * Where deploys come from: each program's `.so` copied right after its own `anchor build -p`.
+ * target/deploy itself is not safe: a later `-p` build overwrites the programs it depends on there
+ * with their `cpi` (no entrypoint) builds.
+ */
+const STAGE = join(ROOT, "target/deploy-stage");
+const soPath = (name: string) => join(STAGE, `${name}.so`);
 const keypairPath = (name: string) => join(ROOT, "target/deploy", `${name}-keypair.json`);
 
 type IdlIx = { name: string; discriminator: number[]; accounts: { name: string; writable?: boolean; signer?: boolean; optional?: boolean; address?: string }[] };
@@ -282,9 +290,14 @@ async function rentFor(rpc: any, bytes: number): Promise<bigint> {
 
 export function build(bins: ReturnType<typeof resolveBins>, mockVrf: boolean): void {
   step("build");
-  run(bins.anchor, ["build", "--tools-version", "v1.54"]);
-  // The full build above is the plain session; localnet swaps in the mock-vrf one.
-  if (mockVrf) run(bins.anchor, ["build", "--tools-version", "v1.54", "-p", "deadroll_session", "--", "--features", "mock-vrf"]);
+  // One `-p` build per program, staged at once (see STAGE): a dependent program's build replaces
+  // its dependencies in target/deploy with their `cpi` builds (no entrypoint, a few hundred bytes).
+  mkdirSync(STAGE, { recursive: true });
+  for (const p of PROGRAMS) {
+    const features = p.key === "session" && mockVrf ? ["--", "--features", "mock-vrf"] : [];
+    run(bins.anchor, ["build", "--tools-version", "v1.54", "-p", p.name, ...features]);
+    copyFileSync(join(ROOT, "target/deploy", `${p.name}.so`), soPath(p.name));
+  }
   run(bins.bash, ["crates/render/wasm/build.sh"]);
   run(bins.cargo, ["run", "-q", "-p", "art", "--", "pack", "--out", "target/render-assets"]);
 }
@@ -309,6 +322,7 @@ function embedsKey(so: Uint8Array, key: Uint8Array): boolean {
 
 /** "mock" when the built session accepts the mock VRF identity, "real" for the oracle identity. */
 export function sessionVrfMode(): "mock" | "real" | "unknown" {
+  if (!existsSync(soPath("deadroll_session"))) return "unknown";
   const so = readFileSync(soPath("deadroll_session"));
   const mock = embedsKey(so, addrBytes(MOCK_VRF_IDENTITY));
   const real = embedsKey(so, addrBytes(VRF_IDENTITY));
@@ -320,6 +334,10 @@ export function sessionVrfMode(): "mock" | "real" | "unknown" {
 function checkArtifacts(opts: DeployOptions): void {
   for (const p of PROGRAMS) {
     if (!existsSync(soPath(p.name))) throw new Error(`${soPath(p.name)} missing; run without --skip-build`);
+    const size = readFileSync(soPath(p.name)).length;
+    if (size < MIN_PROGRAM_SIZE) {
+      throw new Error(`${p.name}.so is ${size} bytes, a no-entrypoint (cpi) build; rebuild with anchor build -p ${p.name}`);
+    }
   }
   const mode = sessionVrfMode();
   if (opts.mockVrf && mode !== "mock") throw new Error(`session build is "${mode}", expected the mock-vrf build`);
@@ -488,6 +506,12 @@ function paletteVersion(): number {
 async function uploadRender(conn: Rpc, opts: DeployOptions, wallet: KeyPairSigner, programIds: Record<string, string>) {
   step("registry tables");
   script("seed-registry.ts", [], opts);
+  // open_session reads monster HP, speed, initiative and tile costs from these two.
+  for (const seed of ["bestiary", "tileset"]) {
+    const [table] = await getProgramDerivedAddress({ programAddress: address(programIds.registry), seeds: [enc.encode(seed)] });
+    const data = await fetchData(conn.rpc, table);
+    if (!data || data.subarray(16).every((b) => b === 0)) throw new Error(`registry ${seed} table ${table} is not seeded`);
+  }
 
   step("render blobs");
   const palVersion = paletteVersion();

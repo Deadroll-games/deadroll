@@ -50,7 +50,6 @@ const PRICE = new BN(LAMPORTS_PER_SOL / 10);
 const [N, E, S, W] = [0, 1, 2, 3];
 const MAX_PATH = 16;
 const MONSTER_BASE = 4;
-const NO_RESONANCE = 0xff;
 const [WOLF, CHIEFTAIN] = [0, 2];
 /** Skill slots of the preset sets (crates/skillcheck presets). */
 const PIERCING_THRUST = 0;
@@ -67,6 +66,8 @@ const sha256 = (data: Buffer | string) => createHash("sha256").update(data).dige
 const sighash = (preimage: string) => sha256(preimage).subarray(0, 8);
 
 const config = pda([Buffer.from("config")], REGISTRY);
+const bestiary = pda([Buffer.from("bestiary")], REGISTRY);
+const tileset = pda([Buffer.from("tileset")], REGISTRY);
 const sessionAuthority = pda([Buffer.from("authority")], SESSION);
 const MOCK_VRF = Keypair.fromSeed(sha256("deadroll:mock-vrf"));
 const vrfAccounts = {
@@ -100,6 +101,8 @@ const MISS = seedWhere((s) => d20(s) === 1);
 const RESONANT = seedWhere((s) => d20(s) === 20 && rollAt(s, 1) % 10_000n < 100n);
 
 const signatures: { what: string; sig: string }[] = [];
+/** Every VRF callback, read back from the chain right after it landed. */
+const publicRolls: { sig: string; ok: boolean }[] = [];
 function track(what: string) {
   return (sig: string) => {
     signatures.push({ what, sig });
@@ -164,6 +167,17 @@ const MAGE_SKILLS: [string, any][] = [
 
 const cheb = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
 
+/**
+ * `rules::roll_initiative`: unit `i` (players by slot, then living monsters by index) rolls d20
+ * number `i` of the start_session VRF value; higher `d20 + initiative` first, then higher
+ * initiative, then lower unit id.
+ */
+function initiativeOrder(seed: Buffer, units: [number, number][]): { order: number[]; d20: number[] } {
+  const rolled = units.map(([unit, init], i) => ({ unit, init, d20: Number(rollAt(seed, i) % 20n) + 1 }));
+  rolled.sort((a, b) => b.d20 + b.init - (a.d20 + a.init) || b.init - a.init || a.unit - b.unit);
+  return { order: rolled.map((r) => r.unit), d20: rolled.map((r) => r.d20) };
+}
+
 // ---------------------------------------------------------------------------------------------
 // what must be on the validator
 
@@ -178,6 +192,9 @@ for (const [name, id] of [["registry", REGISTRY], ["character", CHARACTER], ["ma
 const cfg = await connection.getAccountInfo(config);
 if (!cfg?.owner.equals(REGISTRY)) missing.push("registry GameConfig");
 else if (!new PublicKey(cfg.data.subarray(41 + 5 * 32, 41 + 6 * 32)).equals(SESSION)) missing.push("GameConfig trusting session");
+for (const [name, table] of [["bestiary", bestiary], ["tileset", tileset]] as const) {
+  if (!(await connection.getAccountInfo(table))?.owner.equals(REGISTRY)) missing.push(`registry ${name} table`);
+}
 const SKIP = missing.length ? `run tools/scripts/deploy-local.ts first; missing: ${missing.join(", ")}` : false;
 
 const load = (i: number) => JSON.parse(readFileSync(IDLS[i], "utf8"));
@@ -444,7 +461,13 @@ class Demo {
       })
       .signers([MOCK_VRF])
       .rpc({ commitment: "confirmed" })
-      .then(track("consume_randomness"));
+      .then(track("consume_randomness"))
+      .then(async (sig: string) => {
+        // Read back at once: the shared validator keeps ~100 slots of transaction history.
+        const names = (await eventsOf(sig)).map((x) => x.name);
+        publicRolls.push({ sig, ok: names.includes("hitResolved") || names.includes("initiativeRolled") });
+        return sig;
+      });
   }
   /** One player attack: request, oracle callback, the `HitResolved` event. */
   async attack(who: number, slot: number, monster: number, seed: Buffer) {
@@ -454,6 +477,15 @@ class Demo {
   }
 
   // --- turn helpers
+  /** Initiative units of the started session: players by slot, then living monsters by index. */
+  async initiativeUnits(): Promise<[number, number][]> {
+    const s = await this.state();
+    const ms = await this.monsters();
+    const units: [number, number][] = [];
+    for (let slot = 0; slot < s.core.playerCount; slot++) units.push([slot, s.playerInitiative[slot]]);
+    ms.forEach((m, i) => m.alive && units.push([MONSTER_BASE + i, s.monsterInitiative[i]]));
+    return units;
+  }
   async current(): Promise<{ s: any; unit: number }> {
     const s = await this.state();
     return { s, unit: s.core.turnOrder[s.core.turnIndex] };
@@ -593,6 +625,8 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
         ...demo.acc,
         sessionAuthority,
         config,
+        bestiary,
+        tileset,
         mapProgram: MAP,
         systemProgram: SystemProgram.programId,
       })
@@ -640,14 +674,34 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
     }
     await session.methods
       .startSession()
-      .accountsStrict({ dm: demo.dm.publicKey, session: demo.acc.session, monsters: demo.acc.monsters, escrow: demo.acc.escrow })
+      .accountsStrict({
+        dm: demo.dm.publicKey,
+        session: demo.acc.session,
+        monsters: demo.acc.monsters,
+        escrow: demo.acc.escrow,
+        ...vrfAccounts,
+      })
       .signers([demo.dm])
       .rpc()
       .then(track("start_session"));
-    const s = await demo.state();
-    assert.ok(s.core.status.active);
-    const order = [...s.core.turnOrder.slice(0, s.turnOrderLen)];
-    assert.deepEqual(order, [0, 1, ...preset.spawns.map((_, i) => MONSTER_BASE + i)]);
+    let s = await demo.state();
+    assert.ok(s.core.status.active && s.core.pendingVrf, "waiting for the initiative roll");
+    assert.equal(s.turnOrderLen, 0);
+
+    // The oracle answers the initiative request (action 0) with player slot 0's accounts.
+    const units = await demo.initiativeUnits();
+    assert.equal(units.length, 2 + preset.spawns.length);
+    const seed = randomBytes(32);
+    const rolled = await demo.consume(0, seed);
+    const ev = await eventOf(rolled, "initiativeRolled");
+    const expected = initiativeOrder(seed, units);
+    assert.equal(ev.actionCounter, 0);
+    assert.deepEqual(ev.order.slice(0, ev.len), expected.order);
+    assert.deepEqual(ev.d20.slice(0, ev.len), expected.d20);
+    s = await demo.state();
+    assert.ok(!s.core.pendingVrf);
+    assert.deepEqual([...s.core.turnOrder.slice(0, s.turnOrderLen)], expected.order);
+    console.log(`  initiative: ${expected.order.map((u) => (u < MONSTER_BASE ? demo.players[u].kind : `monster ${u - MONSTER_BASE}`)).join(", ")}`);
   });
 
   it("combat with wolves: moves, attacks, VRF rolls, hit breakdown, a resonance; the mage dies", async () => {
@@ -674,14 +728,21 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
           }
           const now = (await demo.state()).playerPos[WARRIOR];
           while (ap >= 2 && cheb(now, ms[target]) === 1 && (await demo.monsters())[target].alive) {
+            const hpBefore = (await demo.monsters())[target].hp;
             const { hit, events } = await demo.attack(WARRIOR, PIERCING_THRUST, target, CRIT);
-            assert.deepEqual([hit.outcome, hit.d20, hit.crit], [1, 20, true]);
-            assert.ok(hit.damage > 0 && hit.breakdown.length > 100, "damage and the Borsh hit breakdown");
-            assert.equal(hit.targetHp, (await demo.monsters())[target].hp);
-            if (hit.killed) {
-              const killed = events.find((x) => x.name === "monsterKilled")?.data;
-              assert.ok(killed && killed.monster === target && !killed.boss);
-            }
+            // The app's shape: session, attacker, target, seed, actionCounter, result (HitResult).
+            assert.ok(hit.session.equals(demo.acc.session));
+            assert.deepEqual([hit.attacker, hit.target], [WARRIOR, MONSTER_BASE + target]);
+            assert.ok(hit.actionCounter >= 1, "action 0 is the initiative roll");
+            assert.deepEqual(Buffer.from(hit.seed), CRIT);
+            const r = hit.result;
+            assert.ok(r.outcome.hit && r.d20 === 20 && r.crit, "natural 20: hit and crit");
+            assert.ok(r.damage > 0 && r.packetCount >= 1 && r.rollsUsed >= 2, "the dice cascade and packets");
+            const after = (await demo.monsters())[target];
+            assert.equal(after.hp, Math.max(0, hpBefore - r.damage));
+            const killed = events.find((x) => x.name === "monsterKilled")?.data;
+            assert.equal(!!killed, !after.alive);
+            if (killed) assert.ok(killed.monster === target && !killed.boss);
             ap -= 2;
           }
         }
@@ -691,9 +752,12 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
         if (!resonanceShown && target !== undefined && cheb(s.playerPos[MAGE], ms[target]) <= 6) {
           // Frost Burn (cold + fire) with the mage's cold race tint: the fire base rolls the tint.
           const { hit } = await demo.attack(MAGE, FROST_BURN, target, RESONANT);
-          assert.equal(hit.outcome, 1);
-          console.log(`  mage Frost Burn: damage ${hit.damage}, resonance ${JSON.stringify(hit.resonance)}`);
-          assert.ok(hit.resonance.some((r: number) => r !== NO_RESONANCE), "a resonance triggered");
+          const r = hit.result;
+          assert.ok(r.outcome.hit);
+          const res = r.resonances.filter((x: any) => x !== null);
+          console.log(`  mage Frost Burn: damage ${r.damage}, resonances ${JSON.stringify(res.map((x: any) => ({ id: x.id, active: x.active })))}`);
+          assert.ok(r.tintRollCount >= 1 && r.tintRolls[0].success, "the tint roll succeeded");
+          assert.ok(res.some((x: any) => x.active), "a resonance triggered");
           resonanceShown = true;
         }
         await demo.endTurn(MAGE);
@@ -773,10 +837,10 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
       }
       while (ap >= 2 && cheb((await demo.state()).playerPos[WARRIOR], chief) === 1) {
         const { sig, hit, events } = await demo.attack(WARRIOR, PIERCING_THRUST, boss, CRIT);
-        assert.equal(hit.outcome, 1);
+        assert.ok(hit.result.outcome.hit);
         ap -= 2;
-        if (hit.killed) {
-          const killed = events.find((x) => x.name === "monsterKilled")!.data;
+        const killed = events.find((x) => x.name === "monsterKilled")?.data;
+        if (killed) {
           assert.ok(killed.boss);
           const ended = events.find((x) => x.name === "sessionEnded")!.data;
           assert.ok(ended.status.victory);
@@ -845,12 +909,10 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
     assert.ok((await mapProgram.account.map.fetch(demo.map)).core.status.finished);
   });
 
-  it("every roll is public: each HitResolved is in a confirmed transaction", async () => {
+  it("every roll is public: each VRF callback is a confirmed transaction with its event", async () => {
     const rolls = signatures.filter((x) => x.what === "consume_randomness");
     assert.ok(rolls.length >= 3);
-    for (const { sig } of rolls) {
-      const tx = await connection.getTransaction(sig, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
-      assert.ok(tx && !tx.meta?.err);
-    }
+    assert.equal(publicRolls.length, rolls.length);
+    for (const { sig, ok } of publicRolls) assert.ok(ok, `${sig}: no InitiativeRolled / HitResolved in its logs`);
   });
 });

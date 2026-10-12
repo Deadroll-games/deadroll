@@ -16,6 +16,7 @@ import { existsSync, readFileSync } from "node:fs";
 import anchor from "@anchor-lang/core";
 import type { DeadrollSession } from "../target/types/deadroll_session.ts";
 import {
+  Connection,
   Keypair,
   LAMPORTS_PER_SOL,
   PublicKey,
@@ -31,7 +32,13 @@ const idl = JSON.parse(
   readFileSync(new URL("../target/idl/deadroll_session.json", import.meta.url), "utf8"),
 ) as DeadrollSession;
 
-const provider = AnchorProvider.env();
+// "confirmed" throughout: with the default "processed" the next simulation can miss a fresh
+// blockhash ("Blockhash not found") on the shared validator.
+const env = AnchorProvider.env();
+const provider = new AnchorProvider(new Connection(env.connection.rpcEndpoint, "confirmed"), env.wallet, {
+  commitment: "confirmed",
+  preflightCommitment: "confirmed",
+});
 const connection = provider.connection;
 const program = new Program<DeadrollSession>(idl, provider);
 const SESSION = program.programId;
