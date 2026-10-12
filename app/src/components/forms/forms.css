@@ -1,0 +1,171 @@
+.forms-root {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.forms-root p,
+.forms-root h2 {
+  margin: 0;
+}
+
+.forms-root h2 {
+  font-size: 18px;
+}
+
+.forms-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 200px;
+  gap: 16px;
+  align-items: start;
+}
+
+.forms-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.forms-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14px;
+}
+
+.forms-field input,
+.forms-field select {
+  width: 100%;
+  min-width: 12rem;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font: inherit;
+}
+
+.forms-seg {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.forms-seg .btn[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.forms-stat {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.forms-stat-value {
+  min-width: 1.5rem;
+  text-align: center;
+}
+
+.forms-frame {
+  min-height: 180px;
+  display: grid;
+  place-items: center;
+  background: var(--panel-2);
+}
+
+.forms-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.forms-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 6px;
+  border: 1px solid var(--border);
+  vertical-align: -1px;
+}
+
+.forms-spawns,
+.forms-errors,
+.forms-slots {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.forms-spawns li,
+.forms-slot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.forms-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: end;
+}
+
+.forms-row .forms-field {
+  flex: 1;
+}
+
+.forms-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  align-items: baseline;
+}
+
+.forms-ready {
+  color: var(--good);
+  border-color: var(--good);
+}
+
+.forms-demo {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.forms-demo h2 {
+  margin: 0 0 10px;
+  font-size: 18px;
+}
+
+canvas.forms-preview {
+  width: 128px;
+  height: 128px;
+}
+
+.forms-log {
+  margin: 0;
+}
+
+@media (max-width: 720px) {
+  .forms-split {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .forms-root,
+  .forms-root * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+.forms-seg .btn {
+  transition: border-color 120ms linear;
+}

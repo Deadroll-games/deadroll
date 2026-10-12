@@ -130,11 +130,11 @@ Each task = one fresh Grok session, writes only in `assets/sprites/<name>.dsl`, 
 
 ## L9. App
 
-- [ ] **L9.1 (C)** App shell: wallet adapter, session key start, routes (Character, Map builder, Party), data layer over `sdk/`.
-- [ ] **L9.2 (C)** Rasterizer loader: read `GameConfig`, fetch `RasterizerCode`, verify SHA-256, cache in IndexedDB, render to canvas.
-- [ ] **L9.3 (G)** Grid canvas component (tiles, units, move highlight, click to move/target), props only, mock data.
-- [ ] **L9.4 (G)** Dice cascade animation + hit breakdown panel from a `HitResolved` event, mock data.
-- [ ] **L9.5 (G)** Character creation form, map builder palette UI, party lobby UI (mock data).
+- [ ] **L9.1 (C)** Claude (L9). App shell: wallet adapter, session key start, routes (Character, Map builder, Party), data layer over `sdk/`.
+- [ ] **L9.2 (C)** Claude (L9). Rasterizer loader: read `GameConfig`, fetch `RasterizerCode`, verify SHA-256, cache in IndexedDB, render to canvas.
+- [ ] **L9.3 (G)** Grok, reviewed by Claude (L9). Grid canvas component (tiles, units, move highlight, click to move/target), props only, mock data.
+- [ ] **L9.4 (G)** Grok, reviewed by Claude (L9). Dice cascade animation + hit breakdown panel from a `HitResolved` event, mock data.
+- [ ] **L9.5 (G)** Grok, reviewed by Claude (L9). Character creation form, map builder palette UI, party lobby UI (mock data).
 - [ ] **L9.6 (C)** Wire components to chain, event subscriptions, error toasts.
 - [ ] **L9.7 (H)** Visual pass for the video.
 
