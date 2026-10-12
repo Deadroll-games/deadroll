@@ -55,3 +55,4 @@ canvas.pixel { image-rendering: pixelated; }
 .turn-banner b.me { color: var(--accent); }
 .skills { display: flex; flex-wrap: wrap; gap: 6px; }
 .skills .btn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.badge.reconnecting { color: var(--accent); border-color: var(--accent); }

@@ -1,13 +1,14 @@
 // Live view of one party: polls the accounts (session, monsters, participations, characters, map)
 // and listens to session program logs for its events, so all windows (DM and players) see the
-// same moves, rolls and deaths. Nothing relies on old transactions: the shared validator keeps
-// only ~100 slots of history.
+// same moves, rolls and deaths. The log subscription reconnects with backoff; after a gap the
+// party is re-read and recent party transactions are replayed when the node still has them
+// (the local validator keeps only ~100 slots of history).
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Address } from "@solana/kit";
 import { DATA_SOURCE, PROGRAMS } from "../config";
-import { client } from "../wallet/client";
 import type { ChainEvent } from "./events";
 import { readParty, type Party } from "./game";
+import { openProgramLogs, recentLogs, subscribeResilient, type SubStatus } from "./subscribe";
 import { eventsOfLogs } from "./useTx";
 
 export type PartyEvent = ChainEvent & { signature: string; at: number };
@@ -18,6 +19,7 @@ export function useParty(address: Address | null) {
   const [party, setParty] = useState<Party | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [events, setEvents] = useState<PartyEvent[]>([]);
+  const [live, setLive] = useState<SubStatus>({ state: "connecting" });
   const tiles = useRef<Uint8Array | null>(null);
   const seen = useRef(new Set<string>());
   const inflight = useRef(false);
@@ -60,22 +62,27 @@ export function useParty(address: Address | null) {
     void refresh();
     const timer = setInterval(() => void refresh(), POLL_MS);
     const abort = new AbortController();
-    (async () => {
-      const stream = await client.rpcSubscriptions
-        .logsNotifications({ mentions: [PROGRAMS.session] }, { commitment: "confirmed" })
-        .subscribe({ abortSignal: abort.signal });
-      for await (const note of stream) {
-        if (note.value.err) continue;
-        ingest(note.value.signature, eventsOfLogs(note.value.logs));
-      }
-    })().catch((e: unknown) => {
-      if (!abort.signal.aborted) setError(`log subscription: ${e instanceof Error ? e.message : String(e)}`);
-    });
+    // After a WebSocket gap: re-read the party and replay the events of recent party transactions
+    // (ingest skips the ones already seen). Best effort: a node without history only gets the refresh.
+    const resync = () => {
+      void refresh();
+      void recentLogs(address).then(
+        (txs) => txs.forEach((t) => ingest(t.signature, eventsOfLogs(t.logs))),
+        () => undefined,
+      );
+    };
+    void subscribeResilient(
+      openProgramLogs(PROGRAMS.session),
+      (note) => {
+        if (!note.err) ingest(note.signature, eventsOfLogs(note.logs));
+      },
+      { signal: abort.signal, onStatus: setLive, onReconnect: resync },
+    );
     return () => {
       clearInterval(timer);
       abort.abort();
     };
   }, [address, refresh, ingest]);
 
-  return { party, error, events, refresh, ingest };
+  return { party, error, events, refresh, ingest, live };
 }

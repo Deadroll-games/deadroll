@@ -50,6 +50,7 @@ import {
 } from "../chain/game";
 import { toHitResolved } from "../chain/hit";
 import { bestiaryName, playerCritChanceBp } from "../chain/names";
+import { statusLabel, type SubStatus } from "../chain/subscribe";
 import { skillSetPda } from "../chain/pda";
 import { affordable, cheb, reachable, route, type Step } from "../chain/route";
 import { useAutoFreezeTombstone } from "../chain/useAutoFreezeTombstone";
@@ -186,7 +187,7 @@ function PartyView({ address }: { address: Address }) {
   const wallet = useAppWallet();
   const sk = useSessionKey();
   const { send, busy } = useTx();
-  const { party, error, events, ingest, refresh } = useParty(address);
+  const { party, error, events, ingest, refresh, live } = useParty(address);
   const draw = useSprites();
   const [seedKind, setSeedKind] = useState<SeedKind>("random");
   const [skill, setSkill] = useState<number>(0);
@@ -552,7 +553,9 @@ function PartyView({ address }: { address: Address }) {
     };
     return (
       <section>
-        <h1>Party lobby</h1>
+        <h1>
+          Party lobby <LiveBadge status={live} />
+        </h1>
         {header}
         <PartyLobby
           mapName={shortAddress(s.core.map)}
@@ -598,7 +601,9 @@ function PartyView({ address }: { address: Address }) {
 
   return (
     <section>
-      <h1>{ended ? `Party ended: ${st}` : "Battle"}</h1>
+      <h1>
+        {ended ? `Party ended: ${st}` : "Battle"} <LiveBadge status={live} />
+      </h1>
       {header}
       <div style={{ display: "flex", gap: 20, alignItems: "flex-start", flexWrap: "wrap" }}>
         <div>
@@ -832,5 +837,16 @@ function EventLog({ events, label }: { events: PartyEvent[]; label: (u: number) 
         ))}
       </ol>
     </div>
+  );
+}
+
+/** Log subscription state: events (dice, deaths) arrive live only while this says "live". */
+function LiveBadge({ status }: { status: SubStatus }) {
+  const tone = status.state === "live" ? " chain" : status.state === "reconnecting" ? " reconnecting" : "";
+  const title = status.state === "reconnecting" ? `log subscription dropped: ${status.reason}` : "session program log subscription";
+  return (
+    <span className={`badge${tone}`} title={title}>
+      {statusLabel(status)}
+    </span>
   );
 }
