@@ -4,6 +4,18 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node -e \"console.log('no integration tests yet (L8.2)')\""
+    "test": "node --import tsx --test --test-concurrency=1 \"*.test.ts\"",
+    "test:character": "node --import tsx --test character.test.ts",
+    "test:render": "node --import tsx --test render.test.ts",
+    "test:map": "node --import tsx --test map.test.ts",
+    "test:session": "node --import tsx --test session.test.ts"
+  },
+  "devDependencies": {
+    "@anchor-lang/core": "1.2.1",
+    "@solana/kit": "8.4.0",
+    "@solana/web3.js": "^1.98.0",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.8.0"
   }
 }
