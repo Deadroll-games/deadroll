@@ -4,9 +4,9 @@ use deadroll_types::{seeds, SessionStatus};
 use crate::{
     auth,
     errors::SessionError,
-    events::TurnStarted,
-    rules::{monster_ap, Unit},
+    rules::Unit,
     state::{GameSession, Monsters, Participation},
+    turns,
 };
 
 #[derive(Accounts)]
@@ -60,54 +60,15 @@ pub fn handler(ctx: Context<EndTurn>) -> Result<()> {
                 &participation.core.actor,
                 token,
             )?;
+            // Any other action on a player's turn resets every escape intent (PARTY_AND_TURNS 7.3).
+            session.flee_mask = 0;
         }
         Unit::Monster(_) => {
             auth::check_actor(&accounts.signer, &session.core.dm, &session.dm_actor, token)?;
         }
     }
 
-    // Next living unit in the order; passing the end starts a new round. Unspent AP are lost:
-    // players get fresh AP lazily through `turn_seq`, monsters right here.
     let monsters = Monsters::load(&accounts.monsters, &session.key())?;
-    let len = session.turn_order_len;
-    let mut index = session.core.turn_index;
-    for _ in 0..len {
-        index = (index + 1) % len;
-        if index == 0 {
-            session.core.round = session
-                .core
-                .round
-                .checked_add(1)
-                .ok_or(SessionError::Overflow)?;
-        }
-        let alive = match Unit::from_id(session.core.turn_order[index as usize]) {
-            Some(Unit::Player(slot)) => session.player_alive(slot),
-            Some(Unit::Monster(i)) => monsters.get(i)?.alive,
-            None => false,
-        };
-        if alive {
-            break;
-        }
-    }
-    session.core.turn_index = index;
-    session.turn_seq = session
-        .turn_seq
-        .checked_add(1)
-        .ok_or(SessionError::Overflow)?;
-    session.turn_started_at = Clock::get()?.unix_timestamp;
-
-    let unit = session.core.turn_order[index as usize];
-    if let Some(Unit::Monster(i)) = Unit::from_id(unit) {
-        let mut monster = monsters.get(i)?;
-        monster.action_points = monster_ap(monster.bestiary_id);
-        monsters.set(i, &monster)?;
-    }
-
-    emit!(TurnStarted {
-        session: session.key(),
-        unit,
-        round: session.core.round,
-        turn_seq: session.turn_seq,
-    });
-    Ok(())
+    let key = session.key();
+    turns::advance(session, key, &monsters)
 }

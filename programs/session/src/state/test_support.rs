@@ -143,5 +143,10 @@ pub fn session(players: &[Cell]) -> GameSession {
         player_pos,
         alive_mask: ((1u16 << players.len()) - 1) as u8,
         ready_mask: 0,
+        pending: Default::default(),
+        flee_mask: 0,
+        settled_mask: 0,
+        xp_pool: 0,
+        victory_seed: [0; 32],
     }
 }

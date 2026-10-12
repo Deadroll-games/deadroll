@@ -771,10 +771,15 @@ version = "0.1.0"
 dependencies = [
  "anchor-lang",
  "deadroll-character",
+ "deadroll-combat",
  "deadroll-map",
+ "deadroll-mapcheck",
  "deadroll-registry",
+ "deadroll-skillcheck",
  "deadroll-types",
+ "ephemeral-vrf-sdk",
  "session-keys",
+ "solana-sha256-hasher",
 ]
 
 [[package]]
@@ -870,6 +875,30 @@ dependencies = [
  "sec1",
  "subtle",
  "zeroize",
+]
+
+[[package]]
+name = "ephemeral-vrf-sdk"
+version = "0.17.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6e80db66b345edea9bd07834bcc7a6ba490d1485f26694f0997a0329c702f77"
+dependencies = [
+ "anchor-lang",
+ "borsh 1.8.1",
+ "ephemeral-vrf-sdk-vrf-macro",
+ "solana-program",
+ "solana-system-interface 2.0.0",
+]
+
+[[package]]
+name = "ephemeral-vrf-sdk-vrf-macro"
+version = "0.17.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4db39f8c0da21e16b3e57141959023a3de6f759eb0b258ae5c9441c938160480"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
 ]
 
 [[package]]

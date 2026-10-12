@@ -20,17 +20,29 @@ idl-build = ["anchor-lang/idl-build", "deadroll-types/idl-build", "session-keys/
 anchor-debug = []
 custom-heap = []
 custom-panic = []
+# Localnet only: `consume_randomness` accepts a fixed test identity instead of the VRF oracle and
+# `act` / `monster_act` skip the VRF request. Never in a devnet build (the deploy script checks).
+mock-vrf = []
 
 [dependencies]
 # `lazy-account`: MonsterState is too big to Borsh-decode on-chain (see state/monster_state.rs).
 anchor-lang = { workspace = true, features = ["lazy-account"] }
 deadroll-types = { workspace = true, features = ["anchor"] }
 session-keys.workspace = true
-# Program ids only for now; CPI goes through the stubs in src/cpi_out until L5/L6 add the instructions.
+# CPI targets (generated `cpi` modules) and the `SkillRecord` layout.
 deadroll-character.workspace = true
 deadroll-map.workspace = true
 # GameConfig PDA address only.
 deadroll-registry.workspace = true
+# Hit resolution; `borsh` encodes the full `HitResult` into the `HitResolved` event.
+deadroll-combat = { workspace = true, features = ["borsh"] }
+# P0 bestiary roles (boss detection), shared with map validation.
+deadroll-mapcheck.workspace = true
+# Skill block enums (category, purpose) of the character's `SkillRecord`.
+deadroll-skillcheck = { workspace = true, features = ["anchor"] }
+ephemeral-vrf-sdk.workspace = true
+# Dice: the SHA-256 syscall gives the same rolls as `deadroll_combat::VrfRoll` for far fewer CU.
+solana-sha256-hasher = { version = "3.1", features = ["sha2"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

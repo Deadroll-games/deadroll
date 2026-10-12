@@ -1,14 +1,17 @@
 // deadroll_session against the shared local validator (agents/TASKS.md, decision block).
 //
+// Deploy the `mock-vrf` build (`anchor build --tools-version v1.54 -p deadroll_session -- --features
+// mock-vrf`): the validator has no VRF oracle, so these tests sign `consume_randomness` with the
+// fixed mock identity and choose the VRF value themselves.
+//
 // Fresh random keypairs everywhere; nothing assumes an empty ledger.
-// Part 1 runs now. Part 2 (the party flow) needs real `Map`/`MapLayout`/`Character` accounts and the
-// `map.set_status` / `character.lock_for_session` CPI targets: it skips itself until the character
-// (L5) and map (L6) programs are deployed, then `createFinalizedMap` / `createCharacter` below must
-// be filled in with their instructions.
+// Part 1 runs on any validator with the session program. Part 2 (the party flow on the map lane's
+// demo preset) needs the registry `GameConfig` (trusting session), the character and map programs
+// deployed and their IDLs built; it skips itself with the missing piece named otherwise.
 import { before, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 // Node loads the CJS build; its getter exports are invisible to ESM named imports.
 import anchor from "@anchor-lang/core";
 import type { DeadrollSession } from "../target/types/deadroll_session.ts";
@@ -21,7 +24,7 @@ import {
   TransactionInstruction,
 } from "@solana/web3.js";
 
-const { AnchorProvider, BN, Program } = anchor;
+const { AnchorProvider, BN, EventParser, Program } = anchor;
 type BN = InstanceType<typeof BN>;
 
 const idl = JSON.parse(
@@ -36,23 +39,40 @@ const CHARACTER = new PublicKey("9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL");
 const MAP = new PublicKey("2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH");
 const REGISTRY = new PublicKey("dZ1jraMfS3bAUTkRw2TA1ddg8UDGzgUdFQz5pmBxjoG");
 const SESSION_KEYS = new PublicKey("KeyspM2ssCJbqUhQ4k7sveSiY4WjnYsrXkC8oDbwde5");
+const MPL_CORE = new PublicKey("CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d");
+// MagicBlock VRF (ephemeral-vrf-sdk 0.17.3 consts); none of them has to exist under mock-vrf.
+const VRF_PROGRAM = new PublicKey("Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz");
+const ORACLE_QUEUE = new PublicKey("Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh");
+const SLOT_HASHES = new PublicKey("SysvarS1otHashes111111111111111111111111111");
 
 const PRICE = new BN(LAMPORTS_PER_SOL / 10);
 const MIN_PRICE = new BN(10_000_000);
 const [N, E, S, W] = [0, 1, 2, 3];
 const MAX_PATH = 16;
 const EMPTY_UNIT = 0xff;
+const BASE_ATTACK = 0xff;
+const MONSTER_BASE = 4;
 
 // ---------------------------------------------------------------------------------------------
 // helpers
 
 const pda = (seeds: (Buffer | Uint8Array)[], programId: PublicKey) =>
   PublicKey.findProgramAddressSync(seeds, programId)[0];
-const sighash = (preimage: string) =>
-  createHash("sha256").update(preimage).digest().subarray(0, 8);
+const sha256 = (data: Buffer | string) => createHash("sha256").update(data).digest();
+const sighash = (preimage: string) => sha256(preimage).subarray(0, 8);
 
 const sessionAuthority = pda([Buffer.from("authority")], SESSION);
 const config = pda([Buffer.from("config")], REGISTRY);
+const programIdentity = pda([Buffer.from("identity")], SESSION);
+/** `MOCK_VRF_IDENTITY` of programs/session/src/vrf.rs: a public test key, mock-vrf builds only. */
+const MOCK_VRF = Keypair.fromSeed(sha256("deadroll:mock-vrf"));
+const vrfAccounts = {
+  programIdentity,
+  oracleQueue: ORACLE_QUEUE,
+  vrfProgram: VRF_PROGRAM,
+  slotHashes: SLOT_HASHES,
+  systemProgram: SystemProgram.programId,
+};
 
 function sessionAccounts(map: PublicKey) {
   const session = pda([Buffer.from("session"), map.toBuffer()], SESSION);
@@ -70,6 +90,8 @@ function playerAccounts(session: PublicKey, character: PublicKey) {
       SESSION,
     ),
     stash: pda([Buffer.from("stash"), session.toBuffer(), character.toBuffer()], SESSION),
+    skillSet: pda([Buffer.from("skills"), character.toBuffer()], CHARACTER),
+    bag: pda([Buffer.from("bag"), character.toBuffer()], CHARACTER),
   };
 }
 
@@ -95,7 +117,7 @@ async function rejects(promise: Promise<unknown>, code: string): Promise<void> {
     const logs: string[] = e?.logs ?? e?.transactionLogs ?? [];
     const text = `${e?.message ?? e}\n${logs.join("\n")}`;
     assert.ok(
-      name === code || text.includes(`Error Code: ${code}`),
+      name === code || text.includes(`Error Code: ${code}`) || text.includes(code),
       `expected ${code}, got ${name ?? text}`,
     );
     return;
@@ -107,6 +129,38 @@ function path(steps: number[]): [number[], number] {
   const padded = [...steps.slice(0, MAX_PATH)];
   while (padded.length < MAX_PATH) padded.push(0);
   return [padded, steps.length];
+}
+
+/** Roll `index` of a VRF value, exactly `deadroll_combat::VrfRoll`: sha256(seed ‖ index u32 LE). */
+function rollAt(seed: Buffer, index: number): bigint {
+  const i = Buffer.alloc(4);
+  i.writeUInt32LE(index);
+  return sha256(Buffer.concat([seed, i])).readBigUInt64LE(0);
+}
+const d20Of = (seed: Buffer) => Number(rollAt(seed, 0) % 20n) + 1;
+function seedWhere(pred: (d20: number) => boolean): Buffer {
+  for (;;) {
+    const seed = randomBytes(32);
+    if (pred(d20Of(seed))) return seed;
+  }
+}
+/** Natural 20: always a hit and a crit. Natural 1: always a miss. */
+const CRIT = seedWhere((d) => d === 20);
+const MISS = seedWhere((d) => d === 1);
+
+const parser = new EventParser(SESSION, program.coder);
+async function eventsOf(sig: string): Promise<{ name: string; data: any }[]> {
+  const tx = await connection.getTransaction(sig, {
+    commitment: "confirmed",
+    maxSupportedTransactionVersion: 0,
+  });
+  return [...parser.parseLogs(tx?.meta?.logMessages ?? [])];
+}
+/** The data of event `name` (any casing) emitted by `sig`. */
+async function eventOf(sig: string, name: string): Promise<any> {
+  const found = (await eventsOf(sig)).find((x) => x.name.toLowerCase() === name.toLowerCase());
+  assert.ok(found, `no ${name} event`);
+  return found.data;
 }
 
 /** MagicBlock Session Keys `create_session_v2`, signed by the session key and the main wallet. */
@@ -181,6 +235,24 @@ function openSession(dm: Keypair, map: PublicKey, layout: PublicKey, price: BN, 
     .signers([dm]);
 }
 
+/** The VRF callback, signed by `identity` (the mock identity on localnet). */
+function consume(
+  identity: Keypair,
+  a: { session: PublicKey; monsters: PublicKey; participation: PublicKey; character: PublicKey; skillSet: PublicKey },
+  seed: Buffer,
+) {
+  return program.methods
+    .consumeRandomness([...seed])
+    .accountsStrict({
+      vrfProgramIdentity: identity.publicKey,
+      ...a,
+      sessionAuthority,
+      config,
+      characterProgram: CHARACTER,
+    })
+    .signers([identity]);
+}
+
 // ---------------------------------------------------------------------------------------------
 // Part 1: runs on the shared validator today
 
@@ -223,34 +295,100 @@ describe("deadroll_session: deployed program", () => {
   it("game instructions reject a session that was never opened", async () => {
     const signer = await funded();
     const { session, monsters, escrow } = sessionAccounts(Keypair.generate().publicKey);
-    await rejects(
+    const character = Keypair.generate().publicKey;
+    const { participation, stash, skillSet, bag } = playerAccounts(session, character);
+    const run = (m: any) => rejects(m.signers([signer]).rpc(), "AccountNotInitialized");
+    await run(program.methods.startSession().accountsStrict({ dm: signer.publicKey, session, monsters, escrow }));
+    await run(
       program.methods
-        .startSession()
-        .accountsStrict({ dm: signer.publicKey, session, monsters, escrow })
-        .signers([signer])
-        .rpc(),
-      "AccountNotInitialized",
+        .endTurn()
+        .accountsStrict({ signer: signer.publicKey, session, monsters, participation: null, sessionToken: null }),
+    );
+    await run(
+      program.methods.act(BASE_ATTACK, 0).accountsStrict({
+        signer: signer.publicKey,
+        session,
+        participation,
+        character,
+        skillSet,
+        monsters,
+        sessionToken: null,
+        ...vrfAccounts,
+      }),
+    );
+    await run(
+      program.methods.monsterAct(0, 0, 0).accountsStrict({
+        signer: signer.publicKey,
+        session,
+        monsters,
+        participation,
+        character,
+        sessionToken: null,
+        ...vrfAccounts,
+      }),
+    );
+    await run(
+      program.methods
+        .flee()
+        .accountsStrict({ signer: signer.publicKey, session, monsters, participation, sessionToken: null }),
+    );
+    await run(
+      program.methods.claimEscrow().accountsStrict({
+        dm: signer.publicKey,
+        session,
+        escrow,
+        map: Keypair.generate().publicKey,
+        sessionAuthority,
+        config,
+        mapProgram: MAP,
+      }),
     );
     await rejects(
       program.methods
-        .endTurn()
-        .accountsStrict({
-          signer: signer.publicKey,
-          session,
-          monsters,
-          participation: null,
-          sessionToken: null,
-        })
-        .signers([signer])
+        .claimRewards()
+        .accountsStrict({ session, participation, stash, character, bag, sessionAuthority, config, characterProgram: CHARACTER })
         .rpc(),
       "AccountNotInitialized",
     );
   });
 
-  it("CPI stubs use the Anchor sighashes of the callee instructions", () => {
-    // The program hardcodes these; the party flow below checks the bytes it actually sends.
-    assert.deepEqual([...sighash("global:lock_for_session")], [0xec, 0x7e, 0x7f, 0x53, 0xf6, 0x0b, 0xa2, 0xc0]);
-    assert.deepEqual([...sighash("global:set_status")], [0xb5, 0xb8, 0xe0, 0xcb, 0xc1, 0x1d, 0xb1, 0xe0]);
+  it("act rejects VRF accounts at other addresses", async () => {
+    const signer = await funded();
+    const { session, monsters } = sessionAccounts(Keypair.generate().publicKey);
+    const character = Keypair.generate().publicKey;
+    const { participation, skillSet } = playerAccounts(session, character);
+    const act = (over: Record<string, PublicKey>) =>
+      program.methods
+        .act(BASE_ATTACK, 0)
+        .accountsStrict({ signer: signer.publicKey, session, participation, character, skillSet, monsters, sessionToken: null, ...vrfAccounts, ...over })
+        .signers([signer])
+        .rpc();
+    // Session is checked first; these only prove the IDL carries the checked accounts.
+    for (const key of ["oracleQueue", "vrfProgram", "slotHashes", "programIdentity"]) {
+      await assert.rejects(act({ [key]: Keypair.generate().publicKey }));
+    }
+  });
+
+  it("consume_randomness rejects a session that was never opened", async () => {
+    // Anchor loads every account before any constraint, so the identity check (mock identity in
+    // a mock-vrf build, ConstraintAddress otherwise) shows only with a real session: part 2.
+    const { session, monsters } = sessionAccounts(Keypair.generate().publicKey);
+    const character = Keypair.generate().publicKey;
+    const { participation, skillSet } = playerAccounts(session, character);
+    const accounts = { session, monsters, participation, character, skillSet };
+    await rejects(consume(await funded(1), accounts, CRIT).rpc(), "AccountNotInitialized");
+    await rejects(consume(MOCK_VRF, accounts, CRIT).rpc(), "AccountNotInitialized");
+  });
+
+  it("dice in the tests follow deadroll_combat::VrfRoll", () => {
+    assert.equal(d20Of(CRIT), 20);
+    assert.equal(d20Of(MISS), 1);
+    // sha256([0; 32] ‖ 00 00 00 00), first 8 bytes LE (crates/combat/src/rng.rs test vector source).
+    const zero = Buffer.alloc(32);
+    assert.equal(rollAt(zero, 0), sha256(Buffer.alloc(36)).readBigUInt64LE(0));
+  });
+
+  it("external account discriminators", () => {
     assert.deepEqual([...sighash("account:Character")], [0x8c, 0x73, 0xa5, 0x24, 0xf1, 0x99, 0x66, 0x54]);
     assert.deepEqual([...sighash("account:Map")], [0xb6, 0x1e, 0x8e, 0x97, 0x2a, 0xf1, 0xb4, 0xf4]);
     assert.deepEqual([...sighash("account:MapLayout")], [0x8e, 0x57, 0xdf, 0xf4, 0x3b, 0x7b, 0x3e, 0xca]);
@@ -258,291 +396,702 @@ describe("deadroll_session: deployed program", () => {
 });
 
 // ---------------------------------------------------------------------------------------------
-// Part 2: party flow, needs the character (L5) and map (L6) programs
+// Part 2: party flow on the demo map, needs registry GameConfig + character + map
 
-// Flip once `createFinalizedMap` / `createCharacter` below use the merged L5/L6 instructions.
-const FIXTURES_IMPLEMENTED = false;
-const depsReady = FIXTURES_IMPLEMENTED && (await isProgram(CHARACTER)) && (await isProgram(MAP));
+const CHARACTER_IDL = new URL("../target/idl/deadroll_character.json", import.meta.url);
+const MAP_IDL = new URL("../target/idl/deadroll_map.json", import.meta.url);
+const missing: string[] = [];
+if ((await connection.getAccountInfo(config))?.owner.equals(REGISTRY) !== true)
+  missing.push("registry GameConfig (L4)");
+if (!(await isProgram(CHARACTER))) missing.push("deadroll_character deployed");
+if (!(await isProgram(MAP))) missing.push("deadroll_map deployed");
+if (!existsSync(CHARACTER_IDL)) missing.push("target/idl/deadroll_character.json");
+if (!existsSync(MAP_IDL)) missing.push("target/idl/deadroll_map.json");
+const SKIP_PARTY = missing.length ? `needs ${missing.join(", ")}` : false;
 
-/** Test map: 8x8 floor, entrance (0,0), shallow water (1,0), wall (0,2), two wolves at (5,5) and (6,5). */
+const characterProgram: any = SKIP_PARTY
+  ? null
+  : new Program(JSON.parse(readFileSync(CHARACTER_IDL, "utf8")), provider);
+const mapProgram: any = SKIP_PARTY ? null : new Program(JSON.parse(readFileSync(MAP_IDL, "utf8")), provider);
+
+// The map lane's demo preset (tests/map.test.ts): 16x16 room in a wall ring.
+const TILE = { Floor: 0, Wall: 1, Entrance: 4, Exit: 5 };
+const ENTRANCE = { x: 1, y: 1 };
+const EXIT = { x: 14, y: 14 };
+const [WOLF, GOBLIN, CHIEFTAIN, GOBLIN_WARRIOR, SHAMAN] = [0, 1, 2, 3, 4];
+const DEMO_SPAWNS = [
+  { id: WOLF, x: 6, y: 2, pack: 1 },
+  { id: WOLF, x: 7, y: 3, pack: 1 },
+  { id: GOBLIN, x: 2, y: 10, pack: 2 },
+  { id: GOBLIN, x: 3, y: 11, pack: 2 },
+  { id: CHIEFTAIN, x: 12, y: 12, pack: 3 },
+  { id: GOBLIN_WARRIOR, x: 11, y: 12, pack: 3 },
+  { id: SHAMAN, x: 12, y: 11, pack: 3 },
+];
+
 interface MapFixture {
   map: PublicKey;
   layout: PublicKey;
 }
 
-// TODO(L6): create, write and finalize the test map above through `deadroll_map`.
-async function createFinalizedMap(_dm: Keypair): Promise<MapFixture> {
-  throw new Error("needs deadroll_map create_map / write_layout / finalize_map (L6)");
+async function createFinalizedMap(dm: Keypair): Promise<MapFixture> {
+  const index = randomBytes(4).readUInt32LE(0);
+  const idx = Buffer.alloc(4);
+  idx.writeUInt32LE(index);
+  const map = pda([Buffer.from("map"), dm.publicKey.toBuffer(), idx], MAP);
+  const layout = pda([Buffer.from("layout"), map.toBuffer()], MAP);
+  const edit = { dm: dm.publicKey, map, layout };
+  await mapProgram.methods
+    .createMap(index, 16, 16, 1)
+    .accountsStrict({ ...edit, systemProgram: SystemProgram.programId })
+    .signers([dm])
+    .rpc();
+  const tiles = new Array(15 * 32 + 16).fill(TILE.Wall);
+  for (let y = 1; y < 15; y++) for (let x = 1; x < 15; x++) tiles[y * 32 + x] = TILE.Floor;
+  tiles[ENTRANCE.y * 32 + ENTRANCE.x] = TILE.Entrance;
+  tiles[EXIT.y * 32 + EXIT.x] = TILE.Exit;
+  await mapProgram.methods.writeLayout(0, Buffer.from(tiles)).accountsStrict(edit).signers([dm]).rpc();
+  const spawns = DEMO_SPAWNS.map((s) => ({
+    bestiaryId: s.id,
+    x: s.x,
+    y: s.y,
+    level: 1,
+    skills: 0,
+    flags: 0,
+    aspects: 0,
+    pack: s.pack,
+  }));
+  await mapProgram.methods.writeSpawns(ENTRANCE, EXIT, spawns).accountsStrict(edit).signers([dm]).rpc();
+  await mapProgram.methods.finalizeMap(new Array(32).fill(7)).accountsStrict(edit).signers([dm]).rpc();
+  return { map, layout };
 }
 
-// TODO(L5): create a level-1 character (Dexterity 10, hp_max 30) through `deadroll_character`.
-async function createCharacter(
-  _owner: Keypair,
-  _race: "human" | "forestElf",
-  _class: "warrior" | "mage",
-): Promise<PublicKey> {
-  throw new Error("needs deadroll_character create_character (L5)");
+// Same blocks as `deadroll_skillcheck::presets` (tests/character.test.ts).
+const e = (name: string) => ({ [name]: {} });
+const text = (s: string, len: number) => {
+  const out = new Array(len).fill(0);
+  Buffer.from(s, "ascii").forEach((b, i) => (out[i] = b));
+  return out;
+};
+function blocks(category: string, purpose: string, source: string, form: string, aspects: string[], o: any = {}) {
+  return {
+    category: e(category),
+    purpose: e(purpose),
+    source: e(source),
+    form: e(form),
+    target: e(o.line ? "line" : "single"),
+    aspects: [...aspects, "fire", "fire"].slice(0, 3).map(e),
+    aspectCount: aspects.length,
+    effect: e(o.effect ?? "none"),
+    trigger: e(o.trigger ?? "none"),
+    auraRadius: 0,
+  };
+}
+const WARRIOR_SKILLS: [string, any][] = [
+  ["Piercing Thrust", blocks("active", "damage", "combat", "strike", ["piercing"])],
+  ["Shield Bash", blocks("active", "damage", "combat", "strike", ["blunt"], { effect: "stun" })],
+  ["Javelin", blocks("active", "damage", "combat", "projectile", ["piercing"])],
+  ["Bleeding Cleave", blocks("active", "damage", "combat", "strike", ["blood", "piercing"], { line: true })],
+  ["Riposte", blocks("reactive", "damage", "combat", "strike", ["piercing"], { trigger: "hit" })],
+  ["Iron Skin", blocks("passive", "buff", "combat", "strike", ["blunt"], { effect: "protection" })],
+];
+const MAGE_SKILLS: [string, any][] = [
+  ["Frost Bolt", blocks("active", "damage", "magical", "projectile", ["cold"])],
+  ["Frost Burn", blocks("active", "damage", "magical", "projectile", ["cold", "fire"])],
+  ["Ice Prison", blocks("active", "damage", "magical", "projectile", ["cold"], { effect: "freeze" })],
+  ["Arc", blocks("active", "damage", "magical", "strike", ["lightning"], { line: true })],
+  ["Cold Snap", blocks("reactive", "debuff", "magical", "strike", ["cold"], { effect: "slow", trigger: "enemyAdjacent" })],
+  ["Cold Mind", blocks("passive", "buff", "magical", "projectile", ["cold"], { effect: "empowerment" })],
+];
+/** Projectile damage skill slot per class: Javelin, Frost Bolt. */
+const RANGED_SLOT = { warrior: 2, mage: 0 };
+const REACTIVE_SLOT = 4;
+
+type Kind = "warrior" | "mage";
+async function createCharacter(owner: Keypair, kind: Kind): Promise<PublicKey> {
+  const profile = pda([Buffer.from("profile"), owner.publicKey.toBuffer()], CHARACTER);
+  if (!(await connection.getAccountInfo(profile))) {
+    await characterProgram.methods
+      .createProfile()
+      .accountsStrict({ owner: owner.publicKey, profile, systemProgram: SystemProgram.programId })
+      .signers([owner])
+      .rpc();
+  }
+  const index = (await characterProgram.account.playerProfile.fetch(profile)).characterCount;
+  const character = pda([Buffer.from("character"), owner.publicKey.toBuffer(), Buffer.from([index])], CHARACTER);
+  const layer = { spriteId: 1, materialRamp: 2, accentRamp: 3, elementRamp: 0 };
+  const set = kind === "warrior" ? WARRIOR_SKILLS : MAGE_SKILLS;
+  const args = {
+    name: text(kind === "warrior" ? "Bran" : "Ilyra", 32),
+    race: e(kind === "warrior" ? "human" : "forestElf"),
+    class: e(kind),
+    predisposition: e(kind === "warrior" ? "piercing" : "cold"),
+    stats: kind === "warrior" ? [10, 7, 5, 8] : [5, 7, 13, 5],
+    appearance: new Array(20).fill(layer),
+    skills: set.map(([name, b]) => ({ blocks: structuredClone(b), name: text(name, 24) })),
+  };
+  const asset = Keypair.generate();
+  await characterProgram.methods
+    .createCharacter(args)
+    .accountsStrict({
+      owner: owner.publicKey,
+      profile,
+      character,
+      skillSet: pda([Buffer.from("skills"), character.toBuffer()], CHARACTER),
+      bag: pda([Buffer.from("bag"), character.toBuffer()], CHARACTER),
+      config,
+      asset: asset.publicKey,
+      mplCoreProgram: MPL_CORE,
+      systemProgram: SystemProgram.programId,
+    })
+    .signers([owner, asset])
+    .rpc();
+  return character;
 }
 
-describe(
-  "deadroll_session: party flow",
-  {
-    skip: depsReady
-      ? false
-      : "needs map/character fixtures from the L5/L6 instructions and both programs deployed",
-  },
-  () => {
-    let dm: Keypair, dmActor: Keypair, stranger: Keypair;
-    const players: { wallet: Keypair; actor: Keypair; character: PublicKey; participation: PublicKey; stash: PublicKey }[] = [];
-    let fixture: MapFixture;
-    let acc: ReturnType<typeof sessionAccounts>;
-    let p0Token: PublicKey, p1Token: PublicKey, dmToken: PublicKey;
+interface Player {
+  kind: Kind;
+  wallet: Keypair;
+  actor: Keypair;
+  character: PublicKey;
+  participation: PublicKey;
+  stash: PublicKey;
+  skillSet: PublicKey;
+  bag: PublicKey;
+}
 
-    const move = (who: number, signer: Keypair, steps: number[], token: PublicKey | null = null) => {
-      const [padded, len] = path(steps);
-      return program.methods
-        .moveUnit(padded, len)
-        .accountsStrict({
-          signer: signer.publicKey,
-          session: acc.session,
-          participation: players[who].participation,
-          monsters: acc.monsters,
-          layout: fixture.layout,
-          sessionToken: token,
-        })
-        .signers([signer])
-        .rpc();
-    };
-    const monsterMove = (signer: Keypair, monster: number, steps: number[], token: PublicKey | null = null) => {
-      const [padded, len] = path(steps);
-      return program.methods
-        .monsterMove(monster, padded, len)
-        .accountsStrict({
-          signer: signer.publicKey,
-          session: acc.session,
-          monsters: acc.monsters,
-          layout: fixture.layout,
-          sessionToken: token,
-        })
-        .signers([signer])
-        .rpc();
-    };
-    const endTurn = (signer: Keypair, who: number | null, token: PublicKey | null = null) =>
-      program.methods
-        .endTurn()
-        .accountsStrict({
-          signer: signer.publicKey,
-          session: acc.session,
-          monsters: acc.monsters,
-          participation: who === null ? null : players[who].participation,
-          sessionToken: token,
-        })
-        .signers([signer])
-        .rpc();
-    const join = (who: number, signer: Keypair, contribution: BN) =>
-      program.methods
-        .joinSession(contribution, players[who].actor.publicKey)
-        .accountsStrict({
-          player: signer.publicKey,
-          session: acc.session,
-          character: players[who].character,
-          participation: players[who].participation,
-          stash: players[who].stash,
-          escrow: acc.escrow,
-          sessionAuthority,
-          config,
-          characterProgram: CHARACTER,
-          systemProgram: SystemProgram.programId,
-        })
-        .signers([signer])
-        .rpc();
-    const ready = (who: number, signer: Keypair, value: boolean) =>
-      program.methods
-        .setReady(value)
-        .accountsStrict({ player: signer.publicKey, session: acc.session, participation: players[who].participation })
-        .signers([signer])
-        .rpc();
-    const start = (signer: Keypair) =>
-      program.methods
-        .startSession()
-        .accountsStrict({ dm: signer.publicKey, session: acc.session, monsters: acc.monsters, escrow: acc.escrow })
-        .signers([signer])
-        .rpc();
-    const state = () => program.account.gameSession.fetch(acc.session) as Promise<any>;
-    const part = (who: number) => program.account.participation.fetch(players[who].participation) as Promise<any>;
-    const monsters = () => program.account.monsterState.fetch(acc.monsters) as Promise<any>;
+/** One party on a fresh demo map, with helpers for every session instruction. */
+class Party {
+  dm!: Keypair;
+  dmActor!: Keypair;
+  fixture!: MapFixture;
+  acc!: ReturnType<typeof sessionAccounts>;
+  players: Player[] = [];
 
-    before(async () => {
-      [dm, dmActor, stranger] = await Promise.all([funded(), funded(1), funded(1)]);
-      fixture = await createFinalizedMap(dm);
-      acc = sessionAccounts(fixture.map);
-      for (const [race, cls] of [["human", "warrior"], ["forestElf", "mage"]] as const) {
-        const [wallet, actor] = await Promise.all([funded(), funded(1)]);
-        const character = await createCharacter(wallet, race, cls);
-        players.push({ wallet, actor, character, ...playerAccounts(acc.session, character) });
+  static async create(kinds: Kind[]): Promise<Party> {
+    const p = new Party();
+    [p.dm, p.dmActor] = await Promise.all([funded(), funded(1)]);
+    p.fixture = await createFinalizedMap(p.dm);
+    p.acc = sessionAccounts(p.fixture.map);
+    for (const kind of kinds) {
+      const [wallet, actor] = await Promise.all([funded(), funded(1)]);
+      const character = await createCharacter(wallet, kind);
+      p.players.push({ kind, wallet, actor, character, ...playerAccounts(p.acc.session, character) });
+    }
+    return p;
+  }
+
+  open() {
+    return openSession(this.dm, this.fixture.map, this.fixture.layout, PRICE, this.dmActor.publicKey);
+  }
+  join(who: number, signer: Keypair, contribution: BN) {
+    const pl = this.players[who];
+    return program.methods
+      .joinSession(contribution, pl.actor.publicKey)
+      .accountsStrict({
+        player: signer.publicKey,
+        session: this.acc.session,
+        character: pl.character,
+        participation: pl.participation,
+        stash: pl.stash,
+        escrow: this.acc.escrow,
+        sessionAuthority,
+        config,
+        characterProgram: CHARACTER,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([signer])
+      .rpc();
+  }
+  ready(who: number, signer: Keypair, value: boolean) {
+    return program.methods
+      .setReady(value)
+      .accountsStrict({ player: signer.publicKey, session: this.acc.session, participation: this.players[who].participation })
+      .signers([signer])
+      .rpc();
+  }
+  start(signer: Keypair) {
+    return program.methods
+      .startSession()
+      .accountsStrict({ dm: signer.publicKey, session: this.acc.session, monsters: this.acc.monsters, escrow: this.acc.escrow })
+      .signers([signer])
+      .rpc();
+  }
+  /** open, everyone joins (player 0 pays the whole price), ready, start. */
+  async startAll() {
+    await this.open().rpc();
+    for (let i = 0; i < this.players.length; i++) await this.join(i, this.players[i].wallet, i === 0 ? PRICE : new BN(0));
+    for (let i = 0; i < this.players.length; i++) await this.ready(i, this.players[i].wallet, true);
+    await this.start(this.dm);
+  }
+  move(who: number, signer: Keypair, steps: number[], token: PublicKey | null = null) {
+    const [padded, len] = path(steps);
+    return program.methods
+      .moveUnit(padded, len)
+      .accountsStrict({
+        signer: signer.publicKey,
+        session: this.acc.session,
+        participation: this.players[who].participation,
+        monsters: this.acc.monsters,
+        layout: this.fixture.layout,
+        sessionToken: token,
+      })
+      .signers([signer])
+      .rpc();
+  }
+  monsterMove(signer: Keypair, monster: number, steps: number[], token: PublicKey | null = null) {
+    const [padded, len] = path(steps);
+    return program.methods
+      .monsterMove(monster, padded, len)
+      .accountsStrict({
+        signer: signer.publicKey,
+        session: this.acc.session,
+        monsters: this.acc.monsters,
+        layout: this.fixture.layout,
+        sessionToken: token,
+      })
+      .signers([signer])
+      .rpc();
+  }
+  endTurn(signer: Keypair, who: number | null, token: PublicKey | null = null) {
+    return program.methods
+      .endTurn()
+      .accountsStrict({
+        signer: signer.publicKey,
+        session: this.acc.session,
+        monsters: this.acc.monsters,
+        participation: who === null ? null : this.players[who].participation,
+        sessionToken: token,
+      })
+      .signers([signer])
+      .rpc();
+  }
+  act(who: number, signer: Keypair, slot: number, target: number, token: PublicKey | null = null) {
+    const pl = this.players[who];
+    return program.methods
+      .act(slot, target)
+      .accountsStrict({
+        signer: signer.publicKey,
+        session: this.acc.session,
+        participation: pl.participation,
+        character: pl.character,
+        skillSet: pl.skillSet,
+        monsters: this.acc.monsters,
+        sessionToken: token,
+        ...vrfAccounts,
+      })
+      .signers([signer])
+      .rpc();
+  }
+  monsterAct(signer: Keypair, monster: number, target: number, token: PublicKey | null = null, action = 0) {
+    const pl = this.players[target];
+    return program.methods
+      .monsterAct(monster, action, target)
+      .accountsStrict({
+        signer: signer.publicKey,
+        session: this.acc.session,
+        monsters: this.acc.monsters,
+        participation: pl.participation,
+        character: pl.character,
+        sessionToken: token,
+        ...vrfAccounts,
+      })
+      .signers([signer])
+      .rpc();
+  }
+  /** The callback for the pending action of player `who` (attacker or target). */
+  consume(who: number, seed: Buffer, identity = MOCK_VRF) {
+    const pl = this.players[who];
+    return consume(
+      identity,
+      {
+        session: this.acc.session,
+        monsters: this.acc.monsters,
+        participation: pl.participation,
+        character: pl.character,
+        skillSet: pl.skillSet,
+      },
+      seed,
+    ).rpc({ commitment: "confirmed" });
+  }
+  flee(who: number, signer: Keypair) {
+    return program.methods
+      .flee()
+      .accountsStrict({
+        signer: signer.publicKey,
+        session: this.acc.session,
+        monsters: this.acc.monsters,
+        participation: this.players[who].participation,
+        sessionToken: null,
+      })
+      .signers([signer])
+      .rpc();
+  }
+  claimRewards(who: number) {
+    const pl = this.players[who];
+    return program.methods
+      .claimRewards()
+      .accountsStrict({
+        session: this.acc.session,
+        participation: pl.participation,
+        stash: pl.stash,
+        character: pl.character,
+        bag: pl.bag,
+        sessionAuthority,
+        config,
+        characterProgram: CHARACTER,
+      })
+      .rpc({ commitment: "confirmed" });
+  }
+  claimEscrow(signer: Keypair) {
+    return program.methods
+      .claimEscrow()
+      .accountsStrict({
+        dm: signer.publicKey,
+        session: this.acc.session,
+        escrow: this.acc.escrow,
+        map: this.fixture.map,
+        sessionAuthority,
+        config,
+        mapProgram: MAP,
+      })
+      .signers([signer])
+      .rpc();
+  }
+  state() {
+    return program.account.gameSession.fetch(this.acc.session) as Promise<any>;
+  }
+  part(who: number) {
+    return program.account.participation.fetch(this.players[who].participation) as Promise<any>;
+  }
+  monsters() {
+    return program.account.monsterState.fetch(this.acc.monsters) as Promise<any>;
+  }
+  character(who: number) {
+    return characterProgram.account.character.fetch(this.players[who].character) as Promise<any>;
+  }
+
+  /**
+   * Plays until the party ends or `steps` transactions ran. Players shoot their ranged skill at the
+   * nearest living monster (walking closer when out of range) with `playerSeed`; monsters walk to
+   * and strike `huntSlot` (or any living player) with `monsterSeed(slot)`; `passive` players only
+   * end their turn.
+   */
+  async play(opts: {
+    playerSeed: Buffer;
+    monsterSeed: (slot: number) => Buffer;
+    huntSlot?: number;
+    passive?: boolean;
+    steps?: number;
+    until?: (s: any) => boolean;
+  }) {
+    const cheb = (a: any, b: any) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
+    const dirs = [
+      [N, 0, -1],
+      [E, 1, 0],
+      [S, 0, 1],
+      [W, -1, 0],
+    ];
+    for (let step = 0; step < (opts.steps ?? 400); step++) {
+      const s = await this.state();
+      if (!s.core.status.active || opts.until?.(s)) return s;
+      const unit = s.core.turnOrder[s.core.turnIndex];
+      const all = (await this.monsters()).core;
+      const ms = all.monsters.slice(0, all.count);
+      if (unit < MONSTER_BASE) {
+        const pl = await this.part(unit);
+        const ap = pl.apSeq === s.turnSeq ? pl.core.actionPoints : pl.maxAp;
+        const living = ms.map((m: any, i: number) => ({ ...m, i })).filter((m: any) => m.alive);
+        const target = living.sort((a: any, b: any) => cheb(pl.core, a) - cheb(pl.core, b))[0];
+        if (opts.passive || !target || ap < 1) {
+          await this.endTurn(this.players[unit].wallet, unit);
+        } else if (cheb(pl.core, target) <= 6 && cheb(pl.core, target) >= 1 && ap >= 2) {
+          await this.act(unit, this.players[unit].wallet, RANGED_SLOT[this.players[unit].kind], target.i);
+          await this.consume(unit, opts.playerSeed);
+        } else if (!(await this.stepToward(unit, pl.core, target, dirs, cheb))) {
+          await this.endTurn(this.players[unit].wallet, unit);
+        }
+      } else {
+        const mi = unit - MONSTER_BASE;
+        const m = ms[mi];
+        const alive = this.players.map((_, i) => i).filter((i) => s.aliveMask & (1 << i));
+        const slot = opts.huntSlot !== undefined && alive.includes(opts.huntSlot) ? opts.huntSlot : alive[0];
+        const pos = s.playerPos[slot];
+        const range = m.bestiaryId === SHAMAN ? 6 : 1;
+        if (cheb(m, pos) <= range && m.actionPoints >= 2) {
+          await this.monsterAct(this.dm, mi, slot);
+          await this.consume(slot, opts.monsterSeed(slot));
+        } else if (m.actionPoints >= 1 && (await this.stepToward(null, m, pos, dirs, cheb, mi))) {
+          // stepped
+        } else {
+          await this.endTurn(this.dm, null);
+        }
       }
-    });
+    }
+    return this.state();
+  }
 
-    it("open_session: DM only, minimum price, then opens and spawns monsters", async () => {
-      await rejects(openSession(players[0].wallet, fixture.map, fixture.layout, PRICE, dmActor.publicKey).rpc(), "NotDm");
-      await rejects(openSession(dm, fixture.map, fixture.layout, MIN_PRICE.subn(1), dmActor.publicKey).rpc(), "PriceTooLow");
-      const sig = await openSession(dm, fixture.map, fixture.layout, PRICE, dmActor.publicKey).rpc({ commitment: "confirmed" });
+  private async stepToward(who: number | null, from: any, to: any, dirs: number[][], cheb: any, monster?: number) {
+    const options = dirs
+      .map(([d, dx, dy]) => ({ d, cell: { x: from.x + dx, y: from.y + dy } }))
+      .filter((o) => cheb(o.cell, to) < cheb(from, to))
+      .sort((a, b) => cheb(a.cell, to) - cheb(b.cell, to));
+    for (const o of options) {
+      try {
+        if (who === null) await this.monsterMove(this.dm, monster!, [o.d]);
+        else await this.move(who, this.players[who].wallet, [o.d]);
+        return true;
+      } catch {
+        // blocked or occupied: try the next direction
+      }
+    }
+    return false;
+  }
+}
 
-      const s = await state();
-      assert.ok(s.core.status.lobby);
-      assert.ok(s.core.dm.equals(dm.publicKey));
-      assert.ok(s.core.priceLamports.eq(PRICE));
-      assert.deepEqual([s.entrance.x, s.entrance.y], [0, 0]);
-      assert.equal(s.core.turnOrder[0], EMPTY_UNIT);
-      const m = await monsters();
-      assert.equal(m.core.count, 2);
-      assert.ok(m.core.monsters[0].alive && m.core.monsters[1].alive);
-      assert.deepEqual([m.core.monsters[0].x, m.core.monsters[0].y], [5, 5]);
+describe("deadroll_session: lobby, auth and movement on the demo map", { skip: SKIP_PARTY }, () => {
+  let party: Party, stranger: Keypair;
+  let p0Token: PublicKey, p1Token: PublicKey;
 
-      const tx = await connection.getTransaction(sig, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
-      const inner = tx!.meta!.innerInstructions!.flatMap((i) => i.instructions);
-      const keys = tx!.transaction.message.staticAccountKeys;
-      const toMap = inner.find((ix) => keys[ix.programIdIndex].equals(MAP));
-      assert.ok(toMap, "map.set_status CPI");
+  before(async () => {
+    party = await Party.create(["warrior", "mage"]);
+    stranger = await funded(1);
+  });
 
-      await rejects(openSession(dm, fixture.map, fixture.layout, PRICE, dmActor.publicKey).rpc(), "already in use");
-    });
+  it("open_session: DM only, minimum price, then opens and spawns monsters", async () => {
+    const { dm, dmActor, fixture } = party;
+    await rejects(openSession(party.players[0].wallet, fixture.map, fixture.layout, PRICE, dmActor.publicKey).rpc(), "NotDm");
+    await rejects(openSession(dm, fixture.map, fixture.layout, MIN_PRICE.subn(1), dmActor.publicKey).rpc(), "PriceTooLow");
+    await party.open().rpc({ commitment: "confirmed" });
+    const s = await party.state();
+    assert.ok(s.core.status.lobby);
+    assert.deepEqual([s.entrance.x, s.entrance.y], [ENTRANCE.x, ENTRANCE.y]);
+    const m = await party.monsters();
+    assert.equal(m.core.count, DEMO_SPAWNS.length);
+    assert.deepEqual([m.core.monsters[4].x, m.core.monsters[4].y, m.core.monsters[4].bestiaryId], [12, 12, CHIEFTAIN]);
+    await rejects(party.open().rpc(), "already in use");
+  });
 
-    it("join_session: owner only, pays only the missing part of the price", async () => {
-      await rejects(join(0, players[1].wallet, PRICE), "NotCharacterOwner");
-      await rejects(join(0, players[0].actor, PRICE), "NotCharacterOwner");
-      const before = await connection.getBalance(acc.escrow);
-      await join(0, players[0].wallet, PRICE.muln(3));
-      assert.equal((await connection.getBalance(acc.escrow)) - before, PRICE.toNumber());
-      await join(1, players[1].wallet, PRICE);
+  it("join_session: owner only (also signs character.lock_for_session), pays only the missing part", async () => {
+    const [p0, p1] = party.players;
+    await rejects(party.join(0, p1.wallet, PRICE), "NotCharacterOwner");
+    const before = await connection.getBalance(party.acc.escrow);
+    await party.join(0, p0.wallet, PRICE.muln(3));
+    assert.equal((await connection.getBalance(party.acc.escrow)) - before, PRICE.toNumber());
+    await party.join(1, p1.wallet, PRICE);
+    const [a, b] = await Promise.all([party.part(0), party.part(1)]);
+    assert.ok(a.contribution.eq(PRICE) && b.contribution.eqn(0));
+    assert.equal(a.core.hp, (await party.character(0)).core.hpMax);
+    assert.ok((await party.character(0)).core.inSession.equals(party.acc.session));
+  });
 
-      const [p0, p1] = await Promise.all([part(0), part(1)]);
-      assert.ok(p0.contribution.eq(PRICE));
-      assert.ok(p1.contribution.eqn(0));
-      assert.equal(p0.core.slot, 0);
-      assert.equal(p1.core.slot, 1);
-      assert.equal(p0.core.hp, 30);
-      assert.equal(p0.maxAp, 5);
-      assert.ok(p0.core.actor.equals(players[0].actor.publicKey));
-      assert.ok(p0.player.equals(players[0].wallet.publicKey));
-      const escrow = (await program.account.escrow.fetch(acc.escrow)) as any;
-      assert.ok(escrow.collected.eq(PRICE));
-      await rejects(join(0, players[0].wallet, PRICE), "already in use");
-    });
+  it("set_ready / start_session", async () => {
+    const [p0, p1] = party.players;
+    await rejects(party.ready(0, p0.actor, true), "NotPlayer");
+    await party.ready(0, p0.wallet, true);
+    await rejects(party.start(party.dm), "NotAllReady");
+    await party.ready(1, p1.wallet, true);
+    await rejects(party.start(party.dmActor), "NotDm");
+    await party.start(party.dm);
+    const s = await party.state();
+    assert.ok(s.core.status.active);
+    assert.deepEqual(s.core.turnOrder.slice(0, 10), [0, 1, 4, 5, 6, 7, 8, 9, 10, EMPTY_UNIT]);
+  });
 
-    it("set_ready / start_session: main wallets only, everyone ready, DM starts", async () => {
-      await rejects(ready(0, players[0].actor, true), "NotPlayer");
-      await rejects(ready(0, players[1].wallet, true), "NotPlayer");
-      await ready(0, players[0].wallet, true);
-      await rejects(start(dm), "NotAllReady");
-      await ready(1, players[1].wallet, true);
-      await ready(1, players[1].wallet, false);
-      assert.equal((await state()).readyMask, 0b01);
-      await ready(1, players[1].wallet, true);
-      await rejects(start(players[0].wallet), "NotDm");
-      await rejects(start(dmActor), "NotDm");
-      await start(dm);
+  it("auth: main wallet or bound session key with a live token from that wallet", async () => {
+    const [p0, p1] = party.players;
+    await rejects(party.move(0, stranger, [S]), "Unauthorized");
+    await rejects(party.move(0, p0.actor, [S]), "SessionTokenMissing");
+    const foreign = await issueToken(p0.actor, p1.wallet);
+    await rejects(party.move(0, p0.actor, [S], foreign), "InvalidSessionToken");
+    const now = (await connection.getBlockTime(await connection.getSlot()))!;
+    const expired = await issueToken(p0.actor, p0.wallet, { validUntil: now - 60 });
+    await rejects(party.move(0, p0.actor, [S], expired), "SessionTokenExpired");
+    await revokeToken(expired, p0.wallet.publicKey);
+    p0Token = await issueToken(p0.actor, p0.wallet);
+    p1Token = await issueToken(p1.actor, p1.wallet);
+    await rejects(party.move(0, p1.actor, [S], p1Token), "Unauthorized");
+  });
 
-      const s = await state();
-      assert.ok(s.core.status.active);
-      assert.deepEqual(s.core.turnOrder.slice(0, 5), [0, 1, 4, 5, EMPTY_UNIT]);
-      assert.equal(s.core.round, 1);
-      assert.equal(s.turnSeq, 1);
-      await rejects(start(dm), "NotInLobby");
-      await rejects(ready(0, players[0].wallet, false), "NotInLobby");
-    });
+  it("move_unit: walls, occupancy and action points", async () => {
+    const key = party.players[0].actor;
+    await rejects(party.move(1, party.players[1].wallet, [S]), "NotYourTurn");
+    await rejects(party.move(0, key, [N], p0Token), "CellBlocked"); // wall ring
+    await rejects(party.move(0, key, [E, W], p0Token), "CellOccupied"); // player 1 on the entrance
+    await rejects(party.move(0, key, [E, E, E, E, E, E, E, E], p0Token), "NotEnoughActionPoints");
+    await party.move(0, key, [S], p0Token);
+    const p = await party.part(0);
+    assert.deepEqual([p.core.x, p.core.y, p.core.actionPoints], [1, 2, p.maxAp - 1]);
+  });
+});
 
-    it("auth: main wallet or bound session key with a live token from that wallet", async () => {
-      const [p0, p1] = players;
-      await rejects(move(0, stranger, [S]), "Unauthorized");
-      await rejects(move(0, dm, [S]), "Unauthorized");
-      await rejects(move(0, p0.actor, [S]), "SessionTokenMissing");
-      await rejects(move(0, p0.actor, [S], p0.wallet.publicKey), "InvalidSessionToken"); // not a token
-      const foreign = await issueToken(p0.actor, p1.wallet);
-      await rejects(move(0, p0.actor, [S], foreign), "InvalidSessionToken");
-      const otherTarget = await issueToken(p0.actor, p0.wallet, { target: SESSION_KEYS });
-      await rejects(move(0, p0.actor, [S], otherTarget), "InvalidSessionToken");
-      const now = (await connection.getBlockTime(await connection.getSlot()))!;
-      const expired = await issueToken(p0.actor, p0.wallet, { validUntil: now - 60 });
-      await rejects(move(0, p0.actor, [S], expired), "SessionTokenExpired");
-      await revokeToken(expired, p0.wallet.publicKey);
-      p0Token = await issueToken(p0.actor, p0.wallet);
-      p1Token = await issueToken(p1.actor, p1.wallet);
-      await rejects(move(0, p1.actor, [S], p1Token), "Unauthorized");
-      const loose = await funded(1);
-      const looseToken = await issueToken(loose, p0.wallet);
-      await rejects(move(0, loose, [S], looseToken), "Unauthorized");
-    });
+describe("deadroll_session: combat, death, victory and payouts", { skip: SKIP_PARTY }, () => {
+  let party: Party;
 
-    it("move_unit: path, tiles, occupancy and action points", async () => {
-      const key = players[0].actor;
-      await rejects(move(1, players[1].wallet, [S]), "NotYourTurn");
-      await rejects(move(0, key, [], p0Token), "InvalidPathLength");
-      await rejects(move(0, key, Array(17).fill(S), p0Token), "InvalidPathLength");
-      await rejects(move(0, key, [4], p0Token), "InvalidDirection");
-      await rejects(move(0, key, [N], p0Token), "OutOfBounds");
-      await rejects(move(0, key, [W], p0Token), "OutOfBounds");
-      await rejects(move(0, key, [S, S], p0Token), "CellBlocked");
-      await rejects(move(0, key, [S, N], p0Token), "CellOccupied"); // player 1 on the entrance
-      await rejects(move(0, key, [S, E, E, E, E, E], p0Token), "NotEnoughActionPoints");
+  before(async () => {
+    party = await Party.create(["warrior", "mage"]);
+    await party.startAll();
+  });
 
-      await move(0, key, [E, E], p0Token); // water 2 + floor 1
-      let p = await part(0);
-      assert.deepEqual([p.core.x, p.core.y, p.core.actionPoints], [2, 0, 2]);
-      await rejects(move(0, key, [S, S, S], p0Token), "NotEnoughActionPoints");
-      await move(0, players[0].wallet, [S]);
-      p = await part(0);
-      assert.deepEqual([p.core.x, p.core.y, p.core.actionPoints], [2, 1, 1]);
-      assert.deepEqual([(await state()).playerPos[0].x, (await state()).playerPos[0].y], [2, 1]);
-    });
+  it("act: turn, range, skill and target checks", async () => {
+    const [p0, p1] = party.players;
+    await rejects(party.act(1, p1.wallet, RANGED_SLOT.mage, 0), "NotYourTurn");
+    await rejects(party.act(0, p1.wallet, RANGED_SLOT.warrior, 0), "Unauthorized");
+    await rejects(party.act(0, p0.wallet, 0, 0), "OutOfRange"); // Piercing Thrust is a strike
+    await rejects(party.act(0, p0.wallet, BASE_ATTACK, 0), "OutOfRange");
+    await rejects(party.act(0, p0.wallet, REACTIVE_SLOT, 0), "InvalidSkill");
+    await rejects(party.act(0, p0.wallet, 9, 0), "InvalidSkill");
+    await rejects(party.act(0, p0.wallet, RANGED_SLOT.warrior, 50), "InvalidTarget");
+  });
 
-    it("end_turn: the current unit's player or the DM, then round-robin", async () => {
-      await rejects(endTurn(players[0].wallet, null), "ParticipationMissing");
-      await rejects(endTurn(players[1].wallet, 1), "NotYourTurn");
-      await rejects(endTurn(players[1].wallet, 0), "Unauthorized");
-      await endTurn(players[0].actor, 0, p0Token);
-      let s = await state();
-      assert.deepEqual([s.core.turnIndex, s.turnSeq], [1, 2]);
+  it("act requests a roll; nothing moves until the VRF callback resolves the hit", async () => {
+    const p0 = party.players[0];
+    const before = (await party.monsters()).core.monsters[0].hp;
+    await party.act(0, p0.wallet, RANGED_SLOT.warrior, 0); // wolf at (6,2), distance 5
+    let s = await party.state();
+    assert.ok(s.core.pendingVrf);
+    assert.deepEqual([s.pending.attacker, s.pending.target, s.pending.skillSlot], [0, MONSTER_BASE, RANGED_SLOT.warrior]);
+    assert.equal((await party.part(0)).core.actionPoints, (await party.part(0)).maxAp - 2);
+    await rejects(party.move(0, p0.wallet, [S]), "RollPending");
+    await rejects(party.endTurn(p0.wallet, 0), "RollPending");
+    await rejects(party.act(0, p0.wallet, RANGED_SLOT.warrior, 0), "RollPending");
+    await rejects(party.flee(0, p0.wallet), "RollPending");
 
-      await move(1, players[1].actor, [E], p1Token);
-      await endTurn(players[1].wallet, 1);
-      s = await state();
-      assert.equal(s.core.turnIndex, 2);
-      assert.equal((await monsters()).core.monsters[0].actionPoints, 4);
-    });
+    const impostor = await funded(1);
+    await rejects(party.consume(0, CRIT, impostor), "ConstraintAddress");
+    await rejects(party.consume(1, CRIT), "InvalidPendingAccounts");
 
-    it("monster_move: DM or DM session key, on that monster's turn", async () => {
-      await rejects(monsterMove(players[0].wallet, 0, [N]), "Unauthorized");
-      await rejects(monsterMove(players[0].actor, 0, [N], p0Token), "Unauthorized");
-      await rejects(monsterMove(dm, 1, [N]), "NotYourTurn");
-      await rejects(monsterMove(dm, 2, [N]), "InvalidMonster");
-      await rejects(monsterMove(dm, 0, [E]), "CellOccupied");
-      await rejects(monsterMove(dm, 0, [N, N, N, N, N]), "NotEnoughActionPoints");
-      await rejects(monsterMove(dmActor, 0, [N]), "SessionTokenMissing");
-      dmToken = await issueToken(dmActor, dm);
-      await monsterMove(dmActor, 0, [N], dmToken);
-      await monsterMove(dm, 0, [W]);
-      const m = (await monsters()).core.monsters[0];
-      assert.deepEqual([m.x, m.y, m.actionPoints], [4, 4, 2]);
+    const sig = await party.consume(0, CRIT);
+    const hit = await eventOf(sig, "hitResolved");
+    assert.equal(hit.outcome, 1);
+    assert.equal(hit.d20, 20);
+    assert.ok(hit.crit);
+    assert.deepEqual(Buffer.from(hit.seed), CRIT);
+    assert.ok(hit.damage >= 1);
+    assert.ok(hit.breakdown.length > 100, "Borsh HitResult");
+    const wolf = (await party.monsters()).core.monsters[0];
+    assert.equal(wolf.hp, Math.max(0, before - hit.damage));
+    assert.equal(hit.targetHp, wolf.hp);
+    s = await party.state();
+    assert.ok(!s.core.pendingVrf);
+    assert.equal(s.core.actionCounter, 1);
+    assert.deepEqual(Buffer.from(s.core.lastSeed), CRIT);
+    await rejects(party.consume(0, CRIT), "NoRollPending");
+  });
 
-      await rejects(endTurn(players[0].wallet, 0), "Unauthorized");
-      await endTurn(dmActor, null, dmToken);
-      await endTurn(dm, null);
-      const s = await state();
-      assert.deepEqual([s.core.turnIndex, s.core.round, s.turnSeq], [0, 2, 5]);
-    });
+  it("a miss deals nothing", async () => {
+    const p0 = party.players[0];
+    const before = (await party.monsters()).core.monsters[0];
+    if (!before.alive) return;
+    await party.act(0, p0.wallet, RANGED_SLOT.warrior, 0);
+    const sig = await party.consume(0, MISS);
+    const hit = await eventOf(sig, "hitResolved");
+    assert.deepEqual([hit.outcome, hit.d20, hit.damage], [0, 1, 0]);
+    assert.equal((await party.monsters()).core.monsters[0].hp, before.hp);
+    await rejects(party.act(0, p0.wallet, RANGED_SLOT.warrior, 0), "NotEnoughActionPoints");
+  });
 
-    it("action points refill on the next own turn; monsters block", async () => {
-      await move(0, players[0].wallet, [E]); // (3,1), fresh AP 5 -> 4
-      assert.equal((await part(0)).core.actionPoints, 4);
-      await rejects(move(0, players[0].wallet, [E, S, S, S]), "CellOccupied"); // wolf at (4,4)
-    });
+  it("monster_act: DM on that monster's turn, target in range", async () => {
+    const [p0, p1] = party.players;
+    await party.endTurn(p0.wallet, 0);
+    await rejects(party.monsterAct(party.dm, 0, 0), "NotYourTurn");
+    await party.endTurn(p1.wallet, 1);
+    const s = await party.state();
+    const wolfTurn = s.core.turnOrder[s.core.turnIndex] - MONSTER_BASE;
+    await rejects(party.monsterAct(p0.wallet, wolfTurn, 0), "Unauthorized");
+    await rejects(party.monsterAct(party.dm, wolfTurn, 0, null, 7), "InvalidAction");
+    await rejects(party.monsterAct(party.dm, wolfTurn, 0), "OutOfRange");
+  });
 
-    it("lobby is closed after start", async () => {
-      const late = await funded();
-      const character = await createCharacter(late, "human", "warrior");
-      players.push({ wallet: late, actor: late, character, ...playerAccounts(acc.session, character) });
-      await rejects(join(2, late, PRICE), "NotInLobby");
-    });
-  },
-);
+  it("monsters kill the mage: tombstone through character.mark_dead", async () => {
+    const s = await party.play({ playerSeed: MISS, monsterSeed: (slot) => (slot === 1 ? CRIT : MISS), huntSlot: 1, passive: true, steps: 400, until: (st) => (st.aliveMask & 0b10) === 0 });
+    assert.ok(s.core.status.active, "the warrior still lives");
+    assert.equal(s.aliveMask & 0b10, 0);
+    assert.equal((await party.part(1)).core.hp, 0);
+    const c = await party.character(1);
+    assert.ok(!c.core.alive);
+    assert.ok(c.core.inSession.equals(party.acc.session), "a tombstone stays locked to its last session");
+    assert.equal(c.core.stateVersion, 1);
+  });
+
+  it("killing the goblin chieftain wins the party", async () => {
+    await rejects(party.claimRewards(0), "NotFinished");
+    await rejects(party.claimEscrow(party.dm), "NotFinished");
+    const s = await party.play({ playerSeed: CRIT, monsterSeed: () => MISS, steps: 2000 });
+    assert.ok(s.core.status.victory, "boss killed");
+    assert.ok(s.xpPool > 0);
+    assert.deepEqual(Buffer.from(s.victorySeed), Buffer.from(s.core.lastSeed));
+    const m = await party.monsters();
+    assert.ok(!m.core.monsters[4].alive);
+  });
+
+  it("claim_rewards: XP and boss loot for the living, nothing for the dead, once each", async () => {
+    const before = await party.character(0);
+    const sig = await party.claimRewards(0);
+    const ev = await eventOf(sig, "rewardsClaimed");
+    const s = await party.state();
+    assert.equal(ev.xp, s.xpPool);
+    assert.ok(ev.resources.reduce((a: number, b: number) => a + b, 0) >= 2);
+    const after = await party.character(0);
+    assert.equal(after.core.xp, before.core.xp + s.xpPool);
+    assert.equal(after.core.inSession, null);
+    const bag = await characterProgram.account.bag.fetch(party.players[0].bag);
+    assert.deepEqual(bag.resources, ev.resources);
+    const stash = (await program.account.tempStash.fetch(party.players[0].stash)) as any;
+    assert.equal(stash.xp, 0);
+    await rejects(party.claimRewards(0), "AlreadySettled");
+
+    const dead = await eventOf(await party.claimRewards(1), "rewardsClaimed");
+    assert.equal(dead.xp, 0);
+    assert.ok(!(await party.character(1)).core.alive);
+  });
+
+  it("claim_escrow: DM main wallet only, once; the map is finished", async () => {
+    await rejects(party.claimEscrow(party.players[0].wallet), "NotDm");
+    await rejects(party.claimEscrow(party.dmActor), "NotDm");
+    const before = await connection.getBalance(party.dm.publicKey);
+    await party.claimEscrow(party.dm);
+    const gained = (await connection.getBalance(party.dm.publicKey)) - before;
+    assert.ok(gained > PRICE.toNumber() - 10_000, `DM got ${gained}`);
+    const map = await mapProgram.account.map.fetch(party.fixture.map);
+    assert.ok(map.core.status.finished);
+    await rejects(party.claimEscrow(party.dm), "AlreadyClaimed");
+  });
+});
+
+describe("deadroll_session: flee and wipe", { skip: SKIP_PARTY }, () => {
+  it("flee needs every living player; any other action resets the intents", async () => {
+    const party = await Party.create(["warrior", "mage"]);
+    await party.startAll();
+    const [p0, p1] = party.players;
+    await rejects(party.flee(1, p1.wallet), "NotYourTurn");
+    await party.flee(0, p0.wallet); // spends the turn
+    let s = await party.state();
+    assert.deepEqual([s.fleeMask, s.core.turnIndex], [0b01, 1]);
+    await party.move(1, p1.wallet, [S]); // another action: intents reset
+    assert.equal((await party.state()).fleeMask, 0);
+    await party.endTurn(p1.wallet, 1);
+    for (let i = 0; i < DEMO_SPAWNS.length; i++) await party.endTurn(party.dm, null);
+    await party.flee(0, p0.wallet);
+    await party.flee(1, p1.wallet);
+    s = await party.state();
+    assert.ok(s.core.status.fled);
+    await rejects(party.flee(0, p0.wallet), "NotActive");
+
+    const ev = await eventOf(await party.claimRewards(0), "rewardsClaimed");
+    assert.equal(ev.xp, 0);
+    assert.equal((await party.character(0)).core.inSession, null, "unlocked, the cache is abandoned");
+    await party.claimEscrow(party.dm);
+  });
+
+  it("a wiped party ends; the DM is still paid", async () => {
+    const party = await Party.create(["mage"]);
+    await party.startAll();
+    const s = await party.play({ playerSeed: MISS, monsterSeed: () => CRIT, passive: true, steps: 300 });
+    assert.ok(s.core.status.wiped);
+    assert.equal(s.aliveMask, 0);
+    await party.claimRewards(0);
+    assert.ok((await party.character(0)).core.inSession !== null);
+    await party.claimEscrow(party.dm);
+  });
+});

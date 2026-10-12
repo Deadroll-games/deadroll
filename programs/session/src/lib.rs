@@ -2,6 +2,7 @@
 use anchor_lang::prelude::*;
 
 pub mod auth;
+pub mod combat_input;
 // Outgoing CPI wrappers. Not named `cpi`: `#[program]` generates a crate-level `cpi` module.
 pub mod cpi_out;
 pub mod errors;
@@ -10,6 +11,8 @@ pub mod instructions;
 pub mod movement;
 pub mod rules;
 pub mod state;
+pub mod turns;
+pub mod vrf;
 
 use instructions::*;
 use rules::MAX_PATH;
@@ -62,5 +65,41 @@ pub mod deadroll_session {
     /// Ends the current unit's turn and starts the next living unit's.
     pub fn end_turn(ctx: Context<EndTurn>) -> Result<()> {
         end_turn::handler(ctx)
+    }
+
+    /// Player attacks a monster with a skill slot (`0xFF` = weapon): spends AP, requests VRF.
+    pub fn act(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
+        act::handler(ctx, skill_slot, target)
+    }
+
+    /// DM: the current monster attacks a player slot; same VRF path as `act`.
+    pub fn monster_act(
+        ctx: Context<MonsterAct>,
+        monster: u8,
+        action: u8,
+        target: u8,
+    ) -> Result<()> {
+        monster_act::handler(ctx, monster, action, target)
+    }
+
+    /// VRF callback: resolves the pending attack through `deadroll_combat`, applies HP and
+    /// states, death (`character.mark_dead`), boss victory and wipe.
+    pub fn consume_randomness(ctx: Context<ConsumeRandomness>, randomness: [u8; 32]) -> Result<()> {
+        consume_randomness::handler(ctx, randomness)
+    }
+
+    /// Player chooses "Escape" on their turn; the party flees when every living player did.
+    pub fn flee(ctx: Context<Flee>) -> Result<()> {
+        flee::handler(ctx)
+    }
+
+    /// After the party ended: rewards and unlock for one character (permissionless).
+    pub fn claim_rewards(ctx: Context<ClaimRewards>) -> Result<()> {
+        claim_rewards::handler(ctx)
+    }
+
+    /// After the party ended: the DM takes the escrow and the map goes `Finished`.
+    pub fn claim_escrow(ctx: Context<ClaimEscrow>) -> Result<()> {
+        claim_escrow::handler(ctx)
     }
 }

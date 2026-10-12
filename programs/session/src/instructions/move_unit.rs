@@ -85,6 +85,8 @@ pub fn handler(ctx: Context<MoveUnit>, steps: [u8; MAX_PATH], len: u8) -> Result
     participation.core.y = end.y;
     participation.core.action_points = action_points;
     session.player_pos[participation.core.slot as usize] = end;
+    // Moving is another action: every escape intent resets (docs/PARTY_AND_TURNS.md, 7.3).
+    session.flee_mask = 0;
 
     emit!(Moved {
         session: session.key(),

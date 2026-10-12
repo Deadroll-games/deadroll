@@ -3,6 +3,21 @@ use deadroll_types::{Cell, GameSessionData, PARTY_MAX};
 
 use crate::rules::{Unit, EMPTY_UNIT};
 
+/// The attack waiting for its VRF value (`core.pending_vrf`), resolved by `consume_randomness`.
+#[derive(
+    AnchorSerialize, AnchorDeserialize, InitSpace, Clone, Copy, Debug, Default, PartialEq, Eq,
+)]
+pub struct PendingAction {
+    /// Turn-order id of the attacker.
+    pub attacker: u8,
+    /// Turn-order id of the target.
+    pub target: u8,
+    /// Skill slot of a player attack, `rules::BASE_ATTACK` for the weapon; monsters: the action.
+    pub skill_slot: u8,
+    /// The player side of the hit (attacker or target): the callback must receive exactly it.
+    pub participation: Pubkey,
+}
+
 /// `["session", map]`: one party on one map.
 #[account]
 #[derive(InitSpace)]
@@ -29,6 +44,17 @@ pub struct GameSession {
     pub alive_mask: u8,
     /// Bit per player slot: ready in the lobby.
     pub ready_mask: u8,
+    /// Valid while `core.pending_vrf`.
+    pub pending: PendingAction,
+    /// Bit per player slot: chose "Escape" and nobody took another action since
+    /// (docs/PARTY_AND_TURNS.md, section 7.3).
+    pub flee_mask: u8,
+    /// Bit per player slot: `claim_rewards` done after the party ended.
+    pub settled_mask: u8,
+    /// Experience from killed monsters; every living player gets all of it on victory.
+    pub xp_pool: u32,
+    /// VRF value of the boss kill; the reward rolls derive from it.
+    pub victory_seed: [u8; 32],
 }
 
 impl GameSession {

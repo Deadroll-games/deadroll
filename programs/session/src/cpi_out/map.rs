@@ -1,15 +1,27 @@
 use anchor_lang::prelude::*;
+use deadroll_map::{cpi, cpi::accounts};
 use deadroll_types::MapStatus;
 
-use super::TrustedCall;
+use super::{signed, SessionSigner};
 
-/// `sha256("global:set_status")[..8]`.
-pub const SET_STATUS: [u8; 8] = [0xb5, 0xb8, 0xe0, 0xcb, 0xc1, 0x1d, 0xb1, 0xe0];
-
-/// `map::set_status(status)`: accounts `[map (mut), session authority (signer), config]`.
-/// STUB(L6), see the module docs.
-pub fn set_status(call: TrustedCall, status: MapStatus) -> Result<()> {
-    let mut data = SET_STATUS.to_vec();
-    data.push(status as u8);
-    call.invoke(data)
+/// `map::set_status(status)`: `InSession` at `open_session`, `Finished` at `claim_escrow`.
+pub fn set_status<'info>(
+    s: &SessionSigner<'_, 'info>,
+    map: &AccountInfo<'info>,
+    status: MapStatus,
+) -> Result<()> {
+    signed(s.bump, |seeds| {
+        cpi::set_status(
+            CpiContext::new_with_signer(
+                deadroll_map::ID,
+                accounts::SetStatus {
+                    map: map.clone(),
+                    session_authority: s.authority(),
+                    config: s.config(),
+                },
+                seeds,
+            ),
+            status,
+        )
+    })
 }
