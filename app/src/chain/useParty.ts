@@ -35,6 +35,7 @@ export function useParty(address: Address | null) {
   const tiles = useRef<Uint8Array | null>(null);
   const seen = useRef(new Set<string>());
   const inflight = useRef(false);
+  const latest = useRef<Party | null>(null);
   const liveRef = useRef<SubStatus["state"]>("connecting");
   const lastRun = useRef(0);
   const trailing = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -44,7 +45,8 @@ export function useParty(address: Address | null) {
     inflight.current = true;
     lastRun.current = Date.now();
     try {
-      const p = await readParty(address, tiles.current);
+      const p = await readParty(address, tiles.current, latest.current);
+      latest.current = p;
       if (p?.tiles) tiles.current = p.tiles;
       setParty(p);
       setError(p ? null : "No party at this address");
@@ -81,6 +83,7 @@ export function useParty(address: Address | null) {
 
   useEffect(() => {
     tiles.current = null;
+    latest.current = null;
     seen.current = new Set();
     setEvents([]);
     setParty(null);

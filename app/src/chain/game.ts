@@ -634,8 +634,17 @@ export type Party = {
   tiles: Uint8Array | null;
 };
 
-export async function readParty(address: Address, tiles: Uint8Array | null = null): Promise<Party | null> {
-  const [rawSession, rawMonsters, rawEscrow] = await getAccounts([address, await monstersPda(address), await escrowPda(address)]);
+export async function readParty(address: Address, tiles: Uint8Array | null = null, prev: Party | null = null): Promise<Party | null> {
+  // With the previous read of the same party, the player, participation, character, map and layout
+  // addresses are already known, so everything comes in ONE getMultipleAccounts call. If the roster
+  // or the map changed (a join), the guess is wrong and the second call fetches the right accounts.
+  const known = prev && prev.address === address ? prev.session : null;
+  const knownChars = known ? known.core.players.slice(0, known.core.playerCount) : [];
+  const guess: Address[] = known
+    ? [...(await Promise.all(knownChars.map((c) => participationPda(address, c)))), ...knownChars, known.core.map, ...(tiles ? [] : [known.layout])]
+    : [];
+  const head = [address, await monstersPda(address), await escrowPda(address)];
+  const [rawSession, rawMonsters, rawEscrow, ...guessed] = await getAccounts([...head, ...guess]);
   if (!rawSession) return null;
   const session = coders.session.decodeAccount<GameSessionAcc>("GameSession", rawSession);
   const monsters = rawMonsters
@@ -644,7 +653,8 @@ export async function readParty(address: Address, tiles: Uint8Array | null = nul
   const escrow = rawEscrow ? coders.session.decodeAccount<{ collected: bigint; claimed: boolean }>("Escrow", rawEscrow) : null;
   const chars = session.core.players.slice(0, session.core.playerCount);
   const parts = await Promise.all(chars.map((c) => participationPda(address, c)));
-  const extra = await getAccounts([...parts, ...chars, session.core.map, ...(tiles ? [] : [session.layout])]);
+  const wanted = [...parts, ...chars, session.core.map, ...(tiles ? [] : [session.layout])];
+  const extra = wanted.length === guess.length && wanted.every((a, i) => a === guess[i]) ? guessed : await getAccounts(wanted);
   const players: PartyPlayer[] = chars.flatMap((character, slot) => {
     const p = extra[slot];
     const c = extra[chars.length + slot];
