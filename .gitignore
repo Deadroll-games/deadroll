@@ -22,3 +22,5 @@ test-ledger/
 
 # os
 .DS_Store
+
+!app/.env.devnet
