@@ -1,0 +1,45 @@
+{
+  "records": [
+    { "base": "Fire", "tint": "Fire", "condition": "Always", "effects": [{ "kind": "None" }, { "kind": "None" }] },
+    { "base": "Fire", "tint": "Cold", "condition": "CanBurn", "effects": [{ "kind": "Multiplier", "value": 10000 }, { "kind": "None" }] },
+    { "base": "Fire", "tint": "Lightning", "condition": "CanBurn", "effects": [{ "kind": "Multiplier", "value": 10000 }, { "kind": "None" }] },
+    { "base": "Fire", "tint": "Blood", "condition": "CanBurn", "effects": [{ "kind": "Multiplier", "value": 10000 }, { "kind": "None" }] },
+    { "base": "Fire", "tint": "Blunt", "condition": "CanBurn", "effects": [{ "kind": "Multiplier", "value": 10000 }, { "kind": "None" }] },
+    { "base": "Fire", "tint": "Piercing", "condition": "CanBurn", "effects": [{ "kind": "Multiplier", "value": 10000 }, { "kind": "None" }] },
+
+    { "base": "Cold", "tint": "Fire", "condition": "CanBeFrozen", "effects": [{ "kind": "Multiplier", "value": 10000 }, { "kind": "None" }] },
+    { "base": "Cold", "tint": "Cold", "condition": "Always", "effects": [{ "kind": "None" }, { "kind": "None" }] },
+    { "base": "Cold", "tint": "Lightning", "condition": "CanBeFrozen", "effects": [{ "kind": "Multiplier", "value": 10000 }, { "kind": "None" }] },
+    { "base": "Cold", "tint": "Blood", "condition": "CanBeChilled", "effects": [{ "kind": "Multiplier", "value": 10000 }, { "kind": "None" }] },
+    { "base": "Cold", "tint": "Blunt", "condition": "IsFrozen", "effects": [{ "kind": "Multiplier", "value": 10000 }, { "kind": "None" }] },
+    { "base": "Cold", "tint": "Piercing", "condition": "CanBeFrozen", "effects": [{ "kind": "Multiplier", "value": 10000 }, { "kind": "StateOnCrit", "state": "Freeze" }] },
+
+    { "base": "Lightning", "tint": "Fire", "condition": "CanBeShocked", "effects": [{ "kind": "Multiplier", "value": 10000 }, { "kind": "None" }] },
+    { "base": "Lightning", "tint": "Cold", "condition": "CanBeShocked", "effects": [{ "kind": "Multiplier", "value": 10000 }, { "kind": "None" }] },
+    { "base": "Lightning", "tint": "Lightning", "condition": "Always", "effects": [{ "kind": "None" }, { "kind": "None" }] },
+    { "base": "Lightning", "tint": "Blood", "condition": "CanBeShocked", "effects": [{ "kind": "Multiplier", "value": 10000 }, { "kind": "None" }] },
+    { "base": "Lightning", "tint": "Blunt", "condition": "CanBeShocked", "effects": [{ "kind": "Multiplier", "value": 10000 }, { "kind": "None" }] },
+    { "base": "Lightning", "tint": "Piercing", "condition": "CanBeShocked", "effects": [{ "kind": "Multiplier", "value": 10000 }, { "kind": "None" }] },
+
+    { "base": "Blood", "tint": "Fire", "condition": "CanBleed", "effects": [{ "kind": "Multiplier", "value": 10000 }, { "kind": "None" }] },
+    { "base": "Blood", "tint": "Cold", "condition": "CanBleed", "effects": [{ "kind": "Multiplier", "value": 10000 }, { "kind": "None" }] },
+    { "base": "Blood", "tint": "Lightning", "condition": "CanBleed", "effects": [{ "kind": "Multiplier", "value": 10000 }, { "kind": "None" }] },
+    { "base": "Blood", "tint": "Blood", "condition": "Always", "effects": [{ "kind": "None" }, { "kind": "None" }] },
+    { "base": "Blood", "tint": "Blunt", "condition": "CanBleed", "effects": [{ "kind": "Multiplier", "value": 10000 }, { "kind": "None" }] },
+    { "base": "Blood", "tint": "Piercing", "condition": "CanBleed", "effects": [{ "kind": "Multiplier", "value": 10000 }, { "kind": "None" }] },
+
+    { "base": "Blunt", "tint": "Fire", "condition": "CanBeStunned", "effects": [{ "kind": "Multiplier", "value": 10000 }, { "kind": "None" }] },
+    { "base": "Blunt", "tint": "Cold", "condition": "CanBeStunned", "effects": [{ "kind": "Multiplier", "value": 10000 }, { "kind": "None" }] },
+    { "base": "Blunt", "tint": "Lightning", "condition": "CanBeStunned", "effects": [{ "kind": "Multiplier", "value": 10000 }, { "kind": "None" }] },
+    { "base": "Blunt", "tint": "Blood", "condition": "CanBeStunned", "effects": [{ "kind": "Multiplier", "value": 10000 }, { "kind": "None" }] },
+    { "base": "Blunt", "tint": "Blunt", "condition": "Always", "effects": [{ "kind": "None" }, { "kind": "None" }] },
+    { "base": "Blunt", "tint": "Piercing", "condition": "CanBeStunned", "effects": [{ "kind": "Multiplier", "value": 10000 }, { "kind": "None" }] },
+
+    { "base": "Piercing", "tint": "Fire", "condition": "HasArmor", "effects": [{ "kind": "Multiplier", "value": 10000 }, { "kind": "None" }] },
+    { "base": "Piercing", "tint": "Cold", "condition": "HasArmor", "effects": [{ "kind": "Multiplier", "value": 10000 }, { "kind": "ExtraStateChance", "state": "Chill", "value": 3000 }] },
+    { "base": "Piercing", "tint": "Lightning", "condition": "HasArmor", "effects": [{ "kind": "Multiplier", "value": 10000 }, { "kind": "None" }] },
+    { "base": "Piercing", "tint": "Blood", "condition": "CanBleed", "effects": [{ "kind": "Multiplier", "value": 10000 }, { "kind": "None" }] },
+    { "base": "Piercing", "tint": "Blunt", "condition": "HasArmor", "effects": [{ "kind": "Multiplier", "value": 10000 }, { "kind": "None" }] },
+    { "base": "Piercing", "tint": "Piercing", "condition": "Always", "effects": [{ "kind": "None" }, { "kind": "None" }] }
+  ]
+}
