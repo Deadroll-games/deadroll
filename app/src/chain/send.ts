@@ -60,7 +60,7 @@ export async function sendTx(payer: TransactionSigner, instructions: Instruction
       await sendAndConfirm(tx as Parameters<typeof sendAndConfirm>[0], { commitment: "confirmed" });
       signature = getSignatureFromTransaction(tx);
     }
-    window.dispatchEvent(new Event(TX_SENT_EVENT));
+    window.dispatchEvent(new CustomEvent<string>(TX_SENT_EVENT, { detail: payer.address }));
     return { signature, logs: await logsOf(signature) };
   } catch (e) {
     if (e instanceof TxError) throw e;

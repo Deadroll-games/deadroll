@@ -78,13 +78,15 @@ export function AppWalletProvider({ children }: { children: ReactNode }) {
     const t = setInterval(() => {
       if (!document.hidden) void refreshBalance();
     }, BALANCE_POLL_MS);
-    const onSent = () => void refreshBalance();
+    const onSent = (e: Event) => {
+      if ((e as CustomEvent<string>).detail === address) void refreshBalance();
+    };
     window.addEventListener(TX_SENT_EVENT, onSent);
     return () => {
       clearInterval(t);
       window.removeEventListener(TX_SENT_EVENT, onSent);
     };
-  }, [refreshBalance]);
+  }, [refreshBalance, address]);
 
   const value = useMemo<AppWallet>(
     () => ({
