@@ -1,7 +1,8 @@
 /// <reference types="vitest/config" />
 import { createReadStream, existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig, loadEnv, type Plugin } from "vite";
+import { isBundleSafeRpc } from "./src/rpcSettings";
 import react from "@vitejs/plugin-react";
 
 const root = resolve(import.meta.dirname, "..");
@@ -40,10 +41,30 @@ function devAssets(): Plugin {
   };
 }
 
-export default defineConfig({
-  plugins: [react(), devAssets()],
+/**
+ * A production bundle is public: a provider URL with an API key in VITE_RPC_URL or VITE_RPC_WS_URL would
+ * ship to every visitor. Builds accept only the public devnet endpoints or localhost.
+ */
+function noBundledRpcKey(mode: string): Plugin {
+  return {
+    name: "deadroll-no-bundled-rpc-key",
+    apply: "build",
+    buildStart() {
+      const env = loadEnv(mode, import.meta.dirname, "VITE_");
+      for (const name of ["VITE_RPC_URL", "VITE_RPC_WS_URL"]) {
+        const value = env[name];
+        if (value && !isBundleSafeRpc(value)) {
+          throw new Error(`${name} would be bundled into the site. Use the public devnet RPC for hosted builds; keep a private URL in the Custom RPC setting or an untracked .env.*.local for dev runs.`);
+        }
+      }
+    },
+  };
+}
+
+export default defineConfig(({ mode }) => ({
+  plugins: [react(), devAssets(), noBundledRpcKey(mode)],
   test: {
     environment: "jsdom",
     setupFiles: ["./src/test-setup.ts"],
   },
-});
+}));

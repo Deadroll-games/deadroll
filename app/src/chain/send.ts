@@ -23,6 +23,7 @@ import {
 import { client } from "../wallet/client";
 import { coders } from "./programs";
 import { PROGRAMS } from "../config";
+import { TX_SENT_EVENT } from "./txEvents";
 
 export type Sent = { signature: Signature; logs: string[] };
 
@@ -59,6 +60,7 @@ export async function sendTx(payer: TransactionSigner, instructions: Instruction
       await sendAndConfirm(tx as Parameters<typeof sendAndConfirm>[0], { commitment: "confirmed" });
       signature = getSignatureFromTransaction(tx);
     }
+    window.dispatchEvent(new CustomEvent<string>(TX_SENT_EVENT, { detail: payer.address }));
     return { signature, logs: await logsOf(signature) };
   } catch (e) {
     if (e instanceof TxError) throw e;
@@ -72,24 +74,29 @@ export async function sendWithPayer(payer: TransactionSigner, instructions: Inst
   return (await sendTx(payer, instructions)).signature;
 }
 
+/** Signature-status poll for send-only wallets: 1.5 s apart, 40 tries (about a minute). */
+export const CONFIRM_POLL_MS = 1_500;
+/** Wait before the n-th getTransaction retry: 500 ms, 1 s, 1.5 s ... (a confirmed tx is usually served at once). */
+export const logsRetryMs = (attempt: number): number => 500 * (attempt + 1);
+
 async function waitConfirmed(signature: Signature): Promise<void> {
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 40; i++) {
     const { value } = await client.rpc.getSignatureStatuses([signature]).send();
     const st = value[0];
     if (st?.err) throw new Error(`transaction failed: ${JSON.stringify(st.err)}`);
     if (st?.confirmationStatus === "confirmed" || st?.confirmationStatus === "finalized") return;
-    await new Promise((r) => setTimeout(r, 400));
+    await new Promise((r) => setTimeout(r, CONFIRM_POLL_MS));
   }
   throw new Error(`not confirmed: ${signature}`);
 }
 
 export async function logsOf(signature: Signature): Promise<string[]> {
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 6; i++) {
     const tx = await client.rpc
       .getTransaction(signature, { commitment: "confirmed", maxSupportedTransactionVersion: 0, encoding: "json" })
       .send();
     if (tx) return [...(tx.meta?.logMessages ?? [])];
-    await new Promise((r) => setTimeout(r, 300));
+    await new Promise((r) => setTimeout(r, logsRetryMs(i)));
   }
   return [];
 }
