@@ -10,6 +10,7 @@ pub mod events;
 pub mod hit_event;
 pub mod instructions;
 pub mod movement;
+pub mod outcomes;
 pub mod rules;
 pub mod state;
 pub mod turns;
@@ -47,6 +48,13 @@ pub mod deadroll_session {
     /// initiative roll; `consume_randomness` writes the turn order.
     pub fn start_session(ctx: Context<StartSession>) -> Result<()> {
         start_session::handler(ctx)
+    }
+
+    /// Starts the current unit's turn, before anything else on it (permissionless): over-time
+    /// damage (same death and victory path as hits), Freeze / Stun skip the turn, state
+    /// durations and cooldowns count down. A skip or a death ends the turn on its own.
+    pub fn start_turn(ctx: Context<StartTurn>) -> Result<()> {
+        start_turn::handler(ctx)
     }
 
     /// Player moves along a path of grid steps on their turn.

@@ -77,6 +77,7 @@ pub fn handler(ctx: Context<MonsterAct>, monster: u8, action: u8, target: u8) ->
         session.current_unit() == Some(Unit::Monster(monster)),
         SessionError::NotYourTurn
     );
+    require!(session.turn_started(), SessionError::TurnNotStarted);
     let mut state = monsters.get(monster)?;
     require!(state.alive, SessionError::UnitDead);
     // One attack per turn, like players (PARTY_AND_TURNS 5.1).

@@ -53,6 +53,7 @@ pub fn handler(
         session.current_unit() == Some(unit),
         SessionError::NotYourTurn
     );
+    require!(session.turn_started(), SessionError::TurnNotStarted);
     let mut state = monsters.get(monster)?;
     require!(state.alive, SessionError::UnitDead);
 

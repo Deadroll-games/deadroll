@@ -154,6 +154,7 @@ pub fn session(players: &[Cell]) -> GameSession {
         player_initiative: [0; PARTY_MAX],
         tile_cost: TILE_COST,
         acted_seq: 0,
+        started_seq: 0,
     }
 }
 

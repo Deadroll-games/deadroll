@@ -53,6 +53,8 @@ const MONSTER_BASE = 4;
 const [WOLF, CHIEFTAIN] = [0, 2];
 /** Skill slots of the preset sets (crates/skillcheck presets). */
 const PIERCING_THRUST = 0;
+/** `act` slot of the weapon's basic attack (no cooldown). */
+const BASE_ATTACK = 0xff;
 const FROST_BOLT = 0;
 const FROST_BURN = 1;
 const WARRIOR = 0;
@@ -410,6 +412,25 @@ class Demo {
       .rpc()
       .then(track(`end_turn ${pl?.kind ?? "monster"}`));
   }
+  /** `start_turn` for whoever's turn it is: permissionless, sent here by the provider wallet. */
+  async begin() {
+    const s = await this.state();
+    const unit = s.core.turnOrder[s.core.turnIndex];
+    const pl = unit < MONSTER_BASE ? this.players[unit] : null;
+    return session.methods
+      .startTurn()
+      .accountsStrict({
+        session: this.acc.session,
+        monsters: this.acc.monsters,
+        participation: pl ? pl.participation : null,
+        character: pl ? pl.character : null,
+        sessionAuthority,
+        config,
+        characterProgram: CHARACTER,
+      })
+      .rpc({ commitment: "confirmed" })
+      .then(track(`start_turn ${pl?.kind ?? "monster"}`));
+  }
   // --- DM moves through the DM's session key
   monsterMove(monster: number, steps: number[]) {
     const [padded, len] = path(steps);
@@ -567,6 +588,9 @@ class Demo {
 
 describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
   const demo = new Demo();
+  /** The warrior's strike this turn: Piercing Thrust off cooldown, else the weapon. */
+  const warriorStrike = async () =>
+    (await demo.part(WARRIOR)).cooldowns[PIERCING_THRUST] === 0 ? PIERCING_THRUST : BASE_ATTACK;
   let wolves: number[] = [];
   let boss = -1;
 
@@ -709,6 +733,10 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
     let mageDied: { sig: string } | null = null;
     for (let guard = 0; guard < 300; guard++) {
       const { s, unit } = await demo.current();
+      if (s.core.status.active && s.startedSeq !== s.turnSeq) {
+        await demo.begin(); // every turn starts first (states, cooldowns)
+        continue;
+      }
       const ms = await demo.monsters();
       const livingWolves = wolves.filter((i) => ms[i].alive);
       const mageAlive = (s.aliveMask & (1 << MAGE)) !== 0;
@@ -727,9 +755,10 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
             if (steps) ap -= await demo.walk(WARRIOR, null, steps, ap, 2);
           }
           const now = (await demo.state()).playerPos[WARRIOR];
-          while (ap >= 2 && cheb(now, ms[target]) === 1 && (await demo.monsters())[target].alive) {
+          // One attack per turn: Piercing Thrust, or the weapon while it is on cooldown.
+          if (ap >= 2 && cheb(now, ms[target]) === 1 && (await demo.monsters())[target].alive) {
             const hpBefore = (await demo.monsters())[target].hp;
-            const { hit, events } = await demo.attack(WARRIOR, PIERCING_THRUST, target, CRIT);
+            const { hit, events } = await demo.attack(WARRIOR, await warriorStrike(), target, CRIT);
             // The app's shape: session, attacker, target, seed, actionCounter, result (HitResult).
             assert.ok(hit.session.equals(demo.acc.session));
             assert.deepEqual([hit.attacker, hit.target], [WARRIOR, MONSTER_BASE + target]);
@@ -743,7 +772,6 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
             const killed = events.find((x) => x.name === "monsterKilled")?.data;
             assert.equal(!!killed, !after.alive);
             if (killed) assert.ok(killed.monster === target && !killed.boss);
-            ap -= 2;
           }
         }
         await demo.endTurn(WARRIOR);
@@ -824,6 +852,10 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
     for (let guard = 0; guard < 400 && !victory; guard++) {
       const { s, unit } = await demo.current();
       assert.ok(s.core.status.active, "party still active");
+      if (s.startedSeq !== s.turnSeq) {
+        await demo.begin();
+        continue;
+      }
       if (unit !== WARRIOR) {
         await demo.endTurn(null); // the DM passes every monster turn
         continue;
@@ -835,17 +867,16 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
         assert.ok(steps, "a path to the chieftain");
         ap -= await demo.walk(WARRIOR, null, steps, ap, 2);
       }
-      while (ap >= 2 && cheb((await demo.state()).playerPos[WARRIOR], chief) === 1) {
-        const { sig, hit, events } = await demo.attack(WARRIOR, PIERCING_THRUST, boss, CRIT);
+      // One attack per turn: Piercing Thrust, or the weapon while it is on cooldown.
+      if (ap >= 2 && cheb((await demo.state()).playerPos[WARRIOR], chief) === 1) {
+        const { sig, hit, events } = await demo.attack(WARRIOR, await warriorStrike(), boss, CRIT);
         assert.ok(hit.result.outcome.hit);
-        ap -= 2;
         const killed = events.find((x) => x.name === "monsterKilled")?.data;
         if (killed) {
           assert.ok(killed.boss);
           const ended = events.find((x) => x.name === "sessionEnded")!.data;
           assert.ok(ended.status.victory);
           victory = sig;
-          break;
         }
       }
       if (!victory) await demo.endTurn(WARRIOR);

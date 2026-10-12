@@ -68,6 +68,8 @@ pub fn handler(ctx: Context<EndTurn>) -> Result<()> {
         }
     }
 
+    // The start (and its over-time damage) cannot be skipped by ending the turn.
+    require!(session.turn_started(), SessionError::TurnNotStarted);
     let monsters = Monsters::load(&accounts.monsters, &session.key())?;
     let key = session.key();
     turns::advance(session, key, &monsters)

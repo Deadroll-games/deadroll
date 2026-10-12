@@ -98,4 +98,8 @@ pub enum SessionError {
     AlreadyActed,
     #[msg("Skill is on cooldown")]
     SkillOnCooldown,
+    #[msg("The turn has not started: call start_turn first")]
+    TurnNotStarted,
+    #[msg("This turn has already started")]
+    TurnAlreadyStarted,
 }

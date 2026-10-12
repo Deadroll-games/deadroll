@@ -6,11 +6,11 @@ use crate::{
     combat_input::{
         monster_attacker, monster_defender, player_attacker, player_defender, take_damage,
     },
-    cpi_out::{self, SessionSigner},
+    cpi_out::SessionSigner,
     errors::SessionError,
-    events::{MonsterKilled, PlayerDied, SessionEnded},
     hit_event::emit_hit_resolved,
-    rules::{is_boss, monster_profile, Unit, BASE_ATTACK},
+    outcomes,
+    rules::{Unit, BASE_ATTACK},
     state::{
         external::{read_character, read_skill},
         GameSession, Monsters, Participation, PendingAction,
@@ -112,27 +112,16 @@ pub fn handler(ctx: Context<ConsumeRandomness>, randomness: [u8; 32]) -> Result<
             monster.hp = hp;
             monster.states = result.states;
             if died {
-                monster.alive = false;
+                outcomes::monster_killed(
+                    session,
+                    session_key,
+                    &mut monster,
+                    index,
+                    pending.attacker,
+                    randomness,
+                );
             }
             monsters.set(index, &monster)?;
-
-            if died {
-                let xp = monster_profile(monster.bestiary_id, monster.level).map_or(0, |p| p.xp);
-                session.xp_pool = session.xp_pool.saturating_add(xp);
-                let boss = is_boss(monster.bestiary_id);
-                emit!(MonsterKilled {
-                    session: session_key,
-                    monster: index,
-                    bestiary_id: monster.bestiary_id,
-                    by: pending.attacker,
-                    xp,
-                    boss,
-                });
-                if boss {
-                    session.core.status = SessionStatus::Victory;
-                    session.victory_seed = randomness;
-                }
-            }
         }
         (Some(Unit::Monster(index)), Some(Unit::Player(slot))) => {
             require!(
@@ -154,8 +143,11 @@ pub fn handler(ctx: Context<ConsumeRandomness>, randomness: [u8; 32]) -> Result<
             participation.core.hp = hp;
             participation.core.states = result.states;
             if died {
-                session.alive_mask &= !(1 << slot);
-                cpi_out::character::mark_dead(
+                outcomes::player_killed(
+                    session,
+                    session_key,
+                    slot,
+                    pending.attacker,
                     &SessionSigner {
                         session_authority: &accounts.session_authority,
                         config: &accounts.config,
@@ -163,15 +155,6 @@ pub fn handler(ctx: Context<ConsumeRandomness>, randomness: [u8; 32]) -> Result<
                     },
                     &accounts.character,
                 )?;
-                emit!(PlayerDied {
-                    session: session_key,
-                    character: participation.core.character,
-                    slot,
-                    by: pending.attacker,
-                });
-                if session.alive_mask == 0 {
-                    session.core.status = SessionStatus::Wiped;
-                }
             }
         }
         _ => return err!(SessionError::InvalidPendingAccounts),
@@ -186,13 +169,7 @@ pub fn handler(ctx: Context<ConsumeRandomness>, randomness: [u8; 32]) -> Result<
         action,
         &result,
     )?;
-    if session.core.status != SessionStatus::Active {
-        emit!(SessionEnded {
-            session: session_key,
-            status: session.core.status,
-            round: session.core.round,
-        });
-    }
+    outcomes::emit_if_ended(session, session_key);
     Ok(())
 }
 

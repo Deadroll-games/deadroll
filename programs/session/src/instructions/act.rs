@@ -80,6 +80,7 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
         session.current_unit() == Some(Unit::Player(slot)),
         SessionError::NotYourTurn
     );
+    require!(session.turn_started(), SessionError::TurnNotStarted);
     require!(
         session.player_alive(slot) && participation.core.hp > 0,
         SessionError::UnitDead
