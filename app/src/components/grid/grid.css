@@ -1,0 +1,50 @@
+.grid-canvas {
+  display: block;
+  cursor: crosshair;
+  background: var(--bg);
+}
+
+.grid-demo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.grid-map {
+  overflow: auto;
+  max-width: 100%;
+  line-height: 0;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.grid-side {
+  width: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.grid-title {
+  margin: 0;
+  font-size: 16px;
+}
+
+.grid-stat {
+  margin: 0;
+}
+
+.grid-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .grid-demo,
+  .grid-demo * {
+    transition: none;
+    animation: none;
+  }
+}

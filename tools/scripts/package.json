@@ -6,7 +6,8 @@
   "scripts": {
     "upload-rasterizer": "node --experimental-strip-types --no-warnings upload-rasterizer.ts",
     "upload-sprites": "node --experimental-strip-types --no-warnings upload-sprites.ts",
-    "test": "node --experimental-strip-types --no-warnings --test lib/render-program.test.ts"
+    "seed-registry": "node --experimental-strip-types --no-warnings seed-registry.ts",
+    "test": "node --experimental-strip-types --no-warnings --test lib/render-program.test.ts lib/registry-records.test.ts"
   },
   "devDependencies": {
     "@solana/kit": "8.4.0"

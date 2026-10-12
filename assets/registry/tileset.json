@@ -1,0 +1,11 @@
+{
+  "records": [
+    { "tile": "Floor", "passable": 1, "cost": 1, "blocks_los": 0, "flags": 0 },
+    { "tile": "Wall", "passable": 0, "cost": 0, "blocks_los": 1, "flags": 0 },
+    { "tile": "Water", "passable": 1, "cost": 2, "blocks_los": 0, "flags": 0 },
+    { "tile": "Door", "passable": 1, "cost": 1, "blocks_los": 1, "flags": 0 },
+    { "tile": "Entrance", "passable": 1, "cost": 1, "blocks_los": 0, "flags": 0 },
+    { "tile": "Exit", "passable": 1, "cost": 1, "blocks_los": 0, "flags": 0 },
+    { "tile": "Trap", "passable": 1, "cost": 1, "blocks_los": 0, "flags": 0 }
+  ]
+}
