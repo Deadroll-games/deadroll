@@ -1,0 +1,187 @@
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { Aspect, Class, Race, Tile } from "../../chain/types";
+import { CharacterForm } from "./CharacterForm";
+import { formatSol, pointsLeft, shortAddress } from "./format";
+import { MapPalette } from "./MapPalette";
+import { PartyLobby } from "./PartyLobby";
+import type { CharacterDraft, LobbyPlayer, MapPaletteProps, PartyLobbyProps } from "./types";
+
+afterEach(() => {
+  cleanup();
+});
+
+const ALL_ASPECTS = [Aspect.Fire, Aspect.Cold, Aspect.Lightning, Aspect.Blood, Aspect.Blunt, Aspect.Piercing];
+
+const DRAFT: CharacterDraft = {
+  name: "Bran",
+  race: Race.Human,
+  class: Class.Warrior,
+  predisposition: Aspect.Piercing,
+  stats: [5, 5, 5, 5],
+};
+
+describe("format helpers", () => {
+  it("counts unspent stat points", () => {
+    expect(pointsLeft([5, 5, 5, 5], 5, 6)).toBe(6);
+    expect(pointsLeft([7, 6, 5, 5], 5, 6)).toBe(3);
+    expect(pointsLeft([8, 6, 6, 6], 5, 6)).toBe(0);
+  });
+
+  it("formats lamports as SOL", () => {
+    expect(formatSol(1_500_000_000n)).toBe("1.5");
+    expect(formatSol(0n)).toBe("0");
+    expect(formatSol(123_456_789n)).toBe("0.1234");
+    expect(formatSol(2_000_000_000n)).toBe("2");
+  });
+
+  it("shortens an address", () => {
+    expect(shortAddress("Ch4rWarr1or1111111111111111111111111111111")).toBe("Ch4r..1111");
+  });
+});
+
+function CharacterHarness({ onSubmit }: { onSubmit: (draft: CharacterDraft) => void }) {
+  const [value, setValue] = useState(DRAFT);
+  return (
+    <CharacterForm
+      value={value}
+      onChange={setValue}
+      onSubmit={onSubmit}
+      statPoints={6}
+      statMin={5}
+      allowedPredispositions={ALL_ASPECTS}
+    />
+  );
+}
+
+describe("CharacterForm", () => {
+  it("keeps submit disabled until the points are spent, then submits the draft", () => {
+    const onSubmit = vi.fn();
+    render(<CharacterHarness onSubmit={onSubmit} />);
+    const submit = screen.getByRole("button", { name: "Create character" });
+    expect(submit).toHaveProperty("disabled", true);
+
+    const increase = screen.getByRole("button", { name: "increase Strength" });
+    for (let i = 0; i < 6; i++) fireEvent.click(increase);
+
+    expect(submit).toHaveProperty("disabled", false);
+    fireEvent.click(submit);
+    expect(onSubmit).toHaveBeenCalledWith({ ...DRAFT, stats: [11, 5, 5, 5] });
+  });
+
+  it("increments a stat through onChange", () => {
+    const onChange = vi.fn();
+    render(
+      <CharacterForm
+        value={DRAFT}
+        onChange={onChange}
+        onSubmit={() => {}}
+        statPoints={6}
+        statMin={5}
+        allowedPredispositions={ALL_ASPECTS}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "increase Strength" }));
+    expect(onChange).toHaveBeenCalledWith({ ...DRAFT, stats: [6, 5, 5, 5] });
+  });
+});
+
+function paletteProps(overrides: Partial<MapPaletteProps> = {}): MapPaletteProps {
+  return {
+    tool: { kind: "erase" },
+    onToolChange: () => {},
+    bestiary: [{ id: 0, name: "Wolf" }],
+    presets: [{ name: "demo_16x16", width: 16, height: 16 }],
+    onLoadPreset: () => {},
+    spawns: [],
+    onRemoveSpawn: () => {},
+    errors: [],
+    onValidate: () => {},
+    canFinalize: false,
+    onFinalize: () => {},
+    ...overrides,
+  };
+}
+
+describe("MapPalette", () => {
+  it("selects a tile tool", () => {
+    const onToolChange = vi.fn();
+    render(<MapPalette {...paletteProps({ onToolChange })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Floor" }));
+    expect(onToolChange).toHaveBeenCalledWith({ kind: "tile", tile: Tile.Floor });
+  });
+
+  it("disables Finalize until the map is valid", () => {
+    const { rerender } = render(<MapPalette {...paletteProps({ canFinalize: false })} />);
+    expect(screen.getByRole("button", { name: "Finalize" })).toHaveProperty("disabled", true);
+    rerender(<MapPalette {...paletteProps({ canFinalize: true })} />);
+    expect(screen.getByRole("button", { name: "Finalize" })).toHaveProperty("disabled", false);
+  });
+});
+
+function lobbyProps(overrides: Partial<PartyLobbyProps> = {}): PartyLobbyProps {
+  return {
+    mapName: "demo_16x16",
+    dm: "Dm11111111111111111111111111111111111111dm",
+    priceLamports: 100_000_000n,
+    collected: 0n,
+    players: [],
+    maxPlayers: 4,
+    role: "dm",
+    myCharacters: [],
+    onJoin: () => {},
+    onReady: () => {},
+    onStart: () => {},
+    ...overrides,
+  };
+}
+
+const BRAN: LobbyPlayer = {
+  slot: 0,
+  player: "Ch4rWarr1or1111111111111111111111111111111",
+  characterName: "Bran",
+  race: Race.Human,
+  class: Class.Warrior,
+  ready: false,
+  paid: 100_000_000n,
+};
+
+const ARIA: LobbyPlayer = {
+  slot: 1,
+  player: "Ch4rE1fMage111111111111111111111111111111",
+  characterName: "Aria",
+  race: Race.ForestElf,
+  class: Class.Mage,
+  ready: true,
+  paid: 100_000_000n,
+};
+
+describe("PartyLobby", () => {
+  it("keeps Start disabled until every player is ready", () => {
+    const players = [BRAN, ARIA];
+    const { rerender } = render(<PartyLobby {...lobbyProps({ players })} />);
+    expect(screen.getByRole("button", { name: "Start session" })).toHaveProperty("disabled", true);
+    rerender(<PartyLobby {...lobbyProps({ players: [{ ...BRAN, ready: true }, ARIA] })} />);
+    expect(screen.getByRole("button", { name: "Start session" })).toHaveProperty("disabled", false);
+  });
+
+  it("joins with the selected character", () => {
+    const onJoin = vi.fn();
+    render(
+      <PartyLobby
+        {...lobbyProps({
+          role: "guest",
+          onJoin,
+          myCharacters: [
+            { address: BRAN.player, name: "Bran" },
+            { address: ARIA.player, name: "Aria" },
+          ],
+        })}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Character"), { target: { value: ARIA.player } });
+    fireEvent.click(screen.getByRole("button", { name: "Join and pay 0.1 SOL" }));
+    expect(onJoin).toHaveBeenCalledWith(ARIA.player);
+  });
+});

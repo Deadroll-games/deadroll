@@ -6,7 +6,7 @@ import type { Aspect, Cell, Class, Race, Spawn, Tile } from "../../chain/types";
 // ---- Character creation ----
 
 export type CharacterDraft = {
-  /** UTF-8, at most 32 bytes on chain (NAME_LEN). */
+  /** 1..=32 printable ASCII, no leading space (programs/character rules.rs name_valid). */
   name: string;
   race: Race;
   class: Class;

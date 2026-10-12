@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 
-const root = resolve(__dirname, "..");
+const root = resolve(import.meta.dirname, "..");
 
 /**
  * Mock mode only: serves local build outputs under /dev-assets/ so the loader can run its normal
