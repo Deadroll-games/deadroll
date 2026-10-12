@@ -1,0 +1,10 @@
+{
+  "records": [
+    { "aspect": "Fire", "family": "Elemental", "flags": 0 },
+    { "aspect": "Cold", "family": "Elemental", "flags": 0 },
+    { "aspect": "Lightning", "family": "Elemental", "flags": 0 },
+    { "aspect": "Blood", "family": "Physical", "flags": 0 },
+    { "aspect": "Blunt", "family": "Physical", "flags": 0 },
+    { "aspect": "Piercing", "family": "Physical", "flags": 0 }
+  ]
+}
