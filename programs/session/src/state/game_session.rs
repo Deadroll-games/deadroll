@@ -1,9 +1,10 @@
 use anchor_lang::prelude::*;
-use deadroll_types::{Cell, GameSessionData, PARTY_MAX};
+use deadroll_types::{Cell, GameSessionData, Tile, MONSTERS_MAX, PARTY_MAX};
 
 use crate::rules::{Unit, EMPTY_UNIT};
 
-/// The attack waiting for its VRF value (`core.pending_vrf`), resolved by `consume_randomness`.
+/// The roll waiting for its VRF value (`core.pending_vrf`), resolved by `consume_randomness`:
+/// an attack, or the initiative roll of `start_session` ([`PendingAction::initiative`]).
 #[derive(
     AnchorSerialize, AnchorDeserialize, InitSpace, Clone, Copy, Debug, Default, PartialEq, Eq,
 )]
@@ -15,7 +16,24 @@ pub struct PendingAction {
     /// Skill slot of a player attack, `rules::BASE_ATTACK` for the weapon; monsters: the action.
     pub skill_slot: u8,
     /// The player side of the hit (attacker or target): the callback must receive exactly it.
+    /// For the initiative roll: player slot 0 (the callback's account list is fixed).
     pub participation: Pubkey,
+}
+
+impl PendingAction {
+    /// The initiative roll: no attacker, no target.
+    pub fn initiative(participation: Pubkey) -> Self {
+        Self {
+            attacker: EMPTY_UNIT,
+            target: EMPTY_UNIT,
+            skill_slot: 0,
+            participation,
+        }
+    }
+
+    pub fn is_initiative(&self) -> bool {
+        self.attacker == EMPTY_UNIT
+    }
 }
 
 /// `["session", map]`: one party on one map.
@@ -55,6 +73,15 @@ pub struct GameSession {
     pub xp_pool: u32,
     /// VRF value of the boss kill; the reward rolls derive from it.
     pub victory_seed: [u8; 32],
+    // Registry rules, copied when the party opens so they stay fixed for it.
+    /// Bestiary speed (action points per turn) of each monster, by monster index.
+    pub monster_speed: [u8; MONSTERS_MAX],
+    /// Bestiary initiative of each monster, by monster index.
+    pub monster_initiative: [u16; MONSTERS_MAX],
+    /// Initiative of each player slot, set at `join_session`.
+    pub player_initiative: [u16; PARTY_MAX],
+    /// Step cost in action points per `Tile`, 0 = cannot be entered (registry `Tileset`).
+    pub tile_cost: [u8; Tile::COUNT],
 }
 
 impl GameSession {

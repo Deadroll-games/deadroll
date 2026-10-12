@@ -7,12 +7,15 @@ use art::validate::{validate_files, Compiled, Issue};
 
 const DEFAULT_PALETTE: &str = "assets/palette/palette_1.pal";
 const SPRITES_DIR: &str = "assets/sprites";
+/// `SpriteBook` body limit in programs/render.
+const BOOK_MAX: usize = 64 * 1024;
 
 const USAGE: &str = "usage:
   art validate [files.dsl ...]                 default: every file in assets/sprites
   art <file.dsl> [--id N] [--scale 8] [--out DIR|FILE.png] [--material NAME] [--bg #rrggbb]
   art sheet characters [--scale 8] [--out FILE.png]
   art sheet contact [files.dsl ...] [--scale 4] [--out FILE.png]
+  art pack [--out DIR]                          palette.bin + book.bin (book 1, every sprite) for upload
 options: --palette FILE.pal (default assets/palette/palette_1.pal)";
 
 struct Opts {
@@ -220,6 +223,33 @@ fn cmd_sheet(o: &Opts) -> Result<bool, String> {
     Ok(true)
 }
 
+/// Writes the upload inputs: the compiled palette and one sprite book (id 1) with every repo sprite.
+fn cmd_pack(o: &Opts) -> Result<bool, String> {
+    let (sprites, issues) = load_all(&repo_files())?;
+    if !issues.is_empty() {
+        for i in &issues {
+            eprintln!("{i}");
+        }
+        return Err(format!("{} problems, run `art validate`", issues.len()));
+    }
+    let pal = load_pal(o)?;
+    let book = preview::pack_book(&sprites)?;
+    if book.len() > BOOK_MAX {
+        return Err(format!("book is {} bytes, over {BOOK_MAX}", book.len()));
+    }
+    let dir = o.out.clone().unwrap_or_else(|| PathBuf::from("target/render-assets"));
+    write(&dir.join("palette.bin"), &pal.src.bytes)?;
+    write(&dir.join("book.bin"), &book)?;
+    println!(
+        "{}: palette {} bytes, book {} bytes ({} sprites)",
+        dir.display(),
+        pal.src.bytes.len(),
+        book.len(),
+        sprites.len()
+    );
+    Ok(true)
+}
+
 fn run() -> Result<bool, String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.is_empty() || args[0] == "-h" || args[0] == "--help" {
@@ -233,6 +263,7 @@ fn run() -> Result<bool, String> {
             ..o
         }),
         Some("sheet") => cmd_sheet(&o),
+        Some("pack") => cmd_pack(&o),
         Some(_) => cmd_render(&o),
         None => Err(USAGE.into()),
     }

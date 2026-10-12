@@ -10,7 +10,9 @@ use crate::{
     events::SessionOpened,
     rules::{monster_hp, EMPTY_UNIT, MIN_PRICE_LAMPORTS},
     state::{
-        external::{read_map, MapLayoutView},
+        external::{
+            read_bestiary, read_map, read_tile_costs, MapLayoutView, BESTIARY_TABLE, TILESET_TABLE,
+        },
         Escrow, GameSession, Monsters, ACCOUNT_VERSION,
     },
 };
@@ -49,6 +51,12 @@ pub struct OpenSession<'info> {
     /// CHECK: registry `GameConfig`, forwarded to the callee, which checks the trust list.
     #[account(seeds = [seeds::CONFIG], bump, seeds::program = deadroll_registry::ID)]
     pub config: UncheckedAccount<'info>,
+    /// CHECK: registry `["bestiary"]` table, checked by `read_bestiary` (HP, speed, initiative).
+    #[account(address = BESTIARY_TABLE @ SessionError::InvalidRegistryTable)]
+    pub bestiary: UncheckedAccount<'info>,
+    /// CHECK: registry `["tileset"]` table, checked by `read_tile_costs`.
+    #[account(address = TILESET_TABLE @ SessionError::InvalidRegistryTable)]
+    pub tileset: UncheckedAccount<'info>,
     /// CHECK: the map program.
     #[account(address = deadroll_map::ID)]
     pub map_program: UncheckedAccount<'info>,
@@ -107,6 +115,7 @@ pub fn handler(ctx: Context<OpenSession>, price_lamports: u64, dm_actor: Pubkey)
     session.height = map.height;
     session.entrance = layout.entrance();
     session.dm_actor = dm_actor;
+    session.tile_cost = read_tile_costs(&accounts.tileset)?;
 
     let monsters = Monsters::create(
         &accounts.monsters,
@@ -117,7 +126,10 @@ pub fn handler(ctx: Context<OpenSession>, price_lamports: u64, dm_actor: Pubkey)
     )?;
     for i in 0..spawn_count {
         let spawn = layout.spawn(i as usize)?;
-        let hp = monster_hp(spawn.bestiary_id, spawn.level);
+        let record = read_bestiary(&accounts.bestiary, spawn.bestiary_id)?;
+        let hp = monster_hp(&record, spawn.level);
+        session.monster_speed[i as usize] = record.speed;
+        session.monster_initiative[i as usize] = record.initiative;
         monsters.set(
             i,
             &Monster {

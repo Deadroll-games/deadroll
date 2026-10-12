@@ -3,14 +3,16 @@ use deadroll_types::{seeds, SessionStatus};
 
 use crate::{
     errors::SessionError,
-    events::TurnStarted,
-    rules::{monster_ap, Unit},
-    state::{Escrow, GameSession, Monsters},
+    events::ActionRequested,
+    rules::EMPTY_UNIT,
+    state::{Escrow, GameSession, MonsterState, Monsters, PendingAction},
+    vrf::{self, CallbackAccounts, RequestAccounts},
 };
 
 #[derive(Accounts)]
 pub struct StartSession<'info> {
-    /// DM main wallet.
+    /// DM main wallet; pays the VRF fee of the initiative roll.
+    #[account(mut)]
     pub dm: Signer<'info>,
     #[account(
         mut,
@@ -18,18 +20,34 @@ pub struct StartSession<'info> {
         bump = session.core.bump,
     )]
     pub session: Box<Account<'info, GameSession>>,
-    /// CHECK: `MonsterState` of this session, checked by `Monsters::load` (written in place; a
-    /// mutable `LazyAccount` would re-serialize the whole account on exit).
-    #[account(mut)]
-    pub monsters: UncheckedAccount<'info>,
+    /// Read-only, never Borsh-decoded: owner and discriminator checked here, session in
+    /// `Monsters`; passed on to the callback.
+    pub monsters: LazyAccount<'info, MonsterState>,
     #[account(seeds = [seeds::ESCROW, session.key().as_ref()], bump = escrow.bump)]
     pub escrow: Box<Account<'info, Escrow>>,
+    /// CHECK: our `["identity"]` PDA, signs the VRF request.
+    #[account(seeds = [vrf::PROGRAM_IDENTITY_SEED], bump)]
+    pub program_identity: UncheckedAccount<'info>,
+    /// CHECK: VRF oracle queue, address checked.
+    #[account(mut, address = vrf::oracle_queue())]
+    pub oracle_queue: UncheckedAccount<'info>,
+    /// CHECK: MagicBlock VRF program, address checked (not `Program<_>`: localnet has none).
+    #[account(address = vrf::vrf_program_id())]
+    pub vrf_program: UncheckedAccount<'info>,
+    /// CHECK: SlotHashes sysvar, address checked.
+    #[account(address = vrf::slot_hashes())]
+    pub slot_hashes: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
 }
 
+/// Checks the lobby, then asks the VRF for the initiative roll. The party is `Active` from here,
+/// but nobody can act until `consume_randomness` writes the turn order (`turn_order_len == 0`
+/// and `pending_vrf`).
 pub fn handler(ctx: Context<StartSession>) -> Result<()> {
-    let session = &mut ctx.accounts.session;
-    let monsters = Monsters::load(&ctx.accounts.monsters, &session.key())?;
-    require_keys_eq!(session.core.dm, ctx.accounts.dm.key(), SessionError::NotDm);
+    let accounts = ctx.accounts;
+    let session = &mut accounts.session;
+    let session_key = session.key();
+    require_keys_eq!(session.core.dm, accounts.dm.key(), SessionError::NotDm);
     require!(
         session.core.status == SessionStatus::Lobby,
         SessionError::NotInLobby
@@ -40,43 +58,59 @@ pub fn handler(ctx: Context<StartSession>) -> Result<()> {
         SessionError::NotAllReady
     );
     require!(
-        ctx.accounts.escrow.collected >= session.core.price_lamports,
+        accounts.escrow.collected >= session.core.price_lamports,
         SessionError::PriceNotCollected
     );
+    Monsters::load(accounts.monsters.as_ref(), &session_key)?;
 
-    // Round-robin: players by slot, then monsters by index.
-    // TODO(L7.4): initiative roll from VRF; P1: initiative timeline (docs/PARTY_AND_TURNS.md, 6).
-    let mut len = 0usize;
-    for slot in 0..session.core.player_count {
-        session.core.turn_order[len] = Unit::Player(slot).id();
-        len += 1;
-    }
-    for index in 0..monsters.count()? {
-        if monsters.get(index)?.alive {
-            session.core.turn_order[len] = Unit::Monster(index).id();
-            len += 1;
-        }
-    }
-    session.turn_order_len = len as u8;
-    session.core.turn_index = 0;
-    session.core.round = 1;
+    // The callback's account list is fixed (participation + character of the hit's player
+    // side); the initiative roll passes player slot 0, which the callback does not modify.
+    let character = session.core.players[0];
+    let (participation, _) = Pubkey::find_program_address(
+        &[
+            seeds::PARTICIPATION,
+            session_key.as_ref(),
+            character.as_ref(),
+        ],
+        &crate::ID,
+    );
+
     session.core.status = SessionStatus::Active;
-    session.turn_seq = 1;
+    session.core.round = 1;
+    session.core.turn_index = 0;
+    session.turn_order_len = 0;
+    session.turn_seq = 0;
     session.turn_started_at = Clock::get()?.unix_timestamp;
+    session.pending = PendingAction::initiative(participation);
+    session.core.pending_vrf = true;
 
-    // Players are first, so the first unit is a player slot: their AP refill on first action.
-    let unit = session.core.turn_order[0];
-    if let Some(Unit::Monster(index)) = Unit::from_id(unit) {
-        let mut monster = monsters.get(index)?;
-        monster.action_points = monster_ap(monster.bestiary_id);
-        monsters.set(index, &monster)?;
-    }
+    vrf::request(
+        RequestAccounts {
+            payer: &accounts.dm,
+            program_identity: &accounts.program_identity,
+            oracle_queue: &accounts.oracle_queue,
+            system_program: &accounts.system_program,
+            slot_hashes: &accounts.slot_hashes,
+        },
+        ctx.bumps.program_identity,
+        vrf::caller_seed(&session_key, session.core.action_counter),
+        &CallbackAccounts {
+            session: session_key,
+            monsters: accounts.monsters.key(),
+            participation,
+            character,
+            // Not read for the initiative roll.
+            skill_set: character,
+        },
+    )?;
 
-    emit!(TurnStarted {
-        session: session.key(),
-        unit,
-        round: session.core.round,
-        turn_seq: session.turn_seq,
+    emit!(ActionRequested {
+        session: session_key,
+        action: session.core.action_counter,
+        attacker: EMPTY_UNIT,
+        target: EMPTY_UNIT,
+        skill_slot: 0,
+        action_points: 0,
     });
     Ok(())
 }

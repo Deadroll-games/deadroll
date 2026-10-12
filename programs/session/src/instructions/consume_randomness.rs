@@ -8,12 +8,14 @@ use crate::{
     },
     cpi_out::{self, SessionSigner},
     errors::SessionError,
-    events::{HitResolved, MonsterKilled, PlayerDied, SessionEnded},
+    events::{MonsterKilled, PlayerDied, SessionEnded},
+    hit_event::emit_hit_resolved,
     rules::{is_boss, monster_profile, Unit, BASE_ATTACK},
     state::{
         external::{read_character, read_skill},
         GameSession, Monsters, Participation, PendingAction,
     },
+    turns,
     vrf::{self, SyscallRoll},
 };
 
@@ -24,10 +26,14 @@ pub struct ConsumeRandomness<'info> {
     /// The VRF program's identity for this program (`mock-vrf`: the fixed test identity).
     #[account(address = vrf::identity())]
     pub vrf_program_identity: Signer<'info>,
+    /// State checks run here, before the pending-accounts checks below: once a roll is resolved
+    /// `pending` is cleared, and a late callback must read `NoRollPending`, not a wrong account.
     #[account(
         mut,
         seeds = [seeds::SESSION, session.core.map.as_ref()],
         bump = session.core.bump,
+        constraint = session.core.status == SessionStatus::Active @ SessionError::NotActive,
+        constraint = session.core.pending_vrf @ SessionError::NoRollPending,
     )]
     pub session: Box<Account<'info, GameSession>>,
     /// CHECK: `MonsterState` of this session, checked by `Monsters::load` (written in place).
@@ -57,21 +63,22 @@ pub fn handler(ctx: Context<ConsumeRandomness>, randomness: [u8; 32]) -> Result<
     let accounts = ctx.accounts;
     let session = &mut accounts.session;
     let session_key = session.key();
-    require!(
-        session.core.status == SessionStatus::Active,
-        SessionError::NotActive
-    );
-    require!(session.core.pending_vrf, SessionError::NoRollPending);
     let pending = session.pending;
     let monsters = Monsters::load(&accounts.monsters, &session_key)?;
+
+    // `start_session`'s roll: the turn order, nothing else.
+    if pending.is_initiative() {
+        turns::begin(session, session_key, &monsters, randomness)?;
+        settle(session, randomness)?;
+        return Ok(());
+    }
+
     let participation = &mut accounts.participation;
     let character = read_character(&accounts.character)?;
 
     // Off the 4 KB stack frame: `HitResult` alone is over 1 KB.
     let mut input = Box::<HitInput>::default();
     let mut result = Box::<HitResult>::default();
-    let target_hp;
-    let mut killed = false;
 
     match (
         Unit::from_id(pending.attacker),
@@ -106,10 +113,8 @@ pub fn handler(ctx: Context<ConsumeRandomness>, randomness: [u8; 32]) -> Result<
             monster.states = result.states;
             if died {
                 monster.alive = false;
-                killed = true;
             }
             monsters.set(index, &monster)?;
-            target_hp = hp;
 
             if died {
                 let xp = monster_profile(monster.bestiary_id, monster.level).map_or(0, |p| p.xp);
@@ -148,9 +153,7 @@ pub fn handler(ctx: Context<ConsumeRandomness>, randomness: [u8; 32]) -> Result<
             let (hp, died) = take_damage(participation.core.hp, result.damage);
             participation.core.hp = hp;
             participation.core.states = result.states;
-            target_hp = hp;
             if died {
-                killed = true;
                 session.alive_mask &= !(1 << slot);
                 cpi_out::character::mark_dead(
                     &SessionSigner {
@@ -174,36 +177,15 @@ pub fn handler(ctx: Context<ConsumeRandomness>, randomness: [u8; 32]) -> Result<
         _ => return err!(SessionError::InvalidPendingAccounts),
     }
 
-    let action = session.core.action_counter;
-    session.core.pending_vrf = false;
-    session.pending = PendingAction::default();
-    session.core.last_seed = randomness;
-    session.core.action_counter = action.checked_add(1).ok_or(SessionError::Overflow)?;
-
-    let mut resonance = [0xFF; 3];
-    for (out, res) in resonance.iter_mut().zip(result.resonances.iter()) {
-        if let Some(r) = res.filter(|r| r.active) {
-            *out = r.id;
-        }
-    }
-    emit!(HitResolved {
-        session: session_key,
+    let action = settle(session, randomness)?;
+    emit_hit_resolved(
+        &session_key,
+        pending.attacker,
+        pending.target,
+        &randomness,
         action,
-        attacker: pending.attacker,
-        target: pending.target,
-        skill_slot: pending.skill_slot,
-        seed: randomness,
-        outcome: result.outcome as u8,
-        d20: result.d20,
-        crit: result.crit,
-        d100: result.d100,
-        damage: result.damage,
-        resonance,
-        states: result.states,
-        target_hp,
-        killed,
-        breakdown: borsh::to_vec(&*result)?,
-    });
+        &result,
+    )?;
     if session.core.status != SessionStatus::Active {
         emit!(SessionEnded {
             session: session_key,
@@ -212,4 +194,14 @@ pub fn handler(ctx: Context<ConsumeRandomness>, randomness: [u8; 32]) -> Result<
         });
     }
     Ok(())
+}
+
+/// Clears the pending roll and counts the action; returns its number.
+fn settle(session: &mut GameSession, randomness: [u8; 32]) -> Result<u32> {
+    let action = session.core.action_counter;
+    session.core.pending_vrf = false;
+    session.pending = PendingAction::default();
+    session.core.last_seed = randomness;
+    session.core.action_counter = action.checked_add(1).ok_or(SessionError::Overflow)?;
+    Ok(action)
 }
