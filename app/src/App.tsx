@@ -5,6 +5,7 @@ import { ConnectButton } from "./wallet/ConnectButton";
 import { SessionKeyButton } from "./session-key/SessionKeyProvider";
 import { Home } from "./routes/Home";
 import { CharacterPage } from "./routes/Character";
+import { CharacterDetailPage } from "./routes/CharacterDetail";
 import { MapBuilderPage } from "./routes/MapBuilder";
 import { PartyPage } from "./routes/Party";
 
@@ -33,6 +34,7 @@ export function App() {
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/character" element={<CharacterPage />} />
+            <Route path="/character/:address" element={<CharacterDetailPage />} />
             <Route path="/map" element={<MapBuilderPage />} />
             <Route path="/party" element={<PartyPage />} />
             <Route path="/dev/grid" element={<GridDemo />} />

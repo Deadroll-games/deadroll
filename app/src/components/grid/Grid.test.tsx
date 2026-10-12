@@ -43,7 +43,7 @@ describe("Grid", () => {
     expect(canvas.className).toContain("pixel");
   });
 
-  it("clicks an empty cell and a unit cell", () => {
+  it("clicks an empty cell, a live unit, and a dead unit cell as a move", () => {
     const onCellClick = vi.fn();
     const onUnitClick = vi.fn();
     const wolf: GridUnit = {
@@ -89,14 +89,15 @@ describe("Grid", () => {
     expect(onUnitClick).toHaveBeenCalledTimes(1);
     expect(onUnitClick).toHaveBeenCalledWith(wolf);
 
+    // A dead unit does not occupy its cell: the click is a cell click (move onto the corpse).
     fireEvent.click(canvas, { clientX: 10 + 3 * 24 + 4, clientY: 20 + 3 * 24 + 4 });
-    expect(onUnitClick).toHaveBeenCalledTimes(2);
-    expect(onUnitClick).toHaveBeenLastCalledWith(fallen);
-    expect(onCellClick).toHaveBeenCalledTimes(1);
+    expect(onUnitClick).toHaveBeenCalledTimes(1);
+    expect(onCellClick).toHaveBeenCalledTimes(2);
+    expect(onCellClick).toHaveBeenLastCalledWith({ x: 3, y: 3 });
 
     fireEvent.click(canvas, { clientX: 0, clientY: 0 });
-    expect(onCellClick).toHaveBeenCalledTimes(1);
-    expect(onUnitClick).toHaveBeenCalledTimes(2);
+    expect(onCellClick).toHaveBeenCalledTimes(2);
+    expect(onUnitClick).toHaveBeenCalledTimes(1);
   });
 
   it("reports hover only when the cell changes, then null on leave", () => {

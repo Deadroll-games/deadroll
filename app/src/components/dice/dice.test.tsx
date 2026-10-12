@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MOCK_HITS } from "../../chain/mock";
 import { HitOutcome } from "../../chain/types";
 import { formatScaled } from "../../chain/names";
-import { cascadeSteps } from "./cascade";
+import { cascadeSteps, chanceView } from "./cascade";
 import { DiceCascade } from "./DiceCascade";
 import { HitBreakdown } from "./HitBreakdown";
 import Demo from "./Demo";
@@ -43,9 +43,12 @@ describe("cascadeSteps", () => {
     ]);
     expect(steps[0]?.success).toBe(true);
     expect(steps[1]?.success).toBe(false);
-    expect(steps[2]?.label).toBe("Cold tint Fire (Race, tier 9)");
-    expect(steps[2]?.value).toBe("977");
-    expect(steps[2]?.target).toBe("< 1800");
+    expect(steps[2]?.label).toBe("Resonance (Fire tint on Cold, tier 9)");
+    expect(steps[2]?.value).toBe("rolled 90.22");
+    expect(steps[2]?.target).toBe("needs 82.00+");
+    expect(steps[2]?.flag).toBe("RESONANCE!");
+    expect(steps[2]?.bar).toEqual({ shown: 9_022, needed: 8_200, success: true });
+    expect(steps[2]?.title).toBe("on-chain raw roll 9.77%, shown as 99.99 - raw, passes when raw < 18.00%, carrier Race");
     expect(steps[2]?.success).toBe(true);
     expect(steps[3]?.success).toBe(false);
     expect(steps[4]?.label).toBe("Resonance Cold + Fire");
@@ -61,7 +64,8 @@ describe("cascadeSteps", () => {
     const chill = steps.find((s) => s.kind === "state" && s.label.startsWith("Chill"));
     expect(chill?.label).toBe("Chill chance added");
     expect(chill?.success).toBe(true);
-    expect(chill?.target).toBe("< 3500");
+    expect(chill?.value).toBe("rolled 87.95");
+    expect(chill?.target).toBe("needs 65.00+");
     expect(steps[10]?.label).toBe("Damage");
     expect(steps[10]?.value).toBe("9");
   });
@@ -70,8 +74,22 @@ describe("cascadeSteps", () => {
     const steps = cascadeSteps(MOCK_HITS.crit);
     const crit = steps.find((s) => s.kind === "crit");
     expect(crit?.success).toBe(true);
-    expect(crit?.value).toBe("211");
+    expect(crit?.label).toBe("Crit");
+    expect(crit?.value).toBe("rolled 97.88");
+    expect(crit?.flag).toBe("CRIT!");
+    expect(crit?.target).toBe("needs ?+");
+    expect(cascadeSteps(MOCK_HITS.crit, 500).find((s) => s.kind === "crit")?.target).toBe("needs 95.00+");
     expect(steps.find((s) => s.kind === "state")?.label).toBe("Bleeding chance added");
+  });
+
+  it("shown roll agrees with the chain at the boundary (raw < chance passes)", () => {
+    const atChance = chanceView(500, 500, false);
+    expect(atChance.value).toBe("rolled 94.99");
+    expect(atChance.target).toBe("needs 95.00+");
+    expect(atChance.bar.shown).toBeLessThan(atChance.bar.needed!);
+    const justUnder = chanceView(499, 500, true);
+    expect(justUnder.value).toBe("rolled 95.00");
+    expect(justUnder.bar.shown).toBe(justUnder.bar.needed);
   });
 
   it("immune replaces the defense target", () => {
@@ -167,13 +185,18 @@ describe("HitBreakdown", () => {
     expect(resonance.getByText("Hit breakdown")).toBeTruthy();
     expect(resonance.getByText("Cold + Fire, tier 9, Race, second tint none")).toBeTruthy();
     expect(resonance.getByText("Total damage: 9")).toBeTruthy();
+    expect(resonance.getByText("Resonance (Fire tint on Cold, tier 9): needs 82.00+, rolled 90.22, RESONANCE!")).toBeTruthy();
+    expect(resonance.getByText("Crit: needs ?+, rolled 95.87, fail")).toBeTruthy();
     expect(resonance.getByText("Rolls used: 9")).toBeTruthy();
     expect((resonance.getByText("Hit breakdown").closest("details") as HTMLDetailsElement).open).toBe(true);
 
     cleanup();
-    const crit = render(<HitBreakdown hit={MOCK_HITS.crit} />);
+    const crit = render(<HitBreakdown hit={MOCK_HITS.crit} critChanceBp={500} />);
     expect(crit.container.querySelectorAll('[data-testid="packet"]')).toHaveLength(1);
     expect(crit.getByText("+50%")).toBeTruthy();
+    expect(crit.getByText("Crit: needs 95.00+, rolled 97.88, CRIT!").getAttribute("title")).toBe(
+      "on-chain raw roll 2.11%, shown as 99.99 - raw, passes when raw < 5.00%",
+    );
 
     cleanup();
     const miss = render(<HitBreakdown hit={MOCK_HITS.miss} defaultOpen={false} />);
@@ -198,7 +221,7 @@ describe("Demo", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Crit" }));
     expect(screen.getByText("16")).toBeTruthy();
-    expect(screen.getByText("Crit roll")).toBeTruthy();
+    expect(document.querySelector('[data-kind="crit"] .dice-label')?.textContent).toBe("Crit");
 
     fireEvent.click(screen.getByRole("button", { name: "Replay" }));
     expect(screen.getByText("16")).toBeTruthy();

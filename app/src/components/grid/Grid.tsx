@@ -134,11 +134,12 @@ function paintOrder(units: readonly GridUnit[]): GridUnit[] {
   return monsters.concat(players);
 }
 
+/** Live unit on a cell. Corpses and tombstones do not occupy a cell, so a click on one is a cell click (a move). */
 function unitOnCell(units: readonly GridUnit[], cell: Cell): GridUnit | undefined {
   const ordered = paintOrder(units);
   for (let i = ordered.length - 1; i >= 0; i--) {
     const unit = ordered[i];
-    if (unit && unit.x === cell.x && unit.y === cell.y) return unit;
+    if (unit && unit.alive && unit.x === cell.x && unit.y === cell.y) return unit;
   }
   return undefined;
 }

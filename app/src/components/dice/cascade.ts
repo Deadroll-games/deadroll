@@ -1,6 +1,19 @@
 // Roll order for one HitResult. Pure: same hit always yields the same steps.
-import { Applied, HitOutcome, type HitResult, type StateRoll } from "../../chain/types";
-import { aspectName, carrierName, formatScaled, resonanceName, stateName } from "../../chain/names";
+import { Applied, HitOutcome, type HitResult, type StateRoll, type TintRoll } from "../../chain/types";
+import {
+  aspectName,
+  carrierName,
+  formatHundredths,
+  formatScaled,
+  neededRoll,
+  resonanceName,
+  rollTitle,
+  shownRoll,
+  stateName,
+} from "../../chain/names";
+
+/** Shown roll and needed roll, both in hundredths 0..9_999 / 1..10_000 (see shownRoll in chain/names). */
+export type RollBarData = { shown: number; needed: number | null; success: boolean };
 
 export type CascadeStep = {
   key: string;
@@ -9,7 +22,45 @@ export type CascadeStep = {
   value: string;
   target?: string;
   success?: boolean;
+  /** Overrides the "pass" text on success, e.g. "CRIT!". */
+  flag?: string;
+  /** Raw on-chain numbers for the tooltip. */
+  title?: string;
+  bar?: RollBarData;
 };
+
+/** One chance roll, shown "high roll wins". `chanceBp` null when the app cannot know it. */
+export type ChanceView = {
+  value: string;
+  target: string;
+  success: boolean;
+  flag: string;
+  title: string;
+  bar: RollBarData;
+};
+
+export function chanceView(raw: number, chanceBp: number | null, success: boolean, passWord = "pass"): ChanceView {
+  const shown = shownRoll(raw);
+  const needed = chanceBp == null ? null : neededRoll(chanceBp);
+  return {
+    value: `rolled ${formatHundredths(shown)}`,
+    target: `needs ${needed == null ? "?" : formatHundredths(needed)}+`,
+    success,
+    flag: success ? passWord : "fail",
+    title: rollTitle(raw, chanceBp),
+    bar: { shown, needed, success },
+  };
+}
+
+/** e.g. "Resonance (Piercing tint on Lightning, tier 14)". */
+export function tintLabel(tint: TintRoll): string {
+  return `Resonance (${aspectName(tint.tint)} tint on ${aspectName(tint.base)}, tier ${tint.tier})`;
+}
+
+export function tintView(tint: TintRoll): ChanceView {
+  const view = chanceView(tint.roll, tint.chanceBp, tint.success, "RESONANCE!");
+  return { ...view, title: `${view.title}, carrier ${carrierName(tint.carrier)}` };
+}
 
 function appliedSuffix(applied: Applied): string {
   if (applied === Applied.Added) return " added";
@@ -24,13 +75,12 @@ function pushState(steps: CascadeStep[], roll: StateRoll, key: string): void {
     key,
     kind: "state",
     label: `${stateName(roll.kind)} chance${appliedSuffix(roll.applied)}`,
-    value: String(roll.roll),
-    target: `< ${roll.chanceBp}`,
-    success: roll.success,
+    ...chanceView(roll.roll, roll.chanceBp, roll.success),
   });
 }
 
-export function cascadeSteps(hit: HitResult): CascadeStep[] {
+/** `critChanceBp` is not in the event: the caller derives it (playerCritChanceBp) or leaves it unknown. */
+export function cascadeSteps(hit: HitResult, critChanceBp?: number): CascadeStep[] {
   const steps: CascadeStep[] = [];
 
   steps.push({
@@ -46,9 +96,8 @@ export function cascadeSteps(hit: HitResult): CascadeStep[] {
     steps.push({
       key: "crit",
       kind: "crit",
-      label: "Crit roll",
-      value: String(hit.critRoll),
-      success: hit.crit,
+      label: "Crit",
+      ...chanceView(hit.critRoll, critChanceBp ?? null, hit.crit, "CRIT!"),
     });
   }
 
@@ -56,10 +105,8 @@ export function cascadeSteps(hit: HitResult): CascadeStep[] {
     steps.push({
       key: `tint-${i}`,
       kind: "tint",
-      label: `${aspectName(tint.base)} tint ${aspectName(tint.tint)} (${carrierName(tint.carrier)}, tier ${tint.tier})`,
-      value: String(tint.roll),
-      target: `< ${tint.chanceBp}`,
-      success: tint.success,
+      label: tintLabel(tint),
+      ...tintView(tint),
     });
   });
 

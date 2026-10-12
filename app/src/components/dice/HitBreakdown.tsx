@@ -1,5 +1,7 @@
 import { Applied, HitOutcome, type StateRoll } from "../../chain/types";
 import { aspectName, carrierName, formatBp, formatScaled, resonanceName, stateName } from "../../chain/names";
+import { chanceView, tintLabel, tintView, type ChanceView } from "./cascade";
+import { RollBar } from "./RollBar";
 import type { HitBreakdownProps } from "./types";
 import "./dice.css";
 
@@ -16,12 +18,21 @@ function appliedLabel(applied: Applied): string {
   return "none";
 }
 
-function stateRollLine(roll: StateRoll): string {
-  const verdict = roll.success ? "pass" : "fail";
-  return `${stateName(roll.kind)}, roll ${roll.roll} < ${roll.chanceBp} (${formatBp(roll.chanceBp)}), ${verdict}, ${appliedLabel(roll.applied)}`;
+/** "Crit: needs 95.00+, rolled 81.04, fail" with the raw roll in the tooltip and a bar below. */
+function RollLine({ label, view, suffix = "" }: { label: string; view: ChanceView; suffix?: string }) {
+  return (
+    <span className="dice-roll-line" title={view.title}>
+      {`${label}: ${view.target}, ${view.value}, ${view.flag}${suffix}`}
+      <RollBar bar={view.bar} />
+    </span>
+  );
 }
 
-export function HitBreakdown({ hit, defaultOpen = true }: HitBreakdownProps) {
+function StateRollLine({ roll }: { roll: StateRoll }) {
+  return <RollLine label={stateName(roll.kind)} view={chanceView(roll.roll, roll.chanceBp, roll.success)} suffix={`, ${appliedLabel(roll.applied)}`} />;
+}
+
+export function HitBreakdown({ hit, defaultOpen = true, critChanceBp }: HitBreakdownProps) {
   const resonances = hit.resonances.filter((r) => r != null);
   const stateRolls = [...hit.packets.map((p) => p.state), ...hit.resonanceStates].filter((roll) => roll.rolled);
 
@@ -32,10 +43,23 @@ export function HitBreakdown({ hit, defaultOpen = true }: HitBreakdownProps) {
         <p className="dice-line">
           To hit: d20 {hit.d20}, total {hit.attackTotal} vs defense {hit.defense}, {outcomeLabel(hit.outcome)}
         </p>
-        <p className="dice-line">
-          Crit: {hit.crit ? "yes" : "no"}
-          {hit.critRoll !== null ? `, roll ${hit.critRoll}` : ""}
-        </p>
+        {hit.critRoll !== null ? (
+          <p className="dice-line">
+            <RollLine label="Crit" view={chanceView(hit.critRoll, critChanceBp ?? null, hit.crit, "CRIT!")} />
+          </p>
+        ) : (
+          <p className="dice-line">Crit: {hit.crit ? "yes" : "no"}</p>
+        )}
+
+        {hit.tintRolls.length > 0 && (
+          <ul className="dice-list">
+            {hit.tintRolls.map((tint, i) => (
+              <li key={i}>
+                <RollLine label={tintLabel(tint)} view={tintView(tint)} />
+              </li>
+            ))}
+          </ul>
+        )}
 
         {hit.packets.map((packet, i) => (
           <table key={i} className="dice-packet" data-testid="packet">
@@ -118,7 +142,9 @@ export function HitBreakdown({ hit, defaultOpen = true }: HitBreakdownProps) {
           ) : (
             <ul className="dice-list">
               {stateRolls.map((roll, i) => (
-                <li key={i}>{stateRollLine(roll)}</li>
+                <li key={i}>
+                  <StateRollLine roll={roll} />
+                </li>
               ))}
             </ul>
           )}

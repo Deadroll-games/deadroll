@@ -132,6 +132,33 @@ export type CharacterAcc = {
   unspentPoints: number;
   nftFrozen: boolean;
 };
+/** programs/character SkillRecord: crates/skillcheck SkillBlocks + derived values. */
+export type SkillRecordAcc = {
+  blocks: {
+    category: Enum;
+    purpose: Enum;
+    source: Enum;
+    form: Enum;
+    target: Enum;
+    aspects: Enum[];
+    aspectCount: number;
+    effect: Enum;
+    trigger: Enum;
+    auraRadius: number;
+  };
+  sharesBp: number[];
+  powerBp: number;
+  fusion: number;
+  cooldown: number;
+  name: Uint8Array;
+};
+export type SkillSetAcc = { character: Address; count: number; skills: SkillRecordAcc[] };
+export const variantKey = (e: Enum): string => Object.keys(e)[0] ?? "";
+/** Enum variant as a label: { enemyAdjacent: {} } -> "Enemy adjacent". */
+export function variantLabel(e: Enum): string {
+  const words = variantKey(e).replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
 export type MapAcc = {
   core: { dm: Address; index: number; width: number; height: number; status: Enum; layoutHash: Uint8Array };
   tier: number;
