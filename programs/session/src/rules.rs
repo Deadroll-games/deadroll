@@ -1,12 +1,15 @@
 //! Session-local game rules: unit ids, action points, step costs, combat numbers, rewards.
 //!
-//! Numbers here are placeholders until balancing (docs have none yet). Each one sits behind a
-//! single function so the registry tables (L4) can replace it without touching instructions.
-use deadroll_combat::{DamageRange, RollSource};
+//! Monster HP, speed, initiative and tile costs come from the registry tables (copied at
+//! `open_session`). The other numbers are placeholders until balancing (docs have none yet),
+//! each behind a single function.
+use deadroll_combat::{d20, DamageRange, RollSource};
 use deadroll_mapcheck::roster::{ids, p0_role, Role};
-use deadroll_types::{Aspect, Cell, Class, Form, Race, Source, Tile, PARTY_MAX, STATS_COUNT};
+use deadroll_types::{
+    Aspect, Cell, Class, Form, Race, Source, Tile, PARTY_MAX, STATS_COUNT, TURN_ORDER_MAX,
+};
 
-use crate::state::STASH_RESOURCES;
+use crate::state::{external::BestiaryRecord, STASH_RESOURCES};
 
 /// Minimum party price: 0.01 SOL (docs/PARTY_AND_TURNS.md, section 3.1).
 pub const MIN_PRICE_LAMPORTS: u64 = 10_000_000;
@@ -57,39 +60,83 @@ pub fn player_ap(race: Race, class: Class, dexterity: u16) -> u8 {
     (base + dexterity / 10).clamp(1, 12) as u8
 }
 
-/// Action points per turn for a monster, from its bestiary speed.
-// TODO(L4): read speed from the registry `Bestiary`; it has no layout yet.
-pub fn monster_ap(_bestiary_id: u8) -> u8 {
-    4
+/// Action points per turn for a monster: its registry bestiary speed (copied at open).
+pub fn monster_ap(speed: u8) -> u8 {
+    speed.clamp(1, 12)
 }
 
-/// Monster HP at spawn (docs/BESTIARY.md, section 7: wolf medium, goblin low, chieftain boss).
-// TODO(L4): read HP from the registry `Bestiary`; it has no layout yet.
-pub fn monster_hp(bestiary_id: u8, level: u8) -> u32 {
-    let level = level as u32;
-    match bestiary_id {
-        ids::WOLF => 12 + 4 * level,
-        ids::GOBLIN => 8 + 3 * level,
-        ids::GOBLIN_CHIEFTAIN => 40 + 10 * level,
-        ids::GOBLIN_WARRIOR => 16 + 5 * level,
-        ids::GOBLIN_SHAMAN => 10 + 3 * level,
-        _ => 10 + 5 * level,
+/// Monster HP at spawn from its registry bestiary record (at least 1).
+pub fn monster_hp(record: &BestiaryRecord, level: u8) -> u32 {
+    record
+        .hp
+        .saturating_add(record.hp_per_level.saturating_mul(level as u32))
+        .max(1)
+}
+
+/// Action points to step onto a tile, `None` if it cannot be entered. `costs` is the registry
+/// `Tileset` copied at open (`GameSession.tile_cost`, 0 = impassable).
+pub fn step_cost(tile: Tile, costs: &[u8; Tile::COUNT]) -> Option<u8> {
+    match costs[tile as usize] {
+        0 => None,
+        cost => Some(cost),
     }
 }
 
-/// Action points to step onto a tile, `None` if it cannot be entered.
-// TODO(L4): read passability and cost from the registry `Tileset`.
-pub fn step_cost(tile: Tile) -> Option<u8> {
-    match tile {
-        Tile::Floor | Tile::Door | Tile::Entrance | Tile::Exit | Tile::Trap => Some(1),
-        // Shallow water is difficult terrain (docs/MAP_DESCRIPTION.md, section 4.2).
-        Tile::Water => Some(2),
-        Tile::Wall => None,
+/// Initiative of a player (docs/CHARACTER.md, 3.2: Intelligence; items and effects in P1).
+// TODO(balance): placeholder scale, same order as the bestiary values.
+pub fn player_initiative(stats: &[u16; STATS_COUNT]) -> u16 {
+    stats[deadroll_types::Stat::Intelligence as usize] / 2
+}
+
+/// The turn order rolled from one VRF value (docs/PARTY_AND_TURNS.md, 6; the timeline is P1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Initiative {
+    pub len: u8,
+    /// Turn-order ids, first to act first; `EMPTY_UNIT` after `len`.
+    pub order: [u8; TURN_ORDER_MAX],
+    pub d20: [u8; TURN_ORDER_MAX],
+    pub initiative: [u16; TURN_ORDER_MAX],
+}
+
+/// Every unit in `units` (players by slot, then monsters by index) rolls a d20 in that order
+/// (roll `i` of the seed's stream); the higher `d20 + initiative` acts first, ties go to the
+/// higher initiative, then to the lower unit id.
+pub fn roll_initiative(units: &[(u8, u16)], src: &mut impl RollSource) -> Initiative {
+    let mut out = Initiative {
+        len: units.len().min(TURN_ORDER_MAX) as u8,
+        order: [EMPTY_UNIT; TURN_ORDER_MAX],
+        d20: [0; TURN_ORDER_MAX],
+        initiative: [0; TURN_ORDER_MAX],
+    };
+    let len = out.len as usize;
+    for (i, &(unit, initiative)) in units[..len].iter().enumerate() {
+        out.order[i] = unit;
+        out.d20[i] = d20(src);
+        out.initiative[i] = initiative;
     }
+    // Insertion sort: at most 28 units, stable, no allocation.
+    let key = |o: &Initiative, i: usize| {
+        (
+            o.d20[i] as u32 + o.initiative[i] as u32,
+            o.initiative[i],
+            u8::MAX - o.order[i],
+        )
+    };
+    for i in 1..len {
+        let mut j = i;
+        while j > 0 && key(&out, j) > key(&out, j - 1) {
+            out.order.swap(j, j - 1);
+            out.d20.swap(j, j - 1);
+            out.initiative.swap(j, j - 1);
+            j -= 1;
+        }
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------------------------
-// Combat (L7.4). TODO(balance): every number below; TODO(L4): monsters from the `Bestiary`.
+// Combat (L7.4). TODO(balance): every number below. The bestiary combat fields (armor, evasion,
+// accuracy, damage) are relative levels until balancing, so the combat profile stays here.
 
 /// `act` skill slot for the weapon's basic attack.
 pub const BASE_ATTACK: u8 = 0xFF;
@@ -301,6 +348,82 @@ mod tests {
         assert_eq!(player_ap(Race::Human, Class::Mage, 0), 3);
         assert_eq!(player_ap(Race::ForestElf, Class::Warrior, 25), 7);
         assert_eq!(player_ap(Race::ForestElf, Class::Warrior, u16::MAX), 12);
+        assert_eq!(monster_ap(0), 1);
+        assert_eq!(monster_ap(6), 6);
+        assert_eq!(monster_ap(200), 12);
+    }
+
+    #[test]
+    fn monster_hp_from_the_bestiary() {
+        let wolf = BestiaryRecord {
+            speed: 6,
+            initiative: 6,
+            hp: 12,
+            hp_per_level: 3,
+        };
+        assert_eq!(monster_hp(&wolf, 0), 12);
+        assert_eq!(monster_hp(&wolf, 2), 18);
+        let zero = BestiaryRecord {
+            hp: 0,
+            hp_per_level: 0,
+            ..wolf
+        };
+        assert_eq!(monster_hp(&zero, 5), 1);
+        let huge = BestiaryRecord {
+            hp: u32::MAX,
+            ..wolf
+        };
+        assert_eq!(monster_hp(&huge, 255), u32::MAX);
+    }
+
+    #[test]
+    fn step_cost_from_the_tileset() {
+        let costs = crate::state::test_support::TILE_COST;
+        assert_eq!(step_cost(Tile::Floor, &costs), Some(1));
+        assert_eq!(step_cost(Tile::Water, &costs), Some(2));
+        assert_eq!(step_cost(Tile::Wall, &costs), None);
+        assert_eq!(step_cost(Tile::Trap, &[3; Tile::COUNT]), Some(3));
+    }
+
+    #[test]
+    fn initiative_order() {
+        use deadroll_combat::ScriptedRoll;
+        // d20 = roll % 20 + 1. Units: player 0 (init 5), player 1 (init 0), monsters 4, 5, 6.
+        let units = [(0, 5), (1, 0), (4, 2), (5, 2), (6, 10)];
+        // d20s:    10       15      13      13      1
+        // totals:  15       15      15      15      11
+        let mut src = ScriptedRoll::new([9, 14, 12, 12, 0]);
+        let r = roll_initiative(&units, &mut src);
+        assert_eq!(r.len, 5);
+        // Tie at 15: higher initiative first (0: 5), then 4 and 5 (init 2, lower id first), then 1.
+        assert_eq!(&r.order[..5], &[0, 4, 5, 1, 6]);
+        assert_eq!(&r.d20[..5], &[10, 13, 13, 15, 1]);
+        assert_eq!(&r.initiative[..5], &[5, 2, 2, 0, 10]);
+        assert!(r.order[5..].iter().all(|&u| u == EMPTY_UNIT));
+    }
+
+    #[test]
+    fn initiative_is_deterministic_and_complete() {
+        let units: Vec<(u8, u16)> = (0..2u8)
+            .map(|s| (s, 3))
+            .chain((0..20u8).map(|i| (MONSTER_UNIT_BASE + i, i as u16 % 7)))
+            .collect();
+        for seed in 0..50 {
+            let a = roll_initiative(&units, &mut SeededRoll::new(seed));
+            assert_eq!(a, roll_initiative(&units, &mut SeededRoll::new(seed)));
+            let mut ids: Vec<u8> = a.order[..a.len as usize].to_vec();
+            ids.sort();
+            let mut expected: Vec<u8> = units.iter().map(|u| u.0).collect();
+            expected.sort();
+            assert_eq!(ids, expected);
+            for w in 0..a.len as usize - 1 {
+                let t = |i: usize| a.d20[i] as u32 + a.initiative[i] as u32;
+                assert!(t(w) >= t(w + 1));
+                assert!((1..=20).contains(&a.d20[w]));
+            }
+        }
+        let none = roll_initiative(&[], &mut SeededRoll::new(1));
+        assert_eq!(none.len, 0);
     }
 
     #[test]
@@ -321,7 +444,7 @@ mod tests {
         for id in 0..=4u8 {
             let p = monster_profile(id, 1).unwrap();
             assert!(p.weapon.min >= 1 && p.weapon.max >= p.weapon.min);
-            assert!(p.xp > 0 && monster_hp(id, 1) > 0);
+            assert!(p.xp > 0);
         }
         assert_eq!(monster_profile(5, 1), None);
         assert!(is_boss(ids::GOBLIN_CHIEFTAIN));

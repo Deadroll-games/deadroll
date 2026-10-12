@@ -63,6 +63,8 @@ const sighash = (preimage: string) => sha256(preimage).subarray(0, 8);
 
 const sessionAuthority = pda([Buffer.from("authority")], SESSION);
 const config = pda([Buffer.from("config")], REGISTRY);
+const bestiary = pda([Buffer.from("bestiary")], REGISTRY);
+const tileset = pda([Buffer.from("tileset")], REGISTRY);
 const programIdentity = pda([Buffer.from("identity")], SESSION);
 /** `MOCK_VRF_IDENTITY` of programs/session/src/vrf.rs: a public test key, mock-vrf builds only. */
 const MOCK_VRF = Keypair.fromSeed(sha256("deadroll:mock-vrf"));
@@ -148,6 +150,36 @@ function seedWhere(pred: (d20: number) => boolean): Buffer {
 const CRIT = seedWhere((d) => d === 20);
 const MISS = seedWhere((d) => d === 1);
 
+/**
+ * `rules::roll_initiative`: unit `i` (players by slot, then living monsters by index) rolls
+ * d20 number `i`; higher `d20 + initiative` first, then higher initiative, then lower unit id.
+ */
+function initiativeOrder(seed: Buffer, units: [number, number][]): { order: number[]; d20: number[] } {
+  const rolled = units.map(([unit, init], i) => ({ unit, init, d20: Number(rollAt(seed, i) % 20n) + 1 }));
+  rolled.sort((a, b) => b.d20 + b.init - (a.d20 + a.init) || b.init - a.init || a.unit - b.unit);
+  return { order: rolled.map((r) => r.unit), d20: rolled.map((r) => r.d20) };
+}
+
+/** Units of a started session, in roll order, from its stored initiatives. */
+function initiativeUnits(s: any, monsters: any): [number, number][] {
+  const units: [number, number][] = [];
+  for (let slot = 0; slot < s.core.playerCount; slot++) units.push([slot, s.playerInitiative[slot]]);
+  for (let i = 0; i < monsters.count; i++)
+    if (monsters.monsters[i].alive) units.push([MONSTER_BASE + i, s.monsterInitiative[i]]);
+  return units;
+}
+
+/** A VRF value whose initiative roll puts every player first, in slot order (keeps the flow tests
+ * deterministic: player 0 acts first, then player 1, then the monsters). */
+function playersFirstSeed(units: [number, number][], players: number): Buffer {
+  const want = units.slice(0, players).map(([u]) => u);
+  for (;;) {
+    const seed = randomBytes(32);
+    const { order } = initiativeOrder(seed, units);
+    if (want.every((u, i) => order[i] === u)) return seed;
+  }
+}
+
 const parser = new EventParser(SESSION, program.coder);
 async function eventsOf(sig: string): Promise<{ name: string; data: any }[]> {
   const tx = await connection.getTransaction(sig, {
@@ -229,6 +261,8 @@ function openSession(dm: Keypair, map: PublicKey, layout: PublicKey, price: BN, 
       ...sessionAccounts(map),
       sessionAuthority,
       config,
+      bestiary,
+      tileset,
       mapProgram: MAP,
       systemProgram: SystemProgram.programId,
     })
@@ -281,6 +315,17 @@ describe("deadroll_session: deployed program", () => {
     );
   });
 
+  it("open_session rejects registry tables at other addresses", async () => {
+    const dm = await funded();
+    const map = Keypair.generate().publicKey;
+    for (const over of [{ bestiary: tileset }, { tileset: bestiary }, { bestiary: config }]) {
+      await rejects(
+        openSession(dm, map, map, PRICE, PublicKey.default).accountsPartial(over).rpc(),
+        "InvalidRegistryTable",
+      );
+    }
+  });
+
   it("open_session rejects a wrong map program", async () => {
     const dm = await funded();
     const map = Keypair.generate().publicKey;
@@ -298,7 +343,11 @@ describe("deadroll_session: deployed program", () => {
     const character = Keypair.generate().publicKey;
     const { participation, stash, skillSet, bag } = playerAccounts(session, character);
     const run = (m: any) => rejects(m.signers([signer]).rpc(), "AccountNotInitialized");
-    await run(program.methods.startSession().accountsStrict({ dm: signer.publicKey, session, monsters, escrow }));
+    await run(
+      program.methods
+        .startSession()
+        .accountsStrict({ dm: signer.publicKey, session, monsters, escrow, ...vrfAccounts }),
+    );
     await run(
       program.methods
         .endTurn()
@@ -383,6 +432,10 @@ describe("deadroll_session: deployed program", () => {
   it("dice in the tests follow deadroll_combat::VrfRoll", () => {
     assert.equal(d20Of(CRIT), 20);
     assert.equal(d20Of(MISS), 1);
+    // rules::tests::initiative_order: same tie-breaks (total, then initiative, then unit id).
+    const units: [number, number][] = [[0, 5], [1, 0], [4, 2], [5, 2], [6, 10]];
+    const seed = playersFirstSeed(units, 2);
+    assert.deepEqual(initiativeOrder(seed, units).order.slice(0, 2), [0, 1]);
     // sha256([0; 32] ‖ 00 00 00 00), first 8 bytes LE (crates/combat/src/rng.rs test vector source).
     const zero = Buffer.alloc(32);
     assert.equal(rollAt(zero, 0), sha256(Buffer.alloc(36)).readBigUInt64LE(0));
@@ -403,6 +456,9 @@ const MAP_IDL = new URL("../target/idl/deadroll_map.json", import.meta.url);
 const missing: string[] = [];
 if ((await connection.getAccountInfo(config))?.owner.equals(REGISTRY) !== true)
   missing.push("registry GameConfig (L4)");
+for (const [name, table] of [["bestiary", bestiary], ["tileset", tileset]] as const)
+  if ((await connection.getAccountInfo(table))?.owner.equals(REGISTRY) !== true)
+    missing.push(`registry ${name} table seeded (tools/scripts/seed-registry.ts)`);
 if (!(await isProgram(CHARACTER))) missing.push("deadroll_character deployed");
 if (!(await isProgram(MAP))) missing.push("deadroll_map deployed");
 if (!existsSync(CHARACTER_IDL)) missing.push("target/idl/deadroll_character.json");
@@ -613,16 +669,32 @@ class Party {
   start(signer: Keypair) {
     return program.methods
       .startSession()
-      .accountsStrict({ dm: signer.publicKey, session: this.acc.session, monsters: this.acc.monsters, escrow: this.acc.escrow })
+      .accountsStrict({
+        dm: signer.publicKey,
+        session: this.acc.session,
+        monsters: this.acc.monsters,
+        escrow: this.acc.escrow,
+        ...vrfAccounts,
+      })
       .signers([signer])
       .rpc();
   }
-  /** open, everyone joins (player 0 pays the whole price), ready, start. */
+  /** The initiative units of the started session (players, then living monsters). */
+  async initiativeUnits() {
+    return initiativeUnits(await this.state(), (await this.monsters()).core);
+  }
+  /** The initiative callback (player slot 0's accounts) with a seed that puts players first. */
+  async rollInitiative(): Promise<{ sig: string; seed: Buffer }> {
+    const seed = playersFirstSeed(await this.initiativeUnits(), this.players.length);
+    return { sig: await this.consume(0, seed), seed };
+  }
+  /** open, everyone joins (player 0 pays the whole price), ready, start, initiative. */
   async startAll() {
     await this.open().rpc();
     for (let i = 0; i < this.players.length; i++) await this.join(i, this.players[i].wallet, i === 0 ? PRICE : new BN(0));
     for (let i = 0; i < this.players.length; i++) await this.ready(i, this.players[i].wallet, true);
     await this.start(this.dm);
+    await this.rollInitiative();
   }
   move(who: number, signer: Keypair, steps: number[], token: PublicKey | null = null) {
     const [padded, len] = path(steps);
@@ -893,9 +965,40 @@ describe("deadroll_session: lobby, auth and movement on the demo map", { skip: S
     await party.ready(1, p1.wallet, true);
     await rejects(party.start(party.dmActor), "NotDm");
     await party.start(party.dm);
+    let s = await party.state();
+    assert.ok(s.core.status.active && s.core.pendingVrf);
+    assert.equal(s.turnOrderLen, 0);
+    assert.deepEqual([s.pending.attacker, s.pending.target], [EMPTY_UNIT, EMPTY_UNIT]);
+    assert.ok(s.pending.participation.equals(party.players[0].participation));
+    // Registry snapshot: speed and initiative per monster, tile costs (Wall impassable).
+    assert.ok(s.monsterSpeed.slice(0, DEMO_SPAWNS.length).every((v: number) => v >= 1));
+    assert.equal(s.tileCost[TILE.Wall], 0);
+    // Nobody acts before the initiative roll.
+    await rejects(party.move(0, party.players[0].wallet, [S]), "RollPending");
+    await rejects(party.start(party.dm), "NotInLobby");
+  });
+
+  it("initiative: one VRF value orders every unit; InitiativeRolled shows the dice", async () => {
+    await rejects(party.consume(0, CRIT, await funded(1)), "ConstraintAddress");
+    await rejects(party.consume(1, CRIT), "InvalidPendingAccounts");
+    const units = await party.initiativeUnits();
+    assert.equal(units.length, 2 + DEMO_SPAWNS.length);
+    const { sig, seed } = await party.rollInitiative();
+    const expected = initiativeOrder(seed, units);
+    const ev = await eventOf(sig, "initiativeRolled");
+    assert.equal(ev.len, units.length);
+    assert.equal(ev.actionCounter, 0);
+    assert.deepEqual(Buffer.from(ev.seed), seed);
+    assert.deepEqual(ev.order.slice(0, ev.len), expected.order);
+    assert.deepEqual(ev.d20.slice(0, ev.len), expected.d20);
+    assert.equal((await eventOf(sig, "turnStarted")).unit, 0);
     const s = await party.state();
-    assert.ok(s.core.status.active);
-    assert.deepEqual(s.core.turnOrder.slice(0, 10), [0, 1, 4, 5, 6, 7, 8, 9, 10, EMPTY_UNIT]);
+    assert.ok(!s.core.pendingVrf);
+    assert.equal(s.turnOrderLen, units.length);
+    assert.deepEqual(s.core.turnOrder.slice(0, units.length), expected.order);
+    assert.equal(s.core.turnOrder[units.length], EMPTY_UNIT);
+    assert.deepEqual([s.core.turnIndex, s.core.round, s.turnSeq, s.core.actionCounter], [0, 1, 1, 1]);
+    await rejects(party.consume(0, seed), "NoRollPending");
   });
 
   it("auth: main wallet or bound session key with a live token from that wallet", async () => {
@@ -963,18 +1066,21 @@ describe("deadroll_session: combat, death, victory and payouts", { skip: SKIP_PA
 
     const sig = await party.consume(0, CRIT);
     const hit = await eventOf(sig, "hitResolved");
-    assert.equal(hit.outcome, 1);
-    assert.equal(hit.d20, 20);
-    assert.ok(hit.crit);
+    // The app's shape: session, attacker, target, seed, actionCounter, result (HitResult).
+    assert.ok(hit.session.equals(party.acc.session));
+    assert.deepEqual([hit.attacker, hit.target, hit.actionCounter], [0, MONSTER_BASE, 1]);
     assert.deepEqual(Buffer.from(hit.seed), CRIT);
-    assert.ok(hit.damage >= 1);
-    assert.ok(hit.breakdown.length > 100, "Borsh HitResult");
+    const r = hit.result;
+    assert.ok(r.outcome.hit);
+    assert.equal(r.d20, 20);
+    assert.ok(r.crit);
+    assert.ok(r.damage >= 1);
+    assert.ok(r.packetCount >= 1 && r.rollsUsed >= 2);
     const wolf = (await party.monsters()).core.monsters[0];
-    assert.equal(wolf.hp, Math.max(0, before - hit.damage));
-    assert.equal(hit.targetHp, wolf.hp);
+    assert.equal(wolf.hp, Math.max(0, before - r.damage));
     s = await party.state();
     assert.ok(!s.core.pendingVrf);
-    assert.equal(s.core.actionCounter, 1);
+    assert.equal(s.core.actionCounter, 2);
     assert.deepEqual(Buffer.from(s.core.lastSeed), CRIT);
     await rejects(party.consume(0, CRIT), "NoRollPending");
   });
@@ -986,7 +1092,8 @@ describe("deadroll_session: combat, death, victory and payouts", { skip: SKIP_PA
     await party.act(0, p0.wallet, RANGED_SLOT.warrior, 0);
     const sig = await party.consume(0, MISS);
     const hit = await eventOf(sig, "hitResolved");
-    assert.deepEqual([hit.outcome, hit.d20, hit.damage], [0, 1, 0]);
+    assert.ok(hit.result.outcome.miss);
+    assert.deepEqual([hit.result.d20, hit.result.damage], [1, 0]);
     assert.equal((await party.monsters()).core.monsters[0].hp, before.hp);
     await rejects(party.act(0, p0.wallet, RANGED_SLOT.warrior, 0), "NotEnoughActionPoints");
   });
