@@ -20,6 +20,11 @@ ramp dark      #1a0e14 #2c1820 #40222c #56303a
 ramp eyes      #10101a #202848 #3c5c9c #a0c4ff
 ramp cape_red  #3a0c10 #5e1418 #8a2024 #b8383a
 ramp fur       #3a3430 #5a524a #827868 #aea08c
+# tile ramps (appended)
+ramp stone     #20242e #3a4150 #5c6679 #8f9ab0
+ramp floor     #2a2830 #46444e #6a6872 #97949e
+ramp water     #0f2a52 #1c4a86 #3a7cc0 #8fc4f0
+ramp wood      #2e1a0e #4e2e18 #744724 #9c6a38
 
 dark dark
 
@@ -33,3 +38,8 @@ material cape       cape_red leather
 material wolf       fur      fur
 material goblin     green    leather
 material stone      gray     gray
+# tile materials (appended)
+material tile_wall   stone  gray
+material tile_floor  floor  stone
+material tile_water  water  cold
+material tile_door   wood   leather
