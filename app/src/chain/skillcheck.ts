@@ -26,6 +26,7 @@ export const Effect = {
   Haste: 6,
   Empowerment: 7,
   Protection: 8,
+  Heal: 9,
 } as const;
 export type Effect = (typeof Effect)[keyof typeof Effect];
 export const Trigger = { None: 0, Hit: 1, CritHit: 2, HpBelow: 3, AllyHpBelow: 4, Controlled: 5, EnemyAdjacent: 6 } as const;
@@ -36,7 +37,7 @@ export const PURPOSE_NAMES = ["Damage", "Buff", "Debuff"] as const;
 export const SOURCE_NAMES = ["Magical", "Combat"] as const;
 export const FORM_NAMES = ["Strike", "Projectile"] as const;
 export const TARGET_NAMES = ["Single", "Line"] as const;
-export const EFFECT_NAMES = ["None", "Weakening", "Slow", "Vulnerability", "Stun", "Freeze", "Haste", "Empowerment", "Protection"] as const;
+export const EFFECT_NAMES = ["None", "Weakening", "Slow", "Vulnerability", "Stun", "Freeze", "Haste", "Empowerment", "Protection", "Heal"] as const;
 export const TRIGGER_NAMES = ["None", "Hit", "Crit hit", "HP below", "Ally HP below", "Controlled", "Enemy adjacent"] as const;
 
 export const SKILL_ASPECTS_MAX = 3;
@@ -102,7 +103,7 @@ export const SKILL_ERROR_MESSAGES: Record<SkillError, string> = {
   UnusedAspectSet: "An unused aspect slot must stay empty.",
   ThirdAspectTarget: "A third aspect needs a single target.",
   EffectNeedsOneAspect: "A damage skill with an effect takes exactly one aspect.",
-  EffectKind: "This effect does not fit the purpose: buffs take Haste, Empowerment or Protection; damage and debuffs take Weakening, Slow, Vulnerability, Stun or Freeze.",
+  EffectKind: "This effect does not fit the purpose: buffs take Haste, Empowerment, Protection or Heal; damage and debuffs take Weakening, Slow, Vulnerability, Stun or Freeze.",
   MissingEffect: "A buff or debuff needs an effect.",
   HardControlAspect: "Stun needs Blunt and Freeze needs Cold as the first aspect.",
   MissingTrigger: "A reactive skill needs a trigger.",
@@ -120,7 +121,8 @@ export const SKILL_ERROR_MESSAGES: Record<SkillError, string> = {
 
 export const isDebuff = (e: Effect): boolean =>
   e === Effect.Weakening || e === Effect.Slow || e === Effect.Vulnerability || e === Effect.Stun || e === Effect.Freeze;
-export const isBuff = (e: Effect): boolean => e === Effect.Haste || e === Effect.Empowerment || e === Effect.Protection;
+export const isBuff = (e: Effect): boolean =>
+  e === Effect.Haste || e === Effect.Empowerment || e === Effect.Protection || e === Effect.Heal;
 export function hardControlAspect(e: Effect): Aspect | null {
   if (e === Effect.Stun) return Aspect.Blunt;
   if (e === Effect.Freeze) return Aspect.Cold;

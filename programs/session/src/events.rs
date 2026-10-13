@@ -1,11 +1,17 @@
 //! Events (CONTRACTS.md, section 7). `PlayerReady`, `InitiativeRolled`, `TurnTicked`,
-//! `TurnSkipped`, `SkillUsed`, `PlayerDied`, `FleeVoted`, `RewardsClaimed` and `EscrowClaimed`
+//! `TurnSkipped`, `ModsTicked`, `EffectResolved`, `SkillUsed`, `PlayerDied`, `FleeVoted`, `RewardsClaimed` and `EscrowClaimed`
 //! are session-local.
 use anchor_lang::prelude::*;
 use deadroll_character::state::SKILLS_MAX;
+use deadroll_combat::MODS_MAX;
 use deadroll_types::{ActiveState, SessionStatus, StateKind, STATES_MAX, TURN_ORDER_MAX};
 
-use crate::hit_event::HitResultData;
+use deadroll_skillcheck::Effect;
+
+use crate::{
+    hit_event::{Applied, EffectRollData, HitResultData},
+    state::TimedModData,
+};
 
 #[event]
 pub struct SessionOpened {
@@ -65,6 +71,21 @@ pub struct TurnTicked {
     /// Cooldowns after the tick, own turn starts until usable: a player's by `SkillSet` slot,
     /// a monster's in the first `MONSTER_SKILLS_MAX` entries.
     pub cooldowns: [u8; SKILLS_MAX],
+}
+
+/// Buffs and debuffs at the start of a unit's turn (`start_turn`, right after `TurnTicked`).
+#[event]
+pub struct ModsTicked {
+    pub session: Pubkey,
+    /// Turn-order id.
+    pub unit: u8,
+    pub turn_seq: u32,
+    /// `deadroll_combat::support::mod_bit` of every buff or debuff that ended now.
+    pub expired: u8,
+    /// The unit's buffs and debuffs after the tick (`turns`: own turn starts left).
+    pub mods: [TimedModData; MODS_MAX],
+    /// Action points of this turn: speed with Haste and Slow.
+    pub action_points: u8,
 }
 
 /// Hard control took the unit's turn: `start_turn` ended it on its own.
@@ -127,6 +148,35 @@ pub struct HitResolved {
     /// `GameSession.action_counter` of this action, the same number as its `ActionRequested`.
     pub action_counter: u32,
     pub result: HitResultData,
+}
+
+/// A resolved heal, buff or debuff (`act` with such a skill: instead of `HitResolved`), or the
+/// effect of a damage skill after its hit (`rider`: right after that action's `HitResolved`).
+/// Every roll is in `roll`; the website can replay it from `seed` (`deadroll_combat::support`).
+#[event]
+pub struct EffectResolved {
+    pub session: Pubkey,
+    /// Turn-order ids: the caster and the unit the effect went to.
+    pub caster: u8,
+    pub target: u8,
+    /// The VRF value of this action.
+    pub seed: [u8; 32],
+    /// `GameSession.action_counter` of this action, the same number as its `ActionRequested`.
+    pub action_counter: u32,
+    pub skill_slot: u8,
+    /// The skill's effect.
+    pub effect: Effect,
+    /// The effect of a damage skill, rolled after the hit on the next dice of the same seed.
+    pub rider: bool,
+    pub roll: EffectRollData,
+    /// What it did: `Added` / `Refreshed` (a buff, debuff or Stun), `Froze`, or `None` (a miss,
+    /// a heal, or no free slot).
+    pub applied: Applied,
+    /// The target's HP after (a heal raises it, up to its maximum).
+    pub hp: u32,
+    /// The target's states and buffs / debuffs after.
+    pub states: [ActiveState; STATES_MAX],
+    pub mods: [TimedModData; MODS_MAX],
 }
 
 /// The turn order, rolled once from the VRF value of `start_session`: per unit `d20 +

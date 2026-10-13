@@ -127,6 +127,20 @@ fn debuff_with_buff_effect() {
 }
 
 #[test]
+fn damage_with_heal_effect() {
+    let mut s = presets::WARRIOR[0].blocks;
+    s.effect = Effect::Heal;
+    assert_eq!(validate(&s), Err(SkillError::EffectKind));
+}
+
+#[test]
+fn debuff_with_heal_effect() {
+    let mut s = presets::SUPPORT[1].blocks;
+    s.effect = Effect::Heal;
+    assert_eq!(validate(&s), Err(SkillError::EffectKind));
+}
+
+#[test]
 fn buff_missing_effect() {
     let mut s = presets::SUPPORT[0].blocks;
     s.effect = Effect::None;

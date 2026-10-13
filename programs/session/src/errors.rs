@@ -72,7 +72,7 @@ pub enum SessionError {
     InvalidTarget,
     #[msg("Target is out of range")]
     OutOfRange,
-    #[msg("Skill cannot be used as an attack")]
+    #[msg("Skill cannot be used as an action")]
     InvalidSkill,
     #[msg("Account is not the skill set of this character")]
     InvalidSkillSet,
@@ -102,4 +102,10 @@ pub enum SessionError {
     TurnNotStarted,
     #[msg("This turn has already started")]
     TurnAlreadyStarted,
+    #[msg("Target is not a living ally")]
+    InvalidAllyTarget,
+    #[msg("A heal or buff on another ally needs that ally's participation")]
+    AllyAccountMissing,
+    #[msg("target_participation is only for a heal or buff on another ally")]
+    UnexpectedAllyAccount,
 }

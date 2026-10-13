@@ -1,14 +1,15 @@
 use anchor_lang::prelude::*;
 use deadroll_character::state::SKILLS_MAX;
+use deadroll_combat::speed_ap;
 use deadroll_types::{seeds, SessionStatus};
 
 use crate::{
     cpi_out::SessionSigner,
     errors::SessionError,
-    events::{TurnSkipped, TurnTicked},
+    events::{ModsTicked, TurnSkipped, TurnTicked},
     outcomes,
-    rules::Unit,
-    state::{GameSession, Monsters, Participation, MONSTER_SKILLS_MAX},
+    rules::{monster_ap, Unit},
+    state::{mods::from_combat, GameSession, Monsters, Participation, MONSTER_SKILLS_MAX},
     turns::{self, TurnStart},
     vrf,
 };
@@ -68,7 +69,7 @@ pub fn handler(ctx: Context<StartTurn>) -> Result<()> {
     let turn_seq = session.turn_seq;
 
     let mut cooldowns = [0u8; SKILLS_MAX];
-    let (start, states): (TurnStart, _) = match current {
+    let (start, states, mods, action_points): (TurnStart, _, _, u8) = match current {
         Unit::Player(slot) => {
             let participation: &mut Participation = accounts
                 .participation
@@ -84,12 +85,16 @@ pub fn handler(ctx: Context<StartTurn>) -> Result<()> {
                 participation.core.character,
                 SessionError::InvalidCharacter
             );
+            let mut mods = participation.combat_mods();
             let start = turns::start_of_turn(
                 &mut participation.core.states,
+                &mut mods,
                 &mut participation.cooldowns,
                 participation.core.hp,
             );
             participation.core.hp = start.hp;
+            participation.set_combat_mods(&mods);
+            // After the tick: this turn's AP see the buffs and debuffs that still cover it.
             participation.refresh_ap(turn_seq);
             if start.died {
                 outcomes::player_killed(
@@ -106,18 +111,24 @@ pub fn handler(ctx: Context<StartTurn>) -> Result<()> {
                 )?;
             }
             cooldowns = participation.cooldowns;
-            (start, participation.core.states)
+            (
+                start,
+                participation.core.states,
+                mods,
+                participation.core.action_points,
+            )
         }
         Unit::Monster(index) => {
             // A player's accounts on a monster's turn: the caller mistook whose turn it is.
-            require!(
-                accounts.participation.is_none(),
-                SessionError::NotYourTurn
-            );
+            require!(accounts.participation.is_none(), SessionError::NotYourTurn);
             let mut monster = monsters.get(index)?;
             let mut own = monsters.cooldowns(index)?;
-            let start = turns::start_of_turn(&mut monster.states, &mut own, monster.hp);
+            let mut mods = monsters.mods(index)?;
+            let start = turns::start_of_turn(&mut monster.states, &mut mods, &mut own, monster.hp);
             monster.hp = start.hp;
+            // `advance` granted the base AP; Haste and Slow apply after the tick.
+            monster.action_points =
+                speed_ap(monster_ap(session.monster_speed[index as usize]), &mods);
             if start.died {
                 // No VRF value of its own: the reward seed of a boss killed this way is the
                 // latest one, already public but out of anyone's hands by now.
@@ -133,8 +144,9 @@ pub fn handler(ctx: Context<StartTurn>) -> Result<()> {
             }
             monsters.set(index, &monster)?;
             monsters.set_cooldowns(index, &own)?;
+            monsters.set_mods(index, &mods)?;
             cooldowns[..MONSTER_SKILLS_MAX].copy_from_slice(&own);
-            (start, monster.states)
+            (start, monster.states, mods, monster.action_points)
         }
     };
     session.started_seq = turn_seq;
@@ -151,6 +163,14 @@ pub fn handler(ctx: Context<StartTurn>) -> Result<()> {
         expired: start.expired,
         states,
         cooldowns,
+    });
+    emit!(ModsTicked {
+        session: session_key,
+        unit,
+        turn_seq,
+        expired: start.expired_mods,
+        mods: from_combat(&mods),
+        action_points,
     });
     if outcomes::emit_if_ended(session, session_key) {
         return Ok(());

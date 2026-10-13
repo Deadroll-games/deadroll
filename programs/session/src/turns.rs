@@ -1,7 +1,10 @@
 //! Turn changes: the first turn after the initiative roll, the advance shared by `end_turn`,
 //! `flee` and `start_turn`, the start of a turn, and the escape rule.
 use anchor_lang::prelude::*;
-use deadroll_combat::states::{has, tick_turn_start, States};
+use deadroll_combat::{
+    states::{has, tick_turn_start, States},
+    tick_mods, TimedMods,
+};
 use deadroll_types::{StateKind, TURN_ORDER_MAX};
 
 use crate::{
@@ -132,13 +135,20 @@ pub struct TurnStart {
     pub skip: Option<StateKind>,
     /// `state_bit`s of the states that ended now.
     pub expired: u8,
+    /// `deadroll_combat::support::mod_bit`s of the buffs and debuffs that ended now.
+    pub expired_mods: u8,
     /// Unit that applied the strongest over-time state (the killer on a death), `EMPTY_UNIT` if none.
     pub dot_source: u8,
 }
 
 /// The start of a unit's own turn (docs/COMBAT_MATH.md, 7.5; SKILL_BUILDER.md, 8): over-time
-/// damage, hard control, every state duration and every cooldown down by one.
-pub fn start_of_turn(states: &mut States, cooldowns: &mut [u8], hp: u32) -> TurnStart {
+/// damage, hard control, every state, buff and debuff duration and every cooldown down by one.
+pub fn start_of_turn(
+    states: &mut States,
+    mods: &mut TimedMods,
+    cooldowns: &mut [u8],
+    hp: u32,
+) -> TurnStart {
     let dot_source = states
         .iter()
         .filter(|s| s.turns > 0 && matches!(s.kind, StateKind::Burning | StateKind::Bleeding))
@@ -148,6 +158,7 @@ pub fn start_of_turn(states: &mut States, cooldowns: &mut [u8], hp: u32) -> Turn
         .into_iter()
         .find(|&kind| has(states, kind));
     let tick = tick_turn_start(states);
+    let expired_mods = tick_mods(mods);
     tick_cooldowns(cooldowns);
     let (hp, died) = take_damage(hp, tick.dot_damage);
     TurnStart {
@@ -156,6 +167,7 @@ pub fn start_of_turn(states: &mut States, cooldowns: &mut [u8], hp: u32) -> Turn
         died,
         skip: if died { None } else { hard },
         expired: tick.expired,
+        expired_mods,
         dot_source,
     }
 }
@@ -170,8 +182,16 @@ pub fn everyone_flees(flee_mask: u8, alive_mask: u8) -> bool {
 mod tests {
     use super::*;
 
-    use deadroll_combat::states::state_bit;
-    use deadroll_types::{ActiveState, STATES_MAX};
+    use deadroll_combat::{mod_turns, states::state_bit, support::mod_bit, ModKind, TimedMod};
+    use deadroll_types::{ActiveState, Aspect, STATES_MAX};
+
+    const NONE: TimedMods = [TimedMod {
+        kind: ModKind::Haste,
+        aspect: Aspect::Fire,
+        turns: 0,
+        power_bp: 0,
+        source: 0,
+    }; deadroll_combat::MODS_MAX];
 
     fn with(states: &[(StateKind, u8, u32, u8)]) -> States {
         let mut out = [ActiveState::default(); STATES_MAX];
@@ -190,7 +210,7 @@ mod tests {
     fn quiet_turn_counts_cooldowns_only() {
         let mut states = with(&[]);
         let mut cooldowns = [0, 1, 3];
-        let start = start_of_turn(&mut states, &mut cooldowns, 10);
+        let start = start_of_turn(&mut states, &mut NONE.clone(), &mut cooldowns, 10);
         assert_eq!(
             start,
             TurnStart {
@@ -199,6 +219,7 @@ mod tests {
                 died: false,
                 skip: None,
                 expired: 0,
+                expired_mods: 0,
                 dot_source: EMPTY_UNIT,
             }
         );
@@ -212,7 +233,7 @@ mod tests {
             (StateKind::Bleeding, 1, 5, 5),
             (StateKind::Chill, 1, 2_000, 4),
         ]);
-        let start = start_of_turn(&mut states, &mut [], 20);
+        let start = start_of_turn(&mut states, &mut NONE.clone(), &mut [], 20);
         assert_eq!((start.dot_damage, start.hp, start.died), (8, 12, false));
         // The strongest over-time state names its source.
         assert_eq!(start.dot_source, 5);
@@ -224,7 +245,7 @@ mod tests {
         assert_eq!((states[0].kind, states[0].turns), (StateKind::Burning, 1));
         assert!(states[1].is_empty() && states[2].is_empty());
 
-        let next = start_of_turn(&mut states, &mut [], start.hp);
+        let next = start_of_turn(&mut states, &mut NONE.clone(), &mut [], start.hp);
         assert_eq!((next.dot_damage, next.hp), (3, 9));
         assert_eq!(next.expired, state_bit(StateKind::Burning));
         assert!(states.iter().all(|s| s.is_empty()));
@@ -232,16 +253,13 @@ mod tests {
 
     #[test]
     fn dot_kills_at_zero_hp_and_death_wins_over_a_skip() {
-        let mut states = with(&[
-            (StateKind::Bleeding, 3, 7, 6),
-            (StateKind::Freeze, 2, 0, 6),
-        ]);
-        let start = start_of_turn(&mut states, &mut [], 7);
+        let mut states = with(&[(StateKind::Bleeding, 3, 7, 6), (StateKind::Freeze, 2, 0, 6)]);
+        let start = start_of_turn(&mut states, &mut NONE.clone(), &mut [], 7);
         assert_eq!((start.hp, start.died, start.skip), (0, true, None));
         assert_eq!(start.dot_source, 6);
 
         let mut states = with(&[(StateKind::Burning, 1, 100, 4)]);
-        let start = start_of_turn(&mut states, &mut [], 3);
+        let start = start_of_turn(&mut states, &mut NONE.clone(), &mut [], 3);
         assert_eq!((start.dot_damage, start.hp, start.died), (100, 0, true));
     }
 
@@ -249,25 +267,56 @@ mod tests {
     fn freeze_and_stun_skip_each_of_their_turns() {
         let mut states = with(&[(StateKind::Freeze, 2, 0, 4)]);
         let mut cooldowns = [2];
-        let first = start_of_turn(&mut states, &mut cooldowns, 5);
+        let first = start_of_turn(&mut states, &mut NONE.clone(), &mut cooldowns, 5);
         assert_eq!((first.skip, first.expired), (Some(StateKind::Freeze), 0));
         // A skipped turn still counts down cooldowns.
         assert_eq!(cooldowns, [1]);
-        let second = start_of_turn(&mut states, &mut cooldowns, 5);
+        let second = start_of_turn(&mut states, &mut NONE.clone(), &mut cooldowns, 5);
         assert_eq!(
             (second.skip, second.expired),
             (Some(StateKind::Freeze), state_bit(StateKind::Freeze))
         );
-        assert_eq!(start_of_turn(&mut states, &mut cooldowns, 5).skip, None);
+        assert_eq!(
+            start_of_turn(&mut states, &mut NONE.clone(), &mut cooldowns, 5).skip,
+            None
+        );
 
         let mut stunned = with(&[(StateKind::Stun, 1, 0, 0), (StateKind::Burning, 1, 2, 0)]);
-        let start = start_of_turn(&mut stunned, &mut [], 5);
+        let start = start_of_turn(&mut stunned, &mut NONE.clone(), &mut [], 5);
         assert_eq!((start.skip, start.hp), (Some(StateKind::Stun), 3));
         let mut both = with(&[(StateKind::Stun, 1, 0, 0), (StateKind::Freeze, 1, 0, 0)]);
         assert_eq!(
-            start_of_turn(&mut both, &mut [], 5).skip,
+            start_of_turn(&mut both, &mut NONE.clone(), &mut [], 5).skip,
             Some(StateKind::Freeze)
         );
+    }
+
+    #[test]
+    fn buffs_and_debuffs_count_down_with_the_turn() {
+        let mut mods = NONE;
+        mods[0] = TimedMod {
+            kind: ModKind::Haste,
+            aspect: Aspect::Blood,
+            turns: mod_turns(1),
+            power_bp: 5_000,
+            source: 1,
+        };
+        mods[1] = TimedMod {
+            kind: ModKind::Slow,
+            turns: mod_turns(2),
+            ..mods[0]
+        };
+        let mut states = with(&[]);
+        let first = start_of_turn(&mut states, &mut mods, &mut [], 10);
+        // Both still cover this turn.
+        assert_eq!(first.expired_mods, 0);
+        assert_eq!((mods[0].turns, mods[1].turns), (1, 2));
+        let second = start_of_turn(&mut states, &mut mods, &mut [], 10);
+        assert_eq!(second.expired_mods, mod_bit(ModKind::Haste));
+        assert!(mods[0].is_empty() && mods[1].turns == 1);
+        let third = start_of_turn(&mut states, &mut mods, &mut [], 10);
+        assert_eq!(third.expired_mods, mod_bit(ModKind::Slow));
+        assert!(mods.iter().all(|m| m.is_empty()));
     }
 
     #[test]

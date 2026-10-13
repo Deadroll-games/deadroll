@@ -1,18 +1,26 @@
 use anchor_lang::prelude::*;
-use deadroll_combat::{resolve_hit_into, Balance, HitInput, HitResult};
-use deadroll_types::{seeds, SessionStatus};
+use deadroll_character::state::SkillRecord;
+use deadroll_combat::{
+    resolve_hit_into, resolve_rider, resolve_support, Applied as CombatApplied, Balance,
+    EffectRoll, HitInput, HitResult, Outcome, States, SupportBalance, TimedMods,
+};
+use deadroll_skillcheck::{Effect, Purpose};
+use deadroll_types::{seeds, CharacterData, SessionStatus};
 
 use crate::{
     combat_input::{
-        monster_attacker, monster_defender, player_attacker, player_defender, take_damage,
+        effect_action, effect_range, heal, land_effect, monster_attacker, monster_defender,
+        player_attacker, player_defender, support_input, take_damage, EffectAction,
     },
     cpi_out::SessionSigner,
     errors::SessionError,
+    events::EffectResolved,
     hit_event::emit_hit_resolved,
     outcomes,
     rules::{Unit, BASE_ATTACK},
     state::{
         external::{read_character, read_skill},
+        mods::from_combat,
         GameSession, Monsters, Participation, PendingAction,
     },
     turns,
@@ -57,6 +65,10 @@ pub struct ConsumeRandomness<'info> {
     /// CHECK: the character program.
     #[account(address = deadroll_character::ID)]
     pub character_program: UncheckedAccount<'info>,
+    /// The ally of a heal or buff that is not the caster (`session.pending_target`); `None`
+    /// for every other roll.
+    #[account(mut, address = session.pending_target @ SessionError::InvalidPendingAccounts)]
+    pub target_participation: Option<Box<Account<'info, Participation>>>,
 }
 
 pub fn handler(ctx: Context<ConsumeRandomness>, randomness: [u8; 32]) -> Result<()> {
@@ -73,12 +85,20 @@ pub fn handler(ctx: Context<ConsumeRandomness>, randomness: [u8; 32]) -> Result<
         return Ok(());
     }
 
+    // The ally account is there exactly when `act` recorded one.
+    let ally = accounts.target_participation.as_mut();
+    require!(
+        ally.as_ref().map(|a| a.key()).unwrap_or_default() == session.pending_target,
+        SessionError::InvalidPendingAccounts
+    );
     let participation = &mut accounts.participation;
     let character = read_character(&accounts.character)?;
-
-    // Off the 4 KB stack frame: `HitResult` alone is over 1 KB.
-    let mut input = Box::<HitInput>::default();
-    let mut result = Box::<HitResult>::default();
+    let roll = Roll {
+        session_key,
+        pending,
+        seed: randomness,
+        action: session.core.action_counter,
+    };
 
     match (
         Unit::from_id(pending.attacker),
@@ -98,79 +118,345 @@ pub fn handler(ctx: Context<ConsumeRandomness>, randomness: [u8; 32]) -> Result<
                     pending.skill_slot,
                 )?)
             };
-            let mut monster = monsters.get(index)?;
-            input.attacker = player_attacker(pending.attacker, &character, skill.as_ref());
-            input.defender = monster_defender(&monster).ok_or(SessionError::InvalidMonster)?;
-            resolve_hit_into(
-                &input,
-                &Balance::DEFAULT,
-                &mut SyscallRoll::new(randomness),
-                &mut result,
-            );
-
-            let (hp, died) = take_damage(monster.hp, result.damage);
-            monster.hp = hp;
-            monster.states = result.states;
-            if died {
-                outcomes::monster_killed(
-                    session,
-                    session_key,
-                    &mut monster,
+            match skill
+                .as_ref()
+                .map(|s| (s.blocks.purpose, effect_action(s.blocks.effect)))
+            {
+                Some((Purpose::Debuff, Some(effect))) => debuff_monster(
+                    &roll,
+                    &monsters,
                     index,
-                    pending.attacker,
-                    randomness,
-                );
+                    &character,
+                    skill.as_ref().ok_or(SessionError::InvalidSkill)?,
+                    effect,
+                )?,
+                _ => attack_monster(
+                    &roll,
+                    session,
+                    &monsters,
+                    index,
+                    participation,
+                    &character,
+                    skill.as_ref(),
+                )?,
             }
-            monsters.set(index, &monster)?;
+        }
+        (Some(Unit::Player(slot)), Some(Unit::Player(target))) => {
+            require!(
+                participation.core.slot == slot,
+                SessionError::InvalidPendingAccounts
+            );
+            let skill = read_skill(
+                &accounts.skill_set,
+                &participation.core.character,
+                pending.skill_slot,
+            )?;
+            let effect = effect_action(skill.blocks.effect).ok_or(SessionError::InvalidSkill)?;
+            // A self-cast lands on the caster's own participation, another ally on its account.
+            let target_participation: &mut Participation = match ally {
+                None if target == slot => participation,
+                Some(ally) if target != slot && ally.core.slot == target => ally,
+                _ => return err!(SessionError::InvalidPendingAccounts),
+            };
+            support_ally(&roll, target_participation, &character, &skill, effect)?;
         }
         (Some(Unit::Monster(index)), Some(Unit::Player(slot))) => {
             require!(
                 participation.core.slot == slot,
                 SessionError::InvalidPendingAccounts
             );
-            let monster = monsters.get(index)?;
-            input.attacker =
-                monster_attacker(pending.attacker, &monster).ok_or(SessionError::InvalidMonster)?;
-            input.defender = player_defender(&character, &participation.core.states);
-            resolve_hit_into(
-                &input,
-                &Balance::DEFAULT,
-                &mut SyscallRoll::new(randomness),
-                &mut result,
-            );
-
-            let (hp, died) = take_damage(participation.core.hp, result.damage);
-            participation.core.hp = hp;
-            participation.core.states = result.states;
-            if died {
-                outcomes::player_killed(
-                    session,
-                    session_key,
-                    slot,
-                    pending.attacker,
-                    &SessionSigner {
-                        session_authority: &accounts.session_authority,
-                        config: &accounts.config,
-                        bump: vrf::SESSION_AUTHORITY_BUMP,
-                    },
-                    &accounts.character,
-                )?;
-            }
+            monster_attack(
+                &roll,
+                session,
+                &monsters,
+                index,
+                participation,
+                &character,
+                &SessionSigner {
+                    session_authority: &accounts.session_authority,
+                    config: &accounts.config,
+                    bump: vrf::SESSION_AUTHORITY_BUMP,
+                },
+                &accounts.character,
+            )?;
         }
         _ => return err!(SessionError::InvalidPendingAccounts),
     }
 
-    let action = settle(session, randomness)?;
-    emit_hit_resolved(
-        &session_key,
-        pending.attacker,
-        pending.target,
-        &randomness,
-        action,
-        &result,
-    )?;
+    settle(session, randomness)?;
     outcomes::emit_if_ended(session, session_key);
     Ok(())
+}
+
+/// The action being resolved and its VRF value.
+struct Roll {
+    session_key: Pubkey,
+    pending: PendingAction,
+    seed: [u8; 32],
+    /// `GameSession.action_counter` of this action (before `settle` counts it).
+    action: u32,
+}
+
+impl Roll {
+    #[allow(clippy::too_many_arguments)]
+    fn emit_effect(
+        &self,
+        rider: bool,
+        effect: Effect,
+        roll: &EffectRoll,
+        applied: CombatApplied,
+        hp: u32,
+        states: &States,
+        mods: &TimedMods,
+    ) {
+        emit!(EffectResolved {
+            session: self.session_key,
+            caster: self.pending.attacker,
+            target: self.pending.target,
+            seed: self.seed,
+            action_counter: self.action,
+            skill_slot: self.pending.skill_slot,
+            effect,
+            rider,
+            roll: roll.into(),
+            applied: applied.into(),
+            hp,
+            states: *states,
+            mods: from_combat(mods),
+        });
+    }
+}
+
+/// A player's weapon or damage skill on a monster, then that skill's effect (if any) when the
+/// hit landed and the monster lives.
+#[inline(never)]
+fn attack_monster(
+    roll: &Roll,
+    session: &mut GameSession,
+    monsters: &Monsters,
+    index: u8,
+    participation: &Participation,
+    character: &CharacterData,
+    skill: Option<&SkillRecord>,
+) -> Result<()> {
+    // Off the 4 KB stack frame: `HitResult` alone is over 1 KB.
+    let mut input = Box::<HitInput>::default();
+    let mut result = Box::<HitResult>::default();
+    let mut monster = monsters.get(index)?;
+    let mut mods = monsters.mods(index)?;
+    input.attacker = player_attacker(
+        roll.pending.attacker,
+        character,
+        skill,
+        &participation.combat_mods(),
+    );
+    input.defender = monster_defender(&monster, &mods).ok_or(SessionError::InvalidMonster)?;
+    resolve_hit_into(
+        &input,
+        &Balance::DEFAULT,
+        &mut SyscallRoll::new(roll.seed),
+        &mut result,
+    );
+
+    let (hp, died) = take_damage(monster.hp, result.damage);
+    monster.hp = hp;
+    monster.states = result.states;
+    if died {
+        outcomes::monster_killed(
+            session,
+            roll.session_key,
+            &mut monster,
+            index,
+            roll.pending.attacker,
+            roll.seed,
+        );
+    }
+    emit_hit_resolved(
+        &roll.session_key,
+        roll.pending.attacker,
+        roll.pending.target,
+        &roll.seed,
+        roll.action,
+        &result,
+    )?;
+
+    // The skill's effect: its own chance on a hit (certain on a crit), on the next dice.
+    if let Some(skill) = skill {
+        if let Some(effect) = effect_action(skill.blocks.effect) {
+            if result.outcome == Outcome::Hit && monster.alive {
+                let (min, max) = effect_range(character.class, skill.power_bp, effect);
+                let rider = resolve_rider(
+                    SupportBalance::DEFAULT.rider_chance_bp,
+                    result.crit,
+                    min,
+                    max,
+                    &Balance::DEFAULT,
+                    &mut SyscallRoll::at(roll.seed, result.rolls_used),
+                );
+                let applied = if rider.outcome == Outcome::Hit {
+                    land_effect(
+                        effect,
+                        rider.amount,
+                        skill.blocks.aspects[0],
+                        roll.pending.attacker,
+                        &mut monster.states,
+                        &mut mods,
+                    )
+                } else {
+                    CombatApplied::None
+                };
+                monsters.set_mods(index, &mods)?;
+                roll.emit_effect(
+                    true,
+                    skill.blocks.effect,
+                    &rider,
+                    applied,
+                    monster.hp,
+                    &monster.states,
+                    &mods,
+                );
+            }
+        }
+    }
+    monsters.set(index, &monster)
+}
+
+/// A debuff skill on a monster: it rolls to land (d20 against the monster's defense).
+#[inline(never)]
+fn debuff_monster(
+    roll: &Roll,
+    monsters: &Monsters,
+    index: u8,
+    character: &CharacterData,
+    skill: &SkillRecord,
+    effect: EffectAction,
+) -> Result<()> {
+    let mut monster = monsters.get(index)?;
+    let mut mods = monsters.mods(index)?;
+    let defense = monster_defender(&monster, &mods)
+        .ok_or(SessionError::InvalidMonster)?
+        .defense;
+    let input = support_input(character, skill, effect, Some(defense));
+    let result = resolve_support(&input, &Balance::DEFAULT, &mut SyscallRoll::new(roll.seed));
+    let applied = if result.outcome == Outcome::Hit && monster.alive {
+        land_effect(
+            effect,
+            result.amount,
+            skill.blocks.aspects[0],
+            roll.pending.attacker,
+            &mut monster.states,
+            &mut mods,
+        )
+    } else {
+        CombatApplied::None
+    };
+    monsters.set(index, &monster)?;
+    monsters.set_mods(index, &mods)?;
+    roll.emit_effect(
+        false,
+        skill.blocks.effect,
+        &result,
+        applied,
+        monster.hp,
+        &monster.states,
+        &mods,
+    );
+    Ok(())
+}
+
+/// A heal or buff on the caster or an ally: no roll to land, a crit roll and the d100 strength.
+#[inline(never)]
+fn support_ally(
+    roll: &Roll,
+    target: &mut Participation,
+    character: &CharacterData,
+    skill: &SkillRecord,
+    effect: EffectAction,
+) -> Result<()> {
+    let input = support_input(character, skill, effect, None);
+    let result = resolve_support(&input, &Balance::DEFAULT, &mut SyscallRoll::new(roll.seed));
+    let mut mods = target.combat_mods();
+    // `act` checked the target lives and nothing ran since; a dead one is never raised.
+    let applied = if target.core.hp == 0 {
+        CombatApplied::None
+    } else if effect == EffectAction::Heal {
+        target.core.hp = heal(target.core.hp, target.hp_max, result.amount);
+        CombatApplied::None
+    } else {
+        land_effect(
+            effect,
+            result.amount,
+            skill.blocks.aspects[0],
+            roll.pending.attacker,
+            &mut target.core.states,
+            &mut mods,
+        )
+    };
+    target.set_combat_mods(&mods);
+    roll.emit_effect(
+        false,
+        skill.blocks.effect,
+        &result,
+        applied,
+        target.core.hp,
+        &target.core.states,
+        &mods,
+    );
+    Ok(())
+}
+
+/// A monster's natural attack on a player.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn monster_attack<'info>(
+    roll: &Roll,
+    session: &mut GameSession,
+    monsters: &Monsters,
+    index: u8,
+    participation: &mut Participation,
+    character: &CharacterData,
+    signer: &SessionSigner<'_, 'info>,
+    character_info: &AccountInfo<'info>,
+) -> Result<()> {
+    let mut input = Box::<HitInput>::default();
+    let mut result = Box::<HitResult>::default();
+    let slot = participation.core.slot;
+    let monster = monsters.get(index)?;
+    input.attacker = monster_attacker(roll.pending.attacker, &monster, &monsters.mods(index)?)
+        .ok_or(SessionError::InvalidMonster)?;
+    input.defender = player_defender(
+        character,
+        &participation.core.states,
+        &participation.combat_mods(),
+    );
+    resolve_hit_into(
+        &input,
+        &Balance::DEFAULT,
+        &mut SyscallRoll::new(roll.seed),
+        &mut result,
+    );
+
+    let (hp, died) = take_damage(participation.core.hp, result.damage);
+    participation.core.hp = hp;
+    participation.core.states = result.states;
+    if died {
+        outcomes::player_killed(
+            session,
+            roll.session_key,
+            slot,
+            roll.pending.attacker,
+            signer,
+            character_info,
+        )?;
+    }
+    emit_hit_resolved(
+        &roll.session_key,
+        roll.pending.attacker,
+        roll.pending.target,
+        &roll.seed,
+        roll.action,
+        &result,
+    )
 }
 
 /// Clears the pending roll and counts the action; returns its number.
@@ -178,6 +464,7 @@ fn settle(session: &mut GameSession, randomness: [u8; 32]) -> Result<u32> {
     let action = session.core.action_counter;
     session.core.pending_vrf = false;
     session.pending = PendingAction::default();
+    session.pending_target = Pubkey::default();
     session.core.last_seed = randomness;
     session.core.action_counter = action.checked_add(1).ok_or(SessionError::Overflow)?;
     Ok(action)

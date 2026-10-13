@@ -101,6 +101,7 @@ pub fn handler(ctx: Context<StartSession>) -> Result<()> {
             character,
             // Not read for the initiative roll.
             skill_set: character,
+            target_participation: None,
         },
     )?;
 

@@ -391,6 +391,7 @@ class Demo {
         monsters: this.acc.monsters,
         sessionToken: pl.token,
         ...vrfAccounts,
+        targetParticipation: null,
       })
       .signers([pl.actor])
       .rpc()
@@ -479,6 +480,7 @@ class Demo {
         sessionAuthority,
         config,
         characterProgram: CHARACTER,
+        targetParticipation: null,
       })
       .signers([MOCK_VRF])
       .rpc({ commitment: "confirmed" })

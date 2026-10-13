@@ -106,6 +106,7 @@ pub fn monsters_account(session: Pubkey, monsters: &[Monster]) -> TestAccount {
             bump: 254,
         },
         cooldowns: [[0; super::MONSTER_SKILLS_MAX]; MONSTERS_MAX],
+        mods: [Default::default(); MONSTERS_MAX],
     };
     let mut data = Vec::new();
     state.try_serialize(&mut data).unwrap();
@@ -155,6 +156,7 @@ pub fn session(players: &[Cell]) -> GameSession {
         tile_cost: TILE_COST,
         acted_seq: 0,
         started_seq: 0,
+        pending_target: Pubkey::default(),
     }
 }
 

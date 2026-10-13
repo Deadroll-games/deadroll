@@ -88,6 +88,9 @@ pub struct GameSession {
     /// `turn_seq` whose start ran (`start_turn`): states ticked, cooldowns counted down. Every
     /// other turn instruction waits for it.
     pub started_seq: u32,
+    /// The ally `Participation` a pending heal or buff targets when it is not the caster: the
+    /// callback's `target_participation`. `Pubkey::default()` = none.
+    pub pending_target: Pubkey,
 }
 
 impl GameSession {
