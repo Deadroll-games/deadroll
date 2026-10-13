@@ -60,7 +60,8 @@ export async function sendTx(payer: TransactionSigner, instructions: Instruction
       await sendAndConfirm(tx as Parameters<typeof sendAndConfirm>[0], { commitment: "confirmed" });
       signature = getSignatureFromTransaction(tx);
     }
-    window.dispatchEvent(new CustomEvent<string>(TX_SENT_EVENT, { detail: payer.address }));
+    // Balance badges re-read after own transactions; no window in node (the localnet e2e test).
+    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent<string>(TX_SENT_EVENT, { detail: payer.address }));
     return { signature, logs: await logsOf(signature) };
   } catch (e) {
     if (e instanceof TxError) throw e;
