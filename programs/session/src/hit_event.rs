@@ -9,7 +9,7 @@ use anchor_lang::{prelude::*, Discriminator};
 use deadroll_combat::{
     packet::{PACKETS_MAX, SKILL_ASPECTS_MAX},
     resonance::TINT_ROLLS_MAX,
-    HitResult,
+    EffectRoll, HitResult, Outcome,
 };
 use deadroll_types::{ActiveState, Aspect, StateKind, STATES_MAX};
 
@@ -118,6 +118,66 @@ pub struct HitResultData {
     pub rolls_used: u32,
 }
 
+/// `deadroll_combat::EffectRoll`: the dice of a heal, buff, debuff or a damage skill's effect.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EffectRollData {
+    /// `Hit`: the effect lands. `Miss`: the d20 or the effect chance failed.
+    pub outcome: HitOutcome,
+    /// The hit roll of a debuff, 0 = none (heals and buffs do not roll to land).
+    pub d20: u8,
+    pub attack_total: u32,
+    pub defense: u32,
+    pub crit: bool,
+    pub crit_roll: Option<u16>,
+    /// Effect chance of a damage skill's effect (0 for heals, buffs and debuffs).
+    pub chance_bp: u32,
+    /// `None` when not rolled (not a damage skill's effect, or certain on a crit).
+    pub chance_roll: Option<u16>,
+    pub d100: u8,
+    /// HP for a heal, bp for a buff or debuff, 0 for Stun / Freeze or a miss.
+    pub amount: u32,
+    pub rolls_used: u32,
+}
+
+impl From<Outcome> for HitOutcome {
+    fn from(o: Outcome) -> Self {
+        match o {
+            Outcome::Miss => Self::Miss,
+            Outcome::Hit => Self::Hit,
+            Outcome::Immune => Self::Immune,
+        }
+    }
+}
+
+impl From<deadroll_combat::Applied> for Applied {
+    fn from(a: deadroll_combat::Applied) -> Self {
+        match a {
+            deadroll_combat::Applied::None => Self::None,
+            deadroll_combat::Applied::Added => Self::Added,
+            deadroll_combat::Applied::Refreshed => Self::Refreshed,
+            deadroll_combat::Applied::Froze => Self::Froze,
+        }
+    }
+}
+
+impl From<&EffectRoll> for EffectRollData {
+    fn from(r: &EffectRoll) -> Self {
+        Self {
+            outcome: r.outcome.into(),
+            d20: r.d20,
+            attack_total: r.attack_total,
+            defense: r.defense,
+            crit: r.crit,
+            crit_roll: r.crit_roll,
+            chance_bp: r.chance_bp,
+            chance_roll: r.chance_roll,
+            d100: r.d100,
+            amount: r.amount,
+            rolls_used: r.rolls_used,
+        }
+    }
+}
+
 /// Writes the [`HitResolved`] event: the same log line `emit!` would write (one
 /// `Program data:` chunk of discriminator ‖ Borsh fields).
 pub fn emit_hit_resolved(
@@ -159,6 +219,39 @@ mod tests {
     use deadroll_combat::{resolve_hit_into, Balance, VrfRoll};
 
     use crate::combat_input::tests::preset_inputs;
+
+    #[test]
+    fn effect_roll_mirrors_the_combat_bytes() {
+        use deadroll_combat::{resolve_rider, resolve_support, SupportInput};
+        let input = SupportInput {
+            hostile: true,
+            attack_bonus: 3,
+            defense: 12,
+            crit_chance_bp: 2_000,
+            min: 1_000,
+            max: 3_000,
+        };
+        for seed_byte in 0..40u8 {
+            let mut src = VrfRoll::new([seed_byte; 32]);
+            for roll in [
+                resolve_support(&input, &Balance::DEFAULT, &mut src),
+                resolve_rider(3_000, seed_byte % 2 == 0, 0, 0, &Balance::DEFAULT, &mut src),
+            ] {
+                assert_eq!(
+                    borsh::to_vec(&EffectRollData::from(&roll)).unwrap(),
+                    borsh::to_vec(&roll).unwrap()
+                );
+            }
+        }
+        for a in [
+            deadroll_combat::Applied::None,
+            deadroll_combat::Applied::Added,
+            deadroll_combat::Applied::Refreshed,
+            deadroll_combat::Applied::Froze,
+        ] {
+            assert_eq!(Applied::from(a) as u8, a as u8);
+        }
+    }
 
     #[test]
     fn event_bytes_decode_as_hit_resolved() {

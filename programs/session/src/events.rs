@@ -6,7 +6,12 @@ use deadroll_character::state::SKILLS_MAX;
 use deadroll_combat::MODS_MAX;
 use deadroll_types::{ActiveState, SessionStatus, StateKind, STATES_MAX, TURN_ORDER_MAX};
 
-use crate::{hit_event::HitResultData, state::TimedModData};
+use deadroll_skillcheck::Effect;
+
+use crate::{
+    hit_event::{Applied, EffectRollData, HitResultData},
+    state::TimedModData,
+};
 
 #[event]
 pub struct SessionOpened {
@@ -143,6 +148,35 @@ pub struct HitResolved {
     /// `GameSession.action_counter` of this action, the same number as its `ActionRequested`.
     pub action_counter: u32,
     pub result: HitResultData,
+}
+
+/// A resolved heal, buff or debuff (`act` with such a skill: instead of `HitResolved`), or the
+/// effect of a damage skill after its hit (`rider`: right after that action's `HitResolved`).
+/// Every roll is in `roll`; the website can replay it from `seed` (`deadroll_combat::support`).
+#[event]
+pub struct EffectResolved {
+    pub session: Pubkey,
+    /// Turn-order ids: the caster and the unit the effect went to.
+    pub caster: u8,
+    pub target: u8,
+    /// The VRF value of this action.
+    pub seed: [u8; 32],
+    /// `GameSession.action_counter` of this action, the same number as its `ActionRequested`.
+    pub action_counter: u32,
+    pub skill_slot: u8,
+    /// The skill's effect.
+    pub effect: Effect,
+    /// The effect of a damage skill, rolled after the hit on the next dice of the same seed.
+    pub rider: bool,
+    pub roll: EffectRollData,
+    /// What it did: `Added` / `Refreshed` (a buff, debuff or Stun), `Froze`, or `None` (a miss,
+    /// a heal, or no free slot).
+    pub applied: Applied,
+    /// The target's HP after (a heal raises it, up to its maximum).
+    pub hp: u32,
+    /// The target's states and buffs / debuffs after.
+    pub states: [ActiveState; STATES_MAX],
+    pub mods: [TimedModData; MODS_MAX],
 }
 
 /// The turn order, rolled once from the VRF value of `start_session`: per unit `d20 +

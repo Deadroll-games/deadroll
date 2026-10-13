@@ -21,7 +21,8 @@ use crate::{
 /// `Account<MonsterState>` overflows the 4 KB SBPF v3 stack frame. Contexts take it as
 /// `LazyAccount` (owner + discriminator check, IDL entry) and instructions go through
 /// [`Monsters`], which reads and writes one monster at a time in place. `cargo-build-sbf` still
-/// warns about the generated `try_deserialize_unchecked`; nothing calls it.
+/// warns about the generated Borsh decoders (`try_deserialize_unchecked`, `deserialize_reader`)
+/// and the `LazyAccount` loaders (`__load_common`); nothing calls them.
 #[account]
 #[derive(InitSpace)]
 pub struct MonsterState {

@@ -3,16 +3,17 @@
 //! Numbers come from `rules.rs` (placeholders until the registry tables, L4).
 use deadroll_character::state::SkillRecord;
 use deadroll_combat::{
-    apply_to_attacker, apply_to_defender, Attacker, Carrier, Defender, Mod, ModFilter, ModKind,
-    Skill, TimedMods, Tint,
+    apply_mod, apply_state, apply_to_attacker, apply_to_defender, mod_range, mod_turns,
+    states::freeze, Applied, Attacker, Balance, Carrier, Defender, Mod, ModFilter, ModKind, Skill,
+    States, SupportBalance, SupportInput, TimedMod, TimedMods, Tint,
 };
 use deadroll_skillcheck::{Category, Effect, Purpose};
-use deadroll_types::{ActiveState, CharacterData, Form, Monster, STATES_MAX};
+use deadroll_types::{ActiveState, Aspect, CharacterData, Form, Monster, StateKind, STATES_MAX};
 
 use crate::rules::{
-    class_increase, class_source, class_weapon, monster_profile, player_attack_bonus,
-    player_crit_bp, player_defense, predisposition_added, MonsterProfile, BASIC_STATE_CHANCE_BP,
-    SKILL_STATE_CHANCE_BP,
+    class_increase, class_source, class_weapon, heal_range, monster_profile, player_attack_bonus,
+    player_crit_bp, player_defense, predisposition_added, support_increase, MonsterProfile,
+    BASIC_STATE_CHANCE_BP, SKILL_STATE_CHANCE_BP,
 };
 
 /// Why a skill cannot be used with `act`.
@@ -172,6 +173,85 @@ pub fn monster_defender(m: &Monster, mods: &TimedMods) -> Option<Defender> {
     }
     apply_to_defender(&mut defender, mods);
     Some(defender)
+}
+
+/// Strength range of `action` cast by a `class` with a skill of `power_bp`: HP for a heal, bp for
+/// a modifier, none (`(0, 0)`) for hard control.
+pub fn effect_range(
+    class: deadroll_types::Class,
+    power_bp: u32,
+    action: EffectAction,
+) -> (u32, u32) {
+    match action {
+        EffectAction::Heal => heal_range(class, power_bp),
+        EffectAction::Mod(kind) => mod_range(
+            kind,
+            power_bp,
+            support_increase(class),
+            &SupportBalance::DEFAULT,
+        ),
+        EffectAction::Stun | EffectAction::Freeze => (0, 0),
+    }
+}
+
+/// The rolls of a heal, buff or debuff cast by `c` with `skill`. `defense`: the enemy's, for a
+/// debuff (it rolls to land); `None` for a heal or buff on an ally.
+pub fn support_input(
+    c: &CharacterData,
+    skill: &SkillRecord,
+    action: EffectAction,
+    defense: Option<u32>,
+) -> SupportInput {
+    let (min, max) = effect_range(c.class, skill.power_bp, action);
+    SupportInput {
+        hostile: defense.is_some(),
+        attack_bonus: player_attack_bonus(c.level, &c.stats, skill.blocks.source),
+        defense: defense.unwrap_or(0),
+        crit_chance_bp: player_crit_bp(&c.stats),
+        min,
+        max,
+    }
+}
+
+/// Lands `action` (not a heal) of strength `amount` on a unit: a modifier for its duration, or
+/// the existing Stun / Freeze state. `aspect`: the skill's; `source`: the caster's turn-order id.
+pub fn land_effect(
+    action: EffectAction,
+    amount: u32,
+    aspect: Aspect,
+    source: u8,
+    states: &mut States,
+    mods: &mut TimedMods,
+) -> Applied {
+    let balance = &Balance::DEFAULT;
+    match action {
+        EffectAction::Mod(kind) => apply_mod(
+            mods,
+            TimedMod {
+                kind,
+                aspect,
+                turns: mod_turns(SupportBalance::DEFAULT.duration(kind)),
+                power_bp: amount,
+                source,
+            },
+        ),
+        EffectAction::Stun => apply_state(
+            states,
+            ActiveState {
+                kind: StateKind::Stun,
+                turns: balance.turns(StateKind::Stun),
+                power: 0,
+                source,
+            },
+        ),
+        EffectAction::Freeze => freeze(states, source, balance),
+        EffectAction::Heal => Applied::None,
+    }
+}
+
+/// HP after a heal: up to the maximum, never down (docs/COMBAT_MATH.md, 11).
+pub fn heal(hp: u32, hp_max: u32, amount: u32) -> u32 {
+    hp.saturating_add(amount).min(hp_max).max(hp)
 }
 
 /// HP after `damage`, and whether that killed (HP never goes below 0).
@@ -438,6 +518,117 @@ pub(crate) mod tests {
         assert_eq!(
             effect_action(Effect::Vulnerability),
             Some(EffectAction::Mod(ModKind::Vulnerability))
+        );
+    }
+
+    #[test]
+    fn heals_stop_at_the_maximum() {
+        assert_eq!(heal(10, 30, 8), 18);
+        assert_eq!(heal(25, 30, 8), 30);
+        assert_eq!(heal(30, 30, 8), 30);
+        assert_eq!(heal(u32::MAX - 1, u32::MAX, u32::MAX), u32::MAX);
+        // A maximum below the HP (never written) does not take HP away.
+        assert_eq!(heal(12, 0, 5), 12);
+    }
+
+    #[test]
+    fn support_rolls_from_the_caster() {
+        let support = character(Race::Human, Class::Support, Aspect::Lightning);
+        let quicken = record(presets::SUPPORT[0].blocks);
+        let haste = effect_action(quicken.blocks.effect).unwrap();
+        let input = support_input(&support, &quicken, haste, None);
+        assert!(!input.hostile);
+        // Haste 2_500..5_000 at full power, +20% for Support.
+        assert_eq!((input.min, input.max), (3_000, 6_000));
+        assert_eq!(
+            input.attack_bonus,
+            player_attack_bonus(1, &support.stats, quicken.blocks.source)
+        );
+        let sap = record(presets::SUPPORT[1].blocks);
+        let weaken = effect_action(sap.blocks.effect).unwrap();
+        let input = support_input(&support, &sap, weaken, Some(11));
+        assert!(input.hostile && input.defense == 11);
+        let mut mend = quicken;
+        mend.blocks.effect = Effect::Heal;
+        let input = support_input(&support, &mend, EffectAction::Heal, None);
+        assert_eq!(
+            (input.min, input.max),
+            heal_range(Class::Support, mend.power_bp)
+        );
+        // Hard control has no strength.
+        let mage = character(Race::ForestElf, Class::Mage, Aspect::Cold);
+        let prison = record(presets::MAGE[2].blocks);
+        assert_eq!(
+            effect_action(prison.blocks.effect),
+            Some(EffectAction::Freeze)
+        );
+        let input = support_input(&mage, &prison, EffectAction::Freeze, Some(10));
+        assert_eq!((input.min, input.max), (0, 0));
+    }
+
+    #[test]
+    fn effects_land_as_modifiers_or_states() {
+        use deadroll_combat::states::has;
+        let mut states = [ActiveState::default(); STATES_MAX];
+        let mut mods = NONE;
+        let slow = EffectAction::Mod(ModKind::Slow);
+        assert_eq!(
+            land_effect(slow, 3_000, Aspect::Cold, 2, &mut states, &mut mods),
+            Applied::Added
+        );
+        assert_eq!(
+            (
+                mods[0].kind,
+                mods[0].power_bp,
+                mods[0].aspect,
+                mods[0].source
+            ),
+            (ModKind::Slow, 3_000, Aspect::Cold, 2)
+        );
+        assert_eq!(
+            mods[0].turns,
+            mod_turns(SupportBalance::DEFAULT.duration(ModKind::Slow))
+        );
+        assert_eq!(
+            land_effect(slow, 1_000, Aspect::Fire, 3, &mut states, &mut mods),
+            Applied::Refreshed
+        );
+        assert_eq!(mods[0].power_bp, 3_000);
+
+        assert_eq!(
+            land_effect(
+                EffectAction::Stun,
+                0,
+                Aspect::Blunt,
+                2,
+                &mut states,
+                &mut mods
+            ),
+            Applied::Added
+        );
+        assert!(has(&states, StateKind::Stun));
+        assert_eq!(
+            land_effect(
+                EffectAction::Freeze,
+                0,
+                Aspect::Cold,
+                2,
+                &mut states,
+                &mut mods
+            ),
+            Applied::Froze
+        );
+        assert!(has(&states, StateKind::Freeze));
+        assert_eq!(
+            land_effect(
+                EffectAction::Heal,
+                9,
+                Aspect::Cold,
+                2,
+                &mut states,
+                &mut mods
+            ),
+            Applied::None
         );
     }
 

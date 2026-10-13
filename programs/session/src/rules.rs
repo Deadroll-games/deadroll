@@ -3,10 +3,10 @@
 //! Monster HP, speed, initiative and tile costs come from the registry tables (copied at
 //! `open_session`). The other numbers are placeholders until balancing (docs have none yet),
 //! each behind a single function.
-use deadroll_combat::{d20, DamageRange, RollSource};
+use deadroll_combat::{d20, modifiers::more, DamageRange, RollSource};
 use deadroll_mapcheck::roster::{ids, p0_role, Role};
 use deadroll_types::{
-    Aspect, Cell, Class, Form, Race, Source, Tile, PARTY_MAX, STATS_COUNT, TURN_ORDER_MAX,
+    Aspect, Cell, Class, Form, Race, Source, Tile, BP, PARTY_MAX, STATS_COUNT, TURN_ORDER_MAX,
 };
 
 use crate::state::{external::BestiaryRecord, STASH_RESOURCES};
@@ -206,6 +206,30 @@ pub fn class_increase(class: Class) -> Option<(Source, u32)> {
         Class::Mage => Some((Source::Magical, 2_000)),
         Class::Support => None,
     }
+}
+
+/// Class increase on the power of heals, buffs and debuffs, bp (docs/CHARACTER.md, 8.1: Support's
+/// class tag). TODO(balance): placeholder.
+pub fn support_increase(class: Class) -> u32 {
+    match class {
+        Class::Support => 2_000,
+        Class::Warrior | Class::Mage => 0,
+    }
+}
+
+/// HP a heal restores per point of the class weapon's range, bp. TODO(balance): placeholder.
+pub const HEAL_WEAPON_BP: u32 = 20_000;
+
+/// HP range of a heal skill with `power_bp`: the class weapon's range (the damage base of every
+/// skill, SKILL_BUILDER 5.1) x `HEAL_WEAPON_BP` x power, with the support increase. At least 1.
+pub fn heal_range(class: Class, power_bp: u32) -> (u32, u32) {
+    let weapon = class_weapon(class);
+    let scale = |v: u32| {
+        let v = v as u64 * HEAL_WEAPON_BP as u64 / BP as u64 * power_bp as u64 / BP as u64;
+        more(v, support_increase(class)).clamp(1, u32::MAX as u64) as u32
+    };
+    let min = scale(weapon.min);
+    (min, scale(weapon.max).max(min))
 }
 
 /// Race trait: flat added damage of the predisposition aspect (docs/CHARACTER.md, 6.2, 7.1).
@@ -500,6 +524,19 @@ mod tests {
             monster_profile(ids::GOBLIN_SHAMAN, 1).unwrap().form,
             Form::Projectile
         );
+    }
+
+    #[test]
+    fn heal_scales_with_power_and_support() {
+        // Support weapon 2..5, x2, +20%.
+        assert_eq!(heal_range(Class::Support, BP), (4, 12));
+        // Mage weapon 3..6, x2.
+        assert_eq!(heal_range(Class::Mage, BP), (6, 12));
+        assert_eq!(heal_range(Class::Warrior, 5_000), (4, 8));
+        assert_eq!(heal_range(Class::Warrior, 0), (1, 1));
+        assert_eq!(heal_range(Class::Support, u32::MAX).1, 5_153_960);
+        assert_eq!(support_increase(Class::Support), 2_000);
+        assert_eq!(support_increase(Class::Mage), 0);
     }
 
     #[test]

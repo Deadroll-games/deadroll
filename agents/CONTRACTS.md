@@ -151,7 +151,9 @@ open_session(map, price)             DM; creates GameSession, MonsterState, Escr
 join_session(character, actor)       player; pays price to Escrow; creates Participation, TempStash; CPI character.lock_for_session
 set_ready / start_session            all ready -> roll initiative (VRF) -> Active
 move(path)                           actor; spends action points; no rolls
-act(skill_slot | base_attack, target) actor; requests VRF -> callback resolves hit via deadroll_combat
+act(skill_slot | base_attack, target) actor; requests VRF -> callback resolves hit via deadroll_combat;
+                                     heal / buff skills: target = ally slot (own included), debuffs: monster
+                                     index; optional trailing account target_participation = another ally
 monster_act(monster, action, target) DM; same VRF path
 end_turn                             actor or DM
 on death in callback                 CPI character.mark_dead
@@ -159,7 +161,9 @@ on boss death                        status Victory; claim_rewards per player; D
 ```
 
 VRF callback instruction: `consume_randomness(randomness: [u8; 32])`, signed by the VRF program identity. It resolves the **pending action stored in `GameSession`** and emits `HitResolved` with the full breakdown.
+Heals, buffs, debuffs and the effect of a damage skill emit `EffectResolved` (all of them roll on the same VRF value).
+Accounts after the VRF identity: `session, monsters, participation, character, skill_set, session_authority, config, character_program, target_participation` - the last is optional (the program id when absent), set only for a heal or buff on another ally (`GameSession.pending_target`).
 
 ## 7. Events (all programs)
 
-`CharacterCreated, CharacterDied, MapFinalized, SessionOpened, PlayerJoined, TurnStarted, Moved, ActionRequested, HitResolved { rolls, packets, resonance, states, damage }, MonsterKilled, SessionEnded, RewardsGranted, RasterizerFinalized`.
+`CharacterCreated, CharacterDied, MapFinalized, SessionOpened, PlayerJoined, TurnStarted, Moved, ActionRequested, HitResolved { rolls, packets, resonance, states, damage }, EffectResolved, MonsterKilled, SessionEnded, RewardsGranted, RasterizerFinalized`.
