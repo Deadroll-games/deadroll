@@ -27,6 +27,16 @@ export function fallbackPollMs(live: SubStatus["state"], hidden: boolean): numbe
   return live === "live" ? POLL_LIVE_MS : POLL_FALLBACK_MS;
 }
 
+/**
+ * A party read failure as text. Accounts written before the session program grew (turn rules:
+ * appended fields) are too short for the current layout and cannot be played any more.
+ */
+export function partyReadError(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e);
+  if (msg.startsWith("borsh: read past end")) return "This party was opened before the session program upgrade and cannot be read. Open a new party.";
+  return msg;
+}
+
 export function useParty(address: Address | null) {
   const [party, setParty] = useState<Party | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -51,7 +61,7 @@ export function useParty(address: Address | null) {
       setParty(p);
       setError(p ? null : "No party at this address");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(partyReadError(e));
     } finally {
       inflight.current = false;
     }

@@ -93,6 +93,10 @@ export type GameSessionAcc = {
   monsterInitiative: number[];
   playerInitiative: number[];
   tileCost: Uint8Array;
+  /** `turnSeq` in which the current unit used its one attack or active skill. */
+  actedSeq: number;
+  /** `turnSeq` whose `start_turn` ran; every other turn instruction waits for it. */
+  startedSeq: number;
 };
 export type ParticipationAcc = {
   core: {
@@ -111,6 +115,8 @@ export type ParticipationAcc = {
   maxAp: number;
   apSeq: number;
   contribution: bigint;
+  /** Per SkillSet slot: own turn starts until the skill is usable again, 0 = usable. */
+  cooldowns: Uint8Array;
 };
 export type CharacterAcc = {
   core: {
@@ -470,6 +476,22 @@ export async function endTurnIx(actor: Actor, session: Address, character: Addre
   });
 }
 
+/**
+ * start_turn for the current unit (demo.test.ts `begin`): permissionless, the sender only pays the
+ * fee. `player` null: a monster turn. Sent alone: a Freeze / Stun skip ends the turn inside it.
+ */
+export async function startTurnIx(session: Address, player: { participation: Address; character: Address } | null): Promise<Instruction> {
+  return buildInstruction("session", "start_turn", {}, {
+    session,
+    monsters: await monstersPda(session),
+    participation: player?.participation ?? null,
+    character: player?.character ?? null,
+    sessionAuthority: await sessionAuthorityPda(),
+    config: await gameConfigPda(),
+    characterProgram: PROGRAMS.character,
+  });
+}
+
 export async function monsterMoveIx(dmActor: Actor, session: Address, layout: Address, monster: number, steps: Step[]): Promise<Instruction> {
   return buildInstruction("session", "monster_move", { monster, ...pathArgs(steps) }, {
     signer: dmActor.signer,
@@ -589,6 +611,8 @@ export type Party = {
   session: GameSessionAcc;
   monsters: MonsterAcc[];
   players: PartyPlayer[];
+  /** Per monster (same index as `monsters`), per skill: own turn starts until usable. */
+  monsterCooldowns: Uint8Array[];
   escrow: { collected: bigint; claimed: boolean } | null;
   map: MapAcc | null;
   tiles: Uint8Array | null;
@@ -607,9 +631,10 @@ export async function readParty(address: Address, tiles: Uint8Array | null = nul
   const [rawSession, rawMonsters, rawEscrow, ...guessed] = await getAccounts([...head, ...guess]);
   if (!rawSession) return null;
   const session = coders.session.decodeAccount<GameSessionAcc>("GameSession", rawSession);
-  const monsters = rawMonsters
-    ? coders.session.decodeAccount<{ core: { monsters: MonsterAcc[]; count: number } }>("MonsterState", rawMonsters).core
-    : { monsters: [], count: 0 };
+  const monsterState = rawMonsters
+    ? coders.session.decodeAccount<{ core: { monsters: MonsterAcc[]; count: number }; cooldowns?: Uint8Array[] }>("MonsterState", rawMonsters)
+    : null;
+  const monsters = monsterState?.core ?? { monsters: [], count: 0 };
   const escrow = rawEscrow ? coders.session.decodeAccount<{ collected: bigint; claimed: boolean }>("Escrow", rawEscrow) : null;
   const chars = session.core.players.slice(0, session.core.playerCount);
   const parts = await Promise.all(chars.map((c) => participationPda(address, c)));
@@ -635,7 +660,8 @@ export async function readParty(address: Address, tiles: Uint8Array | null = nul
     const rawLayout = extra[chars.length * 2 + 1];
     tiles = rawLayout ? coders.map.decodeAccount<{ core: { tiles: Uint8Array } }>("MapLayout", rawLayout).core.tiles : null;
   }
-  return { address, session, monsters: monsters.monsters.slice(0, monsters.count), players, escrow, map, tiles };
+  const monsterCooldowns = (monsterState?.cooldowns ?? []).slice(0, monsters.count);
+  return { address, session, monsters: monsters.monsters.slice(0, monsters.count), players, monsterCooldowns, escrow, map, tiles };
 }
 
 /** Parties in the lobby or in play, any DM. */
