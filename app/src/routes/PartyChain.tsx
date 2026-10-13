@@ -40,6 +40,7 @@ import {
   sessionAccounts,
   setReadyIx,
   startSessionIx,
+  startTurnIx,
   status,
   type Actor,
   type CharacterAcc,
@@ -51,7 +52,9 @@ import {
 } from "../chain/game";
 import { toHitResolved } from "../chain/hit";
 import { bestiaryName, playerCritChanceBp } from "../chain/names";
+import { errorName } from "../chain/send";
 import { statusLabel, type SubStatus } from "../chain/subscribe";
+import { cooldownLabel, skillCooldowns, skillUsedText, skipText, startTurnFor, tickText, turnActed, turnStarted } from "../chain/turns";
 import { skillSetPda } from "../chain/pda";
 import { affordable, cheb, reachable, route, type Step } from "../chain/route";
 import { useAutoFreezeTombstone } from "../chain/useAutoFreezeTombstone";
@@ -231,6 +234,14 @@ function PartyView({ address }: { address: Address }) {
     [party],
   );
 
+  const skillName = useCallback(
+    (u: number, slot: number): string => {
+      const pl = party?.players.find((p) => p.slot === u);
+      return (pl && skillNames[pl.character]?.find((k) => k.slot === slot)?.name) || `skill ${slot}`;
+    },
+    [party, skillNames],
+  );
+
   // My characters (lobby join list) and skill names of party characters (attack buttons).
   useEffect(() => {
     if (!me) return;
@@ -305,13 +316,70 @@ function PartyView({ address }: { address: Address }) {
     }
   }, [s, isDm, consume, seedKind]);
 
+  // ---- start_turn: every turn begins with it. This tab sends it for its own player, the DM tab
+  // for monsters. A Freeze / Stun skip or a death from over-time damage ends the turn inside it,
+  // so the loop goes on while the next unit is this tab's too; other tabs start theirs.
+  const startRun = useRef<Promise<Party | null> | null>(null);
+  const startFailed = useRef<{ seq: number; at: number } | null>(null);
+  const ensureStarted = useCallback((): Promise<Party | null> => {
+    startRun.current ??= (async () => {
+      try {
+        let p = await readParty(address, party?.tiles ?? null);
+        for (let i = 0; p && i < 2 * PARTY_MAX + 24; i++) {
+          const next = startTurnFor(p, me ?? null);
+          if (!next) break;
+          // A failed start (no SOL, RPC down) is retried after 3 s, by the poll or the next action.
+          if (startFailed.current?.seq === next.turnSeq && Date.now() - startFailed.current.at < 3_000) break;
+          const actor = actorFor(next.player ? next.player.part.core.actor : p.session.dmActor);
+          if (!actor) break;
+          const player = next.player ? { participation: next.player.participation, character: next.player.character } : null;
+          let failed = false;
+          const res = await send(`start turn ${label(next.unit)}`, actor.signer, async () => [await startTurnIx(address, player)], {
+            quiet: true,
+            onError: (m) => {
+              // Another tab started it first: nothing to show.
+              if (errorName(m) === "TurnAlreadyStarted") return true;
+              failed = true;
+              return false;
+            },
+          });
+          if (res) ingest(res.signature, res.events);
+          if (failed) {
+            startFailed.current = { seq: next.turnSeq, at: Date.now() };
+            break;
+          }
+          p = await readParty(address, p.tiles);
+        }
+        if (p) await refresh();
+        return p;
+      } finally {
+        startRun.current = null;
+      }
+    })();
+    return startRun.current;
+  }, [address, party?.tiles, me, actorFor, send, ingest, refresh, label]);
+
+  useEffect(() => {
+    if (party && startTurnFor(party, me ?? null)) void ensureStarted();
+  }, [party, me, ensureStarted]);
+
   /** Sends one game action, then (localnet) answers its VRF request at once. */
   const act = async (what: string, signer: TransactionSigner | null, ixs: () => Promise<Parameters<typeof send>[2]>, needsRoll: boolean) => {
     if (lock.current) return;
     lock.current = true;
     try {
-      const res = await send(what, signer, async () => (await ixs()) as never, { quiet: true });
-      if (!res) return;
+      // A stale read can let an action through before start_turn: start it and retry, never show it.
+      let notStarted = false;
+      const opts = { quiet: true, onError: (m: string) => (notStarted = errorName(m) === "TurnNotStarted") };
+      let res = await send(what, signer, async () => (await ixs()) as never, opts);
+      if (!res && notStarted) {
+        await ensureStarted();
+        res = await send(what, signer, async () => (await ixs()) as never, opts);
+      }
+      if (!res) {
+        await refresh();
+        return;
+      }
       ingest(res.signature, res.events);
       if (needsRoll && MOCK_VRF) await consume();
       await refresh();
@@ -369,6 +437,17 @@ function PartyView({ address }: { address: Address }) {
     return null;
   }, [party, unit, myTurn, activePlayer, monsterTurn, isDm]);
   const moverAp = !party || !s || unit === null ? 0 : myTurn && activePlayer ? playerAp(activePlayer.part, s) : monsterTurn ? (party.monsters[unit - MONSTER_BASE]?.actionPoints ?? 0) : 0;
+  // This tab moves the current unit; nothing goes out before its start_turn (sent on its own above).
+  const controls = myTurn || (monsterTurn && isDm);
+  const started = !!s && turnStarted(s);
+  const canMove = controls && started && !s?.core.pendingVrf;
+  // One attack or active skill per turn; movement spends the AP left before or after it.
+  const acted = !!s && turnActed(s);
+  const canAttack = canMove && !acted;
+  // Active skills of the current player; one on cooldown cannot be picked, the weapon never is.
+  const activeSkills = activePlayer ? (skillNames[activePlayer.character] ?? []).filter((k) => k.active) : [];
+  const cooldowns = activePlayer && s ? skillCooldowns(activePlayer.part, events, activePlayer.slot, s.turnSeq) : [];
+  const chosenSkill = activeSkills.some((k) => k.slot === skill && !cooldowns[k.slot]) ? skill : BASE_ATTACK;
 
   const pathTo = useCallback(
     (to: Cell): Step[] | null => {
@@ -379,8 +458,8 @@ function PartyView({ address }: { address: Address }) {
     [party, s, moverPos, unit, tileCost, taken, moverAp],
   );
   const reach = useMemo(
-    () => (party?.tiles && s && moverPos && unit !== null && !s.core.pendingVrf ? reachable({ from: moverPos, ap: moverAp, tiles: party.tiles, width: s.width, height: s.height, tileCost, taken: taken(party, unit) }) : []),
-    [party, s, moverPos, unit, moverAp, tileCost, taken],
+    () => (party?.tiles && s && moverPos && unit !== null && canMove ? reachable({ from: moverPos, ap: moverAp, tiles: party.tiles, width: s.width, height: s.height, tileCost, taken: taken(party, unit) }) : []),
+    [party, s, moverPos, unit, moverAp, tileCost, taken, canMove],
   );
   const preview = hover && moverPos ? (pathTo(hover)?.map((st) => st.to) ?? []) : [];
 
@@ -393,9 +472,9 @@ function PartyView({ address }: { address: Address }) {
     void act(`move ${label(activePlayer.slot)}`, actor?.signer ?? null, async () => [await moveIx(actor!, address, activePlayer.character, s.layout, steps)], false);
   };
   const attack = (monster: number) => {
-    if (!activePlayer) return;
+    if (!activePlayer || !canAttack) return;
     const actor = actorFor(activePlayer.part.core.actor);
-    void act(`attack ${label(MONSTER_BASE + monster)}`, actor?.signer ?? null, async () => [await actIx(actor!, address, activePlayer.character, skill, monster)], true);
+    void act(`attack ${label(MONSTER_BASE + monster)}`, actor?.signer ?? null, async () => [await actIx(actor!, address, activePlayer.character, chosenSkill, monster)], true);
   };
   const endTurn = () => {
     if (!s) return;
@@ -416,7 +495,7 @@ function PartyView({ address }: { address: Address }) {
   };
   const monsterAttack = (slot: number) => {
     const target = party?.players.find((p) => p.slot === slot);
-    if (!s || unit === null || !target) return;
+    if (!s || unit === null || !target || !canAttack) return;
     const actor = actorFor(s.dmActor);
     void act(`${label(unit)} attacks ${label(slot)}`, actor?.signer ?? null, async () => [await monsterActIx(actor!, address, unit - MONSTER_BASE, slot, target.character)], true);
   };
@@ -426,10 +505,12 @@ function PartyView({ address }: { address: Address }) {
     if (lock.current) return;
     lock.current = true;
     try {
-      let p = await readParty(address, party?.tiles ?? null);
-      if (!p?.tiles) return;
+      // start_turn first: a Freeze / Stun skip or a death from over-time damage ends the turn there.
+      let p = await ensureStarted();
+      if (!p?.tiles || !turnStarted(p.session)) return;
       const u = currentUnit(p.session);
       if (u === null || u < MONSTER_BASE || p.session.core.pendingVrf) return;
+      const seq = p.session.turnSeq;
       const mi = u - MONSTER_BASE;
       const m = p.monsters[mi];
       const actor = actorFor(p.session.dmActor);
@@ -450,7 +531,7 @@ function PartyView({ address }: { address: Address }) {
         }
         p = (await readParty(address, p.tiles))!;
         const mm = p.monsters[mi]!;
-        if (ap >= 2 && mm.alive && cheb(mm, tpos) === 1) {
+        if (ap >= 2 && mm.alive && cheb(mm, tpos) === 1 && !turnActed(p.session)) {
           const r = await send(`${label(u)} attacks ${label(target.slot)}`, actor.signer, async () => [await monsterActIx(actor, address, mi, target.slot, target.character)], { quiet: true });
           if (r) {
             ingest(r.signature, r.events);
@@ -463,7 +544,7 @@ function PartyView({ address }: { address: Address }) {
         }
       }
       p = (await readParty(address, p.tiles))!;
-      if (currentUnit(p.session) === u && !p.session.core.pendingVrf) {
+      if (p.session.turnSeq === seq && !p.session.core.pendingVrf) {
         const r = await send("end monster turn", actor.signer, async () => [await endTurnIx(actor, address, null)], { quiet: true });
         if (r) ingest(r.signature, r.events);
       }
@@ -471,14 +552,14 @@ function PartyView({ address }: { address: Address }) {
     } finally {
       lock.current = false;
     }
-  }, [address, party?.tiles, actorFor, send, ingest, consume, refresh, taken, label]);
+  }, [address, ensureStarted, actorFor, send, ingest, consume, refresh, taken, label]);
 
   // Auto-play monster turns from the DM window (toggle).
   useEffect(() => {
     if (!autoMonsters || !isDm || !monsterTurn || s?.core.pendingVrf || busy) return;
     const t = setTimeout(() => void autoMonsterTurn(), 700);
     return () => clearTimeout(t);
-  }, [autoMonsters, isDm, monsterTurn, s?.core.pendingVrf, s?.turnSeq, busy, autoMonsterTurn]);
+  }, [autoMonsters, isDm, monsterTurn, s?.core.pendingVrf, s?.turnSeq, s?.startedSeq, busy, autoMonsterTurn]);
 
   // Dev server only: a plain snapshot for browser automation (tools drive the demo through clicks).
   useEffect(() => {
@@ -486,6 +567,9 @@ function PartyView({ address }: { address: Address }) {
     (window as unknown as { __deadrollParty?: unknown }).__deadrollParty = {
       status: status(party.session),
       unit: currentUnit(party.session),
+      turnSeq: party.session.turnSeq,
+      started: turnStarted(party.session),
+      acted: turnActed(party.session),
       pending: party.session.core.pendingVrf,
       aliveMask: party.session.aliveMask,
       width: party.session.width,
@@ -493,7 +577,7 @@ function PartyView({ address }: { address: Address }) {
       tiles: party.tiles ? Array.from(party.tiles) : [],
       tileCost: Array.from(party.session.tileCost),
       xpPool: party.session.xpPool,
-      players: party.players.map((p) => ({ slot: p.slot, x: p.part.core.x, y: p.part.core.y, hp: p.part.core.hp, ap: playerAp(p.part, party.session), name: bytesText(p.char.name), player: p.part.player, nftFrozen: p.char.nftFrozen })),
+      players: party.players.map((p) => ({ slot: p.slot, x: p.part.core.x, y: p.part.core.y, hp: p.part.core.hp, ap: playerAp(p.part, party.session), name: bytesText(p.char.name), player: p.part.player, nftFrozen: p.char.nftFrozen, cooldowns: Array.from(p.part.cooldowns) })),
       monsters: party.monsters.map((m, i) => ({ i, bestiaryId: m.bestiaryId, x: m.x, y: m.y, hp: m.hp, alive: m.alive, ap: m.actionPoints })),
       events: events.map((e) => e.name),
     };
@@ -596,9 +680,8 @@ function PartyView({ address }: { address: Address }) {
 
   // ---- battle and its end
   const ended = st !== "active";
-  const activeSkills = activePlayer ? (skillNames[activePlayer.character] ?? []).filter((k) => k.active) : [];
   const monsterTargets: Cell[] =
-    myTurn && moverPos ? party.monsters.filter((m) => m.alive).map((m) => ({ x: m.x, y: m.y })) : monsterTurn && isDm ? party.players.filter((p) => s.aliveMask & (1 << p.slot)).map((p) => ({ x: p.part.core.x, y: p.part.core.y })) : [];
+    !canAttack ? [] : myTurn && moverPos ? party.monsters.filter((m) => m.alive).map((m) => ({ x: m.x, y: m.y })) : monsterTurn && isDm ? party.players.filter((p) => s.aliveMask & (1 << p.slot)).map((p) => ({ x: p.part.core.x, y: p.part.core.y })) : [];
 
   return (
     <section>
@@ -614,21 +697,28 @@ function PartyView({ address }: { address: Address }) {
             tiles={tiles}
             units={units}
             activeUnitId={unit}
-            reachable={!ended && (myTurn || (monsterTurn && isDm)) ? reach : []}
+            reachable={!ended && canMove ? reach : []}
             targets={!ended ? monsterTargets : []}
             path={preview}
             cellPx={CELL_PX}
             unitSprite={unitSprite}
             tileSprite={tileSprite}
             onCellHover={setHover}
-            onCellClick={(c) => (myTurn ? movePlayer(c) : monsterTurn && isDm ? moveMonster(c) : undefined)}
+            onCellClick={(c) => (!canMove ? undefined : myTurn ? movePlayer(c) : monsterTurn && isDm ? moveMonster(c) : undefined)}
             onUnitClick={(u) => {
+              if (!canAttack) return;
               if (myTurn && u.kind === "monster" && u.alive) attack(u.id - MONSTER_BASE);
               else if (monsterTurn && isDm && u.kind === "player" && u.alive) monsterAttack(u.id);
             }}
           />
           <p className="muted" style={{ maxWidth: CELL_PX * s.width }}>
-            {myTurn ? "Your turn: click a cell to move, a monster to attack with the selected skill." : monsterTurn && isDm ? "Monster turn: click a cell to move it, a hero to attack, or Auto." : ""}
+            {controls && acted && started
+              ? "Attack used: move with the AP left or end the turn."
+              : myTurn
+                ? "Your turn: click a cell to move, a monster to attack with the selected skill (one attack per turn)."
+                : monsterTurn && isDm
+                  ? "Monster turn: click a cell to move it, a hero to attack (once), or Auto."
+                  : ""}
           </p>
         </div>
         <div style={{ flex: "1 1 380px", display: "grid", gap: 12, minWidth: 320 }}>
@@ -638,16 +728,28 @@ function PartyView({ address }: { address: Address }) {
                 Turn: <b className={myTurn || (monsterTurn && isDm) ? "me" : ""}>{unit !== null ? label(unit) : "initiative roll..."}</b>
                 {unit !== null && (myTurn || monsterTurn) && <> · {moverAp} AP</>}
                 {s.core.pendingVrf && <span className="muted"> · waiting for the VRF roll</span>}
+                {unit !== null && !started && !s.core.pendingVrf && <span className="muted"> · {controls ? "starting the turn..." : "waiting for the turn to start"}</span>}
               </p>
               {myTurn && (
                 <>
                   <div className="skills">
-                    {activeSkills.map((k) => (
-                      <button key={k.slot} className="btn" aria-pressed={skill === k.slot} onClick={() => setSkill(k.slot)}>
-                        {k.name}
-                      </button>
-                    ))}
-                    <button className="btn" aria-pressed={skill === BASE_ATTACK} onClick={() => setSkill(BASE_ATTACK)}>
+                    {activeSkills.map((k) => {
+                      const cd = cooldowns[k.slot] ?? 0;
+                      return (
+                        <button
+                          key={k.slot}
+                          className={cd > 0 ? "btn cooldown" : "btn"}
+                          disabled={!canAttack || cd > 0}
+                          aria-pressed={chosenSkill === k.slot}
+                          title={cd > 0 ? `On cooldown: ${cooldownLabel(cd)}` : undefined}
+                          onClick={() => setSkill(k.slot)}
+                        >
+                          {k.name}
+                          {cd > 0 && <span className="cd"> · {cooldownLabel(cd)}</span>}
+                        </button>
+                      );
+                    })}
+                    <button className="btn" disabled={!canAttack} aria-pressed={chosenSkill === BASE_ATTACK} onClick={() => setSkill(BASE_ATTACK)}>
                       Weapon
                     </button>
                   </div>
@@ -656,7 +758,7 @@ function PartyView({ address }: { address: Address }) {
               )}
               <div className="row">
                 {(myTurn || (monsterTurn && isDm)) && (
-                  <button className="btn" disabled={busy !== null || s.core.pendingVrf} onClick={endTurn}>
+                  <button className="btn" disabled={busy !== null || !canMove} onClick={endTurn}>
                     End turn
                   </button>
                 )}
@@ -716,7 +818,7 @@ function PartyView({ address }: { address: Address }) {
               </ul>
             </div>
           )}
-          <EventLog events={events} label={label} />
+          <EventLog events={events} label={label} skillName={skillName} />
         </div>
       </div>
     </section>
@@ -780,7 +882,10 @@ function Claims({
   );
 }
 
-function describe(e: PartyEvent, label: (u: number) => string): string {
+type SkillName = (unit: number, slot: number) => string;
+
+/** One log line per event; null for an event with nothing to tell (a quiet turn start). */
+function describe(e: PartyEvent, label: (u: number) => string, skillName: SkillName): string | null {
   const d = e.data;
   switch (e.name) {
     case "SessionOpened":
@@ -793,6 +898,12 @@ function describe(e: PartyEvent, label: (u: number) => string): string {
       return `initiative: ${Array.from(d.order as Uint8Array).slice(0, d.len).map((u, i) => `${label(u)} (d20 ${d.d20[i]})`).join(", ")}`;
     case "TurnStarted":
       return `turn: ${label(d.unit)} (round ${d.round})`;
+    case "TurnTicked":
+      return tickText(d, label(d.unit));
+    case "TurnSkipped":
+      return skipText(d, label(d.unit));
+    case "SkillUsed":
+      return skillUsedText(d, label(d.unit), skillName(d.unit, d.skillSlot));
     case "Moved":
       return `${label(d.unit)} moved to ${d.x},${d.y}`;
     case "ActionRequested":
@@ -822,15 +933,19 @@ function describe(e: PartyEvent, label: (u: number) => string): string {
   }
 }
 
-function EventLog({ events, label }: { events: PartyEvent[]; label: (u: number) => string }) {
-  if (events.length === 0) return null;
+function EventLog({ events, label, skillName = (_, slot) => `skill ${slot}` }: { events: PartyEvent[]; label: (u: number) => string; skillName?: SkillName }) {
+  const lines = events.flatMap((e, i) => {
+    const text = describe(e, label, skillName);
+    return text === null ? [] : [{ e, i, text }];
+  });
+  if (lines.length === 0) return null;
   return (
     <div className="panel">
       <h3>Every roll is public</h3>
       <ol className="mono log" reversed>
-        {[...events].reverse().map((e, i) => (
+        {[...lines].reverse().map(({ e, i, text }) => (
           <li key={`${e.signature}-${i}`}>
-            {describe(e, label)}{" "}
+            {text}{" "}
             <a href={explorerUrl("tx", e.signature)} target="_blank" rel="noreferrer">
               tx
             </a>

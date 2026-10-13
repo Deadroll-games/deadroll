@@ -16,12 +16,13 @@ import {
   joinSessionIx,
   mockVrfSigner,
   moveIx,
+  startTurnIx,
   textBytes,
   type Actor,
 } from "./game";
 import { toHitResolved } from "./hit";
 import { coders } from "./programs";
-import { monstersPda, participationPda, programIdentityPda, sessionTokenPda, skillSetPda } from "./pda";
+import { gameConfigPda, monstersPda, participationPda, programIdentityPda, sessionAuthorityPda, sessionTokenPda, skillSetPda } from "./pda";
 import { affordable, pathArgs, reachable, route } from "./route";
 import { explainFailure } from "./send";
 import { Aspect, Class, HitOutcome, MAP_MAX, Tile } from "./types";
@@ -100,6 +101,27 @@ describe("session builders", () => {
     expect(toHex(ix.data as Uint8Array)).toBe(toHex(ixDisc("end_turn")));
   });
 
+  it("start_turn: no args, no signer, the participation and character of a player turn", async () => {
+    const participation = addrOf(13);
+    const ix = await startTurnIx(session, { participation, character });
+    expect(toHex(ix.data as Uint8Array)).toBe(toHex(ixDisc("start_turn")));
+    expect(ix.accounts!.map((a) => [a.address, a.role])).toEqual([
+      [session, AccountRole.WRITABLE],
+      [await monstersPda(session), AccountRole.WRITABLE],
+      [participation, AccountRole.WRITABLE],
+      [character, AccountRole.WRITABLE],
+      [await sessionAuthorityPda(), AccountRole.READONLY],
+      [await gameConfigPda(), AccountRole.READONLY],
+      [PROGRAMS.character, AccountRole.READONLY],
+    ]);
+  });
+
+  it("start_turn for a monster passes None for the participation and the character", async () => {
+    const ix = await startTurnIx(session, null);
+    expect(ix.accounts![2]).toEqual({ address: PROGRAMS.session, role: AccountRole.READONLY });
+    expect(ix.accounts![3]).toEqual({ address: PROGRAMS.session, role: AccountRole.READONLY });
+  });
+
   it("join_session: contribution u64 LE and the actor key", async () => {
     const player = await generateKeyPairSigner();
     const ix = await joinSessionIx(player, session, character, 50_000_000n, addrOf(11));
@@ -160,6 +182,67 @@ describe("decoders", () => {
     expect(back.core.priceLamports).toBe(100_000_000n);
     expect(back.core.turnOrder[0]).toBe(6);
     expect([back.aliveMask, back.xpPool]).toEqual([3, 70]);
+  });
+
+  it("reads the turn-rule fields appended to GameSession, Participation and MonsterState", () => {
+    const c = coders.session;
+    const roundTrip = (name: string, edit: (v: Record<string, any>) => void) => {
+      const v = zero(c, { defined: { name } }) as Record<string, any>;
+      edit(v);
+      const out: Uint8Array[] = [c.accountDiscriminator(name)];
+      c.encode({ defined: { name } }, v, out);
+      const bytes = concat(...out);
+      return { bytes, back: c.decodeAccount<any>(name, bytes) };
+    };
+    const s = roundTrip("GameSession", (v) => {
+      v.turnSeq = 9;
+      v.actedSeq = 9;
+      v.startedSeq = 8;
+    });
+    // acted_seq and started_seq are the last 8 bytes.
+    expect(Array.from(s.bytes.subarray(-8))).toEqual([9, 0, 0, 0, 8, 0, 0, 0]);
+    expect([s.back.turnSeq, s.back.actedSeq, s.back.startedSeq]).toEqual([9, 9, 8]);
+    const p = roundTrip("Participation", (v) => {
+      v.cooldowns[1] = 2;
+    });
+    expect(p.back.cooldowns).toHaveLength(16);
+    expect(Array.from(p.bytes.subarray(-16, -14))).toEqual([0, 2]);
+    const m = roundTrip("MonsterState", (v) => {
+      v.cooldowns[2] = Uint8Array.of(1, 0, 3, 0);
+    });
+    expect(m.back.cooldowns).toHaveLength(24);
+    expect(Array.from(m.back.cooldowns[2])).toEqual([1, 0, 3, 0]);
+    // A pre-upgrade account (no trailing fields) no longer decodes.
+    expect(() => c.decodeAccount("Participation", p.bytes.subarray(0, -16))).toThrow(/read past end/);
+  });
+
+  it("decodes TurnTicked, TurnSkipped and SkillUsed", () => {
+    const c = coders.session;
+    const event = (name: string, edit: (v: Record<string, any>) => void) => {
+      const v = zero(c, { defined: { name } }) as Record<string, any>;
+      v.session = addrOf(3);
+      edit(v);
+      const out: Uint8Array[] = [Uint8Array.from(c.idl.events!.find((e) => e.name === name)!.discriminator)];
+      c.encode({ defined: { name } }, v, out);
+      return c.decodeEvent(concat(...out))!;
+    };
+    const tick = event("TurnTicked", (v) => {
+      Object.assign(v, { unit: 5, turnSeq: 12, dotDamage: 4, hp: 6, died: false, skipped: true, expired: 1 << 1 });
+      v.states[0] = { kind: "burning", turns: 1, power: 4, source: 1 };
+      v.cooldowns[0] = 1;
+    });
+    expect(tick.name).toBe("TurnTicked");
+    expect(tick.data).toMatchObject({ unit: 5, turnSeq: 12, dotDamage: 4, hp: 6, died: false, skipped: true, expired: 2 });
+    expect(tick.data.states[0]).toEqual({ kind: { burning: {} }, turns: 1, power: 4, source: 1 });
+    expect(tick.data.cooldowns[0]).toBe(1);
+    const skip = event("TurnSkipped", (v) => Object.assign(v, { unit: 4, turnSeq: 3, state: "stun" }));
+    expect(skip.data).toMatchObject({ unit: 4, turnSeq: 3, state: { stun: {} } });
+    const used = event("SkillUsed", (v) => {
+      Object.assign(v, { unit: 1, skillSlot: 1, cooldown: 2 });
+      v.cooldowns[1] = 3;
+    });
+    expect(used.data).toMatchObject({ unit: 1, skillSlot: 1, cooldown: 2 });
+    expect(used.data.cooldowns[1]).toBe(3);
   });
 
   it("HitResolved maps to the app HitResult, used entries only", () => {
@@ -263,6 +346,12 @@ describe("errors", () => {
   it("names a custom error of the failing instruction's program without logs", async () => {
     const ix: Instruction = { programAddress: PROGRAMS.character, accounts: [], data: new Uint8Array() };
     expect(explainFailure(new Error("Custom program error: #6016 (instruction #1)"), [], [ix])).toBe("AlreadyFrozen: Tombstone NFT is already frozen");
+  });
+
+  it("knows the turn-rule errors of the session program", () => {
+    const ix: Instruction = { programAddress: PROGRAMS.session, accounts: [], data: new Uint8Array() };
+    const name = (code: number) => explainFailure(new Error(`Custom program error: #${code} (instruction #1)`), [], [ix]).split(":")[0];
+    expect([6046, 6047, 6048, 6049].map(name)).toEqual(["AlreadyActed", "SkillOnCooldown", "TurnNotStarted", "TurnAlreadyStarted"]);
   });
 });
 
