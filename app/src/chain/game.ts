@@ -43,7 +43,7 @@ import { Aspect, Class, MAP_CELLS, MAP_MAX, Race, Tile, type Cell, type Spawn } 
 
 export type Enum = Record<string, Record<string, unknown>>;
 export type ActiveStateAcc = { kind: Enum; turns: number; power: number; source: number };
-/** A buff or debuff slot (session TimedModData): active while `turns > 0`, one slot per kind. */
+/** A buff or debuff slot (session TimedModData): active while `turns > 0`. One per kind, in the first free slot: find by `kind`. */
 export type TimedModAcc = { kind: Enum; aspect: Enum; turns: number; powerBp: number; source: number };
 export type MonsterAcc = {
   bestiaryId: number;
@@ -123,7 +123,7 @@ export type ParticipationAcc = {
   cooldowns: Uint8Array;
   /** The character's maximum HP, copied at join_session (heals stop here). */
   hpMax: number;
-  /** Buffs and debuffs on this player, one slot per ModKindData. */
+  /** Buffs and debuffs on this player (one per kind, any slot: read them with support.ts activeMods). */
   mods: TimedModAcc[];
 };
 export type CharacterAcc = {

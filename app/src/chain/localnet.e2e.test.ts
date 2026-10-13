@@ -48,7 +48,7 @@ import { affordable, cheb, route } from "./route";
 import { sendTx } from "./send";
 import { toHitResolved } from "./hit";
 import { Category, Effect, Form, Purpose, Source, makeBlocks, type NamedSkill } from "./skillcheck";
-import { toEffectResolved } from "./support";
+import { activeMods, toEffectResolved } from "./support";
 import { turnStarted } from "./turns";
 import { Applied, Aspect, Class, HitOutcome, MAP_MAX, ModKind, Race } from "./types";
 
@@ -326,7 +326,8 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
           expect((await readParty(acc.session, tiles))!.session.pendingTarget).toBe(DEFAULT_KEY);
           const fx = effectOf(await oracle(await pickSeed("random")));
           expect([fx.caster, fx.target, fx.effect, fx.rider, fx.applied, fx.roll.d20]).toEqual([SUPPORT, SUPPORT, Effect.Haste, false, Applied.Added, 0]);
-          const haste = (await readParty(acc.session, tiles))!.players[SUPPORT]!.part.mods[ModKind.Haste]!;
+          // Slots hold one mod per kind in the first free slot: find it by kind.
+          const haste = activeMods((await readParty(acc.session, tiles))!.players[SUPPORT]!.part.mods).find((m) => m.kind === ModKind.Haste)!;
           expect([haste.turns, haste.powerBp, haste.source]).toEqual([3, fx.roll.amount, SUPPORT]);
           hasted = Math.min(255, Math.max(1, Math.floor((me.part.maxAp * (10_000 + fx.roll.amount)) / 10_000)));
           expect(hasted).toBeGreaterThan(me.part.maxAp);
@@ -351,7 +352,7 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
             // A natural 20 always lands (and crits).
             const fx = effectOf(await oracle(await pickSeed("crit")));
             expect([fx.target, fx.effect, fx.roll.d20, fx.roll.crit, fx.applied]).toEqual([MONSTER_BASE + wolf, Effect.Weakening, 20, true, Applied.Added]);
-            const weak = (await readParty(acc.session, tiles))!.monsterMods[wolf]![ModKind.Weakening]!;
+            const weak = activeMods((await readParty(acc.session, tiles))!.monsterMods[wolf]).find((m) => m.kind === ModKind.Weakening)!;
             expect([weak.turns, weak.powerBp]).toEqual([3, fx.roll.amount]);
             phase = "done";
           }
