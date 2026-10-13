@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { getAddressDecoder, type Address } from "@solana/kit";
 import type { GameSessionAcc, Party, PartyPlayer } from "./game";
 import { errorName } from "./send";
-import { startTurnFor, turnActed, turnStarted } from "./turns";
+import { cooldownLabel, skillCooldowns, startTurnFor, turnActed, turnStarted } from "./turns";
 
 const A = (n: number) => getAddressDecoder().decode(new Uint8Array(32).fill(n)) as Address;
 const DM = A(1);
@@ -61,5 +61,29 @@ describe("errorName", () => {
     expect(errorName("TurnNotStarted: The turn has not started: call start_turn first")).toBe("TurnNotStarted");
     expect(errorName("transaction failed: {}")).toBeNull();
     expect(errorName("not confirmed: 5x")).toBeNull();
+  });
+});
+
+describe("skillCooldowns", () => {
+  const part = { cooldowns: Uint8Array.of(0, 1, 0, ...new Array(13).fill(0)) } as never;
+  const cds = (...xs: number[]) => Uint8Array.from([...xs, ...new Array(16 - xs.length).fill(0)]);
+  const ticked = (unit: number, turnSeq: number) => ({ name: "TurnTicked", data: { unit, turnSeq, cooldowns: cds() } });
+  const used = (unit: number, ...xs: number[]) => ({ name: "SkillUsed", data: { unit, cooldowns: cds(...xs) } });
+
+  it("is the participation's value without events of this turn", () => {
+    expect(skillCooldowns(part, [], 0, 7).slice(0, 3)).toEqual([0, 1, 0]);
+    // A SkillUsed of an earlier turn (before this unit's tick for turn 7) does not count.
+    expect(skillCooldowns(part, [used(0, 3), ticked(0, 7)], 0, 7).slice(0, 3)).toEqual([0, 1, 0]);
+  });
+
+  it("takes a SkillUsed after this turn's tick at once, for this unit only", () => {
+    expect(skillCooldowns(part, [ticked(0, 7), used(1, 0, 0, 4), used(0, 2)], 0, 7).slice(0, 3)).toEqual([2, 1, 0]);
+    // The tick of another turn does not open the window.
+    expect(skillCooldowns(part, [ticked(0, 5), used(0, 2)], 0, 7)[0]).toBe(0);
+  });
+
+  it("labels the turns left", () => {
+    expect(cooldownLabel(1)).toBe("ready in 1 turn");
+    expect(cooldownLabel(3)).toBe("ready in 3 turns");
   });
 });

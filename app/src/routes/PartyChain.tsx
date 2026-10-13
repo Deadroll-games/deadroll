@@ -54,7 +54,7 @@ import { toHitResolved } from "../chain/hit";
 import { bestiaryName, playerCritChanceBp } from "../chain/names";
 import { errorName } from "../chain/send";
 import { statusLabel, type SubStatus } from "../chain/subscribe";
-import { startTurnFor, turnActed, turnStarted } from "../chain/turns";
+import { cooldownLabel, skillCooldowns, startTurnFor, turnActed, turnStarted } from "../chain/turns";
 import { skillSetPda } from "../chain/pda";
 import { affordable, cheb, reachable, route, type Step } from "../chain/route";
 import { useAutoFreezeTombstone } from "../chain/useAutoFreezeTombstone";
@@ -436,6 +436,10 @@ function PartyView({ address }: { address: Address }) {
   // One attack or active skill per turn; movement spends the AP left before or after it.
   const acted = !!s && turnActed(s);
   const canAttack = canMove && !acted;
+  // Active skills of the current player; one on cooldown cannot be picked, the weapon never is.
+  const activeSkills = activePlayer ? (skillNames[activePlayer.character] ?? []).filter((k) => k.active) : [];
+  const cooldowns = activePlayer && s ? skillCooldowns(activePlayer.part, events, activePlayer.slot, s.turnSeq) : [];
+  const chosenSkill = activeSkills.some((k) => k.slot === skill && !cooldowns[k.slot]) ? skill : BASE_ATTACK;
 
   const pathTo = useCallback(
     (to: Cell): Step[] | null => {
@@ -462,7 +466,7 @@ function PartyView({ address }: { address: Address }) {
   const attack = (monster: number) => {
     if (!activePlayer || !canAttack) return;
     const actor = actorFor(activePlayer.part.core.actor);
-    void act(`attack ${label(MONSTER_BASE + monster)}`, actor?.signer ?? null, async () => [await actIx(actor!, address, activePlayer.character, skill, monster)], true);
+    void act(`attack ${label(MONSTER_BASE + monster)}`, actor?.signer ?? null, async () => [await actIx(actor!, address, activePlayer.character, chosenSkill, monster)], true);
   };
   const endTurn = () => {
     if (!s) return;
@@ -555,6 +559,9 @@ function PartyView({ address }: { address: Address }) {
     (window as unknown as { __deadrollParty?: unknown }).__deadrollParty = {
       status: status(party.session),
       unit: currentUnit(party.session),
+      turnSeq: party.session.turnSeq,
+      started: turnStarted(party.session),
+      acted: turnActed(party.session),
       pending: party.session.core.pendingVrf,
       aliveMask: party.session.aliveMask,
       width: party.session.width,
@@ -562,7 +569,7 @@ function PartyView({ address }: { address: Address }) {
       tiles: party.tiles ? Array.from(party.tiles) : [],
       tileCost: Array.from(party.session.tileCost),
       xpPool: party.session.xpPool,
-      players: party.players.map((p) => ({ slot: p.slot, x: p.part.core.x, y: p.part.core.y, hp: p.part.core.hp, ap: playerAp(p.part, party.session), name: bytesText(p.char.name), player: p.part.player, nftFrozen: p.char.nftFrozen })),
+      players: party.players.map((p) => ({ slot: p.slot, x: p.part.core.x, y: p.part.core.y, hp: p.part.core.hp, ap: playerAp(p.part, party.session), name: bytesText(p.char.name), player: p.part.player, nftFrozen: p.char.nftFrozen, cooldowns: Array.from(p.part.cooldowns) })),
       monsters: party.monsters.map((m, i) => ({ i, bestiaryId: m.bestiaryId, x: m.x, y: m.y, hp: m.hp, alive: m.alive, ap: m.actionPoints })),
       events: events.map((e) => e.name),
     };
@@ -665,7 +672,6 @@ function PartyView({ address }: { address: Address }) {
 
   // ---- battle and its end
   const ended = st !== "active";
-  const activeSkills = activePlayer ? (skillNames[activePlayer.character] ?? []).filter((k) => k.active) : [];
   const monsterTargets: Cell[] =
     !canAttack ? [] : myTurn && moverPos ? party.monsters.filter((m) => m.alive).map((m) => ({ x: m.x, y: m.y })) : monsterTurn && isDm ? party.players.filter((p) => s.aliveMask & (1 << p.slot)).map((p) => ({ x: p.part.core.x, y: p.part.core.y })) : [];
 
@@ -719,12 +725,23 @@ function PartyView({ address }: { address: Address }) {
               {myTurn && (
                 <>
                   <div className="skills">
-                    {activeSkills.map((k) => (
-                      <button key={k.slot} className="btn" disabled={!canAttack} aria-pressed={skill === k.slot} onClick={() => setSkill(k.slot)}>
-                        {k.name}
-                      </button>
-                    ))}
-                    <button className="btn" disabled={!canAttack} aria-pressed={skill === BASE_ATTACK} onClick={() => setSkill(BASE_ATTACK)}>
+                    {activeSkills.map((k) => {
+                      const cd = cooldowns[k.slot] ?? 0;
+                      return (
+                        <button
+                          key={k.slot}
+                          className={cd > 0 ? "btn cooldown" : "btn"}
+                          disabled={!canAttack || cd > 0}
+                          aria-pressed={chosenSkill === k.slot}
+                          title={cd > 0 ? `On cooldown: ${cooldownLabel(cd)}` : undefined}
+                          onClick={() => setSkill(k.slot)}
+                        >
+                          {k.name}
+                          {cd > 0 && <span className="cd"> · {cooldownLabel(cd)}</span>}
+                        </button>
+                      );
+                    })}
+                    <button className="btn" disabled={!canAttack} aria-pressed={chosenSkill === BASE_ATTACK} onClick={() => setSkill(BASE_ATTACK)}>
                       Weapon
                     </button>
                   </div>

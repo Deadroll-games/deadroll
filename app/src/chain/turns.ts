@@ -2,7 +2,7 @@
 // every turn begins with the permissionless start_turn, one attack or active skill per turn,
 // skill cooldowns counted in own turn starts. Pure functions over decoded accounts and events.
 import type { Address } from "@solana/kit";
-import { MONSTER_BASE, currentUnit, status, type GameSessionAcc, type Party, type PartyPlayer } from "./game";
+import { MONSTER_BASE, currentUnit, status, type GameSessionAcc, type Party, type ParticipationAcc, type PartyPlayer } from "./game";
 
 /** start_turn ran for the current turn (states ticked, cooldowns counted down, AP granted). */
 export const turnStarted = (s: GameSessionAcc): boolean => s.startedSeq === s.turnSeq;
@@ -28,3 +28,25 @@ export function startTurnFor(p: Party, me: Address | null): TurnStart | null {
   }
   return s.core.dm === me ? { unit, turnSeq: s.turnSeq, player: null } : null;
 }
+
+/**
+ * A player's cooldowns by SkillSet slot: own turn starts until usable (0 = usable). The
+ * participation can trail the events by a refresh, so SkillUsed events of this unit after its
+ * TurnTicked for `turnSeq` raise them at once (a use only ever raises a cooldown within a turn).
+ */
+export function skillCooldowns(part: ParticipationAcc, events: readonly { name: string; data: any }[], unit: number, turnSeq: number): number[] {
+  const out = Array.from(part.cooldowns);
+  let since = -1;
+  events.forEach((e, i) => {
+    if (e.name === "TurnTicked" && e.data.unit === unit && e.data.turnSeq === turnSeq) since = i;
+  });
+  if (since < 0) return out;
+  for (const e of events.slice(since + 1)) {
+    if (e.name !== "SkillUsed" || e.data.unit !== unit) continue;
+    Array.from(e.data.cooldowns as Uint8Array).forEach((n, i) => (out[i] = Math.max(out[i] ?? 0, n)));
+  }
+  return out;
+}
+
+/** The value is already "own turn starts until usable": no off-by-one. */
+export const cooldownLabel = (n: number): string => `ready in ${n} turn${n === 1 ? "" : "s"}`;
