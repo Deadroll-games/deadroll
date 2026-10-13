@@ -217,10 +217,20 @@ export function skillNameValid(name: string): boolean {
   return new RegExp(`^[!-~][ -~]{0,${SKILL_NAME_LEN - 1}}$`).test(name);
 }
 
-/** session `act` accepts only Active + Damage skills today. */
-export const usableInCombat = (s: SkillBlocks): boolean => s.category === Category.Active && s.purpose === Purpose.Damage;
+/** session `act` takes every Active skill; a buff or debuff without an effect is refused. */
+export const usableInCombat = (s: SkillBlocks): boolean =>
+  s.category === Category.Active && (s.purpose === Purpose.Damage || s.effect !== Effect.None);
 /** Range by form (programs/session rules.rs): Strike 1, Projectile 6. */
 export const formRange = (f: Form): number => (f === Form.Strike ? 1 : 6);
+
+/** Who `act` targets with a skill: heals and buffs go to an ally (self included), the rest to a monster. */
+export type Side = "ally" | "enemy";
+export const skillSide = (purpose: Purpose): Side => (purpose === Purpose.Buff ? "ally" : "enemy");
+/**
+ * Reach of `act` at Chebyshev distance `dist` (rules.rs in_range / in_ally_range): allies may
+ * share a cell (distance 0), an enemy needs at least 1.
+ */
+export const inReach = (side: Side, form: Form, dist: number): boolean => (side === "ally" ? dist >= 0 : dist >= 1) && dist <= formRange(form);
 
 /** Every problem of one starting skill: its first failing rule and the name check. */
 export function skillProblems(s: { name: string; blocks: SkillBlocks }, cls: Class): string[] {

@@ -1,8 +1,12 @@
 // Roll order for one HitResult. Pure: same hit always yields the same steps.
+import { Effect } from "../../chain/skillcheck";
+import type { EffectResolved } from "../../chain/support";
 import { Applied, HitOutcome, type HitResult, type StateRoll, type TintRoll } from "../../chain/types";
 import {
   aspectName,
   carrierName,
+  effectAmount,
+  effectName,
   formatHundredths,
   formatScaled,
   neededRoll,
@@ -17,7 +21,7 @@ export type RollBarData = { shown: number; needed: number | null; success: boole
 
 export type CascadeStep = {
   key: string;
-  kind: "d20" | "crit" | "tint" | "resonance" | "d100" | "packet" | "state" | "damage";
+  kind: "d20" | "crit" | "tint" | "resonance" | "d100" | "packet" | "state" | "damage" | "chance";
   label: string;
   value: string;
   target?: string;
@@ -150,5 +154,52 @@ export function cascadeSteps(hit: HitResult, critChanceBp?: number): CascadeStep
     value: String(hit.damage),
   });
 
+  return steps;
+}
+
+/**
+ * Roll order of an EffectResolved (deadroll_combat::support): a debuff's d20 vs defense, the
+ * crit roll, a damage skill effect's chance roll, the d100 point in the strength range, then the
+ * result. Heals and buffs have no d20 (it is 0); Stun and Freeze no d100.
+ */
+export function effectSteps(e: EffectResolved, critChanceBp?: number): CascadeStep[] {
+  const r = e.roll;
+  const steps: CascadeStep[] = [];
+  if (r.d20 > 0) {
+    steps.push({
+      key: "d20",
+      kind: "d20",
+      label: "Hit d20",
+      value: String(r.d20),
+      target: `total ${r.attackTotal} vs defense ${r.defense}`,
+      success: r.outcome !== HitOutcome.Miss,
+      flag: r.d20 === 20 ? "NAT 20" : r.d20 === 1 ? "NAT 1" : undefined,
+    });
+  }
+  if (r.chanceRoll !== null) {
+    steps.push({ key: "chance", kind: "chance", label: `${effectName(e.effect)} chance`, ...chanceView(r.chanceRoll, r.chanceBp, r.outcome !== HitOutcome.Miss) });
+  } else if (e.rider && r.outcome !== HitOutcome.Miss) {
+    steps.push({ key: "chance", kind: "chance", label: `${effectName(e.effect)} chance`, value: "certain", target: "on a crit", success: true });
+  }
+  if (r.critRoll !== null) {
+    steps.push({ key: "crit", kind: "crit", label: "Crit", ...chanceView(r.critRoll, critChanceBp ?? null, r.crit, "CRIT!") });
+  }
+  if (r.outcome !== HitOutcome.Miss && r.d100 > 0) {
+    steps.push({
+      key: "d100",
+      kind: "d100",
+      label: e.effect === Effect.Heal ? "Heal d100" : "Strength d100",
+      value: String(r.d100),
+      target: r.crit ? "x crit" : undefined,
+    });
+  }
+  const applied = e.applied === Applied.Added ? "added" : e.applied === Applied.Refreshed ? "refreshed" : e.applied === Applied.Froze ? "froze" : null;
+  steps.push({
+    key: "result",
+    kind: "damage",
+    label: r.outcome === HitOutcome.Miss ? "Miss" : e.effect === Effect.Heal ? "Healed" : effectName(e.effect),
+    value: effectAmount(e),
+    target: e.effect === Effect.Heal && r.outcome !== HitOutcome.Miss ? `${e.hp} hp` : (applied ?? undefined),
+  });
   return steps;
 }

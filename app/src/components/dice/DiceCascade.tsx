@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { HitResult } from "../../chain/types";
 import { cascadeSteps, type CascadeStep } from "./cascade";
 import { RollBar } from "./RollBar";
 import type { DiceCascadeProps } from "./types";
@@ -52,45 +51,54 @@ function StepValue({ step, animate }: { step: CascadeStep; animate: boolean }) {
   );
 }
 
-type View = { hit: HitResult; showAll: boolean; count: number };
+type View = { steps: CascadeStep[]; showAll: boolean; count: number };
 
-export function DiceCascade({
-  hit,
-  attackerLabel,
-  targetLabel,
+/**
+ * Steps revealed one per `stepMs` (all at once with `instant` or reduced motion). A new `steps`
+ * array (by identity) restarts the reveal, so callers memoize it on their roll.
+ */
+export function StepCascade({
+  steps,
+  header,
+  ariaLabel = "Dice cascade",
   stepMs = 450,
   instant = false,
   onDone,
-  critChanceBp,
-}: DiceCascadeProps) {
-  const steps = useMemo(() => cascadeSteps(hit, critChanceBp), [hit, critChanceBp]);
+}: {
+  steps: CascadeStep[];
+  header: string;
+  ariaLabel?: string;
+  stepMs?: number;
+  instant?: boolean;
+  onDone?: () => void;
+}) {
   const showAll = instant || prefersReducedMotion();
-  const finishedHit = useRef<HitResult | null>(null);
+  const finished = useRef<CascadeStep[] | null>(null);
   const [view, setView] = useState<View>(() => ({
-    hit,
+    steps,
     showAll,
     count: openingCount(showAll, steps.length, false),
   }));
 
-  if (view.hit !== hit || view.showAll !== showAll) {
+  if (view.steps !== steps || view.showAll !== showAll) {
     setView({
-      hit,
+      steps,
       showAll,
-      count: openingCount(showAll, steps.length, finishedHit.current === hit),
+      count: openingCount(showAll, steps.length, finished.current === steps),
     });
   }
 
-  const count = view.hit === hit && view.showAll === showAll ? view.count : openingCount(showAll, steps.length, finishedHit.current === hit);
+  const count = view.steps === steps && view.showAll === showAll ? view.count : openingCount(showAll, steps.length, finished.current === steps);
 
   const onDoneRef = useRef(onDone);
   onDoneRef.current = onDone;
 
   useEffect(() => {
-    if (finishedHit.current === hit) return;
+    if (finished.current === steps) return;
 
     const finish = () => {
-      if (finishedHit.current === hit) return;
-      finishedHit.current = hit;
+      if (finished.current === steps) return;
+      finished.current = steps;
       onDoneRef.current?.();
     };
 
@@ -102,7 +110,7 @@ export function DiceCascade({
     let shown = 1;
     const id = window.setInterval(() => {
       shown += 1;
-      setView((prev) => (prev.hit === hit && !prev.showAll ? { ...prev, count: shown } : prev));
+      setView((prev) => (prev.steps === steps && !prev.showAll ? { ...prev, count: shown } : prev));
       if (shown >= steps.length) {
         window.clearInterval(id);
         finish();
@@ -110,15 +118,13 @@ export function DiceCascade({
     }, stepMs);
 
     return () => window.clearInterval(id);
-  }, [hit, showAll, stepMs, steps.length]);
+  }, [steps, showAll, stepMs]);
 
   const visible = steps.slice(0, count);
 
   return (
-    <section className="dice-cascade panel" aria-label="Dice cascade">
-      <p className="dice-header">
-        {attackerLabel} → {targetLabel}
-      </p>
+    <section className="dice-cascade panel" aria-label={ariaLabel}>
+      <p className="dice-header">{header}</p>
       <ol className="dice-steps" aria-live="polite">
         {visible.map((step) => (
           <li key={step.key} className="dice-step" data-kind={step.kind} title={step.title}>
@@ -135,4 +141,9 @@ export function DiceCascade({
       </ol>
     </section>
   );
+}
+
+export function DiceCascade({ hit, attackerLabel, targetLabel, stepMs, instant, onDone, critChanceBp }: DiceCascadeProps) {
+  const steps = useMemo(() => cascadeSteps(hit, critChanceBp), [hit, critChanceBp]);
+  return <StepCascade steps={steps} header={`${attackerLabel} → ${targetLabel}`} stepMs={stepMs} instant={instant} onDone={onDone} />;
 }

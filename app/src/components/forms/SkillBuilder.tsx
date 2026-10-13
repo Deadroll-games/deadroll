@@ -135,7 +135,7 @@ function SkillCard({ skill, index, problems, onChange, onRemove, disabled }: { s
         <Pick label={`Skill ${n} aura`} value={Math.min(b.auraRadius, AURA_RADIUS_MAX)} names={AURA_NAMES} disabled={disabled} onChange={(auraRadius) => set({ auraRadius })} />
       </div>
       <p className="muted skill-preview">
-        {preview(b)} · {usableInCombat(b) ? "usable in combat" : "not usable in combat yet (only active damage skills are)"}
+        {preview(b)} · {usableInCombat(b) ? "usable in combat" : "not usable in combat (only active skills are)"}
       </p>
       {problems.length > 0 && (
         <ul className="skill-problems">
@@ -178,7 +178,7 @@ export function SkillBuilder({ cls, skills, onChange, disabled }: SkillBuilderPr
         ))}
       </div>
       {check.loadout && <p className="error">{check.loadout}</p>}
-      {!anyCombat && <p className="muted">No active damage skill: in combat this character only has the weapon attack.</p>}
+      {!anyCombat && <p className="muted">No active skill: in combat this character only has the weapon attack.</p>}
       <ol className="skill-list">
         {skills.map((s, i) => (
           <SkillCard

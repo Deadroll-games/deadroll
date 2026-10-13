@@ -84,8 +84,10 @@ describe("helpers", () => {
     expect(skillAspects(s)).toBe("Cold 65% · Fire 35%");
   });
 
-  it("only Active + Damage is usable in combat", () => {
+  it("every Active skill with its effect is usable in combat", () => {
     expect(usableInCombat(skill("a"))).toBe(true);
+    expect(usableInCombat(skill("q", { purpose: e("buff"), effect: e("haste") }))).toBe(true);
+    expect(usableInCombat(skill("s", { purpose: e("debuff"), effect: e("weakening") }))).toBe(true);
     expect(usableInCombat(skill("b", { category: e("passive"), purpose: e("buff") }))).toBe(false);
   });
 });
@@ -99,7 +101,7 @@ describe("CharacterDetailView", () => {
     expect(screen.getByText("Intelligence").nextSibling?.textContent).toBe("12");
     expect(screen.getByText("30 (max)")).toBeTruthy();
     expect(screen.getByText("Frost Bolt")).toBeTruthy();
-    expect(screen.getAllByText(/not usable in combat yet/)).toHaveLength(1);
+    expect(screen.getAllByText(/not usable in combat/)).toHaveLength(1);
     expect(screen.getByText("Empowerment")).toBeTruthy();
     expect(screen.getAllByRole("listitem")).toHaveLength(EQUIPMENT_SLOTS.length);
     expect(screen.getByText("Items coming soon.")).toBeTruthy();

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { Address, TransactionSigner } from "@solana/kit";
 import { DiceCascade } from "../components/dice/DiceCascade";
+import { EffectCascade } from "../components/dice/EffectCascade";
 import { HitBreakdown } from "../components/dice/HitBreakdown";
 import { Grid } from "../components/grid/Grid";
 import type { GridUnit } from "../components/grid/types";
@@ -34,6 +35,7 @@ import {
   myCharacters,
   openSessionIx,
   openSessions,
+  pendingTargetOf,
   pickSeed,
   playerAp,
   readParty,
@@ -59,6 +61,8 @@ import { skillSetPda } from "../chain/pda";
 import { affordable, cheb, reachable, route, type Step } from "../chain/route";
 import { useAutoFreezeTombstone } from "../chain/useAutoFreezeTombstone";
 import { useParty, type PartyEvent } from "../chain/useParty";
+import { Purpose, inReach } from "../chain/skillcheck";
+import { activeMods, combatSkill, effectText, modLabel, modsTickText, toEffectResolved, type CombatSkill, type EffectResolved } from "../chain/support";
 import { useTx } from "../chain/useTx";
 import { MAP_MAX, PARTY_MAX, type Cell, type Class, type HitResult, type Race, type Tile } from "../chain/types";
 import { MOCK_VRF, explorerUrl } from "../config";
@@ -185,7 +189,10 @@ function PartyPicker({ map }: { map: Address | null }) {
 // ---------------------------------------------------------------------------------------------
 // one party
 
-type Hit = { result: HitResult; attacker: string; target: string; key: string; critChanceBp?: number };
+type Hit = { result: HitResult; attacker: string; target: string; critChanceBp?: number };
+type EffectView = { effect: EffectResolved; caster: string; target: string; skill: string; critChanceBp?: number };
+/** The dice panel: a hit, a heal / buff / debuff, or a hit followed by its skill's effect. */
+type Roll = { key: string; hit: Hit | null; effect: EffectView | null };
 
 function PartyView({ address }: { address: Address }) {
   const wallet = useAppWallet();
@@ -197,9 +204,9 @@ function PartyView({ address }: { address: Address }) {
   const [skill, setSkill] = useState<number>(0);
   const [hover, setHover] = useState<Cell | null>(null);
   const [autoMonsters, setAutoMonsters] = useState(false);
-  const [hit, setHit] = useState<Hit | null>(null);
+  const [roll, setRoll] = useState<Roll | null>(null);
   const [myChars, setMyChars] = useState<{ address: Address; data: CharacterAcc }[]>([]);
-  const [skillNames, setSkillNames] = useState<Record<string, { slot: number; name: string; active: boolean }[]>>({});
+  const [skillNames, setSkillNames] = useState<Record<string, CombatSkill[]>>({});
   const lock = useRef(false);
 
   const me = wallet.address;
@@ -257,25 +264,42 @@ function PartyView({ address }: { address: Address }) {
           "SkillSet",
           await skillSetPda(p.character),
         );
-        const list = (set?.skills ?? []).slice(0, set?.count ?? 0).map((k, slot) => ({ slot, name: bytesText(k.name), active: "active" in k.blocks.category }));
+        const list = (set?.skills ?? []).slice(0, set?.count ?? 0).map((k, slot) => combatSkill(slot, k));
         return [p.character, list] as const;
       }),
     ).then((entries) => setSkillNames(Object.fromEntries(entries)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [partyChars]);
 
-  // The dice cascade follows the newest HitResolved of this party (any window's action).
-  const lastHitSig = useRef<string | null>(null);
+  // The dice panel follows the newest HitResolved or EffectResolved of this party (any window's
+  // action). A damage skill's effect (rider) comes after its hit on the same action: both show.
+  const lastRollKey = useRef<string | null>(null);
   useEffect(() => {
-    const ev = [...events].reverse().find((e) => e.name === "HitResolved");
-    if (!ev || ev.signature === lastHitSig.current) return;
-    lastHitSig.current = ev.signature;
-    const h = toHitResolved(ev.data);
-    // Crit chance is not in the event; players derive it from Dexterity, monsters never roll crit.
-    const dex = h.attacker < MONSTER_BASE ? party?.players.find((p) => p.slot === h.attacker)?.char.core.stats[1] : undefined;
-    const critChanceBp = dex == null ? undefined : playerCritChanceBp(dex);
-    setHit({ result: h.result, attacker: label(h.attacker), target: label(h.target), key: ev.signature, critChanceBp });
-  }, [events, label, party]);
+    const lastOf = (pred: (e: PartyEvent) => boolean, before = events.length) => {
+      for (let j = before - 1; j >= 0; j--) if (pred(events[j]!)) return j;
+      return -1;
+    };
+    const i = lastOf((e) => e.name === "HitResolved" || e.name === "EffectResolved");
+    const ev = events[i];
+    if (!ev) return;
+    const key = `${ev.signature}:${i}`;
+    if (key === lastRollKey.current) return;
+    lastRollKey.current = key;
+    // Crit chance is not in the events; players derive it from Dexterity, monsters never roll crit.
+    const critOf = (u: number) => {
+      const dex = u < MONSTER_BASE ? party?.players.find((p) => p.slot === u)?.char.core.stats[1] : undefined;
+      return dex == null ? undefined : playerCritChanceBp(dex);
+    };
+    const hitView = (data: unknown): Hit => {
+      const h = toHitResolved(data);
+      return { result: h.result, attacker: label(h.attacker), target: label(h.target), critChanceBp: critOf(h.attacker) };
+    };
+    if (ev.name === "HitResolved") return setRoll({ key, hit: hitView(ev.data), effect: null });
+    const e = toEffectResolved(ev.data);
+    const effect: EffectView = { effect: e, caster: label(e.caster), target: label(e.target), skill: skillName(e.caster, e.skillSlot), critChanceBp: critOf(e.caster) };
+    const hitEv = e.rider ? events[lastOf((x) => x.name === "HitResolved" && x.data.actionCounter === e.actionCounter, i)] : undefined;
+    setRoll({ key, hit: hitEv ? hitView(hitEv.data) : null, effect });
+  }, [events, label, party, skillName]);
 
   // ---- the localnet VRF oracle (mock-vrf build): answers the pending roll of this party.
   const consume = useCallback(
@@ -286,7 +310,7 @@ function PartyView({ address }: { address: Address }) {
       const pl = p.players.find((x) => x.participation === pend);
       if (!pl) return;
       const seed = await pickSeed(kind);
-      const res = await send("VRF roll (localnet oracle)", sk.signer ?? wallet.signer, async () => [await consumeIx(address, pend, pl.character, seed)], {
+      const res = await send("VRF roll (localnet oracle)", sk.signer ?? wallet.signer, async () => [await consumeIx(address, pend, pl.character, seed, pendingTargetOf(p.session))], {
         quiet: true,
         silent: quietFail,
       });
@@ -409,7 +433,8 @@ function PartyView({ address }: { address: Address }) {
         x: p.part.core.x,
         y: p.part.core.y,
         hp: p.part.core.hp,
-        hpMax: p.char.core.hpMax,
+        // Participation.hpMax since #25 (heals stop there); 0 on a party joined before it.
+        hpMax: p.part.hpMax || p.char.core.hpMax,
         alive: (party.session.aliveMask & (1 << p.slot)) !== 0,
         label: bytesText(p.char.name),
       })),
@@ -445,9 +470,12 @@ function PartyView({ address }: { address: Address }) {
   const acted = !!s && turnActed(s);
   const canAttack = canMove && !acted;
   // Active skills of the current player; one on cooldown cannot be picked, the weapon never is.
-  const activeSkills = activePlayer ? (skillNames[activePlayer.character] ?? []).filter((k) => k.active) : [];
+  const activeSkills = activePlayer ? (skillNames[activePlayer.character] ?? []).filter((k) => k.usable) : [];
   const cooldowns = activePlayer && s ? skillCooldowns(activePlayer.part, events, activePlayer.slot, s.turnSeq) : [];
-  const chosenSkill = activeSkills.some((k) => k.slot === skill && !cooldowns[k.slot]) ? skill : BASE_ATTACK;
+  const chosen = activeSkills.find((k) => k.slot === skill && !cooldowns[k.slot]) ?? null;
+  const chosenSkill = chosen ? chosen.slot : BASE_ATTACK;
+  // Heals and buffs go to an ally (self included), everything else to a monster.
+  const chosenSide = chosen?.side ?? "enemy";
 
   const pathTo = useCallback(
     (to: Cell): Step[] | null => {
@@ -472,9 +500,17 @@ function PartyView({ address }: { address: Address }) {
     void act(`move ${label(activePlayer.slot)}`, actor?.signer ?? null, async () => [await moveIx(actor!, address, activePlayer.character, s.layout, steps)], false);
   };
   const attack = (monster: number) => {
-    if (!activePlayer || !canAttack) return;
+    if (!activePlayer || !canAttack || chosenSide !== "enemy") return;
     const actor = actorFor(activePlayer.part.core.actor);
-    void act(`attack ${label(MONSTER_BASE + monster)}`, actor?.signer ?? null, async () => [await actIx(actor!, address, activePlayer.character, chosenSkill, monster)], true);
+    void act(`attack ${label(MONSTER_BASE + monster)}`, actor?.signer ?? null, async () => [await actIx(actor!, address, activePlayer.character, chosenSkill, monster, null)], true);
+  };
+  /** A heal or buff on an ally: the target is its player slot, its Participation unless a self-cast. */
+  const support = (slot: number) => {
+    const ally = party?.players.find((p) => p.slot === slot);
+    if (!activePlayer || !canAttack || chosenSide !== "ally" || !ally || !chosen) return;
+    const actor = actorFor(activePlayer.part.core.actor);
+    const allyAccount = slot === activePlayer.slot ? null : ally.participation;
+    void act(`${chosen.name} on ${label(slot)}`, actor?.signer ?? null, async () => [await actIx(actor!, address, activePlayer.character, chosenSkill, slot, allyAccount)], true);
   };
   const endTurn = () => {
     if (!s) return;
@@ -577,8 +613,8 @@ function PartyView({ address }: { address: Address }) {
       tiles: party.tiles ? Array.from(party.tiles) : [],
       tileCost: Array.from(party.session.tileCost),
       xpPool: party.session.xpPool,
-      players: party.players.map((p) => ({ slot: p.slot, x: p.part.core.x, y: p.part.core.y, hp: p.part.core.hp, ap: playerAp(p.part, party.session), name: bytesText(p.char.name), player: p.part.player, nftFrozen: p.char.nftFrozen, cooldowns: Array.from(p.part.cooldowns) })),
-      monsters: party.monsters.map((m, i) => ({ i, bestiaryId: m.bestiaryId, x: m.x, y: m.y, hp: m.hp, alive: m.alive, ap: m.actionPoints })),
+      players: party.players.map((p) => ({ slot: p.slot, x: p.part.core.x, y: p.part.core.y, hp: p.part.core.hp, ap: playerAp(p.part, party.session), name: bytesText(p.char.name), player: p.part.player, nftFrozen: p.char.nftFrozen, cooldowns: Array.from(p.part.cooldowns), hpMax: p.part.hpMax, mods: activeMods(p.part.mods) })),
+      monsters: party.monsters.map((m, i) => ({ i, bestiaryId: m.bestiaryId, x: m.x, y: m.y, hp: m.hp, alive: m.alive, ap: m.actionPoints, mods: activeMods(party.monsterMods[i]) })),
       events: events.map((e) => e.name),
     };
   }, [party, events]);
@@ -680,8 +716,18 @@ function PartyView({ address }: { address: Address }) {
 
   // ---- battle and its end
   const ended = st !== "active";
-  const monsterTargets: Cell[] =
-    !canAttack ? [] : myTurn && moverPos ? party.monsters.filter((m) => m.alive).map((m) => ({ x: m.x, y: m.y })) : monsterTurn && isDm ? party.players.filter((p) => s.aliveMask & (1 << p.slot)).map((p) => ({ x: p.part.core.x, y: p.part.core.y })) : [];
+  const livingPlayers = party.players.filter((p) => s.aliveMask & (1 << p.slot));
+  // A skill's targets within its reach (the weapon: every living monster, the program checks range).
+  const reachOk = (c: Cell) => !chosen || !moverPos || inReach(chosen.side, chosen.form, cheb(moverPos, c));
+  const monsterTargets: Cell[] = !canAttack
+    ? []
+    : myTurn && moverPos
+      ? chosenSide === "ally"
+        ? livingPlayers.map((p) => ({ x: p.part.core.x, y: p.part.core.y })).filter(reachOk)
+        : party.monsters.filter((m) => m.alive).map((m) => ({ x: m.x, y: m.y })).filter(reachOk)
+      : monsterTurn && isDm
+        ? livingPlayers.map((p) => ({ x: p.part.core.x, y: p.part.core.y }))
+        : [];
 
   return (
     <section>
@@ -707,7 +753,8 @@ function PartyView({ address }: { address: Address }) {
             onCellClick={(c) => (!canMove ? undefined : myTurn ? movePlayer(c) : monsterTurn && isDm ? moveMonster(c) : undefined)}
             onUnitClick={(u) => {
               if (!canAttack) return;
-              if (myTurn && u.kind === "monster" && u.alive) attack(u.id - MONSTER_BASE);
+              if (myTurn && chosenSide === "enemy" && u.kind === "monster" && u.alive) attack(u.id - MONSTER_BASE);
+              else if (myTurn && chosenSide === "ally" && u.kind === "player" && u.alive) support(u.id);
               else if (monsterTurn && isDm && u.kind === "player" && u.alive) monsterAttack(u.id);
             }}
           />
@@ -715,7 +762,9 @@ function PartyView({ address }: { address: Address }) {
             {controls && acted && started
               ? "Attack used: move with the AP left or end the turn."
               : myTurn
-                ? "Your turn: click a cell to move, a monster to attack with the selected skill (one attack per turn)."
+                ? chosenSide === "ally"
+                  ? `Your turn: click an ally or yourself to cast ${chosen?.name ?? "the skill"} (one attack or skill per turn).`
+                  : "Your turn: click a cell to move, a monster to attack with the selected skill (one attack per turn)."
                 : monsterTurn && isDm
                   ? "Monster turn: click a cell to move it, a hero to attack (once), or Auto."
                   : ""}
@@ -741,10 +790,11 @@ function PartyView({ address }: { address: Address }) {
                           className={cd > 0 ? "btn cooldown" : "btn"}
                           disabled={!canAttack || cd > 0}
                           aria-pressed={chosenSkill === k.slot}
-                          title={cd > 0 ? `On cooldown: ${cooldownLabel(cd)}` : undefined}
+                          title={cd > 0 ? `On cooldown: ${cooldownLabel(cd)}` : k.side === "ally" ? "Heal or buff: click an ally or yourself" : k.purpose === Purpose.Debuff ? "Debuff: click a monster" : undefined}
                           onClick={() => setSkill(k.slot)}
                         >
                           {k.name}
+                          {k.side === "ally" ? <span className="muted"> · ally</span> : k.purpose === Purpose.Debuff ? <span className="muted"> · debuff</span> : null}
                           {cd > 0 && <span className="cd"> · {cooldownLabel(cd)}</span>}
                         </button>
                       );
@@ -799,12 +849,23 @@ function PartyView({ address }: { address: Address }) {
               </div>
             </div>
           )}
-          {hit && (
+          {roll?.hit && (
             <>
-              <DiceCascade key={hit.key} hit={hit.result} attackerLabel={hit.attacker} targetLabel={hit.target} critChanceBp={hit.critChanceBp} />
-              <HitBreakdown hit={hit.result} defaultOpen={false} critChanceBp={hit.critChanceBp} />
+              <DiceCascade key={roll.key} hit={roll.hit.result} attackerLabel={roll.hit.attacker} targetLabel={roll.hit.target} critChanceBp={roll.hit.critChanceBp} />
+              <HitBreakdown hit={roll.hit.result} defaultOpen={false} critChanceBp={roll.hit.critChanceBp} />
             </>
           )}
+          {roll?.effect && (
+            <EffectCascade
+              key={`${roll.key}:effect`}
+              effect={roll.effect.effect}
+              casterLabel={roll.effect.caster}
+              targetLabel={roll.effect.target}
+              skillLabel={roll.effect.skill}
+              critChanceBp={roll.effect.critChanceBp}
+            />
+          )}
+          <ModsPanel party={party} label={label} />
           {ended && <Claims party={party} isDm={isDm} payer={wallet.signer} send={send} ingest={ingest} busy={busy} />}
           {tombLog.length > 0 && (
             <div className="panel">
@@ -900,6 +961,12 @@ function describe(e: PartyEvent, label: (u: number) => string, skillName: SkillN
       return `turn: ${label(d.unit)} (round ${d.round})`;
     case "TurnTicked":
       return tickText(d, label(d.unit));
+    case "ModsTicked":
+      return modsTickText(d, label(d.unit));
+    case "EffectResolved": {
+      const ev = toEffectResolved(d);
+      return effectText(ev, label(ev.caster), label(ev.target), skillName(ev.caster, ev.skillSlot));
+    }
     case "TurnSkipped":
       return skipText(d, label(d.unit));
     case "SkillUsed":
@@ -931,6 +998,28 @@ function describe(e: PartyEvent, label: (u: number) => string, skillName: SkillN
     default:
       return e.name;
   }
+}
+
+/** Buffs and debuffs on every living unit (Participation.mods, MonsterState.mods); nothing when none. */
+function ModsPanel({ party, label }: { party: Party; label: (u: number) => string }) {
+  const rows = [
+    ...party.players.filter((p) => party.session.aliveMask & (1 << p.slot)).map((p) => ({ unit: p.slot, mods: activeMods(p.part.mods) })),
+    ...party.monsters.flatMap((m, i) => (m.alive ? [{ unit: MONSTER_BASE + i, mods: activeMods(party.monsterMods[i]) }] : [])),
+  ].filter((r) => r.mods.length > 0);
+  if (rows.length === 0) return null;
+  return (
+    <div className="panel">
+      <h3>Buffs and debuffs</h3>
+      <ul className="mono">
+        {rows.map((r) => (
+          <li key={r.unit}>
+            {label(r.unit)}: {r.mods.map(modLabel).join(", ")}
+          </li>
+        ))}
+      </ul>
+      <p className="muted">(n): own turns left after the current one.</p>
+    </div>
+  );
 }
 
 function EventLog({ events, label, skillName = (_, slot) => `skill ${slot}` }: { events: PartyEvent[]; label: (u: number) => string; skillName?: SkillName }) {

@@ -1,4 +1,5 @@
 // Props contract for the dice cascade and hit breakdown (L9.4). Written by the lane owner.
+import type { EffectResolved } from "../../chain/support";
 import type { HitResult } from "../../chain/types";
 
 export type DiceCascadeProps = {
@@ -25,4 +26,17 @@ export type HitBreakdownProps = {
   critChanceBp?: number;
   /** Expanded by default. */
   defaultOpen?: boolean;
+};
+
+export type EffectCascadeProps = {
+  effect: EffectResolved;
+  casterLabel: string;
+  targetLabel: string;
+  /** The skill's name. */
+  skillLabel: string;
+  stepMs?: number;
+  instant?: boolean;
+  onDone?: () => void;
+  /** Caster crit chance in bp. Not in the event; shown as "?" when unknown. */
+  critChanceBp?: number;
 };

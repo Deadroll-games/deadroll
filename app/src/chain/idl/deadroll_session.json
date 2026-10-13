@@ -143,6 +143,46 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "target_participation",
+          "docs": [
+            "The ally a heal or buff targets when it is not the caster; `None` for every other action",
+            "(a self-cast, an attack, a debuff). Any `Participation` of this session; the handler",
+            "checks its slot."
+          ],
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  114,
+                  116,
+                  105,
+                  99,
+                  105,
+                  112,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              },
+              {
+                "kind": "account",
+                "path": "target_participation.core.character",
+                "account": "Participation"
+              }
+            ]
+          }
         }
       ],
       "args": [
@@ -528,7 +568,7 @@
             "The VRF program's identity for this program (`mock-vrf`: the fixed test identity)."
           ],
           "signer": true,
-          "address": "Bj7XBktwDmAg6J4FohS6oRHbevD6MMd8jnCZKvzKPiKV"
+          "address": "5RotSMue7vx9xBPp3L8iQEKbKSc3ezbY4GqiJxDEe6sN"
         },
         {
           "name": "session",
@@ -591,6 +631,15 @@
         {
           "name": "character_program",
           "address": "9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL"
+        },
+        {
+          "name": "target_participation",
+          "docs": [
+            "The ally of a heal or buff that is not the caster (`session.pending_target`); `None`",
+            "for every other roll."
+          ],
+          "writable": true,
+          "optional": true
         }
       ],
       "args": [
@@ -1984,6 +2033,19 @@
       ]
     },
     {
+      "name": "EffectResolved",
+      "discriminator": [
+        122,
+        47,
+        143,
+        56,
+        64,
+        145,
+        122,
+        184
+      ]
+    },
+    {
       "name": "EscrowClaimed",
       "discriminator": [
         32,
@@ -2033,6 +2095,19 @@
         179,
         127,
         28
+      ]
+    },
+    {
+      "name": "ModsTicked",
+      "discriminator": [
+        89,
+        93,
+        117,
+        132,
+        137,
+        245,
+        91,
+        232
       ]
     },
     {
@@ -2371,7 +2446,7 @@
     {
       "code": 6035,
       "name": "InvalidSkill",
-      "msg": "Skill cannot be used as an attack"
+      "msg": "Skill cannot be used as an action"
     },
     {
       "code": 6036,
@@ -2442,6 +2517,21 @@
       "code": 6049,
       "name": "TurnAlreadyStarted",
       "msg": "This turn has already started"
+    },
+    {
+      "code": 6050,
+      "name": "InvalidAllyTarget",
+      "msg": "Target is not a living ally"
+    },
+    {
+      "code": 6051,
+      "name": "AllyAccountMissing",
+      "msg": "A heal or buff on another ally needs that ally's participation"
+    },
+    {
+      "code": 6052,
+      "name": "UnexpectedAllyAccount",
+      "msg": "target_participation is only for a heal or buff on another ally"
     }
   ],
   "types": [
@@ -2613,6 +2703,254 @@
           {
             "name": "y",
             "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Effect",
+      "docs": [
+        "Section 6. `None` only for pure damage. Debuffs and hard control first, then buffs;",
+        "`Heal` was appended later (a buff kind: restores HP up to the maximum)."
+      ],
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "None"
+          },
+          {
+            "name": "Weakening"
+          },
+          {
+            "name": "Slow"
+          },
+          {
+            "name": "Vulnerability"
+          },
+          {
+            "name": "Stun"
+          },
+          {
+            "name": "Freeze"
+          },
+          {
+            "name": "Haste"
+          },
+          {
+            "name": "Empowerment"
+          },
+          {
+            "name": "Protection"
+          },
+          {
+            "name": "Heal"
+          }
+        ]
+      }
+    },
+    {
+      "name": "EffectResolved",
+      "docs": [
+        "A resolved heal, buff or debuff (`act` with such a skill: instead of `HitResolved`), or the",
+        "effect of a damage skill after its hit (`rider`: right after that action's `HitResolved`).",
+        "Every roll is in `roll`; the website can replay it from `seed` (`deadroll_combat::support`)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "caster",
+            "docs": [
+              "Turn-order ids: the caster and the unit the effect went to."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "target",
+            "type": "u8"
+          },
+          {
+            "name": "seed",
+            "docs": [
+              "The VRF value of this action."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "action_counter",
+            "docs": [
+              "`GameSession.action_counter` of this action, the same number as its `ActionRequested`."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "skill_slot",
+            "type": "u8"
+          },
+          {
+            "name": "effect",
+            "docs": [
+              "The skill's effect."
+            ],
+            "type": {
+              "defined": {
+                "name": "Effect"
+              }
+            }
+          },
+          {
+            "name": "rider",
+            "docs": [
+              "The effect of a damage skill, rolled after the hit on the next dice of the same seed."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "roll",
+            "type": {
+              "defined": {
+                "name": "EffectRollData"
+              }
+            }
+          },
+          {
+            "name": "applied",
+            "docs": [
+              "What it did: `Added` / `Refreshed` (a buff, debuff or Stun), `Froze`, or `None` (a miss,",
+              "a heal, or no free slot)."
+            ],
+            "type": {
+              "defined": {
+                "name": "Applied"
+              }
+            }
+          },
+          {
+            "name": "hp",
+            "docs": [
+              "The target's HP after (a heal raises it, up to its maximum)."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "states",
+            "docs": [
+              "The target's states and buffs / debuffs after."
+            ],
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "ActiveState"
+                  }
+                },
+                6
+              ]
+            }
+          },
+          {
+            "name": "mods",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "TimedModData"
+                  }
+                },
+                6
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "EffectRollData",
+      "docs": [
+        "`deadroll_combat::EffectRoll`: the dice of a heal, buff, debuff or a damage skill's effect."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "outcome",
+            "docs": [
+              "`Hit`: the effect lands. `Miss`: the d20 or the effect chance failed."
+            ],
+            "type": {
+              "defined": {
+                "name": "HitOutcome"
+              }
+            }
+          },
+          {
+            "name": "d20",
+            "docs": [
+              "The hit roll of a debuff, 0 = none (heals and buffs do not roll to land)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "attack_total",
+            "type": "u32"
+          },
+          {
+            "name": "defense",
+            "type": "u32"
+          },
+          {
+            "name": "crit",
+            "type": "bool"
+          },
+          {
+            "name": "crit_roll",
+            "type": {
+              "option": "u16"
+            }
+          },
+          {
+            "name": "chance_bp",
+            "docs": [
+              "Effect chance of a damage skill's effect (0 for heals, buffs and debuffs)."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "chance_roll",
+            "docs": [
+              "`None` when not rolled (not a damage skill's effect, or certain on a crit)."
+            ],
+            "type": {
+              "option": "u16"
+            }
+          },
+          {
+            "name": "d100",
+            "type": "u8"
+          },
+          {
+            "name": "amount",
+            "docs": [
+              "HP for a heal, bp for a buff or debuff, 0 for Stun / Freeze or a miss."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "rolls_used",
+            "type": "u32"
           }
         ]
       }
@@ -2909,6 +3247,14 @@
               "other turn instruction waits for it."
             ],
             "type": "u32"
+          },
+          {
+            "name": "pending_target",
+            "docs": [
+              "The ally `Participation` a pending heal or buff targets when it is not the caster: the",
+              "callback's `target_participation`. `Pubkey::default()` = none."
+            ],
+            "type": "pubkey"
           }
         ]
       }
@@ -3275,6 +3621,91 @@
       }
     },
     {
+      "name": "ModKindData",
+      "docs": [
+        "`deadroll_combat::ModKind`."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Haste"
+          },
+          {
+            "name": "Slow"
+          },
+          {
+            "name": "Empowerment"
+          },
+          {
+            "name": "Weakening"
+          },
+          {
+            "name": "Protection"
+          },
+          {
+            "name": "Vulnerability"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ModsTicked",
+      "docs": [
+        "Buffs and debuffs at the start of a unit's turn (`start_turn`, right after `TurnTicked`)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "unit",
+            "docs": [
+              "Turn-order id."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "turn_seq",
+            "type": "u32"
+          },
+          {
+            "name": "expired",
+            "docs": [
+              "`deadroll_combat::support::mod_bit` of every buff or debuff that ended now."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "mods",
+            "docs": [
+              "The unit's buffs and debuffs after the tick (`turns`: own turn starts left)."
+            ],
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "TimedModData"
+                  }
+                },
+                6
+              ]
+            }
+          },
+          {
+            "name": "action_points",
+            "docs": [
+              "Action points of this turn: speed with Haste and Slow."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
       "name": "Monster",
       "docs": [
         "A live monster in a session."
@@ -3379,7 +3810,8 @@
         "`Account<MonsterState>` overflows the 4 KB SBPF v3 stack frame. Contexts take it as",
         "`LazyAccount` (owner + discriminator check, IDL entry) and instructions go through",
         "[`Monsters`], which reads and writes one monster at a time in place. `cargo-build-sbf` still",
-        "warns about the generated `try_deserialize_unchecked`; nothing calls it."
+        "warns about the generated Borsh decoders (`try_deserialize_unchecked`, `deserialize_reader`)",
+        "and the `LazyAccount` loaders (`__load_common`); nothing calls them."
       ],
       "type": {
         "kind": "struct",
@@ -3408,6 +3840,27 @@
                   "array": [
                     "u8",
                     4
+                  ]
+                },
+                24
+              ]
+            }
+          },
+          {
+            "name": "mods",
+            "docs": [
+              "Per monster: buffs and debuffs (`deadroll_combat::support`), like `Participation.mods`."
+            ],
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    {
+                      "defined": {
+                        "name": "TimedModData"
+                      }
+                    },
+                    6
                   ]
                 },
                 24
@@ -3621,6 +4074,30 @@
               "array": [
                 "u8",
                 16
+              ]
+            }
+          },
+          {
+            "name": "hp_max",
+            "docs": [
+              "The character's maximum HP, copied at `join_session` (heals stop here)."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "mods",
+            "docs": [
+              "Buffs and debuffs on this player (`deadroll_combat::support`), one slot per kind;",
+              "`start_turn` counts them down."
+            ],
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "TimedModData"
+                  }
+                },
+                6
               ]
             }
           }
@@ -4148,6 +4625,54 @@
           },
           {
             "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TimedModData",
+      "docs": [
+        "`deadroll_combat::TimedMod`: a buff or debuff on a unit, `turns == 0` = empty slot."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "kind",
+            "type": {
+              "defined": {
+                "name": "ModKindData"
+              }
+            }
+          },
+          {
+            "name": "aspect",
+            "docs": [
+              "The skill's aspect (Vulnerability is to this aspect)."
+            ],
+            "type": {
+              "defined": {
+                "name": "Aspect"
+              }
+            }
+          },
+          {
+            "name": "turns",
+            "docs": [
+              "Own turn starts of the bearer until it ends."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "power_bp",
+            "type": "u32"
+          },
+          {
+            "name": "source",
+            "docs": [
+              "Turn-order id of the unit that applied it."
+            ],
             "type": "u8"
           }
         ]

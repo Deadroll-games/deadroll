@@ -9,9 +9,11 @@ import { concat, toHex } from "./bytes";
 import { camel, type IdlType } from "./coder";
 import { decodeEvents } from "./events";
 import {
+  DEFAULT_KEY,
   SKILL_PRESETS,
   actIx,
   consumeIx,
+  pendingTargetOf,
   endTurnIx,
   joinSessionIx,
   mockVrfSigner,
@@ -21,11 +23,13 @@ import {
   type Actor,
 } from "./game";
 import { toHitResolved } from "./hit";
+import { toEffectResolved } from "./support";
+import { Effect } from "./skillcheck";
 import { coders } from "./programs";
 import { gameConfigPda, monstersPda, participationPda, programIdentityPda, sessionAuthorityPda, sessionTokenPda, skillSetPda } from "./pda";
 import { affordable, pathArgs, reachable, route } from "./route";
 import { explainFailure } from "./send";
-import { Aspect, Class, HitOutcome, MAP_MAX, Tile } from "./types";
+import { Applied, Aspect, Class, HitOutcome, MAP_MAX, ModKind, Tile } from "./types";
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex").slice(0, 16);
 const A = (n: number) => new Uint8Array(32).fill(n);
@@ -84,14 +88,25 @@ describe("session builders", () => {
 
   it("act: skill slot and target, VRF accounts after the session token", async () => {
     const signer = await generateKeyPairSigner();
-    const ix = await actIx({ signer, token: null }, session, character, 1, 3);
+    const ix = await actIx({ signer, token: null }, session, character, 1, 3, null);
     expect(toHex(ix.data as Uint8Array)).toBe(toHex(concat(ixDisc("act"), Uint8Array.of(1, 3))));
     const addrs = ix.accounts!.map((a) => a.address);
     expect(addrs[4]).toBe(await skillSetPda(character));
     // No session token: Anchor's None is the program id.
     expect(addrs[6]).toBe(PROGRAMS.session);
-    expect(addrs.slice(7)).toEqual([await programIdentityPda(), VRF.oracleQueue, VRF.program, VRF.slotHashes, "11111111111111111111111111111111"]);
+    expect(addrs.slice(7, 12)).toEqual([await programIdentityPda(), VRF.oracleQueue, VRF.program, VRF.slotHashes, "11111111111111111111111111111111"]);
     expect(ix.accounts![8]!.role).toBe(AccountRole.WRITABLE);
+    // An enemy target (or a self-cast): no ally account, the trailing optional is None.
+    expect(ix.accounts).toHaveLength(13);
+    expect(ix.accounts![12]).toEqual({ address: PROGRAMS.session, role: AccountRole.READONLY });
+  });
+
+  it("act: a buff on another ally targets its player slot and passes its participation last", async () => {
+    const signer = await generateKeyPairSigner();
+    const ally = addrOf(14);
+    const ix = await actIx({ signer, token: null }, session, character, 2, 1, ally);
+    expect(toHex(ix.data as Uint8Array)).toBe(toHex(concat(ixDisc("act"), Uint8Array.of(2, 1))));
+    expect(ix.accounts![12]).toEqual({ address: ally, role: AccountRole.READONLY });
   });
 
   it("end_turn for a monster passes None for the participation", async () => {
@@ -133,10 +148,20 @@ describe("session builders", () => {
 
   it("consume_randomness is signed by the mock-vrf identity of programs/session/src/vrf.rs", async () => {
     expect((await mockVrfSigner()).address).toBe("5RotSMue7vx9xBPp3L8iQEKbKSc3ezbY4GqiJxDEe6sN");
-    const ix = await consumeIx(session, addrOf(12), character, A(0x5a));
+    const ix = await consumeIx(session, addrOf(12), character, A(0x5a), null);
     expect(toHex(ix.data as Uint8Array)).toBe(toHex(concat(ixDisc("consume_randomness"), A(0x5a))));
     expect(ix.accounts![0]!.role).toBe(AccountRole.READONLY_SIGNER);
     expect(ix.accounts![3]!.address).toBe(addrOf(12));
+    expect(ix.accounts).toHaveLength(10);
+    expect(ix.accounts![9]).toEqual({ address: PROGRAMS.session, role: AccountRole.READONLY });
+  });
+
+  it("consume_randomness passes GameSession.pendingTarget, writable, for a heal or buff on an ally", async () => {
+    const ally = addrOf(15);
+    expect(pendingTargetOf({ pendingTarget: DEFAULT_KEY } as never)).toBeNull();
+    expect(pendingTargetOf({ pendingTarget: ally } as never)).toBe(ally);
+    const ix = await consumeIx(session, addrOf(12), character, A(1), ally);
+    expect(ix.accounts![9]).toEqual({ address: ally, role: AccountRole.WRITABLE });
   });
 });
 
@@ -194,26 +219,43 @@ describe("decoders", () => {
       const bytes = concat(...out);
       return { bytes, back: c.decodeAccount<any>(name, bytes) };
     };
+    const ally = addrOf(16);
     const s = roundTrip("GameSession", (v) => {
       v.turnSeq = 9;
       v.actedSeq = 9;
       v.startedSeq = 8;
+      v.pendingTarget = ally;
     });
-    // acted_seq and started_seq are the last 8 bytes.
-    expect(Array.from(s.bytes.subarray(-8))).toEqual([9, 0, 0, 0, 8, 0, 0, 0]);
-    expect([s.back.turnSeq, s.back.actedSeq, s.back.startedSeq]).toEqual([9, 9, 8]);
+    // acted_seq and started_seq, then pending_target (32) are the last 40 bytes.
+    expect(Array.from(s.bytes.subarray(-40, -32))).toEqual([9, 0, 0, 0, 8, 0, 0, 0]);
+    expect(Array.from(s.bytes.subarray(-32))).toEqual(Array.from(pk(ally)));
+    expect([s.back.turnSeq, s.back.actedSeq, s.back.startedSeq, s.back.pendingTarget]).toEqual([9, 9, 8, ally]);
+    const mod = { kind: "weakening", aspect: "blood", turns: 3, powerBp: 1_800, source: 2 };
     const p = roundTrip("Participation", (v) => {
       v.cooldowns[1] = 2;
+      v.hpMax = 30;
+      v.mods[ModKind.Weakening] = mod;
     });
     expect(p.back.cooldowns).toHaveLength(16);
-    expect(Array.from(p.bytes.subarray(-16, -14))).toEqual([0, 2]);
+    // cooldowns (16), hp_max (4), mods (6 x 8 bytes).
+    expect(Array.from(p.bytes.subarray(-68, -66))).toEqual([0, 2]);
+    expect(Array.from(p.bytes.subarray(-52, -48))).toEqual([30, 0, 0, 0]);
+    // TimedModData: kind, aspect, turns, power_bp u32, source = 8 bytes.
+    expect(Array.from(p.bytes.subarray(-48 + 8 * 3, -48 + 8 * 4))).toEqual([ModKind.Weakening, Aspect.Blood, 3, 0x08, 0x07, 0, 0, 2]);
+    expect(p.back.hpMax).toBe(30);
+    expect(p.back.mods[ModKind.Weakening]).toEqual({ ...mod, kind: { weakening: {} }, aspect: { blood: {} } });
     const m = roundTrip("MonsterState", (v) => {
       v.cooldowns[2] = Uint8Array.of(1, 0, 3, 0);
+      v.mods[2][ModKind.Slow] = { kind: "slow", aspect: "cold", turns: 2, powerBp: 2_500, source: 1 };
     });
     expect(m.back.cooldowns).toHaveLength(24);
     expect(Array.from(m.back.cooldowns[2])).toEqual([1, 0, 3, 0]);
+    // mods: 24 monsters x 6 slots x 8 bytes after the cooldowns.
+    expect(m.back.mods).toHaveLength(24);
+    expect(Array.from(m.bytes.subarray(-1152 + 2 * 48 + 8, -1152 + 2 * 48 + 11))).toEqual([ModKind.Slow, Aspect.Cold, 2]);
+    expect(m.back.mods[2][ModKind.Slow].turns).toBe(2);
     // A pre-upgrade account (no trailing fields) no longer decodes.
-    expect(() => c.decodeAccount("Participation", p.bytes.subarray(0, -16))).toThrow(/read past end/);
+    expect(() => c.decodeAccount("Participation", p.bytes.subarray(0, -52))).toThrow(/read past end/);
   });
 
   it("decodes TurnTicked, TurnSkipped and SkillUsed", () => {
@@ -243,6 +285,40 @@ describe("decoders", () => {
     });
     expect(used.data).toMatchObject({ unit: 1, skillSlot: 1, cooldown: 2 });
     expect(used.data.cooldowns[1]).toBe(3);
+  });
+
+  it("decodes EffectResolved and ModsTicked", () => {
+    const c = coders.session;
+    const event = (name: string, edit: (v: Record<string, any>) => void) => {
+      const v = zero(c, { defined: { name } }) as Record<string, any>;
+      v.session = addrOf(3);
+      edit(v);
+      const out: Uint8Array[] = [Uint8Array.from(c.idl.events!.find((e) => e.name === name)!.discriminator)];
+      c.encode({ defined: { name } }, v, out);
+      return c.decodeEvent(concat(...out))!;
+    };
+    const sap = event("EffectResolved", (v) => {
+      Object.assign(v, { caster: 2, target: 5, actionCounter: 7, skillSlot: 1, effect: "weakening", rider: false, applied: "added", hp: 9 });
+      Object.assign(v.roll, { outcome: "hit", d20: 20, attackTotal: 23, defense: 12, crit: true, critRoll: null, chanceBp: 0, chanceRoll: null, d100: 40, amount: 2_160, rollsUsed: 2 });
+      v.mods[ModKind.Weakening] = { kind: "weakening", aspect: "blood", turns: 3, powerBp: 2_160, source: 2 };
+    });
+    expect(sap.name).toBe("EffectResolved");
+    const e = toEffectResolved(sap.data);
+    expect([e.caster, e.target, e.actionCounter, e.skillSlot, e.effect, e.rider, e.applied, e.hp]).toEqual([2, 5, 7, 1, Effect.Weakening, false, Applied.Added, 9]);
+    expect(e.roll).toMatchObject({ outcome: HitOutcome.Hit, d20: 20, crit: true, critRoll: null, chanceRoll: null, d100: 40, amount: 2_160 });
+    expect(e.mods).toEqual([{ kind: ModKind.Weakening, aspect: Aspect.Blood, turns: 3, powerBp: 2_160, source: 2 }]);
+    const mend = toEffectResolved(
+      event("EffectResolved", (v) => {
+        Object.assign(v, { caster: 2, target: 0, effect: "heal", applied: "none", hp: 25 });
+        Object.assign(v.roll, { outcome: "hit", critRoll: 9_000, d100: 70, amount: 7 });
+      }).data,
+    );
+    expect([mend.effect, mend.roll.critRoll, mend.roll.amount, mend.mods]).toEqual([Effect.Heal, 9_000, 7, []]);
+    const tick = event("ModsTicked", (v) => {
+      Object.assign(v, { unit: 2, turnSeq: 11, expired: 1 << ModKind.Haste, actionPoints: 5 });
+    });
+    expect(tick.data).toMatchObject({ unit: 2, turnSeq: 11, expired: 1, actionPoints: 5 });
+    expect(tick.data.mods).toHaveLength(6);
   });
 
   it("HitResolved maps to the app HitResult, used entries only", () => {
@@ -352,6 +428,14 @@ describe("errors", () => {
     const ix: Instruction = { programAddress: PROGRAMS.session, accounts: [], data: new Uint8Array() };
     const name = (code: number) => explainFailure(new Error(`Custom program error: #${code} (instruction #1)`), [], [ix]).split(":")[0];
     expect([6046, 6047, 6048, 6049].map(name)).toEqual(["AlreadyActed", "SkillOnCooldown", "TurnNotStarted", "TurnAlreadyStarted"]);
+  });
+
+  it("knows the ally-target errors of the session program", () => {
+    const ix: Instruction = { programAddress: PROGRAMS.session, accounts: [], data: new Uint8Array() };
+    const explain = (code: number) => explainFailure(new Error(`Custom program error: #${code} (instruction #1)`), [], [ix]);
+    expect(explain(6050)).toBe("InvalidAllyTarget: Target is not a living ally");
+    expect(explain(6051)).toBe("AllyAccountMissing: A heal or buff on another ally needs that ally's participation");
+    expect(explain(6052)).toBe("UnexpectedAllyAccount: target_participation is only for a heal or buff on another ally");
   });
 });
 
