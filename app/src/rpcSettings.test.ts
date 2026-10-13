@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hostOf, isBundleSafeRpc, loadCustomRpc, parseCustomRpc, RPC_STORAGE_KEY, saveCustomRpc } from "./rpcSettings";
+import { findBundledRpcKey, hostOf, isBundleSafeRpc, loadCustomRpc, parseCustomRpc, RPC_STORAGE_KEY, saveCustomRpc } from "./rpcSettings";
 
 const memory = () => {
   const m = new Map<string, string>();
@@ -31,5 +31,12 @@ describe("custom RPC setting", () => {
     expect(isBundleSafeRpc("wss://api.devnet.solana.com")).toBe(true);
     expect(isBundleSafeRpc("http://127.0.0.1:8899")).toBe(true);
     expect(isBundleSafeRpc("https://solana-devnet.g.alchemy.com/v2/key")).toBe(false);
+  });
+  it("finds provider RPC references in built code", () => {
+    expect(findBundledRpcKey('const u="https://devnet.helius-rpc.com/?api-key=abc"')).toBe("helius-rpc.com");
+    expect(findBundledRpcKey("fetch('https://solana-devnet.g.alchemy.com/v2/k')")).toBe("alchemy.com");
+    expect(findBundledRpcKey("https://x.solana-devnet.quiknode.pro/t/")).toBe("quiknode.pro");
+    expect(findBundledRpcKey("https://rpc.example/?api_key=1")).toBe("?api_key=");
+    expect(findBundledRpcKey('const RPC="https://api.devnet.solana.com",WS="wss://api.devnet.solana.com"')).toBeNull();
   });
 });

@@ -60,6 +60,14 @@ export function hostOf(url: string): string {
   }
 }
 
+/** Provider hosts and key parameters that must never appear in an emitted bundle. */
+const PROVIDER_RPC = /helius-rpc\.com|helius\.xyz|alchemy\.com|alchemyapi\.io|quiknode\.pro|quicknode\.com|rpcpool\.com|triton\.one|[?&]api[-_]key=/i;
+
+/** The first provider RPC reference in `code`, or null. vite.config.ts runs it over every built chunk. */
+export function findBundledRpcKey(code: string): string | null {
+  return PROVIDER_RPC.exec(code)?.[0] ?? null;
+}
+
 /** Hosted (production) builds may only be configured with these endpoints; a provider URL carries a key. */
 export function isBundleSafeRpc(url: string): boolean {
   try {

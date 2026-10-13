@@ -1,7 +1,7 @@
 // Sends instructions with a payer and reports through toasts. One hook for every screen.
 import { useCallback, useState } from "react";
 import type { Instruction, TransactionSigner } from "@solana/kit";
-import { PROGRAMS } from "../config";
+import { DEV_TOOLS, PROGRAMS } from "../config";
 import { useToast } from "../components/toast/Toast";
 import { decodeEvents, type ChainEvent } from "./events";
 import { coders } from "./programs";
@@ -30,7 +30,7 @@ export function useTx() {
   const send = useCallback(
     async (what: string, payer: TransactionSigner | null, ixs: Instruction[] | (() => Promise<Instruction[]>), opts: SendOptions = {}): Promise<TxResult | null> => {
       if (!payer) {
-        toast.push({ kind: "error", text: `${what}: connect a wallet (or open the app with ?dev=1 on localnet)` });
+        toast.push({ kind: "error", text: `${what}: connect a wallet${DEV_TOOLS ? " (or open the app with ?dev=1 on localnet)" : ""}` });
         return null;
       }
       setBusy(what);

@@ -18,7 +18,7 @@ import {
 import { aspectName, className, raceName } from "../chain/names";
 import { Aspect, Class, Race } from "../chain/types";
 import { useTx } from "../chain/useTx";
-import { DATA_SOURCE } from "../config";
+import { DATA_SOURCE, DEV_TOOLS } from "../config";
 import { useRasterizer, useRenderImage } from "../raster/RasterizerProvider";
 import { SpriteCanvas } from "../raster/SpriteCanvas";
 import { useAppWallet } from "../wallet/AppWallet";
@@ -101,7 +101,7 @@ export function CharacterPage() {
       {DATA_SOURCE === "chain" && (
         <>
           <h2>My characters</h2>
-          {!wallet.address && <p className="muted">Connect a wallet, or open the app with ?dev=1 on localnet.</p>}
+          {!wallet.address && <p className="muted">{DEV_TOOLS ? "Connect a wallet, or open the app with ?dev=1 on localnet." : "Connect a wallet."}</p>}
           {wallet.address && mine.length === 0 && <p className="muted">None yet.</p>}
           <div className="char-list">
             {mine.map((c) => (
