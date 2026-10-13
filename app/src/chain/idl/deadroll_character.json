@@ -1154,7 +1154,8 @@
     {
       "name": "Effect",
       "docs": [
-        "Section 6. `None` only for pure damage. Debuffs and hard control first, then buffs."
+        "Section 6. `None` only for pure damage. Debuffs and hard control first, then buffs;",
+        "`Heal` was appended later (a buff kind: restores HP up to the maximum)."
       ],
       "repr": {
         "kind": "rust"
@@ -1188,6 +1189,9 @@
           },
           {
             "name": "Protection"
+          },
+          {
+            "name": "Heal"
           }
         ]
       }

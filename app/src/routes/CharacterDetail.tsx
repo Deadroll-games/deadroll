@@ -53,9 +53,9 @@ export function skillAspects(s: SkillRecordAcc): string {
     .join(" · ");
 }
 
-/** The session `act` instruction accepts only Active + Damage skills today. */
+/** The session `act` instruction takes every Active skill (a buff or debuff needs its effect). */
 export const usableInCombat = (s: SkillRecordAcc): boolean =>
-  variantKey(s.blocks.category) === "active" && variantKey(s.blocks.purpose) === "damage";
+  variantKey(s.blocks.category) === "active" && (variantKey(s.blocks.purpose) === "damage" || variantKey(s.blocks.effect) !== "none");
 
 export function CharacterDetailPage() {
   const { address } = useParams<{ address: string }>();
@@ -202,7 +202,7 @@ export function CharacterDetailView({ address, c, skills, party }: { address: Ad
                   <tr key={i}>
                     <td>
                       {bytesText(s.name)}
-                      {!usableInCombat(s) && <span className="muted"> · not usable in combat yet</span>}
+                      {!usableInCombat(s) && <span className="muted"> · not usable in combat</span>}
                     </td>
                     <td>
                       {variantLabel(s.blocks.category)} {variantLabel(s.blocks.purpose).toLowerCase()} · {variantLabel(s.blocks.source)}

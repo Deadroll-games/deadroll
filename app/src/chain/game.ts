@@ -43,6 +43,8 @@ import { Aspect, Class, MAP_CELLS, MAP_MAX, Race, Tile, type Cell, type Spawn } 
 
 export type Enum = Record<string, Record<string, unknown>>;
 export type ActiveStateAcc = { kind: Enum; turns: number; power: number; source: number };
+/** A buff or debuff slot (session TimedModData): active while `turns > 0`. One per kind, in the first free slot: find by `kind`. */
+export type TimedModAcc = { kind: Enum; aspect: Enum; turns: number; powerBp: number; source: number };
 export type MonsterAcc = {
   bestiaryId: number;
   level: number;
@@ -97,6 +99,8 @@ export type GameSessionAcc = {
   actedSeq: number;
   /** `turnSeq` whose `start_turn` ran; every other turn instruction waits for it. */
   startedSeq: number;
+  /** The ally Participation of a pending heal or buff on another player; the default key = none. */
+  pendingTarget: Address;
 };
 export type ParticipationAcc = {
   core: {
@@ -117,6 +121,10 @@ export type ParticipationAcc = {
   contribution: bigint;
   /** Per SkillSet slot: own turn starts until the skill is usable again, 0 = usable. */
   cooldowns: Uint8Array;
+  /** The character's maximum HP, copied at join_session (heals stop here). */
+  hpMax: number;
+  /** Buffs and debuffs on this player (one per kind, any slot: read them with support.ts activeMods). */
+  mods: TimedModAcc[];
 };
 export type CharacterAcc = {
   core: {
@@ -179,6 +187,10 @@ export const enumIndex = (e: Enum, names: readonly string[]) => names.indexOf(Ob
 export const ASPECT_KEYS = ["fire", "cold", "lightning", "blood", "blunt", "piercing"] as const;
 export const RACE_KEYS = ["human", "forestElf"] as const;
 export const CLASS_KEYS = ["warrior", "mage", "support"] as const;
+/** ModKindData variants in on-chain order; `expired` bit i is `1 << i` (deadroll_combat::support::mod_bit). */
+export const MOD_KEYS = ["haste", "slow", "empowerment", "weakening", "protection", "vulnerability"] as const;
+/** `Pubkey::default()`: no account. */
+export const DEFAULT_KEY = "11111111111111111111111111111111" as Address;
 export const currentUnit = (s: GameSessionAcc): number | null =>
   status(s) === "active" && s.turnOrderLen > 0 ? (s.core.turnOrder[s.core.turnIndex] ?? null) : null;
 
@@ -447,11 +459,23 @@ export async function moveIx(actor: Actor, session: Address, character: Address,
   });
 }
 
-export async function actIx(actor: Actor, session: Address, character: Address, skillSlot: number, monster: number): Promise<Instruction> {
+/**
+ * `target` by the skill's side: a monster index for the weapon, damage and debuff skills, a player
+ * slot (the caster's own for a self-cast) for heals and buffs. `targetParticipation` is that ally's
+ * Participation only for a heal or buff on another player, otherwise null.
+ */
+export async function actIx(
+  actor: Actor,
+  session: Address,
+  character: Address,
+  skillSlot: number,
+  target: number,
+  targetParticipation: Address | null,
+): Promise<Instruction> {
   return buildInstruction(
     "session",
     "act",
-    { skillSlot, target: monster },
+    { skillSlot, target },
     {
       signer: actor.signer,
       session,
@@ -461,6 +485,7 @@ export async function actIx(actor: Actor, session: Address, character: Address, 
       monsters: await monstersPda(session),
       sessionToken: actor.token,
       ...(await vrfAccounts()),
+      targetParticipation,
     },
   );
 }
@@ -554,8 +579,20 @@ export function mockVrfSigner(): Promise<KeyPairSigner> {
   return mockVrf;
 }
 
-/** consume_randomness for the pending action: the callback gets the pending participation's player. */
-export async function consumeIx(session: Address, pendingParticipation: Address, character: Address, seed: Uint8Array): Promise<Instruction> {
+/** The ally account a pending heal or buff needs in the callback (`GameSession.pendingTarget`), or null. */
+export const pendingTargetOf = (s: GameSessionAcc): Address | null => (s.pendingTarget === DEFAULT_KEY ? null : s.pendingTarget);
+
+/**
+ * consume_randomness for the pending action: the callback gets the pending participation's player,
+ * and `targetParticipation` = `pendingTargetOf(session)` for a heal or buff on another ally.
+ */
+export async function consumeIx(
+  session: Address,
+  pendingParticipation: Address,
+  character: Address,
+  seed: Uint8Array,
+  targetParticipation: Address | null,
+): Promise<Instruction> {
   return buildInstruction("session", "consume_randomness", { randomness: seed }, {
     vrfProgramIdentity: await mockVrfSigner(),
     session,
@@ -566,6 +603,7 @@ export async function consumeIx(session: Address, pendingParticipation: Address,
     sessionAuthority: await sessionAuthorityPda(),
     config: await gameConfigPda(),
     characterProgram: PROGRAMS.character,
+    targetParticipation,
   });
 }
 
@@ -613,6 +651,8 @@ export type Party = {
   players: PartyPlayer[];
   /** Per monster (same index as `monsters`), per skill: own turn starts until usable. */
   monsterCooldowns: Uint8Array[];
+  /** Per monster (same index as `monsters`): buffs and debuffs, like `Participation.mods`. */
+  monsterMods: TimedModAcc[][];
   escrow: { collected: bigint; claimed: boolean } | null;
   map: MapAcc | null;
   tiles: Uint8Array | null;
@@ -632,7 +672,7 @@ export async function readParty(address: Address, tiles: Uint8Array | null = nul
   if (!rawSession) return null;
   const session = coders.session.decodeAccount<GameSessionAcc>("GameSession", rawSession);
   const monsterState = rawMonsters
-    ? coders.session.decodeAccount<{ core: { monsters: MonsterAcc[]; count: number }; cooldowns?: Uint8Array[] }>("MonsterState", rawMonsters)
+    ? coders.session.decodeAccount<{ core: { monsters: MonsterAcc[]; count: number }; cooldowns?: Uint8Array[]; mods?: TimedModAcc[][] }>("MonsterState", rawMonsters)
     : null;
   const monsters = monsterState?.core ?? { monsters: [], count: 0 };
   const escrow = rawEscrow ? coders.session.decodeAccount<{ collected: bigint; claimed: boolean }>("Escrow", rawEscrow) : null;
@@ -661,7 +701,8 @@ export async function readParty(address: Address, tiles: Uint8Array | null = nul
     tiles = rawLayout ? coders.map.decodeAccount<{ core: { tiles: Uint8Array } }>("MapLayout", rawLayout).core.tiles : null;
   }
   const monsterCooldowns = (monsterState?.cooldowns ?? []).slice(0, monsters.count);
-  return { address, session, monsters: monsters.monsters.slice(0, monsters.count), players, monsterCooldowns, escrow, map, tiles };
+  const monsterMods = (monsterState?.mods ?? []).slice(0, monsters.count);
+  return { address, session, monsters: monsters.monsters.slice(0, monsters.count), players, monsterCooldowns, monsterMods, escrow, map, tiles };
 }
 
 /** Parties in the lobby or in play, any DM. */

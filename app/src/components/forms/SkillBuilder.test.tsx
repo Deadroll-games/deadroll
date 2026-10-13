@@ -67,7 +67,7 @@ describe("SkillBuilder", () => {
 
   it("adds presets in one click and stops at 6", () => {
     render(<Builder cls={Class.Mage} initial={[]} />);
-    expect(screen.getByText("No active damage skill: in combat this character only has the weapon attack.")).toBeTruthy();
+    expect(screen.getByText("No active skill: in combat this character only has the weapon attack.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "+ Frost Bolt" }));
     expect(screen.getByLabelText("Skill 1 name")).toHaveProperty("value", "Frost Bolt");
     fireEvent.click(screen.getByRole("button", { name: "Use class presets" }));

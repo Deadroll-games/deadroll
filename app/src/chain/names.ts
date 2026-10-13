@@ -1,5 +1,7 @@
 // Display names for enum values. English UI strings; keep in sync with chain/types.ts.
-import { ASPECT_COUNT, type Aspect, type Carrier, type Class, type Race, type StateKind, type Tile } from "./types";
+import { EFFECT_NAMES, Effect } from "./skillcheck";
+import type { EffectResolved } from "./support";
+import { ASPECT_COUNT, HitOutcome, type Aspect, type Carrier, type Class, type Race, type StateKind, type Tile } from "./types";
 
 export const ASPECT_NAMES = ["Fire", "Cold", "Lightning", "Blood", "Blunt", "Piercing"] as const;
 export const STATE_NAMES = ["Burning", "Chill", "Freeze", "Bleeding", "Shock", "Stun"] as const;
@@ -69,4 +71,14 @@ export function rollTitle(raw: number, chanceBp: number | null): string {
  */
 export function playerCritChanceBp(dexterity: number): number {
   return Math.min(9_500, Math.max(500, dexterity * 20));
+}
+
+export const effectName = (e: Effect): string => EFFECT_NAMES[e] ?? `effect ${e}`;
+
+/** What one effect roll did, e.g. "+7 hp", "Weakening 18%", "Freeze", "missed". */
+export function effectAmount(e: Pick<EffectResolved, "effect" | "roll">): string {
+  if (e.roll.outcome === HitOutcome.Miss) return "missed";
+  if (e.effect === Effect.Heal) return `+${e.roll.amount} hp`;
+  if (e.effect === Effect.Stun || e.effect === Effect.Freeze) return effectName(e.effect);
+  return `${effectName(e.effect)} ${Math.round(e.roll.amount / 100)}%`;
 }
