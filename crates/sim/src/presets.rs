@@ -10,7 +10,7 @@ use std::{
 };
 
 use deadroll_combat::DamageRange;
-use deadroll_rules::{player::predisposition_allowed, MonsterBase, PlayerTuning};
+use deadroll_rules::{items::Equipment, player::predisposition_allowed, MonsterBase, PlayerTuning};
 use deadroll_skillcheck::{
     validate, validate_starting, Category, Effect, Purpose, SkillBlocks, SkillError, Target,
     Trigger, SKILL_ASPECTS_MAX,
@@ -142,6 +142,14 @@ pub struct HeroPreset {
     /// Skills written inline (random builds); used when an id is not in the skill presets.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub inline_skills: Vec<SkillPreset>,
+    /// What the hero wears, by slot. Left out = the class starter kit, as the items program
+    /// gives a new character (`init_loadout`); `{}` = nothing.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "named::equipment"
+    )]
+    pub equipment: Option<Equipment>,
 }
 
 impl HeroPreset {

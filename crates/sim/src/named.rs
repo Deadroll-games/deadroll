@@ -3,8 +3,9 @@
 use std::fmt::Debug;
 
 use deadroll_combat::ModKind;
+use deadroll_rules::items::Equipment;
 use deadroll_skillcheck::{Category, Effect, Purpose, Target, Trigger};
-use deadroll_types::{Aspect, Class, Form, Race, Source, Stat, StateKind};
+use deadroll_types::{Aspect, Class, EquipSlot, Form, ItemBase, Race, Source, Stat, StateKind};
 use serde::{de::Error as _, Deserialize, Deserializer, Serializer};
 
 /// An enum with every variant listed in `ALL`; the name is the `Debug` text.
@@ -35,7 +36,8 @@ macro_rules! named {
 }
 
 named!(
-    Race, Class, Aspect, Source, Form, Stat, StateKind, Category, Purpose, Target, Effect, Trigger
+    Race, Class, Aspect, Source, Form, Stat, StateKind, Category, Purpose, Target, Effect, Trigger,
+    EquipSlot, ItemBase
 );
 
 impl Named for ModKind {
@@ -152,5 +154,36 @@ pub mod by_aspect {
 
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<[u32; Aspect::COUNT], D::Error> {
         de_keyed::<Aspect, _, { Aspect::COUNT }, _>(d)
+    }
+}
+
+/// `#[serde(with = "named::equipment")]` on `Option<Equipment>`: worn bases keyed by slot name,
+/// `{"MainHand": "Sword", "Body": "LeatherArmor"}`. Use with `default`: a missing key is `None`.
+pub mod equipment {
+    use std::collections::BTreeMap;
+
+    use serde::ser::SerializeMap;
+
+    use super::*;
+
+    pub fn serialize<S: Serializer>(v: &Option<Equipment>, s: S) -> Result<S::Ok, S::Error> {
+        let worn: Vec<(EquipSlot, ItemBase)> = v.iter().flat_map(|e| e.worn()).collect();
+        let mut map = s.serialize_map(Some(worn.len()))?;
+        for (slot, base) in worn {
+            map.serialize_entry(&slot.name(), &base.name())?;
+        }
+        map.end()
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Equipment>, D::Error> {
+        let mut out = Equipment::EMPTY;
+        for (slot, base) in BTreeMap::<String, String>::deserialize(d)? {
+            let s = EquipSlot::parse(&slot)
+                .ok_or_else(|| D::Error::custom(unknown::<EquipSlot>(&slot)))?;
+            let b = ItemBase::parse(&base)
+                .ok_or_else(|| D::Error::custom(unknown::<ItemBase>(&base)))?;
+            out.set(s, Some(b));
+        }
+        Ok(Some(out))
     }
 }

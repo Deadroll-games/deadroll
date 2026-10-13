@@ -1,7 +1,9 @@
 //! `BalanceConfig` as JSON. Loading lays the file over the defaults: missing keys keep the default,
 //! arrays merge index by index (enum variants are append-only), so a file saved before a new
-//! variant or a new field still loads.
-use deadroll_rules::BalanceConfig;
+//! variant or a new field still loads. The item table ([`ItemTuning`]) also loads and saves on
+//! its own: the Items tab keeps item presets in `presets/items/`.
+use deadroll_rules::{BalanceConfig, ItemTuning};
+use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 
 pub fn to_json(cfg: &BalanceConfig) -> String {
@@ -9,8 +11,21 @@ pub fn to_json(cfg: &BalanceConfig) -> String {
 }
 
 pub fn from_json(text: &str) -> Result<BalanceConfig, String> {
+    overlay(&BalanceConfig::DEFAULT, text)
+}
+
+pub fn items_to_json(items: &ItemTuning) -> String {
+    serde_json::to_string_pretty(items).unwrap_or_default() + "\n"
+}
+
+pub fn items_from_json(text: &str) -> Result<ItemTuning, String> {
+    overlay(&ItemTuning::DEFAULT, text)
+}
+
+/// `text` laid over `default`.
+fn overlay<T: Serialize + DeserializeOwned>(default: &T, text: &str) -> Result<T, String> {
     let over: Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
-    let mut base = serde_json::to_value(BalanceConfig::DEFAULT).map_err(|e| e.to_string())?;
+    let mut base = serde_json::to_value(default).map_err(|e| e.to_string())?;
     merge(&mut base, over);
     serde_json::from_value(base).map_err(|e| e.to_string())
 }

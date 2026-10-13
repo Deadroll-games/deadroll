@@ -1,0 +1,334 @@
+{
+  "combat": {
+    "crit_more_bp": 5000,
+    "armor_k": 100,
+    "resist_cap_bp": 30000,
+    "chance_min_bp": 500,
+    "chance_max_bp": 9500,
+    "min_damage": 1,
+    "tint_chance_bp": [
+      3950,
+      3700,
+      3450,
+      3200,
+      2950,
+      2700,
+      2450,
+      2200,
+      1950,
+      1700,
+      1450,
+      1200,
+      950,
+      700
+    ],
+    "resonance_more_bp": [
+      3600,
+      3400,
+      3200,
+      3000,
+      2800,
+      2600,
+      2400,
+      2200,
+      2000,
+      1800,
+      1600,
+      1400,
+      1200,
+      1000
+    ],
+    "pure_pair_bp": [
+      5900,
+      5600,
+      5300,
+      5000,
+      4700,
+      4400,
+      4100,
+      3800,
+      3500,
+      3200,
+      2900,
+      2600,
+      2300,
+      2000
+    ],
+    "state_turns": [
+      3,
+      3,
+      1,
+      3,
+      2,
+      1
+    ],
+    "state_turns_max": 5,
+    "dot_share_bp": 3000,
+    "chill_buildup_bp": 5000,
+    "freeze_threshold_bp": 10000,
+    "chill_slow_share_bp": 10000
+  },
+  "support": {
+    "mod_min_bp": [
+      2500,
+      2500,
+      2000,
+      2500,
+      2000,
+      2000
+    ],
+    "mod_max_bp": [
+      5000,
+      5000,
+      4000,
+      5000,
+      4000,
+      4000
+    ],
+    "mod_duration": [
+      2,
+      2,
+      2,
+      2,
+      2,
+      2
+    ],
+    "rider_chance_bp": 3000
+  },
+  "skills": {
+    "shares_bp": [
+      [
+        10000,
+        0,
+        0
+      ],
+      [
+        6500,
+        3500,
+        0
+      ],
+      [
+        5500,
+        3000,
+        1500
+      ]
+    ],
+    "line_counter_bp": 5000,
+    "effect_counter_bp": 2500,
+    "third_aspect_counter_bp": 2000,
+    "active_cooldown": 1,
+    "reactive_cooldown": 2
+  },
+  "players": {
+    "ap_base": [
+      [
+        4,
+        3,
+        4
+      ],
+      [
+        5,
+        4,
+        5
+      ]
+    ],
+    "ap_dex_div": 10,
+    "ap_min": 1,
+    "ap_max": 12,
+    "initiative_div": 2,
+    "act_ap": 2,
+    "strike_range": 1,
+    "projectile_range": 6,
+    "skill_state_chance_bp": 2000,
+    "basic_state_chance_bp": 1000,
+    "class_increase_bp": [
+      2000,
+      2000,
+      0
+    ],
+    "support_increase_bp": [
+      0,
+      0,
+      2000
+    ],
+    "heal_weapon_bp": 20000,
+    "predisposition_added": [
+      1,
+      2
+    ],
+    "attack_stat_div": 5,
+    "crit_per_dex_bp": 20,
+    "defense_base": 10,
+    "defense_dex_div": 5,
+    "armor": [
+      20,
+      3,
+      0
+    ],
+    "hp_base": [
+      30,
+      18,
+      22
+    ],
+    "hp_per_endurance": 2,
+    "hp_per_level": [
+      6,
+      3,
+      4
+    ],
+    "stat_base": 5,
+    "stat_points_start": 10,
+    "stat_max_start": 15,
+    "start_tier": 14
+  },
+  "monsters": {
+    "weapon_min_per_level_bp": 5000,
+    "weapon_max_per_level_bp": 10000,
+    "attack_per_level_bp": 10000,
+    "ap_min": 1,
+    "ap_max": 12
+  },
+  "items": {
+    "bases": {
+      "Sword": {
+        "slot": "MainHand",
+        "level": 1,
+        "aspect": "Blunt",
+        "damage": [
+          4,
+          8
+        ],
+        "armor": 0,
+        "defense": 0,
+        "attack": 0,
+        "stats": {
+          "Strength": 0,
+          "Dexterity": 0,
+          "Intelligence": 0,
+          "Endurance": 0
+        },
+        "hp": 0
+      },
+      "Staff": {
+        "slot": "MainHand",
+        "level": 1,
+        "aspect": "Blunt",
+        "damage": [
+          3,
+          6
+        ],
+        "armor": 0,
+        "defense": 0,
+        "attack": 0,
+        "stats": {
+          "Strength": 0,
+          "Dexterity": 0,
+          "Intelligence": 0,
+          "Endurance": 0
+        },
+        "hp": 0
+      },
+      "Wand": {
+        "slot": "MainHand",
+        "level": 1,
+        "aspect": "Blunt",
+        "damage": [
+          2,
+          5
+        ],
+        "armor": 0,
+        "defense": 0,
+        "attack": 0,
+        "stats": {
+          "Strength": 0,
+          "Dexterity": 0,
+          "Intelligence": 0,
+          "Endurance": 0
+        },
+        "hp": 0
+      },
+      "LeatherArmor": {
+        "slot": "Body",
+        "level": 1,
+        "aspect": "Blunt",
+        "damage": [
+          0,
+          0
+        ],
+        "armor": 10,
+        "defense": 0,
+        "attack": 0,
+        "stats": {
+          "Strength": 0,
+          "Dexterity": 0,
+          "Intelligence": 0,
+          "Endurance": 0
+        },
+        "hp": 0
+      },
+      "Robe": {
+        "slot": "Body",
+        "level": 1,
+        "aspect": "Blunt",
+        "damage": [
+          0,
+          0
+        ],
+        "armor": 2,
+        "defense": 0,
+        "attack": 0,
+        "stats": {
+          "Strength": 0,
+          "Dexterity": 0,
+          "Intelligence": 0,
+          "Endurance": 0
+        },
+        "hp": 0
+      },
+      "LightLeatherArmor": {
+        "slot": "Body",
+        "level": 1,
+        "aspect": "Blunt",
+        "damage": [
+          0,
+          0
+        ],
+        "armor": 5,
+        "defense": 0,
+        "attack": 0,
+        "stats": {
+          "Strength": 0,
+          "Dexterity": 0,
+          "Intelligence": 0,
+          "Endurance": 0
+        },
+        "hp": 0
+      }
+    },
+    "starter_kits": {
+      "Warrior": [
+        "Sword",
+        "LeatherArmor",
+        null,
+        null
+      ],
+      "Mage": [
+        "Staff",
+        "Robe",
+        null,
+        null
+      ],
+      "Support": [
+        "Wand",
+        "LightLeatherArmor",
+        null,
+        null
+      ]
+    },
+    "unarmed": [
+      1,
+      2
+    ],
+    "level_gap": 4
+  }
+}

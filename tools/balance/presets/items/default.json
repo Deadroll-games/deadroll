@@ -1,0 +1,143 @@
+{
+  "bases": {
+    "Sword": {
+      "slot": "MainHand",
+      "level": 1,
+      "aspect": "Blunt",
+      "damage": [
+        4,
+        8
+      ],
+      "armor": 0,
+      "defense": 0,
+      "attack": 0,
+      "stats": {
+        "Strength": 0,
+        "Dexterity": 0,
+        "Intelligence": 0,
+        "Endurance": 0
+      },
+      "hp": 0
+    },
+    "Staff": {
+      "slot": "MainHand",
+      "level": 1,
+      "aspect": "Blunt",
+      "damage": [
+        3,
+        6
+      ],
+      "armor": 0,
+      "defense": 0,
+      "attack": 0,
+      "stats": {
+        "Strength": 0,
+        "Dexterity": 0,
+        "Intelligence": 0,
+        "Endurance": 0
+      },
+      "hp": 0
+    },
+    "Wand": {
+      "slot": "MainHand",
+      "level": 1,
+      "aspect": "Blunt",
+      "damage": [
+        2,
+        5
+      ],
+      "armor": 0,
+      "defense": 0,
+      "attack": 0,
+      "stats": {
+        "Strength": 0,
+        "Dexterity": 0,
+        "Intelligence": 0,
+        "Endurance": 0
+      },
+      "hp": 0
+    },
+    "LeatherArmor": {
+      "slot": "Body",
+      "level": 1,
+      "aspect": "Blunt",
+      "damage": [
+        0,
+        0
+      ],
+      "armor": 10,
+      "defense": 0,
+      "attack": 0,
+      "stats": {
+        "Strength": 0,
+        "Dexterity": 0,
+        "Intelligence": 0,
+        "Endurance": 0
+      },
+      "hp": 0
+    },
+    "Robe": {
+      "slot": "Body",
+      "level": 1,
+      "aspect": "Blunt",
+      "damage": [
+        0,
+        0
+      ],
+      "armor": 2,
+      "defense": 0,
+      "attack": 0,
+      "stats": {
+        "Strength": 0,
+        "Dexterity": 0,
+        "Intelligence": 0,
+        "Endurance": 0
+      },
+      "hp": 0
+    },
+    "LightLeatherArmor": {
+      "slot": "Body",
+      "level": 1,
+      "aspect": "Blunt",
+      "damage": [
+        0,
+        0
+      ],
+      "armor": 5,
+      "defense": 0,
+      "attack": 0,
+      "stats": {
+        "Strength": 0,
+        "Dexterity": 0,
+        "Intelligence": 0,
+        "Endurance": 0
+      },
+      "hp": 0
+    }
+  },
+  "starter_kits": {
+    "Warrior": [
+      "Sword",
+      "LeatherArmor",
+      null,
+      null
+    ],
+    "Mage": [
+      "Staff",
+      "Robe",
+      null,
+      null
+    ],
+    "Support": [
+      "Wand",
+      "LightLeatherArmor",
+      null,
+      null
+    ]
+  },
+  "unarmed": [
+    1,
+    2
+  ],
+  "level_gap": 4
+}

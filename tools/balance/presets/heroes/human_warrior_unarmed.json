@@ -1,0 +1,25 @@
+{
+  "name": "Human warrior (no armor)",
+  "race": "Human",
+  "class": "Warrior",
+  "level": 1,
+  "stats": {
+    "Strength": 10,
+    "Dexterity": 7,
+    "Intelligence": 5,
+    "Endurance": 8
+  },
+  "predisposition": "Piercing",
+  "tier": 14,
+  "skills": [
+    "piercing_thrust",
+    "shield_bash",
+    "javelin",
+    "bleeding_cleave",
+    "riposte",
+    "iron_skin"
+  ],
+  "equipment": {
+    "MainHand": "Sword"
+  }
+}
