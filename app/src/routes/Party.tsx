@@ -175,7 +175,7 @@ function MockParty() {
             cellPx={36}
             onUnitClick={(u) => (u.kind === "monster" ? setTarget(u.id) : setActive(u.id))}
           />
-          <div style={{ flex: "1 1 360px", display: "grid", gap: 12 }}>
+          <div style={{ flex: "1 1 360px", display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 12, minWidth: 0 }}>
             <div className="panel">
               <p>
                 Active: <b>{activeUnit?.label}</b> · Target: <b>{units.find((u) => u.id === target)?.label ?? "click a monster"}</b>

@@ -779,7 +779,7 @@ function PartyView({ address }: { address: Address }) {
                   : ""}
           </p>
         </div>
-        <div style={{ flex: "1 1 380px", display: "grid", gap: 12, minWidth: 320 }}>
+        <div style={{ flex: "1 1 380px", display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 12, minWidth: 320 }}>
           {!ended && (
             <div className="panel">
               <p className="turn-banner">

@@ -1,4 +1,12 @@
+/* The panel never widens its column: long cells wrap, and if the table still does not fit,
+   only .stats-scroll scrolls sideways, never the page. */
+.stats-panel {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .stats-scroll {
+  max-width: 100%;
   overflow-x: auto;
 }
 
@@ -6,6 +14,7 @@
   border-collapse: collapse;
   width: 100%;
   word-break: normal;
+  overflow-wrap: break-word;
 }
 
 .stats-table th,
@@ -14,7 +23,7 @@
   vertical-align: top;
   padding: 4px 8px;
   border-bottom: 1px solid var(--border);
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .stats-table thead th {
@@ -43,6 +52,5 @@
 }
 
 .stats-mod {
-  display: inline-block;
-  margin-right: 8px;
+  display: block;
 }
