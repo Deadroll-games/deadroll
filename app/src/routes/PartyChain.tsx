@@ -54,7 +54,7 @@ import { toHitResolved } from "../chain/hit";
 import { bestiaryName, playerCritChanceBp } from "../chain/names";
 import { errorName } from "../chain/send";
 import { statusLabel, type SubStatus } from "../chain/subscribe";
-import { cooldownLabel, skillCooldowns, startTurnFor, turnActed, turnStarted } from "../chain/turns";
+import { cooldownLabel, skillCooldowns, skillUsedText, skipText, startTurnFor, tickText, turnActed, turnStarted } from "../chain/turns";
 import { skillSetPda } from "../chain/pda";
 import { affordable, cheb, reachable, route, type Step } from "../chain/route";
 import { useAutoFreezeTombstone } from "../chain/useAutoFreezeTombstone";
@@ -232,6 +232,14 @@ function PartyView({ address }: { address: Address }) {
       return m ? `${bestiaryName(m.bestiaryId)} ${u - MONSTER_BASE}` : `monster ${u - MONSTER_BASE}`;
     },
     [party],
+  );
+
+  const skillName = useCallback(
+    (u: number, slot: number): string => {
+      const pl = party?.players.find((p) => p.slot === u);
+      return (pl && skillNames[pl.character]?.find((k) => k.slot === slot)?.name) || `skill ${slot}`;
+    },
+    [party, skillNames],
   );
 
   // My characters (lobby join list) and skill names of party characters (attack buttons).
@@ -810,7 +818,7 @@ function PartyView({ address }: { address: Address }) {
               </ul>
             </div>
           )}
-          <EventLog events={events} label={label} />
+          <EventLog events={events} label={label} skillName={skillName} />
         </div>
       </div>
     </section>
@@ -874,7 +882,10 @@ function Claims({
   );
 }
 
-function describe(e: PartyEvent, label: (u: number) => string): string {
+type SkillName = (unit: number, slot: number) => string;
+
+/** One log line per event; null for an event with nothing to tell (a quiet turn start). */
+function describe(e: PartyEvent, label: (u: number) => string, skillName: SkillName): string | null {
   const d = e.data;
   switch (e.name) {
     case "SessionOpened":
@@ -887,6 +898,12 @@ function describe(e: PartyEvent, label: (u: number) => string): string {
       return `initiative: ${Array.from(d.order as Uint8Array).slice(0, d.len).map((u, i) => `${label(u)} (d20 ${d.d20[i]})`).join(", ")}`;
     case "TurnStarted":
       return `turn: ${label(d.unit)} (round ${d.round})`;
+    case "TurnTicked":
+      return tickText(d, label(d.unit));
+    case "TurnSkipped":
+      return skipText(d, label(d.unit));
+    case "SkillUsed":
+      return skillUsedText(d, label(d.unit), skillName(d.unit, d.skillSlot));
     case "Moved":
       return `${label(d.unit)} moved to ${d.x},${d.y}`;
     case "ActionRequested":
@@ -916,15 +933,19 @@ function describe(e: PartyEvent, label: (u: number) => string): string {
   }
 }
 
-function EventLog({ events, label }: { events: PartyEvent[]; label: (u: number) => string }) {
-  if (events.length === 0) return null;
+function EventLog({ events, label, skillName = (_, slot) => `skill ${slot}` }: { events: PartyEvent[]; label: (u: number) => string; skillName?: SkillName }) {
+  const lines = events.flatMap((e, i) => {
+    const text = describe(e, label, skillName);
+    return text === null ? [] : [{ e, i, text }];
+  });
+  if (lines.length === 0) return null;
   return (
     <div className="panel">
       <h3>Every roll is public</h3>
       <ol className="mono log" reversed>
-        {[...events].reverse().map((e, i) => (
+        {[...lines].reverse().map(({ e, i, text }) => (
           <li key={`${e.signature}-${i}`}>
-            {describe(e, label)}{" "}
+            {text}{" "}
             <a href={explorerUrl("tx", e.signature)} target="_blank" rel="noreferrer">
               tx
             </a>

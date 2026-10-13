@@ -50,3 +50,32 @@ export function skillCooldowns(part: ParticipationAcc, events: readonly { name: 
 
 /** The value is already "own turn starts until usable": no off-by-one. */
 export const cooldownLabel = (n: number): string => `ready in ${n} turn${n === 1 ? "" : "s"}`;
+
+// ---- battle log texts for the turn-rule events
+
+/** StateKind variants in on-chain order; `expired` bit i is `1 << i` (deadroll_combat::states::state_bit). */
+const STATE_KEYS = ["burning", "chill", "freeze", "bleeding", "shock", "stun"] as const;
+const DOT_KEYS: readonly string[] = ["burning", "bleeding"];
+const kindOf = (e: unknown): string => Object.keys(e as object)[0] ?? "";
+
+/** TurnTicked as a log line; null when the start changed nothing worth a line (no damage, nothing wore off). */
+export function tickText(d: { dotDamage: number; hp: number; died: boolean; expired: number; states: { kind: unknown; turns: number }[] }, unit: string): string | null {
+  const expired = STATE_KEYS.filter((_, i) => d.expired & (1 << i));
+  const parts: string[] = [];
+  if (d.dotDamage > 0) {
+    // The over-time states that dealt it: still on the unit, or ended with this tick.
+    const live = d.states.filter((x) => x.turns > 0).map((x) => kindOf(x.kind));
+    const kinds = DOT_KEYS.filter((k) => live.includes(k) || expired.includes(k as (typeof STATE_KEYS)[number]));
+    parts.push(`${unit} takes ${d.dotDamage} ${kinds.join(" + ") || "over-time"} damage (${d.hp} hp)${d.died ? " and dies" : ""}`);
+  }
+  if (expired.length) parts.push(`${parts.length ? "" : `${unit}: `}${expired.join(", ")} wore off`);
+  return parts.length ? parts.join("; ") : null;
+}
+
+export function skipText(d: { state: unknown }, unit: string): string {
+  return `${unit} is ${kindOf(d.state) === "freeze" ? "frozen" : "stunned"}: turn skipped`;
+}
+
+export function skillUsedText(d: { cooldown: number }, unit: string, skill: string): string {
+  return d.cooldown > 0 ? `${unit} used ${skill}: cooldown ${d.cooldown} turn${d.cooldown === 1 ? "" : "s"}` : `${unit} used ${skill}`;
+}

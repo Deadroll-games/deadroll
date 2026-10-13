@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { getAddressDecoder, type Address } from "@solana/kit";
 import type { GameSessionAcc, Party, PartyPlayer } from "./game";
 import { errorName } from "./send";
-import { cooldownLabel, skillCooldowns, startTurnFor, turnActed, turnStarted } from "./turns";
+import { cooldownLabel, skillCooldowns, skillUsedText, skipText, startTurnFor, tickText, turnActed, turnStarted } from "./turns";
 
 const A = (n: number) => getAddressDecoder().decode(new Uint8Array(32).fill(n)) as Address;
 const DM = A(1);
@@ -85,5 +85,32 @@ describe("skillCooldowns", () => {
   it("labels the turns left", () => {
     expect(cooldownLabel(1)).toBe("ready in 1 turn");
     expect(cooldownLabel(3)).toBe("ready in 3 turns");
+  });
+});
+
+describe("log texts", () => {
+  const st = (kind: string, turns: number) => ({ kind: { [kind]: {} }, turns });
+  const empty = st("burning", 0);
+  const tick = (over: object) => ({ dotDamage: 0, hp: 10, died: false, expired: 0, states: [empty, empty], ...over });
+
+  it("TurnTicked names the over-time damage, a death and what wore off", () => {
+    expect(tickText(tick({ dotDamage: 4, hp: 6, states: [st("burning", 1), empty] }), "Wolf 0")).toBe("Wolf 0 takes 4 burning damage (6 hp)");
+    // Bleeding ended with this tick but still dealt damage; chill (bit 1) wore off too.
+    expect(tickText(tick({ dotDamage: 7, hp: 0, died: true, expired: (1 << 3) | (1 << 1), states: [st("burning", 2), empty] }), "Ilyra")).toBe(
+      "Ilyra takes 7 burning + bleeding damage (0 hp) and dies; chill, bleeding wore off",
+    );
+    expect(tickText(tick({ expired: 1 << 4 }), "Bran")).toBe("Bran: shock wore off");
+  });
+
+  it("a quiet TurnTicked has no line", () => {
+    expect(tickText(tick({ states: [st("chill", 2), empty] }), "Bran")).toBeNull();
+  });
+
+  it("TurnSkipped and SkillUsed", () => {
+    expect(skipText({ state: { freeze: {} } }, "Wolf 1")).toBe("Wolf 1 is frozen: turn skipped");
+    expect(skipText({ state: { stun: {} } }, "Bran")).toBe("Bran is stunned: turn skipped");
+    expect(skillUsedText({ cooldown: 2 }, "Ilyra", "Frost Burn")).toBe("Ilyra used Frost Burn: cooldown 2 turns");
+    expect(skillUsedText({ cooldown: 1 }, "Ilyra", "Frost Bolt")).toBe("Ilyra used Frost Bolt: cooldown 1 turn");
+    expect(skillUsedText({ cooldown: 0 }, "Bran", "Jab")).toBe("Bran used Jab");
   });
 });
