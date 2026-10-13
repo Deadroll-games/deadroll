@@ -579,7 +579,7 @@
             "The VRF program's identity for this program (`mock-vrf`: the fixed test identity)."
           ],
           "signer": true,
-          "address": "5RotSMue7vx9xBPp3L8iQEKbKSc3ezbY4GqiJxDEe6sN"
+          "address": "Bj7XBktwDmAg6J4FohS6oRHbevD6MMd8jnCZKvzKPiKV"
         },
         {
           "name": "session",
