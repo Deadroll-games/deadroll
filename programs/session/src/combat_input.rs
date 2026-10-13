@@ -1,11 +1,12 @@
 //! Builds `deadroll_combat` hit inputs from session and character state. Pure, no accounts.
+//! A player is a `HeroStats`: the character with what it wears (`Participation::hero`).
 //!
 //! The rules live in `deadroll_rules::input` (shared with `tools/balance`); these wrappers feed
 //! them the character program's `SkillRecord` and the program's numbers (`rules::BALANCE`).
 use deadroll_character::state::SkillRecord;
 use deadroll_combat::{Applied, Attacker, Defender, States, SupportInput, TimedMods};
-use deadroll_rules::input;
-use deadroll_types::{ActiveState, Aspect, CharacterData, Form, Monster, STATES_MAX};
+use deadroll_rules::{input, HeroStats};
+use deadroll_types::{ActiveState, Aspect, Form, Monster, STATES_MAX};
 
 pub use deadroll_rules::input::{effect_action, heal, take_damage, EffectAction, Side, SkillUse};
 
@@ -39,26 +40,20 @@ pub fn player_form(skill: Option<&SkillRecord>) -> Form {
 /// turn-order id, written as the source of applied states. `mods`: the player's buffs and debuffs.
 pub fn player_attacker(
     unit: u8,
-    c: &CharacterData,
+    h: &HeroStats,
     skill: Option<&SkillRecord>,
     mods: &TimedMods,
 ) -> Attacker {
-    input::player_attacker(
-        BALANCE,
-        unit,
-        &c.into(),
-        skill.map(skill_stats).as_ref(),
-        mods,
-    )
+    input::player_attacker(BALANCE, unit, h, skill.map(skill_stats).as_ref(), mods)
 }
 
 /// A player as the target.
 pub fn player_defender(
-    c: &CharacterData,
+    h: &HeroStats,
     states: &[ActiveState; STATES_MAX],
     mods: &TimedMods,
 ) -> Defender {
-    input::player_defender(BALANCE, &c.into(), states, mods)
+    input::player_defender(BALANCE, h, states, mods)
 }
 
 /// A monster attacking with its natural attack. `None` for an unknown bestiary id.
@@ -73,25 +68,21 @@ pub fn monster_defender(m: &Monster, mods: &TimedMods) -> Option<Defender> {
     Some(input::monster_defender(&p, &m.states, mods))
 }
 
-/// Strength range of `action` cast by a `class` with a skill of `power_bp`: HP for a heal, bp for
-/// a modifier, none (`(0, 0)`) for hard control.
-pub fn effect_range(
-    class: deadroll_types::Class,
-    power_bp: u32,
-    action: EffectAction,
-) -> (u32, u32) {
-    input::effect_range(BALANCE, class, power_bp, action)
+/// Strength range of `action` cast by `h` with a skill of `power_bp`: HP for a heal (from the
+/// weapon), bp for a modifier, none (`(0, 0)`) for hard control.
+pub fn effect_range(h: &HeroStats, power_bp: u32, action: EffectAction) -> (u32, u32) {
+    input::effect_range(BALANCE, h, power_bp, action)
 }
 
-/// The rolls of a heal, buff or debuff cast by `c` with `skill`. `defense`: the enemy's, for a
+/// The rolls of a heal, buff or debuff cast by `h` with `skill`. `defense`: the enemy's, for a
 /// debuff (it rolls to land); `None` for a heal or buff on an ally.
 pub fn support_input(
-    c: &CharacterData,
+    h: &HeroStats,
     skill: &SkillRecord,
     action: EffectAction,
     defense: Option<u32>,
 ) -> SupportInput {
-    input::support_input(BALANCE, &c.into(), &skill_stats(skill), action, defense)
+    input::support_input(BALANCE, h, &skill_stats(skill), action, defense)
 }
 
 /// Lands `action` (not a heal) of strength `amount` on a unit: a modifier for its duration, or
@@ -110,7 +101,7 @@ pub fn land_effect(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::rules::{class_weapon, heal_range, player_attack_bonus};
+    use crate::rules::{heal_range, hero_weapon, player_attack_bonus, starter_equipment};
     use deadroll_combat::{
         mod_turns, preview_range, resolve_hit, Balance, HitInput, Mod, ModFilter, ModKind, Outcome,
         SeededRoll, SupportBalance,
@@ -118,6 +109,7 @@ pub(crate) mod tests {
     use deadroll_mapcheck::roster::ids;
     use deadroll_skillcheck::{derive, presets, SkillBlocks};
     use deadroll_skillcheck::{Category, Effect, Purpose};
+    use deadroll_types::CharacterData;
     use deadroll_types::StateKind;
     use deadroll_types::{Aspect, Class, Race, Source};
 
@@ -149,6 +141,11 @@ pub(crate) mod tests {
             state_version: 0,
             bump: 255,
         }
+    }
+
+    /// `c` wearing its class starter kit, as after `init_loadout`.
+    pub(crate) fn kit(c: &CharacterData) -> HeroStats {
+        HeroStats::from(c).with_equipment(starter_equipment(c.class))
     }
 
     fn record(blocks: SkillBlocks) -> SkillRecord {
@@ -189,13 +186,13 @@ pub(crate) mod tests {
             for skill in &skills {
                 for id in 0..=4 {
                     out.push(HitInput {
-                        attacker: player_attacker(0, c, skill.as_ref(), &NONE),
+                        attacker: player_attacker(0, &kit(c), skill.as_ref(), &NONE),
                         defender: monster_defender(&monster(id), &NONE).unwrap(),
                     });
                 }
             }
         }
-        let target = player_defender(&warrior, &[ActiveState::default(); STATES_MAX], &NONE);
+        let target = player_defender(&kit(&warrior), &[ActiveState::default(); STATES_MAX], &NONE);
         for id in 0..=4 {
             out.push(HitInput {
                 attacker: monster_attacker(4, &monster(id), &NONE).unwrap(),
@@ -223,7 +220,7 @@ pub(crate) mod tests {
                 if skill_use(&skill) != SkillUse::Ok || skill.blocks.purpose != Purpose::Damage {
                     continue;
                 }
-                let attacker = player_attacker(0, &c, Some(&skill), &NONE);
+                let attacker = player_attacker(0, &kit(&c), Some(&skill), &NONE);
                 assert_eq!(attacker.tints[0].aspect, c.predisposition);
                 assert_eq!(attacker.added[0].aspect, c.predisposition);
                 for id in 0..=4 {
@@ -245,14 +242,21 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn basic_attack_uses_class_weapon_and_source() {
+    fn basic_attack_uses_the_worn_weapon_and_class_source() {
         let c = character(Race::Human, Class::Warrior, Aspect::Piercing);
-        let a = player_attacker(2, &c, None, &NONE);
+        let a = player_attacker(2, &kit(&c), None, &NONE);
         assert_eq!(a.slot, 2);
         assert_eq!(a.skill.aspect_count, 0);
         assert_eq!(a.skill.source, Source::Combat);
         assert_eq!(a.skill.form, Form::Strike);
-        assert_eq!(a.weapon, class_weapon(Class::Warrior));
+        assert_eq!(a.weapon, hero_weapon(&kit(&c)));
+        assert_eq!((a.weapon.min, a.weapon.max), (4, 8));
+        // Bare hands without a loadout.
+        let bare = player_attacker(2, &HeroStats::from(&c), None, &NONE);
+        assert_eq!(
+            (bare.weapon.min, bare.weapon.max),
+            (BALANCE.items.unarmed[0], BALANCE.items.unarmed[1])
+        );
         assert_eq!(
             a.increased[0],
             Mod::new(ModFilter::Source(Source::Combat), 2_000)
@@ -263,8 +267,15 @@ pub(crate) mod tests {
     #[test]
     fn monsters_attack_and_defend() {
         let c = character(Race::Human, Class::Warrior, Aspect::Piercing);
-        let target = player_defender(&c, &[ActiveState::default(); STATES_MAX], &NONE);
+        let target = player_defender(&kit(&c), &[ActiveState::default(); STATES_MAX], &NONE);
+        // Class armor 20 + leather armor 10.
         assert_eq!((target.defense, target.armor), (12, 30));
+        let bare = player_defender(
+            &HeroStats::from(&c),
+            &[ActiveState::default(); STATES_MAX],
+            &NONE,
+        );
+        assert_eq!(bare.armor, 20);
         for id in 0..=4 {
             let a = monster_attacker(4, &monster(id), &NONE).unwrap();
             let (lo, hi) = preview_range(
@@ -312,11 +323,11 @@ pub(crate) mod tests {
         apply_mod(&mut mods, timed(ModKind::Protection, 4_000));
         apply_mod(&mut mods, timed(ModKind::Vulnerability, 5_000));
 
-        let a = player_attacker(0, &warrior, None, &mods);
+        let a = player_attacker(0, &kit(&warrior), None, &mods);
         // Slot 0 is the class increase, the buff takes the next one.
         assert_eq!(a.increased[1], Mod::new(ModFilter::Any, 3_000));
         assert_eq!(a.weaken_bp, 2_000);
-        let d = player_defender(&warrior, &[ActiveState::default(); STATES_MAX], &mods);
+        let d = player_defender(&kit(&warrior), &[ActiveState::default(); STATES_MAX], &mods);
         assert!(d.resist_bp.iter().all(|&r| r == 4_000));
         assert_eq!(d.vuln_bp[Aspect::Blunt as usize], 5_000);
 
@@ -389,7 +400,7 @@ pub(crate) mod tests {
         let support = character(Race::Human, Class::Support, Aspect::Lightning);
         let quicken = record(presets::SUPPORT[0].blocks);
         let haste = effect_action(quicken.blocks.effect).unwrap();
-        let input = support_input(&support, &quicken, haste, None);
+        let input = support_input(&kit(&support), &quicken, haste, None);
         assert!(!input.hostile);
         // Haste 2_500..5_000 at full power, +20% for Support.
         assert_eq!((input.min, input.max), (3_000, 6_000));
@@ -399,14 +410,14 @@ pub(crate) mod tests {
         );
         let sap = record(presets::SUPPORT[1].blocks);
         let weaken = effect_action(sap.blocks.effect).unwrap();
-        let input = support_input(&support, &sap, weaken, Some(11));
+        let input = support_input(&kit(&support), &sap, weaken, Some(11));
         assert!(input.hostile && input.defense == 11);
         let mut mend = quicken;
         mend.blocks.effect = Effect::Heal;
-        let input = support_input(&support, &mend, EffectAction::Heal, None);
+        let input = support_input(&kit(&support), &mend, EffectAction::Heal, None);
         assert_eq!(
             (input.min, input.max),
-            heal_range(Class::Support, mend.power_bp)
+            heal_range(Class::Support, hero_weapon(&kit(&support)), mend.power_bp)
         );
         // Hard control has no strength.
         let mage = character(Race::ForestElf, Class::Mage, Aspect::Cold);
@@ -415,7 +426,7 @@ pub(crate) mod tests {
             effect_action(prison.blocks.effect),
             Some(EffectAction::Freeze)
         );
-        let input = support_input(&mage, &prison, EffectAction::Freeze, Some(10));
+        let input = support_input(&kit(&mage), &prison, EffectAction::Freeze, Some(10));
         assert_eq!((input.min, input.max), (0, 0));
     }
 

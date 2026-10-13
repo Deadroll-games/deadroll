@@ -11,7 +11,8 @@ use deadroll_combat::{
     resonance::TINT_ROLLS_MAX,
     EffectRoll, HitResult, Outcome,
 };
-use deadroll_types::{ActiveState, Aspect, StateKind, STATES_MAX};
+use deadroll_rules::HeroStats;
+use deadroll_types::{ActiveState, Aspect, ItemBase, StateKind, STATES_MAX};
 
 use crate::events::HitResolved;
 
@@ -118,6 +119,37 @@ pub struct HitResultData {
     pub rolls_used: u32,
 }
 
+/// What a player's worn items put into a hit (`deadroll_rules::items::ItemBonus`), so the
+/// breakdown can show it. All zero / `None` for a monster.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ItemBonusData {
+    /// The main-hand weapon whose damage is the base; `None` = bare hands (or a monster).
+    pub weapon: Option<ItemBase>,
+    pub armor: u32,
+    pub defense: u32,
+    /// Flat `d20` attack bonus (stat bonuses are already in the totals).
+    pub attack: u32,
+}
+
+impl ItemBonusData {
+    pub fn of(hero: &HeroStats) -> Self {
+        let b = crate::rules::item_bonus(hero);
+        Self {
+            weapon: b.weapon,
+            armor: b.armor,
+            defense: b.defense,
+            attack: b.attack,
+        }
+    }
+}
+
+/// The items of both sides of a hit.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HitItemsData {
+    pub attacker: ItemBonusData,
+    pub defender: ItemBonusData,
+}
+
 /// `deadroll_combat::EffectRoll`: the dice of a heal, buff, debuff or a damage skill's effect.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EffectRollData {
@@ -187,8 +219,17 @@ pub fn emit_hit_resolved(
     seed: &[u8; 32],
     action_counter: u32,
     result: &HitResult,
+    items: &HitItemsData,
 ) -> Result<()> {
-    let data = hit_resolved_data(session, attacker, target, seed, action_counter, result)?;
+    let data = hit_resolved_data(
+        session,
+        attacker,
+        target,
+        seed,
+        action_counter,
+        result,
+        items,
+    )?;
     anchor_lang::solana_program::log::sol_log_data(&[&data]);
     Ok(())
 }
@@ -201,6 +242,7 @@ pub fn hit_resolved_data(
     seed: &[u8; 32],
     action_counter: u32,
     result: &HitResult,
+    items: &HitItemsData,
 ) -> Result<Vec<u8>> {
     let mut data = Vec::with_capacity(8 + 32 + 2 + 32 + 4 + 1_024);
     data.extend_from_slice(HitResolved::DISCRIMINATOR);
@@ -210,6 +252,7 @@ pub fn hit_resolved_data(
     data.extend_from_slice(seed);
     data.extend_from_slice(&action_counter.to_le_bytes());
     borsh::to_writer(&mut data, result)?;
+    borsh::to_writer(&mut data, items)?;
     Ok(data)
 }
 
@@ -267,7 +310,16 @@ mod tests {
                     &mut VrfRoll::new(seed),
                     &mut result,
                 );
-                let bytes = hit_resolved_data(&session, 1, 5, &seed, 42, &result).unwrap();
+                let items = HitItemsData {
+                    attacker: ItemBonusData {
+                        weapon: Some(ItemBase::Sword),
+                        armor: 0,
+                        defense: 1,
+                        attack: 2,
+                    },
+                    defender: ItemBonusData::default(),
+                };
+                let bytes = hit_resolved_data(&session, 1, 5, &seed, 42, &result, &items).unwrap();
                 assert_eq!(&bytes[..8], HitResolved::DISCRIMINATOR);
 
                 let mut rest = &bytes[8..];
@@ -277,6 +329,7 @@ mod tests {
                 assert_eq!((event.attacker, event.target), (1, 5));
                 assert_eq!(event.seed, seed);
                 assert_eq!(event.action_counter, 42);
+                assert_eq!(event.items, items);
                 assert_eq!(event.result.damage, result.damage);
                 assert_eq!(event.result.d20, result.d20);
                 assert_eq!(event.result.packet_count, result.packet_count);

@@ -39,6 +39,8 @@ session-keys.workspace = true
 # CPI targets (generated `cpi` modules) and the `SkillRecord` layout.
 deadroll-character.workspace = true
 deadroll-map.workspace = true
+# Program id and `Loadout` discriminator (equipment snapshot at `join_session`).
+deadroll-items.workspace = true
 # GameConfig PDA address only.
 deadroll-registry.workspace = true
 # Hit resolution; `borsh` encodes the full `HitResult` into the `HitResolved` event.

@@ -11,7 +11,10 @@ use deadroll_registry::state::{
     records::{BESTIARY_MAX, MONSTER_SIZE, TILE_SIZE},
     Table, TableKind, TABLE_CAP,
 };
-use deadroll_types::{Cell, CharacterData, MapData, Spawn, Tile, MAP_CELLS, MAP_MAX, SPAWNS_MAX};
+use deadroll_rules::items::Equipment;
+use deadroll_types::{
+    Cell, CharacterData, LoadoutData, MapData, Spawn, Tile, MAP_CELLS, MAP_MAX, SPAWNS_MAX,
+};
 
 use crate::errors::SessionError;
 
@@ -50,6 +53,24 @@ fn decode<T: AnchorDeserialize>(
 pub fn read_character(info: &AccountInfo) -> Result<CharacterData> {
     decode(info, &deadroll_character::ID, &CHARACTER_DISCRIMINATOR)
         .ok_or(error!(SessionError::InvalidCharacter))
+}
+
+/// What a character wears, from its `deadroll_items` `Loadout` (address checked by the caller).
+/// A character without a loadout (created before items) wears nothing.
+pub fn read_equipment(info: &AccountInfo) -> Result<Equipment> {
+    if info.owner != &deadroll_items::ID {
+        require!(info.data_is_empty(), SessionError::InvalidLoadout);
+        return Ok(Equipment::EMPTY);
+    }
+    decode::<LoadoutData>(
+        info,
+        &deadroll_items::ID,
+        deadroll_items::state::Loadout::DISCRIMINATOR
+            .try_into()
+            .map_err(|_| error!(SessionError::InvalidLoadout))?,
+    )
+    .map(|l| Equipment(l.equipment()))
+    .ok_or(error!(SessionError::InvalidLoadout))
 }
 
 /// A `deadroll_map` `Map` account.

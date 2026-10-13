@@ -3,16 +3,16 @@ use deadroll_character::state::SkillRecord;
 use deadroll_combat::{
     Applied as CombatApplied, EffectRoll, HitInput, HitResult, States, TimedMods,
 };
-use deadroll_rules::resolve;
+use deadroll_rules::{resolve, HeroStats};
 use deadroll_skillcheck::{Effect, Purpose};
-use deadroll_types::{seeds, CharacterData, SessionStatus};
+use deadroll_types::{seeds, SessionStatus};
 
 use crate::{
     combat_input::{effect_action, skill_stats, EffectAction},
     cpi_out::SessionSigner,
     errors::SessionError,
     events::EffectResolved,
-    hit_event::emit_hit_resolved,
+    hit_event::{emit_hit_resolved, HitItemsData, ItemBonusData},
     outcomes,
     rules::{monster_profile, Unit, BALANCE, BASE_ATTACK},
     state::{
@@ -90,6 +90,9 @@ pub fn handler(ctx: Context<ConsumeRandomness>, randomness: [u8; 32]) -> Result<
     );
     let participation = &mut accounts.participation;
     let character = read_character(&accounts.character)?;
+    // The character of `participation` (the caster, or the target of a monster) with what it
+    // wears.
+    let hero = participation.hero(&character);
     let roll = Roll {
         session_key,
         pending,
@@ -123,7 +126,7 @@ pub fn handler(ctx: Context<ConsumeRandomness>, randomness: [u8; 32]) -> Result<
                     &roll,
                     &monsters,
                     index,
-                    &character,
+                    &hero,
                     skill.as_ref().ok_or(SessionError::InvalidSkill)?,
                     effect,
                 )?,
@@ -133,7 +136,7 @@ pub fn handler(ctx: Context<ConsumeRandomness>, randomness: [u8; 32]) -> Result<
                     &monsters,
                     index,
                     participation,
-                    &character,
+                    &hero,
                     skill.as_ref(),
                 )?,
             }
@@ -155,7 +158,7 @@ pub fn handler(ctx: Context<ConsumeRandomness>, randomness: [u8; 32]) -> Result<
                 Some(ally) if target != slot && ally.core.slot == target => ally,
                 _ => return err!(SessionError::InvalidPendingAccounts),
             };
-            support_ally(&roll, target_participation, &character, &skill, effect)?;
+            support_ally(&roll, target_participation, &hero, &skill, effect)?;
         }
         (Some(Unit::Monster(index)), Some(Unit::Player(slot))) => {
             require!(
@@ -168,7 +171,7 @@ pub fn handler(ctx: Context<ConsumeRandomness>, randomness: [u8; 32]) -> Result<
                 &monsters,
                 index,
                 participation,
-                &character,
+                &hero,
                 &SessionSigner {
                     session_authority: &accounts.session_authority,
                     config: &accounts.config,
@@ -233,7 +236,7 @@ fn attack_monster(
     monsters: &Monsters,
     index: u8,
     participation: &Participation,
-    character: &CharacterData,
+    hero: &HeroStats,
     skill: Option<&SkillRecord>,
 ) -> Result<()> {
     // Off the 4 KB stack frame: `HitResult` alone is over 1 KB.
@@ -249,7 +252,7 @@ fn attack_monster(
     let outcome = resolve::attack_monster(
         BALANCE,
         roll.pending.attacker,
-        &character.into(),
+        hero,
         skill.as_ref(),
         &participation.combat_mods(),
         &profile,
@@ -276,6 +279,10 @@ fn attack_monster(
         &roll.seed,
         roll.action,
         &result,
+        &HitItemsData {
+            attacker: ItemBonusData::of(hero),
+            defender: ItemBonusData::default(),
+        },
     )?;
 
     if let (Some(rider), Some(skill)) = (outcome.rider, skill) {
@@ -299,7 +306,7 @@ fn debuff_monster(
     roll: &Roll,
     monsters: &Monsters,
     index: u8,
-    character: &CharacterData,
+    hero: &HeroStats,
     skill: &SkillRecord,
     effect: EffectAction,
 ) -> Result<()> {
@@ -310,7 +317,7 @@ fn debuff_monster(
     let out = resolve::debuff_monster(
         BALANCE,
         roll.pending.attacker,
-        &character.into(),
+        hero,
         &skill_stats(skill),
         effect,
         &profile,
@@ -337,7 +344,7 @@ fn debuff_monster(
 fn support_ally(
     roll: &Roll,
     target: &mut Participation,
-    character: &CharacterData,
+    hero: &HeroStats,
     skill: &SkillRecord,
     effect: EffectAction,
 ) -> Result<()> {
@@ -347,7 +354,7 @@ fn support_ally(
     let out = resolve::support_ally(
         BALANCE,
         roll.pending.attacker,
-        &character.into(),
+        hero,
         &skill_stats(skill),
         effect,
         &mut target.core.hp,
@@ -378,7 +385,7 @@ fn monster_attack<'info>(
     monsters: &Monsters,
     index: u8,
     participation: &mut Participation,
-    character: &CharacterData,
+    hero: &HeroStats,
     signer: &SessionSigner<'_, 'info>,
     character_info: &AccountInfo<'info>,
 ) -> Result<()> {
@@ -394,7 +401,7 @@ fn monster_attack<'info>(
         roll.pending.attacker,
         &profile,
         &monsters.mods(index)?,
-        &character.into(),
+        hero,
         &mut participation.core.hp,
         &mut participation.core.states,
         &hero_mods,
@@ -419,6 +426,10 @@ fn monster_attack<'info>(
         &roll.seed,
         roll.action,
         &result,
+        &HitItemsData {
+            attacker: ItemBonusData::default(),
+            defender: ItemBonusData::of(hero),
+        },
     )
 }
 
