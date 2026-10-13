@@ -1,0 +1,48 @@
+.stats-scroll {
+  overflow-x: auto;
+}
+
+.stats-table {
+  border-collapse: collapse;
+  width: 100%;
+  word-break: normal;
+}
+
+.stats-table th,
+.stats-table td {
+  text-align: left;
+  vertical-align: top;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.stats-table thead th {
+  color: var(--muted);
+  font-weight: normal;
+}
+
+.stats-row.player th {
+  color: var(--player);
+}
+
+.stats-row.monster th {
+  color: var(--monster);
+}
+
+.stats-row.current {
+  background: var(--panel-2);
+}
+
+.stats-table .good {
+  color: var(--good);
+}
+
+.stats-table .bad {
+  color: var(--bad);
+}
+
+.stats-mod {
+  display: inline-block;
+  margin-right: 8px;
+}

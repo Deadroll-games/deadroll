@@ -7,6 +7,9 @@ import type { Address, TransactionSigner } from "@solana/kit";
 import { DiceCascade } from "../components/dice/DiceCascade";
 import { EffectCascade } from "../components/dice/EffectCascade";
 import { HitBreakdown } from "../components/dice/HitBreakdown";
+import type { HitMods } from "../components/dice/types";
+import { StatsPanel } from "../components/stats/StatsPanel";
+import type { StatsUnit } from "../components/stats/types";
 import { Grid } from "../components/grid/Grid";
 import type { GridUnit } from "../components/grid/types";
 import { PartyLobby } from "../components/forms/PartyLobby";
@@ -62,7 +65,8 @@ import { affordable, cheb, reachable, route, type Step } from "../chain/route";
 import { useAutoFreezeTombstone } from "../chain/useAutoFreezeTombstone";
 import { useParty, type PartyEvent } from "../chain/useParty";
 import { Purpose, inReach } from "../chain/skillcheck";
-import { activeMods, combatSkill, effectText, modLabel, modsTickText, toEffectResolved, type CombatSkill, type EffectResolved } from "../chain/support";
+import { MONSTER_DEFENSE, monsterBaseAp, playerDefense, unitStats } from "../chain/stats";
+import { activeMods, combatSkill, effectText, modsAt, modsTickText, toEffectResolved, type CombatSkill, type EffectResolved } from "../chain/support";
 import { useTx } from "../chain/useTx";
 import { MAP_MAX, PARTY_MAX, type Cell, type Class, type HitResult, type Race, type Tile } from "../chain/types";
 import { MOCK_VRF, explorerUrl } from "../config";
@@ -189,7 +193,7 @@ function PartyPicker({ map }: { map: Address | null }) {
 // ---------------------------------------------------------------------------------------------
 // one party
 
-type Hit = { result: HitResult; attacker: string; target: string; critChanceBp?: number };
+type Hit = { result: HitResult; attacker: string; target: string; critChanceBp?: number; mods: HitMods };
 type EffectView = { effect: EffectResolved; caster: string; target: string; skill: string; critChanceBp?: number };
 /** The dice panel: a hit, a heal / buff / debuff, or a hit followed by its skill's effect. */
 type Roll = { key: string; hit: Hit | null; effect: EffectView | null };
@@ -290,15 +294,20 @@ function PartyView({ address }: { address: Address }) {
       const dex = u < MONSTER_BASE ? party?.players.find((p) => p.slot === u)?.char.core.stats[1] : undefined;
       return dex == null ? undefined : playerCritChanceBp(dex);
     };
-    const hitView = (data: unknown): Hit => {
+    // Mods are not in HitResolved: take each side's from the events before the hit, else the accounts.
+    const modsNow = (u: number) =>
+      !party ? [] : u < MONSTER_BASE ? activeMods(party.players.find((p) => p.slot === u)?.part.mods) : activeMods(party.monsterMods[u - MONSTER_BASE]);
+    const hitView = (data: unknown, at: number): Hit => {
       const h = toHitResolved(data);
-      return { result: h.result, attacker: label(h.attacker), target: label(h.target), critChanceBp: critOf(h.attacker) };
+      const mods = { attacker: modsAt(events, at, h.attacker, modsNow(h.attacker)), target: modsAt(events, at, h.target, modsNow(h.target)) };
+      return { result: h.result, attacker: label(h.attacker), target: label(h.target), critChanceBp: critOf(h.attacker), mods };
     };
-    if (ev.name === "HitResolved") return setRoll({ key, hit: hitView(ev.data), effect: null });
+    if (ev.name === "HitResolved") return setRoll({ key, hit: hitView(ev.data, i), effect: null });
     const e = toEffectResolved(ev.data);
     const effect: EffectView = { effect: e, caster: label(e.caster), target: label(e.target), skill: skillName(e.caster, e.skillSlot), critChanceBp: critOf(e.caster) };
-    const hitEv = e.rider ? events[lastOf((x) => x.name === "HitResolved" && x.data.actionCounter === e.actionCounter, i)] : undefined;
-    setRoll({ key, hit: hitEv ? hitView(hitEv.data) : null, effect });
+    const hitAt = e.rider ? lastOf((x) => x.name === "HitResolved" && x.data.actionCounter === e.actionCounter, i) : -1;
+    const hitEv = events[hitAt];
+    setRoll({ key, hit: hitEv ? hitView(hitEv.data, hitAt) : null, effect });
   }, [events, label, party, skillName]);
 
   // ---- the localnet VRF oracle (mock-vrf build): answers the pending roll of this party.
@@ -852,7 +861,7 @@ function PartyView({ address }: { address: Address }) {
           {roll?.hit && (
             <>
               <DiceCascade key={roll.key} hit={roll.hit.result} attackerLabel={roll.hit.attacker} targetLabel={roll.hit.target} critChanceBp={roll.hit.critChanceBp} />
-              <HitBreakdown hit={roll.hit.result} defaultOpen={false} critChanceBp={roll.hit.critChanceBp} />
+              <HitBreakdown hit={roll.hit.result} defaultOpen={false} critChanceBp={roll.hit.critChanceBp} mods={roll.hit.mods} />
             </>
           )}
           {roll?.effect && (
@@ -865,7 +874,7 @@ function PartyView({ address }: { address: Address }) {
               critChanceBp={roll.effect.critChanceBp}
             />
           )}
-          <ModsPanel party={party} label={label} />
+          <StatsPanel units={statsUnits(party, label)} />
           {ended && <Claims party={party} isDm={isDm} payer={wallet.signer} send={send} ingest={ingest} busy={busy} />}
           {tombLog.length > 0 && (
             <div className="panel">
@@ -1000,26 +1009,43 @@ function describe(e: PartyEvent, label: (u: number) => string, skillName: SkillN
   }
 }
 
-/** Buffs and debuffs on every living unit (Participation.mods, MonsterState.mods); nothing when none. */
-function ModsPanel({ party, label }: { party: Party; label: (u: number) => string }) {
-  const rows = [
-    ...party.players.filter((p) => party.session.aliveMask & (1 << p.slot)).map((p) => ({ unit: p.slot, mods: activeMods(p.part.mods) })),
-    ...party.monsters.flatMap((m, i) => (m.alive ? [{ unit: MONSTER_BASE + i, mods: activeMods(party.monsterMods[i]) }] : [])),
-  ].filter((r) => r.mods.length > 0);
-  if (rows.length === 0) return null;
-  return (
-    <div className="panel">
-      <h3>Buffs and debuffs</h3>
-      <ul className="mono">
-        {rows.map((r) => (
-          <li key={r.unit}>
-            {label(r.unit)}: {r.mods.map(modLabel).join(", ")}
-          </li>
-        ))}
-      </ul>
-      <p className="muted">(n): own turns left after the current one.</p>
-    </div>
-  );
+/**
+ * Combat stats of every living unit with its buffs and debuffs (Participation.mods,
+ * MonsterState.mods): HP, AP per turn (Haste / Slow), defense, armor, resistances, vulnerabilities.
+ */
+function statsUnits(party: Party, label: (u: number) => string): StatsUnit[] {
+  const s = party.session;
+  const current = currentUnit(s);
+  const running = turnStarted(s);
+  const players = party.players
+    .filter((p) => s.aliveMask & (1 << p.slot))
+    .map((p): StatsUnit => {
+      const mine = current === p.slot && running;
+      const stats = unitStats({
+        hp: p.part.core.hp,
+        hpMax: p.part.hpMax || p.char.core.hpMax,
+        apBase: p.part.maxAp,
+        apNow: mine ? playerAp(p.part, s) : null,
+        profile: playerDefense(enumIndex(p.char.core.class, CLASS_KEYS) as Class, p.char.core.stats),
+        mods: activeMods(p.part.mods),
+      });
+      return { unit: p.slot, label: label(p.slot), kind: "player", current: current === p.slot, stats };
+    });
+  const monsters = party.monsters.flatMap((m, i): StatsUnit[] => {
+    const profile = MONSTER_DEFENSE[m.bestiaryId];
+    if (!m.alive || !profile) return [];
+    const u = MONSTER_BASE + i;
+    const stats = unitStats({
+      hp: m.hp,
+      hpMax: m.hpMax,
+      apBase: monsterBaseAp(s.monsterSpeed[i] ?? m.actionPoints),
+      apNow: current === u && running ? m.actionPoints : null,
+      profile,
+      mods: activeMods(party.monsterMods[i]),
+    });
+    return [{ unit: u, label: label(u), kind: "monster", current: current === u, stats }];
+  });
+  return [...players, ...monsters];
 }
 
 function EventLog({ events, label, skillName = (_, slot) => `skill ${slot}` }: { events: PartyEvent[]; label: (u: number) => string; skillName?: SkillName }) {

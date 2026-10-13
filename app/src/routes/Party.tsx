@@ -4,6 +4,8 @@ import { useConnectedWallet } from "@solana/kit-plugin-wallet/react";
 import { DiceCascade } from "../components/dice/DiceCascade";
 import { HitBreakdown } from "../components/dice/HitBreakdown";
 import { Grid } from "../components/grid/Grid";
+import { StatsPanel } from "../components/stats/StatsPanel";
+import type { StatsUnit } from "../components/stats/types";
 import type { GridUnit } from "../components/grid/types";
 import { PartyLobby } from "../components/forms/PartyLobby";
 import type { LobbyPlayer } from "../components/forms/types";
@@ -12,7 +14,8 @@ import { DEMO_MAP, MOCK_CHARACTERS, MOCK_HITS } from "../chain/mock";
 import { bestiaryName } from "../chain/names";
 import { useAutoFreezeTombstone } from "../chain/useAutoFreezeTombstone";
 import type { TombstoneLog } from "../chain/tombstone";
-import { PARTY_MAX, type HitResult } from "../chain/types";
+import { MONSTER_DEFENSE, playerDefense, unitStats } from "../chain/stats";
+import { Aspect, Class, ModKind, PARTY_MAX, type HitResult, type TimedMod } from "../chain/types";
 import { DATA_SOURCE } from "../config";
 import { useSessionKey } from "../session-key/SessionKeyProvider";
 import { client } from "../wallet/client";
@@ -38,6 +41,26 @@ function initialUnits(): GridUnit[] {
   ];
 }
 
+/** Mock buffs and debuffs: Bran empowered, Aria hasted, the first wolf exposed to Fire. */
+const MOCK_MODS: Record<number, TimedMod[]> = {
+  0: [{ kind: ModKind.Empowerment, aspect: Aspect.Blunt, turns: 2, powerBp: 3_000, source: 1 }],
+  1: [{ kind: ModKind.Haste, aspect: Aspect.Lightning, turns: 3, powerBp: 3_400, source: 1 }],
+  4: [{ kind: ModKind.Vulnerability, aspect: Aspect.Fire, turns: 2, powerBp: 2_500, source: 1 }],
+};
+
+function mockStats(units: GridUnit[], active: number): StatsUnit[] {
+  return units
+    .filter((u) => u.alive)
+    .flatMap((u): StatsUnit[] => {
+      const profile =
+        u.kind === "player" ? playerDefense(MOCK_CHARACTERS[u.id]?.class ?? Class.Warrior, [10, 7, 5, 8]) : MONSTER_DEFENSE[DEMO_MAP.spawns[u.id - 4]?.bestiaryId ?? -1];
+      if (!profile) return [];
+      const apBase = u.kind === "player" ? 4 : 6;
+      const stats = unitStats({ hp: u.hp, hpMax: u.hpMax, apBase, apNow: u.id === active ? apBase : null, profile, mods: MOCK_MODS[u.id] ?? [] });
+      return [{ unit: u.id, label: u.label, kind: u.kind, current: u.id === active, stats }];
+    });
+}
+
 export function PartyPage() {
   return DATA_SOURCE === "chain" ? <PartyChain /> : <MockParty />;
 }
@@ -57,7 +80,7 @@ function MockParty() {
   const [units, setUnits] = useState(initialUnits);
   const [active, setActive] = useState(1);
   const [target, setTarget] = useState<number | null>(null);
-  const [hit, setHit] = useState<{ result: HitResult; attacker: string; target: string; key: number } | null>(null);
+  const [hit, setHit] = useState<{ result: HitResult; attacker: string; target: string; key: number; attackerId: number; targetId: number } | null>(null);
 
   const joined = players.map((p) => p.slot);
   const myChars = MOCK_CHARACTERS.filter((_, i) => !joined.includes(i)).map((c) => ({ address: c.address, name: c.name }));
@@ -86,7 +109,7 @@ function MockParty() {
     const t = units.find((u) => u.id === target);
     if (!activeUnit || !t) return;
     const result = MOCK_HITS[kind];
-    setHit({ result, attacker: activeUnit.label, target: t.label, key: Date.now() });
+    setHit({ result, attacker: activeUnit.label, target: t.label, key: Date.now(), attackerId: activeUnit.id, targetId: t.id });
     setUnits((us) => us.map((u) => (u.id === t.id ? { ...u, hp: Math.max(0, u.hp - result.damage), alive: u.hp - result.damage > 0 } : u)));
   };
 
@@ -173,9 +196,10 @@ function MockParty() {
             {hit && (
               <>
                 <DiceCascade key={hit.key} hit={hit.result} attackerLabel={hit.attacker} targetLabel={hit.target} />
-                <HitBreakdown hit={hit.result} defaultOpen={false} />
+                <HitBreakdown hit={hit.result} defaultOpen={false} mods={{ attacker: MOCK_MODS[hit.attackerId] ?? [], target: MOCK_MODS[hit.targetId] ?? [] }} />
               </>
             )}
+            <StatsPanel units={mockStats(units, active)} />
             {log.length > 0 && (
               <div className="panel">
                 <h3>Tombstones</h3>
