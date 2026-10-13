@@ -317,4 +317,63 @@ fn size_matches_anchor_init_space() {
     assert_eq!(GameSessionData::SIZE, GameSessionData::INIT_SPACE);
     assert_eq!(ParticipationData::SIZE, ParticipationData::INIT_SPACE);
     assert_eq!(MonsterStateData::SIZE, MonsterStateData::INIT_SPACE);
+    assert_eq!(ItemRecord::SIZE, ItemRecord::INIT_SPACE);
+    assert_eq!(EquipRef::SIZE, EquipRef::INIT_SPACE);
+    assert_eq!(LoadoutData::SIZE, LoadoutData::INIT_SPACE);
+}
+
+fn loadout(version: u8) -> LoadoutData {
+    LoadoutData {
+        version,
+        character: pk(15),
+        owner: pk(16),
+        items: [ItemRecord {
+            base: last(ItemBase::ALL),
+            level: u8::MAX,
+        }; SOULBOUND_MAX],
+        item_count: SOULBOUND_MAX as u8,
+        equipped: [EquipRef {
+            source: last(EquipSource::ALL),
+            index: u8::MAX,
+            asset: pk(17),
+        }; EQUIP_SLOTS],
+        bump: u8::MAX,
+    }
+}
+
+enum_tests! {
+    equip_slot: EquipSlot, EQUIP_SLOTS;
+    item_base: ItemBase, 6;
+    equip_source: EquipSource, 3;
+}
+
+#[test]
+fn loadout_size_version_and_owner_offsets() {
+    let v = 0x7E;
+    let bytes = check(&loadout(v), LoadoutData::SIZE);
+    assert_eq!(bytes[0], v);
+    assert_eq!(&bytes[1..33], pk(15).as_ref());
+    assert_eq!(&bytes[33..65], pk(16).as_ref());
+    check(&EquipRef::EMPTY, EquipRef::SIZE);
+    assert_eq!(seeds::LOADOUT, b"loadout");
+}
+
+#[test]
+fn loadout_equipment_reads_worn_soulbound_bases() {
+    let mut l = loadout(1);
+    l.items[0].base = ItemBase::Sword;
+    l.items[1].base = ItemBase::LeatherArmor;
+    l.item_count = 2;
+    l.equipped = [EquipRef::EMPTY; EQUIP_SLOTS];
+    l.equipped[EquipSlot::MainHand as usize] = EquipRef::soulbound(0);
+    l.equipped[EquipSlot::Body as usize] = EquipRef::soulbound(1);
+    // Past `item_count`: ignored.
+    l.equipped[EquipSlot::Ring1 as usize] = EquipRef::soulbound(3);
+    let eq = l.equipment();
+    assert_eq!(eq[EquipSlot::MainHand as usize], ItemBase::Sword as u8);
+    assert_eq!(eq[EquipSlot::Body as usize], ItemBase::LeatherArmor as u8);
+    assert_eq!(eq[EquipSlot::Ring1 as usize], EMPTY_ITEM);
+    assert_eq!(eq.iter().filter(|b| **b != EMPTY_ITEM).count(), 2);
+    assert_eq!(l.worn_slot(1), Some(EquipSlot::Body));
+    assert_eq!(l.worn_slot(2), None);
 }

@@ -16,9 +16,10 @@
 //! discriminator. `SIZE` is the max borsh size (`Option` counted as `Some`).
 
 use crate::{
-    Aspect, Class, LayerRef, MapStatus, Pubkey, Race, SessionStatus, StateKind, LAYERS_MAX,
-    MAP_CELLS, MONSTERS_MAX, PARTY_MAX, PROGRAMS_COUNT, SPAWNS_MAX, STATES_MAX, STATS_COUNT,
-    TURN_ORDER_MAX, URI_BASE_LEN,
+    Aspect, Class, EquipSlot, EquipSource, ItemBase, LayerRef, MapStatus, Pubkey, Race,
+    SessionStatus, StateKind, EMPTY_ITEM, EQUIP_SLOTS, LAYERS_MAX, MAP_CELLS, MONSTERS_MAX,
+    PARTY_MAX, PROGRAMS_COUNT, SOULBOUND_MAX, SPAWNS_MAX, STATES_MAX, STATS_COUNT, TURN_ORDER_MAX,
+    URI_BASE_LEN,
 };
 
 const PUBKEY: usize = 32;
@@ -180,6 +181,38 @@ shared! {
         pub bump: u8,
     }
 
+    /// A soulbound item record of a loadout (a class starter item).
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct ItemRecord {
+        pub base: ItemBase,
+        /// Item level (docs/ITEMS_AND_CRAFT.md, section 4).
+        pub level: u8,
+    }
+
+    /// What one equipment slot holds. `index` is the soulbound record for `Soulbound`; `asset`
+    /// is the item NFT for `Asset` (crafting, later), default otherwise.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct EquipRef {
+        pub source: EquipSource,
+        pub index: u8,
+        pub asset: Pubkey,
+    }
+
+    /// items `["loadout", character]`: the soulbound items and what is worn, by slot.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct LoadoutData {
+        pub version: u8,
+        pub character: Pubkey,
+        /// The character owner (for `memcmp` filters).
+        pub owner: Pubkey,
+        /// Records `0..item_count` are used.
+        pub items: [ItemRecord; SOULBOUND_MAX],
+        pub item_count: u8,
+        /// Indexed by `EquipSlot`.
+        pub equipped: [EquipRef; EQUIP_SLOTS],
+        pub bump: u8,
+    }
+
     /// session `["monsters", session]`.
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub struct MonsterStateData {
@@ -268,3 +301,54 @@ impl ParticipationData {
 impl MonsterStateData {
     pub const SIZE: usize = 1 + PUBKEY + MONSTERS_MAX * Monster::SIZE + 1 + 1;
 }
+
+impl ItemRecord {
+    pub const SIZE: usize = ItemBase::SIZE + 1;
+}
+
+impl EquipRef {
+    pub const EMPTY: EquipRef = EquipRef {
+        source: EquipSource::Empty,
+        index: 0,
+        asset: Pubkey::new_from_array([0; 32]),
+    };
+    pub const SIZE: usize = EquipSource::SIZE + 1 + PUBKEY;
+
+    /// Soulbound record `index` of the loadout.
+    pub const fn soulbound(index: u8) -> EquipRef {
+        EquipRef {
+            source: EquipSource::Soulbound,
+            index,
+            asset: Pubkey::new_from_array([0; 32]),
+        }
+    }
+}
+
+impl LoadoutData {
+    pub const SIZE: usize =
+        1 + PUBKEY * 2 + SOULBOUND_MAX * ItemRecord::SIZE + 1 + EQUIP_SLOTS * EquipRef::SIZE + 1;
+
+    /// The `ItemBase` byte worn in each slot (`EMPTY_ITEM` for none): what combat reads. Item
+    /// NFTs (`EquipSource::Asset`) are not resolved yet and read as empty.
+    pub fn equipment(&self) -> [u8; EQUIP_SLOTS] {
+        let mut out = [EMPTY_ITEM; EQUIP_SLOTS];
+        for (slot, r) in out.iter_mut().zip(&self.equipped) {
+            if r.source == EquipSource::Soulbound && r.index < self.item_count {
+                if let Some(item) = self.items.get(r.index as usize) {
+                    *slot = item.base as u8;
+                }
+            }
+        }
+        out
+    }
+
+    /// The slot record `index` is worn in, if any.
+    pub fn worn_slot(&self, index: u8) -> Option<EquipSlot> {
+        self.equipped
+            .iter()
+            .position(|r| r.source == EquipSource::Soulbound && r.index == index)
+            .and_then(|i| EquipSlot::ALL.get(i).copied())
+    }
+}
+
+const _: () = assert!(EQUIP_SLOTS == EquipSlot::COUNT);
