@@ -1,0 +1,15 @@
+{
+  "name": "Wolves (demo pack 1)",
+  "monsters": [
+    {
+      "monster": "wolf",
+      "level": 1,
+      "count": 2
+    }
+  ],
+  "arena": {
+    "width": 14,
+    "height": 10,
+    "gap": 6
+  }
+}

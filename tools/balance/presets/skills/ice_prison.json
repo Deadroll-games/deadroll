@@ -1,0 +1,14 @@
+{
+  "name": "Ice Prison",
+  "category": "Active",
+  "purpose": "Damage",
+  "source": "Magical",
+  "form": "Projectile",
+  "target": "Single",
+  "aspects": [
+    "Cold"
+  ],
+  "effect": "Freeze",
+  "trigger": "None",
+  "aura_radius": 0
+}

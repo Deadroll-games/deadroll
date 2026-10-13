@@ -1,0 +1,15 @@
+{
+  "name": "Goblins (demo pack 2)",
+  "monsters": [
+    {
+      "monster": "goblin",
+      "level": 1,
+      "count": 2
+    }
+  ],
+  "arena": {
+    "width": 14,
+    "height": 10,
+    "gap": 6
+  }
+}

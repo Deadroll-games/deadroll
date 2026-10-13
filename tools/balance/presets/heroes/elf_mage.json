@@ -1,0 +1,22 @@
+{
+  "name": "Forest elf mage",
+  "race": "ForestElf",
+  "class": "Mage",
+  "level": 1,
+  "stats": {
+    "Strength": 5,
+    "Dexterity": 7,
+    "Intelligence": 10,
+    "Endurance": 8
+  },
+  "predisposition": "Cold",
+  "tier": 14,
+  "skills": [
+    "frost_bolt",
+    "frost_burn",
+    "ice_prison",
+    "arc",
+    "cold_snap",
+    "cold_mind"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "name": "Last Stand",
+  "category": "Reactive",
+  "purpose": "Buff",
+  "source": "Combat",
+  "form": "Strike",
+  "target": "Single",
+  "aspects": [
+    "Blunt"
+  ],
+  "effect": "Protection",
+  "trigger": "HpBelow",
+  "aura_radius": 2
+}

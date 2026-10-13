@@ -1,0 +1,14 @@
+{
+  "name": "Arc",
+  "category": "Active",
+  "purpose": "Damage",
+  "source": "Magical",
+  "form": "Strike",
+  "target": "Line",
+  "aspects": [
+    "Lightning"
+  ],
+  "effect": "None",
+  "trigger": "None",
+  "aura_radius": 0
+}

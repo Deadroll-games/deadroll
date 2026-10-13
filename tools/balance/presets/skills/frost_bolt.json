@@ -1,0 +1,14 @@
+{
+  "name": "Frost Bolt",
+  "category": "Active",
+  "purpose": "Damage",
+  "source": "Magical",
+  "form": "Projectile",
+  "target": "Single",
+  "aspects": [
+    "Cold"
+  ],
+  "effect": "None",
+  "trigger": "None",
+  "aura_radius": 0
+}

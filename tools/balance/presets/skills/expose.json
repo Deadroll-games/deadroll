@@ -1,0 +1,14 @@
+{
+  "name": "Expose",
+  "category": "Active",
+  "purpose": "Debuff",
+  "source": "Magical",
+  "form": "Projectile",
+  "target": "Single",
+  "aspects": [
+    "Fire"
+  ],
+  "effect": "Vulnerability",
+  "trigger": "None",
+  "aura_radius": 0
+}
