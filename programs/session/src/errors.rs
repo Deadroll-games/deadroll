@@ -108,4 +108,6 @@ pub enum SessionError {
     AllyAccountMissing,
     #[msg("target_participation is only for a heal or buff on another ally")]
     UnexpectedAllyAccount,
+    #[msg("Only the character's owner or their session key can claim its rewards")]
+    NotRewardOwner,
 }

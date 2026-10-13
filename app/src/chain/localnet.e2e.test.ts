@@ -268,7 +268,12 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
     expect(victory).toBe(true);
 
     // 8. claims
-    for (const pl of players) await send(dmKey, [await claimRewardsIx(acc.session, pl.character)]);
+    // claim_rewards: only the owner (main wallet or its session key), never someone else.
+    const [owner0, owner1] = [players[0]!, players[1]!];
+    await expect(send(dm, [await claimRewardsIx({ signer: dm, token: null }, acc.session, owner0.character)])).rejects.toThrow(/NotRewardOwner/);
+    await expect(send(owner1.wallet, [await claimRewardsIx({ signer: owner1.wallet, token: null }, acc.session, owner0.character)])).rejects.toThrow(/NotRewardOwner/);
+    await send(owner0.key, [await claimRewardsIx(owner0.actor, acc.session, owner0.character)]);
+    await send(owner1.wallet, [await claimRewardsIx({ signer: owner1.wallet, token: null }, acc.session, owner1.character)]);
     const evs = await send(dm, [await claimEscrowIx(dm, acc.session, built.map)]);
     expect(BigInt(evs.find((e) => e.name === "EscrowClaimed")!.data.amount)).toBe(PRICE);
     party = (await readParty(acc.session))!;

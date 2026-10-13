@@ -2,6 +2,7 @@ use anchor_lang::prelude::*;
 use deadroll_types::{seeds, SessionStatus};
 
 use crate::{
+    auth,
     cpi_out::{self, SessionSigner},
     errors::SessionError,
     events::RewardsClaimed,
@@ -12,6 +13,8 @@ use crate::{
 
 #[derive(Accounts)]
 pub struct ClaimRewards<'info> {
+    /// The character's owner (the participation's `player`) or its session key.
+    pub signer: Signer<'info>,
     #[account(
         mut,
         seeds = [seeds::SESSION, session.core.map.as_ref()],
@@ -44,9 +47,12 @@ pub struct ClaimRewards<'info> {
     /// CHECK: the character program.
     #[account(address = deadroll_character::ID)]
     pub character_program: UncheckedAccount<'info>,
+    /// CHECK: MagicBlock `SessionTokenV2`, checked in `auth::check_actor`.
+    pub session_token: Option<UncheckedAccount<'info>>,
 }
 
-/// Permissionless, once per character after the party ended (docs/PARTY_AND_TURNS.md, 7-9):
+/// Owner (main wallet or session key) only, once per character after the party ended
+/// (docs/PARTY_AND_TURNS.md, 7-9):
 /// - victory, alive: the temporary cache (all accumulated XP + boss rewards) goes to the
 ///   character through `grant_rewards`, then `unlock`;
 /// - fled, alive: the cache is abandoned, `unlock` only;
@@ -55,6 +61,20 @@ pub struct ClaimRewards<'info> {
 /// TODO(P1, L6.5): only after the DM's final audit.
 pub fn handler(ctx: Context<ClaimRewards>) -> Result<()> {
     let accounts = ctx.accounts;
+    let participation = &accounts.participation;
+    let caller = accounts.signer.key();
+    require!(
+        caller == participation.player
+            || (participation.core.actor != Pubkey::default()
+                && caller == participation.core.actor),
+        SessionError::NotRewardOwner
+    );
+    auth::check_actor(
+        &accounts.signer,
+        &participation.player,
+        &participation.core.actor,
+        accounts.session_token.as_ref(),
+    )?;
     let session = &mut accounts.session;
     let status = session.core.status;
     require!(
