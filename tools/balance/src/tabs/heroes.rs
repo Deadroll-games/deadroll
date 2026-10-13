@@ -1,7 +1,8 @@
-//! Heroes: race, class, level, stats, predisposition and skills (ids of skill presets), with the
-//! numbers the rules derive and the same validation a Run applies.
-use deadroll_rules::player::{
-    player_ap, player_attack_bonus, player_crit_bp, player_defense, player_initiative,
+//! Heroes: race, class, level, stats, predisposition, skills (ids of skill presets) and what the
+//! hero wears, with the numbers the rules derive and the same validation a Run applies.
+use deadroll_rules::{
+    input::hero as rules_hero,
+    items::{item_bonus, starter_loadout},
 };
 use deadroll_sim::{
     named::Named,
@@ -9,7 +10,9 @@ use deadroll_sim::{
     setup::{fighter, Issues},
     BalanceConfig,
 };
-use deadroll_types::{Aspect, Class, Race, Source, Stat, PARTY_MAX, STATS_COUNT};
+use deadroll_types::{
+    Aspect, Class, EquipSlot, ItemBase, Race, Source, Stat, PARTY_MAX, STATS_COUNT,
+};
 use eframe::egui::{self, Ui};
 
 use crate::{app::BalanceApp, widgets};
@@ -37,6 +40,7 @@ fn fresh(cfg: &BalanceConfig, skill: Option<String>) -> HeroPreset {
         tier: t.start_tier,
         skills: skill.into_iter().collect(),
         inline_skills: vec![],
+        equipment: None,
     }
 }
 
@@ -181,15 +185,57 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                 hero.skills.push(skills[0].0.clone());
             }
 
+            ui.add_space(6.0);
+            ui.strong("Equipment");
+            let mut kit = hero.equipment.is_none();
+            if ui
+                .checkbox(&mut kit, "Class starter kit")
+                .on_hover_text("what the items program gives a new character of this class")
+                .changed()
+            {
+                hero.equipment = if kit {
+                    None
+                } else {
+                    Some(starter_loadout(hero.class, &cfg.items).equipment())
+                };
+            }
+            let shown = hero
+                .equipment
+                .unwrap_or_else(|| starter_loadout(hero.class, &cfg.items).equipment());
+            egui::Grid::new("hero_equipment")
+                .num_columns(2)
+                .striped(true)
+                .show(ui, |ui| {
+                    for &slot in EquipSlot::all() {
+                        ui.label(slot.name());
+                        let mut worn = shown.get(slot);
+                        ui.add_enabled_ui(!kit, |ui| {
+                            egui::ComboBox::from_id_salt(("equip", slot as u8))
+                                .selected_text(worn.map_or("—".into(), |b| b.name()))
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(&mut worn, None, "—");
+                                    for &b in ItemBase::all() {
+                                        ui.selectable_value(&mut worn, Some(b), b.name());
+                                    }
+                                });
+                        });
+                        if let Some(eq) = hero.equipment.as_mut() {
+                            eq.set(slot, worn);
+                        }
+                        ui.end_row();
+                    }
+                });
+
             // What a Run would do with this hero.
             let hero = hero.clone();
             let mut issues = Issues::default();
             let f = fighter(&app.presets, &id, &hero, &cfg, &mut issues);
             ui.add_space(8.0);
             ui.strong("In a fight");
-            let t = &cfg.players;
             let h = &f.hero;
-            let (defense, armor) = player_defense(h.class, &h.stats, t);
+            let (defense, armor) = rules_hero::defense(&cfg, h);
+            let items = item_bonus(&h.equipment, &cfg.items);
+            let weapon = rules_hero::weapon(&cfg, h);
             egui::Grid::new("hero_numbers")
                 .num_columns(2)
                 .show(ui, |ui| {
@@ -199,25 +245,32 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                         ui.end_row();
                     };
                     row("HP", f.hp_max.to_string());
-                    row(
-                        "Action points",
-                        player_ap(h.race, h.class, h.stats[Stat::Dexterity as usize], t)
-                            .to_string(),
-                    );
-                    row("Initiative", player_initiative(&h.stats, t).to_string());
+                    row("Action points", rules_hero::ap(&cfg, h).to_string());
+                    row("Initiative", rules_hero::initiative(&cfg, h).to_string());
                     row("Defense / armor", format!("{defense} / {armor}"));
                     row(
                         "Attack bonus (martial / magical)",
                         format!(
                             "{} / {}",
-                            player_attack_bonus(h.level, &h.stats, Source::Combat, t),
-                            player_attack_bonus(h.level, &h.stats, Source::Magical, t)
+                            rules_hero::attack_bonus(&cfg, h, Source::Combat),
+                            rules_hero::attack_bonus(&cfg, h, Source::Magical)
                         ),
                     );
                     row(
                         "Crit chance",
-                        format!("{:.2}%", player_crit_bp(&h.stats, t) as f64 / 100.0),
+                        format!("{:.2}%", rules_hero::crit_bp(&cfg, h) as f64 / 100.0),
                     );
+                    row(
+                        "Weapon (damage base)",
+                        format!(
+                            "{} {} {}-{}",
+                            items.weapon.map_or("bare hands".into(), |b| b.name()),
+                            weapon.aspect.name(),
+                            weapon.min,
+                            weapon.max
+                        ),
+                    );
+                    row("From items", item_summary(&items));
                 });
             ui.add_space(4.0);
             ui.label(format!("Actions: weapon + {} skills", f.skills.len()));
@@ -232,4 +285,30 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
             ui.add_space(4.0);
             widgets::issues(ui, &issues.errors, &issues.warnings);
         });
+}
+
+/// What worn items add, in one line.
+fn item_summary(b: &deadroll_rules::ItemBonus) -> String {
+    let mut parts = Vec::new();
+    for (name, v) in [
+        ("armor", b.armor),
+        ("defense", b.defense),
+        ("attack", b.attack),
+        ("HP", b.hp),
+    ] {
+        if v > 0 {
+            parts.push(format!("+{v} {name}"));
+        }
+    }
+    for &stat in Stat::all() {
+        let v = b.stats[stat as usize];
+        if v > 0 {
+            parts.push(format!("+{v} {}", stat.name()));
+        }
+    }
+    if parts.is_empty() {
+        "nothing".into()
+    } else {
+        parts.join(", ")
+    }
 }

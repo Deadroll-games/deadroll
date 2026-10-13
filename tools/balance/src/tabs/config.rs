@@ -469,8 +469,6 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                     egui::Grid::new("by_class").striped(true).show(ui, |ui| {
                         for h in [
                             "",
-                            "weapon min",
-                            "weapon max",
                             "class increase",
                             "support increase",
                             "armor",
@@ -482,15 +480,12 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                         ui.end_row();
                         for &class in Class::all() {
                             let i = class as usize;
-                            let changed = p.weapon[i] != dp.weapon[i]
-                                || p.class_increase_bp[i] != dp.class_increase_bp[i]
+                            let changed = p.class_increase_bp[i] != dp.class_increase_bp[i]
                                 || p.support_increase_bp[i] != dp.support_increase_bp[i]
                                 || p.armor[i] != dp.armor[i]
                                 || p.hp_base[i] != dp.hp_base[i]
                                 || p.hp_per_level[i] != dp.hp_per_level[i];
                             widgets::label(ui, &class.name(), changed);
-                            widgets::int(ui, &mut p.weapon[i][0], 0..=10_000);
-                            widgets::int(ui, &mut p.weapon[i][1], 0..=10_000);
                             widgets::bp(ui, &mut p.class_increase_bp[i]);
                             widgets::bp(ui, &mut p.support_increase_bp[i]);
                             widgets::int(ui, &mut p.armor[i], 0..=10_000);

@@ -2,6 +2,7 @@
 pub mod config;
 pub mod encounters;
 pub mod heroes;
+pub mod items;
 pub mod monsters;
 pub mod results;
 pub mod skills;

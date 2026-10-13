@@ -21,16 +21,18 @@ pub enum Tab {
     Skills,
     Monsters,
     Encounters,
+    Items,
     Config,
     Results,
 }
 
 impl Tab {
-    const ALL: [Tab; 6] = [
+    const ALL: [Tab; 7] = [
         Tab::Heroes,
         Tab::Skills,
         Tab::Monsters,
         Tab::Encounters,
+        Tab::Items,
         Tab::Config,
         Tab::Results,
     ];
@@ -41,6 +43,7 @@ impl Tab {
             Tab::Skills => "Skills",
             Tab::Monsters => "Monsters",
             Tab::Encounters => "Encounters",
+            Tab::Items => "Items",
             Tab::Config => "Config",
             Tab::Results => "Results",
         }
@@ -435,6 +438,7 @@ impl eframe::App for BalanceApp {
             Tab::Skills => tabs::skills::show(self, ui),
             Tab::Monsters => tabs::monsters::show(self, ui),
             Tab::Encounters => tabs::encounters::show(self, ui),
+            Tab::Items => tabs::items::show(self, ui),
             Tab::Config => tabs::config::show(self, ui),
             Tab::Results => tabs::results::show(self, ui),
         });
@@ -505,6 +509,29 @@ mod tests {
         h.get_by_label("Config").click();
         h.run();
         h.get_by_label("Armor constant K");
+        // Items: every base and class kit from the enums, edits reach the config.
+        h.get_by_label("Items").click();
+        h.run();
+        for base in [
+            "Sword",
+            "Staff",
+            "Wand",
+            "LeatherArmor",
+            "Robe",
+            "LightLeatherArmor",
+        ] {
+            h.get_by_label(base);
+        }
+        h.get_by_label("all items are the program's defaults");
+        h.state_mut().cfg.items.bases[0].armor = 3;
+        h.run();
+        h.get_by_label("Sword *");
+        // Heroes wear their class kit by default; the panel shows what the items give.
+        h.get_all_by_label("Heroes").next().unwrap().click();
+        h.run();
+        h.get_by_label("Class starter kit");
+        h.get_by_label("Sword Blunt 4-8");
+        h.get_by_label("+13 armor");
         h.get_by_label("Results").click();
         h.run();
     }
