@@ -1,23 +1,20 @@
 use anchor_lang::prelude::*;
 use deadroll_character::state::SkillRecord;
 use deadroll_combat::{
-    resolve_hit_into, resolve_rider, resolve_support, Applied as CombatApplied, Balance,
-    EffectRoll, HitInput, HitResult, Outcome, States, SupportBalance, TimedMods,
+    Applied as CombatApplied, EffectRoll, HitInput, HitResult, States, TimedMods,
 };
+use deadroll_rules::resolve;
 use deadroll_skillcheck::{Effect, Purpose};
 use deadroll_types::{seeds, CharacterData, SessionStatus};
 
 use crate::{
-    combat_input::{
-        effect_action, effect_range, heal, land_effect, monster_attacker, monster_defender,
-        player_attacker, player_defender, support_input, take_damage, EffectAction,
-    },
+    combat_input::{effect_action, skill_stats, EffectAction},
     cpi_out::SessionSigner,
     errors::SessionError,
     events::EffectResolved,
     hit_event::emit_hit_resolved,
     outcomes,
-    rules::{Unit, BASE_ATTACK},
+    rules::{monster_profile, Unit, BALANCE, BASE_ATTACK},
     state::{
         external::{read_character, read_skill},
         mods::from_combat,
@@ -228,7 +225,7 @@ impl Roll {
 }
 
 /// A player's weapon or damage skill on a monster, then that skill's effect (if any) when the
-/// hit landed and the monster lives.
+/// hit landed and the monster lives (`deadroll_rules::resolve::attack_monster`).
 #[inline(never)]
 fn attack_monster(
     roll: &Roll,
@@ -244,24 +241,25 @@ fn attack_monster(
     let mut result = Box::<HitResult>::default();
     let mut monster = monsters.get(index)?;
     let mut mods = monsters.mods(index)?;
-    input.attacker = player_attacker(
+    let profile =
+        monster_profile(monster.bestiary_id, monster.level).ok_or(SessionError::InvalidMonster)?;
+    let skill = skill.map(skill_stats);
+    // One stream for the action: the skill's effect reads the indices after the hit's
+    // `rolls_used`, the same as `SyscallRoll::at(seed, rolls_used)`.
+    let outcome = resolve::attack_monster(
+        BALANCE,
         roll.pending.attacker,
-        character,
-        skill,
+        &character.into(),
+        skill.as_ref(),
         &participation.combat_mods(),
-    );
-    input.defender = monster_defender(&monster, &mods).ok_or(SessionError::InvalidMonster)?;
-    resolve_hit_into(
-        &input,
-        &Balance::DEFAULT,
-        &mut SyscallRoll::new(roll.seed),
+        &profile,
+        &mut monster,
+        &mut mods,
+        &mut input,
         &mut result,
+        &mut SyscallRoll::new(roll.seed),
     );
-
-    let (hp, died) = take_damage(monster.hp, result.damage);
-    monster.hp = hp;
-    monster.states = result.states;
-    if died {
+    if outcome.died {
         outcomes::monster_killed(
             session,
             roll.session_key,
@@ -280,43 +278,17 @@ fn attack_monster(
         &result,
     )?;
 
-    // The skill's effect: its own chance on a hit (certain on a crit), on the next dice.
-    if let Some(skill) = skill {
-        if let Some(effect) = effect_action(skill.blocks.effect) {
-            if result.outcome == Outcome::Hit && monster.alive {
-                let (min, max) = effect_range(character.class, skill.power_bp, effect);
-                let rider = resolve_rider(
-                    SupportBalance::DEFAULT.rider_chance_bp,
-                    result.crit,
-                    min,
-                    max,
-                    &Balance::DEFAULT,
-                    &mut SyscallRoll::at(roll.seed, result.rolls_used),
-                );
-                let applied = if rider.outcome == Outcome::Hit {
-                    land_effect(
-                        effect,
-                        rider.amount,
-                        skill.blocks.aspects[0],
-                        roll.pending.attacker,
-                        &mut monster.states,
-                        &mut mods,
-                    )
-                } else {
-                    CombatApplied::None
-                };
-                monsters.set_mods(index, &mods)?;
-                roll.emit_effect(
-                    true,
-                    skill.blocks.effect,
-                    &rider,
-                    applied,
-                    monster.hp,
-                    &monster.states,
-                    &mods,
-                );
-            }
-        }
+    if let (Some(rider), Some(skill)) = (outcome.rider, skill) {
+        monsters.set_mods(index, &mods)?;
+        roll.emit_effect(
+            true,
+            skill.blocks.effect,
+            &rider.roll,
+            rider.applied,
+            monster.hp,
+            &monster.states,
+            &mods,
+        );
     }
     monsters.set(index, &monster)
 }
@@ -333,30 +305,26 @@ fn debuff_monster(
 ) -> Result<()> {
     let mut monster = monsters.get(index)?;
     let mut mods = monsters.mods(index)?;
-    let defense = monster_defender(&monster, &mods)
-        .ok_or(SessionError::InvalidMonster)?
-        .defense;
-    let input = support_input(character, skill, effect, Some(defense));
-    let result = resolve_support(&input, &Balance::DEFAULT, &mut SyscallRoll::new(roll.seed));
-    let applied = if result.outcome == Outcome::Hit && monster.alive {
-        land_effect(
-            effect,
-            result.amount,
-            skill.blocks.aspects[0],
-            roll.pending.attacker,
-            &mut monster.states,
-            &mut mods,
-        )
-    } else {
-        CombatApplied::None
-    };
+    let profile =
+        monster_profile(monster.bestiary_id, monster.level).ok_or(SessionError::InvalidMonster)?;
+    let out = resolve::debuff_monster(
+        BALANCE,
+        roll.pending.attacker,
+        &character.into(),
+        &skill_stats(skill),
+        effect,
+        &profile,
+        &mut monster,
+        &mut mods,
+        &mut SyscallRoll::new(roll.seed),
+    );
     monsters.set(index, &monster)?;
     monsters.set_mods(index, &mods)?;
     roll.emit_effect(
         false,
         skill.blocks.effect,
-        &result,
-        applied,
+        &out.roll,
+        out.applied,
         monster.hp,
         &monster.states,
         &mods,
@@ -373,31 +341,27 @@ fn support_ally(
     skill: &SkillRecord,
     effect: EffectAction,
 ) -> Result<()> {
-    let input = support_input(character, skill, effect, None);
-    let result = resolve_support(&input, &Balance::DEFAULT, &mut SyscallRoll::new(roll.seed));
     let mut mods = target.combat_mods();
+    let hp_max = target.hp_max;
     // `act` checked the target lives and nothing ran since; a dead one is never raised.
-    let applied = if target.core.hp == 0 {
-        CombatApplied::None
-    } else if effect == EffectAction::Heal {
-        target.core.hp = heal(target.core.hp, target.hp_max, result.amount);
-        CombatApplied::None
-    } else {
-        land_effect(
-            effect,
-            result.amount,
-            skill.blocks.aspects[0],
-            roll.pending.attacker,
-            &mut target.core.states,
-            &mut mods,
-        )
-    };
+    let out = resolve::support_ally(
+        BALANCE,
+        roll.pending.attacker,
+        &character.into(),
+        &skill_stats(skill),
+        effect,
+        &mut target.core.hp,
+        hp_max,
+        &mut target.core.states,
+        &mut mods,
+        &mut SyscallRoll::new(roll.seed),
+    );
     target.set_combat_mods(&mods);
     roll.emit_effect(
         false,
         skill.blocks.effect,
-        &result,
-        applied,
+        &out.roll,
+        out.applied,
         target.core.hp,
         &target.core.states,
         &mods,
@@ -422,23 +386,22 @@ fn monster_attack<'info>(
     let mut result = Box::<HitResult>::default();
     let slot = participation.core.slot;
     let monster = monsters.get(index)?;
-    input.attacker = monster_attacker(roll.pending.attacker, &monster, &monsters.mods(index)?)
-        .ok_or(SessionError::InvalidMonster)?;
-    input.defender = player_defender(
-        character,
-        &participation.core.states,
-        &participation.combat_mods(),
-    );
-    resolve_hit_into(
-        &input,
-        &Balance::DEFAULT,
-        &mut SyscallRoll::new(roll.seed),
+    let profile =
+        monster_profile(monster.bestiary_id, monster.level).ok_or(SessionError::InvalidMonster)?;
+    let hero_mods = participation.combat_mods();
+    let died = resolve::monster_attack(
+        BALANCE,
+        roll.pending.attacker,
+        &profile,
+        &monsters.mods(index)?,
+        &character.into(),
+        &mut participation.core.hp,
+        &mut participation.core.states,
+        &hero_mods,
+        &mut input,
         &mut result,
+        &mut SyscallRoll::new(roll.seed),
     );
-
-    let (hp, died) = take_damage(participation.core.hp, result.damage);
-    participation.core.hp = hp;
-    participation.core.states = result.states;
     if died {
         outcomes::player_killed(
             session,

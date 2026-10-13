@@ -1,76 +1,46 @@
-//! Session-local game rules: unit ids, action points, step costs, combat numbers, rewards.
+//! Session-local game rules: step costs, instruction constants, rewards, and the shared rules of
+//! `deadroll-rules` with the program's numbers ([`BALANCE`]).
 //!
 //! Monster HP, speed, initiative and tile costs come from the registry tables (copied at
-//! `open_session`). The other numbers are placeholders until balancing (docs have none yet),
-//! each behind a single function.
-use deadroll_combat::{d20, modifiers::more, DamageRange, RollSource};
-use deadroll_mapcheck::roster::{ids, p0_role, Role};
-use deadroll_types::{
-    Aspect, Cell, Class, Form, Race, Source, Tile, BP, PARTY_MAX, STATS_COUNT, TURN_ORDER_MAX,
+//! `open_session`). Every combat number lives in `deadroll_rules::BalanceConfig` (placeholders
+//! until balancing, tuned in `tools/balance`); the wrappers below keep one call per rule.
+use deadroll_combat::{DamageRange, RollSource};
+use deadroll_mapcheck::roster::{p0_role, Role};
+use deadroll_rules::{config::BalanceConfig, monster, player, units};
+use deadroll_types::{Aspect, Cell, Class, Form, Race, Source, Tile, STATS_COUNT};
+
+pub use deadroll_rules::units::{
+    cooldown_after_use, roll_initiative, tick_cooldowns, Initiative, Unit, EMPTY_UNIT,
+    MONSTER_UNIT_BASE,
 };
+pub use deadroll_rules::MonsterProfile;
 
 use crate::state::{external::BestiaryRecord, STASH_RESOURCES};
+
+/// The numbers the program plays with.
+pub const BALANCE: &BalanceConfig = &BalanceConfig::DEFAULT;
 
 /// Minimum party price: 0.01 SOL (docs/PARTY_AND_TURNS.md, section 3.1).
 pub const MIN_PRICE_LAMPORTS: u64 = 10_000_000;
 /// Max steps in one `move_unit` / `monster_move`.
 pub const MAX_PATH: usize = 16;
-/// Unused `turn_order` entry.
-pub const EMPTY_UNIT: u8 = 0xFF;
-/// `turn_order` ids `0..PARTY_MAX` are player slots, `PARTY_MAX + i` is monster `i`.
-pub const MONSTER_UNIT_BASE: u8 = PARTY_MAX as u8;
-
-/// A participant in the turn order. The id is also `ActiveState.source`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Unit {
-    Player(u8),
-    Monster(u8),
-}
-
-impl Unit {
-    pub fn from_id(id: u8) -> Option<Unit> {
-        match id {
-            EMPTY_UNIT => None,
-            id if id < MONSTER_UNIT_BASE => Some(Unit::Player(id)),
-            id => Some(Unit::Monster(id - MONSTER_UNIT_BASE)),
-        }
-    }
-
-    pub fn id(self) -> u8 {
-        match self {
-            Unit::Player(slot) => slot,
-            Unit::Monster(index) => MONSTER_UNIT_BASE + index,
-        }
-    }
-}
 
 /// Grid step: 0 = north (y - 1), 1 = east, 2 = south, 3 = west.
 pub const DIRECTIONS: u8 = 4;
 
-/// Action points per turn from speed (docs/CHARACTER.md, section 3.1: race base, class
-/// adjustment, Dexterity bonus). Items and effects join in P1.
-// TODO(balance): placeholder numbers.
+/// Action points per turn from speed (docs/CHARACTER.md, section 3.1).
 pub fn player_ap(race: Race, class: Class, dexterity: u16) -> u8 {
-    let base: u16 = match (race, class) {
-        (Race::Human, Class::Mage) => 3,
-        (Race::Human, _) => 4,
-        (Race::ForestElf, Class::Mage) => 4,
-        (Race::ForestElf, _) => 5,
-    };
-    (base + dexterity / 10).clamp(1, 12) as u8
+    player::player_ap(race, class, dexterity, &BALANCE.players)
 }
 
 /// Action points per turn for a monster: its registry bestiary speed (copied at open).
 pub fn monster_ap(speed: u8) -> u8 {
-    speed.clamp(1, 12)
+    monster::monster_ap(speed, &BALANCE.monsters)
 }
 
 /// Monster HP at spawn from its registry bestiary record (at least 1).
 pub fn monster_hp(record: &BestiaryRecord, level: u8) -> u32 {
-    record
-        .hp
-        .saturating_add(record.hp_per_level.saturating_mul(level as u32))
-        .max(1)
+    monster::monster_hp(record.hp, record.hp_per_level, level)
 }
 
 /// Action points to step onto a tile, `None` if it cannot be entered. `costs` is the registry
@@ -83,272 +53,87 @@ pub fn step_cost(tile: Tile, costs: &[u8; Tile::COUNT]) -> Option<u8> {
 }
 
 /// Initiative of a player (docs/CHARACTER.md, 3.2: Intelligence; items and effects in P1).
-// TODO(balance): placeholder scale, same order as the bestiary values.
 pub fn player_initiative(stats: &[u16; STATS_COUNT]) -> u16 {
-    stats[deadroll_types::Stat::Intelligence as usize] / 2
-}
-
-/// The turn order rolled from one VRF value (docs/PARTY_AND_TURNS.md, 6; the timeline is P1).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Initiative {
-    pub len: u8,
-    /// Turn-order ids, first to act first; `EMPTY_UNIT` after `len`.
-    pub order: [u8; TURN_ORDER_MAX],
-    pub d20: [u8; TURN_ORDER_MAX],
-    pub initiative: [u16; TURN_ORDER_MAX],
-}
-
-/// Every unit in `units` (players by slot, then monsters by index) rolls a d20 in that order
-/// (roll `i` of the seed's stream); the higher `d20 + initiative` acts first, ties go to the
-/// higher initiative, then to the lower unit id.
-pub fn roll_initiative(units: &[(u8, u16)], src: &mut impl RollSource) -> Initiative {
-    let mut out = Initiative {
-        len: units.len().min(TURN_ORDER_MAX) as u8,
-        order: [EMPTY_UNIT; TURN_ORDER_MAX],
-        d20: [0; TURN_ORDER_MAX],
-        initiative: [0; TURN_ORDER_MAX],
-    };
-    let len = out.len as usize;
-    for (i, &(unit, initiative)) in units[..len].iter().enumerate() {
-        out.order[i] = unit;
-        out.d20[i] = d20(src);
-        out.initiative[i] = initiative;
-    }
-    // Insertion sort: at most 28 units, stable, no allocation.
-    let key = |o: &Initiative, i: usize| {
-        (
-            o.d20[i] as u32 + o.initiative[i] as u32,
-            o.initiative[i],
-            u8::MAX - o.order[i],
-        )
-    };
-    for i in 1..len {
-        let mut j = i;
-        while j > 0 && key(&out, j) > key(&out, j - 1) {
-            out.order.swap(j, j - 1);
-            out.d20.swap(j, j - 1);
-            out.initiative.swap(j, j - 1);
-            j -= 1;
-        }
-    }
-    out
+    player::player_initiative(stats, &BALANCE.players)
 }
 
 // ---------------------------------------------------------------------------------------------
-// Combat (L7.4). TODO(balance): every number below. The bestiary combat fields (armor, evasion,
-// accuracy, damage) are relative levels until balancing, so the combat profile stays here.
+// Combat (L7.4). Numbers: `BALANCE`.
 
 /// `act` skill slot for the weapon's basic attack.
 pub const BASE_ATTACK: u8 = 0xFF;
 /// `monster_act` action: the monster's natural attack (the only P0 action).
 pub const NATURAL_ATTACK: u8 = 0;
 /// Action points one attack costs.
-pub const ACT_AP: u8 = 2;
+pub const ACT_AP: u8 = BALANCE.players.act_ap;
 /// Strikes reach the 8 neighbouring cells.
-pub const STRIKE_RANGE: u8 = 1;
+pub const STRIKE_RANGE: u8 = BALANCE.players.strike_range;
 /// Projectiles reach this far (Chebyshev distance). TODO(P1): line of sight.
-pub const PROJECTILE_RANGE: u8 = 6;
+pub const PROJECTILE_RANGE: u8 = BALANCE.players.projectile_range;
 /// Native state chance of a skill / basic attack (crates/combat `Skill::state_chance_bp`).
-pub const SKILL_STATE_CHANCE_BP: u32 = 2_000;
-pub const BASIC_STATE_CHANCE_BP: u32 = 1_000;
-
-/// Cooldown value stored when a skill with `cooldown` (own turns, `SkillRecord.cooldown`) is
-/// used: own turn starts until it is usable again. Each start counts it down by one, so the
-/// skill misses exactly its next `cooldown` own turns (docs/SKILL_BUILDER.md, section 8).
-pub fn cooldown_after_use(cooldown: u8) -> u8 {
-    match cooldown {
-        0 => 0,
-        c => c.saturating_add(1),
-    }
-}
-
-/// Start of the unit's own turn: every cooldown goes down by one.
-pub fn tick_cooldowns(cooldowns: &mut [u8]) {
-    for c in cooldowns {
-        *c = c.saturating_sub(1);
-    }
-}
+pub const SKILL_STATE_CHANCE_BP: u32 = BALANCE.players.skill_state_chance_bp;
+pub const BASIC_STATE_CHANCE_BP: u32 = BALANCE.players.basic_state_chance_bp;
+/// HP a heal restores per point of the class weapon's range, bp.
+pub const HEAL_WEAPON_BP: u32 = BALANCE.players.heal_weapon_bp;
 
 /// Whether `form` reaches from `from` to `to` (Chebyshev distance, never the own cell).
 pub fn in_range(form: Form, from: Cell, to: Cell) -> bool {
-    let distance = chebyshev(from, to);
-    distance >= 1 && distance <= reach(form)
+    units::in_range(form, from, to, &BALANCE.players)
 }
 
-/// Whether a heal or buff of `form` reaches an ally: the same, but allies may share a cell (the
-/// whole party stands on the entrance when it joins).
+/// Whether a heal or buff of `form` reaches an ally (allies may share a cell).
 pub fn in_ally_range(form: Form, from: Cell, to: Cell) -> bool {
-    chebyshev(from, to) <= reach(form)
-}
-
-fn chebyshev(from: Cell, to: Cell) -> u8 {
-    from.x.abs_diff(to.x).max(from.y.abs_diff(to.y))
-}
-
-fn reach(form: Form) -> u8 {
-    match form {
-        Form::Strike => STRIKE_RANGE,
-        Form::Projectile => PROJECTILE_RANGE,
-    }
+    units::in_ally_range(form, from, to, &BALANCE.players)
 }
 
 /// Power source of a class's own attacks (docs/CHARACTER.md, section 8.1).
 pub fn class_source(class: Class) -> Source {
-    match class {
-        Class::Warrior => Source::Combat,
-        Class::Mage | Class::Support => Source::Magical,
-    }
+    player::class_source(class)
 }
 
 /// Starting weapon until items exist (P0 has no equipment). Skills convert its base.
 pub fn class_weapon(class: Class) -> DamageRange {
-    match class {
-        Class::Warrior => DamageRange::new(Aspect::Blunt, 4, 8),
-        Class::Mage => DamageRange::new(Aspect::Blunt, 3, 6),
-        Class::Support => DamageRange::new(Aspect::Blunt, 2, 5),
-    }
+    player::class_weapon(class, &BALANCE.players)
 }
 
-/// Class tag increase in bp and the source it applies to (docs/CHARACTER.md, section 8.1;
-/// Support's increase is on buff power, not damage).
+/// Class tag increase in bp and the source it applies to (docs/CHARACTER.md, section 8.1).
 pub fn class_increase(class: Class) -> Option<(Source, u32)> {
-    match class {
-        Class::Warrior => Some((Source::Combat, 2_000)),
-        Class::Mage => Some((Source::Magical, 2_000)),
-        Class::Support => None,
-    }
+    player::class_increase(class, &BALANCE.players)
 }
 
-/// Class increase on the power of heals, buffs and debuffs, bp (docs/CHARACTER.md, 8.1: Support's
-/// class tag). TODO(balance): placeholder.
+/// Class increase on the power of heals, buffs and debuffs, bp (docs/CHARACTER.md, 8.1).
 pub fn support_increase(class: Class) -> u32 {
-    match class {
-        Class::Support => 2_000,
-        Class::Warrior | Class::Mage => 0,
-    }
+    player::support_increase(class, &BALANCE.players)
 }
 
-/// HP a heal restores per point of the class weapon's range, bp. TODO(balance): placeholder.
-pub const HEAL_WEAPON_BP: u32 = 20_000;
-
-/// HP range of a heal skill with `power_bp`: the class weapon's range (the damage base of every
-/// skill, SKILL_BUILDER 5.1) x `HEAL_WEAPON_BP` x power, with the support increase. At least 1.
+/// HP range of a heal skill with `power_bp` (see `deadroll_rules::player::heal_range`).
 pub fn heal_range(class: Class, power_bp: u32) -> (u32, u32) {
-    let weapon = class_weapon(class);
-    let scale = |v: u32| {
-        let v = v as u64 * HEAL_WEAPON_BP as u64 / BP as u64 * power_bp as u64 / BP as u64;
-        more(v, support_increase(class)).clamp(1, u32::MAX as u64) as u32
-    };
-    let min = scale(weapon.min);
-    (min, scale(weapon.max).max(min))
+    player::heal_range(class, power_bp, &BALANCE.players)
 }
 
 /// Race trait: flat added damage of the predisposition aspect (docs/CHARACTER.md, 6.2, 7.1).
 pub fn predisposition_added(aspect: Aspect) -> DamageRange {
-    DamageRange::new(aspect, 1, 2)
+    player::predisposition_added(aspect, &BALANCE.players)
 }
 
 /// `d20` bonus: level plus the attack stat (Strength for martial, Intelligence for magical).
 pub fn player_attack_bonus(level: u16, stats: &[u16; STATS_COUNT], source: Source) -> u32 {
-    let stat = match source {
-        Source::Combat => stats[deadroll_types::Stat::Strength as usize],
-        Source::Magical => stats[deadroll_types::Stat::Intelligence as usize],
-    };
-    level as u32 + stat as u32 / 5
+    player::player_attack_bonus(level, stats, source, &BALANCE.players)
 }
 
 /// Crit chance besides a natural 20, from Dexterity.
 pub fn player_crit_bp(stats: &[u16; STATS_COUNT]) -> u32 {
-    stats[deadroll_types::Stat::Dexterity as usize] as u32 * 20
+    player::player_crit_bp(stats, &BALANCE.players)
 }
 
 /// Defense threshold and armor of a player (warriors have high base armor, CHARACTER 8.1).
 pub fn player_defense(class: Class, stats: &[u16; STATS_COUNT]) -> (u32, u32) {
-    let defense = 10 + stats[deadroll_types::Stat::Dexterity as usize] as u32 / 5;
-    let armor = match class {
-        Class::Warrior => 30,
-        Class::Mage | Class::Support => 5,
-    };
-    (defense, armor)
+    player::player_defense(class, stats, &BALANCE.players)
 }
 
-/// One bestiary template at a level (docs/BESTIARY.md, sections 7-8).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct MonsterProfile {
-    pub weapon: DamageRange,
-    pub source: Source,
-    pub form: Form,
-    pub attack_bonus: u32,
-    pub defense: u32,
-    pub armor: u32,
-    /// Resistance (counterweight) for one aspect, `None` = no special defense.
-    pub resist: Option<(Aspect, u32)>,
-    /// Experience for killing it.
-    pub xp: u32,
-}
-
-/// P0 bestiary ids: 0 wolf, 1 goblin, 2 goblin chieftain, 3 goblin warrior, 4 goblin shaman.
+/// One P0 bestiary template at a level (`deadroll_rules::monster::p0`).
 pub fn monster_profile(bestiary_id: u8, level: u8) -> Option<MonsterProfile> {
-    let l = level as u32;
-    let strike = |aspect, min: u32, max: u32| DamageRange::new(aspect, min + l / 2, max + l);
-    let profile = match bestiary_id {
-        // Bite: martial, strike, Piercing; thick fur resists Cold.
-        ids::WOLF => MonsterProfile {
-            weapon: strike(Aspect::Piercing, 2, 4),
-            source: Source::Combat,
-            form: Form::Strike,
-            attack_bonus: 2 + l,
-            defense: 10,
-            armor: 5,
-            resist: Some((Aspect::Cold, 5_000)),
-            xp: 10 * l.max(1),
-        },
-        // Rusty blade: martial, strike, Piercing; no special defenses.
-        ids::GOBLIN => MonsterProfile {
-            weapon: strike(Aspect::Piercing, 1, 3),
-            source: Source::Combat,
-            form: Form::Strike,
-            attack_bonus: 1 + l,
-            defense: 9,
-            armor: 5,
-            resist: None,
-            xp: 6 * l.max(1),
-        },
-        // Heavy blade: martial, strike, Piercing; trophy armor resists Piercing.
-        ids::GOBLIN_CHIEFTAIN => MonsterProfile {
-            weapon: strike(Aspect::Piercing, 4, 8),
-            source: Source::Combat,
-            form: Form::Strike,
-            attack_bonus: 4 + l,
-            defense: 13,
-            armor: 40,
-            resist: Some((Aspect::Piercing, 5_000)),
-            xp: 50 * l.max(1),
-        },
-        ids::GOBLIN_WARRIOR => MonsterProfile {
-            weapon: strike(Aspect::Blunt, 2, 5),
-            source: Source::Combat,
-            form: Form::Strike,
-            attack_bonus: 3 + l,
-            defense: 11,
-            armor: 25,
-            resist: None,
-            xp: 15 * l.max(1),
-        },
-        // Support caster: a magical bolt from range.
-        ids::GOBLIN_SHAMAN => MonsterProfile {
-            weapon: strike(Aspect::Fire, 2, 4),
-            source: Source::Magical,
-            form: Form::Projectile,
-            attack_bonus: 2 + l,
-            defense: 10,
-            armor: 5,
-            resist: Some((Aspect::Fire, 5_000)),
-            xp: 15 * l.max(1),
-        },
-        _ => return None,
-    };
-    Some(profile)
+    monster::p0::monster_base(bestiary_id).map(|b| b.profile(level, &BALANCE.monsters))
 }
 
 /// Killing this monster wins the party (docs/PARTY_AND_TURNS.md, section 7.1).
@@ -384,6 +169,8 @@ pub fn boss_rewards(src: &mut impl RollSource) -> [u32; STASH_RESOURCES] {
 mod tests {
     use super::*;
     use deadroll_combat::SeededRoll;
+    use deadroll_mapcheck::roster::ids;
+    use deadroll_types::BP;
 
     #[test]
     fn unit_ids_round_trip() {

@@ -39,7 +39,7 @@ Session builds `deadroll_combat::Skill` from `blocks.aspects/aspect_count/source
 - **NFT**: owner = player, update authority = the character PDA, plugin
   `PermanentFreezeDelegate { frozen: false }` (survives transfers), uri
   `<GameConfig.uri_base>/char/<character>/v<state_version>.json`. Never deserialize a Core asset on-chain.
-- Balance numbers (stat budget, HP, XP per level) are placeholders in `src/rules.rs`.
+- Balance numbers are placeholders: creation and HP numbers come from `deadroll_rules::PlayerTuning::DEFAULT` (`crates/rules`, tuned in `tools/balance`), XP per level stays in `src/rules.rs`.
 
 ## Features
 

@@ -1,57 +1,49 @@
 //! Creation and growth rules (docs/CHARACTER.md, sections 2, 4, 5, 6.3, 7).
-//! Every number marked BALANCE is a placeholder until `tools/sim` picks the curve.
+//! Creation and HP numbers come from `deadroll_rules::PlayerTuning::DEFAULT` (shared with the
+//! session program and `tools/balance`); the rest marked BALANCE are placeholders.
 
-use deadroll_types::{Aspect, Class, Race, Stat, STATS_COUNT};
+use deadroll_rules::{player, PlayerTuning};
+use deadroll_types::{Aspect, Class, Race, STATS_COUNT};
+
+/// The numbers the program plays with.
+const TUNING: &PlayerTuning = &PlayerTuning::DEFAULT;
 
 /// Account layout version written by this program.
 pub const ACCOUNT_VERSION: u8 = 1;
 
-/// Every stat starts here before the player spends points. BALANCE.
-pub const STAT_BASE: u16 = 5;
-/// Points the player distributes at creation. BALANCE.
-pub const STAT_POINTS_START: u16 = 10;
-/// Highest value of one stat at creation. BALANCE.
-pub const STAT_MAX_START: u16 = 15;
+/// Every stat starts here before the player spends points.
+pub const STAT_BASE: u16 = TUNING.stat_base;
+/// Points the player distributes at creation.
+pub const STAT_POINTS_START: u16 = TUNING.stat_points_start;
+/// Highest value of one stat at creation.
+pub const STAT_MAX_START: u16 = TUNING.stat_max_start;
 /// Stat points per level gained. BALANCE.
 pub const STAT_POINTS_PER_LEVEL: u8 = 2;
 
-/// HP: class base + Endurance x per point + per level, indexed by `Class`. BALANCE.
-pub const CLASS_HP_BASE: [u32; Class::COUNT] = [30, 18, 22];
-pub const HP_PER_ENDURANCE: u32 = 2;
-pub const CLASS_HP_PER_LEVEL: [u32; Class::COUNT] = [6, 3, 4];
+/// HP: class base + Endurance x per point + per level, indexed by `Class`.
+pub const CLASS_HP_BASE: [u32; Class::COUNT] = TUNING.hp_base;
+pub const HP_PER_ENDURANCE: u32 = TUNING.hp_per_endurance;
+pub const CLASS_HP_PER_LEVEL: [u32; Class::COUNT] = TUNING.hp_per_level;
 
 /// Total XP needed for each level, levels 1..=4 in the first version (section 5). BALANCE.
 pub const LEVEL_XP: [u32; 4] = [0, 100, 300, 600];
 pub const LEVEL_MAX: u16 = LEVEL_XP.len() as u16;
 
 /// Race and class trait tiers start low and only grow deterministically (section 6.3).
-pub const START_TIER: u8 = 14;
+pub const START_TIER: u8 = TUNING.start_tier;
 
 /// Section 7.1: humans pick a physical aspect, forest elves an elemental one.
 pub const fn predisposition_allowed(race: Race, aspect: Aspect) -> bool {
-    match race {
-        Race::Human => matches!(aspect, Aspect::Piercing | Aspect::Blunt | Aspect::Blood),
-        Race::ForestElf => matches!(aspect, Aspect::Fire | Aspect::Cold | Aspect::Lightning),
-    }
+    player::predisposition_allowed(race, aspect)
 }
 
 /// Each stat in `STAT_BASE..=STAT_MAX_START` and exactly `STAT_POINTS_START` points spent.
 pub fn stats_valid(stats: &[u16; STATS_COUNT]) -> bool {
-    let in_range = stats
-        .iter()
-        .all(|s| (STAT_BASE..=STAT_MAX_START).contains(s));
-    let spent: u32 = stats
-        .iter()
-        .map(|s| u32::from(s.saturating_sub(STAT_BASE)))
-        .sum();
-    in_range && spent == u32::from(STAT_POINTS_START)
+    player::stats_valid(stats, TUNING)
 }
 
 pub fn hp_max(class: Class, stats: &[u16; STATS_COUNT], level: u16) -> u32 {
-    let c = class as usize;
-    CLASS_HP_BASE[c]
-        + u32::from(stats[Stat::Endurance as usize]) * HP_PER_ENDURANCE
-        + u32::from(level.saturating_sub(1)) * CLASS_HP_PER_LEVEL[c]
+    player::hp_max(class, stats, level, TUNING)
 }
 
 /// The level reached with `xp` total experience.

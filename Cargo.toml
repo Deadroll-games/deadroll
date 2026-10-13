@@ -1,5 +1,5 @@
 [workspace]
-members = ["programs/*", "crates/*", "crates/combat/wasm", "crates/render/wasm", "tools/art"]
+members = ["programs/*", "crates/*", "crates/combat/wasm", "crates/render/wasm", "tools/art", "tools/balance"]
 resolver = "2"
 
 [workspace.package]
@@ -28,6 +28,8 @@ deadroll-combat = { path = "crates/combat" }
 deadroll-skillcheck = { path = "crates/skillcheck" }
 deadroll-mapcheck = { path = "crates/mapcheck" }
 deadroll-render = { path = "crates/render" }
+deadroll-rules = { path = "crates/rules" }
+deadroll-sim = { path = "crates/sim" }
 
 deadroll-registry = { path = "programs/registry", features = ["cpi"] }
 deadroll-render-program = { path = "programs/render", features = ["cpi"] }

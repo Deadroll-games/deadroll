@@ -67,7 +67,7 @@ pub mod presets;
 pub mod rules;
 
 pub use blocks::*;
-pub use derive::{derive, fusion_id, Derived};
+pub use derive::{derive, derive_with, fusion_id, Derived, SkillTuning};
 pub use rules::{
     check_loadout, validate, validate_starting, SkillError, ACTIVE_MAX, AURA_RADIUS_MAX,
     PASSIVE_MAX, REACTIVE_MAX, STARTING_MAX,

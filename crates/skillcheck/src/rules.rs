@@ -56,6 +56,33 @@ pub enum SkillError {
     TooManyPassive,
 }
 
+impl SkillError {
+    /// A short English explanation for builder UIs.
+    pub const fn message(self) -> &'static str {
+        match self {
+            SkillError::AspectCount => "the number of aspects does not fit the purpose",
+            SkillError::RepeatedAspect => "the same aspect twice",
+            SkillError::UnusedAspectSet => "an unused aspect slot is set",
+            SkillError::ThirdAspectTarget => "a third aspect needs a single target",
+            SkillError::EffectNeedsOneAspect => "an effect needs exactly one damage aspect",
+            SkillError::EffectKind => "the effect kind does not fit the purpose",
+            SkillError::MissingEffect => "a buff or debuff needs an effect",
+            SkillError::HardControlAspect => "Stun needs Blunt, Freeze needs Cold",
+            SkillError::MissingTrigger => "a reactive skill needs a trigger",
+            SkillError::UnexpectedTrigger => "only reactive skills have a trigger",
+            SkillError::PassiveDamage => "a passive skill must be a buff or a debuff",
+            SkillError::AuraCategory => "an active skill cannot be an aura",
+            SkillError::AuraEffect => "an aura must give a buff or debuff effect",
+            SkillError::AuraRadius => "aura radius is too large",
+            SkillError::ClassSource => "the class does not allow this power source",
+            SkillError::ClassPurpose => "the class does not allow this purpose",
+            SkillError::TooManyActive => "more than 4 active skills",
+            SkillError::TooManyReactive => "more than 1 reactive skill",
+            SkillError::TooManyPassive => "more than 1 passive skill",
+        }
+    }
+}
+
 /// Builder rules for any skill (starting or cut from an uncut skill).
 pub fn validate(s: &SkillBlocks) -> Result<(), SkillError> {
     let count = s.aspect_count as usize;

@@ -28,6 +28,8 @@ nft = ["dep:mpl-core"]
 anchor-lang.workspace = true
 deadroll-types = { workspace = true, features = ["anchor"] }
 deadroll-skillcheck = { workspace = true, features = ["anchor"] }
+# Creation and HP numbers, shared with the session program and tools/balance.
+deadroll-rules.workspace = true
 # Program id only (owner of `GameConfig`).
 deadroll-registry.workspace = true
 mpl-core = { workspace = true, optional = true }

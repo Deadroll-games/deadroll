@@ -1,0 +1,25 @@
+[package]
+name = "deadroll-rules"
+description = "Deadroll game rules shared by the session program and the balance simulator: one BalanceConfig, hit inputs, turn starts, action resolution."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+default = []
+std = []
+# Serialize / Deserialize on `BalanceConfig` (tools only, never on-chain).
+serde = ["dep:serde", "std"]
+
+[dependencies]
+deadroll-types.workspace = true
+deadroll-combat.workspace = true
+deadroll-skillcheck.workspace = true
+# P0 bestiary ids and roles.
+deadroll-mapcheck.workspace = true
+serde = { version = "1", default-features = false, features = ["derive", "std"], optional = true }
+
+[dev-dependencies]
+serde_json = "1"
