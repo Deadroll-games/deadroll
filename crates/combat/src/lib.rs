@@ -1,4 +1,5 @@
-//! Deadroll combat math: dice, packets, modifiers, states, resonances. Integers only.
+//! Deadroll combat math: dice, packets, modifiers, states, resonances, buffs and debuffs.
+//! Integers only.
 //!
 //! Rules: docs/COMBAT_MATH.md and docs/DAMAGE_TYPES_AND_MIXES.md. Used by the `session`
 //! program (every attack), `tools/sim` and the website (through `crates/combat/wasm`).
@@ -19,6 +20,7 @@ pub mod packet;
 pub mod resonance;
 pub mod rng;
 pub mod states;
+pub mod support;
 
 pub use balance::Balance;
 pub use hit::{
@@ -33,3 +35,7 @@ pub use resonance::{
 };
 pub use rng::{chance, d100, d20, RollSource, ScriptedRoll, SeededRoll, VrfRoll};
 pub use states::{apply_chill, apply_state, native_state, tick_turn_start, Applied, States, Tick};
+pub use support::{
+    apply_mod, apply_to_attacker, apply_to_defender, mod_turns, speed_ap, tick_mods, ModKind,
+    TimedMod, TimedMods, MODS_MAX,
+};
