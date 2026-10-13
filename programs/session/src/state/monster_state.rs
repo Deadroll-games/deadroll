@@ -4,9 +4,16 @@ use anchor_lang::{
         allocate, assign, create_account, transfer, Allocate, Assign, CreateAccount, Transfer,
     },
 };
+use deadroll_combat::{TimedMods, MODS_MAX};
 use deadroll_types::{seeds, Monster, MonsterStateData, MONSTERS_MAX};
 
-use crate::{errors::SessionError, state::ACCOUNT_VERSION};
+use crate::{
+    errors::SessionError,
+    state::{
+        mods::{self, ModsData, TimedModData, TIMED_MOD_SIZE},
+        ACCOUNT_VERSION,
+    },
+};
 
 /// `["monsters", session]`: every monster of the party, spawned from the map layout.
 ///
@@ -24,6 +31,8 @@ pub struct MonsterState {
     /// `Participation.cooldowns`). Counted down by `start_turn`; nothing sets them in P0: the
     /// natural attack has no cooldown. TODO(post-demo): monster skills from the spawn's pool.
     pub cooldowns: [[u8; MONSTER_SKILLS_MAX]; MONSTERS_MAX],
+    /// Per monster: buffs and debuffs (`deadroll_combat::support`), like `Participation.mods`.
+    pub mods: [[TimedModData; MODS_MAX]; MONSTERS_MAX],
 }
 
 /// Cooldown slots per monster.
@@ -44,7 +53,11 @@ mod off {
     pub const COUNT: usize = MONSTERS + MONSTERS_MAX * Monster::SIZE;
     pub const BUMP: usize = COUNT + 1;
     pub const COOLDOWNS: usize = BUMP + 1;
+    pub const MODS: usize = COOLDOWNS + MONSTERS_MAX * MONSTER_SKILLS_MAX;
 }
+
+/// Bytes of one monster's `mods`.
+const MODS_LEN: usize = MODS_MAX * TIMED_MOD_SIZE;
 
 /// In-place access to a `MonsterState` account.
 pub struct Monsters<'a, 'info> {
@@ -182,6 +195,31 @@ impl<'a, 'info> Monsters<'a, 'info> {
         Ok(())
     }
 
+    /// Buffs and debuffs of monster `index`.
+    pub fn mods(&self, index: u8) -> Result<TimedMods> {
+        let start = Self::mods_slot(index)?;
+        let data = self.info.try_borrow_data()?;
+        let m = ModsData::deserialize(&mut &data[start..start + MODS_LEN])
+            .map_err(|_| error!(SessionError::InvalidMonsterState))?;
+        Ok(mods::to_combat(&m))
+    }
+
+    pub fn set_mods(&self, index: u8, m: &TimedMods) -> Result<()> {
+        let start = Self::mods_slot(index)?;
+        let mut data = self.info.try_borrow_mut_data()?;
+        mods::from_combat(m)
+            .serialize(&mut &mut data[start..start + MODS_LEN])
+            .map_err(|_| error!(SessionError::InvalidMonsterState))
+    }
+
+    fn mods_slot(index: u8) -> Result<usize> {
+        require!(
+            (index as usize) < MONSTERS_MAX,
+            SessionError::InvalidMonster
+        );
+        Ok(off::MODS + index as usize * MODS_LEN)
+    }
+
     fn cooldown_slot(index: u8) -> Result<usize> {
         require!(
             (index as usize) < MONSTERS_MAX,
@@ -217,15 +255,24 @@ mod tests {
         assert_eq!(MONSTER_STATE_DISCRIMINATOR, *MonsterState::DISCRIMINATOR);
         assert_eq!(
             MONSTER_STATE_SPACE,
-            8 + MonsterStateData::SIZE + MONSTERS_MAX * MONSTER_SKILLS_MAX
+            8 + MonsterStateData::SIZE + MONSTERS_MAX * (MONSTER_SKILLS_MAX + MODS_LEN)
         );
         assert_eq!(off::COOLDOWNS, 8 + MonsterStateData::SIZE);
+        assert_eq!(off::MODS + MONSTERS_MAX * MODS_LEN, MONSTER_STATE_SPACE);
     }
 
     #[test]
     fn reads_and_writes_in_place_like_borsh() {
         let session = Pubkey::new_unique();
         let mut account = monsters_account(session, &[monster(5, 5), monster(6, 5)]);
+        let mut slowed = TimedMods::default();
+        slowed[0] = deadroll_combat::TimedMod {
+            kind: deadroll_combat::ModKind::Slow,
+            aspect: deadroll_types::Aspect::Cold,
+            turns: 3,
+            power_bp: 4_321,
+            source: 1,
+        };
         {
             let info = account.info();
             let view = Monsters::load(&info, &session).unwrap();
@@ -241,6 +288,10 @@ mod tests {
             assert_eq!(view.cooldowns(2).unwrap(), [0; MONSTER_SKILLS_MAX]);
             view.set_cooldowns(2, &[1, 0, 3, 0]).unwrap();
             view.set_cooldowns(MONSTERS_MAX as u8 - 1, &[9; 4]).unwrap();
+            assert_eq!(view.mods(2).unwrap(), TimedMods::default());
+            view.set_mods(2, &slowed).unwrap();
+            view.set_mods(MONSTERS_MAX as u8 - 1, &slowed).unwrap();
+            assert_eq!(view.mods(2).unwrap(), slowed);
         }
         let state = MonsterState::try_deserialize(&mut &account.data[..]).unwrap();
         assert_eq!(state.core.count, 3);
@@ -256,6 +307,11 @@ mod tests {
         assert_eq!(state.cooldowns[2], [1, 0, 3, 0]);
         assert_eq!(state.cooldowns[MONSTERS_MAX - 1], [9; 4]);
         assert_eq!(state.cooldowns[0], [0; MONSTER_SKILLS_MAX]);
+        assert_eq!(mods::to_combat(&state.mods[2]), slowed);
+        assert_eq!(mods::to_combat(&state.mods[MONSTERS_MAX - 1]), slowed);
+        assert_eq!(state.mods[1], ModsData::default());
+        // The cooldowns of the last monster were not touched by its mods.
+        assert_eq!(state.cooldowns[MONSTERS_MAX - 1], [9; 4]);
     }
 
     #[test]
@@ -292,5 +348,9 @@ mod tests {
         assert!(view.set_count(MONSTERS_MAX as u8 + 1).is_err());
         assert!(view.cooldowns(MONSTERS_MAX as u8).is_err());
         assert!(view.set_cooldowns(MONSTERS_MAX as u8, &[0; 4]).is_err());
+        assert!(view.mods(MONSTERS_MAX as u8).is_err());
+        assert!(view
+            .set_mods(MONSTERS_MAX as u8, &TimedMods::default())
+            .is_err());
     }
 }

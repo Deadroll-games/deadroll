@@ -110,10 +110,7 @@ pub fn handler(ctx: Context<StartTurn>) -> Result<()> {
         }
         Unit::Monster(index) => {
             // A player's accounts on a monster's turn: the caller mistook whose turn it is.
-            require!(
-                accounts.participation.is_none(),
-                SessionError::NotYourTurn
-            );
+            require!(accounts.participation.is_none(), SessionError::NotYourTurn);
             let mut monster = monsters.get(index)?;
             let mut own = monsters.cooldowns(index)?;
             let start = turns::start_of_turn(&mut monster.states, &mut own, monster.hp);

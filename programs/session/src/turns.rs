@@ -232,10 +232,7 @@ mod tests {
 
     #[test]
     fn dot_kills_at_zero_hp_and_death_wins_over_a_skip() {
-        let mut states = with(&[
-            (StateKind::Bleeding, 3, 7, 6),
-            (StateKind::Freeze, 2, 0, 6),
-        ]);
+        let mut states = with(&[(StateKind::Bleeding, 3, 7, 6), (StateKind::Freeze, 2, 0, 6)]);
         let start = start_of_turn(&mut states, &mut [], 7);
         assert_eq!((start.hp, start.died, start.skip), (0, true, None));
         assert_eq!(start.dot_source, 6);

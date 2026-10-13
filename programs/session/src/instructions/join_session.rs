@@ -141,6 +141,7 @@ pub fn handler(ctx: Context<JoinSession>, contribution: u64, actor: Pubkey) -> R
     );
     participation.ap_seq = 0;
     participation.contribution = paid;
+    participation.hp_max = character.hp_max;
 
     let stash = &mut accounts.stash;
     stash.version = ACCOUNT_VERSION;
