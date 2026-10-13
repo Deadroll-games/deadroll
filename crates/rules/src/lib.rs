@@ -7,6 +7,8 @@
 //! mechanic added here reaches both.
 //!
 //! - Every balance number lives in [`BalanceConfig`]. Placeholders, tune in `tools/balance`.
+//! - Item numbers and class starter kits are [`config::ItemTuning`]; [`items`] holds the equipment
+//!   rules every program and the simulator share.
 //! - Content (monster stats) is data: [`monster::MonsterBase`]. The program reads the P0 table
 //!   in [`monster::p0`], the simulator reads JSON presets.
 //! - Integers only, no allocation, `no_std` without features.
@@ -14,14 +16,16 @@
 
 pub mod config;
 pub mod input;
+pub mod items;
 pub mod monster;
 pub mod player;
 pub mod resolve;
 pub mod turn;
 pub mod units;
 
-pub use config::{BalanceConfig, MonsterScaling, PlayerTuning};
+pub use config::{BalanceConfig, ItemBaseStats, ItemTuning, MonsterScaling, PlayerTuning};
 pub use input::{EffectAction, HeroStats, Side, SkillStats, SkillUse};
+pub use items::{EquipError, Equipment, ItemBonus};
 pub use monster::{MonsterBase, MonsterProfile};
 pub use resolve::{AttackOutcome, RiderOutcome};
 pub use turn::{start_of_turn, TurnStart};

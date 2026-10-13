@@ -1,4 +1,5 @@
 //! Builds `deadroll_combat` hit and effect inputs from heroes, skills and monsters. Pure.
+use deadroll_combat::DamageRange;
 use deadroll_combat::{
     apply_mod, apply_state, apply_to_attacker, apply_to_defender, mod_range, mod_turns,
     states::freeze, Applied, Attacker, Carrier, Defender, Mod, ModFilter, ModKind, Skill, States,
@@ -8,15 +9,17 @@ use deadroll_skillcheck::{
     derive_with, Category, Effect, Purpose, SkillBlocks, SkillTuning, SKILL_ASPECTS_MAX,
 };
 use deadroll_types::{
-    ActiveState, Aspect, CharacterData, Class, Form, Race, StateKind, STATES_MAX, STATS_COUNT,
+    ActiveState, Aspect, CharacterData, Class, Form, Race, Source, StateKind, STATES_MAX,
+    STATS_COUNT,
 };
 
 use crate::{
     config::BalanceConfig,
+    items::{effective_stats, item_bonus, weapon_range, Equipment},
     monster::MonsterProfile,
     player::{
-        class_increase, class_source, class_weapon, heal_range, player_attack_bonus,
-        player_crit_bp, player_defense, predisposition_added, support_increase,
+        class_increase, class_source, heal_range, hp_max, player_ap, player_attack_bonus,
+        player_crit_bp, player_defense, player_initiative, predisposition_added, support_increase,
     },
 };
 
@@ -31,6 +34,75 @@ pub struct HeroStats {
     pub predisposition: Aspect,
     /// `1..=14`, see `Tier`.
     pub predisposition_tier: u8,
+    /// What the hero wears (`crate::items`).
+    pub equipment: Equipment,
+}
+
+impl HeroStats {
+    pub fn with_equipment(self, equipment: Equipment) -> Self {
+        HeroStats { equipment, ..self }
+    }
+}
+
+/// Character numbers with the worn items (docs/CHARACTER.md, section 3: derived stats come from
+/// stats, traits and equipment).
+pub mod hero {
+    use super::*;
+
+    /// Core stats plus item stat bonuses.
+    pub fn stats(cfg: &BalanceConfig, c: &HeroStats) -> [u16; STATS_COUNT] {
+        effective_stats(&c.stats, &c.equipment, &cfg.items)
+    }
+
+    /// The damage base: the main-hand weapon, or bare hands.
+    pub fn weapon(cfg: &BalanceConfig, c: &HeroStats) -> DamageRange {
+        weapon_range(&c.equipment, &cfg.items)
+    }
+
+    /// `d20` bonus of an attack from `source`: level, the attack stat, items.
+    pub fn attack_bonus(cfg: &BalanceConfig, c: &HeroStats, source: Source) -> u32 {
+        let base = player_attack_bonus(c.level, &stats(cfg, c), source, &cfg.players);
+        base.saturating_add(item_bonus(&c.equipment, &cfg.items).attack)
+    }
+
+    pub fn crit_bp(cfg: &BalanceConfig, c: &HeroStats) -> u32 {
+        player_crit_bp(&stats(cfg, c), &cfg.players)
+    }
+
+    /// Defense threshold and armor: class and stats, plus items.
+    pub fn defense(cfg: &BalanceConfig, c: &HeroStats) -> (u32, u32) {
+        let (defense, armor) = player_defense(c.class, &stats(cfg, c), &cfg.players);
+        let items = item_bonus(&c.equipment, &cfg.items);
+        (
+            defense.saturating_add(items.defense),
+            armor.saturating_add(items.armor),
+        )
+    }
+
+    /// Action points per turn.
+    pub fn ap(cfg: &BalanceConfig, c: &HeroStats) -> u8 {
+        let dex = stats(cfg, c)[deadroll_types::Stat::Dexterity as usize];
+        player_ap(c.race, c.class, dex, &cfg.players)
+    }
+
+    pub fn initiative(cfg: &BalanceConfig, c: &HeroStats) -> u16 {
+        player_initiative(&stats(cfg, c), &cfg.players)
+    }
+
+    /// HP the items add: flat HP plus their Endurance.
+    pub fn item_hp(cfg: &BalanceConfig, c: &HeroStats) -> u32 {
+        let items = item_bonus(&c.equipment, &cfg.items);
+        let endurance = items.stats[deadroll_types::Stat::Endurance as usize];
+        items
+            .hp
+            .saturating_add(u32::from(endurance).saturating_mul(cfg.players.hp_per_endurance))
+    }
+
+    /// Maximum HP from the hero's own numbers, items included. The program adds [`item_hp`] to the
+    /// stored `CharacterData.hp_max`, which is this without items.
+    pub fn hp_max(cfg: &BalanceConfig, c: &HeroStats) -> u32 {
+        super::hp_max(c.class, &c.stats, c.level, &cfg.players).saturating_add(item_hp(cfg, c))
+    }
 }
 
 impl From<&CharacterData> for HeroStats {
@@ -42,6 +114,7 @@ impl From<&CharacterData> for HeroStats {
             stats: c.stats,
             predisposition: c.predisposition,
             predisposition_tier: c.predisposition_tier,
+            equipment: Equipment::EMPTY,
         }
     }
 }
@@ -170,9 +243,9 @@ pub fn player_attacker(
     };
     let mut attacker = Attacker {
         slot: unit,
-        attack_bonus: player_attack_bonus(c.level, &c.stats, source, t),
-        crit_chance_bp: player_crit_bp(&c.stats, t),
-        weapon: class_weapon(c.class, t),
+        attack_bonus: hero::attack_bonus(cfg, c, source),
+        crit_chance_bp: hero::crit_bp(cfg, c),
+        weapon: hero::weapon(cfg, c),
         skill: combat_skill,
         ..Attacker::default()
     };
@@ -193,7 +266,7 @@ pub fn player_defender(
     states: &[ActiveState; STATES_MAX],
     mods: &TimedMods,
 ) -> Defender {
-    let (defense, armor) = player_defense(c.class, &c.stats, &cfg.players);
+    let (defense, armor) = hero::defense(cfg, c);
     let mut defender = Defender {
         defense,
         armor,
@@ -235,20 +308,20 @@ pub fn monster_defender(p: &MonsterProfile, states: &States, mods: &TimedMods) -
     defender
 }
 
-/// Strength range of `action` cast by a `class` with a skill of `power_bp`: HP for a heal, bp for
-/// a modifier, none (`(0, 0)`) for hard control.
+/// Strength range of `action` cast by `c` with a skill of `power_bp`: HP for a heal (from the
+/// hero's weapon), bp for a modifier, none (`(0, 0)`) for hard control.
 pub fn effect_range(
     cfg: &BalanceConfig,
-    class: Class,
+    c: &HeroStats,
     power_bp: u32,
     action: EffectAction,
 ) -> (u32, u32) {
     match action {
-        EffectAction::Heal => heal_range(class, power_bp, &cfg.players),
+        EffectAction::Heal => heal_range(c.class, hero::weapon(cfg, c), power_bp, &cfg.players),
         EffectAction::Mod(kind) => mod_range(
             kind,
             power_bp,
-            support_increase(class, &cfg.players),
+            support_increase(c.class, &cfg.players),
             &cfg.support,
         ),
         EffectAction::Stun | EffectAction::Freeze => (0, 0),
@@ -264,12 +337,12 @@ pub fn support_input(
     action: EffectAction,
     defense: Option<u32>,
 ) -> SupportInput {
-    let (min, max) = effect_range(cfg, c.class, skill.power_bp, action);
+    let (min, max) = effect_range(cfg, c, skill.power_bp, action);
     SupportInput {
         hostile: defense.is_some(),
-        attack_bonus: player_attack_bonus(c.level, &c.stats, skill.blocks.source, &cfg.players),
+        attack_bonus: hero::attack_bonus(cfg, c, skill.blocks.source),
         defense: defense.unwrap_or(0),
-        crit_chance_bp: player_crit_bp(&c.stats, &cfg.players),
+        crit_chance_bp: hero::crit_bp(cfg, c),
         min,
         max,
     }

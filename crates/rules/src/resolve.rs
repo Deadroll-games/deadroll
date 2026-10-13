@@ -69,7 +69,7 @@ pub fn attack_monster(
     if let Some(skill) = skill {
         if let Some(effect) = effect_action(skill.blocks.effect) {
             if result.outcome == Outcome::Hit && monster.alive {
-                let (min, max) = effect_range(cfg, hero.class, skill.power_bp, effect);
+                let (min, max) = effect_range(cfg, hero, skill.power_bp, effect);
                 let roll = resolve_rider(
                     cfg.support.rider_chance_bp,
                     result.crit,

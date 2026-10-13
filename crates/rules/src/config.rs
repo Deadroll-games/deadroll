@@ -6,7 +6,9 @@
 
 use deadroll_combat::{Balance, SupportBalance};
 use deadroll_skillcheck::SkillTuning;
-use deadroll_types::{Class, Race};
+use deadroll_types::{Aspect, Class, EquipSlot, ItemBase, Race, STATS_COUNT};
+
+use crate::items::KIT_MAX;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -26,6 +28,8 @@ pub struct BalanceConfig {
     pub skills: SkillTuning,
     pub players: PlayerTuning,
     pub monsters: MonsterScaling,
+    /// Item bases and class starter kits (`crate::items`).
+    pub items: ItemTuning,
 }
 
 impl BalanceConfig {
@@ -35,6 +39,7 @@ impl BalanceConfig {
         skills: SkillTuning::DEFAULT,
         players: PlayerTuning::DEFAULT,
         monsters: MonsterScaling::DEFAULT,
+        items: ItemTuning::DEFAULT,
     };
 }
 
@@ -44,8 +49,8 @@ impl Default for BalanceConfig {
     }
 }
 
-/// Hero numbers (docs/CHARACTER.md, sections 2-4 and 8). P0 has no equipment, so the class
-/// weapon stands in for it.
+/// Hero numbers (docs/CHARACTER.md, sections 2-4 and 8). The weapon and item armor come from
+/// [`ItemTuning`].
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PlayerTuning {
@@ -65,13 +70,11 @@ pub struct PlayerTuning {
     /// Native state chance of a skill and of the basic attack.
     pub skill_state_chance_bp: u32,
     pub basic_state_chance_bp: u32,
-    /// Class weapon damage `[min, max]` (Blunt), by class: the damage base of every skill.
-    pub weapon: [[u32; 2]; Class::COUNT],
     /// Class tag increase on the class's own source, by class (0 = none).
     pub class_increase_bp: [u32; Class::COUNT],
     /// Class increase on heal, buff and debuff power, by class.
     pub support_increase_bp: [u32; Class::COUNT],
-    /// HP a heal restores per point of the class weapon's range, bp.
+    /// HP a heal restores per point of the weapon's range, bp.
     pub heal_weapon_bp: u32,
     /// Race trait: flat added damage `[min, max]` of the predisposition aspect.
     pub predisposition_added: [u32; 2],
@@ -82,7 +85,7 @@ pub struct PlayerTuning {
     /// Defense = base + Dexterity / div.
     pub defense_base: u32,
     pub defense_dex_div: u32,
-    /// Armor by class.
+    /// Base armor by class; worn items add theirs.
     pub armor: [u32; Class::COUNT],
     /// HP = base + Endurance x per point + (level - 1) x per level, by class.
     pub hp_base: [u32; Class::COUNT],
@@ -113,7 +116,6 @@ impl PlayerTuning {
         projectile_range: 6,
         skill_state_chance_bp: 2_000,
         basic_state_chance_bp: 1_000,
-        weapon: [[4, 8], [3, 6], [2, 5]],
         class_increase_bp: [2_000, 2_000, 0],
         support_increase_bp: [0, 0, 2_000],
         heal_weapon_bp: 20_000,
@@ -122,7 +124,8 @@ impl PlayerTuning {
         crit_per_dex_bp: 20,
         defense_base: 10,
         defense_dex_div: 5,
-        armor: [30, 5, 5],
+        // With the starter armor (10, 2, 5) the totals stay 30, 5, 5.
+        armor: [20, 3, 0],
         hp_base: [30, 18, 22],
         hp_per_endurance: 2,
         hp_per_level: [6, 3, 4],
@@ -168,6 +171,261 @@ impl MonsterScaling {
 impl Default for MonsterScaling {
     fn default() -> Self {
         Self::DEFAULT
+    }
+}
+
+/// Base numbers of one item base (docs/ITEMS_AND_CRAFT.md, section 3.1). Flat values only.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ItemBaseStats {
+    /// Where it is worn (rings fit either ring slot).
+    #[cfg_attr(feature = "serde", serde(with = "names::variant"))]
+    pub slot: EquipSlot,
+    /// Item level: the character needs `level - ItemTuning.level_gap`.
+    pub level: u8,
+    /// Weapon damage aspect.
+    #[cfg_attr(feature = "serde", serde(with = "names::variant"))]
+    pub aspect: Aspect,
+    /// Weapon damage `[min, max]`; `[0, 0]` = not a weapon. The main-hand weapon is the damage
+    /// base of every attack and skill.
+    pub damage: [u32; 2],
+    pub armor: u32,
+    /// Added to the defense threshold.
+    pub defense: u32,
+    /// Added to the `d20` attack bonus.
+    pub attack: u32,
+    /// Added to the core stats, by `Stat`.
+    #[cfg_attr(feature = "serde", serde(with = "names::by_stat"))]
+    pub stats: [u16; STATS_COUNT],
+    pub hp: u32,
+}
+
+/// Items (docs/ITEMS_AND_CRAFT.md): every base's numbers and the class starter kits.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ItemTuning {
+    /// By `ItemBase`.
+    #[cfg_attr(feature = "serde", serde(with = "names::bases"))]
+    pub bases: [ItemBaseStats; ItemBase::COUNT],
+    /// Soulbound items a new character gets, by class (ITEMS_AND_CRAFT 10).
+    #[cfg_attr(feature = "serde", serde(with = "names::kits"))]
+    pub starter_kits: [[Option<ItemBase>; KIT_MAX]; Class::COUNT],
+    /// Damage `[min, max]` (Blunt) with no weapon in the main hand.
+    pub unarmed: [u32; 2],
+    /// A character may wear items up to this many levels above their own (ITEMS_AND_CRAFT 4.2).
+    pub level_gap: u8,
+}
+
+const fn base(slot: EquipSlot, damage: [u32; 2], armor: u32) -> ItemBaseStats {
+    ItemBaseStats {
+        slot,
+        level: 1,
+        // Blunt until balancing: the starter weapons keep the numbers of the old class weapon.
+        aspect: Aspect::Blunt,
+        damage,
+        armor,
+        defense: 0,
+        attack: 0,
+        stats: [0; STATS_COUNT],
+        hp: 0,
+    }
+}
+
+impl ItemTuning {
+    //                                                   Sword  Staff  Wand  Leather  Robe  Light
+    pub const DEFAULT: ItemTuning = ItemTuning {
+        bases: [
+            base(EquipSlot::MainHand, [4, 8], 0),
+            base(EquipSlot::MainHand, [3, 6], 0),
+            base(EquipSlot::MainHand, [2, 5], 0),
+            base(EquipSlot::Body, [0, 0], 10),
+            base(EquipSlot::Body, [0, 0], 2),
+            base(EquipSlot::Body, [0, 0], 5),
+        ],
+        starter_kits: [
+            [
+                Some(ItemBase::Sword),
+                Some(ItemBase::LeatherArmor),
+                None,
+                None,
+            ],
+            [Some(ItemBase::Staff), Some(ItemBase::Robe), None, None],
+            [
+                Some(ItemBase::Wand),
+                Some(ItemBase::LightLeatherArmor),
+                None,
+                None,
+            ],
+        ],
+        unarmed: [1, 2],
+        level_gap: 4,
+    };
+
+    pub fn base(&self, base: ItemBase) -> &ItemBaseStats {
+        &self.bases[base as usize]
+    }
+}
+
+impl Default for ItemTuning {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
+/// Enums by variant name in JSON (the name is the `Debug` text, the list is the enum's `ALL`).
+#[cfg(feature = "serde")]
+pub mod names {
+    use std::{collections::BTreeMap, fmt::Debug, format, string::String, vec::Vec};
+
+    use deadroll_types::{Aspect, Class, EquipSlot, ItemBase, Stat, STATS_COUNT};
+    use serde::{de::Error as _, ser::SerializeMap, Deserialize, Deserializer, Serializer};
+
+    use super::{ItemBaseStats, KIT_MAX};
+
+    pub trait Variant: Copy + Debug + PartialEq + 'static {
+        fn all() -> &'static [Self];
+
+        fn name(self) -> String {
+            format!("{self:?}")
+        }
+
+        fn parse(text: &str) -> Option<Self> {
+            Self::all().iter().copied().find(|v| v.name() == text)
+        }
+
+        fn index(self) -> usize {
+            Self::all().iter().position(|v| *v == self).unwrap_or(0)
+        }
+    }
+
+    macro_rules! variant {
+        ($($ty:ty),*) => {$(
+            impl Variant for $ty {
+                fn all() -> &'static [Self] {
+                    <$ty>::ALL
+                }
+            }
+        )*};
+    }
+    variant!(Aspect, Class, EquipSlot, ItemBase, Stat);
+
+    fn parse<'de, E: Variant, D: Deserializer<'de>>(text: &str) -> Result<E, D::Error> {
+        E::parse(text).ok_or_else(|| {
+            let names: Vec<String> = E::all().iter().map(|v| v.name()).collect();
+            D::Error::custom(format!(
+                "unknown `{text}`, expected one of: {}",
+                names.join(", ")
+            ))
+        })
+    }
+
+    fn ser_keyed<E: Variant, T: serde::Serialize, S: Serializer>(
+        v: &[T],
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
+        let mut map = s.serialize_map(Some(v.len()))?;
+        for (e, t) in E::all().iter().zip(v) {
+            map.serialize_entry(&e.name(), t)?;
+        }
+        map.end()
+    }
+
+    fn de_keyed<'de, E: Variant, T, const N: usize, D>(d: D) -> Result<[T; N], D::Error>
+    where
+        T: Deserialize<'de> + Default + Copy,
+        D: Deserializer<'de>,
+    {
+        let mut out = [T::default(); N];
+        for (key, value) in BTreeMap::<String, T>::deserialize(d)? {
+            let e: E = parse::<E, D>(&key)?;
+            if let Some(slot) = out.get_mut(e.index()) {
+                *slot = value;
+            }
+        }
+        Ok(out)
+    }
+
+    /// One variant as its name.
+    pub mod variant {
+        use super::*;
+
+        pub fn serialize<E: Variant, S: Serializer>(v: &E, s: S) -> Result<S::Ok, S::Error> {
+            s.serialize_str(&v.name())
+        }
+
+        pub fn deserialize<'de, E: Variant, D: Deserializer<'de>>(d: D) -> Result<E, D::Error> {
+            parse::<E, D>(&String::deserialize(d)?)
+        }
+    }
+
+    /// `[u16; STATS_COUNT]` keyed by `Stat`.
+    pub mod by_stat {
+        use super::*;
+
+        pub fn serialize<S: Serializer>(v: &[u16; STATS_COUNT], s: S) -> Result<S::Ok, S::Error> {
+            ser_keyed::<Stat, _, _>(v, s)
+        }
+
+        pub fn deserialize<'de, D: Deserializer<'de>>(
+            d: D,
+        ) -> Result<[u16; STATS_COUNT], D::Error> {
+            de_keyed::<Stat, _, STATS_COUNT, _>(d)
+        }
+    }
+
+    /// Item bases keyed by `ItemBase`.
+    pub mod bases {
+        use super::*;
+
+        pub fn serialize<S: Serializer>(
+            v: &[ItemBaseStats; ItemBase::COUNT],
+            s: S,
+        ) -> Result<S::Ok, S::Error> {
+            ser_keyed::<ItemBase, _, _>(v, s)
+        }
+
+        pub fn deserialize<'de, D: Deserializer<'de>>(
+            d: D,
+        ) -> Result<[ItemBaseStats; ItemBase::COUNT], D::Error> {
+            de_keyed::<ItemBase, _, { ItemBase::COUNT }, _>(d)
+        }
+    }
+
+    /// Starter kits keyed by `Class`, each `KIT_MAX` base names or `null` (fixed length, so a
+    /// config file laid over the defaults replaces a kit entry by entry).
+    pub mod kits {
+        use super::*;
+
+        type Kits = [[Option<ItemBase>; KIT_MAX]; Class::COUNT];
+
+        pub fn serialize<S: Serializer>(v: &Kits, s: S) -> Result<S::Ok, S::Error> {
+            let mut map = s.serialize_map(Some(v.len()))?;
+            for (class, kit) in Class::ALL.iter().zip(v) {
+                let names: Vec<Option<String>> = kit.iter().map(|b| b.map(|b| b.name())).collect();
+                map.serialize_entry(&class.name(), &names)?;
+            }
+            map.end()
+        }
+
+        pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Kits, D::Error> {
+            let mut out = [[None; KIT_MAX]; Class::COUNT];
+            for (key, list) in BTreeMap::<String, Vec<Option<String>>>::deserialize(d)? {
+                let class: Class = parse::<Class, D>(&key)?;
+                if list.len() > KIT_MAX {
+                    return Err(D::Error::custom(format!(
+                        "{key}: at most {KIT_MAX} starter items"
+                    )));
+                }
+                let kit = &mut out[class as usize];
+                for (slot, name) in kit.iter_mut().zip(&list) {
+                    *slot = match name {
+                        Some(name) => Some(parse::<ItemBase, D>(name)?),
+                        None => None,
+                    };
+                }
+            }
+            Ok(out)
+        }
     }
 }
 

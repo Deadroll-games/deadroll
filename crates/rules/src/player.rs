@@ -25,12 +25,6 @@ pub fn class_source(class: Class) -> Source {
     }
 }
 
-/// Starting weapon until items exist (P0 has no equipment). Skills convert its base.
-pub fn class_weapon(class: Class, t: &PlayerTuning) -> DamageRange {
-    let [min, max] = t.weapon[class as usize];
-    DamageRange::new(Aspect::Blunt, min, max)
-}
-
 /// Class tag increase in bp and the source it applies to (CHARACTER 8.1); `None` when the class
 /// has none (Support's increase is on buff power, not damage).
 pub fn class_increase(class: Class, t: &PlayerTuning) -> Option<(Source, u32)> {
@@ -45,10 +39,14 @@ pub fn support_increase(class: Class, t: &PlayerTuning) -> u32 {
     t.support_increase_bp[class as usize]
 }
 
-/// HP range of a heal skill with `power_bp`: the class weapon's range (the damage base of every
-/// skill, SKILL_BUILDER 5.1) x `heal_weapon_bp` x power, with the support increase. At least 1.
-pub fn heal_range(class: Class, power_bp: u32, t: &PlayerTuning) -> (u32, u32) {
-    let weapon = class_weapon(class, t);
+/// HP range of a heal skill with `power_bp`: the `weapon` range (the damage base of every skill,
+/// SKILL_BUILDER 5.1) x `heal_weapon_bp` x power, with the support increase. At least 1.
+pub fn heal_range(
+    class: Class,
+    weapon: DamageRange,
+    power_bp: u32,
+    t: &PlayerTuning,
+) -> (u32, u32) {
     let scale = |v: u32| {
         let v = v as u64 * t.heal_weapon_bp as u64 / BP as u64 * power_bp as u64 / BP as u64;
         more(v, support_increase(class, t)).clamp(1, u32::MAX as u64) as u32
@@ -82,7 +80,8 @@ pub fn player_crit_bp(stats: &[u16; STATS_COUNT], t: &PlayerTuning) -> u32 {
     (stats[Stat::Dexterity as usize] as u32).saturating_mul(t.crit_per_dex_bp)
 }
 
-/// Defense threshold and armor of a player (warriors have high base armor, CHARACTER 8.1).
+/// Defense threshold and base armor of a player before items (warriors have high base armor,
+/// CHARACTER 8.1).
 pub fn player_defense(class: Class, stats: &[u16; STATS_COUNT], t: &PlayerTuning) -> (u32, u32) {
     let defense =
         t.defense_base + stats[Stat::Dexterity as usize] as u32 / t.defense_dex_div.max(1);
