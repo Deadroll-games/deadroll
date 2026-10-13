@@ -6,7 +6,7 @@ use crate::{
     combat_input::{player_form, skill_use, target_side, Side, SkillUse},
     errors::SessionError,
     events::{ActionRequested, SkillUsed},
-    rules::{cooldown_after_use, in_range, Unit, ACT_AP, BASE_ATTACK},
+    rules::{cooldown_after_use, in_ally_range, in_range, Unit, ACT_AP, BASE_ATTACK},
     state::{
         external::read_skill, GameSession, MonsterState, Monsters, Participation, PendingAction,
     },
@@ -143,7 +143,7 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
                 x: monster.x,
                 y: monster.y,
             };
-            (Unit::Monster(target), Some(to), Pubkey::default())
+            (Unit::Monster(target), Some((to, false)), Pubkey::default())
         }
         Side::Ally if target == slot => {
             // A self-cast resolves on the caster's own participation: no second account.
@@ -170,14 +170,17 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
                 x: ally.core.x,
                 y: ally.core.y,
             };
-            (Unit::Player(target), Some(to), ally.key())
+            (Unit::Player(target), Some((to, true)), ally.key())
         }
     };
-    if let Some(to) = to {
-        require!(
-            in_range(player_form(skill.as_ref()), from, to),
-            SessionError::OutOfRange
-        );
+    if let Some((to, ally)) = to {
+        let form = player_form(skill.as_ref());
+        let reaches = if ally {
+            in_ally_range(form, from, to)
+        } else {
+            in_range(form, from, to)
+        };
+        require!(reaches, SessionError::OutOfRange);
     }
 
     participation.refresh_ap(session.turn_seq);

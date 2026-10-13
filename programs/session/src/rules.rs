@@ -171,14 +171,25 @@ pub fn tick_cooldowns(cooldowns: &mut [u8]) {
 
 /// Whether `form` reaches from `from` to `to` (Chebyshev distance, never the own cell).
 pub fn in_range(form: Form, from: Cell, to: Cell) -> bool {
-    let dx = from.x.abs_diff(to.x);
-    let dy = from.y.abs_diff(to.y);
-    let distance = dx.max(dy);
-    let reach = match form {
+    let distance = chebyshev(from, to);
+    distance >= 1 && distance <= reach(form)
+}
+
+/// Whether a heal or buff of `form` reaches an ally: the same, but allies may share a cell (the
+/// whole party stands on the entrance when it joins).
+pub fn in_ally_range(form: Form, from: Cell, to: Cell) -> bool {
+    chebyshev(from, to) <= reach(form)
+}
+
+fn chebyshev(from: Cell, to: Cell) -> u8 {
+    from.x.abs_diff(to.x).max(from.y.abs_diff(to.y))
+}
+
+fn reach(form: Form) -> u8 {
+    match form {
         Form::Strike => STRIKE_RANGE,
         Form::Projectile => PROJECTILE_RANGE,
-    };
-    distance >= 1 && distance <= reach
+    }
 }
 
 /// Power source of a class's own attacks (docs/CHARACTER.md, section 8.1).
@@ -500,6 +511,12 @@ mod tests {
         assert!(in_range(Form::Projectile, at, c(11, 0)));
         assert!(!in_range(Form::Projectile, at, c(12, 5)));
         assert!(!in_range(Form::Projectile, at, at));
+        // Allies: the own cell counts, the reach is the same.
+        assert!(in_ally_range(Form::Strike, at, at));
+        assert!(in_ally_range(Form::Strike, at, c(6, 4)));
+        assert!(!in_ally_range(Form::Strike, at, c(7, 5)));
+        assert!(in_ally_range(Form::Projectile, at, c(11, 0)));
+        assert!(!in_ally_range(Form::Projectile, at, c(5, 12)));
     }
 
     #[test]
