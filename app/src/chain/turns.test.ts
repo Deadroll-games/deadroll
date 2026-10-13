@@ -1,0 +1,65 @@
+import { describe, expect, it } from "vitest";
+import { getAddressDecoder, type Address } from "@solana/kit";
+import type { GameSessionAcc, Party, PartyPlayer } from "./game";
+import { errorName } from "./send";
+import { startTurnFor, turnActed, turnStarted } from "./turns";
+
+const A = (n: number) => getAddressDecoder().decode(new Uint8Array(32).fill(n)) as Address;
+const DM = A(1);
+const [ALICE, BOB] = [A(2), A(3)];
+
+/** Two players (slots 0, 1) and a monster (unit 4); turn order 0, 4, 1; `turn` is the index in it. */
+function party(turn: number, over: Partial<GameSessionAcc> = {}, core: Partial<GameSessionAcc["core"]> = {}): Party {
+  const session = {
+    core: { status: { active: {} }, dm: DM, turnOrder: Uint8Array.of(0, 4, 1), turnIndex: turn, pendingVrf: false, ...core },
+    turnOrderLen: 3,
+    turnSeq: 7,
+    startedSeq: 6,
+    actedSeq: 6,
+    dmActor: A(9),
+    ...over,
+  } as unknown as GameSessionAcc;
+  const player = (slot: number, owner: Address) =>
+    ({ slot, character: A(20 + slot), participation: A(30 + slot), part: { player: owner, core: { actor: A(40 + slot) } } }) as unknown as PartyPlayer;
+  return { address: A(5), session, monsters: [], players: [player(0, ALICE), player(1, BOB)], monsterCooldowns: [], escrow: null, map: null, tiles: null };
+}
+
+describe("turn state", () => {
+  it("started and acted compare their seq with turnSeq", () => {
+    const p = party(0, { startedSeq: 7, actedSeq: 6 });
+    expect([turnStarted(p.session), turnActed(p.session)]).toEqual([true, false]);
+    p.session.actedSeq = 7;
+    expect(turnActed(p.session)).toBe(true);
+  });
+});
+
+describe("startTurnFor", () => {
+  it("the owner of the next player sends it, with that player's accounts", () => {
+    const p = party(0);
+    expect(startTurnFor(p, ALICE)).toMatchObject({ unit: 0, turnSeq: 7, player: { participation: A(30), character: A(20) } });
+    expect(startTurnFor(p, BOB)).toBeNull();
+    expect(startTurnFor(p, DM)).toBeNull();
+    expect(startTurnFor(party(2), BOB)?.unit).toBe(1);
+  });
+
+  it("the DM sends it for a monster, without player accounts", () => {
+    expect(startTurnFor(party(1), DM)).toEqual({ unit: 4, turnSeq: 7, player: null });
+    expect(startTurnFor(party(1), ALICE)).toBeNull();
+  });
+
+  it("nothing once started, while a roll is pending, outside an active party or without a wallet", () => {
+    expect(startTurnFor(party(0, { startedSeq: 7 }), ALICE)).toBeNull();
+    expect(startTurnFor(party(0, {}, { pendingVrf: true }), ALICE)).toBeNull();
+    expect(startTurnFor(party(0, {}, { status: { victory: {} } } as never), ALICE)).toBeNull();
+    expect(startTurnFor(party(0, { turnOrderLen: 0 }), ALICE)).toBeNull();
+    expect(startTurnFor(party(0), null)).toBeNull();
+  });
+});
+
+describe("errorName", () => {
+  it("reads the Anchor error name of an explainFailure text", () => {
+    expect(errorName("TurnNotStarted: The turn has not started: call start_turn first")).toBe("TurnNotStarted");
+    expect(errorName("transaction failed: {}")).toBeNull();
+    expect(errorName("not confirmed: 5x")).toBeNull();
+  });
+});

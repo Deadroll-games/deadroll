@@ -116,6 +116,11 @@ const PROGRAM_CODERS: Record<string, keyof typeof coders> = {
   [PROGRAMS.map]: "map",
 };
 
+/** The Anchor error name at the start of an `explainFailure` text ("AlreadyActed: ..."), or null. */
+export function errorName(message: string): string | null {
+  return /^([A-Z]\w*):/.exec(message)?.[1] ?? null;
+}
+
 /** The failing program's Anchor error name from logs (or the failing instruction), or the error message. */
 export function explainFailure(e: unknown, logs: string[], instructions: readonly Instruction[] = []): string {
   for (const line of [...logs].reverse()) {
