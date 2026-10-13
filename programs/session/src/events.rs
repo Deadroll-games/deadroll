@@ -1,7 +1,9 @@
-//! Events (CONTRACTS.md, section 7). `PlayerReady`, `InitiativeRolled`, `PlayerDied`,
-//! `FleeVoted`, `RewardsClaimed` and `EscrowClaimed` are session-local.
+//! Events (CONTRACTS.md, section 7). `PlayerReady`, `InitiativeRolled`, `TurnTicked`,
+//! `TurnSkipped`, `SkillUsed`, `PlayerDied`, `FleeVoted`, `RewardsClaimed` and `EscrowClaimed`
+//! are session-local.
 use anchor_lang::prelude::*;
-use deadroll_types::{SessionStatus, TURN_ORDER_MAX};
+use deadroll_character::state::SKILLS_MAX;
+use deadroll_types::{ActiveState, SessionStatus, StateKind, STATES_MAX, TURN_ORDER_MAX};
 
 use crate::hit_event::HitResultData;
 
@@ -40,6 +42,41 @@ pub struct TurnStarted {
     pub turn_seq: u32,
 }
 
+/// The start of a unit's turn (`start_turn`), one per turn: over-time damage, hard control,
+/// durations and cooldowns counted down (docs/COMBAT_MATH.md, 7.5; SKILL_BUILDER.md, 8).
+#[event]
+pub struct TurnTicked {
+    pub session: Pubkey,
+    /// Turn-order id.
+    pub unit: u8,
+    pub turn_seq: u32,
+    /// Burning + Bleeding damage dealt now.
+    pub dot_damage: u32,
+    /// HP after it.
+    pub hp: u32,
+    /// The over-time damage killed the unit (`MonsterKilled` / `PlayerDied` came first).
+    pub died: bool,
+    /// Freeze or Stun: the turn is skipped (`TurnSkipped`, then the next `TurnStarted`).
+    pub skipped: bool,
+    /// `deadroll_combat::states::state_bit` of every state that ended now.
+    pub expired: u8,
+    /// The unit's states after the tick.
+    pub states: [ActiveState; STATES_MAX],
+    /// Cooldowns after the tick, own turn starts until usable: a player's by `SkillSet` slot,
+    /// a monster's in the first `MONSTER_SKILLS_MAX` entries.
+    pub cooldowns: [u8; SKILLS_MAX],
+}
+
+/// Hard control took the unit's turn: `start_turn` ended it on its own.
+#[event]
+pub struct TurnSkipped {
+    pub session: Pubkey,
+    pub unit: u8,
+    pub turn_seq: u32,
+    /// Freeze or Stun.
+    pub state: StateKind,
+}
+
 #[event]
 pub struct Moved {
     pub session: Pubkey,
@@ -60,6 +97,19 @@ pub struct ActionRequested {
     /// Player skill slot (`0xFF` = weapon), or the monster action.
     pub skill_slot: u8,
     pub action_points: u8,
+}
+
+/// A player used an active skill (`act`); it is now on cooldown.
+#[event]
+pub struct SkillUsed {
+    pub session: Pubkey,
+    /// Turn-order id of the player.
+    pub unit: u8,
+    pub skill_slot: u8,
+    /// The skill's cooldown: it misses this many of the player's next own turns.
+    pub cooldown: u8,
+    /// `Participation.cooldowns` after the use: own turn starts until each slot is usable.
+    pub cooldowns: [u8; SKILLS_MAX],
 }
 
 /// One resolved attack, in the shape the website reads (app/src/chain/types.ts). `result` is

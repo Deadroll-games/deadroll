@@ -59,6 +59,7 @@ pub fn handler(ctx: Context<MoveUnit>, steps: [u8; MAX_PATH], len: u8) -> Result
         session.current_unit() == Some(unit),
         SessionError::NotYourTurn
     );
+    require!(session.turn_started(), SessionError::TurnNotStarted);
     require!(
         session.player_alive(participation.core.slot) && participation.core.hp > 0,
         SessionError::UnitDead

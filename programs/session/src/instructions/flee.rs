@@ -58,6 +58,7 @@ pub fn handler(ctx: Context<Flee>) -> Result<()> {
         session.current_unit() == Some(Unit::Player(slot)),
         SessionError::NotYourTurn
     );
+    require!(session.turn_started(), SessionError::TurnNotStarted);
     require!(session.player_alive(slot), SessionError::UnitDead);
 
     let session_key = session.key();

@@ -482,6 +482,8 @@ const TILE = { Floor: 0, Wall: 1, Entrance: 4, Exit: 5 };
 const ENTRANCE = { x: 1, y: 1 };
 const EXIT = { x: 14, y: 14 };
 const [WOLF, GOBLIN, CHIEFTAIN, GOBLIN_WARRIOR, SHAMAN] = [0, 1, 2, 3, 4];
+/** Monster index of the chieftain in `DEMO_SPAWNS`. */
+const CHIEFTAIN_INDEX = 4;
 const DEMO_SPAWNS = [
   { id: WOLF, x: 6, y: 2, pack: 1 },
   { id: WOLF, x: 7, y: 3, pack: 1 },
@@ -623,6 +625,27 @@ interface Player {
   bag: PublicKey;
 }
 
+/** A state of `kind` (IDL name, e.g. "freeze") is on. */
+const hasState = (states: any[], kind: string) => states.some((x) => x.turns > 0 && x.kind[kind] !== undefined);
+/** Burning + Bleeding damage the next turn start deals. */
+const dotOf = (states: any[]) =>
+  states
+    .filter((x) => x.turns > 0 && (x.kind.burning !== undefined || x.kind.bleeding !== undefined))
+    .reduce((sum, x) => sum + x.power, 0);
+const eventsNamed = (events: { name: string; data: any }[], name: string) =>
+  events.filter((x) => x.name.toLowerCase() === name.toLowerCase()).map((x) => x.data);
+
+const cheb = (a: any, b: any) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
+/** A living player slot monster `m` can strike from where it stands (shamans shoot, range 6). */
+function targetInRange(s: any, m: any): number | undefined {
+  const range = m.bestiaryId === SHAMAN ? 6 : 1;
+  for (let slot = 0; slot < s.core.playerCount; slot++) {
+    const d = cheb(m, s.playerPos[slot]);
+    if (s.aliveMask & (1 << slot) && d >= 1 && d <= range) return slot;
+  }
+  return undefined;
+}
+
 /** One party on a fresh demo map, with helpers for every session instruction. */
 class Party {
   dm!: Keypair;
@@ -702,6 +725,96 @@ class Party {
     for (let i = 0; i < this.players.length; i++) await this.ready(i, this.players[i].wallet, true);
     await this.start(this.dm);
     await this.rollInitiative();
+    await this.begin();
+  }
+  /** `start_turn` with player `who`'s accounts (`null`: a monster's turn); sent by the provider
+   * wallet, which is not in the party (anyone may start a turn). */
+  startTurn(who: number | null, over: Record<string, PublicKey | null> = {}) {
+    const pl = who === null ? null : this.players[who];
+    return program.methods
+      .startTurn()
+      .accountsStrict({
+        session: this.acc.session,
+        monsters: this.acc.monsters,
+        participation: pl?.participation ?? null,
+        character: pl?.character ?? null,
+        sessionAuthority,
+        config,
+        characterProgram: CHARACTER,
+        ...over,
+      })
+      .rpc({ commitment: "confirmed" });
+  }
+  /** `start_turn` for whoever's turn it is. */
+  async begin(): Promise<string> {
+    const s = await this.state();
+    const unit = s.core.turnOrder[s.core.turnIndex];
+    return this.startTurn(unit < MONSTER_BASE ? unit : null);
+  }
+  /** Starts every turn and ends every unit's turn but `unit`'s, until `unit`'s turn has started. */
+  async skipTo(unit: number, max = 40) {
+    for (let i = 0; i < max; i++) {
+      const s = await this.state();
+      const cur = s.core.turnOrder[s.core.turnIndex];
+      if (s.startedSeq !== s.turnSeq) await this.begin();
+      else if (cur === unit) return s;
+      else if (cur < MONSTER_BASE) await this.endTurn(this.players[cur].wallet, cur);
+      else await this.endTurn(this.dm, null);
+    }
+    assert.fail(`unit ${unit} never got a turn`);
+  }
+  /**
+   * The callback for player `who`'s pending action with the first VRF value whose simulated
+   * `HitResolved` result passes `pred` (the test picks the dice; nothing is sent while trying).
+   */
+  async consumeWhere(who: number, pred: (result: any) => boolean, tries = 600) {
+    return this.consumeBest(who, (r) => (pred(r) ? 1 : -Infinity), tries, 1);
+  }
+  /** Same, sending the best-scoring of `tries` simulated values (at once when one reaches
+   * `enough`); `null` when every value scored `-Infinity` (nothing sent). */
+  async consumeBest(who: number, score: (result: any) => number, tries = 200, enough = Infinity) {
+    const pl = this.players[who];
+    const a = {
+      session: this.acc.session,
+      monsters: this.acc.monsters,
+      participation: pl.participation,
+      character: pl.character,
+      skillSet: pl.skillSet,
+    };
+    // Simulated through the connection (no signature check): Anchor's `simulate()` re-signs with
+    // the extra signer after the wallet and loses the fee payer's signature.
+    const { blockhash } = await connection.getLatestBlockhash();
+    let best: { seed: Buffer; score: number } | null = null;
+    for (let i = 0; i < tries; i++) {
+      const seed = randomBytes(32);
+      const tx = await consume(MOCK_VRF, a, seed).transaction();
+      tx.feePayer = provider.wallet.publicKey;
+      tx.recentBlockhash = blockhash;
+      tx.partialSign(MOCK_VRF);
+      const sim = await connection.simulateTransaction(tx);
+      const hit = sim.value.err
+        ? undefined
+        : [...parser.parseLogs(sim.value.logs ?? [])].find((x) => x.name.toLowerCase() === "hitresolved");
+      const value = hit ? score(hit.data.result) : -Infinity;
+      if (value > (best?.score ?? -Infinity)) best = { seed, score: value };
+      if (value >= enough) break;
+    }
+    if (!best) return null;
+    const sig = await this.consume(who, best.seed);
+    return { sig, result: (await eventOf(sig, "hitResolved")).result, score: best.score };
+  }
+  /** Starts and ends turns until `unit`'s turn is next to start (it is not started). */
+  async untilStartOf(unit: number, max = 40) {
+    for (let i = 0; i < max; i++) {
+      const s = await this.state();
+      const cur = s.core.turnOrder[s.core.turnIndex];
+      if (s.startedSeq !== s.turnSeq) {
+        if (cur === unit) return s;
+        await this.begin();
+      } else if (cur < MONSTER_BASE) await this.endTurn(this.players[cur].wallet, cur);
+      else await this.endTurn(this.dm, null);
+    }
+    assert.fail(`unit ${unit} never got a turn`);
   }
   move(who: number, signer: Keypair, steps: number[], token: PublicKey | null = null) {
     const [padded, len] = path(steps);
@@ -860,11 +973,12 @@ class Party {
     playerSeed: Buffer;
     monsterSeed: (slot: number) => Buffer;
     huntSlot?: number;
+    /** Players go for this monster while it lives (else the nearest). */
+    focus?: number;
     passive?: boolean;
     steps?: number;
-    until?: (s: any) => boolean;
+    until?: (s: any, monsters: any[]) => boolean;
   }) {
-    const cheb = (a: any, b: any) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
     const dirs = [
       [N, 0, -1],
       [E, 1, 0],
@@ -873,19 +987,30 @@ class Party {
     ];
     for (let step = 0; step < (opts.steps ?? 400); step++) {
       const s = await this.state();
-      if (!s.core.status.active || opts.until?.(s)) return s;
-      const unit = s.core.turnOrder[s.core.turnIndex];
+      if (s.core.status.active && s.startedSeq !== s.turnSeq) {
+        await this.begin();
+        continue;
+      }
       const all = (await this.monsters()).core;
       const ms = all.monsters.slice(0, all.count);
+      if (!s.core.status.active || opts.until?.(s, ms)) return s;
+      const unit = s.core.turnOrder[s.core.turnIndex];
+      // One attack or active skill per turn: after it, the unit ends its turn.
+      const acted = s.actedSeq === s.turnSeq;
       if (unit < MONSTER_BASE) {
         const pl = await this.part(unit);
         const ap = pl.apSeq === s.turnSeq ? pl.core.actionPoints : pl.maxAp;
         const living = ms.map((m: any, i: number) => ({ ...m, i })).filter((m: any) => m.alive);
-        const target = living.sort((a: any, b: any) => cheb(pl.core, a) - cheb(pl.core, b))[0];
-        if (opts.passive || !target || ap < 1) {
+        const target =
+          living.find((m: any) => m.i === opts.focus) ??
+          living.sort((a: any, b: any) => cheb(pl.core, a) - cheb(pl.core, b))[0];
+        // The ranged skill when it is off cooldown, else the weapon (a strike) from next to the target.
+        const ranged = RANGED_SLOT[this.players[unit].kind];
+        const [slot, reach] = pl.cooldowns[ranged] === 0 ? [ranged, 6] : [BASE_ATTACK, 1];
+        if (opts.passive || !target || ap < 1 || acted) {
           await this.endTurn(this.players[unit].wallet, unit);
-        } else if (cheb(pl.core, target) <= 6 && cheb(pl.core, target) >= 1 && ap >= 2) {
-          await this.act(unit, this.players[unit].wallet, RANGED_SLOT[this.players[unit].kind], target.i);
+        } else if (cheb(pl.core, target) <= reach && cheb(pl.core, target) >= 1 && ap >= 2) {
+          await this.act(unit, this.players[unit].wallet, slot, target.i);
           await this.consume(unit, opts.playerSeed);
         } else if (!(await this.stepToward(unit, pl.core, target, dirs, cheb))) {
           await this.endTurn(this.players[unit].wallet, unit);
@@ -897,7 +1022,9 @@ class Party {
         const slot = opts.huntSlot !== undefined && alive.includes(opts.huntSlot) ? opts.huntSlot : alive[0];
         const pos = s.playerPos[slot];
         const range = m.bestiaryId === SHAMAN ? 6 : 1;
-        if (cheb(m, pos) <= range && m.actionPoints >= 2) {
+        if (acted) {
+          await this.endTurn(this.dm, null);
+        } else if (cheb(m, pos) <= range && m.actionPoints >= 2) {
           await this.monsterAct(this.dm, mi, slot);
           await this.consume(slot, opts.monsterSeed(slot));
         } else if (m.actionPoints >= 1 && (await this.stepToward(null, m, pos, dirs, cheb, mi))) {
@@ -910,10 +1037,12 @@ class Party {
     return this.state();
   }
 
-  private async stepToward(who: number | null, from: any, to: any, dirs: number[][], cheb: any, monster?: number) {
+  async stepToward(who: number | null, from: any, to: any, dirs: number[][], cheb: any, monster?: number) {
+    // Grid steps lower the Manhattan distance; a diagonal approach never lowers Chebyshev.
+    const manhattan = (a: any, b: any) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
     const options = dirs
       .map(([d, dx, dy]) => ({ d, cell: { x: from.x + dx, y: from.y + dy } }))
-      .filter((o) => cheb(o.cell, to) < cheb(from, to))
+      .filter((o) => manhattan(o.cell, to) < manhattan(from, to))
       .sort((a, b) => cheb(a.cell, to) - cheb(b.cell, to));
     for (const o of options) {
       try {
@@ -1008,6 +1137,38 @@ describe("deadroll_session: lobby, auth and movement on the demo map", { skip: S
     await rejects(party.consume(0, seed), "NoRollPending");
   });
 
+  it("start_turn: every turn starts first, sent by anyone with the current unit's accounts", async () => {
+    const [p0, p1] = party.players;
+    // Nothing else runs on a turn that has not started (its over-time damage cannot be dodged).
+    await rejects(party.move(0, p0.wallet, [S]), "TurnNotStarted");
+    await rejects(party.act(0, p0.wallet, BASE_ATTACK, 0), "TurnNotStarted");
+    await rejects(party.endTurn(p0.wallet, 0), "TurnNotStarted");
+    await rejects(party.flee(0, p0.wallet), "TurnNotStarted");
+    await rejects(party.startTurn(null), "ParticipationMissing");
+    await rejects(party.startTurn(1), "NotYourTurn");
+    await rejects(party.startTurn(0, { character: p1.character }), "InvalidCharacter");
+    await rejects(party.startTurn(0, { character: null }), "InvalidCharacter");
+    await rejects(party.startTurn(0, { sessionAuthority: stranger.publicKey }), "ConstraintAddress");
+    await rejects(party.startTurn(0, { config: stranger.publicKey }), "ConstraintAddress");
+    await rejects(party.startTurn(0, { characterProgram: MAP }), "ConstraintAddress");
+    // The provider wallet sends it: not in the party, and that is fine.
+    const sig = await party.startTurn(0);
+    const ev = await eventOf(sig, "turnTicked");
+    assert.deepEqual(
+      [ev.unit, ev.turnSeq, ev.dotDamage, ev.died, ev.skipped, ev.expired],
+      [0, 1, 0, false, false, 0],
+    );
+    const p = await party.part(0);
+    assert.equal(ev.hp, p.core.hp);
+    assert.ok(ev.cooldowns.every((c: number) => c === 0));
+    assert.deepEqual(ev.states, p.core.states);
+    const s = await party.state();
+    assert.equal(s.startedSeq, s.turnSeq);
+    // Action points are granted at the start.
+    assert.deepEqual([p.apSeq, p.core.actionPoints], [s.turnSeq, p.maxAp]);
+    await rejects(party.startTurn(0), "TurnAlreadyStarted");
+  });
+
   it("auth: main wallet or bound session key with a live token from that wallet", async () => {
     const [p0, p1] = party.players;
     await rejects(party.move(0, stranger, [S]), "Unauthorized");
@@ -1066,6 +1227,7 @@ describe("deadroll_session: combat, death, victory and payouts", { skip: SKIP_PA
     await rejects(party.endTurn(p0.wallet, 0), "RollPending");
     await rejects(party.act(0, p0.wallet, RANGED_SLOT.warrior, 0), "RollPending");
     await rejects(party.flee(0, p0.wallet), "RollPending");
+    await rejects(party.startTurn(0), "RollPending");
 
     const impostor = await funded(1);
     await rejects(party.consume(0, CRIT, impostor), "ConstraintAddress");
@@ -1092,29 +1254,69 @@ describe("deadroll_session: combat, death, victory and payouts", { skip: SKIP_PA
     await rejects(party.consume(0, CRIT), "NoRollPending");
   });
 
-  it("a miss deals nothing", async () => {
+  it("one attack or active skill per turn; moving spends the AP left", async () => {
     const p0 = party.players[0];
-    const before = (await party.monsters()).core.monsters[0];
-    if (!before.alive) return;
-    await party.act(0, p0.wallet, RANGED_SLOT.warrior, 0);
-    const sig = await party.consume(0, MISS);
+    await rejects(party.act(0, p0.wallet, RANGED_SLOT.warrior, 0), "AlreadyActed");
+    await rejects(party.act(0, p0.wallet, BASE_ATTACK, 0), "AlreadyActed");
+    await rejects(party.act(0, p0.wallet, 0, 0), "AlreadyActed");
+    await party.move(0, p0.wallet, [S]);
+    const p = await party.part(0);
+    assert.deepEqual([p.core.x, p.core.y, p.core.actionPoints], [1, 2, p.maxAp - 3]);
+    assert.equal((await party.state()).actedSeq, (await party.state()).turnSeq);
+    await party.endTurn(p0.wallet, 0);
+  });
+
+  it("a miss deals nothing; the next unit may act again", async () => {
+    const p1 = party.players[1];
+    await party.begin();
+    // Wolf 0 (distance 5) may have died of the crit; wolf 1 is at distance 6.
+    const ms = (await party.monsters()).core.monsters;
+    const wolf = [0, 1].find((i) => ms[i].alive)!;
+    await party.act(1, p1.wallet, RANGED_SLOT.mage, wolf); // Frost Bolt
+    const sig = await party.consume(1, MISS);
     const hit = await eventOf(sig, "hitResolved");
     assert.ok(hit.result.outcome.miss);
     assert.deepEqual([hit.result.d20, hit.result.damage], [1, 0]);
-    assert.equal((await party.monsters()).core.monsters[0].hp, before.hp);
-    await rejects(party.act(0, p0.wallet, RANGED_SLOT.warrior, 0), "NotEnoughActionPoints");
+    assert.equal((await party.monsters()).core.monsters[wolf].hp, ms[wolf].hp);
+    await rejects(party.act(1, p1.wallet, BASE_ATTACK, wolf), "AlreadyActed");
   });
 
   it("monster_act: DM on that monster's turn, target in range", async () => {
     const [p0, p1] = party.players;
-    await party.endTurn(p0.wallet, 0);
     await rejects(party.monsterAct(party.dm, 0, 0), "NotYourTurn");
     await party.endTurn(p1.wallet, 1);
     const s = await party.state();
     const wolfTurn = s.core.turnOrder[s.core.turnIndex] - MONSTER_BASE;
+    // A monster's turn starts first too (no participation needed).
+    await rejects(party.monsterMove(party.dm, wolfTurn, [S]), "TurnNotStarted");
+    await rejects(party.monsterAct(party.dm, wolfTurn, 0), "TurnNotStarted");
+    await rejects(party.endTurn(party.dm, null), "TurnNotStarted");
+    await rejects(party.startTurn(0), "NotYourTurn");
+    const ev = await eventOf(await party.startTurn(null), "turnTicked");
+    assert.deepEqual([ev.unit, ev.skipped], [MONSTER_BASE + wolfTurn, false]);
     await rejects(party.monsterAct(p0.wallet, wolfTurn, 0), "Unauthorized");
     await rejects(party.monsterAct(party.dm, wolfTurn, 0, null, 7), "InvalidAction");
     await rejects(party.monsterAct(party.dm, wolfTurn, 0), "OutOfRange");
+  });
+
+  it("a monster attacks once per turn too", async () => {
+    const s = await party.play({
+      playerSeed: MISS,
+      monsterSeed: () => MISS,
+      passive: true,
+      until: (st, ms) => {
+        const unit = st.core.turnOrder[st.core.turnIndex];
+        if (unit < MONSTER_BASE || st.actedSeq === st.turnSeq) return false;
+        const m = ms[unit - MONSTER_BASE];
+        return m.actionPoints >= 2 && targetInRange(st, m) !== undefined;
+      },
+    });
+    const mi = s.core.turnOrder[s.core.turnIndex] - MONSTER_BASE;
+    const slot = targetInRange(s, (await party.monsters()).core.monsters[mi])!;
+    await party.monsterAct(party.dm, mi, slot);
+    await party.consume(slot, MISS);
+    await rejects(party.monsterAct(party.dm, mi, slot), "AlreadyActed");
+    await party.endTurn(party.dm, null);
   });
 
   it("monsters kill the mage: tombstone through character.mark_dead", async () => {
@@ -1131,7 +1333,7 @@ describe("deadroll_session: combat, death, victory and payouts", { skip: SKIP_PA
   it("killing the goblin chieftain wins the party", async () => {
     await rejects(party.claimRewards(0), "NotFinished");
     await rejects(party.claimEscrow(party.dm), "NotFinished");
-    const s = await party.play({ playerSeed: CRIT, monsterSeed: () => MISS, steps: 2000 });
+    const s = await party.play({ playerSeed: CRIT, monsterSeed: () => MISS, focus: CHIEFTAIN_INDEX, steps: 2000 });
     assert.ok(s.core.status.victory, "boss killed");
     assert.ok(s.xpPool > 0);
     assert.deepEqual(Buffer.from(s.victorySeed), Buffer.from(s.core.lastSeed));
@@ -1182,15 +1384,23 @@ describe("deadroll_session: flee and wipe", { skip: SKIP_PARTY }, () => {
     await party.flee(0, p0.wallet); // spends the turn
     let s = await party.state();
     assert.deepEqual([s.fleeMask, s.core.turnIndex], [0b01, 1]);
+    await party.begin(); // not an action: the intent stays
+    assert.equal((await party.state()).fleeMask, 0b01);
     await party.move(1, p1.wallet, [S]); // another action: intents reset
     assert.equal((await party.state()).fleeMask, 0);
     await party.endTurn(p1.wallet, 1);
-    for (let i = 0; i < DEMO_SPAWNS.length; i++) await party.endTurn(party.dm, null);
+    for (let i = 0; i < DEMO_SPAWNS.length; i++) {
+      await party.begin();
+      await party.endTurn(party.dm, null);
+    }
+    await party.begin();
     await party.flee(0, p0.wallet);
+    await party.begin();
     await party.flee(1, p1.wallet);
     s = await party.state();
     assert.ok(s.core.status.fled);
     await rejects(party.flee(0, p0.wallet), "NotActive");
+    await rejects(party.startTurn(0), "NotActive");
 
     const ev = await eventOf(await party.claimRewards(0), "rewardsClaimed");
     assert.equal(ev.xp, 0);
@@ -1207,5 +1417,202 @@ describe("deadroll_session: flee and wipe", { skip: SKIP_PARTY }, () => {
     await party.claimRewards(0);
     assert.ok((await party.character(0)).core.inSession !== null);
     await party.claimEscrow(party.dm);
+  });
+});
+
+describe("deadroll_session: turn start, cooldowns and over-time damage", { skip: SKIP_PARTY }, () => {
+  const DIRS = [
+    [N, 0, -1],
+    [E, 1, 0],
+    [S, 0, 1],
+    [W, -1, 0],
+  ];
+  /** `deadroll_combat::states::state_bit(StateKind::Freeze)`. */
+  const FREEZE_BIT = 1 << 2;
+  const [FROST_BOLT, FROST_BURN, ICE_PRISON] = [0, 1, 2];
+  const MAGE = 1;
+  const WOLF0 = 0;
+  /** Dice that leave the next turn start's over-time damage lethal score this; else the lower
+   * the HP left the better, with a DoT on first; a kill by the hit itself is refused. */
+  const LETHAL_DOT = 1e9;
+  const dotKillScore = (hp: number) => (r: any) => {
+    const left = hp - r.damage;
+    if (left <= 0) return -Infinity;
+    const dot = dotOf(r.states);
+    if (dot >= left) return LETHAL_DOT;
+    return dot > 0 ? 1e6 - left : -left;
+  };
+
+  it("cooldowns: SkillUsed; a skill misses exactly its next own turns, other slots and the weapon never", async () => {
+    const party = await Party.create(["warrior", "mage"]);
+    await party.startAll();
+    const p0 = party.players[0];
+    const javelin = RANGED_SLOT.warrior;
+    const sig = await party.act(0, p0.wallet, javelin, WOLF0); // cooldown 1
+    const used = await eventOf(sig, "skillUsed");
+    assert.deepEqual([used.unit, used.skillSlot, used.cooldown], [0, javelin, 1]);
+    assert.equal(used.cooldowns[javelin], 2);
+    assert.equal(used.cooldowns.filter((c: number) => c > 0).length, 1);
+    await party.consume(0, MISS);
+    assert.equal((await party.part(0)).cooldowns[javelin], 2);
+
+    // Next own turn: counted down to 1, blocked; the other slots and the weapon are not.
+    await party.untilStartOf(0);
+    let tick = await eventOf(await party.begin(), "turnTicked");
+    assert.equal(tick.cooldowns[javelin], 1);
+    await rejects(party.act(0, p0.wallet, javelin, WOLF0), "SkillOnCooldown");
+    await rejects(party.act(0, p0.wallet, 0, WOLF0), "OutOfRange"); // Piercing Thrust: a strike
+    await rejects(party.act(0, p0.wallet, BASE_ATTACK, WOLF0), "OutOfRange");
+
+    // The turn after: usable again.
+    await party.untilStartOf(0);
+    tick = await eventOf(await party.begin(), "turnTicked");
+    assert.equal(tick.cooldowns[javelin], 0);
+    await party.act(0, p0.wallet, javelin, WOLF0);
+    await party.consume(0, MISS);
+  });
+
+  describe("hard control and over-time damage on a monster", () => {
+    let party: Party;
+    before(async () => {
+      party = await Party.create(["warrior", "mage"]);
+      await party.startAll();
+      await party.endTurn(party.players[0].wallet, 0);
+      await party.begin();
+    });
+
+    it("Freeze skips the wolf's turn on its own; its Burning ticks at the start; durations run out", async () => {
+      const p1 = party.players[MAGE];
+      let wolf = (await party.monsters()).core.monsters[WOLF0];
+      await party.act(MAGE, p1.wallet, FROST_BOLT, WOLF0);
+      const chilled = await party.consumeWhere(MAGE, (r) => r.damage < wolf.hp && hasState(r.states, "chill"));
+      assert.ok(chilled, "no VRF value chills the wolf");
+
+      await party.untilStartOf(MAGE);
+      await party.begin();
+      wolf = (await party.monsters()).core.monsters[WOLF0];
+      assert.ok(hasState(wolf.states, "chill"), "Chill lasts 3 of the wolf's turns");
+      await rejects(party.act(MAGE, p1.wallet, FROST_BOLT, WOLF0), "SkillOnCooldown");
+      await party.act(MAGE, p1.wallet, FROST_BURN, WOLF0); // Cold + Fire
+      const frozen = await party.consumeWhere(
+        MAGE,
+        (r) =>
+          hasState(r.states, "freeze") && hasState(r.states, "burning") && wolf.hp - r.damage > dotOf(r.states),
+        1500,
+      );
+      assert.ok(frozen, "no VRF value freezes and burns the wolf");
+      const hp = (await party.monsters()).core.monsters[WOLF0].hp;
+      const burn = dotOf(frozen.result.states);
+
+      await party.untilStartOf(MONSTER_BASE + WOLF0);
+      const evs = await eventsOf(await party.begin());
+      const [tick] = eventsNamed(evs, "turnTicked");
+      assert.deepEqual(
+        [tick.unit, tick.skipped, tick.died, tick.dotDamage, tick.hp],
+        [MONSTER_BASE + WOLF0, true, false, burn, hp - burn],
+      );
+      assert.ok(tick.expired & FREEZE_BIT, "Freeze lasts one turn");
+      assert.ok(!hasState(tick.states, "freeze") && hasState(tick.states, "burning"));
+      const [skip] = eventsNamed(evs, "turnSkipped");
+      assert.ok(skip.state.freeze !== undefined);
+      assert.deepEqual([skip.unit, skip.turnSeq], [MONSTER_BASE + WOLF0, tick.turnSeq]);
+      // The turn ended on its own: the next unit's turn began and waits for its own start.
+      const [next] = eventsNamed(evs, "turnStarted");
+      assert.ok(next && next.unit !== MONSTER_BASE + WOLF0);
+      assert.equal(next.turnSeq, tick.turnSeq + 1);
+      const s = await party.state();
+      assert.equal(s.core.turnOrder[s.core.turnIndex], next.unit);
+      assert.notEqual(s.startedSeq, s.turnSeq);
+      const after = (await party.monsters()).core.monsters[WOLF0];
+      assert.deepEqual([after.hp, after.alive], [hp - burn, true]);
+      await rejects(party.monsterAct(party.dm, WOLF0, 0), "NotYourTurn");
+    });
+
+    it("over-time damage kills a monster like a hit: MonsterKilled, XP to the pool, the turn moves on", async () => {
+      const p1 = party.players[MAGE];
+      for (let round = 0; round < 20; round++) {
+        await party.untilStartOf(MAGE);
+        await party.begin();
+        const p = await party.part(MAGE);
+        const wolf = (await party.monsters()).core.monsters[WOLF0];
+        assert.ok(wolf.alive);
+        const slot = [FROST_BURN, FROST_BOLT, ICE_PRISON].find((i) => p.cooldowns[i] === 0);
+        if (slot === undefined) continue;
+        await party.act(MAGE, p1.wallet, slot, WOLF0);
+        const sent = await party.consumeBest(MAGE, dotKillScore(wolf.hp), 300, LETHAL_DOT);
+        assert.ok(sent, "every VRF value kills the wolf outright");
+        if (sent.score < LETHAL_DOT) continue;
+
+        const left = wolf.hp - sent.result.damage;
+        await party.untilStartOf(MONSTER_BASE + WOLF0);
+        const xp = (await party.state()).xpPool;
+        const evs = await eventsOf(await party.begin());
+        const [tick] = eventsNamed(evs, "turnTicked");
+        assert.deepEqual([tick.died, tick.skipped, tick.hp], [true, false, 0]);
+        assert.ok(tick.dotDamage >= left);
+        const [killed] = eventsNamed(evs, "monsterKilled");
+        assert.deepEqual([killed.monster, killed.by, killed.boss], [WOLF0, MAGE, false]);
+        assert.ok(killed.xp > 0);
+        assert.equal((await party.state()).xpPool, xp + killed.xp);
+        assert.equal(eventsNamed(evs, "turnStarted").length, 1, "the dead wolf's turn ended");
+        const s = await party.state();
+        assert.ok(s.core.status.active);
+        assert.notEqual(s.core.turnOrder[s.core.turnIndex], MONSTER_BASE + WOLF0);
+        assert.ok(!(await party.monsters()).core.monsters[WOLF0].alive);
+        return;
+      }
+      assert.fail("no lethal over-time damage in 20 rounds");
+    });
+  });
+
+  it("over-time damage kills a player like a hit: PlayerDied, tombstone, the turn moves on", async () => {
+    const party = await Party.create(["warrior", "mage"]);
+    await party.startAll();
+    const SHAMAN_INDEX = DEMO_SPAWNS.findIndex((x) => x.id === SHAMAN);
+    const shamanUnit = MONSTER_BASE + SHAMAN_INDEX;
+    for (let step = 0; step < 800; step++) {
+      const s = await party.state();
+      assert.ok(s.core.status.active);
+      const cur = s.core.turnOrder[s.core.turnIndex];
+      if (s.startedSeq !== s.turnSeq) {
+        const hp = cur === MAGE ? (await party.part(MAGE)).core.hp : 0;
+        const evs = await eventsOf(await party.begin());
+        const [tick] = eventsNamed(evs, "turnTicked");
+        if (cur !== MAGE || !tick.died) continue;
+        assert.deepEqual([tick.unit, tick.hp, tick.skipped], [MAGE, 0, false]);
+        assert.ok(tick.dotDamage >= hp);
+        const [died] = eventsNamed(evs, "playerDied");
+        assert.deepEqual([died.slot, died.by], [MAGE, shamanUnit]);
+        assert.ok(died.character.equals(party.players[MAGE].character));
+        const after = await party.state();
+        assert.equal(after.aliveMask & (1 << MAGE), 0);
+        assert.ok(after.core.status.active, "the warrior still lives");
+        assert.notEqual(after.core.turnOrder[after.core.turnIndex], MAGE);
+        assert.ok(!(await party.character(MAGE)).core.alive, "tombstone through character.mark_dead");
+        return;
+      }
+      if (cur < MONSTER_BASE) {
+        await party.endTurn(party.players[cur].wallet, cur);
+        continue;
+      }
+      if (cur !== shamanUnit || s.actedSeq === s.turnSeq) {
+        await party.endTurn(party.dm, null);
+        continue;
+      }
+      const shaman = (await party.monsters()).core.monsters[SHAMAN_INDEX];
+      const pos = s.playerPos[MAGE];
+      if (cheb(shaman, pos) > 6 || shaman.actionPoints < 2) {
+        const moved =
+          cheb(shaman, pos) > 6 &&
+          shaman.actionPoints >= 1 &&
+          (await party.stepToward(null, shaman, pos, DIRS, cheb, SHAMAN_INDEX));
+        if (!moved) await party.endTurn(party.dm, null);
+        continue;
+      }
+      await party.monsterAct(party.dm, SHAMAN_INDEX, MAGE);
+      const hp = (await party.part(MAGE)).core.hp;
+      assert.ok(await party.consumeBest(MAGE, dotKillScore(hp), 200, LETHAL_DOT), "every VRF value kills the mage");
+    }
+    assert.fail("the mage never died of over-time damage");
   });
 });

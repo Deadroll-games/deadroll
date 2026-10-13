@@ -5,8 +5,8 @@ use crate::{
     auth,
     combat_input::{player_form, skill_use, SkillUse},
     errors::SessionError,
-    events::ActionRequested,
-    rules::{in_range, Unit, ACT_AP, BASE_ATTACK},
+    events::{ActionRequested, SkillUsed},
+    rules::{cooldown_after_use, in_range, Unit, ACT_AP, BASE_ATTACK},
     state::{
         external::read_skill, GameSession, MonsterState, Monsters, Participation, PendingAction,
     },
@@ -80,10 +80,13 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
         session.current_unit() == Some(Unit::Player(slot)),
         SessionError::NotYourTurn
     );
+    require!(session.turn_started(), SessionError::TurnNotStarted);
     require!(
         session.player_alive(slot) && participation.core.hp > 0,
         SessionError::UnitDead
     );
+    // One attack or active skill per turn; movement spends what AP are left (PARTY_AND_TURNS 5.1).
+    require!(!session.acted(), SessionError::AlreadyActed);
 
     let monsters = Monsters::load(accounts.monsters.as_ref(), &session.key())?;
     require!(target < monsters.count()?, SessionError::InvalidTarget);
@@ -101,6 +104,11 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
         require!(
             skill_use(&skill) == SkillUse::Ok,
             SessionError::InvalidSkill
+        );
+        // `read_skill` checked `skill_slot < SKILLS_MAX`. The weapon has no cooldown.
+        require!(
+            participation.cooldowns[skill_slot as usize] == 0,
+            SessionError::SkillOnCooldown
         );
         Some(skill)
     };
@@ -135,6 +143,10 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
         participation: participation.key(),
     };
     session.core.pending_vrf = true;
+    session.acted_seq = session.turn_seq;
+    if let Some(skill) = &skill {
+        participation.cooldowns[skill_slot as usize] = cooldown_after_use(skill.cooldown);
+    }
 
     let session_key = session.key();
     vrf::request(
@@ -156,6 +168,15 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
         },
     )?;
 
+    if let Some(skill) = &skill {
+        emit!(SkillUsed {
+            session: session_key,
+            unit: attacker,
+            skill_slot,
+            cooldown: skill.cooldown,
+            cooldowns: participation.cooldowns,
+        });
+    }
     emit!(ActionRequested {
         session: session_key,
         action: session.core.action_counter,

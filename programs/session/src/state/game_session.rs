@@ -82,6 +82,12 @@ pub struct GameSession {
     pub player_initiative: [u16; PARTY_MAX],
     /// Step cost in action points per `Tile`, 0 = cannot be entered (registry `Tileset`).
     pub tile_cost: [u8; Tile::COUNT],
+    /// `turn_seq` in which the current unit used its one attack or active skill
+    /// (docs/PARTY_AND_TURNS.md, 5.1). Only the current unit acts, so one field serves all.
+    pub acted_seq: u32,
+    /// `turn_seq` whose start ran (`start_turn`): states ticked, cooldowns counted down. Every
+    /// other turn instruction waits for it.
+    pub started_seq: u32,
 }
 
 impl GameSession {
@@ -101,8 +107,47 @@ impl GameSession {
         slot < self.core.player_count && self.alive_mask & (1 << slot) != 0
     }
 
+    /// `start_turn` ran for the current turn.
+    pub fn turn_started(&self) -> bool {
+        self.started_seq == self.turn_seq
+    }
+
+    /// The current unit already used its attack or active skill this turn.
+    pub fn acted(&self) -> bool {
+        self.acted_seq == self.turn_seq
+    }
+
     /// Bits for every joined slot.
     pub fn full_mask(&self) -> u8 {
         ((1u16 << self.core.player_count) - 1) as u8
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::state::test_support::session;
+    use deadroll_types::Cell;
+
+    #[test]
+    fn one_action_per_turn() {
+        let mut s = session(&[Cell { x: 0, y: 0 }]);
+        s.turn_seq = 3;
+        assert!(!s.acted());
+        s.acted_seq = s.turn_seq;
+        assert!(s.acted());
+        // The next turn (any unit) may act again.
+        s.turn_seq += 1;
+        assert!(!s.acted());
+    }
+
+    #[test]
+    fn every_turn_needs_its_start() {
+        let mut s = session(&[Cell { x: 0, y: 0 }]);
+        s.turn_seq = 1;
+        assert!(!s.turn_started());
+        s.started_seq = 1;
+        assert!(s.turn_started());
+        s.turn_seq = 2;
+        assert!(!s.turn_started());
     }
 }

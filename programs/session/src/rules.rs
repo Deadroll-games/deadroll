@@ -152,6 +152,23 @@ pub const PROJECTILE_RANGE: u8 = 6;
 pub const SKILL_STATE_CHANCE_BP: u32 = 2_000;
 pub const BASIC_STATE_CHANCE_BP: u32 = 1_000;
 
+/// Cooldown value stored when a skill with `cooldown` (own turns, `SkillRecord.cooldown`) is
+/// used: own turn starts until it is usable again. Each start counts it down by one, so the
+/// skill misses exactly its next `cooldown` own turns (docs/SKILL_BUILDER.md, section 8).
+pub fn cooldown_after_use(cooldown: u8) -> u8 {
+    match cooldown {
+        0 => 0,
+        c => c.saturating_add(1),
+    }
+}
+
+/// Start of the unit's own turn: every cooldown goes down by one.
+pub fn tick_cooldowns(cooldowns: &mut [u8]) {
+    for c in cooldowns {
+        *c = c.saturating_sub(1);
+    }
+}
+
 /// Whether `form` reaches from `from` to `to` (Chebyshev distance, never the own cell).
 pub fn in_range(form: Form, from: Cell, to: Cell) -> bool {
     let dx = from.x.abs_diff(to.x);
@@ -424,6 +441,28 @@ mod tests {
         }
         let none = roll_initiative(&[], &mut SeededRoll::new(1));
         assert_eq!(none.len, 0);
+    }
+
+    #[test]
+    fn cooldown_blocks_exactly_its_own_turns() {
+        for cooldown in 0..=3u8 {
+            // Used on turn 0; turns 1.. start with a tick.
+            let mut left = [cooldown_after_use(cooldown)];
+            let mut blocked = 0;
+            for _turn in 1..=10 {
+                tick_cooldowns(&mut left);
+                if left[0] > 0 {
+                    blocked += 1;
+                } else {
+                    break;
+                }
+            }
+            assert_eq!(blocked, cooldown, "cooldown {cooldown}");
+        }
+        assert_eq!(cooldown_after_use(u8::MAX), u8::MAX);
+        let mut many = [0, 1, 2, 255];
+        tick_cooldowns(&mut many);
+        assert_eq!(many, [0, 0, 1, 254]);
     }
 
     #[test]

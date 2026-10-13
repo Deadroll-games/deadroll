@@ -1,12 +1,14 @@
-//! Turn changes: the first turn after the initiative roll, the advance shared by `end_turn` and
-//! `flee`, and the escape rule.
+//! Turn changes: the first turn after the initiative roll, the advance shared by `end_turn`,
+//! `flee` and `start_turn`, the start of a turn, and the escape rule.
 use anchor_lang::prelude::*;
-use deadroll_types::TURN_ORDER_MAX;
+use deadroll_combat::states::{has, tick_turn_start, States};
+use deadroll_types::{StateKind, TURN_ORDER_MAX};
 
 use crate::{
+    combat_input::take_damage,
     errors::SessionError,
     events::{InitiativeRolled, TurnStarted},
-    rules::{monster_ap, roll_initiative, Unit},
+    rules::{monster_ap, roll_initiative, tick_cooldowns, Unit, EMPTY_UNIT},
     state::{GameSession, Monsters},
     vrf::SyscallRoll,
 };
@@ -117,6 +119,47 @@ pub fn begin(
     Ok(())
 }
 
+/// What the start of a unit's own turn did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TurnStart {
+    /// Burning + Bleeding damage dealt now.
+    pub dot_damage: u32,
+    /// HP after it.
+    pub hp: u32,
+    /// The over-time damage killed the unit.
+    pub died: bool,
+    /// Hard control that skips this turn (Freeze before Stun); `None` when the unit died.
+    pub skip: Option<StateKind>,
+    /// `state_bit`s of the states that ended now.
+    pub expired: u8,
+    /// Unit that applied the strongest over-time state (the killer on a death), `EMPTY_UNIT` if none.
+    pub dot_source: u8,
+}
+
+/// The start of a unit's own turn (docs/COMBAT_MATH.md, 7.5; SKILL_BUILDER.md, 8): over-time
+/// damage, hard control, every state duration and every cooldown down by one.
+pub fn start_of_turn(states: &mut States, cooldowns: &mut [u8], hp: u32) -> TurnStart {
+    let dot_source = states
+        .iter()
+        .filter(|s| s.turns > 0 && matches!(s.kind, StateKind::Burning | StateKind::Bleeding))
+        .max_by_key(|s| s.power)
+        .map_or(EMPTY_UNIT, |s| s.source);
+    let hard = [StateKind::Freeze, StateKind::Stun]
+        .into_iter()
+        .find(|&kind| has(states, kind));
+    let tick = tick_turn_start(states);
+    tick_cooldowns(cooldowns);
+    let (hp, died) = take_damage(hp, tick.dot_damage);
+    TurnStart {
+        dot_damage: tick.dot_damage,
+        hp,
+        died,
+        skip: if died { None } else { hard },
+        expired: tick.expired,
+        dot_source,
+    }
+}
+
 /// The party flees when every living player has the escape intent (docs/PARTY_AND_TURNS.md,
 /// section 7.3: the dead do not vote, unanimity is the check).
 pub fn everyone_flees(flee_mask: u8, alive_mask: u8) -> bool {
@@ -126,6 +169,106 @@ pub fn everyone_flees(flee_mask: u8, alive_mask: u8) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use deadroll_combat::states::state_bit;
+    use deadroll_types::{ActiveState, STATES_MAX};
+
+    fn with(states: &[(StateKind, u8, u32, u8)]) -> States {
+        let mut out = [ActiveState::default(); STATES_MAX];
+        for (i, &(kind, turns, power, source)) in states.iter().enumerate() {
+            out[i] = ActiveState {
+                kind,
+                turns,
+                power,
+                source,
+            };
+        }
+        out
+    }
+
+    #[test]
+    fn quiet_turn_counts_cooldowns_only() {
+        let mut states = with(&[]);
+        let mut cooldowns = [0, 1, 3];
+        let start = start_of_turn(&mut states, &mut cooldowns, 10);
+        assert_eq!(
+            start,
+            TurnStart {
+                dot_damage: 0,
+                hp: 10,
+                died: false,
+                skip: None,
+                expired: 0,
+                dot_source: EMPTY_UNIT,
+            }
+        );
+        assert_eq!(cooldowns, [0, 0, 2]);
+    }
+
+    #[test]
+    fn burning_and_bleeding_tick_and_expire() {
+        let mut states = with(&[
+            (StateKind::Burning, 2, 3, 4),
+            (StateKind::Bleeding, 1, 5, 5),
+            (StateKind::Chill, 1, 2_000, 4),
+        ]);
+        let start = start_of_turn(&mut states, &mut [], 20);
+        assert_eq!((start.dot_damage, start.hp, start.died), (8, 12, false));
+        // The strongest over-time state names its source.
+        assert_eq!(start.dot_source, 5);
+        assert_eq!(start.skip, None);
+        assert_eq!(
+            start.expired,
+            state_bit(StateKind::Bleeding) | state_bit(StateKind::Chill)
+        );
+        assert_eq!((states[0].kind, states[0].turns), (StateKind::Burning, 1));
+        assert!(states[1].is_empty() && states[2].is_empty());
+
+        let next = start_of_turn(&mut states, &mut [], start.hp);
+        assert_eq!((next.dot_damage, next.hp), (3, 9));
+        assert_eq!(next.expired, state_bit(StateKind::Burning));
+        assert!(states.iter().all(|s| s.is_empty()));
+    }
+
+    #[test]
+    fn dot_kills_at_zero_hp_and_death_wins_over_a_skip() {
+        let mut states = with(&[
+            (StateKind::Bleeding, 3, 7, 6),
+            (StateKind::Freeze, 2, 0, 6),
+        ]);
+        let start = start_of_turn(&mut states, &mut [], 7);
+        assert_eq!((start.hp, start.died, start.skip), (0, true, None));
+        assert_eq!(start.dot_source, 6);
+
+        let mut states = with(&[(StateKind::Burning, 1, 100, 4)]);
+        let start = start_of_turn(&mut states, &mut [], 3);
+        assert_eq!((start.dot_damage, start.hp, start.died), (100, 0, true));
+    }
+
+    #[test]
+    fn freeze_and_stun_skip_each_of_their_turns() {
+        let mut states = with(&[(StateKind::Freeze, 2, 0, 4)]);
+        let mut cooldowns = [2];
+        let first = start_of_turn(&mut states, &mut cooldowns, 5);
+        assert_eq!((first.skip, first.expired), (Some(StateKind::Freeze), 0));
+        // A skipped turn still counts down cooldowns.
+        assert_eq!(cooldowns, [1]);
+        let second = start_of_turn(&mut states, &mut cooldowns, 5);
+        assert_eq!(
+            (second.skip, second.expired),
+            (Some(StateKind::Freeze), state_bit(StateKind::Freeze))
+        );
+        assert_eq!(start_of_turn(&mut states, &mut cooldowns, 5).skip, None);
+
+        let mut stunned = with(&[(StateKind::Stun, 1, 0, 0), (StateKind::Burning, 1, 2, 0)]);
+        let start = start_of_turn(&mut stunned, &mut [], 5);
+        assert_eq!((start.skip, start.hp), (Some(StateKind::Stun), 3));
+        let mut both = with(&[(StateKind::Stun, 1, 0, 0), (StateKind::Freeze, 1, 0, 0)]);
+        assert_eq!(
+            start_of_turn(&mut both, &mut [], 5).skip,
+            Some(StateKind::Freeze)
+        );
+    }
 
     #[test]
     fn flee_needs_every_living_player() {
