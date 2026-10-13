@@ -1,0 +1,23 @@
+{
+  "name": "Goblin chieftain",
+  "bestiary_id": 2,
+  "boss": true,
+  "attack": {
+    "aspect": "Piercing",
+    "source": "Combat",
+    "form": "Strike",
+    "min": 4,
+    "max": 8
+  },
+  "attack_bonus": 4,
+  "defense": 13,
+  "armor": 40,
+  "resist": {
+    "Piercing": 5000
+  },
+  "xp_per_level": 50,
+  "hp": 28,
+  "hp_per_level": 6,
+  "speed": 5,
+  "initiative": 8
+}

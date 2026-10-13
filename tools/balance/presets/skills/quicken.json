@@ -1,0 +1,14 @@
+{
+  "name": "Quicken",
+  "category": "Active",
+  "purpose": "Buff",
+  "source": "Magical",
+  "form": "Projectile",
+  "target": "Single",
+  "aspects": [
+    "Lightning"
+  ],
+  "effect": "Haste",
+  "trigger": "None",
+  "aura_radius": 0
+}

@@ -1,0 +1,192 @@
+//! One action resolved from its dice: what the program's VRF callback does with the state, without
+//! accounts or events (the caller emits them from the results).
+//!
+//! Every function takes one [`RollSource`] for the whole action and keeps reading it: a skill's
+//! effect rolls on the indices after the hit, so a stream at index `rolls_used` is the same as
+//! `VrfRoll` / `SyscallRoll` started there. `HitInput` and `HitResult` come from the caller so the
+//! program can keep them off the 4 KB SBF stack frame.
+use deadroll_combat::{
+    resolve_hit_into, resolve_rider, resolve_support, Applied, EffectRoll, HitInput, HitResult,
+    Outcome, RollSource, States, TimedMods,
+};
+use deadroll_types::Monster;
+
+use crate::{
+    config::BalanceConfig,
+    input::{
+        effect_action, effect_range, heal, land_effect, monster_attacker, monster_defender,
+        player_attacker, player_defender, support_input, take_damage, EffectAction, HeroStats,
+        SkillStats,
+    },
+    monster::MonsterProfile,
+};
+
+/// The effect of a damage skill after its hit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RiderOutcome {
+    pub roll: EffectRoll,
+    pub applied: Applied,
+}
+
+/// What a player's attack on a monster did besides the `HitResult`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AttackOutcome {
+    /// The monster reached 0 HP (`alive` is cleared).
+    pub died: bool,
+    /// The skill's effect, rolled when the hit landed and the monster lives.
+    pub rider: Option<RiderOutcome>,
+}
+
+/// A player's weapon (`skill = None`) or damage skill on a monster, then that skill's effect
+/// (if any) when the hit landed and the monster lives: its own chance (certain on a crit).
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+pub fn attack_monster(
+    cfg: &BalanceConfig,
+    attacker: u8,
+    hero: &HeroStats,
+    skill: Option<&SkillStats>,
+    hero_mods: &TimedMods,
+    profile: &MonsterProfile,
+    monster: &mut Monster,
+    monster_mods: &mut TimedMods,
+    input: &mut HitInput,
+    result: &mut HitResult,
+    src: &mut impl RollSource,
+) -> AttackOutcome {
+    input.attacker = player_attacker(cfg, attacker, hero, skill, hero_mods);
+    input.defender = monster_defender(profile, &monster.states, monster_mods);
+    resolve_hit_into(input, &cfg.combat, src, result);
+
+    let (hp, died) = take_damage(monster.hp, result.damage);
+    monster.hp = hp;
+    monster.states = result.states;
+    if died {
+        monster.alive = false;
+    }
+
+    let mut rider = None;
+    if let Some(skill) = skill {
+        if let Some(effect) = effect_action(skill.blocks.effect) {
+            if result.outcome == Outcome::Hit && monster.alive {
+                let (min, max) = effect_range(cfg, hero.class, skill.power_bp, effect);
+                let roll = resolve_rider(
+                    cfg.support.rider_chance_bp,
+                    result.crit,
+                    min,
+                    max,
+                    &cfg.combat,
+                    src,
+                );
+                let applied = if roll.outcome == Outcome::Hit {
+                    land_effect(
+                        cfg,
+                        effect,
+                        roll.amount,
+                        skill.blocks.aspects[0],
+                        attacker,
+                        &mut monster.states,
+                        monster_mods,
+                    )
+                } else {
+                    Applied::None
+                };
+                rider = Some(RiderOutcome { roll, applied });
+            }
+        }
+    }
+    AttackOutcome { died, rider }
+}
+
+/// A debuff skill on a monster: it rolls to land (d20 against the monster's defense).
+#[allow(clippy::too_many_arguments)]
+pub fn debuff_monster(
+    cfg: &BalanceConfig,
+    caster: u8,
+    hero: &HeroStats,
+    skill: &SkillStats,
+    effect: EffectAction,
+    profile: &MonsterProfile,
+    monster: &mut Monster,
+    monster_mods: &mut TimedMods,
+    src: &mut impl RollSource,
+) -> RiderOutcome {
+    let defense = monster_defender(profile, &monster.states, monster_mods).defense;
+    let input = support_input(cfg, hero, skill, effect, Some(defense));
+    let roll = resolve_support(&input, &cfg.combat, src);
+    let applied = if roll.outcome == Outcome::Hit && monster.alive {
+        land_effect(
+            cfg,
+            effect,
+            roll.amount,
+            skill.blocks.aspects[0],
+            caster,
+            &mut monster.states,
+            monster_mods,
+        )
+    } else {
+        Applied::None
+    };
+    RiderOutcome { roll, applied }
+}
+
+/// A heal or buff on the caster or an ally: no roll to land, a crit roll and the d100 strength.
+/// A dead target (`hp == 0`) is never raised.
+#[allow(clippy::too_many_arguments)]
+pub fn support_ally(
+    cfg: &BalanceConfig,
+    caster: u8,
+    hero: &HeroStats,
+    skill: &SkillStats,
+    effect: EffectAction,
+    hp: &mut u32,
+    hp_max: u32,
+    states: &mut States,
+    mods: &mut TimedMods,
+    src: &mut impl RollSource,
+) -> RiderOutcome {
+    let input = support_input(cfg, hero, skill, effect, None);
+    let roll = resolve_support(&input, &cfg.combat, src);
+    let applied = if *hp == 0 {
+        Applied::None
+    } else if effect == EffectAction::Heal {
+        *hp = heal(*hp, hp_max, roll.amount);
+        Applied::None
+    } else {
+        land_effect(
+            cfg,
+            effect,
+            roll.amount,
+            skill.blocks.aspects[0],
+            caster,
+            states,
+            mods,
+        )
+    };
+    RiderOutcome { roll, applied }
+}
+
+/// A monster's natural attack on a player; returns whether the player died.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+pub fn monster_attack(
+    cfg: &BalanceConfig,
+    attacker: u8,
+    profile: &MonsterProfile,
+    monster_mods: &TimedMods,
+    hero: &HeroStats,
+    hp: &mut u32,
+    states: &mut States,
+    hero_mods: &TimedMods,
+    input: &mut HitInput,
+    result: &mut HitResult,
+    src: &mut impl RollSource,
+) -> bool {
+    input.attacker = monster_attacker(cfg, attacker, profile, monster_mods);
+    input.defender = player_defender(cfg, hero, states, hero_mods);
+    resolve_hit_into(input, &cfg.combat, src, result);
+    let (left, died) = take_damage(*hp, result.damage);
+    *hp = left;
+    *states = result.states;
+    died
+}

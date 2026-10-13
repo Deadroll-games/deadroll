@@ -148,3 +148,27 @@ fn blocks_round_trip_through_borsh() {
     bytes[0] = 9;
     assert!(borsh::from_slice::<SkillBlocks>(&bytes).is_err());
 }
+
+#[test]
+fn tuning_drives_derive() {
+    use deadroll_skillcheck::{derive_with, SkillTuning};
+    let all = presets::WARRIOR
+        .iter()
+        .chain(&presets::MAGE)
+        .chain(&presets::SUPPORT);
+    for p in all.clone() {
+        assert_eq!(
+            derive_with(&p.blocks, &SkillTuning::DEFAULT),
+            derive(&p.blocks)
+        );
+    }
+    let tuned = SkillTuning {
+        line_counter_bp: 0,
+        active_cooldown: 3,
+        ..SkillTuning::DEFAULT
+    };
+    // "Bleeding Cleave": a line, two aspects.
+    let cleave = derive_with(&presets::WARRIOR[3].blocks, &tuned);
+    assert_eq!((cleave.power_bp, cleave.cooldown), (10_000, 4));
+    assert_eq!(cleave.shares_bp, SkillTuning::DEFAULT.shares_bp[1]);
+}

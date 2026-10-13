@@ -1,0 +1,14 @@
+{
+  "name": "Piercing Thrust",
+  "category": "Active",
+  "purpose": "Damage",
+  "source": "Combat",
+  "form": "Strike",
+  "target": "Single",
+  "aspects": [
+    "Piercing"
+  ],
+  "effect": "None",
+  "trigger": "None",
+  "aura_radius": 0
+}

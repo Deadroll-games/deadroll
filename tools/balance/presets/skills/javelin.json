@@ -1,0 +1,14 @@
+{
+  "name": "Javelin",
+  "category": "Active",
+  "purpose": "Damage",
+  "source": "Combat",
+  "form": "Projectile",
+  "target": "Single",
+  "aspects": [
+    "Piercing"
+  ],
+  "effect": "None",
+  "trigger": "None",
+  "aura_radius": 0
+}

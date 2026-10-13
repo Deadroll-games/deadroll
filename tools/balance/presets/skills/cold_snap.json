@@ -1,0 +1,14 @@
+{
+  "name": "Cold Snap",
+  "category": "Reactive",
+  "purpose": "Debuff",
+  "source": "Magical",
+  "form": "Strike",
+  "target": "Single",
+  "aspects": [
+    "Cold"
+  ],
+  "effect": "Slow",
+  "trigger": "EnemyAdjacent",
+  "aura_radius": 0
+}

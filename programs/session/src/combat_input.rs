@@ -1,92 +1,38 @@
 //! Builds `deadroll_combat` hit inputs from session and character state. Pure, no accounts.
 //!
-//! Numbers come from `rules.rs` (placeholders until the registry tables, L4).
+//! The rules live in `deadroll_rules::input` (shared with `tools/balance`); these wrappers feed
+//! them the character program's `SkillRecord` and the program's numbers (`rules::BALANCE`).
 use deadroll_character::state::SkillRecord;
-use deadroll_combat::{
-    apply_mod, apply_state, apply_to_attacker, apply_to_defender, mod_range, mod_turns,
-    states::freeze, Applied, Attacker, Balance, Carrier, Defender, Mod, ModFilter, ModKind, Skill,
-    States, SupportBalance, SupportInput, TimedMod, TimedMods, Tint,
-};
-use deadroll_skillcheck::{Category, Effect, Purpose};
-use deadroll_types::{ActiveState, Aspect, CharacterData, Form, Monster, StateKind, STATES_MAX};
+use deadroll_combat::{Applied, Attacker, Defender, States, SupportInput, TimedMods};
+use deadroll_rules::input;
+use deadroll_types::{ActiveState, Aspect, CharacterData, Form, Monster, STATES_MAX};
 
-use crate::rules::{
-    class_increase, class_source, class_weapon, heal_range, monster_profile, player_attack_bonus,
-    player_crit_bp, player_defense, predisposition_added, support_increase, MonsterProfile,
-    BASIC_STATE_CHANCE_BP, SKILL_STATE_CHANCE_BP,
-};
+pub use deadroll_rules::input::{effect_action, heal, take_damage, EffectAction, Side, SkillUse};
 
-/// Why a skill cannot be used with `act`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SkillUse {
-    Ok,
-    /// Reactive and passive skills are not actions.
-    NotActive,
-    /// A buff or debuff without an effect (never passes the builder; the program checks anyway).
-    NoEffect,
-}
+use crate::rules::{monster_profile, BALANCE};
 
-pub fn skill_use(skill: &SkillRecord) -> SkillUse {
-    if skill.blocks.category != Category::Active {
-        SkillUse::NotActive
-    } else if skill.blocks.purpose != Purpose::Damage
-        && effect_action(skill.blocks.effect).is_none()
-    {
-        SkillUse::NoEffect
-    } else {
-        SkillUse::Ok
+/// The rules' view of a stored skill.
+pub fn skill_stats(skill: &SkillRecord) -> input::SkillStats {
+    input::SkillStats {
+        blocks: skill.blocks,
+        shares_bp: skill.shares_bp,
+        power_bp: skill.power_bp,
+        cooldown: skill.cooldown,
     }
 }
 
-/// Which side an action targets (docs/SKILL_BUILDER.md, section 2: a buff goes on the caster or
-/// an ally, a debuff on an enemy).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Side {
-    /// A monster: the weapon, damage and debuff skills.
-    Enemy,
-    /// A player of the party, the caster included: heal and buff skills.
-    Ally,
+pub fn skill_use(skill: &SkillRecord) -> SkillUse {
+    input::skill_use(&skill_stats(skill))
 }
 
 /// The side of `skill` (`None` = the weapon's basic attack).
 pub fn target_side(skill: Option<&SkillRecord>) -> Side {
-    match skill.map(|s| s.blocks.purpose) {
-        Some(Purpose::Buff) => Side::Ally,
-        _ => Side::Enemy,
-    }
-}
-
-/// What a skill's effect does to its target (docs/SKILL_BUILDER.md, section 6).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum EffectAction {
-    /// HP back, up to the maximum.
-    Heal,
-    /// A timed modifier (`deadroll_combat::support`).
-    Mod(ModKind),
-    /// Hard control: the existing states.
-    Stun,
-    Freeze,
-}
-
-/// `None` for `Effect::None` (pure damage).
-pub fn effect_action(effect: Effect) -> Option<EffectAction> {
-    Some(match effect {
-        Effect::None => return None,
-        Effect::Weakening => EffectAction::Mod(ModKind::Weakening),
-        Effect::Slow => EffectAction::Mod(ModKind::Slow),
-        Effect::Vulnerability => EffectAction::Mod(ModKind::Vulnerability),
-        Effect::Stun => EffectAction::Stun,
-        Effect::Freeze => EffectAction::Freeze,
-        Effect::Haste => EffectAction::Mod(ModKind::Haste),
-        Effect::Empowerment => EffectAction::Mod(ModKind::Empowerment),
-        Effect::Protection => EffectAction::Mod(ModKind::Protection),
-        Effect::Heal => EffectAction::Heal,
-    })
+    input::target_side(skill.map(skill_stats).as_ref())
 }
 
 /// Form of a player attack: the skill's, or a strike for the weapon's basic attack.
 pub fn player_form(skill: Option<&SkillRecord>) -> Form {
-    skill.map_or(Form::Strike, |s| s.blocks.form)
+    input::player_form(skill.map(skill_stats).as_ref())
 }
 
 /// A player attacking with `skill` (`None` = the weapon's basic attack). `unit` is the
@@ -97,35 +43,13 @@ pub fn player_attacker(
     skill: Option<&SkillRecord>,
     mods: &TimedMods,
 ) -> Attacker {
-    let source = skill.map_or(class_source(c.class), |s| s.blocks.source);
-    let combat_skill = match skill {
-        Some(s) => Skill {
-            aspects: s.blocks.aspects,
-            aspect_count: s.blocks.aspect_count,
-            shares_bp: s.shares_bp,
-            power_bp: s.power_bp,
-            source,
-            form: s.blocks.form,
-            state_chance_bp: SKILL_STATE_CHANCE_BP,
-        },
-        None => Skill::basic(source, Form::Strike, BASIC_STATE_CHANCE_BP),
-    };
-    let mut attacker = Attacker {
-        slot: unit,
-        attack_bonus: player_attack_bonus(c.level, &c.stats, source),
-        crit_chance_bp: player_crit_bp(&c.stats),
-        weapon: class_weapon(c.class),
-        skill: combat_skill,
-        ..Attacker::default()
-    };
-    // Race trait: the predisposition adds a flat packet and tints resonances (CHARACTER 6.2).
-    attacker.added[0] = predisposition_added(c.predisposition);
-    attacker.tints[0] = Tint::new(c.predisposition, c.predisposition_tier, Carrier::Race);
-    if let Some((tag, bp)) = class_increase(c.class) {
-        attacker.increased[0] = Mod::new(ModFilter::Source(tag), bp);
-    }
-    apply_to_attacker(&mut attacker, mods);
-    attacker
+    input::player_attacker(
+        BALANCE,
+        unit,
+        &c.into(),
+        skill.map(skill_stats).as_ref(),
+        mods,
+    )
 }
 
 /// A player as the target.
@@ -134,45 +58,19 @@ pub fn player_defender(
     states: &[ActiveState; STATES_MAX],
     mods: &TimedMods,
 ) -> Defender {
-    let (defense, armor) = player_defense(c.class, &c.stats);
-    let mut defender = Defender {
-        defense,
-        armor,
-        states: *states,
-        ..Defender::default()
-    };
-    apply_to_defender(&mut defender, mods);
-    defender
+    input::player_defender(BALANCE, &c.into(), states, mods)
 }
 
 /// A monster attacking with its natural attack. `None` for an unknown bestiary id.
 pub fn monster_attacker(unit: u8, m: &Monster, mods: &TimedMods) -> Option<Attacker> {
     let p = monster_profile(m.bestiary_id, m.level)?;
-    let mut attacker = Attacker {
-        slot: unit,
-        attack_bonus: p.attack_bonus,
-        weapon: p.weapon,
-        skill: Skill::basic(p.source, p.form, BASIC_STATE_CHANCE_BP),
-        ..Attacker::default()
-    };
-    apply_to_attacker(&mut attacker, mods);
-    Some(attacker)
+    Some(input::monster_attacker(BALANCE, unit, &p, mods))
 }
 
 /// A monster as the target. `None` for an unknown bestiary id.
 pub fn monster_defender(m: &Monster, mods: &TimedMods) -> Option<Defender> {
-    let p: MonsterProfile = monster_profile(m.bestiary_id, m.level)?;
-    let mut defender = Defender {
-        defense: p.defense,
-        armor: p.armor,
-        states: m.states,
-        ..Defender::default()
-    };
-    if let Some((aspect, bp)) = p.resist {
-        defender.resist_bp[aspect as usize] = bp;
-    }
-    apply_to_defender(&mut defender, mods);
-    Some(defender)
+    let p = monster_profile(m.bestiary_id, m.level)?;
+    Some(input::monster_defender(&p, &m.states, mods))
 }
 
 /// Strength range of `action` cast by a `class` with a skill of `power_bp`: HP for a heal, bp for
@@ -182,16 +80,7 @@ pub fn effect_range(
     power_bp: u32,
     action: EffectAction,
 ) -> (u32, u32) {
-    match action {
-        EffectAction::Heal => heal_range(class, power_bp),
-        EffectAction::Mod(kind) => mod_range(
-            kind,
-            power_bp,
-            support_increase(class),
-            &SupportBalance::DEFAULT,
-        ),
-        EffectAction::Stun | EffectAction::Freeze => (0, 0),
-    }
+    input::effect_range(BALANCE, class, power_bp, action)
 }
 
 /// The rolls of a heal, buff or debuff cast by `c` with `skill`. `defense`: the enemy's, for a
@@ -202,15 +91,7 @@ pub fn support_input(
     action: EffectAction,
     defense: Option<u32>,
 ) -> SupportInput {
-    let (min, max) = effect_range(c.class, skill.power_bp, action);
-    SupportInput {
-        hostile: defense.is_some(),
-        attack_bonus: player_attack_bonus(c.level, &c.stats, skill.blocks.source),
-        defense: defense.unwrap_or(0),
-        crit_chance_bp: player_crit_bp(&c.stats),
-        min,
-        max,
-    }
+    input::support_input(BALANCE, &c.into(), &skill_stats(skill), action, defense)
 }
 
 /// Lands `action` (not a heal) of strength `amount` on a unit: a modifier for its duration, or
@@ -223,49 +104,21 @@ pub fn land_effect(
     states: &mut States,
     mods: &mut TimedMods,
 ) -> Applied {
-    let balance = &Balance::DEFAULT;
-    match action {
-        EffectAction::Mod(kind) => apply_mod(
-            mods,
-            TimedMod {
-                kind,
-                aspect,
-                turns: mod_turns(SupportBalance::DEFAULT.duration(kind)),
-                power_bp: amount,
-                source,
-            },
-        ),
-        EffectAction::Stun => apply_state(
-            states,
-            ActiveState {
-                kind: StateKind::Stun,
-                turns: balance.turns(StateKind::Stun),
-                power: 0,
-                source,
-            },
-        ),
-        EffectAction::Freeze => freeze(states, source, balance),
-        EffectAction::Heal => Applied::None,
-    }
-}
-
-/// HP after a heal: up to the maximum, never down (docs/COMBAT_MATH.md, 11).
-pub fn heal(hp: u32, hp_max: u32, amount: u32) -> u32 {
-    hp.saturating_add(amount).min(hp_max).max(hp)
-}
-
-/// HP after `damage`, and whether that killed (HP never goes below 0).
-pub fn take_damage(hp: u32, damage: u32) -> (u32, bool) {
-    let left = hp.saturating_sub(damage);
-    (left, hp > 0 && left == 0)
+    input::land_effect(BALANCE, action, amount, aspect, source, states, mods)
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use deadroll_combat::{preview_range, resolve_hit, Balance, HitInput, Outcome, SeededRoll};
+    use crate::rules::{class_weapon, heal_range, player_attack_bonus};
+    use deadroll_combat::{
+        mod_turns, preview_range, resolve_hit, Balance, HitInput, Mod, ModFilter, ModKind, Outcome,
+        SeededRoll, SupportBalance,
+    };
     use deadroll_mapcheck::roster::ids;
     use deadroll_skillcheck::{derive, presets, SkillBlocks};
+    use deadroll_skillcheck::{Category, Effect, Purpose};
+    use deadroll_types::StateKind;
     use deadroll_types::{Aspect, Class, Race, Source};
 
     pub(crate) const NONE: TimedMods = [deadroll_combat::TimedMod {

@@ -1,0 +1,35 @@
+{
+  "name": "Every demo pack at once",
+  "monsters": [
+    {
+      "monster": "wolf",
+      "level": 1,
+      "count": 2
+    },
+    {
+      "monster": "goblin",
+      "level": 1,
+      "count": 2
+    },
+    {
+      "monster": "goblin_chieftain",
+      "level": 1,
+      "count": 1
+    },
+    {
+      "monster": "goblin_warrior",
+      "level": 1,
+      "count": 1
+    },
+    {
+      "monster": "goblin_shaman",
+      "level": 1,
+      "count": 1
+    }
+  ],
+  "arena": {
+    "width": 14,
+    "height": 10,
+    "gap": 6
+  }
+}

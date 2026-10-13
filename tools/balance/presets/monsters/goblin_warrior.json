@@ -1,0 +1,21 @@
+{
+  "name": "Goblin warrior",
+  "bestiary_id": 3,
+  "boss": false,
+  "attack": {
+    "aspect": "Blunt",
+    "source": "Combat",
+    "form": "Strike",
+    "min": 2,
+    "max": 5
+  },
+  "attack_bonus": 3,
+  "defense": 11,
+  "armor": 25,
+  "resist": {},
+  "xp_per_level": 15,
+  "hp": 14,
+  "hp_per_level": 3,
+  "speed": 4,
+  "initiative": 5
+}

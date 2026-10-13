@@ -1,0 +1,22 @@
+{
+  "name": "Human support",
+  "race": "Human",
+  "class": "Support",
+  "level": 1,
+  "stats": {
+    "Strength": 5,
+    "Dexterity": 7,
+    "Intelligence": 9,
+    "Endurance": 9
+  },
+  "predisposition": "Blunt",
+  "tier": 14,
+  "skills": [
+    "quicken",
+    "sap",
+    "expose",
+    "shelter",
+    "last_stand",
+    "cold_ward"
+  ]
+}

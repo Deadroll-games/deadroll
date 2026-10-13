@@ -1,0 +1,15 @@
+{
+  "name": "Bleeding Cleave",
+  "category": "Active",
+  "purpose": "Damage",
+  "source": "Combat",
+  "form": "Strike",
+  "target": "Line",
+  "aspects": [
+    "Blood",
+    "Piercing"
+  ],
+  "effect": "None",
+  "trigger": "None",
+  "aura_radius": 0
+}

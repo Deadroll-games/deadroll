@@ -45,6 +45,8 @@ deadroll-registry.workspace = true
 deadroll-combat = { workspace = true, features = ["borsh"] }
 # P0 bestiary roles (boss detection), shared with map validation.
 deadroll-mapcheck.workspace = true
+# Shared game rules and the balance table (no Anchor), also used by tools/balance.
+deadroll-rules.workspace = true
 # Skill block enums (category, purpose) of the character's `SkillRecord`.
 deadroll-skillcheck = { workspace = true, features = ["anchor"] }
 ephemeral-vrf-sdk.workspace = true

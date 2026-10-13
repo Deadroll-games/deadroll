@@ -1,0 +1,14 @@
+{
+  "name": "Cold Ward",
+  "category": "Passive",
+  "purpose": "Buff",
+  "source": "Magical",
+  "form": "Strike",
+  "target": "Single",
+  "aspects": [
+    "Cold"
+  ],
+  "effect": "Protection",
+  "trigger": "None",
+  "aura_radius": 2
+}

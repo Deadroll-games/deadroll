@@ -1,0 +1,14 @@
+{
+  "name": "Shelter",
+  "category": "Active",
+  "purpose": "Buff",
+  "source": "Combat",
+  "form": "Strike",
+  "target": "Single",
+  "aspects": [
+    "Blunt"
+  ],
+  "effect": "Protection",
+  "trigger": "None",
+  "aura_radius": 0
+}

@@ -173,4 +173,4 @@ Each task = one fresh Grok session, writes only in `assets/sprites/<name>.dsl`, 
 - [ ] items: `ItemState`, item level, affixes, NPC master craft, listings.
 - [ ] city: buildings, storage, masters guild.
 - [ ] worker for wallets.
-- [ ] simulator `tools/sim`.
+- [x] **Balance bench:** `crates/rules` (session rules shared with the program, one `BalanceConfig`), `crates/sim` (fights, presets, rayon), `tools/balance` (egui app).
