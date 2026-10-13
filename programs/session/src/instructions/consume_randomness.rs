@@ -99,8 +99,14 @@ pub fn handler(ctx: Context<ConsumeRandomness>, randomness: [u8; 32]) -> Result<
                 )?)
             };
             let mut monster = monsters.get(index)?;
-            input.attacker = player_attacker(pending.attacker, &character, skill.as_ref());
-            input.defender = monster_defender(&monster).ok_or(SessionError::InvalidMonster)?;
+            input.attacker = player_attacker(
+                pending.attacker,
+                &character,
+                skill.as_ref(),
+                &participation.combat_mods(),
+            );
+            input.defender = monster_defender(&monster, &monsters.mods(index)?)
+                .ok_or(SessionError::InvalidMonster)?;
             resolve_hit_into(
                 &input,
                 &Balance::DEFAULT,
@@ -129,9 +135,13 @@ pub fn handler(ctx: Context<ConsumeRandomness>, randomness: [u8; 32]) -> Result<
                 SessionError::InvalidPendingAccounts
             );
             let monster = monsters.get(index)?;
-            input.attacker =
-                monster_attacker(pending.attacker, &monster).ok_or(SessionError::InvalidMonster)?;
-            input.defender = player_defender(&character, &participation.core.states);
+            input.attacker = monster_attacker(pending.attacker, &monster, &monsters.mods(index)?)
+                .ok_or(SessionError::InvalidMonster)?;
+            input.defender = player_defender(
+                &character,
+                &participation.core.states,
+                &participation.combat_mods(),
+            );
             resolve_hit_into(
                 &input,
                 &Balance::DEFAULT,

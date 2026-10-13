@@ -1,11 +1,12 @@
 //! Events (CONTRACTS.md, section 7). `PlayerReady`, `InitiativeRolled`, `TurnTicked`,
-//! `TurnSkipped`, `SkillUsed`, `PlayerDied`, `FleeVoted`, `RewardsClaimed` and `EscrowClaimed`
+//! `TurnSkipped`, `ModsTicked`, `EffectResolved`, `SkillUsed`, `PlayerDied`, `FleeVoted`, `RewardsClaimed` and `EscrowClaimed`
 //! are session-local.
 use anchor_lang::prelude::*;
 use deadroll_character::state::SKILLS_MAX;
+use deadroll_combat::MODS_MAX;
 use deadroll_types::{ActiveState, SessionStatus, StateKind, STATES_MAX, TURN_ORDER_MAX};
 
-use crate::hit_event::HitResultData;
+use crate::{hit_event::HitResultData, state::TimedModData};
 
 #[event]
 pub struct SessionOpened {
@@ -65,6 +66,21 @@ pub struct TurnTicked {
     /// Cooldowns after the tick, own turn starts until usable: a player's by `SkillSet` slot,
     /// a monster's in the first `MONSTER_SKILLS_MAX` entries.
     pub cooldowns: [u8; SKILLS_MAX],
+}
+
+/// Buffs and debuffs at the start of a unit's turn (`start_turn`, right after `TurnTicked`).
+#[event]
+pub struct ModsTicked {
+    pub session: Pubkey,
+    /// Turn-order id.
+    pub unit: u8,
+    pub turn_seq: u32,
+    /// `deadroll_combat::support::mod_bit` of every buff or debuff that ended now.
+    pub expired: u8,
+    /// The unit's buffs and debuffs after the tick (`turns`: own turn starts left).
+    pub mods: [TimedModData; MODS_MAX],
+    /// Action points of this turn: speed with Haste and Slow.
+    pub action_points: u8,
 }
 
 /// Hard control took the unit's turn: `start_turn` ended it on its own.
