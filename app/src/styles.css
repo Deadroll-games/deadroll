@@ -55,6 +55,8 @@ canvas.pixel { image-rendering: pixelated; }
 .turn-banner b.me { color: var(--accent); }
 .skills { display: flex; flex-wrap: wrap; gap: 6px; }
 .skills .btn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.skills .btn.cooldown { filter: grayscale(1); border-style: dashed; }
+.skills .btn .cd { color: var(--muted); font-size: 12px; }
 .badge.reconnecting { color: var(--accent); border-color: var(--accent); }
 
 /* Character cards open the detail view. */

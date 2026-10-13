@@ -1,6 +1,7 @@
 // @vitest-environment node
 // The demo script through the app's own builders (game.ts) against the shared local validator,
-// the same flow as tests/demo.test.ts. Skipped unless DEADROLL_LOCALNET=1 (needs deploy-local).
+// the same flow as tests/demo.test.ts, with the turn rules (start_turn, one attack per turn).
+// Skipped unless DEADROLL_LOCALNET=1 (needs deploy-local).
 //   DEADROLL_LOCALNET=1 pnpm --filter @deadroll/app exec vitest run src/chain/localnet.e2e.test.ts
 import { describe, expect, it } from "vitest";
 import { generateKeyPairSigner, lamports, type Address, type KeyPairSigner } from "@solana/kit";
@@ -10,6 +11,7 @@ import { client } from "../wallet/client";
 import { createSessionV2Instruction } from "../session-key/sessionKey";
 import { decodeEvents, type ChainEvent } from "./events";
 import {
+  BASE_ATTACK,
   MONSTER_BASE,
   actIx,
   buildMapIxs,
@@ -31,6 +33,7 @@ import {
   sessionAccounts,
   setReadyIx,
   startSessionIx,
+  startTurnIx,
   status,
   type Actor,
   type Party,
@@ -40,6 +43,7 @@ import { coders } from "./programs";
 import { affordable, cheb, route } from "./route";
 import { sendTx } from "./send";
 import { toHitResolved } from "./hit";
+import { turnStarted } from "./turns";
 import { Aspect, Class, MAP_MAX, Race } from "./types";
 
 const ON = process.env.DEADROLL_LOCALNET === "1";
@@ -136,11 +140,29 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
     let mageDied = false;
     let victory = false;
     let hits = 0;
-    for (let guard = 0; guard < 400 && !victory; guard++) {
+    let ticks = 0;
+    let checkedNotStarted = false;
+    let checkedActed = false;
+    for (let guard = 0; guard < 1000 && !victory; guard++) {
       party = (await readParty(acc.session, tiles))!;
       const s = party.session;
       if (status(s) !== "active") break;
       const unit = currentUnit(s)!;
+      // Every turn begins with start_turn, sent alone by whoever plays the unit (the app's rule).
+      if (!turnStarted(s)) {
+        const pl = unit < MONSTER_BASE ? party.players[unit]! : null;
+        const payer = pl ? players[unit]!.key : dmKey;
+        if (!checkedNotStarted && pl) {
+          await expect(send(payer, [await endTurnIx(players[unit]!.actor, acc.session, pl.character)])).rejects.toThrow(/TurnNotStarted/);
+          checkedNotStarted = true;
+        }
+        const evs = await send(payer, [await startTurnIx(acc.session, pl ? { participation: pl.participation, character: pl.character } : null)]);
+        const tick = evs.find((e) => e.name === "TurnTicked")!.data;
+        expect([tick.unit, tick.turnSeq]).toEqual([unit, s.turnSeq]);
+        ticks++;
+        // A skip or a DoT death hands the turn on: the next unit needs its own start.
+        continue;
+      }
       const mageAlive = (s.aliveMask & (1 << MAGE)) !== 0;
       const livingWolves = wolves.filter((i) => party.monsters[i]!.alive);
       if (unit < MONSTER_BASE) {
@@ -149,10 +171,12 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
         let ap = playerAp(me.part, s);
         const pos = { x: me.part.core.x, y: me.part.core.y };
         if (unit === MAGE && !resonance && livingWolves.length && cheb(pos, party.monsters[livingWolves[0]!]!) <= 6) {
-          const evs = await (async () => {
-            await send(pl.key, [await actIx(pl.actor, acc.session, pl.character, 1, livingWolves[0]!)]);
-            return oracle(await pickSeed("resonant"));
-          })();
+          const used = (await send(pl.key, [await actIx(pl.actor, acc.session, pl.character, 1, livingWolves[0]!)])).find((e) => e.name === "SkillUsed")!.data;
+          expect(used.skillSlot).toBe(1);
+          const after = (await readParty(acc.session, tiles))!;
+          expect(Array.from(used.cooldowns as Uint8Array)).toEqual(Array.from(after.players[MAGE]!.part.cooldowns));
+          expect(after.session.actedSeq).toBe(after.session.turnSeq);
+          const evs = await oracle(await pickSeed("resonant"));
           const hit = toHitResolved(evs.find((e) => e.name === "HitResolved")!.data);
           hits++;
           resonance = hit.result.resonances.some((r) => r?.active);
@@ -171,13 +195,17 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
           }
           party = (await readParty(acc.session, tiles))!;
           const now = party.players[unit]!.part.core;
-          while (ap >= 2 && cheb(now, party.monsters[target]!) === 1 && party.monsters[target]!.alive) {
-            await send(pl.key, [await actIx(pl.actor, acc.session, pl.character, 0, target)]);
+          // One attack per turn: Piercing Thrust off cooldown, else the weapon (no cooldown).
+          if (ap >= 2 && cheb(now, party.monsters[target]!) === 1 && party.monsters[target]!.alive) {
+            const skill = party.players[unit]!.part.cooldowns[0] === 0 ? 0 : BASE_ATTACK;
+            await send(pl.key, [await actIx(pl.actor, acc.session, pl.character, skill, target)]);
             const evs = await oracle(await pickSeed("crit"));
             hits++;
             if (evs.some((e) => e.name === "SessionEnded")) victory = true;
-            ap -= 2;
-            party = (await readParty(acc.session, tiles))!;
+            if (!victory && !checkedActed) {
+              await expect(send(pl.key, [await actIx(pl.actor, acc.session, pl.character, BASE_ATTACK, target)])).rejects.toThrow(/AlreadyActed/);
+              checkedActed = true;
+            }
           }
         }
         if (!victory) await send(pl.key, [await endTurnIx(pl.actor, acc.session, pl.character)]);
@@ -213,6 +241,8 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
       }
     }
     expect(hits).toBeGreaterThan(2);
+    expect(ticks).toBeGreaterThan(hits);
+    expect([checkedNotStarted, checkedActed]).toEqual([true, true]);
     expect(resonance).toBe(true);
     expect(mageDied).toBe(true);
     expect(victory).toBe(true);

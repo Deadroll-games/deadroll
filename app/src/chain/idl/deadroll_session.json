@@ -528,7 +528,7 @@
             "The VRF program's identity for this program (`mock-vrf`: the fixed test identity)."
           ],
           "signer": true,
-          "address": "5RotSMue7vx9xBPp3L8iQEKbKSc3ezbY4GqiJxDEe6sN"
+          "address": "Bj7XBktwDmAg6J4FohS6oRHbevD6MMd8jnCZKvzKPiKV"
         },
         {
           "name": "session",
@@ -1791,6 +1791,115 @@
         }
       ],
       "args": []
+    },
+    {
+      "name": "start_turn",
+      "docs": [
+        "Starts the current unit's turn, before anything else on it (permissionless): over-time",
+        "damage (same death and victory path as hits), Freeze / Stun skip the turn, state",
+        "durations and cooldowns count down. A skip or a death ends the turn on its own."
+      ],
+      "discriminator": [
+        149,
+        116,
+        149,
+        184,
+        149,
+        226,
+        103,
+        179
+      ],
+      "accounts": [
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.core.map",
+                "account": "GameSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "monsters",
+          "writable": true
+        },
+        {
+          "name": "participation",
+          "docs": [
+            "Required on a player's turn: the participation whose turn it is."
+          ],
+          "writable": true,
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  114,
+                  116,
+                  105,
+                  99,
+                  105,
+                  112,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              },
+              {
+                "kind": "account",
+                "path": "participation.core.character",
+                "account": "Participation"
+              }
+            ]
+          }
+        },
+        {
+          "name": "character",
+          "docs": [
+            "the handler); written by `character::mark_dead` when over-time damage kills."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "session_authority",
+          "address": "3o8dkZ2aXofZQpeTjHHDvWNCahXrfqvY3GodqKtVMomB"
+        },
+        {
+          "name": "config",
+          "address": "HYGYnuyssMfrHr2gT3AC3hkQpD6xt37a5hrCc2Z97JHN"
+        },
+        {
+          "name": "character_program",
+          "address": "9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL"
+        }
+      ],
+      "args": []
     }
   ],
   "accounts": [
@@ -2031,6 +2140,32 @@
       ]
     },
     {
+      "name": "SkillUsed",
+      "discriminator": [
+        25,
+        22,
+        233,
+        154,
+        131,
+        226,
+        206,
+        25
+      ]
+    },
+    {
+      "name": "TurnSkipped",
+      "discriminator": [
+        150,
+        70,
+        164,
+        15,
+        49,
+        252,
+        194,
+        65
+      ]
+    },
+    {
       "name": "TurnStarted",
       "discriminator": [
         191,
@@ -2041,6 +2176,19 @@
         149,
         147,
         41
+      ]
+    },
+    {
+      "name": "TurnTicked",
+      "discriminator": [
+        253,
+        217,
+        112,
+        119,
+        73,
+        100,
+        18,
+        49
       ]
     }
   ],
@@ -2274,6 +2422,26 @@
       "code": 6045,
       "name": "UnknownMonster",
       "msg": "Monster is not in the registry bestiary"
+    },
+    {
+      "code": 6046,
+      "name": "AlreadyActed",
+      "msg": "Only one attack or active skill per turn"
+    },
+    {
+      "code": 6047,
+      "name": "SkillOnCooldown",
+      "msg": "Skill is on cooldown"
+    },
+    {
+      "code": 6048,
+      "name": "TurnNotStarted",
+      "msg": "The turn has not started: call start_turn first"
+    },
+    {
+      "code": 6049,
+      "name": "TurnAlreadyStarted",
+      "msg": "This turn has already started"
     }
   ],
   "types": [
@@ -2725,6 +2893,22 @@
                 7
               ]
             }
+          },
+          {
+            "name": "acted_seq",
+            "docs": [
+              "`turn_seq` in which the current unit used its one attack or active skill",
+              "(docs/PARTY_AND_TURNS.md, 5.1). Only the current unit acts, so one field serves all."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "started_seq",
+            "docs": [
+              "`turn_seq` whose start ran (`start_turn`): states ticked, cooldowns counted down. Every",
+              "other turn instruction waits for it."
+            ],
+            "type": "u32"
           }
         ]
       }
@@ -3210,6 +3394,25 @@
                 "name": "MonsterStateData"
               }
             }
+          },
+          {
+            "name": "cooldowns",
+            "docs": [
+              "Per monster, per skill: own turn starts until usable, 0 = usable (like",
+              "`Participation.cooldowns`). Counted down by `start_turn`; nothing sets them in P0: the",
+              "natural attack has no cooldown. TODO(post-demo): monster skills from the spawn's pool."
+            ],
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    "u8",
+                    4
+                  ]
+                },
+                24
+              ]
+            }
           }
         ]
       }
@@ -3407,6 +3610,19 @@
               "Lamports paid into the escrow, for refunds."
             ],
             "type": "u64"
+          },
+          {
+            "name": "cooldowns",
+            "docs": [
+              "Per `SkillSet` slot: own turn starts until the skill is usable again, 0 = usable",
+              "(`rules::cooldown_after_use`; `start_turn` counts them down)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                16
+              ]
+            }
           }
         ]
       }
@@ -3777,6 +3993,51 @@
       }
     },
     {
+      "name": "SkillUsed",
+      "docs": [
+        "A player used an active skill (`act`); it is now on cooldown."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "unit",
+            "docs": [
+              "Turn-order id of the player."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "skill_slot",
+            "type": "u8"
+          },
+          {
+            "name": "cooldown",
+            "docs": [
+              "The skill's cooldown: it misses this many of the player's next own turns."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "cooldowns",
+            "docs": [
+              "`Participation.cooldowns` after the use: own turn starts until each slot is usable."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                16
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
       "name": "StateKind",
       "docs": [
         "P0 uses Burning, Chill, Freeze, Bleeding."
@@ -3944,6 +4205,40 @@
       }
     },
     {
+      "name": "TurnSkipped",
+      "docs": [
+        "Hard control took the unit's turn: `start_turn` ended it on its own."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "unit",
+            "type": "u8"
+          },
+          {
+            "name": "turn_seq",
+            "type": "u32"
+          },
+          {
+            "name": "state",
+            "docs": [
+              "Freeze or Stun."
+            ],
+            "type": {
+              "defined": {
+                "name": "StateKind"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
       "name": "TurnStarted",
       "type": {
         "kind": "struct",
@@ -3966,6 +4261,97 @@
           {
             "name": "turn_seq",
             "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TurnTicked",
+      "docs": [
+        "The start of a unit's turn (`start_turn`), one per turn: over-time damage, hard control,",
+        "durations and cooldowns counted down (docs/COMBAT_MATH.md, 7.5; SKILL_BUILDER.md, 8)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "unit",
+            "docs": [
+              "Turn-order id."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "turn_seq",
+            "type": "u32"
+          },
+          {
+            "name": "dot_damage",
+            "docs": [
+              "Burning + Bleeding damage dealt now."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "hp",
+            "docs": [
+              "HP after it."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "died",
+            "docs": [
+              "The over-time damage killed the unit (`MonsterKilled` / `PlayerDied` came first)."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "skipped",
+            "docs": [
+              "Freeze or Stun: the turn is skipped (`TurnSkipped`, then the next `TurnStarted`)."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "expired",
+            "docs": [
+              "`deadroll_combat::states::state_bit` of every state that ended now."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "states",
+            "docs": [
+              "The unit's states after the tick."
+            ],
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "ActiveState"
+                  }
+                },
+                6
+              ]
+            }
+          },
+          {
+            "name": "cooldowns",
+            "docs": [
+              "Cooldowns after the tick, own turn starts until usable: a player's by `SkillSet` slot,",
+              "a monster's in the first `MONSTER_SKILLS_MAX` entries."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                16
+              ]
+            }
           }
         ]
       }
