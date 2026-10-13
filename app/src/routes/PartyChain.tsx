@@ -54,7 +54,7 @@ import { toHitResolved } from "../chain/hit";
 import { bestiaryName, playerCritChanceBp } from "../chain/names";
 import { errorName } from "../chain/send";
 import { statusLabel, type SubStatus } from "../chain/subscribe";
-import { startTurnFor, turnStarted } from "../chain/turns";
+import { startTurnFor, turnActed, turnStarted } from "../chain/turns";
 import { skillSetPda } from "../chain/pda";
 import { affordable, cheb, reachable, route, type Step } from "../chain/route";
 import { useAutoFreezeTombstone } from "../chain/useAutoFreezeTombstone";
@@ -433,6 +433,9 @@ function PartyView({ address }: { address: Address }) {
   const controls = myTurn || (monsterTurn && isDm);
   const started = !!s && turnStarted(s);
   const canMove = controls && started && !s?.core.pendingVrf;
+  // One attack or active skill per turn; movement spends the AP left before or after it.
+  const acted = !!s && turnActed(s);
+  const canAttack = canMove && !acted;
 
   const pathTo = useCallback(
     (to: Cell): Step[] | null => {
@@ -457,7 +460,7 @@ function PartyView({ address }: { address: Address }) {
     void act(`move ${label(activePlayer.slot)}`, actor?.signer ?? null, async () => [await moveIx(actor!, address, activePlayer.character, s.layout, steps)], false);
   };
   const attack = (monster: number) => {
-    if (!activePlayer) return;
+    if (!activePlayer || !canAttack) return;
     const actor = actorFor(activePlayer.part.core.actor);
     void act(`attack ${label(MONSTER_BASE + monster)}`, actor?.signer ?? null, async () => [await actIx(actor!, address, activePlayer.character, skill, monster)], true);
   };
@@ -480,7 +483,7 @@ function PartyView({ address }: { address: Address }) {
   };
   const monsterAttack = (slot: number) => {
     const target = party?.players.find((p) => p.slot === slot);
-    if (!s || unit === null || !target) return;
+    if (!s || unit === null || !target || !canAttack) return;
     const actor = actorFor(s.dmActor);
     void act(`${label(unit)} attacks ${label(slot)}`, actor?.signer ?? null, async () => [await monsterActIx(actor!, address, unit - MONSTER_BASE, slot, target.character)], true);
   };
@@ -516,7 +519,7 @@ function PartyView({ address }: { address: Address }) {
         }
         p = (await readParty(address, p.tiles))!;
         const mm = p.monsters[mi]!;
-        if (ap >= 2 && mm.alive && cheb(mm, tpos) === 1) {
+        if (ap >= 2 && mm.alive && cheb(mm, tpos) === 1 && !turnActed(p.session)) {
           const r = await send(`${label(u)} attacks ${label(target.slot)}`, actor.signer, async () => [await monsterActIx(actor, address, mi, target.slot, target.character)], { quiet: true });
           if (r) {
             ingest(r.signature, r.events);
@@ -664,7 +667,7 @@ function PartyView({ address }: { address: Address }) {
   const ended = st !== "active";
   const activeSkills = activePlayer ? (skillNames[activePlayer.character] ?? []).filter((k) => k.active) : [];
   const monsterTargets: Cell[] =
-    !canMove ? [] : myTurn && moverPos ? party.monsters.filter((m) => m.alive).map((m) => ({ x: m.x, y: m.y })) : monsterTurn && isDm ? party.players.filter((p) => s.aliveMask & (1 << p.slot)).map((p) => ({ x: p.part.core.x, y: p.part.core.y })) : [];
+    !canAttack ? [] : myTurn && moverPos ? party.monsters.filter((m) => m.alive).map((m) => ({ x: m.x, y: m.y })) : monsterTurn && isDm ? party.players.filter((p) => s.aliveMask & (1 << p.slot)).map((p) => ({ x: p.part.core.x, y: p.part.core.y })) : [];
 
   return (
     <section>
@@ -689,13 +692,19 @@ function PartyView({ address }: { address: Address }) {
             onCellHover={setHover}
             onCellClick={(c) => (!canMove ? undefined : myTurn ? movePlayer(c) : monsterTurn && isDm ? moveMonster(c) : undefined)}
             onUnitClick={(u) => {
-              if (!canMove) return;
+              if (!canAttack) return;
               if (myTurn && u.kind === "monster" && u.alive) attack(u.id - MONSTER_BASE);
               else if (monsterTurn && isDm && u.kind === "player" && u.alive) monsterAttack(u.id);
             }}
           />
           <p className="muted" style={{ maxWidth: CELL_PX * s.width }}>
-            {myTurn ? "Your turn: click a cell to move, a monster to attack with the selected skill." : monsterTurn && isDm ? "Monster turn: click a cell to move it, a hero to attack, or Auto." : ""}
+            {controls && acted && started
+              ? "Attack used: move with the AP left or end the turn."
+              : myTurn
+                ? "Your turn: click a cell to move, a monster to attack with the selected skill (one attack per turn)."
+                : monsterTurn && isDm
+                  ? "Monster turn: click a cell to move it, a hero to attack (once), or Auto."
+                  : ""}
           </p>
         </div>
         <div style={{ flex: "1 1 380px", display: "grid", gap: 12, minWidth: 320 }}>
@@ -711,11 +720,11 @@ function PartyView({ address }: { address: Address }) {
                 <>
                   <div className="skills">
                     {activeSkills.map((k) => (
-                      <button key={k.slot} className="btn" aria-pressed={skill === k.slot} onClick={() => setSkill(k.slot)}>
+                      <button key={k.slot} className="btn" disabled={!canAttack} aria-pressed={skill === k.slot} onClick={() => setSkill(k.slot)}>
                         {k.name}
                       </button>
                     ))}
-                    <button className="btn" aria-pressed={skill === BASE_ATTACK} onClick={() => setSkill(BASE_ATTACK)}>
+                    <button className="btn" disabled={!canAttack} aria-pressed={skill === BASE_ATTACK} onClick={() => setSkill(BASE_ATTACK)}>
                       Weapon
                     </button>
                   </div>
