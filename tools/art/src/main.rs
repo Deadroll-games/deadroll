@@ -237,7 +237,10 @@ fn cmd_pack(o: &Opts) -> Result<bool, String> {
     if book.len() > BOOK_MAX {
         return Err(format!("book is {} bytes, over {BOOK_MAX}", book.len()));
     }
-    let dir = o.out.clone().unwrap_or_else(|| PathBuf::from("target/render-assets"));
+    let dir = o
+        .out
+        .clone()
+        .unwrap_or_else(|| PathBuf::from("target/render-assets"));
     write(&dir.join("palette.bin"), &pal.src.bytes)?;
     write(&dir.join("book.bin"), &book)?;
     println!(
