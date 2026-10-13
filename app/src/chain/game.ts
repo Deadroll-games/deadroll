@@ -544,8 +544,10 @@ export async function monsterActIx(dmActor: Actor, session: Address, monster: nu
   );
 }
 
-export async function claimRewardsIx(session: Address, character: Address): Promise<Instruction> {
+/** claim_rewards: only the character's owner, from its main wallet or its session key (+ token). */
+export async function claimRewardsIx(actor: Actor, session: Address, character: Address): Promise<Instruction> {
   return buildInstruction("session", "claim_rewards", {}, {
+    signer: actor.signer,
     session,
     participation: await participationPda(session, character),
     stash: await stashPda(session, character),
@@ -554,6 +556,7 @@ export async function claimRewardsIx(session: Address, character: Address): Prom
     sessionAuthority: await sessionAuthorityPda(),
     config: await gameConfigPda(),
     characterProgram: PROGRAMS.character,
+    sessionToken: actor.token,
   });
 }
 

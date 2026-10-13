@@ -897,6 +897,7 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
       return session.methods
         .claimRewards()
         .accountsStrict({
+          signer: pl.actor.publicKey, // the owner's session key: still no wallet popup
           session: demo.acc.session,
           participation: pl.participation,
           stash: pl.stash,
@@ -905,7 +906,9 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
           sessionAuthority,
           config,
           characterProgram: CHARACTER,
+          sessionToken: pl.token,
         })
+        .signers([pl.actor])
         .rpc({ commitment: "confirmed" })
         .then(track(`claim_rewards ${pl.kind}`));
     };

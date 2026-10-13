@@ -412,7 +412,19 @@ describe("deadroll_session: deployed program", () => {
     await rejects(
       program.methods
         .claimRewards()
-        .accountsStrict({ session, participation, stash, character, bag, sessionAuthority, config, characterProgram: CHARACTER })
+        .accountsStrict({
+          signer: signer.publicKey,
+          session,
+          participation,
+          stash,
+          character,
+          bag,
+          sessionAuthority,
+          config,
+          characterProgram: CHARACTER,
+          sessionToken: null,
+        })
+        .signers([signer])
         .rpc(),
       "AccountNotInitialized",
     );
@@ -976,11 +988,13 @@ class Party {
       .signers([signer])
       .rpc();
   }
-  claimRewards(who: number) {
+  /** Signed by the owner's main wallet unless another signer (and session token) is given. */
+  claimRewards(who: number, signer: Keypair = this.players[who].wallet, sessionToken: PublicKey | null = null) {
     const pl = this.players[who];
     return program.methods
       .claimRewards()
       .accountsStrict({
+        signer: signer.publicKey,
         session: this.acc.session,
         participation: pl.participation,
         stash: pl.stash,
@@ -989,7 +1003,9 @@ class Party {
         sessionAuthority,
         config,
         characterProgram: CHARACTER,
+        sessionToken,
       })
+      .signers([signer])
       .rpc({ commitment: "confirmed" });
   }
   claimEscrow(signer: Keypair) {
@@ -1398,9 +1414,21 @@ describe("deadroll_session: combat, death, victory and payouts", { skip: SKIP_PA
     assert.ok(!m.core.monsters[4].alive);
   });
 
+  let p1ClaimToken: PublicKey;
+  it("claim_rewards: only the owner or their session key", async () => {
+    const [p0, p1] = party.players;
+    await rejects(party.claimRewards(0, p1.wallet), "NotRewardOwner");
+    await rejects(party.claimRewards(0, party.dm), "NotRewardOwner");
+    p1ClaimToken = await issueToken(p1.actor, p1.wallet);
+    await rejects(party.claimRewards(0, p1.actor, p1ClaimToken), "NotRewardOwner");
+    await rejects(party.claimRewards(0, p0.actor), "SessionTokenMissing");
+    await rejects(party.claimRewards(0, p0.actor, await issueToken(p0.actor, p1.wallet)), "InvalidSessionToken");
+    assert.equal((await party.state()).settledMask, 0, "nothing settled by a rejected claim");
+  });
+
   it("claim_rewards: XP and boss loot for the living, nothing for the dead, once each", async () => {
     const before = await party.character(0);
-    const sig = await party.claimRewards(0);
+    const sig = await party.claimRewards(0); // the owner's main wallet
     const ev = await eventOf(sig, "rewardsClaimed");
     const s = await party.state();
     assert.equal(ev.xp, s.xpPool);
@@ -1414,7 +1442,8 @@ describe("deadroll_session: combat, death, victory and payouts", { skip: SKIP_PA
     assert.equal(stash.xp, 0);
     await rejects(party.claimRewards(0), "AlreadySettled");
 
-    const dead = await eventOf(await party.claimRewards(1), "rewardsClaimed");
+    const p1 = party.players[1];
+    const dead = await eventOf(await party.claimRewards(1, p1.actor, p1ClaimToken), "rewardsClaimed"); // the owner's session key
     assert.equal(dead.xp, 0);
     assert.ok(!(await party.character(1)).core.alive);
   });

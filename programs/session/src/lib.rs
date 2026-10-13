@@ -103,7 +103,7 @@ pub mod deadroll_session {
         flee::handler(ctx)
     }
 
-    /// After the party ended: rewards and unlock for one character (permissionless).
+    /// After the party ended: rewards and unlock for one character (its owner or their session key).
     pub fn claim_rewards(ctx: Context<ClaimRewards>) -> Result<()> {
         claim_rewards::handler(ctx)
     }

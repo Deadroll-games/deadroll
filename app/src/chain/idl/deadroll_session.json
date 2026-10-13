@@ -357,7 +357,7 @@
     {
       "name": "claim_rewards",
       "docs": [
-        "After the party ended: rewards and unlock for one character (permissionless)."
+        "After the party ended: rewards and unlock for one character (its owner or their session key)."
       ],
       "discriminator": [
         4,
@@ -370,6 +370,13 @@
         80
       ],
       "accounts": [
+        {
+          "name": "signer",
+          "docs": [
+            "The character's owner (the participation's `player`) or its session key."
+          ],
+          "signer": true
+        },
         {
           "name": "session",
           "writable": true,
@@ -541,6 +548,10 @@
         {
           "name": "character_program",
           "address": "9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL"
+        },
+        {
+          "name": "session_token",
+          "optional": true
         }
       ],
       "args": []
@@ -2532,6 +2543,11 @@
       "code": 6052,
       "name": "UnexpectedAllyAccount",
       "msg": "target_participation is only for a heal or buff on another ally"
+    },
+    {
+      "code": 6053,
+      "name": "NotRewardOwner",
+      "msg": "Only the character's owner or their session key can claim its rewards"
     }
   ],
   "types": [

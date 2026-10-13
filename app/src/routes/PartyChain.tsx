@@ -875,7 +875,7 @@ function PartyView({ address }: { address: Address }) {
             />
           )}
           <StatsPanel units={statsUnits(party, label)} />
-          {ended && <Claims party={party} isDm={isDm} payer={wallet.signer} send={send} ingest={ingest} busy={busy} />}
+          {ended && <Claims party={party} isDm={isDm} me={me} actorFor={actorFor} payer={wallet.signer} send={send} ingest={ingest} busy={busy} />}
           {tombLog.length > 0 && (
             <div className="panel">
               <h3>Tombstones</h3>
@@ -895,9 +895,11 @@ function PartyView({ address }: { address: Address }) {
   );
 }
 
-function Claims({
+export function Claims({
   party,
   isDm,
+  me,
+  actorFor,
   payer,
   send,
   ingest,
@@ -905,6 +907,8 @@ function Claims({
 }: {
   party: Party;
   isDm: boolean;
+  me: Address | null;
+  actorFor: (actor: Address) => Actor | null;
   payer: TransactionSigner | null;
   send: ReturnType<typeof useTx>["send"];
   ingest: (sig: string, evs: never[]) => void;
@@ -925,11 +929,16 @@ function Claims({
               {bytesText(p.char.name)} ({(s.aliveMask & (1 << p.slot)) !== 0 ? "alive" : "tombstone"}) · {p.char.core.xp} xp{" "}
               {settled ? (
                 <span className="ok">claimed</span>
+              ) : p.part.player !== me ? (
+                <span className="muted">not claimed yet</span>
               ) : (
                 <button
                   className="btn"
                   disabled={busy !== null}
-                  onClick={() => void send(`claim_rewards ${bytesText(p.char.name)}`, payer, async () => [await claimRewardsIx(party.address, p.character)]).then((r) => r && ingest(r.signature, r.events as never[]))}
+                  onClick={() => {
+                    const actor = actorFor(p.part.core.actor);
+                    void send(`claim_rewards ${bytesText(p.char.name)}`, actor?.signer ?? null, async () => [await claimRewardsIx(actor!, party.address, p.character)]).then((r) => r && ingest(r.signature, r.events as never[]));
+                  }}
                 >
                   Claim rewards
                 </button>
