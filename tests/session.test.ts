@@ -279,13 +279,22 @@ function openSession(dm: Keypair, map: PublicKey, layout: PublicKey, price: BN, 
 /** The VRF callback, signed by `identity` (the mock identity on localnet). */
 function consume(
   identity: Keypair,
-  a: { session: PublicKey; monsters: PublicKey; participation: PublicKey; character: PublicKey; skillSet: PublicKey },
+  a: {
+    session: PublicKey;
+    monsters: PublicKey;
+    participation: PublicKey;
+    character: PublicKey;
+    skillSet: PublicKey;
+    /** The ally of a heal or buff on another player (`GameSession.pendingTarget`). */
+    targetParticipation?: PublicKey | null;
+  },
   seed: Buffer,
 ) {
   return program.methods
     .consumeRandomness([...seed])
     .accountsStrict({
       vrfProgramIdentity: identity.publicKey,
+      targetParticipation: null,
       ...a,
       sessionAuthority,
       config,
@@ -370,6 +379,7 @@ describe("deadroll_session: deployed program", () => {
         monsters,
         sessionToken: null,
         ...vrfAccounts,
+        targetParticipation: null,
       }),
     );
     await run(
@@ -416,7 +426,7 @@ describe("deadroll_session: deployed program", () => {
     const act = (over: Record<string, PublicKey>) =>
       program.methods
         .act(BASE_ATTACK, 0)
-        .accountsStrict({ signer: signer.publicKey, session, participation, character, skillSet, monsters, sessionToken: null, ...vrfAccounts, ...over })
+        .accountsStrict({ signer: signer.publicKey, session, participation, character, skillSet, monsters, sessionToken: null, targetParticipation: null, ...vrfAccounts, ...over })
         .signers([signer])
         .rpc();
     // Session is checked first; these only prove the IDL carries the checked accounts.
@@ -568,11 +578,25 @@ const MAGE_SKILLS: [string, any][] = [
   ["Cold Snap", blocks("reactive", "debuff", "magical", "strike", ["cold"], { effect: "slow", trigger: "enemyAdjacent" })],
   ["Cold Mind", blocks("passive", "buff", "magical", "projectile", ["cold"], { effect: "empowerment" })],
 ];
-/** Projectile damage skill slot per class: Javelin, Frost Bolt. */
-const RANGED_SLOT = { warrior: 2, mage: 0 };
+const SUPPORT_SKILLS: [string, any][] = [
+  ["Quicken", blocks("active", "buff", "magical", "projectile", ["lightning"], { effect: "haste" })],
+  ["Sap", blocks("active", "debuff", "magical", "projectile", ["blood"], { effect: "weakening" })],
+  ["Mend", blocks("active", "buff", "magical", "projectile", ["blood"], { effect: "heal" })],
+  ["Shelter", blocks("active", "buff", "combat", "strike", ["blunt"], { effect: "protection" })],
+  ["Last Stand", { ...blocks("reactive", "buff", "combat", "strike", ["blunt"], { effect: "protection", trigger: "hpBelow" }), auraRadius: 2 }],
+  ["Cold Ward", { ...blocks("passive", "buff", "magical", "strike", ["cold"], { effect: "protection" }), auraRadius: 2 }],
+];
+const [QUICKEN, SAP, MEND, SHELTER] = [0, 1, 2, 3];
+/** Projectile skill slot per class: Javelin, Frost Bolt, Sap (a debuff, it rolls like an attack). */
+const RANGED_SLOT = { warrior: 2, mage: 0, support: SAP };
 const REACTIVE_SLOT = 4;
 
-type Kind = "warrior" | "mage";
+type Kind = "warrior" | "mage" | "support";
+const PROFILES = {
+  warrior: { name: "Bran", race: "human", predisposition: "piercing", stats: [10, 7, 5, 8], skills: WARRIOR_SKILLS },
+  mage: { name: "Ilyra", race: "forestElf", predisposition: "cold", stats: [5, 7, 13, 5], skills: MAGE_SKILLS },
+  support: { name: "Senna", race: "forestElf", predisposition: "lightning", stats: [5, 8, 12, 5], skills: SUPPORT_SKILLS },
+};
 async function createCharacter(owner: Keypair, kind: Kind): Promise<PublicKey> {
   const profile = pda([Buffer.from("profile"), owner.publicKey.toBuffer()], CHARACTER);
   if (!(await connection.getAccountInfo(profile))) {
@@ -585,15 +609,15 @@ async function createCharacter(owner: Keypair, kind: Kind): Promise<PublicKey> {
   const index = (await characterProgram.account.playerProfile.fetch(profile)).characterCount;
   const character = pda([Buffer.from("character"), owner.publicKey.toBuffer(), Buffer.from([index])], CHARACTER);
   const layer = { spriteId: 1, materialRamp: 2, accentRamp: 3, elementRamp: 0 };
-  const set = kind === "warrior" ? WARRIOR_SKILLS : MAGE_SKILLS;
+  const p = PROFILES[kind];
   const args = {
-    name: text(kind === "warrior" ? "Bran" : "Ilyra", 32),
-    race: e(kind === "warrior" ? "human" : "forestElf"),
+    name: text(p.name, 32),
+    race: e(p.race),
     class: e(kind),
-    predisposition: e(kind === "warrior" ? "piercing" : "cold"),
-    stats: kind === "warrior" ? [10, 7, 5, 8] : [5, 7, 13, 5],
+    predisposition: e(p.predisposition),
+    stats: p.stats,
     appearance: new Array(20).fill(layer),
-    skills: set.map(([name, b]) => ({ blocks: structuredClone(b), name: text(name, 24) })),
+    skills: p.skills.map(([name, b]) => ({ blocks: structuredClone(b), name: text(name, 24) })),
   };
   const asset = Keypair.generate();
   await characterProgram.methods
@@ -858,7 +882,8 @@ class Party {
       .signers([signer])
       .rpc();
   }
-  act(who: number, signer: Keypair, slot: number, target: number, token: PublicKey | null = null) {
+  /** `ally`: the target's participation for a heal or buff on another player. */
+  act(who: number, signer: Keypair, slot: number, target: number, token: PublicKey | null = null, ally: PublicKey | null = null) {
     const pl = this.players[who];
     return program.methods
       .act(slot, target)
@@ -871,6 +896,7 @@ class Party {
         monsters: this.acc.monsters,
         sessionToken: token,
         ...vrfAccounts,
+        targetParticipation: ally,
       })
       .signers([signer])
       .rpc();
@@ -891,8 +917,12 @@ class Party {
       .signers([signer])
       .rpc();
   }
-  /** The callback for the pending action of player `who` (attacker or target). */
-  consume(who: number, seed: Buffer, identity = MOCK_VRF) {
+  /** The callback for the pending action of player `who` (attacker or target); `ally`: the
+   * other player of a heal or buff. */
+  consume(who: number, seed: Buffer, identity = MOCK_VRF, ally: PublicKey | null = null) {
+    return this.consumeTx(who, seed, identity, ally).rpc({ commitment: "confirmed" });
+  }
+  consumeTx(who: number, seed: Buffer, identity = MOCK_VRF, ally: PublicKey | null = null) {
     const pl = this.players[who];
     return consume(
       identity,
@@ -902,9 +932,36 @@ class Party {
         participation: pl.participation,
         character: pl.character,
         skillSet: pl.skillSet,
+        targetParticipation: ally,
       },
       seed,
-    ).rpc({ commitment: "confirmed" });
+    );
+  }
+  /** The events the callback would emit with `seed` (simulated, nothing sent); `null` on an error. */
+  async simulateConsume(who: number, seed: Buffer, ally: PublicKey | null = null) {
+    const tx = await this.consumeTx(who, seed, MOCK_VRF, ally).transaction();
+    tx.feePayer = provider.wallet.publicKey;
+    tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+    tx.partialSign(MOCK_VRF);
+    const sim = await connection.simulateTransaction(tx);
+    return sim.value.err ? null : [...parser.parseLogs(sim.value.logs ?? [])];
+  }
+  /** Sends the callback with the first VRF value whose simulated events pass `pred`. */
+  async consumeEventsWhere(
+    who: number,
+    pred: (events: { name: string; data: any }[]) => boolean,
+    ally: PublicKey | null = null,
+    tries = 400,
+  ) {
+    for (let i = 0; i < tries; i++) {
+      const seed = randomBytes(32);
+      const events = await this.simulateConsume(who, seed, ally);
+      if (events && pred(events)) {
+        const sig = await this.consume(who, seed, MOCK_VRF, ally);
+        return { sig, seed, events: await eventsOf(sig) };
+      }
+    }
+    return assert.fail("no VRF value gave the wanted rolls");
   }
   flee(who: number, signer: Keypair) {
     return program.methods
@@ -1614,5 +1671,199 @@ describe("deadroll_session: turn start, cooldowns and over-time damage", { skip:
       assert.ok(await party.consumeBest(MAGE, dotKillScore(hp), 200, LETHAL_DOT), "every VRF value kills the mage");
     }
     assert.fail("the mage never died of over-time damage");
+  });
+});
+
+describe("deadroll_session: support and control skills", { skip: SKIP_PARTY }, () => {
+  const DIRS = [
+    [N, 0, -1],
+    [E, 1, 0],
+    [S, 0, 1],
+    [W, -1, 0],
+  ];
+  const [WARRIOR, MAGE, SUPPORT] = [0, 1, 2];
+  const ICE_PRISON = 2;
+  const BP = 10_000;
+  /** `deadroll_combat::support::mod_bit(ModKind::Haste)`. */
+  const HASTE_BIT = 1 << 0;
+  let party: Party;
+
+  const modOf = (mods: any[], kind: string) => mods.find((m) => m.turns > 0 && m.kind[kind] !== undefined);
+  const effectOf = (events: { name: string; data: any }[]) => eventsNamed(events, "effectResolved")[0];
+  /** A living monster `kind` (or any) in projectile reach of player `who`. */
+  async function monsterInReach(who: number, kind?: number) {
+    const pos = (await party.part(who)).core;
+    const all = (await party.monsters()).core;
+    const i = all.monsters
+      .slice(0, all.count)
+      .findIndex((m: any) => m.alive && (kind === undefined || m.bestiaryId === kind) && cheb(m, pos) >= 1 && cheb(m, pos) <= 6);
+    assert.ok(i >= 0, "no monster in reach");
+    return i;
+  }
+
+  before(async () => {
+    party = await Party.create(["warrior", "mage", "support"]);
+    await party.startAll();
+  });
+
+  it("act: heals and buffs take allies, debuffs and attacks take enemies", async () => {
+    await party.skipTo(SUPPORT);
+    const [p0, p1, p2] = party.players;
+    const w = p2.wallet;
+    // Slot 3 never joined; ally accounts must belong to the target slot.
+    await rejects(party.act(SUPPORT, w, QUICKEN, 3), "InvalidAllyTarget");
+    await rejects(party.act(SUPPORT, w, QUICKEN, WARRIOR), "AllyAccountMissing");
+    await rejects(party.act(SUPPORT, w, QUICKEN, WARRIOR, null, p1.participation), "InvalidAllyTarget");
+    // A self-cast takes no ally account, enemy actions never do.
+    await rejects(party.act(SUPPORT, w, QUICKEN, SUPPORT, null, p2.participation), "UnexpectedAllyAccount");
+    await rejects(party.act(SUPPORT, w, SAP, 0, null, p0.participation), "UnexpectedAllyAccount");
+    await rejects(party.act(SUPPORT, w, BASE_ATTACK, 0, null, p0.participation), "UnexpectedAllyAccount");
+    await rejects(party.act(SUPPORT, w, SAP, 50), "InvalidTarget");
+    // Reactive and passive skills are not actions.
+    await rejects(party.act(SUPPORT, w, 4, SUPPORT), "InvalidSkill");
+    const s = await party.state();
+    assert.equal(s.actedSeq === s.turnSeq, false, "nothing was used");
+  });
+
+  it("Haste on the caster: more AP on its next 2 own turns, then it runs out", async () => {
+    const before = await party.part(SUPPORT);
+    await party.act(SUPPORT, party.players[SUPPORT].wallet, QUICKEN, SUPPORT);
+    assert.ok((await party.state()).pendingTarget.equals(PublicKey.default), "a self-cast has no ally account");
+    const sig = await party.consume(SUPPORT, randomBytes(32));
+    const fx = await eventOf(sig, "effectResolved");
+    assert.deepEqual([fx.caster, fx.target, fx.rider], [SUPPORT, SUPPORT, false]);
+    assert.ok(fx.effect.haste !== undefined);
+    // Buffs do not roll to land: no d20, a crit roll and the d100 point in the skill's range.
+    assert.ok(fx.roll.outcome.hit !== undefined && fx.roll.d20 === 0);
+    assert.ok(fx.applied.added !== undefined);
+    const amount = fx.roll.amount;
+    assert.ok(amount >= 3_000 && amount <= 9_000, `haste ${amount}`);
+    const haste = modOf((await party.part(SUPPORT)).mods, "haste");
+    assert.deepEqual([haste.turns, haste.powerBp, haste.source], [3, amount, SUPPORT]);
+    assert.ok(!(await party.state()).core.pendingVrf);
+
+    const hasted = Math.min(255, Math.max(1, Math.floor((before.maxAp * (BP + amount)) / BP)));
+    assert.ok(hasted > before.maxAp);
+    for (const [turnsLeft, ap, expired] of [
+      [2, hasted, 0],
+      [1, hasted, 0],
+      [0, before.maxAp, HASTE_BIT],
+    ]) {
+      await party.endTurn(party.players[SUPPORT].wallet, SUPPORT);
+      await party.untilStartOf(SUPPORT);
+      const ticked = await eventOf(await party.begin(), "modsTicked");
+      assert.deepEqual([ticked.unit, ticked.actionPoints, ticked.expired], [SUPPORT, ap, expired]);
+      const p = await party.part(SUPPORT);
+      assert.equal(p.core.actionPoints, ap);
+      assert.equal(modOf(p.mods, "haste")?.turns ?? 0, turnsLeft);
+    }
+  });
+
+  it("Mend heals an ally on the same cell, never past its maximum", async () => {
+    // Let the monsters wound the warrior (the players only end their turns).
+    const { hpMax } = await party.part(WARRIOR);
+    for (let i = 0; i < 300 && (await party.part(WARRIOR)).core.hp === hpMax; i++) {
+      await party.play({ playerSeed: MISS, monsterSeed: () => CRIT, huntSlot: WARRIOR, passive: true, steps: 1 });
+    }
+    const hp = (await party.part(WARRIOR)).core.hp;
+    assert.ok(hp < hpMax && hp > 0, `warrior ${hp}/${hpMax}`);
+    await party.skipTo(SUPPORT);
+
+    const ally = party.players[WARRIOR].participation;
+    await party.act(SUPPORT, party.players[SUPPORT].wallet, MEND, WARRIOR, null, ally);
+    assert.ok((await party.state()).pendingTarget.equals(ally));
+    // The ally account is part of the callback.
+    await rejects(party.consume(SUPPORT, randomBytes(32)), "InvalidPendingAccounts");
+    const missing = hpMax - hp;
+    const { events } = await party.consumeEventsWhere(SUPPORT, (ev) => effectOf(ev)?.roll.amount > missing, ally);
+    const fx = effectOf(events);
+    assert.deepEqual([fx.caster, fx.target], [SUPPORT, WARRIOR]);
+    assert.ok(fx.effect.heal !== undefined && fx.applied.none !== undefined);
+    assert.equal(fx.hp, hpMax, "the heal stops at the maximum");
+    assert.equal((await party.part(WARRIOR)).core.hp, hpMax);
+    assert.ok((await party.state()).pendingTarget.equals(PublicKey.default), "cleared when the roll settles");
+    await party.endTurn(party.players[SUPPORT].wallet, SUPPORT);
+  });
+
+  it("Sap rolls to land: a natural 1 misses; Weakening counterweighs the wolf's next hit", async () => {
+    await party.skipTo(SUPPORT);
+    const wolf = await monsterInReach(SUPPORT, WOLF);
+    await party.act(SUPPORT, party.players[SUPPORT].wallet, SAP, wolf);
+    const miss = effectOf((await party.simulateConsume(SUPPORT, MISS))!);
+    assert.ok(miss.roll.outcome.miss !== undefined && miss.roll.d20 === 1);
+    assert.ok(miss.applied.none !== undefined && miss.roll.amount === 0);
+    assert.equal(miss.roll.rollsUsed, 1, "a miss stops after the d20");
+
+    const fx = await eventOf(await party.consume(SUPPORT, CRIT), "effectResolved");
+    assert.ok(fx.effect.weakening !== undefined && fx.roll.d20 === 20 && fx.roll.crit);
+    assert.ok(fx.applied.added !== undefined);
+    const weak = modOf((await party.monsters()).mods[wolf], "weakening");
+    assert.deepEqual([weak.turns, weak.powerBp, weak.source], [3, fx.roll.amount, SUPPORT]);
+    assert.ok(modOf(fx.mods, "weakening"), "the event shows the wolf's modifiers");
+
+    // The wolf's own turn: it walks up to a player and bites; the hit carries the Weakening.
+    await party.endTurn(party.players[SUPPORT].wallet, SUPPORT);
+    await party.untilStartOf(MONSTER_BASE + wolf);
+    await party.begin();
+    for (let i = 0; i < 8; i++) {
+      const m = (await party.monsters()).core.monsters[wolf];
+      const s = await party.state();
+      const slot = targetInRange(s, m);
+      if (slot !== undefined) {
+        await party.monsterAct(party.dm, wolf, slot);
+        const hit = await eventOf(await party.consume(slot, CRIT), "hitResolved");
+        assert.equal(hit.attacker, MONSTER_BASE + wolf);
+        assert.equal(hit.result.packets[0].weakenBp, fx.roll.amount);
+        return;
+      }
+      const moved = await party.stepToward(null, m, s.playerPos[WARRIOR], DIRS, cheb, wolf);
+      assert.ok(moved, "the wolf cannot reach the party");
+    }
+    assert.fail("the wolf never got in reach");
+  });
+
+  it("Ice Prison: the skill's Freeze rolls after the hit on the same seed and takes the target's turn", async () => {
+    await party.skipTo(MAGE);
+    const target = await monsterInReach(MAGE);
+    await party.act(MAGE, party.players[MAGE].wallet, ICE_PRISON, target);
+    const { events } = await party.consumeEventsWhere(MAGE, (ev) => {
+      const fx = effectOf(ev);
+      return fx?.rider && fx.applied.froze !== undefined;
+    });
+    const hit = eventsNamed(events, "hitResolved")[0];
+    const fx = effectOf(events);
+    assert.ok(hit.result.outcome.hit !== undefined);
+    assert.equal(fx.actionCounter, hit.actionCounter, "one action, one VRF value");
+    assert.ok(fx.seed.every((b: number, i: number) => b === hit.seed[i]));
+    assert.ok(fx.effect.freeze !== undefined && fx.rider);
+    // The effect's dice follow the hit's: a chance roll unless the hit crit.
+    assert.equal(fx.roll.chanceRoll === null, hit.result.crit);
+    assert.ok(hasState(fx.states, "freeze"));
+    assert.ok(hasState((await party.monsters()).core.monsters[target].states, "freeze"));
+
+    await party.endTurn(party.players[MAGE].wallet, MAGE);
+    await party.untilStartOf(MONSTER_BASE + target);
+    const skipped = await eventOf(await party.begin(), "turnSkipped");
+    assert.equal(skipped.unit, MONSTER_BASE + target);
+    assert.ok(skipped.state.freeze !== undefined);
+  });
+
+  it("a dead ally cannot be healed or buffed", async () => {
+    const s = await party.play({
+      playerSeed: MISS,
+      monsterSeed: (slot) => (slot === MAGE ? CRIT : MISS),
+      huntSlot: MAGE,
+      passive: true,
+      steps: 400,
+      until: (st) => (st.aliveMask & (1 << MAGE)) === 0,
+    });
+    assert.equal(s.aliveMask & (1 << MAGE), 0, "the mage died");
+    await party.skipTo(SUPPORT);
+    const cooldowns = (await party.part(SUPPORT)).cooldowns;
+    const buff = [MEND, QUICKEN, SHELTER].find((slot) => cooldowns[slot] === 0);
+    assert.ok(buff !== undefined);
+    const dead = party.players[MAGE].participation;
+    await rejects(party.act(SUPPORT, party.players[SUPPORT].wallet, buff, MAGE, null, dead), "InvalidAllyTarget");
+    await rejects(party.act(SUPPORT, party.players[SUPPORT].wallet, buff, MAGE), "InvalidAllyTarget");
   });
 });
