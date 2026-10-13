@@ -26,7 +26,9 @@ mock-vrf = []
 
 [dependencies]
 # `lazy-account`: MonsterState is too big to Borsh-decode on-chain (see state/monster_state.rs).
-anchor-lang = { workspace = true, features = ["lazy-account"] }
+# `allow-missing-optionals`: optional accounts appended to an instruction (`act`,
+# `consume_randomness`: `target_participation`) may be left out by older clients.
+anchor-lang = { workspace = true, features = ["lazy-account", "allow-missing-optionals"] }
 deadroll-types = { workspace = true, features = ["anchor"] }
 session-keys.workspace = true
 # CPI targets (generated `cpi` modules) and the `SkillRecord` layout.

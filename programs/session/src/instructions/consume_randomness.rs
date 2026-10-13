@@ -57,6 +57,10 @@ pub struct ConsumeRandomness<'info> {
     /// CHECK: the character program.
     #[account(address = deadroll_character::ID)]
     pub character_program: UncheckedAccount<'info>,
+    /// The ally of a heal or buff that is not the caster (`session.pending_target`); `None`
+    /// for every other roll.
+    #[account(mut, address = session.pending_target @ SessionError::InvalidPendingAccounts)]
+    pub target_participation: Option<Box<Account<'info, Participation>>>,
 }
 
 pub fn handler(ctx: Context<ConsumeRandomness>, randomness: [u8; 32]) -> Result<()> {
@@ -188,6 +192,7 @@ fn settle(session: &mut GameSession, randomness: [u8; 32]) -> Result<u32> {
     let action = session.core.action_counter;
     session.core.pending_vrf = false;
     session.pending = PendingAction::default();
+    session.pending_target = Pubkey::default();
     session.core.last_seed = randomness;
     session.core.action_counter = action.checked_add(1).ok_or(SessionError::Overflow)?;
     Ok(action)

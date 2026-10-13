@@ -3,10 +3,10 @@
 //! Numbers come from `rules.rs` (placeholders until the registry tables, L4).
 use deadroll_character::state::SkillRecord;
 use deadroll_combat::{
-    apply_to_attacker, apply_to_defender, Attacker, Carrier, Defender, Mod, ModFilter, Skill,
-    TimedMods, Tint,
+    apply_to_attacker, apply_to_defender, Attacker, Carrier, Defender, Mod, ModFilter, ModKind,
+    Skill, TimedMods, Tint,
 };
-use deadroll_skillcheck::{Category, Purpose};
+use deadroll_skillcheck::{Category, Effect, Purpose};
 use deadroll_types::{ActiveState, CharacterData, Form, Monster, STATES_MAX};
 
 use crate::rules::{
@@ -21,18 +21,66 @@ pub enum SkillUse {
     Ok,
     /// Reactive and passive skills are not actions.
     NotActive,
-    /// P0 resolves damage skills only. TODO(post-demo): buff and debuff skills.
-    NotDamage,
+    /// A buff or debuff without an effect (never passes the builder; the program checks anyway).
+    NoEffect,
 }
 
 pub fn skill_use(skill: &SkillRecord) -> SkillUse {
     if skill.blocks.category != Category::Active {
         SkillUse::NotActive
-    } else if skill.blocks.purpose != Purpose::Damage {
-        SkillUse::NotDamage
+    } else if skill.blocks.purpose != Purpose::Damage
+        && effect_action(skill.blocks.effect).is_none()
+    {
+        SkillUse::NoEffect
     } else {
         SkillUse::Ok
     }
+}
+
+/// Which side an action targets (docs/SKILL_BUILDER.md, section 2: a buff goes on the caster or
+/// an ally, a debuff on an enemy).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Side {
+    /// A monster: the weapon, damage and debuff skills.
+    Enemy,
+    /// A player of the party, the caster included: heal and buff skills.
+    Ally,
+}
+
+/// The side of `skill` (`None` = the weapon's basic attack).
+pub fn target_side(skill: Option<&SkillRecord>) -> Side {
+    match skill.map(|s| s.blocks.purpose) {
+        Some(Purpose::Buff) => Side::Ally,
+        _ => Side::Enemy,
+    }
+}
+
+/// What a skill's effect does to its target (docs/SKILL_BUILDER.md, section 6).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EffectAction {
+    /// HP back, up to the maximum.
+    Heal,
+    /// A timed modifier (`deadroll_combat::support`).
+    Mod(ModKind),
+    /// Hard control: the existing states.
+    Stun,
+    Freeze,
+}
+
+/// `None` for `Effect::None` (pure damage).
+pub fn effect_action(effect: Effect) -> Option<EffectAction> {
+    Some(match effect {
+        Effect::None => return None,
+        Effect::Weakening => EffectAction::Mod(ModKind::Weakening),
+        Effect::Slow => EffectAction::Mod(ModKind::Slow),
+        Effect::Vulnerability => EffectAction::Mod(ModKind::Vulnerability),
+        Effect::Stun => EffectAction::Stun,
+        Effect::Freeze => EffectAction::Freeze,
+        Effect::Haste => EffectAction::Mod(ModKind::Haste),
+        Effect::Empowerment => EffectAction::Mod(ModKind::Empowerment),
+        Effect::Protection => EffectAction::Mod(ModKind::Protection),
+        Effect::Heal => EffectAction::Heal,
+    })
 }
 
 /// Form of a player attack: the skill's, or a strike for the weapon's basic attack.
@@ -201,7 +249,7 @@ pub(crate) mod tests {
             let mut skills = vec![None];
             for preset in presets::for_class(class) {
                 let skill = record(preset.blocks);
-                if skill_use(&skill) == SkillUse::Ok {
+                if skill_use(&skill) == SkillUse::Ok && skill.blocks.purpose == Purpose::Damage {
                     skills.push(Some(skill));
                 }
             }
@@ -239,7 +287,7 @@ pub(crate) mod tests {
         for (c, class) in cases {
             for preset in presets::for_class(class) {
                 let skill = record(preset.blocks);
-                if skill_use(&skill) != SkillUse::Ok {
+                if skill_use(&skill) != SkillUse::Ok || skill.blocks.purpose != Purpose::Damage {
                     continue;
                 }
                 let attacker = player_attacker(0, &c, Some(&skill), &NONE);
@@ -347,6 +395,50 @@ pub(crate) mod tests {
         let bite = monster_attacker(4, &wolf, &mods).unwrap();
         assert_eq!(bite.increased[0], Mod::new(ModFilter::Any, 3_000));
         assert_eq!(bite.weaken_bp, 2_000);
+    }
+
+    #[test]
+    fn every_active_preset_is_usable_on_its_side() {
+        for class in [Class::Warrior, Class::Mage, Class::Support] {
+            for preset in presets::for_class(class) {
+                let skill = record(preset.blocks);
+                let expected = match preset.blocks.category {
+                    Category::Active => SkillUse::Ok,
+                    _ => SkillUse::NotActive,
+                };
+                assert_eq!(skill_use(&skill), expected, "{}", preset.name);
+                let side = match preset.blocks.purpose {
+                    Purpose::Buff => Side::Ally,
+                    Purpose::Damage | Purpose::Debuff => Side::Enemy,
+                };
+                assert_eq!(target_side(Some(&skill)), side, "{}", preset.name);
+            }
+        }
+        assert_eq!(target_side(None), Side::Enemy);
+        // A buff without an effect is refused.
+        let mut empty = record(presets::SUPPORT[0].blocks);
+        empty.blocks.effect = Effect::None;
+        assert_eq!(skill_use(&empty), SkillUse::NoEffect);
+        let mut heal = record(presets::SUPPORT[0].blocks);
+        heal.blocks.effect = Effect::Heal;
+        assert_eq!(
+            (skill_use(&heal), target_side(Some(&heal))),
+            (SkillUse::Ok, Side::Ally)
+        );
+    }
+
+    #[test]
+    fn every_effect_has_an_action() {
+        assert_eq!(effect_action(Effect::None), None);
+        for effect in Effect::ALL.iter().skip(1) {
+            assert!(effect_action(*effect).is_some(), "{effect:?}");
+        }
+        assert_eq!(effect_action(Effect::Heal), Some(EffectAction::Heal));
+        assert_eq!(effect_action(Effect::Freeze), Some(EffectAction::Freeze));
+        assert_eq!(
+            effect_action(Effect::Vulnerability),
+            Some(EffectAction::Mod(ModKind::Vulnerability))
+        );
     }
 
     #[test]

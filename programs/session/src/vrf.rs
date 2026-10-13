@@ -95,6 +95,8 @@ pub struct CallbackAccounts {
     pub character: Pubkey,
     /// The attacking player's `SkillSet`; any key when a monster attacks (not read).
     pub skill_set: Pubkey,
+    /// The ally of a heal or buff that is not the caster (`GameSession.pending_target`).
+    pub target_participation: Option<Pubkey>,
 }
 
 pub fn callback_metas(a: &CallbackAccounts) -> Vec<SerializableAccountMeta> {
@@ -112,6 +114,11 @@ pub fn callback_metas(a: &CallbackAccounts) -> Vec<SerializableAccountMeta> {
         meta(&SESSION_AUTHORITY, false),
         meta(&GAME_CONFIG, false),
         meta(&deadroll_character::ID, false),
+        // Anchor reads this program's id as `None`.
+        match &a.target_participation {
+            Some(key) => meta(key, true),
+            None => meta(&crate::ID, false),
+        },
     ]
 }
 
@@ -217,32 +224,40 @@ mod tests {
 
     #[test]
     fn callback_metas_follow_consume_randomness() {
-        let keys: Vec<Pubkey> = (0..5).map(|_| Pubkey::new_unique()).collect();
-        let ours = callback_metas(&CallbackAccounts {
-            session: keys[0],
-            monsters: keys[1],
-            participation: keys[2],
-            character: keys[3],
-            skill_set: keys[4],
-        });
-        let anchors = crate::accounts::ConsumeRandomness {
-            vrf_program_identity: VRF_IDENTITY,
-            session: keys[0],
-            monsters: keys[1],
-            participation: keys[2],
-            character: keys[3],
-            skill_set: keys[4],
-            session_authority: SESSION_AUTHORITY,
-            config: GAME_CONFIG,
-            character_program: deadroll_character::ID,
-        }
-        .to_account_metas(None);
-        assert_eq!(anchors.len(), ours.len() + 1);
-        assert!(anchors[0].is_signer && anchors[0].pubkey == VRF_IDENTITY);
-        for (a, o) in anchors[1..].iter().zip(&ours) {
-            assert_eq!(a.pubkey.to_bytes(), o.pubkey.to_bytes());
-            assert_eq!(a.is_writable, o.is_writable, "{}", a.pubkey);
-            assert!(!a.is_signer && !o.is_signer);
+        let keys: Vec<Pubkey> = (0..6).map(|_| Pubkey::new_unique()).collect();
+        for ally in [None, Some(keys[5])] {
+            let ours = callback_metas(&CallbackAccounts {
+                session: keys[0],
+                monsters: keys[1],
+                participation: keys[2],
+                character: keys[3],
+                skill_set: keys[4],
+                target_participation: ally,
+            });
+            let anchors = crate::accounts::ConsumeRandomness {
+                vrf_program_identity: VRF_IDENTITY,
+                session: keys[0],
+                monsters: keys[1],
+                participation: keys[2],
+                character: keys[3],
+                skill_set: keys[4],
+                session_authority: SESSION_AUTHORITY,
+                config: GAME_CONFIG,
+                character_program: deadroll_character::ID,
+                target_participation: ally,
+            }
+            .to_account_metas(None);
+            assert_eq!(anchors.len(), ours.len() + 1);
+            assert!(anchors[0].is_signer && anchors[0].pubkey == VRF_IDENTITY);
+            for (a, o) in anchors[1..].iter().zip(&ours) {
+                assert_eq!(a.pubkey.to_bytes(), o.pubkey.to_bytes());
+                assert_eq!(a.is_writable, o.is_writable, "{}", a.pubkey);
+                assert!(!a.is_signer && !o.is_signer);
+            }
+            assert_eq!(
+                ours.last().unwrap().pubkey.to_bytes(),
+                ally.unwrap_or(crate::ID).to_bytes()
+            );
         }
     }
 }

@@ -3,7 +3,7 @@ use deadroll_types::{seeds, Cell, SessionStatus};
 
 use crate::{
     auth,
-    combat_input::{player_form, skill_use, SkillUse},
+    combat_input::{player_form, skill_use, target_side, Side, SkillUse},
     errors::SessionError,
     events::{ActionRequested, SkillUsed},
     rules::{cooldown_after_use, in_range, Unit, ACT_AP, BASE_ATTACK},
@@ -56,10 +56,23 @@ pub struct Act<'info> {
     #[account(address = vrf::slot_hashes())]
     pub slot_hashes: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
+    /// The ally a heal or buff targets when it is not the caster; `None` for every other action
+    /// (a self-cast, an attack, a debuff). Any `Participation` of this session; the handler
+    /// checks its slot.
+    #[account(
+        seeds = [
+            seeds::PARTICIPATION,
+            session.key().as_ref(),
+            target_participation.core.character.as_ref(),
+        ],
+        bump = target_participation.core.bump,
+    )]
+    pub target_participation: Option<Box<Account<'info, Participation>>>,
 }
 
 /// `skill_slot`: a slot of the character's `SkillSet`, or `BASE_ATTACK` for the weapon.
-/// `target`: a monster index.
+/// `target`: by the skill's side (`combat_input::target_side`): a monster index for the weapon,
+/// damage and debuff skills, a player slot (the caster's own included) for heal and buff skills.
 pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
     let accounts = ctx.accounts;
     let session = &mut accounts.session;
@@ -88,11 +101,6 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
     // One attack or active skill per turn; movement spends what AP are left (PARTY_AND_TURNS 5.1).
     require!(!session.acted(), SessionError::AlreadyActed);
 
-    let monsters = Monsters::load(accounts.monsters.as_ref(), &session.key())?;
-    require!(target < monsters.count()?, SessionError::InvalidTarget);
-    let monster = monsters.get(target)?;
-    require!(monster.alive, SessionError::InvalidTarget);
-
     let skill = if skill_slot == BASE_ATTACK {
         None
     } else {
@@ -112,18 +120,65 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
         );
         Some(skill)
     };
+    // Checked for every action: the callback loads it too, and a callback that fails would leave
+    // the roll pending.
+    let monsters = Monsters::load(accounts.monsters.as_ref(), &session.key())?;
     let from = Cell {
         x: participation.core.x,
         y: participation.core.y,
     };
-    let to = Cell {
-        x: monster.x,
-        y: monster.y,
+
+    // The target must be on the skill's side: an enemy for the weapon, damage and debuffs, an
+    // ally (or the caster) for heals and buffs (docs/SKILL_BUILDER.md, section 2).
+    let (target_unit, to, pending_target) = match target_side(skill.as_ref()) {
+        Side::Enemy => {
+            require!(
+                accounts.target_participation.is_none(),
+                SessionError::UnexpectedAllyAccount
+            );
+            require!(target < monsters.count()?, SessionError::InvalidTarget);
+            let monster = monsters.get(target)?;
+            require!(monster.alive, SessionError::InvalidTarget);
+            let to = Cell {
+                x: monster.x,
+                y: monster.y,
+            };
+            (Unit::Monster(target), Some(to), Pubkey::default())
+        }
+        Side::Ally if target == slot => {
+            // A self-cast resolves on the caster's own participation: no second account.
+            require!(
+                accounts.target_participation.is_none(),
+                SessionError::UnexpectedAllyAccount
+            );
+            (Unit::Player(slot), None, Pubkey::default())
+        }
+        Side::Ally => {
+            require!(
+                session.player_alive(target),
+                SessionError::InvalidAllyTarget
+            );
+            let ally = accounts
+                .target_participation
+                .as_ref()
+                .ok_or(SessionError::AllyAccountMissing)?;
+            require!(
+                ally.core.slot == target && ally.core.hp > 0,
+                SessionError::InvalidAllyTarget
+            );
+            let to = Cell {
+                x: ally.core.x,
+                y: ally.core.y,
+            };
+            (Unit::Player(target), Some(to), ally.key())
+        }
     };
-    require!(
-        in_range(player_form(skill.as_ref()), from, to),
-        SessionError::OutOfRange
-    );
+    if let Some(to) = to {
+        require!(
+            in_range(player_form(skill.as_ref()), from, to),
+            SessionError::OutOfRange
+        );
+    }
 
     participation.refresh_ap(session.turn_seq);
     participation.core.action_points = participation
@@ -131,17 +186,18 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
         .action_points
         .checked_sub(ACT_AP)
         .ok_or(SessionError::NotEnoughActionPoints)?;
-    // Attacking is another action: every escape intent resets (docs/PARTY_AND_TURNS.md, 7.3).
+    // Any action resets every escape intent (docs/PARTY_AND_TURNS.md, 7.3).
     session.flee_mask = 0;
 
     let attacker = Unit::Player(slot).id();
-    let target_unit = Unit::Monster(target).id();
+    let target_unit = target_unit.id();
     session.pending = PendingAction {
         attacker,
         target: target_unit,
         skill_slot,
         participation: participation.key(),
     };
+    session.pending_target = pending_target;
     session.core.pending_vrf = true;
     session.acted_seq = session.turn_seq;
     if let Some(skill) = &skill {
@@ -165,6 +221,7 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
             participation: participation.key(),
             character: accounts.character.key(),
             skill_set: accounts.skill_set.key(),
+            target_participation: (pending_target != Pubkey::default()).then_some(pending_target),
         },
     )?;
 

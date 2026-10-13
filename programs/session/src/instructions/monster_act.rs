@@ -137,6 +137,7 @@ pub fn handler(ctx: Context<MonsterAct>, monster: u8, action: u8, target: u8) ->
             character: accounts.character.key(),
             // Not read when a monster attacks; the list stays fixed.
             skill_set: deadroll_character::ID,
+            target_participation: None,
         },
     )?;
 
