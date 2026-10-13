@@ -2,8 +2,8 @@
 //! Rejections live in `tests/rejections.rs`.
 
 use deadroll_skillcheck::{
-    check_loadout, derive, fusion_id, presets, validate, validate_starting, Category, SkillBlocks,
-    SkillError,
+    check_loadout, derive, fusion_id, presets, validate, validate_starting, Category, Effect,
+    SkillBlocks, SkillError,
 };
 use deadroll_types::{Aspect, Class, BP};
 
@@ -86,6 +86,21 @@ fn derived_values_of_known_skills() {
 
     assert_eq!(derive(&presets::WARRIOR[4].blocks).cooldown, 2); // reactive
     assert_eq!(derive(&presets::WARRIOR[5].blocks).cooldown, 0); // passive
+}
+
+#[test]
+fn heal_is_a_buff_for_any_aspect() {
+    // Quicken with Heal instead of Haste: a Support starting skill, full power, active cooldown.
+    let mut s = presets::SUPPORT[0].blocks;
+    s.effect = Effect::Heal;
+    assert!(Effect::Heal.is_buff() && !Effect::Heal.is_debuff());
+    assert_eq!(Effect::Heal.hard_control_aspect(), None);
+    for &aspect in Aspect::ALL.iter() {
+        s.aspects[0] = aspect;
+        assert_eq!(validate_starting(&s, Class::Support), Ok(()));
+    }
+    let d = derive(&s);
+    assert_eq!((d.power_bp, d.cooldown), (BP, 1));
 }
 
 #[test]
