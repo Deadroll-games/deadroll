@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { textBytes, type SkillRecordAcc, type TimedModAcc } from "./game";
 import { Category, Effect, Form, Purpose, Source, inReach, makeBlocks, skillSide, usableInCombat } from "./skillcheck";
-import { activeMods, combatSkill, effectText, modLabel, modTurnsLeft, modsTickText, type EffectResolved } from "./support";
+import { activeMods, combatSkill, effectText, modLabel, modTurnsLeft, modsAt, modsTickText, type EffectResolved } from "./support";
 import { Applied, Aspect, HitOutcome, ModKind } from "./types";
 
 const e = (k: string) => ({ [k]: {} });
@@ -62,7 +62,31 @@ describe("mods", () => {
       [ModKind.Weakening, 1],
     ]);
     expect(live.map(modTurnsLeft)).toEqual([2, 0]);
-    expect(live.map(modLabel)).toEqual(["Haste +25% (2)", "Weakening -18% (0)"]);
+    expect(live.map(modLabel)).toEqual(["Haste +25% AP (2)", "Weakening -18% damage (0)"]);
+  });
+
+  it("Vulnerability reads as more damage taken, from its aspect only", () => {
+    const mods = empty();
+    mods[ModKind.Vulnerability] = { ...mod("vulnerability", 2), aspect: e("fire") };
+    mods[ModKind.Protection] = mod("protection", 3, 2_000);
+    expect(activeMods(mods).map(modLabel)).toEqual(["Protection +20% resist (2)", "Vulnerability +25% Fire damage taken (1)"]);
+  });
+
+  it("modsAt takes the latest ModsTicked / EffectResolved on the unit before the event", () => {
+    const vuln = empty();
+    vuln[ModKind.Vulnerability] = mod("vulnerability", 2);
+    const tick = empty();
+    const events = [
+      { name: "EffectResolved", data: { target: 5, mods: vuln } },
+      { name: "ModsTicked", data: { unit: 0, mods: tick } },
+      { name: "HitResolved", data: {} },
+      { name: "EffectResolved", data: { target: 5, mods: empty() } },
+    ];
+    expect(modsAt(events, 2, 5, []).map((m) => m.kind)).toEqual([ModKind.Vulnerability]);
+    expect(modsAt(events, 2, 0, [])).toEqual([]);
+    // No event on the unit before the hit: the fallback (account now).
+    const now = activeMods(vuln);
+    expect(modsAt(events, 2, 6, now)).toBe(now);
   });
 
   it("ModsTicked names what wore off and the AP of a hasted turn", () => {

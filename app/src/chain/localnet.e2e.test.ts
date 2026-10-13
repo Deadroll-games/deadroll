@@ -387,4 +387,111 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
     expect(phase).toBe("done");
     expect(checkedHaste).toBe(true);
   });
+
+  it("Expose on a wolf: the warrior's Fire packet takes the Vulnerability, HP drops by the breakdown", { timeout: 15 * 60_000 }, async () => {
+    const supportSkills = SKILL_PRESETS[Class.Support];
+    const EXPOSE = supportSkills.findIndex((k) => k.name === "Expose");
+    expect(EXPOSE).toBeGreaterThanOrEqual(0);
+    // A Fire predisposition (forest elf) gives the warrior's basic hit a Fire packet next to the Blunt weapon.
+    const { dmKey, dmActor, players, acc, oracle, party: first } = await openParty([
+      { cls: Class.Warrior, race: Race.ForestElf, pred: Aspect.Fire, stats: [10, 7, 5, 8], name: "Bran" },
+      { cls: Class.Support, race: Race.Human, pred: Aspect.Blood, stats: [5, 7, 13, 5], name: "Mira", skills: supportSkills },
+    ]);
+    const SUPPORT = 1;
+    const tiles = first.tiles!;
+    const wolves = first.monsters.flatMap((m, i) => (m.bestiaryId === 0 ? [i] : []));
+    const bran = players[WARRIOR]!;
+    const mira = players[SUPPORT]!;
+    const branAt = (p: Party) => ({ x: p.players[WARRIOR]!.part.core.x, y: p.players[WARRIOR]!.part.core.y });
+    const vulnOf = (p: Party, wolf: number) => activeMods(p.monsterMods[wolf]).find((m) => m.kind === ModKind.Vulnerability);
+
+    let phase: "expose" | "strike" | "done" = "expose";
+    let exposed = -1;
+    for (let guard = 0; guard < 400 && phase !== "done"; guard++) {
+      const party = (await readParty(acc.session, tiles))!;
+      const s = party.session;
+      expect(status(s)).toBe("active");
+      const unit = currentUnit(s)!;
+      if (!turnStarted(s)) {
+        const pl = unit < MONSTER_BASE ? party.players[unit]! : null;
+        await send(pl ? players[unit]!.key : dmKey, [await startTurnIx(acc.session, pl ? { participation: pl.participation, character: pl.character } : null)]);
+        continue;
+      }
+      const target = branAt(party);
+      if (unit === SUPPORT) {
+        const me = party.players[SUPPORT]!.part.core;
+        // A wolf already next to the warrior, in Mira's reach.
+        const wolf = wolves.find((i) => party.monsters[i]!.alive && cheb(party.monsters[i]!, target) === 1 && cheb(me, party.monsters[i]!) >= 1 && cheb(me, party.monsters[i]!) <= 6);
+        if (phase === "expose" && wolf !== undefined) {
+          await send(mira.key, [await actIx(mira.actor, acc.session, mira.character, EXPOSE, wolf, null)]);
+          const fx = toEffectResolved((await oracle(await pickSeed("crit"))).find((e) => e.name === "EffectResolved")!.data);
+          expect([fx.target, fx.effect, fx.roll.d20, fx.applied]).toEqual([MONSTER_BASE + wolf, Effect.Vulnerability, 20, Applied.Added]);
+          const v = vulnOf((await readParty(acc.session, tiles))!, wolf)!;
+          expect([v.aspect, v.powerBp]).toEqual([Aspect.Fire, fx.roll.amount]);
+          exposed = wolf;
+          phase = "strike";
+        }
+        await send(mira.key, [await endTurnIx(mira.actor, acc.session, mira.character)]);
+      } else if (unit === WARRIOR) {
+        const v = exposed >= 0 ? vulnOf(party, exposed) : undefined;
+        const wolf = exposed >= 0 ? party.monsters[exposed]! : null;
+        if (phase === "strike" && !v) phase = "expose"; // wore off before the warrior's turn
+        if (phase === "strike" && v && wolf?.alive && cheb(wolf, target) === 1) {
+          const hpBefore = wolf.hp;
+          await send(bran.key, [await actIx(bran.actor, acc.session, bran.character, BASE_ATTACK, exposed, null)]);
+          // A plain roll (no crit), so the hit rarely kills and the HP drop is the whole damage.
+          const hit = toHitResolved((await oracle(await pickSeed("random"))).find((e) => e.name === "HitResolved")!.data).result;
+          const hpAfter = (await readParty(acc.session, tiles))!.monsters[exposed]!.hp;
+          if (hit.outcome !== HitOutcome.Hit) {
+            // A miss: nothing changes, try again on the next warrior turn.
+            expect(hpAfter).toBe(hpBefore);
+            await send(bran.key, [await endTurnIx(bran.actor, acc.session, party.players[WARRIOR]!.character)]);
+            continue;
+          }
+          const fire = hit.packets.find((p) => p.aspect === Aspect.Fire)!;
+          const blunt = hit.packets.find((p) => p.aspect === Aspect.Blunt)!;
+          // Vulnerability is to its aspect only: the Fire packet carries it, the Blunt one does not.
+          expect(fire.vulnBp).toBe(v.powerBp);
+          expect(blunt.vulnBp).toBe(0);
+          // Fire is not physical and the wolf resists only Cold: after defense = rolled x (1 + vuln).
+          expect([fire.armor, fire.resistBp]).toEqual([0, 0]);
+          const fireAfter = (BigInt(fire.rolled) * BigInt(10_000 + v.powerBp)) / 10_000n;
+          expect(BigInt(fire.afterDefense)).toBe(fireAfter);
+          const total = hit.packets.reduce((n, p) => n + BigInt(p.afterDefense), 0n);
+          expect(hit.damage).toBe(Math.max(1, Number(total / 10_000n)));
+          // The real HP drop is the breakdown's damage.
+          expect(hpBefore - hpAfter).toBe(Math.min(hit.damage, hpBefore));
+          const withoutVuln = Number((total - BigInt(fire.afterDefense) + BigInt(fire.rolled)) / 10_000n);
+          console.log(
+            `[vuln check] Vulnerability Fire +${v.powerBp / 100}%: Fire rolled ${Number(fire.rolled) / 10_000} -> ${Number(fire.afterDefense) / 10_000}, ` +
+              `Blunt ${Number(blunt.afterDefense) / 10_000} (vuln ${blunt.vulnBp}), damage ${hit.damage} (without vuln ${Math.max(1, withoutVuln)}), wolf HP ${hpBefore} -> ${hpAfter}`,
+          );
+          phase = "done";
+        }
+        if (phase !== "done") await send(bran.key, [await endTurnIx(bran.actor, acc.session, party.players[WARRIOR]!.character)]);
+      } else {
+        // Wolves walk up to the warrior and bite; the others wait.
+        const mi = unit - MONSTER_BASE;
+        const m = party.monsters[mi]!;
+        if (wolves.includes(mi) && m.alive && s.aliveMask & (1 << WARRIOR)) {
+          let ap = m.actionPoints;
+          if (cheb(m, target) > 1) {
+            const steps = route({ from: m, goal: (x, y) => cheb({ x, y }, target) === 1, tiles, width: s.width, height: s.height, tileCost: tileCost(party), taken: taken(party, unit) });
+            const take = steps ? affordable(steps, ap, 2) : [];
+            if (take.length) {
+              await send(dmKey, [await monsterMoveIx(dmActor, acc.session, s.layout, mi, take)]);
+              ap -= take.reduce((n, st) => n + st.cost, 0);
+            }
+          }
+          const now = (await readParty(acc.session, tiles))!;
+          if (ap >= 2 && cheb(now.monsters[mi]!, target) === 1) {
+            await send(dmKey, [await monsterActIx(dmActor, acc.session, mi, WARRIOR, first.players[WARRIOR]!.character)]);
+            await oracle(await pickSeed("random"));
+          }
+        }
+        if (currentUnit((await readParty(acc.session, tiles))!.session) === unit) await send(dmKey, [await endTurnIx(dmActor, acc.session, null)]);
+      }
+    }
+    expect(phase).toBe("done");
+  });
 });

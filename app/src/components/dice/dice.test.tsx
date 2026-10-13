@@ -1,11 +1,11 @@
 import { cleanup, fireEvent, render, screen, act } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MOCK_HITS } from "../../chain/mock";
-import { HitOutcome } from "../../chain/types";
+import { Aspect, HitOutcome, ModKind } from "../../chain/types";
 import { formatScaled } from "../../chain/names";
 import { cascadeSteps, chanceView } from "./cascade";
 import { DiceCascade } from "./DiceCascade";
-import { HitBreakdown } from "./HitBreakdown";
+import { HitBreakdown, modLines } from "./HitBreakdown";
 import Demo from "./Demo";
 
 afterEach(() => {
@@ -226,5 +226,44 @@ describe("Demo", () => {
     fireEvent.click(screen.getByRole("button", { name: "Replay" }));
     expect(screen.getByText("16")).toBeTruthy();
     expect(screen.getAllByTestId("packet")).toHaveLength(1);
+  });
+});
+
+describe("HitBreakdown modifiers", () => {
+  const m = (kind: ModKind, powerBp: number, aspect: Aspect = Aspect.Fire) => ({ kind, aspect, turns: 2, powerBp, source: 5 });
+
+  it("a Vulnerability to an aspect the hit does not carry does nothing, and says so", () => {
+    // The crit mock is a single Piercing packet.
+    const lines = modLines(MOCK_HITS.crit, { attacker: [], target: [m(ModKind.Vulnerability, 2_500)] });
+    expect(lines).toEqual([{ side: "Target", text: "Vulnerability +25% Fire damage taken: no Fire packet in this hit, does nothing", applied: false }]);
+    render(<HitBreakdown hit={MOCK_HITS.crit} mods={{ attacker: [], target: [m(ModKind.Vulnerability, 2_500)] }} />);
+    expect(screen.getByTestId("hit-mods").textContent).toContain("no Fire packet in this hit");
+    expect(screen.getByTestId("packet").textContent).not.toContain("incl.");
+  });
+
+  it("annotates the rows each mod fed", () => {
+    const mods = { attacker: [m(ModKind.Empowerment, 3_000), m(ModKind.Weakening, 1_000), m(ModKind.Haste, 2_500)], target: [m(ModKind.Vulnerability, 2_500), m(ModKind.Protection, 2_000), m(ModKind.Weakening, 1_500)] };
+    const lines = modLines(MOCK_HITS.resonance, mods);
+    expect(lines.map((l) => [l.side, l.applied])).toEqual([
+      ["Attacker", true],
+      ["Attacker", true],
+      ["Attacker", false],
+      ["Target", true],
+      ["Target", true],
+      ["Target", false],
+    ]);
+    expect(lines[3]!.text).toBe("Vulnerability +25% Fire damage taken: in Vulnerability of the Fire packet");
+    render(<HitBreakdown hit={MOCK_HITS.resonance} mods={mods} />);
+    const [cold, fire] = screen.getAllByTestId("packet");
+    expect(cold!.textContent).toContain("incl. Empowerment 30%");
+    expect(cold!.textContent).toContain("incl. Weakening 10%");
+    expect(cold!.textContent).toContain("incl. Protection 20%");
+    expect(cold!.textContent).not.toContain("incl. Vulnerability");
+    expect(fire!.textContent).toContain("incl. Vulnerability 25%");
+  });
+
+  it("without mods there is no Modifiers section", () => {
+    render(<HitBreakdown hit={MOCK_HITS.crit} />);
+    expect(screen.queryByTestId("hit-mods")).toBeNull();
   });
 });

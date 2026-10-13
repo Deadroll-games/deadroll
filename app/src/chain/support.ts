@@ -3,7 +3,7 @@
 // Pure functions over decoded accounts and events.
 import type { Address } from "@solana/kit";
 import { ASPECT_KEYS, MOD_KEYS, bytesText, enumIndex, variantKey, type Enum, type SkillRecordAcc, type TimedModAcc } from "./game";
-import { effectAmount } from "./names";
+import { ASPECT_NAMES, effectAmount } from "./names";
 import { Effect, Form, Purpose, skillSide, usableInCombat, type Side, type SkillBlocks } from "./skillcheck";
 import { Applied, HitOutcome, type Aspect, type ModKind, type TimedMod } from "./types";
 
@@ -26,9 +26,46 @@ export function activeMods(mods: readonly TimedModAcc[] | undefined): TimedMod[]
 /** Own turns a modifier still covers after the current one (`turns` counts the next start too). */
 export const modTurnsLeft = (m: TimedMod): number => Math.max(0, m.turns - 1);
 
-/** e.g. "Haste +25% (2)"; Stun / Freeze are states, not mods. */
+/**
+ * What a mod does to its bearer's numbers (deadroll_combat::support): Haste / Slow its AP,
+ * Empowerment / Weakening its outgoing damage, Protection its resistances, Vulnerability the damage
+ * it takes from the mod's aspect only.
+ */
+export function modEffectText(m: TimedMod): string {
+  const pct = `${Math.round(m.powerBp / 100)}%`;
+  switch (m.kind) {
+    case 0:
+      return `+${pct} AP`;
+    case 1:
+      return `-${pct} AP`;
+    case 2:
+      return `+${pct} damage`;
+    case 3:
+      return `-${pct} damage`;
+    case 4:
+      return `+${pct} resist`;
+    default:
+      return `+${pct} ${ASPECT_NAMES[m.aspect] ?? "?"} damage taken`;
+  }
+}
+
+/** e.g. "Haste +25% AP (2)", "Vulnerability +25% Fire damage taken (1)"; Stun / Freeze are states, not mods. */
 export function modLabel(m: TimedMod): string {
-  return `${MOD_NAMES[m.kind] ?? "mod"} ${modIsBuff(m.kind) ? "+" : "-"}${Math.round(m.powerBp / 100)}% (${modTurnsLeft(m)})`;
+  return `${MOD_NAMES[m.kind] ?? "mod"} ${modEffectText(m)} (${modTurnsLeft(m)})`;
+}
+
+/**
+ * The bearer's mods as they were at event `index` of a party's event list: the latest ModsTicked
+ * or EffectResolved on that unit before it (both carry the unit's full mods), else `fallback`
+ * (the account now). A rider's EffectResolved follows its hit, so it never counts for that hit.
+ */
+export function modsAt(events: readonly { name: string; data: any }[], index: number, unit: number, fallback: TimedMod[]): TimedMod[] {
+  for (let j = Math.min(index, events.length) - 1; j >= 0; j--) {
+    const e = events[j]!;
+    if (e.name === "ModsTicked" && e.data.unit === unit) return activeMods(e.data.mods);
+    if (e.name === "EffectResolved" && e.data.target === unit) return activeMods(e.data.mods);
+  }
+  return fallback;
 }
 
 // ---- skills in battle
