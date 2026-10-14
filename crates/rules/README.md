@@ -8,7 +8,7 @@ Game rules shared by the session program and the balance bench. Pure Rust, `no_s
 |---|---|
 | `config` | `BalanceConfig`: every balance number (`combat::Balance`, `combat::SupportBalance`, `skillcheck::SkillTuning`, `PlayerTuning`, `MonsterScaling`). `DEFAULT` is what the programs use. |
 | `units` | unit ids, initiative roll, cooldowns, reach |
-| `player` | AP, initiative, class weapon and increases, attack bonus, crit, defense, HP, creation rules |
+| `player` | speed and AP, initiative, accuracy, evasion, stat damage increases, which stat scales a state (by power source), class and race trait tiers, HP, levels, spending stat points, creation rules |
 | `monster` | `MonsterBase` (a template, content) → `MonsterProfile` at a level; the P0 table in `monster::p0` |
 | `input` | `Attacker` / `Defender` / `SupportInput` from a hero, a skill or a monster; effects of skills |
 | `turn` | `start_of_turn`: over-time damage, Freeze / Stun skip, durations, cooldowns |

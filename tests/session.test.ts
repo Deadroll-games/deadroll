@@ -520,6 +520,14 @@ function unequip(owner: Keypair, character: PublicKey, slot: number, signer = ow
     .signers([signer])
     .rpc();
 }
+/** character `spend_stat_points` by `signer` (the owner's main wallet only). */
+function spendStatPoints(signer: Keypair, character: PublicKey, points: number[]) {
+  return characterProgram.methods
+    .spendStatPoints(points)
+    .accountsStrict({ owner: signer.publicKey, character })
+    .signers([signer])
+    .rpc();
+}
 /** character `equip` of soulbound item `item` by the owner. */
 function equip(owner: Keypair, character: PublicKey, item: number, slot: number) {
   return characterProgram.methods
@@ -554,7 +562,8 @@ interface MapFixture {
   layout: PublicKey;
 }
 
-async function createFinalizedMap(dm: Keypair): Promise<MapFixture> {
+/** `bossLevel`: the goblin chieftain's spawn level (its XP grows with it); the rest are level 1. */
+async function createFinalizedMap(dm: Keypair, bossLevel = 1): Promise<MapFixture> {
   const index = randomBytes(4).readUInt32LE(0);
   const idx = Buffer.alloc(4);
   idx.writeUInt32LE(index);
@@ -575,7 +584,7 @@ async function createFinalizedMap(dm: Keypair): Promise<MapFixture> {
     bestiaryId: s.id,
     x: s.x,
     y: s.y,
-    level: 1,
+    level: s.id === CHIEFTAIN ? bossLevel : 1,
     skills: 0,
     flags: 0,
     aspects: 0,
@@ -724,10 +733,10 @@ class Party {
   acc!: ReturnType<typeof sessionAccounts>;
   players: Player[] = [];
 
-  static async create(kinds: Kind[]): Promise<Party> {
+  static async create(kinds: Kind[], opts: { bossLevel?: number } = {}): Promise<Party> {
     const p = new Party();
     [p.dm, p.dmActor] = await Promise.all([funded(), funded(1)]);
-    p.fixture = await createFinalizedMap(p.dm);
+    p.fixture = await createFinalizedMap(p.dm, opts.bossLevel);
     p.acc = sessionAccounts(p.fixture.map);
     for (const kind of kinds) {
       const [wallet, actor] = await Promise.all([funded(), funded(1)]);
@@ -1568,6 +1577,8 @@ describe("deadroll_session: combat, death, victory and payouts", { skip: SKIP_PA
     const dead = await eventOf(await party.claimRewards(1, p1.actor, p1ClaimToken), "rewardsClaimed"); // the owner's session key
     assert.equal(dead.xp, 0);
     assert.ok(!(await party.character(1)).core.alive);
+    // A tombstone spends nothing.
+    await rejects(spendStatPoints(p1.wallet, p1.character, [1, 0, 0, 0]), "CharacterDead");
   });
 
   it("claim_escrow: DM main wallet only, once; the map is finished", async () => {
@@ -1580,6 +1591,57 @@ describe("deadroll_session: combat, death, victory and payouts", { skip: SKIP_PA
     const map = await mapProgram.account.map.fetch(party.fixture.map);
     assert.ok(map.core.status.finished);
     await rejects(party.claimEscrow(party.dm), "AlreadyClaimed");
+  });
+});
+
+describe("character.spend_stat_points after a level-up", { skip: SKIP_PARTY }, () => {
+  // A level 2 chieftain is worth 100 XP: exactly level 2 (PlayerTuning.level_xp), 2 stat points.
+  let party: Party;
+
+  before(async () => {
+    party = await Party.create(["warrior", "mage"], { bossLevel: 2 });
+    await party.startAll();
+  });
+
+  it("not while the character is locked in the party", async () => {
+    const p0 = party.players[0];
+    await rejects(spendStatPoints(p0.wallet, p0.character, [1, 0, 0, 0]), "AlreadyLocked");
+  });
+
+  it("the victory levels the survivors up: points to spend and the level's HP", async () => {
+    const s = await party.play({ playerSeed: CRIT, monsterSeed: () => MISS, focus: CHIEFTAIN_INDEX, steps: 2000 });
+    assert.ok(s.core.status.victory, "boss killed");
+    assert.ok(s.xpPool >= 100 && s.xpPool < 300, `xp ${s.xpPool}`);
+    await party.claimRewards(0);
+    const c = await party.character(0);
+    assert.deepEqual([c.core.level, c.unspentPoints], [2, 2]);
+    // Bran: warrior base 30 + Endurance 8 x 2 + one level x 6.
+    assert.equal(c.core.hpMax, 30 + 8 * 2 + 6);
+  });
+
+  it("only the owner's main wallet; not more than unspent; not nothing", async () => {
+    const [p0, p1] = party.players;
+    await rejects(spendStatPoints(p1.wallet, p0.character, [1, 0, 0, 0]), "NotOwner");
+    await rejects(spendStatPoints(p0.actor, p0.character, [1, 0, 0, 0]), "NotOwner");
+    await rejects(spendStatPoints(p0.wallet, p0.character, [2, 1, 0, 0]), "NotEnoughStatPoints");
+    await rejects(spendStatPoints(p0.wallet, p0.character, [0, 0, 0, 0]), "NoPointsSpent");
+  });
+
+  it("the owner spends every point at once; Endurance raises the stored HP", async () => {
+    const p0 = party.players[0];
+    const before = await party.character(0);
+    const sig = await spendStatPoints(p0.wallet, p0.character, [1, 0, 0, 1]);
+    const tx = await connection.getTransaction(sig, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
+    const events = [...new EventParser(characterProgram.programId, characterProgram.coder).parseLogs(tx?.meta?.logMessages ?? [])];
+    const ev = events.find((x) => x.name.toLowerCase() === "statpointsspent")?.data as any;
+    assert.ok(ev, "no statPointsSpent event");
+    const c = await party.character(0);
+    assert.deepEqual(c.core.stats, [11, 7, 5, 9]);
+    assert.equal(c.unspentPoints, 0);
+    assert.equal(c.core.hpMax, 30 + 9 * 2 + 6);
+    assert.equal(c.core.stateVersion, before.core.stateVersion + 1);
+    assert.deepEqual([ev.points, ev.stats, ev.unspentPoints, ev.hpMax], [[1, 0, 0, 1], [11, 7, 5, 9], 0, c.core.hpMax]);
+    await rejects(spendStatPoints(p0.wallet, p0.character, [1, 0, 0, 0]), "NotEnoughStatPoints");
   });
 });
 
@@ -1747,7 +1809,8 @@ describe("deadroll_session: turn start, cooldowns and over-time damage", { skip:
         const slot = [FROST_BURN, FROST_BOLT, ICE_PRISON].find((i) => p.cooldowns[i] === 0);
         if (slot === undefined) continue;
         await party.act(MAGE, p1.wallet, slot, WOLF0);
-        const sent = await party.consumeBest(MAGE, dotKillScore(wolf.hp), 300, LETHAL_DOT);
+        // Stats raise the mage's hits, so fewer values leave the wolf alive with enough Burning.
+        const sent = await party.consumeBest(MAGE, dotKillScore(wolf.hp), 600, LETHAL_DOT);
         assert.ok(sent, "every VRF value kills the wolf outright");
         if (sent.score < LETHAL_DOT) continue;
 
@@ -1819,7 +1882,7 @@ describe("deadroll_session: turn start, cooldowns and over-time damage", { skip:
       }
       await party.monsterAct(party.dm, SHAMAN_INDEX, MAGE);
       const hp = (await party.part(MAGE)).core.hp;
-      assert.ok(await party.consumeBest(MAGE, dotKillScore(hp), 200, LETHAL_DOT), "every VRF value kills the mage");
+      assert.ok(await party.consumeBest(MAGE, dotKillScore(hp), 400, LETHAL_DOT), "every VRF value kills the mage");
     }
     assert.fail("the mage never died of over-time damage");
   });
@@ -1876,7 +1939,7 @@ describe("deadroll_session: support and control skills", { skip: SKIP_PARTY }, (
     assert.equal(s.actedSeq === s.turnSeq, false, "nothing was used");
   });
 
-  it("Haste on the caster: more AP on its next 2 own turns, then it runs out", async () => {
+  it("Haste on the caster: more AP on its next 3 own turns (2 + 1 from Endurance), then it runs out", async () => {
     const before = await party.part(SUPPORT);
     await party.act(SUPPORT, party.players[SUPPORT].wallet, QUICKEN, SUPPORT);
     assert.ok((await party.state()).pendingTarget.equals(PublicKey.default), "a self-cast has no ally account");
@@ -1890,12 +1953,15 @@ describe("deadroll_session: support and control skills", { skip: SKIP_PARTY }, (
     const amount = fx.roll.amount;
     assert.ok(amount >= 3_000 && amount <= 9_000, `haste ${amount}`);
     const haste = modOf((await party.part(SUPPORT)).mods, "haste");
-    assert.deepEqual([haste.turns, haste.powerBp, haste.source], [3, amount, SUPPORT]);
+    // Own buff on self: Senna's Endurance 5 / PlayerTuning.self_buff_end_div 5 = 1 more own turn, so
+    // mod_turns(2 + 1) = 4 (the running turn plus three).
+    assert.deepEqual([haste.turns, haste.powerBp, haste.source], [4, amount, SUPPORT]);
     assert.ok(!(await party.state()).core.pendingVrf);
 
     const hasted = Math.min(255, Math.max(1, Math.floor((before.maxAp * (BP + amount)) / BP)));
     assert.ok(hasted > before.maxAp);
     for (const [turnsLeft, ap, expired] of [
+      [3, hasted, 0],
       [2, hasted, 0],
       [1, hasted, 0],
       [0, before.maxAp, HASTE_BIT],

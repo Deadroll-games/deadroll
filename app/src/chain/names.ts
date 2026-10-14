@@ -65,14 +65,6 @@ export function rollTitle(raw: number, chanceBp: number | null): string {
   return `on-chain raw roll ${formatHundredths(raw)}%, shown as 99.99 - raw${pass}`;
 }
 
-/**
- * Player crit chance: Dexterity x 20 bp (programs/session/src/rules.rs player_crit_bp), clamped into
- * Balance::DEFAULT [chance_min_bp, chance_max_bp] = [500, 9_500] (crates/combat/src/balance.rs).
- */
-export function playerCritChanceBp(dexterity: number): number {
-  return Math.min(9_500, Math.max(500, dexterity * 20));
-}
-
 export const effectName = (e: Effect): string => EFFECT_NAMES[e] ?? `effect ${e}`;
 
 /** What one effect roll did, e.g. "+7 hp", "Weakening 18%", "Freeze", "missed". */

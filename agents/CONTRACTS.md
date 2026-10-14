@@ -219,3 +219,29 @@ act(skill_slot, target)              skill_slot must be one of Participation.ski
 skill_set (w), bag (w), session_authority, config, character_program, target_participation`.
 `act` and `monster_act` take `skill_set` and `bag` of the participation's character (seeds checked);
 `start_turn` takes them as trailing optional accounts, required when over-time damage kills.
+
+## 9. Patch 2: stats, trait tiers, spending stat points
+
+Appended to section 8. `crates/types` is unchanged (the race trait tier stays
+`CharacterData.predisposition_tier`).
+
+```
+Character (program struct, appended after gear):  ... gear: Gear, class_tier: u8
+                class_tier = class trait tier, 1 best .. 14 (starts at PlayerTuning.class_start_tier)
+                CharacterData.version = 3 for characters created with class_tier
+Participation (program struct, appended):  ... skills: [u8; 6], class_tier: u8
+                copied from Character.class_tier at set_ready(true), with the gear
+```
+
+Character instruction added: `spend_stat_points(points: [u16; 4])` (by `Stat`): the owner's main
+wallet only (no session token), `owner (signer), character (w)`; a living character outside a
+session; `0 < sum(points) <= unspent_points`. Writes the stats, `unspent_points`, `hp_max`, bumps
+`state_version`. Event `StatPointsSpent { character, points, stats, unspent_points, hp_max }`.
+Errors appended to `CharacterError`: `NoPointsSpent`, `NotEnoughStatPoints`.
+
+Level-up numbers moved into `BalanceConfig.players` (`level_xp`, `stat_points_per_level`):
+`grant_rewards` reads them there.
+
+`crates/combat` (not a frozen contract, listed for the WASM layout): `ModFilter::SourceForm(Source,
+Form)` appended as variant 5; `preview_hit` / `HitPreview` added. The website ships
+`app/src/chain/wasm/combat.wasm` (ABI 2, `crates/combat/wasm/README.md`).

@@ -85,23 +85,34 @@ pub fn support_input(
     input::support_input(BALANCE, h, &skill_stats(skill), action, defense)
 }
 
-/// Lands `action` (not a heal) of strength `amount` on a unit: a modifier for its duration, or
-/// the existing Stun / Freeze state. `aspect`: the skill's; `source`: the caster's turn-order id.
+/// Lands `action` (not a heal) of strength `amount` on a unit: a modifier for its duration plus
+/// `extra_turns`, or the existing Stun / Freeze state. `aspect`: the skill's; `source`: the
+/// caster's turn-order id.
 pub fn land_effect(
     action: EffectAction,
     amount: u32,
     aspect: Aspect,
     source: u8,
+    extra_turns: u8,
     states: &mut States,
     mods: &mut TimedMods,
 ) -> Applied {
-    input::land_effect(BALANCE, action, amount, aspect, source, states, mods)
+    input::land_effect(
+        BALANCE,
+        action,
+        amount,
+        aspect,
+        source,
+        extra_turns,
+        states,
+        mods,
+    )
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::rules::{heal_range, hero_weapon, player_attack_bonus, starter_equipment};
+    use crate::rules::{heal_range, hero_weapon, player_accuracy, starter_equipment};
     use deadroll_combat::{
         mod_turns, preview_range, resolve_hit, Balance, HitInput, Mod, ModFilter, ModKind, Outcome,
         SeededRoll, SupportBalance,
@@ -145,7 +156,7 @@ pub(crate) mod tests {
 
     /// `c` wearing its class starter kit, as `create_character` gives it.
     pub(crate) fn kit(c: &CharacterData) -> HeroStats {
-        HeroStats::from(c).with_equipment(starter_equipment(c.class))
+        HeroStats::new(c, 14).with_equipment(starter_equipment(c.class))
     }
 
     fn record(blocks: SkillBlocks) -> SkillRecord {
@@ -252,7 +263,7 @@ pub(crate) mod tests {
         assert_eq!(a.weapon, hero_weapon(&kit(&c)));
         assert_eq!((a.weapon.min, a.weapon.max), (4, 8));
         // Bare hands: nothing worn.
-        let bare = player_attacker(2, &HeroStats::from(&c), None, &NONE);
+        let bare = player_attacker(2, &HeroStats::new(&c, 14), None, &NONE);
         assert_eq!(
             (bare.weapon.min, bare.weapon.max),
             (BALANCE.items.unarmed[0], BALANCE.items.unarmed[1])
@@ -271,7 +282,7 @@ pub(crate) mod tests {
         // Class armor 20 + leather armor 10.
         assert_eq!((target.defense, target.armor), (12, 30));
         let bare = player_defender(
-            &HeroStats::from(&c),
+            &HeroStats::new(&c, 14),
             &[ActiveState::default(); STATES_MAX],
             &NONE,
         );
@@ -324,8 +335,13 @@ pub(crate) mod tests {
         apply_mod(&mut mods, timed(ModKind::Vulnerability, 5_000));
 
         let a = player_attacker(0, &kit(&warrior), None, &mods);
-        // Slot 0 is the class increase, the buff takes the next one.
-        assert_eq!(a.increased[1], Mod::new(ModFilter::Any, 3_000));
+        // Slot 0 is the class increase, 1-3 the core stats (Strength on martial strikes first),
+        // the buff takes the next one.
+        assert_eq!(
+            a.increased[1].filter,
+            ModFilter::SourceForm(Source::Combat, Form::Strike)
+        );
+        assert_eq!(a.increased[4], Mod::new(ModFilter::Any, 3_000));
         assert_eq!(a.weaken_bp, 2_000);
         let d = player_defender(&kit(&warrior), &[ActiveState::default(); STATES_MAX], &mods);
         assert!(d.resist_bp.iter().all(|&r| r == 4_000));
@@ -404,10 +420,7 @@ pub(crate) mod tests {
         assert!(!input.hostile);
         // Haste 2_500..5_000 at full power, +20% for Support.
         assert_eq!((input.min, input.max), (3_000, 6_000));
-        assert_eq!(
-            input.attack_bonus,
-            player_attack_bonus(1, &support.stats, quicken.blocks.source)
-        );
+        assert_eq!(input.attack_bonus, player_accuracy(&support.stats));
         let sap = record(presets::SUPPORT[1].blocks);
         let weaken = effect_action(sap.blocks.effect).unwrap();
         let input = support_input(&kit(&support), &sap, weaken, Some(11));
@@ -417,7 +430,12 @@ pub(crate) mod tests {
         let input = support_input(&kit(&support), &mend, EffectAction::Heal, None);
         assert_eq!(
             (input.min, input.max),
-            heal_range(Class::Support, hero_weapon(&kit(&support)), mend.power_bp)
+            heal_range(
+                Class::Support,
+                14,
+                hero_weapon(&kit(&support)),
+                mend.power_bp
+            )
         );
         // Hard control has no strength.
         let mage = character(Race::ForestElf, Class::Mage, Aspect::Cold);
@@ -437,7 +455,7 @@ pub(crate) mod tests {
         let mut mods = NONE;
         let slow = EffectAction::Mod(ModKind::Slow);
         assert_eq!(
-            land_effect(slow, 3_000, Aspect::Cold, 2, &mut states, &mut mods),
+            land_effect(slow, 3_000, Aspect::Cold, 2, 0, &mut states, &mut mods),
             Applied::Added
         );
         assert_eq!(
@@ -454,7 +472,7 @@ pub(crate) mod tests {
             mod_turns(SupportBalance::DEFAULT.duration(ModKind::Slow))
         );
         assert_eq!(
-            land_effect(slow, 1_000, Aspect::Fire, 3, &mut states, &mut mods),
+            land_effect(slow, 1_000, Aspect::Fire, 3, 0, &mut states, &mut mods),
             Applied::Refreshed
         );
         assert_eq!(mods[0].power_bp, 3_000);
@@ -465,6 +483,7 @@ pub(crate) mod tests {
                 0,
                 Aspect::Blunt,
                 2,
+                0,
                 &mut states,
                 &mut mods
             ),
@@ -477,6 +496,7 @@ pub(crate) mod tests {
                 0,
                 Aspect::Cold,
                 2,
+                0,
                 &mut states,
                 &mut mods
             ),
@@ -489,6 +509,7 @@ pub(crate) mod tests {
                 9,
                 Aspect::Cold,
                 2,
+                0,
                 &mut states,
                 &mut mods
             ),

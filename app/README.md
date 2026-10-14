@@ -20,6 +20,18 @@ bash crates/render/wasm/build.sh                 # target/render-wasm/deadroll_r
 
 Demo pages on mock data: `/dev/grid`, `/dev/dice`, `/dev/forms`.
 
+### Combat module
+
+The character screen's derived stats and the battle screen's attack preview run the combat crate in
+the browser: `src/chain/wasm/combat.wasm`, committed (Vercel builds without Rust) and wrapped by
+`src/chain/combatWasm.ts`. After a change in `crates/combat`, `crates/rules`, `crates/skillcheck` or
+`crates/types`, rebuild and commit it (Docker), and refresh the fixtures:
+
+```
+UPDATE_TS_FIXTURES=1 cargo test -p deadroll-combat-wasm --test ts_fixtures
+bash crates/combat/wasm/build.sh                 # CI runs it with --check and fails on a stale file
+```
+
 ### Chain mode
 
 `app/.env.local`:

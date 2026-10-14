@@ -90,13 +90,14 @@ pub fn handler(ctx: Context<SetReady>, ready: bool, selection: [u8; MAP_SKILLS])
         )?;
         // The gear is frozen from here until the party ends, so one snapshot serves the whole
         // party.
-        let (character, equipment) = read_character_gear(&accounts.character)?;
-        let hero = HeroStats::from(&character).with_equipment(equipment);
+        let (character, equipment, class_tier) = read_character_gear(&accounts.character)?;
+        let hero = HeroStats::new(&character, class_tier).with_equipment(equipment);
         let hp_max = party_hp_max(character.hp_max, &hero);
         participation.core.hp = hp_max;
         participation.hp_max = hp_max;
         participation.max_ap = hero_ap(&hero);
         participation.equipment = equipment.0;
+        participation.class_tier = class_tier;
         participation.skills = selection;
         session.player_initiative[slot as usize] = hero_initiative(&hero);
         session.ready_mask |= 1 << slot;

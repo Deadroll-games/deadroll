@@ -697,7 +697,7 @@
             "The VRF program's identity for this program (`mock-vrf`: the fixed test identity)."
           ],
           "signer": true,
-          "address": "Bj7XBktwDmAg6J4FohS6oRHbevD6MMd8jnCZKvzKPiKV"
+          "address": "5RotSMue7vx9xBPp3L8iQEKbKSc3ezbY4GqiJxDEe6sN"
         },
         {
           "name": "session",
@@ -4548,6 +4548,14 @@
                 6
               ]
             }
+          },
+          {
+            "name": "class_tier",
+            "docs": [
+              "The character's class trait tier (`Character.class_tier`), copied at `set_ready(true)`",
+              "with the gear; the locked character cannot change it during the party."
+            ],
+            "type": "u8"
           }
         ]
       }

@@ -49,6 +49,7 @@ import {
   status,
   type Actor,
   type CharacterAcc,
+  type SkillRecordAcc,
   type SkillSetAcc,
   type GameSessionAcc,
   type MapAcc,
@@ -56,7 +57,8 @@ import {
   type SeedKind,
 } from "../chain/game";
 import { toHitResolved } from "../chain/hit";
-import { bestiaryName, playerCritChanceBp } from "../chain/names";
+import { bestiaryName } from "../chain/names";
+import { heroInputOf, previewOnMonster, previewText, useCombat } from "../chain/combatWasm";
 import { errorName } from "../chain/send";
 import { statusLabel, type SubStatus } from "../chain/subscribe";
 import { cooldownLabel, skillCooldowns, skillUsedText, skipText, startTurnFor, takenOntoMap, tickText, turnActed, turnStarted } from "../chain/turns";
@@ -203,6 +205,7 @@ function PartyView({ address }: { address: Address }) {
   const sk = useSessionKey();
   const { send, busy } = useTx();
   const { party, error, events, ingest, refresh, live } = useParty(address);
+  const combat = useCombat();
   const draw = useSprites();
   const [seedKind, setSeedKind] = useState<SeedKind>("random");
   const [skill, setSkill] = useState<number>(0);
@@ -211,6 +214,8 @@ function PartyView({ address }: { address: Address }) {
   const [roll, setRoll] = useState<Roll | null>(null);
   const [myChars, setMyChars] = useState<{ address: Address; data: CharacterAcc }[]>([]);
   const [skillNames, setSkillNames] = useState<Record<string, CombatSkill[]>>({});
+  /** The skill records of party characters, for the attack preview. */
+  const [skillRecords, setSkillRecords] = useState<Record<string, SkillRecordAcc[]>>({});
   const lock = useRef(false);
 
   const me = wallet.address;
@@ -268,10 +273,13 @@ function PartyView({ address }: { address: Address }) {
           "SkillSet",
           await skillSetPda(p.character),
         );
-        const list = (set?.skills ?? []).slice(0, set?.count ?? 0).map((k, slot) => combatSkill(slot, k));
-        return [p.character, list] as const;
+        const records = (set?.skills ?? []).slice(0, set?.count ?? 0);
+        return [p.character, records] as const;
       }),
-    ).then((entries) => setSkillNames(Object.fromEntries(entries)));
+    ).then((entries) => {
+      setSkillRecords(Object.fromEntries(entries));
+      setSkillNames(Object.fromEntries(entries.map(([c, records]) => [c, records.map((k, slot) => combatSkill(slot, k))])));
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [partyChars]);
 
@@ -289,10 +297,12 @@ function PartyView({ address }: { address: Address }) {
     const key = `${ev.signature}:${i}`;
     if (key === lastRollKey.current) return;
     lastRollKey.current = key;
-    // Crit chance is not in the events; players derive it from Dexterity, monsters never roll crit.
+    // Crit chance is not in the events: a player's comes from the combat module (its gear and
+    // stats, as the program saw them), monsters never roll crit.
     const critOf = (u: number) => {
-      const dex = u < MONSTER_BASE ? party?.players.find((p) => p.slot === u)?.char.core.stats[1] : undefined;
-      return dex == null ? undefined : playerCritChanceBp(dex);
+      const p = u < MONSTER_BASE ? party?.players.find((x) => x.slot === u) : undefined;
+      if (!p || !combat) return undefined;
+      return combat.heroSheet(heroInputOf(p.char, p.part.equipment, p.char.core.stats, p.part.classTier)).critRollBp;
     };
     // Mods are not in HitResolved: take each side's from the events before the hit, else the accounts.
     const modsNow = (u: number) =>
@@ -310,7 +320,7 @@ function PartyView({ address }: { address: Address }) {
     const hitAt = e.rider ? lastOf((x) => x.name === "HitResolved" && x.data.actionCounter === e.actionCounter, i) : -1;
     const hitEv = events[hitAt];
     setRoll({ key, hit: hitEv ? hitView(hitEv.data, hitAt) : null, effect });
-  }, [events, label, party, skillName]);
+  }, [events, label, party, skillName, combat]);
 
   // ---- the localnet VRF oracle (mock-vrf build): answers the pending roll of this party.
   const consume = useCallback(
@@ -741,6 +751,24 @@ function PartyView({ address }: { address: Address }) {
       : monsterTurn && isDm
         ? livingPlayers.map((p) => ({ x: p.part.core.x, y: p.part.core.y }))
         : [];
+  // Before the dice (docs/COMBAT_MATH.md 13): the weapon or a damage skill on the hovered monster,
+  // else on each monster in reach. The combat module builds the hit as the program does.
+  const attackPreviews =
+    combat && activePlayer && myTurn && canAttack && chosenSide === "enemy" && (!chosen || chosen.purpose === Purpose.Damage)
+      ? (() => {
+          const hero = heroInputOf(activePlayer.char, activePlayer.part.equipment, activePlayer.char.core.stats, activePlayer.part.classTier);
+          const heroMods = activeMods(activePlayer.part.mods);
+          const record = chosen ? (skillRecords[activePlayer.character]?.[chosen.slot] ?? null) : null;
+          const inReach = party.monsters
+            .map((m, i) => ({ m, i }))
+            .filter(({ m }) => m.alive && reachOk({ x: m.x, y: m.y }));
+          const hovered = hover ? inReach.filter(({ m }) => m.x === hover.x && m.y === hover.y) : [];
+          return (hovered.length ? hovered : inReach.slice(0, 4)).flatMap(({ m, i }) => {
+            const p = previewOnMonster(combat, hero, heroMods, record, m, activeMods(party.monsterMods[i]));
+            return p ? [{ unit: MONSTER_BASE + i, text: previewText(p) }] : [];
+          });
+        })()
+      : [];
 
   return (
     <section>
@@ -816,6 +844,15 @@ function PartyView({ address }: { address: Address }) {
                       Weapon
                     </button>
                   </div>
+                  {attackPreviews.length > 0 && (
+                    <ul className="attack-preview" aria-label="Attack preview">
+                      {attackPreviews.map((p) => (
+                        <li key={p.unit}>
+                          <b>{label(p.unit)}</b>: {p.text}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                   <p className="muted">Session key: {sk.signer && activePlayer && sk.signer.address === activePlayer.part.core.actor ? "signing moves, no popups" : "not bound to this party; the wallet signs"}</p>
                 </>
               )}

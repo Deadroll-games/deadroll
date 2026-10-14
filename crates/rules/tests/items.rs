@@ -29,6 +29,7 @@ fn hero_of(class: Class, equipment: Equipment) -> HeroStats {
         stats: [10, 7, 5, 8],
         predisposition: Aspect::Piercing,
         predisposition_tier: 14,
+        class_tier: 14,
         equipment,
     }
 }
@@ -168,6 +169,10 @@ fn every_item_number_reaches_the_hero() {
     robe.stats[Stat::Dexterity as usize] = 10;
     robe.stats[Stat::Endurance as usize] = 4;
     robe.stats[Stat::Intelligence as usize] = 6;
+    robe.crit_bp = 700;
+    robe.speed = 5;
+    robe.speed_counter_bp = 10_000;
+    robe.initiative = 4;
     let sword = &mut cfg.items.bases[ItemBase::Sword as usize];
     sword.aspect = Aspect::Piercing;
     sword.damage = [5, 9];
@@ -184,12 +189,10 @@ fn every_item_number_reaches_the_hero() {
         (a.weapon.aspect, a.weapon.min, a.weapon.max),
         (Aspect::Piercing, 5, 9)
     );
-    // +2 flat, and Intelligence 5 + 6 = 11 gives one more point (/ 5) for a magical attack.
-    assert_eq!(a.attack_bonus, a0.attack_bonus + 2 + 1);
-    assert_eq!(
-        a.crit_chance_bp,
-        a0.crit_chance_bp + 10 * cfg.players.crit_per_dex_bp
-    );
+    // Accuracy: +2 flat, and Dexterity 7 + 10 = 17: 17 / 5 = 3 against 7 / 5 = 1.
+    assert_eq!(a.attack_bonus, a0.attack_bonus + 2 + 2);
+    // Crit comes from items only.
+    assert_eq!((a0.crit_chance_bp, a.crit_chance_bp), (0, 700));
 
     let states = [ActiveState::default(); STATES_MAX];
     let d = player_defender(&cfg, &dressed, &states, &NONE);
@@ -202,10 +205,13 @@ fn every_item_number_reaches_the_hero() {
         hero::hp_max(&cfg, &dressed),
         hero::hp_max(&cfg, &bare) + 11 + 4 * cfg.players.hp_per_endurance
     );
-    assert_eq!(hero::ap(&cfg, &dressed), hero::ap(&cfg, &bare) + 1);
+    // Speed: human mage 3, +1 from Dexterity 17, +5 from the item, then its counterweight halves.
+    assert_eq!(hero::ap(&cfg, &bare), 3);
+    assert_eq!(hero::ap(&cfg, &dressed), (3 + 1 + 5) / 2);
+    // Intelligence 11 / 2 against 5 / 2, plus the item.
     assert_eq!(
         hero::initiative(&cfg, &dressed),
-        hero::initiative(&cfg, &bare) + 3
+        hero::initiative(&cfg, &bare) + 3 + 4
     );
     // Heals scale from the equipped weapon.
     let heal = effect_range(&cfg, &dressed, 10_000, EffectAction::Heal);

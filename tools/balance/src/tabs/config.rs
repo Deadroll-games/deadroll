@@ -1,6 +1,7 @@
 //! Every number of `BalanceConfig`. Basis points are edited as percentages, values that differ from
 //! the program's defaults are marked, tables indexed by an enum list its `ALL`.
 use deadroll_combat::ModKind;
+use deadroll_rules::TIERS;
 use deadroll_sim::{config_io, named::Named, BalanceConfig};
 use deadroll_skillcheck::SKILL_ASPECTS_MAX;
 use deadroll_types::{Class, Race, StateKind};
@@ -390,44 +391,81 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                             );
                             int_row(
                                 ui,
-                                "Predisposition damage min",
-                                &mut p.predisposition_added[0],
-                                dp.predisposition_added[0],
-                                0..=1_000,
+                                "Accuracy base",
+                                &mut p.accuracy_base,
+                                dp.accuracy_base,
+                                0..=100,
                             );
                             int_row(
                                 ui,
-                                "Predisposition damage max",
-                                &mut p.predisposition_added[1],
-                                dp.predisposition_added[1],
-                                0..=1_000,
-                            );
-                            int_row(
-                                ui,
-                                "Attack bonus = level + stat /",
-                                &mut p.attack_stat_div,
-                                dp.attack_stat_div,
+                                "Accuracy = base + Dexterity /",
+                                &mut p.accuracy_dex_div,
+                                dp.accuracy_dex_div,
                                 1..=100,
                             );
-                            bp_row(
-                                ui,
-                                "Crit per Dexterity point",
-                                &mut p.crit_per_dex_bp,
-                                dp.crit_per_dex_bp,
-                            );
                             int_row(
                                 ui,
-                                "Defense base",
+                                "Evasion base",
                                 &mut p.defense_base,
                                 dp.defense_base,
                                 0..=100,
                             );
                             int_row(
                                 ui,
-                                "Defense = base + Dexterity /",
+                                "Evasion = base + Dexterity /",
                                 &mut p.defense_dex_div,
                                 dp.defense_dex_div,
                                 1..=100,
+                            );
+                            bp_row(
+                                ui,
+                                "Strength: martial strike damage / point",
+                                &mut p.str_damage_bp,
+                                dp.str_damage_bp,
+                            );
+                            bp_row(
+                                ui,
+                                "Dexterity: martial projectile damage / point",
+                                &mut p.dex_projectile_bp,
+                                dp.dex_projectile_bp,
+                            );
+                            bp_row(
+                                ui,
+                                "Intelligence: magical damage / point",
+                                &mut p.int_magic_bp,
+                                dp.int_magic_bp,
+                            );
+                            bp_row(
+                                ui,
+                                "Strength: martial state chance / point",
+                                &mut p.str_state_chance_bp,
+                                dp.str_state_chance_bp,
+                            );
+                            bp_row(
+                                ui,
+                                "Intelligence: magical state chance / point",
+                                &mut p.int_state_chance_bp,
+                                dp.int_state_chance_bp,
+                            );
+                            bp_row(
+                                ui,
+                                "Dexterity: tempo effect chance / point",
+                                &mut p.dex_state_chance_bp,
+                                dp.dex_state_chance_bp,
+                            );
+                            int_row(
+                                ui,
+                                "Own buff on self: +1 turn per Endurance",
+                                &mut p.self_buff_end_div,
+                                dp.self_buff_end_div,
+                                1..=1_000,
+                            );
+                            int_row(
+                                ui,
+                                "Own buff on self: extra turns max",
+                                &mut p.self_buff_turns_max,
+                                dp.self_buff_turns_max,
+                                0..=10,
                             );
                             int_row(
                                 ui,
@@ -459,38 +497,84 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                             );
                             int_row(
                                 ui,
-                                "Creation: tier",
+                                "Creation: race trait tier",
                                 &mut p.start_tier,
                                 dp.start_tier,
                                 1..=14,
                             );
+                            int_row(
+                                ui,
+                                "Creation: class trait tier",
+                                &mut p.class_start_tier,
+                                dp.class_start_tier,
+                                1..=14,
+                            );
+                            int_row(
+                                ui,
+                                "Stat points per level",
+                                &mut p.stat_points_per_level,
+                                dp.stat_points_per_level,
+                                0..=50,
+                            );
                         });
+                    ui.label("Total XP for each level");
+                    egui::Grid::new("level_xp").striped(true).show(ui, |ui| {
+                        for (i, (v, d)) in p.level_xp.iter_mut().zip(&dp.level_xp).enumerate() {
+                            widgets::label(ui, &format!("level {}", i + 1), v != d);
+                            widgets::int(ui, v, 0..=10_000_000);
+                            ui.end_row();
+                        }
+                    });
                     ui.label("By class");
                     egui::Grid::new("by_class").striped(true).show(ui, |ui| {
-                        for h in [
-                            "",
-                            "class increase",
-                            "support increase",
-                            "armor",
-                            "HP base",
-                            "HP / level",
-                        ] {
+                        for h in ["", "armor", "HP base", "HP / level"] {
                             ui.strong(h);
                         }
                         ui.end_row();
                         for &class in Class::all() {
                             let i = class as usize;
-                            let changed = p.class_increase_bp[i] != dp.class_increase_bp[i]
-                                || p.support_increase_bp[i] != dp.support_increase_bp[i]
-                                || p.armor[i] != dp.armor[i]
+                            let changed = p.armor[i] != dp.armor[i]
                                 || p.hp_base[i] != dp.hp_base[i]
                                 || p.hp_per_level[i] != dp.hp_per_level[i];
                             widgets::label(ui, &class.name(), changed);
-                            widgets::bp(ui, &mut p.class_increase_bp[i]);
-                            widgets::bp(ui, &mut p.support_increase_bp[i]);
                             widgets::int(ui, &mut p.armor[i], 0..=10_000);
                             widgets::int(ui, &mut p.hp_base[i], 0..=100_000);
                             widgets::int(ui, &mut p.hp_per_level[i], 0..=10_000);
+                            ui.end_row();
+                        }
+                    });
+                    ui.label(
+                        "Trait tiers (1 best): race trait = predisposition damage, class trait = \
+                         class increase and support increase",
+                    );
+                    egui::Grid::new("by_tier").striped(true).show(ui, |ui| {
+                        ui.strong("tier");
+                        ui.strong("race min");
+                        ui.strong("race max");
+                        for class in Class::all() {
+                            ui.strong(format!("{} increase", class.name()));
+                            ui.strong(format!("{} support", class.name()));
+                        }
+                        ui.end_row();
+                        for t in 0..TIERS {
+                            let changed = p.predisposition_added_by_tier[t]
+                                != dp.predisposition_added_by_tier[t]
+                                || Class::all().iter().any(|&c| {
+                                    let c = c as usize;
+                                    p.class_increase_by_tier_bp[c][t]
+                                        != dp.class_increase_by_tier_bp[c][t]
+                                        || p.support_increase_by_tier_bp[c][t]
+                                            != dp.support_increase_by_tier_bp[c][t]
+                                });
+                            widgets::label(ui, &(t + 1).to_string(), changed);
+                            let r = &mut p.predisposition_added_by_tier[t];
+                            widgets::int(ui, &mut r[0], 0..=1_000);
+                            widgets::int(ui, &mut r[1], 0..=1_000);
+                            for &class in Class::all() {
+                                let c = class as usize;
+                                widgets::bp(ui, &mut p.class_increase_by_tier_bp[c][t]);
+                                widgets::bp(ui, &mut p.support_increase_by_tier_bp[c][t]);
+                            }
                             ui.end_row();
                         }
                     });

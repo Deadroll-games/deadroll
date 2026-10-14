@@ -9,6 +9,7 @@ pub mod freeze_tombstone;
 pub mod grant_rewards;
 pub mod lock_for_session;
 pub mod mark_dead;
+pub mod spend_stat_points;
 pub mod unequip;
 pub mod unlock;
 
@@ -19,5 +20,6 @@ pub use freeze_tombstone::*;
 pub use grant_rewards::*;
 pub use lock_for_session::*;
 pub use mark_dead::*;
+pub use spend_stat_points::*;
 pub use unequip::*;
 pub use unlock::*;

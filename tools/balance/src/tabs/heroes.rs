@@ -1,8 +1,10 @@
 //! Heroes: race, class, level, stats, predisposition, skills (ids of skill presets) and what the
 //! hero wears, with the numbers the rules derive and the same validation a Run applies.
+use deadroll_combat::{preview_hit, HitInput, ModKind, TimedMod, TimedMods, MODS_MAX};
 use deadroll_rules::{
-    input::hero as rules_hero,
+    input::{hero as rules_hero, monster_defender, player_attacker},
     items::{item_bonus, starter_loadout},
+    player::stat_damage_increases,
 };
 use deadroll_sim::{
     named::Named,
@@ -10,9 +12,7 @@ use deadroll_sim::{
     setup::{fighter, Issues},
     BalanceConfig,
 };
-use deadroll_types::{
-    Aspect, Class, EquipSlot, ItemBase, Race, Source, Stat, PARTY_MAX, STATS_COUNT,
-};
+use deadroll_types::{Aspect, Class, EquipSlot, ItemBase, Race, Stat, PARTY_MAX, STATS_COUNT};
 use eframe::egui::{self, Ui};
 
 use crate::{app::BalanceApp, widgets};
@@ -38,6 +38,7 @@ fn fresh(cfg: &BalanceConfig, skill: Option<String>) -> HeroPreset {
         stats,
         predisposition: Aspect::Piercing,
         tier: t.start_tier,
+        class_tier: t.class_start_tier,
         skills: skill.into_iter().collect(),
         inline_skills: vec![],
         equipment: None,
@@ -132,8 +133,11 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                     ui.label("Predisposition");
                     widgets::pick(ui, "predisposition", &mut hero.predisposition);
                     ui.end_row();
-                    ui.label("Tier (1 best)");
+                    ui.label("Race trait tier (1 best)");
                     widgets::int(ui, &mut hero.tier, 1..=14);
+                    ui.end_row();
+                    ui.label("Class trait tier (1 best)");
+                    widgets::int(ui, &mut hero.class_tier, 1..=14);
                     ui.end_row();
                 });
             ui.add_space(6.0);
@@ -247,18 +251,35 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                     row("HP", f.hp_max.to_string());
                     row("Action points", rules_hero::ap(&cfg, h).to_string());
                     row("Initiative", rules_hero::initiative(&cfg, h).to_string());
-                    row("Defense / armor", format!("{defense} / {armor}"));
                     row(
-                        "Attack bonus (martial / magical)",
+                        "Accuracy (d20 bonus)",
+                        rules_hero::accuracy(&cfg, h).to_string(),
+                    );
+                    row("Evasion / armor", format!("{defense} / {armor}"));
+                    row("Crit chance (items)", pct(rules_hero::crit_bp(&cfg, h)));
+                    let increases =
+                        stat_damage_increases(&rules_hero::stats(&cfg, h), &cfg.players);
+                    row(
+                        "Damage: martial strike / martial projectile / magical",
                         format!(
-                            "{} / {}",
-                            rules_hero::attack_bonus(&cfg, h, Source::Combat),
-                            rules_hero::attack_bonus(&cfg, h, Source::Magical)
+                            "+{} / +{} / +{}",
+                            pct(increases[0].bp),
+                            pct(increases[1].bp),
+                            pct(increases[2].bp)
                         ),
                     );
                     row(
-                        "Crit chance",
-                        format!("{:.2}%", rules_hero::crit_bp(&cfg, h) as f64 / 100.0),
+                        "State chance: martial / magical / tempo",
+                        format!(
+                            "+{} / +{} / +{}",
+                            pct(rules_hero::state_chance(&cfg, h, Stat::Strength)),
+                            pct(rules_hero::state_chance(&cfg, h, Stat::Intelligence)),
+                            pct(rules_hero::state_chance(&cfg, h, Stat::Dexterity))
+                        ),
+                    );
+                    row(
+                        "Own buffs on self",
+                        format!("+{} turns", rules_hero::self_buff_turns(&cfg, h)),
                     );
                     row(
                         "Weapon (damage base)",
@@ -282,9 +303,58 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                     s.stats.cooldown
                 ));
             }
+            // Before the dice (docs/COMBAT_MATH.md, 13): against the monster selected in the
+            // Monsters tab, at the hero's level.
+            let target = app.selected[2]
+                .as_ref()
+                .and_then(|id| app.presets.monsters.get(id))
+                .or_else(|| app.presets.monsters.values().next());
+            if let Some(m) = target {
+                let level = u8::try_from(h.level).unwrap_or(u8::MAX);
+                let profile = m.base().profile(level, &cfg.monsters);
+                ui.add_space(4.0);
+                ui.strong(format!("Preview against {} (level {level})", m.name));
+                egui::Grid::new("hero_preview")
+                    .striped(true)
+                    .show(ui, |ui| {
+                        for head in ["action", "hit", "crit", "damage", "crit damage"] {
+                            ui.strong(head);
+                        }
+                        ui.end_row();
+                        let actions = std::iter::once(("weapon".to_string(), None))
+                            .chain(f.skills.iter().map(|s| (s.name.clone(), Some(s.stats))));
+                        for (name, skill) in actions {
+                            let input = HitInput {
+                                attacker: player_attacker(&cfg, 0, h, skill.as_ref(), &NO_MODS),
+                                defender: monster_defender(&profile, &Default::default(), &NO_MODS),
+                            };
+                            let p = preview_hit(&input, &cfg.combat);
+                            ui.label(name);
+                            ui.label(pct(p.hit_bp));
+                            ui.label(pct(p.crit_bp));
+                            ui.label(format!("{}-{}", p.min, p.max));
+                            ui.label(format!("{}-{}", p.crit_min, p.crit_max));
+                            ui.end_row();
+                        }
+                    });
+            }
             ui.add_space(4.0);
             widgets::issues(ui, &issues.errors, &issues.warnings);
         });
+}
+
+/// No buffs or debuffs.
+const NO_MODS: TimedMods = [TimedMod {
+    kind: ModKind::Haste,
+    aspect: Aspect::Fire,
+    turns: 0,
+    power_bp: 0,
+    source: 0,
+}; MODS_MAX];
+
+/// Basis points as a percentage.
+fn pct(bp: u32) -> String {
+    format!("{:.2}%", bp as f64 / 100.0)
 }
 
 /// What worn items add, in one line.
@@ -292,13 +362,21 @@ fn item_summary(b: &deadroll_rules::ItemBonus) -> String {
     let mut parts = Vec::new();
     for (name, v) in [
         ("armor", b.armor),
-        ("defense", b.defense),
-        ("attack", b.attack),
+        ("evasion", b.defense),
+        ("accuracy", b.attack),
         ("HP", b.hp),
+        ("speed", u32::from(b.speed)),
+        ("initiative", u32::from(b.initiative)),
     ] {
         if v > 0 {
             parts.push(format!("+{v} {name}"));
         }
+    }
+    if b.crit_bp > 0 {
+        parts.push(format!("+{} crit", pct(b.crit_bp)));
+    }
+    if b.speed_counter_bp > 0 {
+        parts.push(format!("speed / (1 + {})", pct(b.speed_counter_bp)));
     }
     for &stat in Stat::all() {
         let v = b.stats[stat as usize];

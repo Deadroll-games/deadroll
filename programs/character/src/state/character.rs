@@ -20,4 +20,7 @@ pub struct Character {
     /// Soulbound starter items and what is worn, by slot (docs/CHARACTER.md, section 10).
     /// Changed only outside a session (`equip`, `unequip`); burned at death.
     pub gear: Gear,
+    /// Class trait tier, `1..=14` (1 best), next to the race trait tier `core.predisposition_tier`
+    /// (docs/CHARACTER.md, sections 6.3 and 10). Starts low, grows only deterministically.
+    pub class_tier: u8,
 }

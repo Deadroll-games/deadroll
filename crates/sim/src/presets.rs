@@ -136,8 +136,11 @@ pub struct HeroPreset {
     pub stats: [u16; STATS_COUNT],
     #[serde(with = "named::variant")]
     pub predisposition: Aspect,
-    /// Predisposition tier, 1 best .. 14 worst.
+    /// Race trait (predisposition) tier, 1 best .. 14 worst.
     pub tier: u8,
+    /// Class trait tier, 1 best .. 14 worst. Left out = 14 (a new character).
+    #[serde(default = "worst_tier")]
+    pub class_tier: u8,
     pub skills: Vec<String>,
     /// Skills written inline (random builds); used when an id is not in the skill presets.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -166,6 +169,9 @@ impl HeroPreset {
         }
         if Tier::new(self.tier).is_err() {
             out.push(format!("tier {} is outside 1..=14", self.tier));
+        }
+        if Tier::new(self.class_tier).is_err() {
+            out.push(format!("class tier {} is outside 1..=14", self.class_tier));
         }
         if self.level <= 1 && !deadroll_rules::player::stats_valid(&self.stats, t) {
             out.push(format!(
@@ -449,4 +455,8 @@ fn save_dir<T: Serialize>(dir: &Path, items: &BTreeMap<String, T>) -> io::Result
         }
     }
     Ok(())
+}
+
+fn worst_tier() -> u8 {
+    deadroll_types::Tier::WORST.get()
 }

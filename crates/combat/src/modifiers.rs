@@ -77,6 +77,9 @@ pub enum ModFilter {
     Source(Source),
     /// Every packet of a skill with this form.
     Form(Form),
+    /// Every packet of a skill with both this power source and this form (a stat bonus such as
+    /// Strength on martial strikes, docs/CHARACTER.md section 2).
+    SourceForm(Source, Form),
 }
 
 impl ModFilter {
@@ -87,6 +90,7 @@ impl ModFilter {
             ModFilter::Family(f) => f == family_of(aspect),
             ModFilter::Source(s) => s == source,
             ModFilter::Form(f) => f == form,
+            ModFilter::SourceForm(s, f) => s == source && f == form,
         }
     }
 }
@@ -189,6 +193,9 @@ mod tests {
         assert!(!ModFilter::Source(Source::Combat).matches(a, s, f));
         assert!(ModFilter::Form(Form::Projectile).matches(a, s, f));
         assert!(!ModFilter::Form(Form::Strike).matches(a, s, f));
+        assert!(ModFilter::SourceForm(Source::Magical, Form::Projectile).matches(a, s, f));
+        assert!(!ModFilter::SourceForm(Source::Combat, Form::Projectile).matches(a, s, f));
+        assert!(!ModFilter::SourceForm(Source::Magical, Form::Strike).matches(a, s, f));
     }
 
     #[test]

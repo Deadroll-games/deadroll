@@ -7,9 +7,10 @@ use deadroll_types::{CharacterData, ParticipationData, EQUIP_SLOTS};
 
 use super::mods::{self, TimedModData};
 
-/// A character with an equipment snapshot (`Participation.equipment`), as the rules see it.
-pub fn hero_of(c: &CharacterData, equipment: &[u8; EQUIP_SLOTS]) -> HeroStats {
-    HeroStats::from(c).with_equipment(Equipment(*equipment))
+/// A character with its class trait tier and an equipment snapshot (`Participation.class_tier`,
+/// `Participation.equipment`), as the rules see it.
+pub fn hero_of(c: &CharacterData, class_tier: u8, equipment: &[u8; EQUIP_SLOTS]) -> HeroStats {
+    HeroStats::new(c, class_tier).with_equipment(Equipment(*equipment))
 }
 
 /// `["participation", session, character]`: one character in one party.
@@ -42,6 +43,9 @@ pub struct Participation {
     /// `5` passive, `NO_SKILL` = empty (docs/SKILL_BUILDER.md, 3.4). Written at
     /// `set_ready(true)` after the character program checked it; cleared by `set_ready(false)`.
     pub skills: [u8; MAP_SKILLS],
+    /// The character's class trait tier (`Character.class_tier`), copied at `set_ready(true)`
+    /// with the gear; the locked character cannot change it during the party.
+    pub class_tier: u8,
 }
 
 impl Participation {
@@ -56,7 +60,7 @@ impl Participation {
 
     /// The rules' view of this participant: the character with what it wears.
     pub fn hero(&self, c: &CharacterData) -> HeroStats {
-        hero_of(c, &self.equipment)
+        hero_of(c, self.class_tier, &self.equipment)
     }
 
     /// Whether `SkillSet` slot `skill` is one of the active skills taken onto this map.
@@ -104,6 +108,7 @@ mod tests {
             equipment: [0; EQUIP_SLOTS],
             // Actives 2, 0, 5 and an empty slot; reactive 1, passive 3.
             skills: [2, 0, NO_SKILL, 5, 1, 3],
+            class_tier: 14,
         };
         for s in [0, 2, 5] {
             assert!(p.active_selected(s), "{s}");
