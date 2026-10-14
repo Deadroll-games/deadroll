@@ -143,6 +143,12 @@ pub struct ItemBonus {
     /// Added to the core stats, indexed by `Stat`.
     pub stats: [u16; STATS_COUNT],
     pub hp: u32,
+    /// Crit chance besides a natural 20, bp.
+    pub crit_bp: u32,
+    /// Speed added before counterweights, and the summed speed counterweight (bp).
+    pub speed: u16,
+    pub speed_counter_bp: u32,
+    pub initiative: u16,
 }
 
 pub fn item_bonus(eq: &Equipment, t: &ItemTuning) -> ItemBonus {
@@ -158,6 +164,10 @@ pub fn item_bonus(eq: &Equipment, t: &ItemTuning) -> ItemBonus {
         out.defense = out.defense.saturating_add(b.defense);
         out.attack = out.attack.saturating_add(b.attack);
         out.hp = out.hp.saturating_add(b.hp);
+        out.crit_bp = out.crit_bp.saturating_add(b.crit_bp);
+        out.speed = out.speed.saturating_add(b.speed);
+        out.speed_counter_bp = out.speed_counter_bp.saturating_add(b.speed_counter_bp);
+        out.initiative = out.initiative.saturating_add(b.initiative);
         for (sum, add) in out.stats.iter_mut().zip(b.stats) {
             *sum = sum.saturating_add(add);
         }

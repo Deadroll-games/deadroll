@@ -24,8 +24,8 @@ pub mod support;
 
 pub use balance::Balance;
 pub use hit::{
-    preview_range, resolve_hit, resolve_hit_into, Attacker, Defender, HitInput, HitResult, Outcome,
-    PacketResult, StateRoll,
+    preview_hit, preview_range, resolve_hit, resolve_hit_into, Attacker, Defender, HitInput,
+    HitPreview, HitResult, Outcome, PacketResult, StateRoll,
 };
 pub use modifiers::{family_of, is_physical, Mod, ModFilter};
 pub use packet::{build_packets, DamageRange, Packet, Packets, Skill};

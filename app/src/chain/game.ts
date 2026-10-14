@@ -129,6 +129,8 @@ export type ParticipationAcc = {
   equipment: Uint8Array;
   /** Skills taken onto the map, SkillSet indexes: 0-3 active, 4 reactive, 5 passive (0xFF = empty). Set by set_ready. */
   skills: Uint8Array;
+  /** The character's class trait tier, copied from `Character.classTier` at set_ready. */
+  classTier: number;
 };
 /** programs/character `Gear`: soulbound starter items and what is worn, by `EquipSlot`. */
 export type GearAcc = {
@@ -147,6 +149,8 @@ export type CharacterAcc = {
     xp: number;
     stats: number[];
     predisposition: Enum;
+    /** Race trait tier, 1 best .. 14. */
+    predispositionTier: number;
     hpMax: number;
     alive: boolean;
     inSession: Address | null;
@@ -157,6 +161,8 @@ export type CharacterAcc = {
   unspentPoints: number;
   nftFrozen: boolean;
   gear: GearAcc;
+  /** Class trait tier, 1 best .. 14 (docs/CHARACTER.md 6.3). */
+  classTier: number;
 };
 /** programs/character SkillRecord: crates/skillcheck SkillBlocks + derived values. */
 export type SkillRecordAcc = {
@@ -755,4 +761,12 @@ export async function openSessions(): Promise<{ address: Address; data: GameSess
 /** Action points the player has now: granted lazily per turn_seq (demo.test.ts `ap`). */
 export function playerAp(p: ParticipationAcc, s: GameSessionAcc): number {
   return p.apSeq === s.turnSeq ? p.core.actionPoints : p.maxAp;
+}
+
+/**
+ * character `spend_stat_points`: the level-up points chosen per stat (Strength, Dexterity,
+ * Intelligence, Endurance), all in one transaction. The owner's main wallet only.
+ */
+export function spendStatPointsIx(owner: TransactionSigner, character: Address, points: readonly number[]): Instruction {
+  return buildInstruction("character", "spend_stat_points", { points: [...points] }, { owner, character });
 }

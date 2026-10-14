@@ -360,6 +360,8 @@ fn support_ally(
 ) -> Result<()> {
     let mut mods = target.combat_mods();
     let hp_max = target.hp_max;
+    // A player's unit id is its slot: the caster buffing itself.
+    let on_self = target.core.slot == roll.pending.attacker;
     // `act` checked the target lives and nothing ran since; a dead one is never raised.
     let out = resolve::support_ally(
         BALANCE,
@@ -367,6 +369,7 @@ fn support_ally(
         hero,
         &skill_stats(skill),
         effect,
+        on_self,
         &mut target.core.hp,
         hp_max,
         &mut target.core.states,

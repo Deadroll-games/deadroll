@@ -236,7 +236,7 @@ describe("create_character: the class starter items", { skip: SKIP }, () => {
       assert.equal(variant(ev.class), kind);
       assert.equal(ev.itemCount, 2);
       const ch = await fetchCharacter(c);
-      assert.equal(ch.core.version, 2);
+      assert.equal(ch.core.version, 3); // 3: gear, then the class trait tier
       assert.equal(ch.gear.itemCount, 2);
       assert.deepEqual(ch.gear.items.slice(0, 2).map((r: any) => [variant(r.base), r.level]), [
         [kit.mainHand, 1],

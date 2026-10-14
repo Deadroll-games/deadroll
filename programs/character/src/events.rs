@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 
-use deadroll_types::{Aspect, Class, EquipSlot, ItemBase, Race};
+use deadroll_types::{Aspect, Class, EquipSlot, ItemBase, Race, STATS_COUNT};
 
 use crate::state::{MAP_SKILLS, RESOURCE_KINDS};
 
@@ -75,6 +75,18 @@ pub struct ItemUnequipped {
     pub character: Pubkey,
     pub slot: EquipSlot,
     pub base: Option<ItemBase>,
+}
+
+#[event]
+pub struct StatPointsSpent {
+    pub character: Pubkey,
+    /// Points added, by `Stat`.
+    pub points: [u16; STATS_COUNT],
+    /// The core stats after spending, by `Stat`.
+    pub stats: [u16; STATS_COUNT],
+    pub unspent_points: u8,
+    /// The stored maximum HP after spending (Endurance raises it).
+    pub hp_max: u32,
 }
 
 #[event]

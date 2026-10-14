@@ -1,4 +1,5 @@
 //! Builds `deadroll_combat` hit and effect inputs from heroes, skills and monsters. Pure.
+use deadroll_combat::modifiers::more;
 use deadroll_combat::DamageRange;
 use deadroll_combat::{
     apply_mod, apply_state, apply_to_attacker, apply_to_defender, mod_range, mod_turns,
@@ -9,8 +10,7 @@ use deadroll_skillcheck::{
     derive_with, Category, Effect, Purpose, SkillBlocks, SkillTuning, SKILL_ASPECTS_MAX,
 };
 use deadroll_types::{
-    ActiveState, Aspect, CharacterData, Class, Form, Race, Source, StateKind, STATES_MAX,
-    STATS_COUNT,
+    ActiveState, Aspect, CharacterData, Class, Form, Race, Stat, StateKind, STATES_MAX, STATS_COUNT,
 };
 
 use crate::{
@@ -18,8 +18,9 @@ use crate::{
     items::{effective_stats, item_bonus, weapon_range, Equipment},
     monster::MonsterProfile,
     player::{
-        class_increase, class_source, heal_range, hp_max, player_ap, player_attack_bonus,
-        player_crit_bp, player_defense, player_initiative, predisposition_added, support_increase,
+        class_increase, class_source, effect_stat, heal_range, hp_max, player_accuracy,
+        player_defense, player_initiative, player_speed, predisposition_added, self_buff_turns,
+        source_stat, speed_to_ap, stat_damage_increases, state_chance_bonus, support_increase,
     },
 };
 
@@ -32,13 +33,30 @@ pub struct HeroStats {
     /// Indexed by `Stat`.
     pub stats: [u16; STATS_COUNT],
     pub predisposition: Aspect,
-    /// `1..=14`, see `Tier`.
+    /// Race trait tier, `1..=14`, see `Tier`.
     pub predisposition_tier: u8,
+    /// Class trait tier, `1..=14` (docs/CHARACTER.md, section 6.3).
+    pub class_tier: u8,
     /// What the hero wears (`crate::items`).
     pub equipment: Equipment,
 }
 
 impl HeroStats {
+    /// A character's core with its class trait tier (kept outside the frozen core), wearing
+    /// nothing.
+    pub fn new(c: &CharacterData, class_tier: u8) -> Self {
+        HeroStats {
+            race: c.race,
+            class: c.class,
+            level: c.level,
+            stats: c.stats,
+            predisposition: c.predisposition,
+            predisposition_tier: c.predisposition_tier,
+            class_tier,
+            equipment: Equipment::EMPTY,
+        }
+    }
+
     pub fn with_equipment(self, equipment: Equipment) -> Self {
         HeroStats { equipment, ..self }
     }
@@ -59,17 +77,19 @@ pub mod hero {
         weapon_range(&c.equipment, &cfg.items)
     }
 
-    /// `d20` bonus of an attack from `source`: level, the attack stat, items.
-    pub fn attack_bonus(cfg: &BalanceConfig, c: &HeroStats, source: Source) -> u32 {
-        let base = player_attack_bonus(c.level, &stats(cfg, c), source, &cfg.players);
+    /// Accuracy, the `d20` bonus of every attack and hostile effect: Dexterity and items.
+    pub fn accuracy(cfg: &BalanceConfig, c: &HeroStats) -> u32 {
+        let base = player_accuracy(&stats(cfg, c), &cfg.players);
         base.saturating_add(item_bonus(&c.equipment, &cfg.items).attack)
     }
 
+    /// Crit chance besides a natural 20: items (traits and skills give none in the first
+    /// version).
     pub fn crit_bp(cfg: &BalanceConfig, c: &HeroStats) -> u32 {
-        player_crit_bp(&stats(cfg, c), &cfg.players)
+        item_bonus(&c.equipment, &cfg.items).crit_bp
     }
 
-    /// Defense threshold and armor: class and stats, plus items.
+    /// Evasion (the hit threshold) and armor: class and stats, plus items.
     pub fn defense(cfg: &BalanceConfig, c: &HeroStats) -> (u32, u32) {
         let (defense, armor) = player_defense(c.class, &stats(cfg, c), &cfg.players);
         let items = item_bonus(&c.equipment, &cfg.items);
@@ -79,20 +99,34 @@ pub mod hero {
         )
     }
 
-    /// Action points per turn.
+    /// Action points per turn: speed from race, class and Dexterity, then items.
     pub fn ap(cfg: &BalanceConfig, c: &HeroStats) -> u8 {
-        let dex = stats(cfg, c)[deadroll_types::Stat::Dexterity as usize];
-        player_ap(c.race, c.class, dex, &cfg.players)
+        let dex = stats(cfg, c)[Stat::Dexterity as usize];
+        let items = item_bonus(&c.equipment, &cfg.items);
+        let speed = player_speed(c.race, c.class, dex, &cfg.players);
+        speed_to_ap(speed, items.speed, items.speed_counter_bp, &cfg.players)
     }
 
+    /// Initiative: Intelligence and items.
     pub fn initiative(cfg: &BalanceConfig, c: &HeroStats) -> u16 {
-        player_initiative(&stats(cfg, c), &cfg.players)
+        let items = item_bonus(&c.equipment, &cfg.items);
+        player_initiative(&stats(cfg, c), &cfg.players).saturating_add(items.initiative)
+    }
+
+    /// Increase on state and effect chances from `stat`, bp.
+    pub fn state_chance(cfg: &BalanceConfig, c: &HeroStats, stat: Stat) -> u32 {
+        state_chance_bonus(&stats(cfg, c), stat, &cfg.players)
+    }
+
+    /// Extra turns of the hero's own buffs on itself (Endurance).
+    pub fn self_buff_turns(cfg: &BalanceConfig, c: &HeroStats) -> u8 {
+        super::self_buff_turns(&stats(cfg, c), &cfg.players)
     }
 
     /// HP the items add: flat HP plus their Endurance.
     pub fn item_hp(cfg: &BalanceConfig, c: &HeroStats) -> u32 {
         let items = item_bonus(&c.equipment, &cfg.items);
-        let endurance = items.stats[deadroll_types::Stat::Endurance as usize];
+        let endurance = items.stats[Stat::Endurance as usize];
         items
             .hp
             .saturating_add(u32::from(endurance).saturating_mul(cfg.players.hp_per_endurance))
@@ -102,20 +136,6 @@ pub mod hero {
     /// stored `CharacterData.hp_max`, which is this without items.
     pub fn hp_max(cfg: &BalanceConfig, c: &HeroStats) -> u32 {
         super::hp_max(c.class, &c.stats, c.level, &cfg.players).saturating_add(item_hp(cfg, c))
-    }
-}
-
-impl From<&CharacterData> for HeroStats {
-    fn from(c: &CharacterData) -> Self {
-        HeroStats {
-            race: c.race,
-            class: c.class,
-            level: c.level,
-            stats: c.stats,
-            predisposition: c.predisposition,
-            predisposition_tier: c.predisposition_tier,
-            equipment: Equipment::EMPTY,
-        }
     }
 }
 
@@ -243,18 +263,24 @@ pub fn player_attacker(
     };
     let mut attacker = Attacker {
         slot: unit,
-        attack_bonus: hero::attack_bonus(cfg, c, source),
+        attack_bonus: hero::accuracy(cfg, c),
         crit_chance_bp: hero::crit_bp(cfg, c),
         weapon: hero::weapon(cfg, c),
         skill: combat_skill,
+        // The source picks the stat that scales its states; the aspect picks the state.
+        state_chance_bonus_bp: hero::state_chance(cfg, c, source_stat(source)),
         ..Attacker::default()
     };
-    // Race trait: the predisposition adds a flat packet and tints resonances (CHARACTER 6.2).
-    attacker.added[0] = predisposition_added(c.predisposition, t);
+    // Race trait: the predisposition adds a flat packet and tints resonances (CHARACTER 6.2),
+    // both at the race trait tier.
+    attacker.added[0] = predisposition_added(c.predisposition, c.predisposition_tier, t);
     attacker.tints[0] = Tint::new(c.predisposition, c.predisposition_tier, Carrier::Race);
-    if let Some((tag, bp)) = class_increase(c.class, t) {
+    // Class trait at its own tier, then the core stats in slots 1-3 (empty when 0).
+    if let Some((tag, bp)) = class_increase(c.class, c.class_tier, t) {
         attacker.increased[0] = Mod::new(ModFilter::Source(tag), bp);
     }
+    let stats = stat_damage_increases(&hero::stats(cfg, c), t);
+    attacker.increased[1..=stats.len()].copy_from_slice(&stats);
     apply_to_attacker(&mut attacker, mods);
     attacker
 }
@@ -317,11 +343,17 @@ pub fn effect_range(
     action: EffectAction,
 ) -> (u32, u32) {
     match action {
-        EffectAction::Heal => heal_range(c.class, hero::weapon(cfg, c), power_bp, &cfg.players),
+        EffectAction::Heal => heal_range(
+            c.class,
+            c.class_tier,
+            hero::weapon(cfg, c),
+            power_bp,
+            &cfg.players,
+        ),
         EffectAction::Mod(kind) => mod_range(
             kind,
             power_bp,
-            support_increase(c.class, &cfg.players),
+            support_increase(c.class, c.class_tier, &cfg.players),
             &cfg.support,
         ),
         EffectAction::Stun | EffectAction::Freeze => (0, 0),
@@ -340,7 +372,7 @@ pub fn support_input(
     let (min, max) = effect_range(cfg, c, skill.power_bp, action);
     SupportInput {
         hostile: defense.is_some(),
-        attack_bonus: hero::attack_bonus(cfg, c, skill.blocks.source),
+        attack_bonus: hero::accuracy(cfg, c),
         defense: defense.unwrap_or(0),
         crit_chance_bp: hero::crit_bp(cfg, c),
         min,
@@ -348,14 +380,44 @@ pub fn support_input(
     }
 }
 
-/// Lands `action` (not a heal) of strength `amount` on a unit: a modifier for its duration, or
-/// the existing Stun / Freeze state. `aspect`: the skill's; `source`: the caster's turn-order id.
+/// Chance of a damage skill's effect on a hit (the rider): the native chance, increased by the
+/// stat of the effect (Dexterity for tempo, else the skill's source).
+pub fn effect_chance(cfg: &BalanceConfig, c: &HeroStats, skill: &SkillStats) -> u32 {
+    let base = cfg.support.rider_chance_bp;
+    match effect_stat(skill.blocks.effect, skill.blocks.source) {
+        Some(stat) => {
+            let bonus = hero::state_chance(cfg, c, stat);
+            more(base as u64, bonus).min(u32::MAX as u64) as u32
+        }
+        None => base,
+    }
+}
+
+/// Extra turns of a modifier `c` lands: Endurance lengthens its own buffs on itself
+/// (`on_self`), nothing else (CHARACTER 2).
+pub fn buff_extra_turns(
+    cfg: &BalanceConfig,
+    c: &HeroStats,
+    on_self: bool,
+    action: EffectAction,
+) -> u8 {
+    match action {
+        EffectAction::Mod(kind) if on_self && !kind.is_harmful() => hero::self_buff_turns(cfg, c),
+        EffectAction::Mod(_) | EffectAction::Heal | EffectAction::Stun | EffectAction::Freeze => 0,
+    }
+}
+
+/// Lands `action` (not a heal) of strength `amount` on a unit: a modifier for its duration plus
+/// `extra_turns` ([`buff_extra_turns`]), or the existing Stun / Freeze state. `aspect`: the
+/// skill's; `source`: the caster's turn-order id.
+#[allow(clippy::too_many_arguments)]
 pub fn land_effect(
     cfg: &BalanceConfig,
     action: EffectAction,
     amount: u32,
     aspect: Aspect,
     source: u8,
+    extra_turns: u8,
     states: &mut States,
     mods: &mut TimedMods,
 ) -> Applied {
@@ -365,7 +427,7 @@ pub fn land_effect(
             TimedMod {
                 kind,
                 aspect,
-                turns: mod_turns(cfg.support.duration(kind)),
+                turns: mod_turns(cfg.support.duration(kind).saturating_add(extra_turns)),
                 power_bp: amount,
                 source,
             },

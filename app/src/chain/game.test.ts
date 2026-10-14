@@ -267,15 +267,18 @@ describe("decoders", () => {
       v.mods[ModKind.Weakening] = mod;
       v.equipment = Uint8Array.of(0, 0xff, 0xff, 3, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff);
       v.skills = Uint8Array.of(2, 0, 0xff, 5, 1, 3);
+      v.classTier = 9;
     });
     expect(p.back.cooldowns).toHaveLength(16);
-    // cooldowns (16), hp_max (4), mods (6 x 8 bytes), equipment (11), skills (6).
-    expect(Array.from(p.bytes.subarray(-85, -83))).toEqual([0, 2]);
-    expect(Array.from(p.bytes.subarray(-69, -65))).toEqual([30, 0, 0, 0]);
+    // cooldowns (16), hp_max (4), mods (6 x 8 bytes), equipment (11), skills (6), class_tier (1).
+    expect(Array.from(p.bytes.subarray(-86, -84))).toEqual([0, 2]);
+    expect(Array.from(p.bytes.subarray(-70, -66))).toEqual([30, 0, 0, 0]);
     // TimedModData: kind, aspect, turns, power_bp u32, source = 8 bytes.
-    expect(Array.from(p.bytes.subarray(-65 + 8 * 3, -65 + 8 * 4))).toEqual([ModKind.Weakening, Aspect.Blood, 3, 0x08, 0x07, 0, 0, 2]);
-    expect(Array.from(p.bytes.subarray(-17, -6))).toEqual([0, 0xff, 0xff, 3, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
-    expect(Array.from(p.bytes.subarray(-6))).toEqual([2, 0, 0xff, 5, 1, 3]);
+    expect(Array.from(p.bytes.subarray(-66 + 8 * 3, -66 + 8 * 4))).toEqual([ModKind.Weakening, Aspect.Blood, 3, 0x08, 0x07, 0, 0, 2]);
+    expect(Array.from(p.bytes.subarray(-18, -7))).toEqual([0, 0xff, 0xff, 3, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
+    expect(Array.from(p.bytes.subarray(-7, -1))).toEqual([2, 0, 0xff, 5, 1, 3]);
+    expect(Array.from(p.bytes.subarray(-1))).toEqual([9]);
+    expect(p.back.classTier).toBe(9);
     expect(Array.from(p.back.skills)).toEqual([2, 0, 0xff, 5, 1, 3]);
     expect(p.back.hpMax).toBe(30);
     expect(Array.from(p.back.equipment)).toEqual([0, 0xff, 0xff, 3, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);

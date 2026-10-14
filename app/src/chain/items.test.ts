@@ -108,6 +108,7 @@ function warrior(): Uint8Array {
       itemCount: 2,
       equipped: EQUIP_SLOTS.map((s) => (s === "mainHand" ? { source: "soulbound", index: 0, asset: addrOf(0) } : s === "body" ? { source: "soulbound", index: 1, asset: addrOf(0) } : empty)),
     },
+    classTier: 11,
   };
   const out: Uint8Array[] = [c.accountDiscriminator("Character")];
   c.encode({ defined: { name: "Character" } }, v, out);
@@ -115,15 +116,17 @@ function warrior(): Uint8Array {
 }
 
 describe("Character.gear", () => {
-  it("is the last field of the account, in the crates/types ItemRecord / EquipRef layout", () => {
+  it("follows nft_frozen, before the class trait tier, in the crates/types ItemRecord / EquipRef layout", () => {
     const bytes = warrior();
-    // 4 items x 2, item_count 1, 11 slots x (source 1, index 1, asset 32).
-    const gear = bytes.length - (4 * 2 + 1 + 11 * 34);
+    // 4 items x 2, item_count 1, 11 slots x (source 1, index 1, asset 32), then class_tier (1).
+    const gear = bytes.length - (4 * 2 + 1 + 11 * 34) - 1;
+    expect(bytes[bytes.length - 1]).toBe(11);
     expect(Array.from(bytes.subarray(gear, gear + 4))).toEqual([BASE.sword, 1, BASE.leatherArmor, 1]);
     const body = gear + 4 * 2 + 1 + SLOT.body! * 34;
     expect(Array.from(bytes.subarray(body, body + 2))).toEqual([1, 1]);
     const c = coders.character.decodeAccount<CharacterAcc>("Character", bytes);
     expect(c.core.owner).toBe(addrOf(2));
+    expect(c.classTier).toBe(11);
     const inv = inventory(c.gear);
     expect(inv.items.map((i) => [i.base, i.worn])).toEqual([
       ["sword", "mainHand"],

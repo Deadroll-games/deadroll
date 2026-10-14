@@ -1,30 +1,42 @@
 # deadroll-combat-wasm
 
-C ABI over `crates/combat` for the website (task L1.7). The page uses it to replay any hit from the VRF seed in a `HitResolved` event and get the same breakdown as the chain, and to preview damage ("roughly how much will I deal").
+C ABI over `crates/combat` for the website. The page uses it to replay any hit from the VRF seed in a `HitResolved` event and get the same breakdown as the chain, to preview an attack before the dice (chance to hit, chance to crit, damage range; docs/COMBAT_MATH.md, section 13), and to show a hero's derived stats. The preview and the hero sheet build their inputs with `crates/rules`, the code the session program runs, so the website repeats no formula.
 
 ## Build
+
+The website ships the built module as `app/src/chain/wasm/combat.wasm` (Vercel builds without Rust). Rebuild it after any change in `crates/combat`, `crates/rules`, `crates/skillcheck`, `crates/types` or this crate, and commit it:
+
+```
+bash crates/combat/wasm/build.sh            # needs Docker; writes app/src/chain/wasm/combat.wasm
+bash crates/combat/wasm/build.sh --check    # what CI runs: fails if the committed file differs
+```
+
+The script builds in the `rust:1.92.0` image so the bytes are the same on every machine (the module embeds source paths in its panic locations). A plain local build is fine for development but differs in bytes:
 
 ```
 cargo build -p deadroll-combat-wasm --target wasm32-unknown-unknown --profile wasm
 # -> target/wasm32-unknown-unknown/wasm/deadroll_combat_wasm.wasm
 ```
 
-There are no imports. The module exports `memory` plus the functions below. Balance numbers are always `Balance::DEFAULT`.
+There are no imports. The module exports `memory` plus the functions below. Balance numbers are always `BalanceConfig::DEFAULT`, the numbers the programs use.
 
 ## Exports
 
 | Export | Signature | What it does |
 |---|---|---|
-| `abi_version` | `() -> u32` | `1`; bumped on any change of exports or layouts |
+| `abi_version` | `() -> u32` | `2`; bumped on any change of exports or layouts |
 | `buffer_len` | `() -> u32` | size of the input and output buffers (4096) |
-| `input_ptr` | `() -> *mut u8` | where to write the borsh `HitInput` |
+| `input_ptr` | `() -> *mut u8` | where to write the borsh input |
 | `seed_ptr` | `() -> *mut u8` | where to write the 32-byte VRF seed |
 | `output_ptr` | `() -> *const u8` | where results are read from |
-| `resolve` | `(input_len: u32) -> i32` | `resolve_hit(input, DEFAULT, VrfRoll(seed))`, writes a borsh `HitResult`, returns its length |
-| `preview` | `(input_len: u32) -> i32` | writes `min: u32 LE, max: u32 LE`, returns 8 |
+| `resolve` | `(input_len: u32) -> i32` | `HitInput` in: `resolve_hit(input, DEFAULT, VrfRoll(seed))`, writes a borsh `HitResult`, returns its length |
+| `preview` | `(input_len: u32) -> i32` | `HitInput` in: writes `min: u32 LE, max: u32 LE`, returns 8 |
+| `preview_hit` | `(input_len: u32) -> i32` | `HitInput` in: writes a borsh `HitPreview` |
+| `hero_sheet` | `(input_len: u32) -> i32` | `HeroInput` in: writes a borsh `HeroSheet` |
+| `preview_attack` | `(input_len: u32) -> i32` | `AttackRequest` in: builds the hit input as the session program does, writes a borsh `HitPreview` |
 | `roll_u64` | `(index: u32) -> u64` (BigInt) | roll number `index` of the seed: first 8 bytes LE of `sha256(seed ‖ index u32 LE)` |
 
-Negative returns: `-1` input longer than the buffer, `-2` input is not a valid borsh `HitInput` (trailing bytes count as invalid), `-3` output does not fit.
+Negative returns: `-1` input longer than the buffer, `-2` input is not valid borsh of the expected type (trailing bytes count as invalid), `-3` output does not fit, `-4` the target's bestiary id has no template.
 
 ```ts
 const { instance } = await WebAssembly.instantiate(bytes, {});
@@ -61,6 +73,7 @@ Skill {
 }
 Mod { filter: ModFilter, bp: u32 }                             // bp == 0: empty slot
 ModFilter = 0 Any | 1 Aspect(Aspect) | 2 Family(Family) | 3 Source(Source) | 4 Form(Form)
+          | 5 SourceForm(Source, Form)
 Tint { aspect: Aspect, tier: u8, carrier: Carrier }            // tier outside 1..=14: empty slot
 Carrier = 0 Race | 1 Class | 2 Item
 
@@ -72,6 +85,57 @@ Defender {
   states: [ActiveState; 6],
 }
 ActiveState { kind: StateKind, turns: u8, power: u32, source: u8 }   // turns == 0: empty slot
+```
+
+
+### `HitPreview`
+
+```
+HitPreview {
+  immune: bool,                                                 // immune to every packet: all zero
+  hit_bp: u32,                                                  // d20 faces that hit, out of 20
+  crit_bp: u32,                                                 // natural 20 + plain hits x crit roll
+  min: u32, max: u32,                                           // damage of a hit, no resonance
+  crit_min: u32, crit_max: u32,                                 // the same with the crit multiplier
+}
+```
+
+### `HeroInput`, `HeroSheet`
+
+```
+HeroInput {                                                     // as the chain stores the character
+  race: Race, class: Class, level: u16,
+  stats: [u16; 4],                                              // Strength, Dexterity, Intelligence, Endurance
+  predisposition: Aspect, predisposition_tier: u8,              // race trait
+  class_tier: u8,                                               // Character.class_tier
+  equipment: [u8; 11],                                          // ItemBase by EquipSlot, 0xFF = nothing
+}
+HeroSheet {
+  accuracy: u32, evasion: u32, armor: u32, crit_bp: u32, hp_max: u32,
+  action_points: u8, initiative: u16,
+  martial_strike_bp: u32, martial_projectile_bp: u32, magical_bp: u32,    // damage increase
+  martial_state_bp: u32, magical_state_bp: u32, tempo_state_bp: u32,      // state chance increase
+  self_buff_turns: u8,
+  crit_roll_bp: u32,                                            // the crit roll's chance, 0 = none
+}
+```
+
+### `AttackRequest`
+
+```
+AttackRequest {
+  hero: HeroInput,
+  hero_mods: [TimedMod; 6],                                     // the attacker's buffs and debuffs
+  skill: Option<SkillInput>,                                    // None = the weapon's basic attack
+  target: TargetInput,
+}
+SkillInput { blocks: SkillBlocks, shares_bp: [u32; 3], power_bp: u32 }  // SkillRecord without the name
+TargetInput { bestiary_id: u8, level: u8, states: [ActiveState; 6], mods: [TimedMod; 6] }
+TimedMod { kind: ModKind, aspect: Aspect, turns: u8, power_bp: u32, source: u8 }   // turns == 0: empty
+SkillBlocks {
+  category: u8, purpose: u8, source: Source, form: Form, target: u8,
+  aspects: [Aspect; 3], aspect_count: u8, effect: u8, trigger: u8, aura_radius: u8,
+}
 ```
 
 ### `HitResult`

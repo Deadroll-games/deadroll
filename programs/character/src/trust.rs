@@ -16,11 +16,7 @@ pub const REGISTRY_PROGRAM: Pubkey = pubkey!("dZ1jraMfS3bAUTkRw2TA1ddg8UDGzgUdFQ
 /// Decodes `GameConfig` and checks it is the registry's `["config"]` PDA (owner, then address
 /// with the stored bump: one hash instead of a bump search).
 pub fn read_config(info: &AccountInfo) -> Result<GameConfigData> {
-    require_keys_eq!(
-        *info.owner,
-        REGISTRY_PROGRAM,
-        CharacterError::InvalidConfig
-    );
+    require_keys_eq!(*info.owner, REGISTRY_PROGRAM, CharacterError::InvalidConfig);
     let config = {
         let data = info.try_borrow_data()?;
         require!(

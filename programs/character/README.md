@@ -9,7 +9,7 @@ Player profiles, characters with their gear, starting skills, bag and the charac
 | Account | Seeds | Layout (after the 8-byte discriminator) |
 |---|---|---|
 | `PlayerProfile` | `["profile", owner]` | `version, owner, character_count: u8, bump` |
-| `Character` | `["character", owner, index: u8]` | `core: CharacterData` (frozen, CONTRACTS.md 4; `version` 2), then `name: [u8; 32], unspent_points: u8, nft_frozen: bool, gear: Gear` |
+| `Character` | `["character", owner, index: u8]` | `core: CharacterData` (frozen, CONTRACTS.md 4; `version` 3), then `name: [u8; 32], unspent_points: u8, nft_frozen: bool, gear: Gear, class_tier: u8` |
 | `SkillSet` | `["skills", character]` | `version, character, count: u8, skills: [SkillRecord; 16], bump` |
 | `Bag` | `["bag", character]` | `version, character, resources: [u32; 8], items: [Pubkey; 20], item_count: u8, bump` |
 
@@ -31,6 +31,7 @@ logic is pure (`src/state/gear.rs`) and runs in the program-vs-simulator parity 
 | `create_character(args)` | player | `owner (s, w), profile (w), character (w), skill_set (w), bag (w), config, asset (s, w, optional), mpl_core_program (optional), system_program` |
 | `equip(item_index: u8, slot: EquipSlot)` | owner or session key | `signer (s), character (w), session_token (optional)` |
 | `unequip(slot: EquipSlot)` | owner or session key | `signer (s), character (w), session_token (optional)` |
+| `spend_stat_points(points: [u16; 4])` | owner main wallet | `owner (s), character (w)` |
 | `lock_for_session(session: Pubkey, selection: [u8; 6])` | session PDA | `character (w), session_authority (s), config, owner (s), skill_set` |
 | `grant_rewards(xp: u32, resources: [u32; 8])` | session PDA | `character (w), session_authority (s), config, bag (w)` |
 | `mark_dead()` | session PDA | `character (w), session_authority (s), config, skill_set (w), bag (w)` |
@@ -59,7 +60,14 @@ logic is pure (`src/state/gear.rs`) and runs in the program-vs-simulator parity 
 - **NFT**: owner = player, update authority = the character PDA, plugin
   `PermanentFreezeDelegate { frozen: false }` (survives transfers), uri
   `<GameConfig.uri_base>/char/<character>/v<state_version>.json`. Never deserialize a Core asset on-chain.
-- Balance numbers are placeholders: creation, HP and item numbers come from `deadroll_rules::BalanceConfig::DEFAULT` (`crates/rules`, tuned in `tools/balance`), XP per level stays in `src/rules.rs`.
+- **Stat points** (docs/CHARACTER.md 5): `grant_rewards` adds `stat_points_per_level` per level
+  gained; `spend_stat_points` places them all at once (`points` by `Stat`, sum in
+  `1..=unspent_points`), only from the owner's main wallet, for a living character outside a
+  session, and recomputes `hp_max`. Event `StatPointsSpent`.
+- **Trait tiers** (docs/CHARACTER.md 6.3): the race trait tier is `core.predisposition_tier`, the
+  class trait tier `class_tier`; both start at the worst tier and grow only deterministically.
+- Balance numbers are placeholders: creation, HP, level XP, stat points and item numbers come from
+  `deadroll_rules::BalanceConfig::DEFAULT` (`crates/rules`, tuned in `tools/balance`).
 
 ## Features
 

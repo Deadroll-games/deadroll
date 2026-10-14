@@ -53,6 +53,7 @@ function character(over: Partial<CharacterAcc["core"]> = {}, frozen = false): Ch
       xp: 140,
       stats: [5, 8, 12, 5],
       predisposition: e("cold"),
+      predispositionTier: 14,
       hpMax: 30,
       alive: true,
       inSession: null,
@@ -62,6 +63,7 @@ function character(over: Partial<CharacterAcc["core"]> = {}, frozen = false): Ch
     },
     name: new TextEncoder().encode("Aria"),
     unspentPoints: 0,
+    classTier: 14,
     nftFrozen: frozen,
     gear: gear(),
   };
@@ -100,7 +102,7 @@ describe("CharacterDetailView", () => {
     expect(screen.getByText("Forest elf Mage · Cold predisposition")).toBeTruthy();
     expect(screen.getByText("Level 2 · 140 XP")).toBeTruthy();
     expect(screen.getByText("Intelligence").nextSibling?.textContent).toBe("12");
-    expect(screen.getByText("30 (max)")).toBeTruthy();
+    expect(screen.getByText("HP 30 (max)")).toBeTruthy();
     expect(screen.getByText("Frost Bolt")).toBeTruthy();
     expect(screen.getAllByText(/not usable in combat/)).toHaveLength(1);
     expect(screen.getByText("Empowerment")).toBeTruthy();
@@ -112,7 +114,7 @@ describe("CharacterDetailView", () => {
 
   it("links the current party with live HP", () => {
     view(character({ inSession: SESSION }), [], { session: SESSION, status: "active", slot: 1, hp: 17 });
-    expect(screen.getByText("17 / 30")).toBeTruthy();
+    expect(screen.getByText("HP 17 / 30")).toBeTruthy();
     expect(screen.getByText("Alive · in a party")).toBeTruthy();
     expect(screen.getByRole("link", { name: "open party" }).getAttribute("href")).toBe(`/party?s=${SESSION}`);
   });
@@ -123,7 +125,7 @@ describe("CharacterDetailView", () => {
     cleanup();
     view(character({ alive: false }, true), [], null);
     expect(screen.getByText("Tombstone · NFT frozen")).toBeTruthy();
-    expect(screen.getByText("0 / 30")).toBeTruthy();
+    expect(screen.getByText("HP 0 / 30")).toBeTruthy();
   });
 });
 

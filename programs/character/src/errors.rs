@@ -58,4 +58,8 @@ pub enum CharacterError {
     InvalidSessionToken,
     #[msg("Session token expired")]
     SessionTokenExpired,
+    #[msg("No stat points chosen")]
+    NoPointsSpent,
+    #[msg("More stat points chosen than the character has unspent")]
+    NotEnoughStatPoints,
 }

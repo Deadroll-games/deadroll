@@ -49,18 +49,23 @@ impl Default for BalanceConfig {
     }
 }
 
-/// Hero numbers (docs/CHARACTER.md, sections 2-4 and 8). The weapon and item armor come from
+/// Trait tiers, `1..=14` (1 is best): tables indexed by tier have this length, index `tier - 1`.
+pub const TIERS: usize = 14;
+/// Character levels in the first version, `1..=LEVELS` (docs/CHARACTER.md, section 5).
+pub const LEVELS: usize = 4;
+
+/// Hero numbers (docs/CHARACTER.md, sections 2-6 and 8). The weapon and item bonuses come from
 /// [`ItemTuning`].
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PlayerTuning {
-    /// Action points per turn before Dexterity, by race then class (CHARACTER 3.1).
+    /// Action points per turn before Dexterity and items, by race then class (CHARACTER 3.1).
     pub ap_base: [[u8; Class::COUNT]; Race::COUNT],
     /// One extra action point per this much Dexterity.
     pub ap_dex_div: u16,
     pub ap_min: u8,
     pub ap_max: u8,
-    /// Initiative = Intelligence / this (CHARACTER 3.2).
+    /// Initiative = Intelligence / this, plus items (CHARACTER 3).
     pub initiative_div: u16,
     /// Action points one attack or active skill costs.
     pub act_ap: u8,
@@ -70,21 +75,34 @@ pub struct PlayerTuning {
     /// Native state chance of a skill and of the basic attack.
     pub skill_state_chance_bp: u32,
     pub basic_state_chance_bp: u32,
-    /// Class tag increase on the class's own source, by class (0 = none).
-    pub class_increase_bp: [u32; Class::COUNT],
-    /// Class increase on heal, buff and debuff power, by class.
-    pub support_increase_bp: [u32; Class::COUNT],
+    /// Class trait: tag increase on the class's own source, by class then tier (0 = none).
+    pub class_increase_by_tier_bp: [[u32; TIERS]; Class::COUNT],
+    /// Class trait: increase on heal, buff and debuff power, by class then tier.
+    pub support_increase_by_tier_bp: [[u32; TIERS]; Class::COUNT],
     /// HP a heal restores per point of the weapon's range, bp.
     pub heal_weapon_bp: u32,
-    /// Race trait: flat added damage `[min, max]` of the predisposition aspect.
-    pub predisposition_added: [u32; 2],
-    /// `d20` bonus = level + attack stat / this.
-    pub attack_stat_div: u32,
-    /// Crit chance per point of Dexterity.
-    pub crit_per_dex_bp: u32,
-    /// Defense = base + Dexterity / div.
+    /// Race trait: flat added damage `[min, max]` of the predisposition aspect, by tier.
+    pub predisposition_added_by_tier: [[u32; 2]; TIERS],
+    /// Accuracy (the `d20` bonus) = base + Dexterity / div, plus items (CHARACTER 3).
+    pub accuracy_base: u32,
+    pub accuracy_dex_div: u32,
+    /// Evasion (the hit threshold) = base + Dexterity / div, plus items (CHARACTER 3).
     pub defense_base: u32,
     pub defense_dex_div: u32,
+    /// Damage increase per point, bp: Strength on martial strikes, Dexterity on martial
+    /// projectiles, Intelligence on every magical packet (CHARACTER 2).
+    pub str_damage_bp: u32,
+    pub dex_projectile_bp: u32,
+    pub int_magic_bp: u32,
+    /// State and debuff chance increase per point, bp: Strength for martial skills,
+    /// Intelligence for magical skills, Dexterity for tempo effects (Haste, Slow).
+    pub str_state_chance_bp: u32,
+    pub int_state_chance_bp: u32,
+    pub dex_state_chance_bp: u32,
+    /// Own buffs on self last one more turn per this much Endurance, at most `self_buff_turns_max`
+    /// more (CHARACTER 2).
+    pub self_buff_end_div: u16,
+    pub self_buff_turns_max: u8,
     /// Base armor by class; worn items add theirs.
     pub armor: [u32; Class::COUNT],
     /// HP = base + Endurance x per point + (level - 1) x per level, by class.
@@ -96,9 +114,22 @@ pub struct PlayerTuning {
     pub stat_base: u16,
     pub stat_points_start: u16,
     pub stat_max_start: u16,
-    /// Predisposition tier at creation (1 best .. 14 worst).
+    /// Race trait (predisposition) tier at creation (1 best .. 14 worst).
     pub start_tier: u8,
+    /// Class trait tier at creation (CHARACTER 6.3: starts low).
+    pub class_start_tier: u8,
+    /// Total experience needed for each level, level 1 first (CHARACTER 5).
+    pub level_xp: [u32; LEVELS],
+    /// Stat points per level gained (CHARACTER 5).
+    pub stat_points_per_level: u8,
 }
+
+/// `2_000 + (14 - tier) x 250` bp: the class increase of the first version at the starting tier,
+/// growing with better tiers.
+const CLASS_TIERS: [u32; TIERS] = [
+    5_250, 5_000, 4_750, 4_500, 4_250, 4_000, 3_750, 3_500, 3_250, 3_000, 2_750, 2_500, 2_250,
+    2_000,
+];
 
 impl PlayerTuning {
     //                       Warrior  Mage  Support
@@ -116,14 +147,38 @@ impl PlayerTuning {
         projectile_range: 6,
         skill_state_chance_bp: 2_000,
         basic_state_chance_bp: 1_000,
-        class_increase_bp: [2_000, 2_000, 0],
-        support_increase_bp: [0, 0, 2_000],
+        class_increase_by_tier_bp: [CLASS_TIERS, CLASS_TIERS, [0; TIERS]],
+        support_increase_by_tier_bp: [[0; TIERS], [0; TIERS], CLASS_TIERS],
         heal_weapon_bp: 20_000,
-        predisposition_added: [1, 2],
-        attack_stat_div: 5,
-        crit_per_dex_bp: 20,
+        // tier 1 .. tier 14
+        predisposition_added_by_tier: [
+            [4, 8],
+            [4, 7],
+            [4, 7],
+            [3, 6],
+            [3, 6],
+            [3, 5],
+            [3, 5],
+            [2, 4],
+            [2, 4],
+            [2, 3],
+            [2, 3],
+            [1, 3],
+            [1, 2],
+            [1, 2],
+        ],
+        accuracy_base: 2,
+        accuracy_dex_div: 5,
         defense_base: 10,
         defense_dex_div: 5,
+        str_damage_bp: 200,
+        dex_projectile_bp: 200,
+        int_magic_bp: 200,
+        str_state_chance_bp: 300,
+        int_state_chance_bp: 300,
+        dex_state_chance_bp: 300,
+        self_buff_end_div: 5,
+        self_buff_turns_max: 2,
         // With the starter armor (10, 2, 5) the totals stay 30, 5, 5.
         armor: [20, 3, 0],
         hp_base: [30, 18, 22],
@@ -133,6 +188,9 @@ impl PlayerTuning {
         stat_points_start: 10,
         stat_max_start: 15,
         start_tier: 14,
+        class_start_tier: 14,
+        level_xp: [0, 100, 300, 600],
+        stat_points_per_level: 2,
     };
 }
 
@@ -198,6 +256,14 @@ pub struct ItemBaseStats {
     #[cfg_attr(feature = "serde", serde(with = "names::by_stat"))]
     pub stats: [u16; STATS_COUNT],
     pub hp: u32,
+    /// Crit chance besides a natural 20, bp (CHARACTER 3: items are a crit source).
+    pub crit_bp: u32,
+    /// Added to speed before the counterweights (light trousers and footwear, CHARACTER 3.1).
+    pub speed: u16,
+    /// Speed counterweight, bp: heavy armor divides speed, never to zero (CHARACTER 3.1).
+    pub speed_counter_bp: u32,
+    /// Added to initiative.
+    pub initiative: u16,
 }
 
 /// Items (docs/ITEMS_AND_CRAFT.md): every base's numbers and the class starter kits.
@@ -228,6 +294,10 @@ const fn base(slot: EquipSlot, damage: [u32; 2], armor: u32) -> ItemBaseStats {
         attack: 0,
         stats: [0; STATS_COUNT],
         hp: 0,
+        crit_bp: 0,
+        speed: 0,
+        speed_counter_bp: 0,
+        initiative: 0,
     }
 }
 

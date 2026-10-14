@@ -83,7 +83,7 @@ function pushState(steps: CascadeStep[], roll: StateRoll, key: string): void {
   });
 }
 
-/** `critChanceBp` is not in the event: the caller derives it (playerCritChanceBp) or leaves it unknown. */
+/** `critChanceBp` is not in the event: the caller takes it from the combat module (HeroSheet.critRollBp) or leaves it unknown. */
 export function cascadeSteps(hit: HitResult, critChanceBp?: number): CascadeStep[] {
   const steps: CascadeStep[] = [];
 

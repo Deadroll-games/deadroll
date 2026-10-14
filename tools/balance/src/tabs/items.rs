@@ -41,6 +41,10 @@ fn base_row(ui: &mut Ui, base: ItemBase, b: &mut ItemBaseStats, d: &ItemBaseStat
         widgets::int(ui, &mut b.stats[stat as usize], 0..=999);
     }
     widgets::int(ui, &mut b.hp, 0..=100_000);
+    widgets::bp(ui, &mut b.crit_bp);
+    widgets::int(ui, &mut b.speed, 0..=100);
+    widgets::bp(ui, &mut b.speed_counter_bp);
+    widgets::int(ui, &mut b.initiative, 0..=1_000);
     ui.end_row();
 }
 
@@ -106,8 +110,8 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                 ui.label("A base with damage max > 0 is a weapon: in the main hand its damage replaces bare hands as the base of every attack and skill. Everything else adds flat.");
                 egui::Grid::new("item_bases").striped(true).show(ui, |ui| {
                     for h in [
-                        "", "slot", "level", "aspect", "dmg min", "dmg max", "armor", "defense",
-                        "attack",
+                        "", "slot", "level", "aspect", "dmg min", "dmg max", "armor", "evasion",
+                        "accuracy",
                     ] {
                         ui.strong(h);
                     }
@@ -115,6 +119,9 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                         ui.strong(format!("+{}", stat.name()));
                     }
                     ui.strong("HP");
+                    for h in ["crit", "speed", "speed counter", "initiative"] {
+                        ui.strong(h);
+                    }
                     ui.end_row();
                     for &base in ItemBase::all() {
                         let i = base as usize;

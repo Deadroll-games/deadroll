@@ -1,0 +1,4409 @@
+{
+  "abiVersion": 2,
+  "attacks": [
+    {
+      "bytes": "000001000500070006000500030e0e00ffff03ffffffffffffff000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "input": {
+        "hero": {
+          "class": 0,
+          "classTier": 14,
+          "equipment": [
+            0,
+            255,
+            255,
+            3,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255
+          ],
+          "level": 1,
+          "predisposition": 3,
+          "predispositionTier": 14,
+          "race": 0,
+          "stats": [
+            5,
+            7,
+            6,
+            5
+          ]
+        },
+        "heroMods": [
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          }
+        ],
+        "skill": null,
+        "target": {
+          "bestiaryId": 0,
+          "level": 1,
+          "mods": [
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ],
+          "states": [
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ]
+        }
+      },
+      "preview": {
+        "critBp": 500,
+        "critMax": 18,
+        "critMin": 9,
+        "hitBp": 7000,
+        "immune": false,
+        "max": 12,
+        "min": 6
+      }
+    },
+    {
+      "bytes": "000001000500070006000500030e0e00ffff03ffffffffffffff020302b80b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000001000005000001000000102700000000000000000000102700000102000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "input": {
+        "hero": {
+          "class": 0,
+          "classTier": 14,
+          "equipment": [
+            0,
+            255,
+            255,
+            3,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255
+          ],
+          "level": 1,
+          "predisposition": 3,
+          "predispositionTier": 14,
+          "race": 0,
+          "stats": [
+            5,
+            7,
+            6,
+            5
+          ]
+        },
+        "heroMods": [
+          {
+            "aspect": 3,
+            "kind": 2,
+            "powerBp": 3000,
+            "source": 0,
+            "turns": 2
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          }
+        ],
+        "skill": {
+          "blocks": [
+            0,
+            0,
+            1,
+            0,
+            0,
+            5,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0
+          ],
+          "powerBp": 10000,
+          "sharesBp": [
+            10000,
+            0,
+            0
+          ]
+        },
+        "target": {
+          "bestiaryId": 1,
+          "level": 2,
+          "mods": [
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ],
+          "states": [
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ]
+        }
+      },
+      "preview": {
+        "critBp": 500,
+        "critMax": 22,
+        "critMin": 11,
+        "hitBp": 7500,
+        "immune": false,
+        "max": 15,
+        "min": 7
+      }
+    },
+    {
+      "bytes": "000001000500070006000500030e0e00ffff03ffffffffffffff00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000001000004000001040000102700000000000000000000401f00000203000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "input": {
+        "hero": {
+          "class": 0,
+          "classTier": 14,
+          "equipment": [
+            0,
+            255,
+            255,
+            3,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255
+          ],
+          "level": 1,
+          "predisposition": 3,
+          "predispositionTier": 14,
+          "race": 0,
+          "stats": [
+            5,
+            7,
+            6,
+            5
+          ]
+        },
+        "heroMods": [
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          }
+        ],
+        "skill": {
+          "blocks": [
+            0,
+            0,
+            1,
+            0,
+            0,
+            4,
+            0,
+            0,
+            1,
+            4,
+            0,
+            0
+          ],
+          "powerBp": 8000,
+          "sharesBp": [
+            10000,
+            0,
+            0
+          ]
+        },
+        "target": {
+          "bestiaryId": 2,
+          "level": 3,
+          "mods": [
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ],
+          "states": [
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ]
+        }
+      },
+      "preview": {
+        "critBp": 500,
+        "critMax": 11,
+        "critMin": 5,
+        "hitBp": 5500,
+        "immune": false,
+        "max": 7,
+        "min": 3
+      }
+    },
+    {
+      "bytes": "000001000500070006000500030e0e00ffff03ffffffffffffff00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000001010005000001000000102700000000000000000000102700000301010288130000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "input": {
+        "hero": {
+          "class": 0,
+          "classTier": 14,
+          "equipment": [
+            0,
+            255,
+            255,
+            3,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255
+          ],
+          "level": 1,
+          "predisposition": 3,
+          "predispositionTier": 14,
+          "race": 0,
+          "stats": [
+            5,
+            7,
+            6,
+            5
+          ]
+        },
+        "heroMods": [
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          }
+        ],
+        "skill": {
+          "blocks": [
+            0,
+            0,
+            1,
+            1,
+            0,
+            5,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0
+          ],
+          "powerBp": 10000,
+          "sharesBp": [
+            10000,
+            0,
+            0
+          ]
+        },
+        "target": {
+          "bestiaryId": 3,
+          "level": 1,
+          "mods": [
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ],
+          "states": [
+            {
+              "kind": 1,
+              "power": 5000,
+              "source": 1,
+              "turns": 2
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ]
+        }
+      },
+      "preview": {
+        "critBp": 500,
+        "critMax": 16,
+        "critMin": 8,
+        "hitBp": 6500,
+        "immune": false,
+        "max": 10,
+        "min": 5
+      }
+    },
+    {
+      "bytes": "000001000500070006000500030e0e00ffff03ffffffffffffff020302b80b000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000100010305000200000064190000ac0d0000000000000a1a00000402000000000000000000000000000000000000000000000000000000000000000000000000000000000000040402c40900000500000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "input": {
+        "hero": {
+          "class": 0,
+          "classTier": 14,
+          "equipment": [
+            0,
+            255,
+            255,
+            3,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255
+          ],
+          "level": 1,
+          "predisposition": 3,
+          "predispositionTier": 14,
+          "race": 0,
+          "stats": [
+            5,
+            7,
+            6,
+            5
+          ]
+        },
+        "heroMods": [
+          {
+            "aspect": 3,
+            "kind": 2,
+            "powerBp": 3000,
+            "source": 0,
+            "turns": 2
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          }
+        ],
+        "skill": {
+          "blocks": [
+            0,
+            0,
+            1,
+            0,
+            1,
+            3,
+            5,
+            0,
+            2,
+            0,
+            0,
+            0
+          ],
+          "powerBp": 6666,
+          "sharesBp": [
+            6500,
+            3500,
+            0
+          ]
+        },
+        "target": {
+          "bestiaryId": 4,
+          "level": 2,
+          "mods": [
+            {
+              "aspect": 4,
+              "kind": 4,
+              "powerBp": 2500,
+              "source": 5,
+              "turns": 2
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ],
+          "states": [
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ]
+        }
+      },
+      "preview": {
+        "critBp": 500,
+        "critMax": 13,
+        "critMin": 6,
+        "hitBp": 7000,
+        "immune": false,
+        "max": 8,
+        "min": 4
+      }
+    },
+    {
+      "bytes": "01000200070008000900060001090a00ffff03ffffffffffffff020302b80b00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000102000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "input": {
+        "hero": {
+          "class": 0,
+          "classTier": 10,
+          "equipment": [
+            0,
+            255,
+            255,
+            3,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255
+          ],
+          "level": 2,
+          "predisposition": 1,
+          "predispositionTier": 9,
+          "race": 1,
+          "stats": [
+            7,
+            8,
+            9,
+            6
+          ]
+        },
+        "heroMods": [
+          {
+            "aspect": 3,
+            "kind": 2,
+            "powerBp": 3000,
+            "source": 0,
+            "turns": 2
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          }
+        ],
+        "skill": null,
+        "target": {
+          "bestiaryId": 1,
+          "level": 2,
+          "mods": [
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ],
+          "states": [
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ]
+        }
+      },
+      "preview": {
+        "critBp": 500,
+        "critMax": 30,
+        "critMin": 15,
+        "hitBp": 7500,
+        "immune": false,
+        "max": 20,
+        "min": 10
+      }
+    },
+    {
+      "bytes": "01000200070008000900060001090a00ffff03ffffffffffffff00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000001000005000001000000102700000000000000000000102700000203000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "input": {
+        "hero": {
+          "class": 0,
+          "classTier": 10,
+          "equipment": [
+            0,
+            255,
+            255,
+            3,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255
+          ],
+          "level": 2,
+          "predisposition": 1,
+          "predispositionTier": 9,
+          "race": 1,
+          "stats": [
+            7,
+            8,
+            9,
+            6
+          ]
+        },
+        "heroMods": [
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          }
+        ],
+        "skill": {
+          "blocks": [
+            0,
+            0,
+            1,
+            0,
+            0,
+            5,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0
+          ],
+          "powerBp": 10000,
+          "sharesBp": [
+            10000,
+            0,
+            0
+          ]
+        },
+        "target": {
+          "bestiaryId": 2,
+          "level": 3,
+          "mods": [
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ],
+          "states": [
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ]
+        }
+      },
+      "preview": {
+        "critBp": 500,
+        "critMax": 16,
+        "critMin": 8,
+        "hitBp": 5500,
+        "immune": false,
+        "max": 11,
+        "min": 5
+      }
+    },
+    {
+      "bytes": "01000200070008000900060001090a00ffff03ffffffffffffff00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000001000004000001040000102700000000000000000000401f00000301010288130000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "input": {
+        "hero": {
+          "class": 0,
+          "classTier": 10,
+          "equipment": [
+            0,
+            255,
+            255,
+            3,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255
+          ],
+          "level": 2,
+          "predisposition": 1,
+          "predispositionTier": 9,
+          "race": 1,
+          "stats": [
+            7,
+            8,
+            9,
+            6
+          ]
+        },
+        "heroMods": [
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          }
+        ],
+        "skill": {
+          "blocks": [
+            0,
+            0,
+            1,
+            0,
+            0,
+            4,
+            0,
+            0,
+            1,
+            4,
+            0,
+            0
+          ],
+          "powerBp": 8000,
+          "sharesBp": [
+            10000,
+            0,
+            0
+          ]
+        },
+        "target": {
+          "bestiaryId": 3,
+          "level": 1,
+          "mods": [
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ],
+          "states": [
+            {
+              "kind": 1,
+              "power": 5000,
+              "source": 1,
+              "turns": 2
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ]
+        }
+      },
+      "preview": {
+        "critBp": 500,
+        "critMax": 19,
+        "critMin": 9,
+        "hitBp": 6500,
+        "immune": false,
+        "max": 13,
+        "min": 6
+      }
+    },
+    {
+      "bytes": "01000200070008000900060001090a00ffff03ffffffffffffff020302b80b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000001010005000001000000102700000000000000000000102700000402000000000000000000000000000000000000000000000000000000000000000000000000000000000000040402c40900000500000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "input": {
+        "hero": {
+          "class": 0,
+          "classTier": 10,
+          "equipment": [
+            0,
+            255,
+            255,
+            3,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255
+          ],
+          "level": 2,
+          "predisposition": 1,
+          "predispositionTier": 9,
+          "race": 1,
+          "stats": [
+            7,
+            8,
+            9,
+            6
+          ]
+        },
+        "heroMods": [
+          {
+            "aspect": 3,
+            "kind": 2,
+            "powerBp": 3000,
+            "source": 0,
+            "turns": 2
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          }
+        ],
+        "skill": {
+          "blocks": [
+            0,
+            0,
+            1,
+            1,
+            0,
+            5,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0
+          ],
+          "powerBp": 10000,
+          "sharesBp": [
+            10000,
+            0,
+            0
+          ]
+        },
+        "target": {
+          "bestiaryId": 4,
+          "level": 2,
+          "mods": [
+            {
+              "aspect": 4,
+              "kind": 4,
+              "powerBp": 2500,
+              "source": 5,
+              "turns": 2
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ],
+          "states": [
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ]
+        }
+      },
+      "preview": {
+        "critBp": 500,
+        "critMax": 24,
+        "critMin": 12,
+        "hitBp": 7000,
+        "immune": false,
+        "max": 16,
+        "min": 8
+      }
+    },
+    {
+      "bytes": "01000200070008000900060001090a00ffff03ffffffffffffff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000100010305000200000064190000ac0d0000000000000a1a00000003000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "input": {
+        "hero": {
+          "class": 0,
+          "classTier": 10,
+          "equipment": [
+            0,
+            255,
+            255,
+            3,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255
+          ],
+          "level": 2,
+          "predisposition": 1,
+          "predispositionTier": 9,
+          "race": 1,
+          "stats": [
+            7,
+            8,
+            9,
+            6
+          ]
+        },
+        "heroMods": [
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          }
+        ],
+        "skill": {
+          "blocks": [
+            0,
+            0,
+            1,
+            0,
+            1,
+            3,
+            5,
+            0,
+            2,
+            0,
+            0,
+            0
+          ],
+          "powerBp": 6666,
+          "sharesBp": [
+            6500,
+            3500,
+            0
+          ]
+        },
+        "target": {
+          "bestiaryId": 0,
+          "level": 3,
+          "mods": [
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ],
+          "states": [
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ]
+        }
+      },
+      "preview": {
+        "critBp": 500,
+        "critMax": 16,
+        "critMin": 8,
+        "hitBp": 7000,
+        "immune": false,
+        "max": 11,
+        "min": 5
+      }
+    },
+    {
+      "bytes": "00010300090009000c000700030406ffffffffffffffffffffff000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000203000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "input": {
+        "hero": {
+          "class": 1,
+          "classTier": 6,
+          "equipment": [
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255
+          ],
+          "level": 3,
+          "predisposition": 3,
+          "predispositionTier": 4,
+          "race": 0,
+          "stats": [
+            9,
+            9,
+            12,
+            7
+          ]
+        },
+        "heroMods": [
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          }
+        ],
+        "skill": null,
+        "target": {
+          "bestiaryId": 2,
+          "level": 3,
+          "mods": [
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ],
+          "states": [
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ]
+        }
+      },
+      "preview": {
+        "critBp": 500,
+        "critMax": 14,
+        "critMin": 7,
+        "hitBp": 5500,
+        "immune": false,
+        "max": 9,
+        "min": 4
+      }
+    },
+    {
+      "bytes": "00010300090009000c000700030406ffffffffffffffffffffff00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000010001000001000000102700000000000000000000102700000301010288130000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "input": {
+        "hero": {
+          "class": 1,
+          "classTier": 6,
+          "equipment": [
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255
+          ],
+          "level": 3,
+          "predisposition": 3,
+          "predispositionTier": 4,
+          "race": 0,
+          "stats": [
+            9,
+            9,
+            12,
+            7
+          ]
+        },
+        "heroMods": [
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          }
+        ],
+        "skill": {
+          "blocks": [
+            0,
+            0,
+            0,
+            1,
+            0,
+            1,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0
+          ],
+          "powerBp": 10000,
+          "sharesBp": [
+            10000,
+            0,
+            0
+          ]
+        },
+        "target": {
+          "bestiaryId": 3,
+          "level": 1,
+          "mods": [
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ],
+          "states": [
+            {
+              "kind": 1,
+              "power": 5000,
+              "source": 1,
+              "turns": 2
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ]
+        }
+      },
+      "preview": {
+        "critBp": 500,
+        "critMax": 16,
+        "critMin": 8,
+        "hitBp": 6500,
+        "immune": false,
+        "max": 11,
+        "min": 5
+      }
+    },
+    {
+      "bytes": "00010300090009000c000700030406ffffffffffffffffffffff020302b80b000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000001000100000200000064190000ac0d000000000000102700000402000000000000000000000000000000000000000000000000000000000000000000000000000000000000040402c40900000500000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "input": {
+        "hero": {
+          "class": 1,
+          "classTier": 6,
+          "equipment": [
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255
+          ],
+          "level": 3,
+          "predisposition": 3,
+          "predispositionTier": 4,
+          "race": 0,
+          "stats": [
+            9,
+            9,
+            12,
+            7
+          ]
+        },
+        "heroMods": [
+          {
+            "aspect": 3,
+            "kind": 2,
+            "powerBp": 3000,
+            "source": 0,
+            "turns": 2
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          }
+        ],
+        "skill": {
+          "blocks": [
+            0,
+            0,
+            0,
+            1,
+            0,
+            1,
+            0,
+            0,
+            2,
+            0,
+            0,
+            0
+          ],
+          "powerBp": 10000,
+          "sharesBp": [
+            6500,
+            3500,
+            0
+          ]
+        },
+        "target": {
+          "bestiaryId": 4,
+          "level": 2,
+          "mods": [
+            {
+              "aspect": 4,
+              "kind": 4,
+              "powerBp": 2500,
+              "source": 5,
+              "turns": 2
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ],
+          "states": [
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ]
+        }
+      },
+      "preview": {
+        "critBp": 500,
+        "critMax": 17,
+        "critMin": 8,
+        "hitBp": 7000,
+        "immune": false,
+        "max": 11,
+        "min": 5
+      }
+    },
+    {
+      "bytes": "00010300090009000c000700030406ffffffffffffffffffffff00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000010001000001050000102700000000000000000000401f00000003000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "input": {
+        "hero": {
+          "class": 1,
+          "classTier": 6,
+          "equipment": [
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255
+          ],
+          "level": 3,
+          "predisposition": 3,
+          "predispositionTier": 4,
+          "race": 0,
+          "stats": [
+            9,
+            9,
+            12,
+            7
+          ]
+        },
+        "heroMods": [
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          }
+        ],
+        "skill": {
+          "blocks": [
+            0,
+            0,
+            0,
+            1,
+            0,
+            1,
+            0,
+            0,
+            1,
+            5,
+            0,
+            0
+          ],
+          "powerBp": 8000,
+          "sharesBp": [
+            10000,
+            0,
+            0
+          ]
+        },
+        "target": {
+          "bestiaryId": 0,
+          "level": 3,
+          "mods": [
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ],
+          "states": [
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ]
+        }
+      },
+      "preview": {
+        "critBp": 500,
+        "critMax": 16,
+        "critMin": 8,
+        "hitBp": 7000,
+        "immune": false,
+        "max": 11,
+        "min": 5
+      }
+    },
+    {
+      "bytes": "00010300090009000c000700030406ffffffffffffffffffffff000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000001020000010000001027000000000000000000000a1a00000101000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "input": {
+        "hero": {
+          "class": 1,
+          "classTier": 6,
+          "equipment": [
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255
+          ],
+          "level": 3,
+          "predisposition": 3,
+          "predispositionTier": 4,
+          "race": 0,
+          "stats": [
+            9,
+            9,
+            12,
+            7
+          ]
+        },
+        "heroMods": [
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          }
+        ],
+        "skill": {
+          "blocks": [
+            0,
+            0,
+            0,
+            0,
+            1,
+            2,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0
+          ],
+          "powerBp": 6666,
+          "sharesBp": [
+            10000,
+            0,
+            0
+          ]
+        },
+        "target": {
+          "bestiaryId": 1,
+          "level": 1,
+          "mods": [
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ],
+          "states": [
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ]
+        }
+      },
+      "preview": {
+        "critBp": 500,
+        "critMax": 17,
+        "critMin": 8,
+        "hitBp": 7500,
+        "immune": false,
+        "max": 11,
+        "min": 5
+      }
+    },
+    {
+      "bytes": "010104000b000a0006000800010e0201ffff04ffffffffffffff000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000301010288130000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "input": {
+        "hero": {
+          "class": 1,
+          "classTier": 2,
+          "equipment": [
+            1,
+            255,
+            255,
+            4,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255
+          ],
+          "level": 4,
+          "predisposition": 1,
+          "predispositionTier": 14,
+          "race": 1,
+          "stats": [
+            11,
+            10,
+            6,
+            8
+          ]
+        },
+        "heroMods": [
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          }
+        ],
+        "skill": null,
+        "target": {
+          "bestiaryId": 3,
+          "level": 1,
+          "mods": [
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ],
+          "states": [
+            {
+              "kind": 1,
+              "power": 5000,
+              "source": 1,
+              "turns": 2
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ]
+        }
+      },
+      "preview": {
+        "critBp": 500,
+        "critMax": 16,
+        "critMin": 8,
+        "hitBp": 7000,
+        "immune": false,
+        "max": 11,
+        "min": 5
+      }
+    },
+    {
+      "bytes": "010104000b000a0006000800010e0201ffff04ffffffffffffff020302b80b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000010001000001000000102700000000000000000000102700000402000000000000000000000000000000000000000000000000000000000000000000000000000000000000040402c40900000500000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "input": {
+        "hero": {
+          "class": 1,
+          "classTier": 2,
+          "equipment": [
+            1,
+            255,
+            255,
+            4,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255
+          ],
+          "level": 4,
+          "predisposition": 1,
+          "predispositionTier": 14,
+          "race": 1,
+          "stats": [
+            11,
+            10,
+            6,
+            8
+          ]
+        },
+        "heroMods": [
+          {
+            "aspect": 3,
+            "kind": 2,
+            "powerBp": 3000,
+            "source": 0,
+            "turns": 2
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          }
+        ],
+        "skill": {
+          "blocks": [
+            0,
+            0,
+            0,
+            1,
+            0,
+            1,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0
+          ],
+          "powerBp": 10000,
+          "sharesBp": [
+            10000,
+            0,
+            0
+          ]
+        },
+        "target": {
+          "bestiaryId": 4,
+          "level": 2,
+          "mods": [
+            {
+              "aspect": 4,
+              "kind": 4,
+              "powerBp": 2500,
+              "source": 5,
+              "turns": 2
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ],
+          "states": [
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ]
+        }
+      },
+      "preview": {
+        "critBp": 500,
+        "critMax": 18,
+        "critMin": 9,
+        "hitBp": 7500,
+        "immune": false,
+        "max": 12,
+        "min": 6
+      }
+    },
+    {
+      "bytes": "010104000b000a0006000800010e0201ffff04ffffffffffffff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000001000100000200000064190000ac0d000000000000102700000003000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "input": {
+        "hero": {
+          "class": 1,
+          "classTier": 2,
+          "equipment": [
+            1,
+            255,
+            255,
+            4,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255
+          ],
+          "level": 4,
+          "predisposition": 1,
+          "predispositionTier": 14,
+          "race": 1,
+          "stats": [
+            11,
+            10,
+            6,
+            8
+          ]
+        },
+        "heroMods": [
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          }
+        ],
+        "skill": {
+          "blocks": [
+            0,
+            0,
+            0,
+            1,
+            0,
+            1,
+            0,
+            0,
+            2,
+            0,
+            0,
+            0
+          ],
+          "powerBp": 10000,
+          "sharesBp": [
+            6500,
+            3500,
+            0
+          ]
+        },
+        "target": {
+          "bestiaryId": 0,
+          "level": 3,
+          "mods": [
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ],
+          "states": [
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ]
+        }
+      },
+      "preview": {
+        "critBp": 500,
+        "critMax": 14,
+        "critMin": 7,
+        "hitBp": 7500,
+        "immune": false,
+        "max": 9,
+        "min": 4
+      }
+    },
+    {
+      "bytes": "010104000b000a0006000800010e0201ffff04ffffffffffffff00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000010001000001050000102700000000000000000000401f00000101000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "input": {
+        "hero": {
+          "class": 1,
+          "classTier": 2,
+          "equipment": [
+            1,
+            255,
+            255,
+            4,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255
+          ],
+          "level": 4,
+          "predisposition": 1,
+          "predispositionTier": 14,
+          "race": 1,
+          "stats": [
+            11,
+            10,
+            6,
+            8
+          ]
+        },
+        "heroMods": [
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          }
+        ],
+        "skill": {
+          "blocks": [
+            0,
+            0,
+            0,
+            1,
+            0,
+            1,
+            0,
+            0,
+            1,
+            5,
+            0,
+            0
+          ],
+          "powerBp": 8000,
+          "sharesBp": [
+            10000,
+            0,
+            0
+          ]
+        },
+        "target": {
+          "bestiaryId": 1,
+          "level": 1,
+          "mods": [
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ],
+          "states": [
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ]
+        }
+      },
+      "preview": {
+        "critBp": 500,
+        "critMax": 16,
+        "critMin": 8,
+        "hitBp": 8000,
+        "immune": false,
+        "max": 11,
+        "min": 5
+      }
+    },
+    {
+      "bytes": "010104000b000a0006000800010e0201ffff04ffffffffffffff020302b80b00000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000001020000010000001027000000000000000000000a1a00000202010288130000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "input": {
+        "hero": {
+          "class": 1,
+          "classTier": 2,
+          "equipment": [
+            1,
+            255,
+            255,
+            4,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255
+          ],
+          "level": 4,
+          "predisposition": 1,
+          "predispositionTier": 14,
+          "race": 1,
+          "stats": [
+            11,
+            10,
+            6,
+            8
+          ]
+        },
+        "heroMods": [
+          {
+            "aspect": 3,
+            "kind": 2,
+            "powerBp": 3000,
+            "source": 0,
+            "turns": 2
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          }
+        ],
+        "skill": {
+          "blocks": [
+            0,
+            0,
+            0,
+            0,
+            1,
+            2,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0
+          ],
+          "powerBp": 6666,
+          "sharesBp": [
+            10000,
+            0,
+            0
+          ]
+        },
+        "target": {
+          "bestiaryId": 2,
+          "level": 2,
+          "mods": [
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ],
+          "states": [
+            {
+              "kind": 1,
+              "power": 5000,
+              "source": 1,
+              "turns": 2
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ]
+        }
+      },
+      "preview": {
+        "critBp": 500,
+        "critMax": 17,
+        "critMin": 8,
+        "hitBp": 6000,
+        "immune": false,
+        "max": 11,
+        "min": 5
+      }
+    },
+    {
+      "bytes": "000201000d000b000900090003090e02ffff05ffffffffffffff020302b80b00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000402000000000000000000000000000000000000000000000000000000000000000000000000000000000000040402c40900000500000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "input": {
+        "hero": {
+          "class": 2,
+          "classTier": 14,
+          "equipment": [
+            2,
+            255,
+            255,
+            5,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255
+          ],
+          "level": 1,
+          "predisposition": 3,
+          "predispositionTier": 9,
+          "race": 0,
+          "stats": [
+            13,
+            11,
+            9,
+            9
+          ]
+        },
+        "heroMods": [
+          {
+            "aspect": 3,
+            "kind": 2,
+            "powerBp": 3000,
+            "source": 0,
+            "turns": 2
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          }
+        ],
+        "skill": null,
+        "target": {
+          "bestiaryId": 4,
+          "level": 2,
+          "mods": [
+            {
+              "aspect": 4,
+              "kind": 4,
+              "powerBp": 2500,
+              "source": 5,
+              "turns": 2
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ],
+          "states": [
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ]
+        }
+      },
+      "preview": {
+        "critBp": 500,
+        "critMax": 15,
+        "critMin": 6,
+        "hitBp": 7500,
+        "immune": false,
+        "max": 10,
+        "min": 4
+      }
+    },
+    {
+      "bytes": "010202000f0007000c000a0001040affffffffffffffffffffff000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "input": {
+        "hero": {
+          "class": 2,
+          "classTier": 10,
+          "equipment": [
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255,
+            255
+          ],
+          "level": 2,
+          "predisposition": 1,
+          "predispositionTier": 4,
+          "race": 1,
+          "stats": [
+            15,
+            7,
+            12,
+            10
+          ]
+        },
+        "heroMods": [
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          }
+        ],
+        "skill": null,
+        "target": {
+          "bestiaryId": 0,
+          "level": 3,
+          "mods": [
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "aspect": 0,
+              "kind": 0,
+              "powerBp": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ],
+          "states": [
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            },
+            {
+              "kind": 0,
+              "power": 0,
+              "source": 0,
+              "turns": 0
+            }
+          ]
+        }
+      },
+      "preview": {
+        "critBp": 500,
+        "critMax": 10,
+        "critMin": 5,
+        "hitBp": 7000,
+        "immune": false,
+        "max": 7,
+        "min": 3
+      }
+    }
+  ],
+  "sheets": [
+    {
+      "bytes": "000001000500070006000500030e0e00ffff03ffffffffffffff",
+      "input": {
+        "class": 0,
+        "classTier": 14,
+        "equipment": [
+          0,
+          255,
+          255,
+          3,
+          255,
+          255,
+          255,
+          255,
+          255,
+          255,
+          255
+        ],
+        "level": 1,
+        "predisposition": 3,
+        "predispositionTier": 14,
+        "race": 0,
+        "stats": [
+          5,
+          7,
+          6,
+          5
+        ]
+      },
+      "sheet": {
+        "accuracy": 3,
+        "actionPoints": 4,
+        "armor": 30,
+        "critBp": 0,
+        "critRollBp": 0,
+        "evasion": 11,
+        "hpMax": 40,
+        "initiative": 3,
+        "magicalBp": 1200,
+        "magicalStateBp": 1800,
+        "martialProjectileBp": 1400,
+        "martialStateBp": 1500,
+        "martialStrikeBp": 1000,
+        "selfBuffTurns": 1,
+        "tempoStateBp": 2100
+      }
+    },
+    {
+      "bytes": "01000200070008000900060001090a00ffff03ffffffffffffff",
+      "input": {
+        "class": 0,
+        "classTier": 10,
+        "equipment": [
+          0,
+          255,
+          255,
+          3,
+          255,
+          255,
+          255,
+          255,
+          255,
+          255,
+          255
+        ],
+        "level": 2,
+        "predisposition": 1,
+        "predispositionTier": 9,
+        "race": 1,
+        "stats": [
+          7,
+          8,
+          9,
+          6
+        ]
+      },
+      "sheet": {
+        "accuracy": 3,
+        "actionPoints": 5,
+        "armor": 30,
+        "critBp": 0,
+        "critRollBp": 0,
+        "evasion": 11,
+        "hpMax": 48,
+        "initiative": 4,
+        "magicalBp": 1800,
+        "magicalStateBp": 2700,
+        "martialProjectileBp": 1600,
+        "martialStateBp": 2100,
+        "martialStrikeBp": 1400,
+        "selfBuffTurns": 1,
+        "tempoStateBp": 2400
+      }
+    },
+    {
+      "bytes": "00010300090009000c000700030406ffffffffffffffffffffff",
+      "input": {
+        "class": 1,
+        "classTier": 6,
+        "equipment": [
+          255,
+          255,
+          255,
+          255,
+          255,
+          255,
+          255,
+          255,
+          255,
+          255,
+          255
+        ],
+        "level": 3,
+        "predisposition": 3,
+        "predispositionTier": 4,
+        "race": 0,
+        "stats": [
+          9,
+          9,
+          12,
+          7
+        ]
+      },
+      "sheet": {
+        "accuracy": 3,
+        "actionPoints": 3,
+        "armor": 3,
+        "critBp": 0,
+        "critRollBp": 0,
+        "evasion": 11,
+        "hpMax": 38,
+        "initiative": 6,
+        "magicalBp": 2400,
+        "magicalStateBp": 3600,
+        "martialProjectileBp": 1800,
+        "martialStateBp": 2700,
+        "martialStrikeBp": 1800,
+        "selfBuffTurns": 1,
+        "tempoStateBp": 2700
+      }
+    },
+    {
+      "bytes": "010104000b000a0006000800010e0201ffff04ffffffffffffff",
+      "input": {
+        "class": 1,
+        "classTier": 2,
+        "equipment": [
+          1,
+          255,
+          255,
+          4,
+          255,
+          255,
+          255,
+          255,
+          255,
+          255,
+          255
+        ],
+        "level": 4,
+        "predisposition": 1,
+        "predispositionTier": 14,
+        "race": 1,
+        "stats": [
+          11,
+          10,
+          6,
+          8
+        ]
+      },
+      "sheet": {
+        "accuracy": 4,
+        "actionPoints": 5,
+        "armor": 5,
+        "critBp": 0,
+        "critRollBp": 0,
+        "evasion": 12,
+        "hpMax": 43,
+        "initiative": 3,
+        "magicalBp": 1200,
+        "magicalStateBp": 1800,
+        "martialProjectileBp": 2000,
+        "martialStateBp": 3300,
+        "martialStrikeBp": 2200,
+        "selfBuffTurns": 1,
+        "tempoStateBp": 3000
+      }
+    },
+    {
+      "bytes": "000201000d000b000900090003090e02ffff05ffffffffffffff",
+      "input": {
+        "class": 2,
+        "classTier": 14,
+        "equipment": [
+          2,
+          255,
+          255,
+          5,
+          255,
+          255,
+          255,
+          255,
+          255,
+          255,
+          255
+        ],
+        "level": 1,
+        "predisposition": 3,
+        "predispositionTier": 9,
+        "race": 0,
+        "stats": [
+          13,
+          11,
+          9,
+          9
+        ]
+      },
+      "sheet": {
+        "accuracy": 4,
+        "actionPoints": 5,
+        "armor": 5,
+        "critBp": 0,
+        "critRollBp": 0,
+        "evasion": 12,
+        "hpMax": 40,
+        "initiative": 4,
+        "magicalBp": 1800,
+        "magicalStateBp": 2700,
+        "martialProjectileBp": 2200,
+        "martialStateBp": 3900,
+        "martialStrikeBp": 2600,
+        "selfBuffTurns": 1,
+        "tempoStateBp": 3300
+      }
+    },
+    {
+      "bytes": "010202000f0007000c000a0001040affffffffffffffffffffff",
+      "input": {
+        "class": 2,
+        "classTier": 10,
+        "equipment": [
+          255,
+          255,
+          255,
+          255,
+          255,
+          255,
+          255,
+          255,
+          255,
+          255,
+          255
+        ],
+        "level": 2,
+        "predisposition": 1,
+        "predispositionTier": 4,
+        "race": 1,
+        "stats": [
+          15,
+          7,
+          12,
+          10
+        ]
+      },
+      "sheet": {
+        "accuracy": 3,
+        "actionPoints": 5,
+        "armor": 0,
+        "critBp": 0,
+        "critRollBp": 0,
+        "evasion": 11,
+        "hpMax": 46,
+        "initiative": 6,
+        "magicalBp": 2400,
+        "magicalStateBp": 3600,
+        "martialProjectileBp": 1400,
+        "martialStateBp": 4500,
+        "martialStrikeBp": 3000,
+        "selfBuffTurns": 2,
+        "tempoStateBp": 2100
+      }
+    }
+  ]
+}

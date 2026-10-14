@@ -128,35 +128,33 @@ pub fn class_source(class: Class) -> Source {
     player::class_source(class)
 }
 
-/// Class tag increase in bp and the source it applies to (docs/CHARACTER.md, section 8.1).
-pub fn class_increase(class: Class) -> Option<(Source, u32)> {
-    player::class_increase(class, &BALANCE.players)
+/// Class trait: tag increase in bp at `tier` and the source it applies to (docs/CHARACTER.md,
+/// sections 6.3 and 8.1).
+pub fn class_increase(class: Class, tier: u8) -> Option<(Source, u32)> {
+    player::class_increase(class, tier, &BALANCE.players)
 }
 
-/// Class increase on the power of heals, buffs and debuffs, bp (docs/CHARACTER.md, 8.1).
-pub fn support_increase(class: Class) -> u32 {
-    player::support_increase(class, &BALANCE.players)
+/// Class trait: increase on the power of heals, buffs and debuffs at `tier`, bp
+/// (docs/CHARACTER.md, 8.1).
+pub fn support_increase(class: Class, tier: u8) -> u32 {
+    player::support_increase(class, tier, &BALANCE.players)
 }
 
 /// HP range of a heal skill with `power_bp` from `weapon` (see
 /// `deadroll_rules::player::heal_range`).
-pub fn heal_range(class: Class, weapon: DamageRange, power_bp: u32) -> (u32, u32) {
-    player::heal_range(class, weapon, power_bp, &BALANCE.players)
+pub fn heal_range(class: Class, class_tier: u8, weapon: DamageRange, power_bp: u32) -> (u32, u32) {
+    player::heal_range(class, class_tier, weapon, power_bp, &BALANCE.players)
 }
 
-/// Race trait: flat added damage of the predisposition aspect (docs/CHARACTER.md, 6.2, 7.1).
-pub fn predisposition_added(aspect: Aspect) -> DamageRange {
-    player::predisposition_added(aspect, &BALANCE.players)
+/// Race trait: flat added damage of the predisposition aspect at `tier` (docs/CHARACTER.md, 6.2,
+/// 6.3, 7.1).
+pub fn predisposition_added(aspect: Aspect, tier: u8) -> DamageRange {
+    player::predisposition_added(aspect, tier, &BALANCE.players)
 }
 
-/// `d20` bonus: level plus the attack stat (Strength for martial, Intelligence for magical).
-pub fn player_attack_bonus(level: u16, stats: &[u16; STATS_COUNT], source: Source) -> u32 {
-    player::player_attack_bonus(level, stats, source, &BALANCE.players)
-}
-
-/// Crit chance besides a natural 20, from Dexterity.
-pub fn player_crit_bp(stats: &[u16; STATS_COUNT]) -> u32 {
-    player::player_crit_bp(stats, &BALANCE.players)
+/// Accuracy, the `d20` bonus, before items: Dexterity (docs/CHARACTER.md, section 3).
+pub fn player_accuracy(stats: &[u16; STATS_COUNT]) -> u32 {
+    player::player_accuracy(stats, &BALANCE.players)
 }
 
 /// Defense threshold and base armor of a player before items (CHARACTER 8.1).
@@ -369,7 +367,7 @@ mod tests {
 
     #[test]
     fn heal_scales_with_power_and_support() {
-        let heal = |class, power| heal_range(class, kit_weapon(class), power);
+        let heal = |class, power| heal_range(class, 14, kit_weapon(class), power);
         // Support wand 2..5, x2, +20%.
         assert_eq!(heal(Class::Support, BP), (4, 12));
         // Mage staff 3..6, x2.
@@ -377,8 +375,8 @@ mod tests {
         assert_eq!(heal(Class::Warrior, 5_000), (4, 8));
         assert_eq!(heal(Class::Warrior, 0), (1, 1));
         assert_eq!(heal(Class::Support, u32::MAX).1, 5_153_960);
-        assert_eq!(support_increase(Class::Support), 2_000);
-        assert_eq!(support_increase(Class::Mage), 0);
+        assert_eq!(support_increase(Class::Support, 14), 2_000);
+        assert_eq!(support_increase(Class::Mage, 14), 0);
     }
 
     #[test]

@@ -14,9 +14,9 @@ use deadroll_types::Monster;
 use crate::{
     config::BalanceConfig,
     input::{
-        effect_action, effect_range, heal, land_effect, monster_attacker, monster_defender,
-        player_attacker, player_defender, support_input, take_damage, EffectAction, HeroStats,
-        SkillStats,
+        buff_extra_turns, effect_action, effect_chance, effect_range, heal, land_effect,
+        monster_attacker, monster_defender, player_attacker, player_defender, support_input,
+        take_damage, EffectAction, HeroStats, SkillStats,
     },
     monster::MonsterProfile,
 };
@@ -71,7 +71,7 @@ pub fn attack_monster(
             if result.outcome == Outcome::Hit && monster.alive {
                 let (min, max) = effect_range(cfg, hero, skill.power_bp, effect);
                 let roll = resolve_rider(
-                    cfg.support.rider_chance_bp,
+                    effect_chance(cfg, hero, skill),
                     result.crit,
                     min,
                     max,
@@ -85,6 +85,7 @@ pub fn attack_monster(
                         roll.amount,
                         skill.blocks.aspects[0],
                         attacker,
+                        0,
                         &mut monster.states,
                         monster_mods,
                     )
@@ -121,6 +122,7 @@ pub fn debuff_monster(
             roll.amount,
             skill.blocks.aspects[0],
             caster,
+            0,
             &mut monster.states,
             monster_mods,
         )
@@ -131,7 +133,8 @@ pub fn debuff_monster(
 }
 
 /// A heal or buff on the caster or an ally: no roll to land, a crit roll and the d100 strength.
-/// A dead target (`hp == 0`) is never raised.
+/// A dead target (`hp == 0`) is never raised. `on_self`: the caster is the target (its own buffs
+/// on itself last longer with Endurance).
 #[allow(clippy::too_many_arguments)]
 pub fn support_ally(
     cfg: &BalanceConfig,
@@ -139,6 +142,7 @@ pub fn support_ally(
     hero: &HeroStats,
     skill: &SkillStats,
     effect: EffectAction,
+    on_self: bool,
     hp: &mut u32,
     hp_max: u32,
     states: &mut States,
@@ -159,6 +163,7 @@ pub fn support_ally(
             roll.amount,
             skill.blocks.aspects[0],
             caster,
+            buff_extra_turns(cfg, hero, on_self, effect),
             states,
             mods,
         )
