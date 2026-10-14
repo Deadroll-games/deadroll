@@ -579,7 +579,7 @@
             "The VRF program's identity for this program (`mock-vrf`: the fixed test identity)."
           ],
           "signer": true,
-          "address": "Bj7XBktwDmAg6J4FohS6oRHbevD6MMd8jnCZKvzKPiKV"
+          "address": "5RotSMue7vx9xBPp3L8iQEKbKSc3ezbY4GqiJxDEe6sN"
         },
         {
           "name": "session",
@@ -1080,6 +1080,69 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "loadout",
+          "docs": [
+            "`external::read_equipment`, empty when the character has none yet."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  111,
+                  97,
+                  100,
+                  111,
+                  117,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "character"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                46,
+                110,
+                246,
+                85,
+                187,
+                203,
+                138,
+                176,
+                77,
+                64,
+                218,
+                134,
+                80,
+                136,
+                141,
+                232,
+                187,
+                100,
+                61,
+                216,
+                141,
+                60,
+                83,
+                159,
+                130,
+                57,
+                10,
+                1,
+                201,
+                51,
+                118,
+                67
+              ]
+            }
+          }
         }
       ],
       "args": [
@@ -2548,6 +2611,11 @@
       "code": 6053,
       "name": "NotRewardOwner",
       "msg": "Only the character's owner or their session key can claim its rewards"
+    },
+    {
+      "code": 6054,
+      "name": "InvalidLoadout",
+      "msg": "Not the character's items loadout"
     }
   ],
   "types": [
@@ -3362,6 +3430,33 @@
       }
     },
     {
+      "name": "HitItemsData",
+      "docs": [
+        "The items of both sides of a hit."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "attacker",
+            "type": {
+              "defined": {
+                "name": "ItemBonusData"
+              }
+            }
+          },
+          {
+            "name": "defender",
+            "type": {
+              "defined": {
+                "name": "ItemBonusData"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
       "name": "HitOutcome",
       "docs": [
         "`deadroll_combat::Outcome`."
@@ -3431,6 +3526,17 @@
             "type": {
               "defined": {
                 "name": "HitResultData"
+              }
+            }
+          },
+          {
+            "name": "items",
+            "docs": [
+              "What the players' worn items put into this hit (weapon base, armor, defense, attack)."
+            ],
+            "type": {
+              "defined": {
+                "name": "HitItemsData"
               }
             }
           }
@@ -3632,6 +3738,79 @@
                 28
               ]
             }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ItemBase",
+      "docs": [
+        "Item base: the type of an item, its slot and base numbers (`deadroll_rules::ItemTuning`).",
+        "P0 has the class starter bases (docs/ITEMS_AND_CRAFT.md, section 10); recipes append more."
+      ],
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Sword"
+          },
+          {
+            "name": "Staff"
+          },
+          {
+            "name": "Wand"
+          },
+          {
+            "name": "LeatherArmor"
+          },
+          {
+            "name": "Robe"
+          },
+          {
+            "name": "LightLeatherArmor"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ItemBonusData",
+      "docs": [
+        "What a player's worn items put into a hit (`deadroll_rules::items::ItemBonus`), so the",
+        "breakdown can show it. All zero / `None` for a monster."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "weapon",
+            "docs": [
+              "The main-hand weapon whose damage is the base; `None` = bare hands (or a monster)."
+            ],
+            "type": {
+              "option": {
+                "defined": {
+                  "name": "ItemBase"
+                }
+              }
+            }
+          },
+          {
+            "name": "armor",
+            "type": "u32"
+          },
+          {
+            "name": "defense",
+            "type": "u32"
+          },
+          {
+            "name": "attack",
+            "docs": [
+              "Flat `d20` attack bonus (stat bonuses are already in the totals)."
+            ],
+            "type": "u32"
           }
         ]
       }
@@ -4114,6 +4293,20 @@
                   }
                 },
                 6
+              ]
+            }
+          },
+          {
+            "name": "equipment",
+            "docs": [
+              "What the character wears, `ItemBase` bytes by `EquipSlot` (`EMPTY_ITEM` = none), copied",
+              "from its items `Loadout` at `join_session`. The items program locks the loadout while",
+              "the character is in a session, so the copy stays exact."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                11
               ]
             }
           }

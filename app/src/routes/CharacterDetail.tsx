@@ -1,5 +1,6 @@
-// One character in full: sprite, identity, stats, HP, skills, party and (empty) equipment.
-import { useCallback, useEffect, useState } from "react";
+// One character in full: sprite, identity, stats, HP, skills, party and its items: what is
+// worn by slot, the soulbound items, Wear / Take off (the owner's wallet or session key).
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import type { Address } from "@solana/kit";
 import { renderRequest, TOMBSTONE } from "../chain/appearance";
@@ -18,6 +19,24 @@ import {
   type SkillRecordAcc,
   type SkillSetAcc,
 } from "../chain/game";
+import {
+  EQUIP_SLOTS,
+  bonusText,
+  equipIx,
+  getLoadout,
+  initLoadoutIx,
+  inventory,
+  itemLabel,
+  itemRequest,
+  slotsFor,
+  unequipIx,
+  type LoadoutAcc,
+} from "../chain/items";
+import { useTx } from "../chain/useTx";
+import { Inventory } from "../components/items/Inventory";
+import type { InventoryItemView, InventoryProps } from "../components/items/types";
+import { useSessionKey } from "../session-key/SessionKeyProvider";
+import { useAppWallet } from "../wallet/AppWallet";
 import { aspectName, className, formatBp, raceName, STAT_NAMES } from "../chain/names";
 import { skillSetPda } from "../chain/pda";
 import { Aspect, Class, Race } from "../chain/types";
@@ -28,19 +47,37 @@ import { SpriteCanvas } from "../raster/SpriteCanvas";
 /** Where this character is right now, read from the party it is in. */
 export type PartyInfo = { session: Address; status: string; slot: number; hp: number } | null;
 
-/** Equipment slots from docs/ART_DESCRIPTION.md 6.3. */
-export const EQUIPMENT_SLOTS = [
-  "Primary weapon",
-  "Shield / second weapon",
-  "Helmet",
-  "Torso armor",
-  "Pants",
-  "Boots",
-  "Gloves",
-  "Necklace",
-  "Cloak",
-  "Rings",
-] as const;
+/** Equipment slots (`EquipSlot` from the items IDL, docs/ART_DESCRIPTION.md 6.3). */
+export const EQUIPMENT_SLOTS = EQUIP_SLOTS.map((key) => ({ key, label: itemLabel(key) }));
+
+/** The loadout as the inventory panel shows it; null when the character has none. */
+export function inventoryView(l: LoadoutAcc | null): InventoryItemView[] | null {
+  if (!l) return null;
+  return inventory(l).items.map((i) => ({
+    index: i.index,
+    base: i.base,
+    label: itemLabel(i.base),
+    level: i.level,
+    bonus: bonusText(i.base),
+    fits: slotsFor(i.base),
+    worn: i.worn,
+  }));
+}
+
+/** The panel's state for a character: who may change it, and when not. */
+export function inventoryLock(c: CharacterAcc, viewer: Address | null): string | null {
+  if (!c.core.alive) return "A tombstone keeps what it wore.";
+  if (viewer !== c.core.owner) return "Only the owner can change the equipment.";
+  if (c.core.inSession) return "In a party: the equipment is locked until it ends.";
+  return null;
+}
+
+/** An item's own sprite from the on-chain sprite book. */
+function ItemIcon({ base }: { base: string }) {
+  const img = useRenderImage(itemRequest(base));
+  return <SpriteCanvas image={img.image} scale={2} label={itemLabel(base)} />;
+}
+const itemIcon = (base: string): ReactNode => <ItemIcon base={base} />;
 
 /** Range by form (programs/session rules.rs): Strike 1, Projectile 6. */
 const RANGE: Record<string, number> = { strike: 1, projectile: 6 };
@@ -62,17 +99,23 @@ export function CharacterDetailPage() {
   const [c, setC] = useState<CharacterAcc | null | "missing">(null);
   const [skills, setSkills] = useState<SkillRecordAcc[]>([]);
   const [party, setParty] = useState<PartyInfo>(null);
+  const [loadout, setLoadout] = useState<LoadoutAcc | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const wallet = useAppWallet();
+  const sk = useSessionKey();
+  const { send, busy } = useTx();
 
   const load = useCallback(async () => {
     if (DATA_SOURCE !== "chain" || !address) return;
     const addr = address as Address;
     try {
-      const [acc, set] = await Promise.all([
+      const [acc, set, items] = await Promise.all([
         getAccount<CharacterAcc>("character", "Character", addr),
         getAccount<SkillSetAcc>("character", "SkillSet", await skillSetPda(addr)),
+        getLoadout(addr),
       ]);
       setC(acc ?? "missing");
+      setLoadout(items);
       setSkills(set ? set.skills.slice(0, set.count) : []);
       const session = acc?.core.inSession ?? null;
       if (session) {
@@ -89,6 +132,28 @@ export function CharacterDetailPage() {
   }, [address]);
   useEffect(() => void load(), [load]);
 
+  // Wear / Take off: the session key when one runs (no wallet popup), else the owner's wallet.
+  const actor = sk.status === "active" && sk.signer ? { signer: sk.signer, token: sk.token } : { signer: wallet.signer, token: null };
+  const act = async (what: string, build: () => Promise<Awaited<ReturnType<typeof equipIx>>>) => {
+    if (await send(what, actor.signer, async () => [await build()])) await load();
+  };
+  const addr = address as Address;
+  const items: Omit<InventoryProps, "icon"> | null =
+    c && c !== "missing"
+      ? {
+          slots: EQUIPMENT_SLOTS,
+          items: inventoryView(loadout),
+          locked: inventoryLock(c, wallet.address ?? null),
+          busy: busy !== null,
+          onEquip: (index, slot) => void act(`Wear in ${itemLabel(slot)}`, () => equipIx(actor.signer!, addr, index, slot, actor.token)),
+          onUnequip: (slot) => void act(`Take off ${itemLabel(slot)}`, () => unequipIx(actor.signer!, addr, slot, actor.token)),
+          onCreate: () =>
+            void (async () => {
+              if (wallet.signer && (await send("Class starter kit", wallet.signer, async () => [await initLoadoutIx(wallet.signer!, addr)]))) await load();
+            })(),
+        }
+      : null;
+
   if (DATA_SOURCE !== "chain") return <p className="muted">Character details need chain mode.</p>;
   return (
     <section>
@@ -101,12 +166,25 @@ export function CharacterDetailPage() {
       {error && <p className="error">{error}</p>}
       {c === null && !error && <p className="muted">Loading…</p>}
       {c === "missing" && <p className="error">No character at this address.</p>}
-      {c && c !== "missing" && <CharacterDetailView address={address as Address} c={c} skills={skills} party={party} />}
+      {c && c !== "missing" && <CharacterDetailView address={address as Address} c={c} skills={skills} party={party} items={items} />}
     </section>
   );
 }
 
-export function CharacterDetailView({ address, c, skills, party }: { address: Address; c: CharacterAcc; skills: SkillRecordAcc[]; party: PartyInfo }) {
+export function CharacterDetailView({
+  address,
+  c,
+  skills,
+  party,
+  items = null,
+}: {
+  address: Address;
+  c: CharacterAcc;
+  skills: SkillRecordAcc[];
+  party: PartyInfo;
+  /** The inventory panel; null while it loads. */
+  items?: Omit<InventoryProps, "icon"> | null;
+}) {
   const dead = !c.core.alive;
   const img = useRenderImage(dead ? TOMBSTONE : renderRequest(c.core.appearance, false));
   const race = enumIndex(c.core.race, RACE_KEYS) as Race;
@@ -228,15 +306,8 @@ export function CharacterDetailView({ address, c, skills, party }: { address: Ad
       </section>
 
       <section className="panel char-detail-wide">
-        <h2>Equipment</h2>
-        <ul className="equip-grid">
-          {EQUIPMENT_SLOTS.map((slot) => (
-            <li key={slot} className="equip-slot">
-              {slot}
-            </li>
-          ))}
-        </ul>
-        <p className="muted">Items coming soon.</p>
+        <h2>Inventory</h2>
+        {items ? <Inventory {...items} icon={itemIcon} /> : <p className="muted">Loading items…</p>}
       </section>
     </div>
   );

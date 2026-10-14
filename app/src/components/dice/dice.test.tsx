@@ -5,7 +5,7 @@ import { Aspect, HitOutcome, ModKind } from "../../chain/types";
 import { formatScaled } from "../../chain/names";
 import { cascadeSteps, chanceView } from "./cascade";
 import { DiceCascade } from "./DiceCascade";
-import { HitBreakdown, modLines } from "./HitBreakdown";
+import { HitBreakdown, itemLines, modLines } from "./HitBreakdown";
 import Demo from "./Demo";
 
 afterEach(() => {
@@ -265,5 +265,32 @@ describe("HitBreakdown modifiers", () => {
   it("without mods there is no Modifiers section", () => {
     render(<HitBreakdown hit={MOCK_HITS.crit} />);
     expect(screen.queryByTestId("hit-mods")).toBeNull();
+  });
+});
+
+describe("HitBreakdown items", () => {
+  const none = { weapon: null, armor: 0, defense: 0, attack: 0 };
+
+  it("says what the worn items put into the hit", () => {
+    // The crit mock is a single Piercing packet with armor in it.
+    const items = { attacker: { weapon: "sword", armor: 0, defense: 0, attack: 2 }, target: { weapon: "staff", armor: 10, defense: 1, attack: 0 } };
+    expect(itemLines(MOCK_HITS.crit, items)).toEqual([
+      { side: "Attacker", text: "Sword: the damage base (Blunt 4-8)", applied: true },
+      { side: "Attacker", text: `+2 attack from items, in the total ${MOCK_HITS.crit.attackTotal}`, applied: true },
+      { side: "Target", text: "+10 armor from items, in Armor of the physical packets", applied: MOCK_HITS.crit.packets.some((p) => p.armor > 0) },
+      { side: "Target", text: `+1 defense from items, in the defense ${MOCK_HITS.crit.defense}`, applied: true },
+    ]);
+    render(<HitBreakdown hit={MOCK_HITS.crit} items={items} />);
+    expect(screen.getByTestId("hit-items").textContent).toContain("Sword: the damage base");
+  });
+
+  it("bare hands, and nothing for a monster side", () => {
+    expect(itemLines(MOCK_HITS.crit, { attacker: none, target: null })).toEqual([{ side: "Attacker", text: "bare hands: the damage base (Blunt 1-2)", applied: true }]);
+    expect(itemLines(MOCK_HITS.crit, { attacker: null, target: none })).toEqual([{ side: "Target", text: "no armor from items", applied: false }]);
+    render(<HitBreakdown hit={MOCK_HITS.crit} items={{ attacker: null, target: null }} />);
+    expect(screen.getByTestId("hit-items").textContent).toContain("None");
+    cleanup();
+    render(<HitBreakdown hit={MOCK_HITS.crit} />);
+    expect(screen.queryByTestId("hit-items")).toBeNull();
   });
 });

@@ -1,0 +1,696 @@
+{
+  "address": "48FtbrDegNrAUHFza9HdJzZAvUo3uUNqs1kNnZxFsqJS",
+  "metadata": {
+    "name": "deadroll_items",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Deadroll items: loadouts (soulbound starter items, equipment by slot); later item state, affixes, crafting."
+  },
+  "instructions": [
+    {
+      "name": "equip",
+      "docs": [
+        "Owner or their session key: wears soulbound item `item_index` in `slot`. Not while the",
+        "character is in a session."
+      ],
+      "discriminator": [
+        158,
+        123,
+        165,
+        74,
+        37,
+        254,
+        39,
+        154
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "docs": [
+            "The owner, or their session key with `session_token`."
+          ],
+          "signer": true
+        },
+        {
+          "name": "character"
+        },
+        {
+          "name": "loadout",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  111,
+                  97,
+                  100,
+                  111,
+                  117,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "character"
+              }
+            ]
+          }
+        },
+        {
+          "name": "session_token",
+          "optional": true
+        }
+      ],
+      "args": [
+        {
+          "name": "item_index",
+          "type": "u8"
+        },
+        {
+          "name": "slot",
+          "type": {
+            "defined": {
+              "name": "EquipSlot"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "init_loadout",
+      "docs": [
+        "Owner: creates the character's `Loadout` with the class starter kit, each item worn in its",
+        "slot. Sent in the same transaction as `character::create_character`; works later for a",
+        "character created before items existed."
+      ],
+      "discriminator": [
+        162,
+        123,
+        226,
+        172,
+        180,
+        112,
+        20,
+        46
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "docs": [
+            "The character owner; pays for the loadout."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "character"
+        },
+        {
+          "name": "loadout",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  111,
+                  97,
+                  100,
+                  111,
+                  117,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "character"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "unequip",
+      "docs": [
+        "Owner or their session key: empties `slot`. Not while the character is in a session."
+      ],
+      "discriminator": [
+        141,
+        117,
+        15,
+        217,
+        254,
+        14,
+        155,
+        255
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "docs": [
+            "The owner, or their session key with `session_token`."
+          ],
+          "signer": true
+        },
+        {
+          "name": "character"
+        },
+        {
+          "name": "loadout",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  111,
+                  97,
+                  100,
+                  111,
+                  117,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "character"
+              }
+            ]
+          }
+        },
+        {
+          "name": "session_token",
+          "optional": true
+        }
+      ],
+      "args": [
+        {
+          "name": "slot",
+          "type": {
+            "defined": {
+              "name": "EquipSlot"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Loadout",
+      "discriminator": [
+        159,
+        57,
+        176,
+        0,
+        157,
+        19,
+        235,
+        13
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "ItemEquipped",
+      "discriminator": [
+        233,
+        7,
+        205,
+        251,
+        5,
+        195,
+        180,
+        69
+      ]
+    },
+    {
+      "name": "ItemUnequipped",
+      "discriminator": [
+        121,
+        191,
+        37,
+        35,
+        175,
+        254,
+        201,
+        16
+      ]
+    },
+    {
+      "name": "LoadoutCreated",
+      "discriminator": [
+        77,
+        246,
+        36,
+        234,
+        68,
+        64,
+        112,
+        133
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "Unauthorized",
+      "msg": "Caller is not authorized for this instruction"
+    },
+    {
+      "code": 6001,
+      "name": "NotOwner",
+      "msg": "Only the character owner can do this"
+    },
+    {
+      "code": 6002,
+      "name": "CharacterLocked",
+      "msg": "The character is in a session: equipment is locked until it ends"
+    },
+    {
+      "code": 6003,
+      "name": "CharacterDead",
+      "msg": "The character is dead"
+    },
+    {
+      "code": 6004,
+      "name": "InvalidCharacter",
+      "msg": "Not a character account"
+    },
+    {
+      "code": 6005,
+      "name": "NoSuchItem",
+      "msg": "No such item in the loadout"
+    },
+    {
+      "code": 6006,
+      "name": "WrongSlot",
+      "msg": "This item is not worn in that slot"
+    },
+    {
+      "code": 6007,
+      "name": "LevelTooLow",
+      "msg": "Character level too low for this item"
+    },
+    {
+      "code": 6008,
+      "name": "SlotEmpty",
+      "msg": "Nothing is worn in that slot"
+    },
+    {
+      "code": 6009,
+      "name": "SessionTokenMissing",
+      "msg": "A session key needs its session token account"
+    },
+    {
+      "code": 6010,
+      "name": "InvalidSessionToken",
+      "msg": "Session token does not match the signer, the owner or the game"
+    },
+    {
+      "code": 6011,
+      "name": "SessionTokenExpired",
+      "msg": "Session token expired"
+    }
+  ],
+  "types": [
+    {
+      "name": "Class",
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Warrior"
+          },
+          {
+            "name": "Mage"
+          },
+          {
+            "name": "Support"
+          }
+        ]
+      }
+    },
+    {
+      "name": "EquipRef",
+      "docs": [
+        "What one equipment slot holds. `index` is the soulbound record for `Soulbound`; `asset`",
+        "is the item NFT for `Asset` (crafting, later), default otherwise."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "source",
+            "type": {
+              "defined": {
+                "name": "EquipSource"
+              }
+            }
+          },
+          {
+            "name": "index",
+            "type": "u8"
+          },
+          {
+            "name": "asset",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "EquipSlot",
+      "docs": [
+        "Equipment slot (docs/ART_DESCRIPTION.md, section 6.3); rings take two slots."
+      ],
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "MainHand"
+          },
+          {
+            "name": "OffHand"
+          },
+          {
+            "name": "Helmet"
+          },
+          {
+            "name": "Body"
+          },
+          {
+            "name": "Pants"
+          },
+          {
+            "name": "Boots"
+          },
+          {
+            "name": "Gloves"
+          },
+          {
+            "name": "Necklace"
+          },
+          {
+            "name": "Cloak"
+          },
+          {
+            "name": "Ring1"
+          },
+          {
+            "name": "Ring2"
+          }
+        ]
+      }
+    },
+    {
+      "name": "EquipSource",
+      "docs": [
+        "What an equipment slot holds: nothing, a soulbound record of the loadout, or an item NFT",
+        "(crafting, later)."
+      ],
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Empty"
+          },
+          {
+            "name": "Soulbound"
+          },
+          {
+            "name": "Asset"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ItemBase",
+      "docs": [
+        "Item base: the type of an item, its slot and base numbers (`deadroll_rules::ItemTuning`).",
+        "P0 has the class starter bases (docs/ITEMS_AND_CRAFT.md, section 10); recipes append more."
+      ],
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Sword"
+          },
+          {
+            "name": "Staff"
+          },
+          {
+            "name": "Wand"
+          },
+          {
+            "name": "LeatherArmor"
+          },
+          {
+            "name": "Robe"
+          },
+          {
+            "name": "LightLeatherArmor"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ItemEquipped",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "character",
+            "type": "pubkey"
+          },
+          {
+            "name": "slot",
+            "type": {
+              "defined": {
+                "name": "EquipSlot"
+              }
+            }
+          },
+          {
+            "name": "item_index",
+            "type": "u8"
+          },
+          {
+            "name": "base",
+            "type": {
+              "defined": {
+                "name": "ItemBase"
+              }
+            }
+          },
+          {
+            "name": "replaced",
+            "docs": [
+              "What the slot held before, if anything."
+            ],
+            "type": {
+              "option": {
+                "defined": {
+                  "name": "ItemBase"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ItemRecord",
+      "docs": [
+        "A soulbound item record of a loadout (a class starter item)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "base",
+            "type": {
+              "defined": {
+                "name": "ItemBase"
+              }
+            }
+          },
+          {
+            "name": "level",
+            "docs": [
+              "Item level (docs/ITEMS_AND_CRAFT.md, section 4)."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ItemUnequipped",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "character",
+            "type": "pubkey"
+          },
+          {
+            "name": "slot",
+            "type": {
+              "defined": {
+                "name": "EquipSlot"
+              }
+            }
+          },
+          {
+            "name": "base",
+            "type": {
+              "option": {
+                "defined": {
+                  "name": "ItemBase"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Loadout",
+      "docs": [
+        "`[\"loadout\", character]`: soulbound items and equipment by slot. The core is",
+        "`deadroll_types::LoadoutData` first after the discriminator, so the session program reads it",
+        "as that type; fields of this lane are only appended after it."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "core",
+            "type": {
+              "defined": {
+                "name": "LoadoutData"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "LoadoutCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "character",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "class",
+            "type": {
+              "defined": {
+                "name": "Class"
+              }
+            }
+          },
+          {
+            "name": "item_count",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LoadoutData",
+      "docs": [
+        "items `[\"loadout\", character]`: the soulbound items and what is worn, by slot."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "character",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "docs": [
+              "The character owner (for `memcmp` filters)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "items",
+            "docs": [
+              "Records `0..item_count` are used."
+            ],
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "ItemRecord"
+                  }
+                },
+                4
+              ]
+            }
+          },
+          {
+            "name": "item_count",
+            "type": "u8"
+          },
+          {
+            "name": "equipped",
+            "docs": [
+              "Indexed by `EquipSlot`."
+            ],
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "EquipRef"
+                  }
+                },
+                11
+              ]
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    }
+  ]
+}

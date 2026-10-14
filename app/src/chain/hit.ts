@@ -3,7 +3,7 @@
 // the used entries.
 import type { Address } from "@solana/kit";
 import { enumIndex, type Enum } from "./game";
-import type { ActiveState, HitResolved, HitResult, PacketResult, Resonance, StateRoll, TintRoll } from "./types";
+import type { ActiveState, HitItems, HitResolved, HitResult, ItemBonusView, PacketResult, Resonance, StateRoll, TintRoll } from "./types";
 
 const ASPECTS = ["fire", "cold", "lightning", "blood", "blunt", "piercing"];
 const STATES = ["burning", "chill", "freeze", "bleeding", "shock", "stun"];
@@ -85,6 +85,18 @@ export function toHitResult(r: any): HitResult {
   };
 }
 
+const itemSide = (x: any): ItemBonusView => ({
+  weapon: x?.weapon ? (Object.keys(x.weapon)[0] ?? null) : null,
+  armor: x?.armor ?? 0,
+  defense: x?.defense ?? 0,
+  attack: x?.attack ?? 0,
+});
+
+/** The worn items of both sides (HitResolved.items); none for an event from before items. */
+export function toHitItems(items: any): HitItems {
+  return { attacker: itemSide(items?.attacker), defender: itemSide(items?.defender) };
+}
+
 export function toHitResolved(ev: any): HitResolved {
   return {
     session: ev.session as Address,
@@ -93,5 +105,6 @@ export function toHitResolved(ev: any): HitResolved {
     seed: ev.seed,
     actionCounter: ev.actionCounter,
     result: toHitResult(ev.result),
+    items: toHitItems(ev.items),
   };
 }

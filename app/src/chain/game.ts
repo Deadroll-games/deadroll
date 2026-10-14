@@ -15,6 +15,7 @@ import { MPL_CORE_PROGRAM, PROGRAMS, SYSTEM_PROGRAM, VRF } from "../config";
 import { client } from "../wallet/client";
 import { characterAppearance } from "./appearance";
 import { fromBase64, sha256 } from "./bytes";
+import { initLoadoutIx } from "./items";
 import { buildInstruction, coders } from "./programs";
 import {
   bagPda,
@@ -23,6 +24,7 @@ import {
   escrowPda,
   gameConfigPda,
   layoutPda,
+  loadoutPda,
   mapPda,
   monstersPda,
   participationPda,
@@ -125,6 +127,8 @@ export type ParticipationAcc = {
   hpMax: number;
   /** Buffs and debuffs on this player (one per kind, any slot: read them with support.ts activeMods). */
   mods: TimedModAcc[];
+  /** What the character wears, `ItemBase` bytes by `EquipSlot` (0xFF = none), copied from its items loadout at join_session. */
+  equipment: Uint8Array;
 };
 export type CharacterAcc = {
   core: {
@@ -270,11 +274,14 @@ export function createProfileIx(owner: TransactionSigner, profile: Address): Ins
   return buildInstruction("character", "create_profile", {}, { owner, profile, systemProgram: SYSTEM_PROGRAM });
 }
 
-/** create_profile if missing, then create_character with a fresh Core NFT asset keypair. */
+/**
+ * create_profile if missing, then create_character with a fresh Core NFT asset keypair and the
+ * items loadout with the class starter kit (`loadoutIx`, sent in the same transaction as `ix`).
+ */
 export async function createCharacterIxs(
   owner: TransactionSigner,
   c: NewCharacter,
-): Promise<{ profileIx: Instruction | null; ix: Instruction; character: Address; asset: KeyPairSigner }> {
+): Promise<{ profileIx: Instruction | null; ix: Instruction; loadoutIx: Instruction; character: Address; asset: KeyPairSigner }> {
   const profile = await profilePda(owner.address);
   const prof = await getAccount<{ characterCount: number }>("character", "PlayerProfile", profile);
   const index = prof?.characterCount ?? 0;
@@ -302,7 +309,7 @@ export async function createCharacterIxs(
     mplCoreProgram: MPL_CORE_PROGRAM,
     systemProgram: SYSTEM_PROGRAM,
   });
-  return { profileIx: prof ? null : createProfileIx(owner, profile), ix, character, asset };
+  return { profileIx: prof ? null : createProfileIx(owner, profile), ix, loadoutIx: await initLoadoutIx(owner, character), character, asset };
 }
 
 /** All characters of `owner`, by profile count (indices 0..count). */
@@ -428,6 +435,7 @@ export async function joinSessionIx(player: TransactionSigner, session: Address,
       config: await gameConfigPda(),
       characterProgram: PROGRAMS.character,
       systemProgram: SYSTEM_PROGRAM,
+      loadout: await loadoutPda(character),
     },
   );
 }
