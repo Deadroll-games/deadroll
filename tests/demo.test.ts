@@ -39,6 +39,7 @@ const REGISTRY = new PublicKey("dZ1jraMfS3bAUTkRw2TA1ddg8UDGzgUdFQz5pmBxjoG");
 const CHARACTER = new PublicKey("9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL");
 const MAP = new PublicKey("2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH");
 const SESSION = new PublicKey("3gzfih2WaBgXcYZ57jWokmZM3FDE6QHX5y4R9EvKZoNJ");
+const ITEMS = new PublicKey("48FtbrDegNrAUHFza9HdJzZAvUo3uUNqs1kNnZxFsqJS");
 const SESSION_KEYS = new PublicKey("KeyspM2ssCJbqUhQ4k7sveSiY4WjnYsrXkC8oDbwde5");
 const MPL_CORE = new PublicKey("CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d");
 // MagicBlock VRF accounts (ephemeral-vrf-sdk consts); under mock-vrf they only pass address checks.
@@ -183,12 +184,12 @@ function initiativeOrder(seed: Buffer, units: [number, number][]): { order: numb
 // ---------------------------------------------------------------------------------------------
 // what must be on the validator
 
-const IDLS = ["deadroll_session", "deadroll_character", "deadroll_map"].map(
+const IDLS = ["deadroll_session", "deadroll_character", "deadroll_map", "deadroll_items"].map(
   (n) => new URL(`../target/idl/${n}.json`, import.meta.url),
 );
 const missing: string[] = [];
 for (const idl of IDLS) if (!existsSync(idl)) missing.push(`${idl.pathname.split("/").pop()} (anchor build)`);
-for (const [name, id] of [["registry", REGISTRY], ["character", CHARACTER], ["map", MAP], ["session", SESSION], ["mpl-core", MPL_CORE], ["session-keys", SESSION_KEYS]] as const) {
+for (const [name, id] of [["registry", REGISTRY], ["character", CHARACTER], ["map", MAP], ["session", SESSION], ["items", ITEMS], ["mpl-core", MPL_CORE], ["session-keys", SESSION_KEYS]] as const) {
   if (!(await isProgram(id))) missing.push(`${name} program`);
 }
 const cfg = await connection.getAccountInfo(config);
@@ -203,6 +204,9 @@ const load = (i: number) => JSON.parse(readFileSync(IDLS[i], "utf8"));
 const session: any = SKIP ? null : new Program(load(0), provider);
 const characterProgram: any = SKIP ? null : new Program(load(1), provider);
 const mapProgram: any = SKIP ? null : new Program(load(2), provider);
+const itemsProgram: any = SKIP ? null : new Program(load(3), provider);
+const itemsEvents = SKIP ? null : new EventParser(ITEMS, itemsProgram.coder);
+const loadoutOf = (character: PublicKey) => pda([Buffer.from("loadout"), character.toBuffer()], ITEMS);
 const sessionEvents = SKIP ? null : new EventParser(SESSION, session.coder);
 const characterEvents = SKIP ? null : new EventParser(CHARACTER, characterProgram.coder);
 
@@ -292,6 +296,11 @@ class Demo {
       skills: (warrior ? WARRIOR_SKILLS : MAGE_SKILLS).map(([name, b]) => ({ blocks: structuredClone(b), name: text(name, 24) })),
     };
     const asset = Keypair.generate();
+    // The class starter kit comes in the same transaction (items init_loadout).
+    const initLoadout = await itemsProgram.methods
+      .initLoadout()
+      .accountsStrict({ owner: owner.publicKey, character, loadout: loadoutOf(character), systemProgram: SystemProgram.programId })
+      .instruction();
     const sig = await characterProgram.methods
       .createCharacter(args)
       .accountsStrict({
@@ -305,6 +314,7 @@ class Demo {
         mplCoreProgram: MPL_CORE,
         systemProgram: SystemProgram.programId,
       })
+      .postInstructions([initLoadout])
       .signers([owner, asset])
       .rpc({ commitment: "confirmed" })
       .then(track(`create_character ${kind}`));
@@ -626,6 +636,15 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
       }
       const nft = await connection.getAccountInfo(asset);
       assert.ok(nft?.owner.equals(MPL_CORE), "asset owned by Metaplex Core");
+      // Starter items by class, worn: sword + leather armor, staff + robe.
+      const tx = await connection.getTransaction(sig, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
+      const created = [...itemsEvents!.parseLogs(tx?.meta?.logMessages ?? [])].find((x) => x.name === "loadoutCreated");
+      assert.ok(created, "LoadoutCreated in the creation transaction");
+      assert.equal(created.data.itemCount, 2);
+      const l = await itemsProgram.account.loadout.fetch(loadoutOf(character));
+      const [weapon, armor] = kind === "warrior" ? ["sword", "leatherArmor"] : ["staff", "robe"];
+      assert.ok(l.core.items[0].base[weapon] !== undefined && l.core.items[1].base[armor] !== undefined);
+      assert.ok(l.core.equipped[0].source.soulbound !== undefined && l.core.equipped[3].source.soulbound !== undefined);
       demo.players.push({ kind, wallet, actor, token: PublicKey.default, character, asset, participation: PublicKey.default, stash: PublicKey.default, skillSet: PublicKey.default, bag: PublicKey.default });
     }
   });
@@ -679,6 +698,7 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
           config,
           characterProgram: CHARACTER,
           systemProgram: SystemProgram.programId,
+          loadout: loadoutOf(pl.character),
         })
         .signers([pl.wallet])
         .rpc()
