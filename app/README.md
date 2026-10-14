@@ -53,6 +53,15 @@ Open `http://localhost:5173/?dev=1` in three tabs or windows: DM, warrior, mage.
 `src/chain/localnet.e2e.test.ts` plays the same script through the app's builders without a browser:
 `DEADROLL_LOCALNET=1 pnpm --filter @deadroll/app exec vitest run src/chain/localnet.e2e.test.ts`.
 
+### Devnet build (hosted site)
+
+```
+pnpm --filter @deadroll/app build:devnet      # vite build --mode devnet -> app/dist
+pnpm --filter @deadroll/app preview:devnet
+```
+
+Reads only `app/.env.devnet` (public values). Chain data only: mock data, the `/dev/*` demo pages, the `?dev=1` wallet and the mock VRF oracle are compiled out or off, even with a localhost Custom RPC; players connect a real Wallet Standard wallet. The rasterizer, palette and sprite books come from the chain, so the build needs neither cargo nor `target/`. `app/vercel.json` holds the hosting config (SPA fallback to `index.html`).
+
 ## Layout
 
 | Path | What |
@@ -78,7 +87,7 @@ Open `http://localhost:5173/?dev=1` in three tabs or windows: DM, warrior, mage.
 
 ## RPC policy
 
-- Hosted builds use the public devnet RPC and WebSocket (`https://api.devnet.solana.com`). `vite build` refuses a `VITE_RPC_URL` or `VITE_RPC_WS_URL` that points anywhere else, so a provider key can never be bundled.
+- Hosted builds use the public devnet RPC and WebSocket (`https://api.devnet.solana.com`). `vite build` refuses a `VITE_RPC_URL` or `VITE_RPC_WS_URL` that points anywhere else, and fails if any emitted chunk mentions a provider host or an `api-key` parameter (`findBundledRpcKey` in `src/rpcSettings.ts`), so a provider key can never be bundled. In `--mode devnet` it also refuses `VITE_DATA=mock` and `VITE_MOCK_VRF=1`.
 - Settings > RPC (header) sets a Custom RPC in this browser's localStorage; it overrides everything else. For local runs a private URL may live in an untracked `app/.env.devnet.local` (`pnpm --filter @deadroll/app dev:devnet` with `--mode devnet`).
 - The party view refreshes on the `logsNotifications` stream. The poll is a fallback: every 10 s while the stream is live, every 3 s while it is down, paused in a hidden tab. A refresh is one `getMultipleAccounts` call once the roster is known.
 - HTTP 429 is retried with backoff (1 s, 2 s, 4 s ..., or `Retry-After`) and the header shows "network busy, retrying".

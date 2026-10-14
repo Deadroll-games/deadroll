@@ -8,7 +8,9 @@
     "dev:localnet": "vite --mode localnet",
     "dev:devnet": "vite --mode devnet",
     "build": "tsc -p . && vite build",
+    "build:devnet": "tsc -p . && vite build --mode devnet",
     "preview": "vite preview",
+    "preview:devnet": "vite preview --mode devnet",
     "typecheck": "tsc -p .",
     "test": "vitest run --passWithNoTests"
   },

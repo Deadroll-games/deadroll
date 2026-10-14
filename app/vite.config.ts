@@ -2,7 +2,7 @@
 import { createReadStream, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { defineConfig, loadEnv, type Plugin } from "vite";
-import { isBundleSafeRpc } from "./src/rpcSettings";
+import { findBundledRpcKey, isBundleSafeRpc } from "./src/rpcSettings";
 import react from "@vitejs/plugin-react";
 
 const root = resolve(import.meta.dirname, "..");
@@ -43,7 +43,9 @@ function devAssets(): Plugin {
 
 /**
  * A production bundle is public: a provider URL with an API key in VITE_RPC_URL or VITE_RPC_WS_URL would
- * ship to every visitor. Builds accept only the public devnet endpoints or localhost.
+ * ship to every visitor. Builds accept only the public devnet endpoints or localhost, and every emitted
+ * chunk is scanned for provider hosts in case one is hardcoded. The devnet build (the hosted site) also
+ * refuses mock data and the mock VRF oracle.
  */
 function noBundledRpcKey(mode: string): Plugin {
   return {
@@ -56,6 +58,15 @@ function noBundledRpcKey(mode: string): Plugin {
         if (value && !isBundleSafeRpc(value)) {
           throw new Error(`${name} would be bundled into the site. Use the public devnet RPC for hosted builds; keep a private URL in the Custom RPC setting or an untracked .env.*.local for dev runs.`);
         }
+      }
+      if (mode === "devnet" && env.VITE_DATA === "mock") throw new Error("VITE_DATA=mock is not allowed in the devnet build.");
+      if (mode === "devnet" && env.VITE_MOCK_VRF === "1") throw new Error("VITE_MOCK_VRF=1 is not allowed in the devnet build.");
+    },
+    generateBundle(_options, bundle) {
+      for (const [file, out] of Object.entries(bundle)) {
+        const code = out.type === "chunk" ? out.code : typeof out.source === "string" ? out.source : "";
+        const hit = findBundledRpcKey(code);
+        if (hit) throw new Error(`${file} contains a provider RPC reference (${hit}). Hosted builds may only use the public devnet RPC.`);
       }
     },
   };

@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { DEV_TOOLS } from "../config";
 import { RasterizerStatus } from "../raster/RasterizerStatus";
 import { useRasterizer, useRenderImage } from "../raster/RasterizerProvider";
 import { SpriteCanvas } from "../raster/SpriteCanvas";
@@ -26,10 +27,12 @@ export function Home() {
           {(alive.error || dead.error) && <p className="error">{alive.error ?? dead.error}</p>}
         </div>
       )}
-      <p className="muted" style={{ marginTop: 24 }}>
-        Component demos on mock data: <Link to="/dev/grid">grid</Link> · <Link to="/dev/dice">dice</Link> ·{" "}
-        <Link to="/dev/forms">forms</Link>
-      </p>
+      {DEV_TOOLS && (
+        <p className="muted" style={{ marginTop: 24 }}>
+          Component demos on mock data: <Link to="/dev/grid">grid</Link> · <Link to="/dev/dice">dice</Link> ·{" "}
+          <Link to="/dev/forms">forms</Link>
+        </p>
+      )}
     </section>
   );
 }

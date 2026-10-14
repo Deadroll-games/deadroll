@@ -2,7 +2,7 @@
 // sessionStorage, airdropped from the local validator. DM and two players run in three tabs or
 // windows side by side without a wallet extension. Never offered for a non-local RPC.
 import { createKeyPairSignerFromPrivateKeyBytes, lamports, type Address, type KeyPairSigner } from "@solana/kit";
-import { IS_LOCALNET } from "../config";
+import { DEV_TOOLS, IS_LOCALNET } from "../config";
 
 const SEED_KEY = "deadroll.devWallet.v1";
 const FLAG_KEY = "deadroll.devMode.v1";
@@ -18,9 +18,15 @@ function storage(): Storage | null {
   }
 }
 
-/** `?dev=1` turns dev mode on for this tab (it survives navigation); `?dev=0` turns it off. */
-export function devModeRequested(search: string = typeof location === "undefined" ? "" : location.search): boolean {
-  if (!IS_LOCALNET) return false;
+/**
+ * `?dev=1` turns dev mode on for this tab (it survives navigation); `?dev=0` turns it off.
+ * Never in the devnet build, even with a localhost Custom RPC.
+ */
+export function devModeRequested(
+  search: string = typeof location === "undefined" ? "" : location.search,
+  allowed: boolean = DEV_TOOLS && IS_LOCALNET,
+): boolean {
+  if (!allowed) return false;
   const q = new URLSearchParams(search).get("dev");
   try {
     if (q === "1") storage()?.setItem(FLAG_KEY, "1");
