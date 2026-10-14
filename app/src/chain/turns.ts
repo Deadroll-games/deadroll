@@ -2,6 +2,7 @@
 // every turn begins with the permissionless start_turn, one attack or active skill per turn,
 // skill cooldowns counted in own turn starts. Pure functions over decoded accounts and events.
 import type { Address } from "@solana/kit";
+import { ACTIVE_MAX, NO_SKILL } from "./skillcheck";
 import { MONSTER_BASE, currentUnit, status, type GameSessionAcc, type Party, type ParticipationAcc, type PartyPlayer } from "./game";
 
 /** start_turn ran for the current turn (states ticked, cooldowns counted down, AP granted). */
@@ -78,4 +79,9 @@ export function skipText(d: { state: unknown }, unit: string): string {
 
 export function skillUsedText(d: { cooldown: number }, unit: string, skill: string): string {
   return d.cooldown > 0 ? `${unit} used ${skill}: cooldown ${d.cooldown} turn${d.cooldown === 1 ? "" : "s"}` : `${unit} used ${skill}`;
+}
+
+/** Whether SkillSet slot `slot` is one of the active skills the player took onto the map (set_ready). */
+export function takenOntoMap(p: ParticipationAcc, slot: number): boolean {
+  return slot !== NO_SKILL && Array.from(p.skills.slice(0, ACTIVE_MAX)).includes(slot);
 }

@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { Category } from "../../chain/skillcheck";
 import { Aspect, Class, Race, Tile } from "../../chain/types";
 import { CharacterForm } from "./CharacterForm";
 import { formatSol, pointsLeft, shortAddress } from "./format";
@@ -164,6 +165,38 @@ describe("PartyLobby", () => {
     expect(screen.getByRole("button", { name: "Start session" })).toHaveProperty("disabled", true);
     rerender(<PartyLobby {...lobbyProps({ players: [{ ...BRAN, ready: true }, ARIA] })} />);
     expect(screen.getByRole("button", { name: "Start session" })).toHaveProperty("disabled", false);
+  });
+
+  it("Ready takes a full map selection: 4 active + 1 reactive + 1 passive, swappable", () => {
+    const onReady = vi.fn();
+    const mySkills = [
+      { index: 0, name: "Thrust", category: Category.Active },
+      { index: 1, name: "Bash", category: Category.Active },
+      { index: 2, name: "Cleave", category: Category.Active },
+      { index: 3, name: "Javelin", category: Category.Active },
+      { index: 4, name: "Riposte", category: Category.Reactive },
+      { index: 5, name: "Iron Skin", category: Category.Passive },
+      { index: 6, name: "Sap", category: Category.Active },
+    ];
+    render(<PartyLobby {...lobbyProps({ role: "player", mySlot: 0, players: [BRAN], mySkills, onReady })} />);
+    // The first four actives start checked; the fifth waits for a free active slot.
+    const box = (name: string) => screen.getByRole("checkbox", { name }) as HTMLInputElement;
+    expect(box("Sap").checked).toBe(false);
+    expect(box("Sap").disabled).toBe(true);
+    fireEvent.click(box("Bash"));
+    expect(screen.getByRole("button", { name: "Ready" })).toHaveProperty("disabled", true);
+    expect(screen.getByText(/Take 4 active/)).toBeTruthy();
+    fireEvent.click(box("Sap"));
+    fireEvent.click(screen.getByRole("button", { name: "Ready" }));
+    expect(onReady).toHaveBeenCalledWith(true, [0, 2, 3, 6, 4, 5]);
+  });
+
+  it("Not ready needs no selection", () => {
+    const onReady = vi.fn();
+    render(<PartyLobby {...lobbyProps({ role: "player", mySlot: 0, players: [{ ...BRAN, ready: true }], mySkills: [], onReady })} />);
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Not ready" }));
+    expect(onReady).toHaveBeenCalledWith(false, [0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
   });
 
   it("joins with the selected character", () => {

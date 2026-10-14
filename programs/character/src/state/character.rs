@@ -1,6 +1,8 @@
 use anchor_lang::prelude::*;
 use deadroll_types::CharacterData;
 
+use super::Gear;
+
 /// Bytes of a character name, zero-padded printable ASCII.
 pub const NAME_LEN: usize = 32;
 
@@ -15,4 +17,7 @@ pub struct Character {
     pub unspent_points: u8,
     /// The Core NFT got its permanent freeze after death (`freeze_tombstone`).
     pub nft_frozen: bool,
+    /// Soulbound starter items and what is worn, by slot (docs/CHARACTER.md, section 10).
+    /// Changed only outside a session (`equip`, `unequip`); burned at death.
+    pub gear: Gear,
 }

@@ -84,7 +84,7 @@ pub fn hero_weapon(h: &HeroStats) -> DamageRange {
     hero::weapon(BALANCE, h)
 }
 
-/// What a new character of `class` wears (the items program's `init_loadout`).
+/// What a new character of `class` wears (`create_character` gives the class starter kit).
 pub fn starter_equipment(class: Class) -> items::Equipment {
     items::starter_loadout(class, &BALANCE.items).equipment()
 }

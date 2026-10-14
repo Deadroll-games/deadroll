@@ -4,7 +4,7 @@ use deadroll_combat::speed_ap;
 use deadroll_types::{seeds, SessionStatus};
 
 use crate::{
-    cpi_out::SessionSigner,
+    cpi_out::{character::DeathAccounts, SessionSigner},
     errors::SessionError,
     events::{ModsTicked, TurnSkipped, TurnTicked},
     outcomes,
@@ -49,6 +49,13 @@ pub struct StartTurn<'info> {
     /// CHECK: the character program.
     #[account(address = deadroll_character::ID)]
     pub character_program: UncheckedAccount<'info>,
+    /// CHECK: required on a player's turn when over-time damage kills: that character's
+    /// `SkillSet`, burned by `character::mark_dead` (which checks its seeds).
+    #[account(mut)]
+    pub skill_set: Option<UncheckedAccount<'info>>,
+    /// CHECK: as `skill_set`, the character's `Bag`.
+    #[account(mut)]
+    pub bag: Option<UncheckedAccount<'info>>,
 }
 
 /// The start of the current unit's turn, before anything else on it. Permissionless: it holds no
@@ -97,6 +104,9 @@ pub fn handler(ctx: Context<StartTurn>) -> Result<()> {
             // After the tick: this turn's AP see the buffs and debuffs that still cover it.
             participation.refresh_ap(turn_seq);
             if start.died {
+                let (Some(skill_set), Some(bag)) = (&accounts.skill_set, &accounts.bag) else {
+                    return err!(SessionError::DeathAccountsMissing);
+                };
                 outcomes::player_killed(
                     session,
                     session_key,
@@ -107,7 +117,11 @@ pub fn handler(ctx: Context<StartTurn>) -> Result<()> {
                         config: &accounts.config,
                         bump: vrf::SESSION_AUTHORITY_BUMP,
                     },
-                    character,
+                    &DeathAccounts {
+                        character,
+                        skill_set,
+                        bag,
+                    },
                 )?;
             }
             cooldowns = participation.cooldowns;

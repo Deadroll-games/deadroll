@@ -143,7 +143,7 @@ pub(crate) mod tests {
         }
     }
 
-    /// `c` wearing its class starter kit, as after `init_loadout`.
+    /// `c` wearing its class starter kit, as `create_character` gives it.
     pub(crate) fn kit(c: &CharacterData) -> HeroStats {
         HeroStats::from(c).with_equipment(starter_equipment(c.class))
     }
@@ -251,7 +251,7 @@ pub(crate) mod tests {
         assert_eq!(a.skill.form, Form::Strike);
         assert_eq!(a.weapon, hero_weapon(&kit(&c)));
         assert_eq!((a.weapon.min, a.weapon.max), (4, 8));
-        // Bare hands without a loadout.
+        // Bare hands: nothing worn.
         let bare = player_attacker(2, &HeroStats::from(&c), None, &NONE);
         assert_eq!(
             (bare.weapon.min, bare.weapon.max),

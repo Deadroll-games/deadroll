@@ -5,7 +5,8 @@ Owner lane: L5. Read the root CLAUDE.md first.
 ## What lives here
 The skill builder rules (`docs/SKILL_BUILDER.md`, section 13), shared by the character program
 and the website: `SkillBlocks`, `validate`, `validate_starting` (class limits, section 10.1),
-`check_loadout` (4 active, 1 reactive, 1 passive), `derive` (shares, power, fusion, cooldown) and
+`check_loadout` (4 active, 1 reactive, 1 passive), `check_map_selection` (the 4 + 1 + 1 taken onto a
+map, checked by the character program at `set_ready`), `derive` (shares, power, fusion, cooldown) and
 the class starter `presets`.
 
 ## Rules for this zone
@@ -23,5 +24,6 @@ cargo clippy -p deadroll-skillcheck --tests -- -D warnings
 ```
 
 ## Done means
-- tests green (happy paths in `tests/presets.rs`, one test per `SkillError` in `tests/rejections.rs`)
+- tests green (happy paths in `tests/presets.rs`, one test per `SkillError` in `tests/rejections.rs`,
+  map selections in `tests/map_selection.rs`)
 - clippy clean

@@ -1,11 +1,12 @@
 // @vitest-environment node
-// Items client: slot and base lists from the IDL, byte-level instructions, the Loadout decoder,
-// and the item numbers against the program defaults (balance.json).
+// Items client: slot and base lists from the IDL, byte-level equip instructions, the gear of a
+// Character account, and the item numbers against the program defaults (balance.json).
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { AccountRole, generateKeyPairSigner, getAddressDecoder, getAddressEncoder, type Address } from "@solana/kit";
-import { PROGRAMS, SYSTEM_PROGRAM } from "../config";
+import { AccountRole, generateKeyPairSigner, getAddressDecoder, type Address } from "@solana/kit";
+import { PROGRAMS } from "../config";
 import { concat, toHex } from "./bytes";
+import type { CharacterAcc } from "./game";
 import {
   EMPTY_ITEM,
   EQUIP_SLOTS,
@@ -14,7 +15,6 @@ import {
   equipIx,
   equipmentOf,
   heroDefense,
-  initLoadoutIx,
   inventory,
   itemBonus,
   itemLabel,
@@ -22,15 +22,12 @@ import {
   slotsFor,
   unequipIx,
   weaponText,
-  type LoadoutAcc,
 } from "./items";
-import { loadoutPda } from "./pda";
 import { coders } from "./programs";
 import { Class } from "./types";
 
 const A = (n: number) => new Uint8Array(32).fill(n);
 const addrOf = (n: number): Address => getAddressDecoder().decode(A(n));
-const pk = (a: Address) => getAddressEncoder().encode(a) as Uint8Array;
 const ixDisc = (name: string) => createHash("sha256").update(`global:${name}`).digest().subarray(0, 8);
 
 const SLOT = Object.fromEntries(EQUIP_SLOTS.map((s, i) => [s, i]));
@@ -38,66 +35,70 @@ const BASE = Object.fromEntries(ITEM_BASES.map((b, i) => [b, i]));
 /** A worn-items snapshot with `on` (slot key -> base key). */
 const worn = (on: Record<string, string>) => EQUIP_SLOTS.map((s) => (on[s] ? BASE[on[s]]! : EMPTY_ITEM));
 
-describe("items IDL", () => {
-  it("is for the items program id", () => {
-    expect(coders.items.idl.address).toBe(PROGRAMS.items);
-  });
-
-  it("lists slots and bases in the crates/types order", () => {
+describe("IDLs", () => {
+  it("slots and bases come from the character IDL in the crates/types order", () => {
     expect(EQUIP_SLOTS).toEqual(["mainHand", "offHand", "helmet", "body", "pants", "boots", "gloves", "necklace", "cloak", "ring1", "ring2"]);
     expect(ITEM_BASES).toEqual(["sword", "staff", "wand", "leatherArmor", "robe", "lightLeatherArmor"]);
     expect(itemLabel("leatherArmor")).toBe("Leather armor");
     expect(itemLabel("ring2")).toBe("Ring 2");
     expect(itemLabel("mainHand")).toBe("Main hand");
   });
+
+  it("the items program has no instructions yet (gear lives in the character)", () => {
+    expect(coders.items.idl.address).toBe(PROGRAMS.items);
+    expect(coders.items.idl.instructions).toEqual([]);
+  });
 });
 
 describe("instructions", () => {
-  it("init_loadout: owner (payer), character, the loadout PDA, system program", async () => {
-    const owner = await generateKeyPairSigner();
-    const character = addrOf(7);
-    const ix = await initLoadoutIx(owner, character);
-    expect(ix.programAddress).toBe(PROGRAMS.items);
-    expect(toHex(ix.data as Uint8Array)).toBe(toHex(ixDisc("init_loadout")));
-    expect(ix.accounts!.map((a) => [a.address, a.role])).toEqual([
-      [owner.address, AccountRole.WRITABLE_SIGNER],
-      [character, AccountRole.READONLY],
-      [await loadoutPda(character), AccountRole.WRITABLE],
-      [SYSTEM_PROGRAM, AccountRole.READONLY],
-    ]);
-  });
-
-  it("equip: item index u8 and the slot; the session token or None", async () => {
+  it("equip: character program, item index u8 and the slot; signer, character (w), token or None", async () => {
     const key = await generateKeyPairSigner();
     const character = addrOf(8);
     const ix = await equipIx(key, character, 1, "body", addrOf(9));
+    expect(ix.programAddress).toBe(PROGRAMS.character);
     expect(toHex(ix.data as Uint8Array)).toBe(toHex(concat(ixDisc("equip"), Uint8Array.of(1, SLOT.body!))));
-    expect(ix.accounts![0]).toMatchObject({ address: key.address, role: AccountRole.READONLY_SIGNER });
-    expect(ix.accounts![2]).toEqual({ address: await loadoutPda(character), role: AccountRole.WRITABLE });
-    expect(ix.accounts![3]).toEqual({ address: addrOf(9), role: AccountRole.READONLY });
-    const owner = await unequipIx(key, character, "ring2", null);
-    expect(toHex(owner.data as Uint8Array)).toBe(toHex(concat(ixDisc("unequip"), Uint8Array.of(SLOT.ring2!))));
+    expect(ix.accounts!.map((a) => [a.address, a.role])).toEqual([
+      [key.address, AccountRole.READONLY_SIGNER],
+      [character, AccountRole.WRITABLE],
+      [addrOf(9), AccountRole.READONLY],
+    ]);
+    const off = await unequipIx(key, character, "ring2", null);
+    expect(off.programAddress).toBe(PROGRAMS.character);
+    expect(toHex(off.data as Uint8Array)).toBe(toHex(concat(ixDisc("unequip"), Uint8Array.of(SLOT.ring2!))));
     // No token: Anchor's None is the program id.
-    expect(owner.accounts![3]).toEqual({ address: PROGRAMS.items, role: AccountRole.READONLY });
-  });
-
-  it("the loadout PDA is [\"loadout\", character] under items", async () => {
-    const character = addrOf(5);
-    const { getProgramDerivedAddress } = await import("@solana/kit");
-    const [want] = await getProgramDerivedAddress({ programAddress: PROGRAMS.items, seeds: [new TextEncoder().encode("loadout"), pk(character)] });
-    expect(await loadoutPda(character)).toBe(want);
+    expect(off.accounts![2]).toEqual({ address: PROGRAMS.character, role: AccountRole.READONLY });
   });
 });
 
-/** A warrior's loadout after init_loadout, as the program writes it. */
-function warriorLoadout(): Uint8Array {
-  const c = coders.items;
+/** A new warrior as create_character writes it: the class starter kit, worn. */
+function warrior(): Uint8Array {
+  const c = coders.character;
   const empty = { source: "empty", index: 0, asset: addrOf(0) };
+  const layer = { spriteId: 0, materialRamp: 0, accentRamp: 0, elementRamp: 0 };
   const v = {
     core: {
-      version: 1,
-      character: addrOf(1),
+      version: 2,
       owner: addrOf(2),
+      index: 0,
+      nft: addrOf(3),
+      race: "human",
+      class: "warrior",
+      level: 1,
+      xp: 0,
+      stats: [10, 5, 5, 10],
+      predisposition: "piercing",
+      predispositionTier: 14,
+      hpMax: 60,
+      alive: true,
+      inSession: null,
+      appearance: Array.from({ length: 20 }, () => layer),
+      stateVersion: 0,
+      bump: 254,
+    },
+    name: new Uint8Array(32),
+    unspentPoints: 0,
+    nftFrozen: false,
+    gear: {
       items: [
         { base: "sword", level: 1 },
         { base: "leatherArmor", level: 1 },
@@ -106,32 +107,30 @@ function warriorLoadout(): Uint8Array {
       ],
       itemCount: 2,
       equipped: EQUIP_SLOTS.map((s) => (s === "mainHand" ? { source: "soulbound", index: 0, asset: addrOf(0) } : s === "body" ? { source: "soulbound", index: 1, asset: addrOf(0) } : empty)),
-      bump: 254,
     },
   };
-  const out: Uint8Array[] = [c.accountDiscriminator("Loadout")];
-  c.encode({ defined: { name: "Loadout" } }, v, out);
+  const out: Uint8Array[] = [c.accountDiscriminator("Character")];
+  c.encode({ defined: { name: "Character" } }, v, out);
   return concat(...out);
 }
 
-describe("Loadout", () => {
-  it("decodes at the crates/types LoadoutData offsets", () => {
-    const bytes = warriorLoadout();
-    // discriminator 8, version 1, character 32, owner 32, 4 items x 2, item_count 1,
-    // 11 slots x (source 1, index 1, asset 32), bump 1.
-    expect(bytes.length).toBe(8 + 1 + 32 + 32 + 4 * 2 + 1 + 11 * 34 + 1);
-    expect(Array.from(bytes.subarray(73, 77))).toEqual([BASE.sword, 1, BASE.leatherArmor, 1]);
-    const body = 8 + 1 + 64 + 8 + 1 + SLOT.body! * 34;
+describe("Character.gear", () => {
+  it("is the last field of the account, in the crates/types ItemRecord / EquipRef layout", () => {
+    const bytes = warrior();
+    // 4 items x 2, item_count 1, 11 slots x (source 1, index 1, asset 32).
+    const gear = bytes.length - (4 * 2 + 1 + 11 * 34);
+    expect(Array.from(bytes.subarray(gear, gear + 4))).toEqual([BASE.sword, 1, BASE.leatherArmor, 1]);
+    const body = gear + 4 * 2 + 1 + SLOT.body! * 34;
     expect(Array.from(bytes.subarray(body, body + 2))).toEqual([1, 1]);
-    const l = coders.items.decodeAccount<LoadoutAcc>("Loadout", bytes);
-    expect(l.core.owner).toBe(addrOf(2));
-    const inv = inventory(l);
+    const c = coders.character.decodeAccount<CharacterAcc>("Character", bytes);
+    expect(c.core.owner).toBe(addrOf(2));
+    const inv = inventory(c.gear);
     expect(inv.items.map((i) => [i.base, i.worn])).toEqual([
       ["sword", "mainHand"],
       ["leatherArmor", "body"],
     ]);
     expect(inv.slots.filter((s) => s.item).map((s) => s.slot)).toEqual(["mainHand", "body"]);
-    expect(equipmentOf(l)).toEqual(worn({ mainHand: "sword", body: "leatherArmor" }));
+    expect(equipmentOf(c.gear)).toEqual(worn({ mainHand: "sword", body: "leatherArmor" }));
   });
 });
 

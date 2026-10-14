@@ -335,7 +335,7 @@ describe("create_character", { skip: NEEDS_CONFIG }, () => {
     const c = await create(p, warrior());
     const ch = await fetchCharacter(c.character);
     const core = ch.core;
-    assert.equal(core.version, 1);
+    assert.equal(core.version, 2); // 2: the gear follows the core
     assert.ok(core.owner.equals(p.publicKey));
     assert.equal(core.index, 0);
     assert.ok(core.nft.equals(c.asset.publicKey));
@@ -349,6 +349,10 @@ describe("create_character", { skip: NEEDS_CONFIG }, () => {
     assert.deepEqual(core.appearance[0], layer);
     assert.equal(Buffer.from(ch.name).toString().replace(/\0+$/, ""), "Bran");
     assert.deepEqual([ch.unspentPoints, ch.nftFrozen], [0, false]);
+    // The class starter items come with the character, worn (docs/CHARACTER.md 9, step 5).
+    assert.equal(ch.gear.itemCount, 2);
+    assert.deepEqual(ch.gear.items.slice(0, 2).map((r: any) => Object.keys(r.base)[0]), ["sword", "leatherArmor"]);
+    assert.ok(ch.gear.equipped[0].source.soulbound !== undefined && ch.gear.equipped[3].source.soulbound !== undefined);
     assert.equal((await fetchProfile(p.publicKey)).characterCount, 1);
 
     const set = await fetchSkills(c.character);
@@ -422,8 +426,8 @@ describe("session-only instructions: untrusted callers", { skip: NEEDS_CONFIG },
     const c = await create(p, warrior());
     const call = (caller: Keypair) =>
       program.methods
-        .lockForSession(Keypair.generate().publicKey)
-        .accountsStrict({ ...session(c.character, caller.publicKey), owner: p.publicKey })
+        .lockForSession(Keypair.generate().publicKey, [0, 1, 2, 3, 4, 5])
+        .accountsStrict({ ...session(c.character, caller.publicKey), owner: p.publicKey, skillSet: skillsOf(c.character) })
         .signers(caller === p ? [p] : [caller, p])
         .rpc();
     await fails(call(p), "UntrustedCaller");
@@ -448,11 +452,16 @@ describe("session-only instructions: untrusted callers", { skip: NEEDS_CONFIG },
     const c = await create(p, warrior());
     for (const caller of [p, await funded(1)]) {
       await fails(
-        program.methods.markDead().accountsStrict(session(c.character, caller.publicKey)).signers([caller]).rpc(),
+        program.methods
+          .markDead()
+          .accountsStrict({ ...session(c.character, caller.publicKey), skillSet: skillsOf(c.character), bag: bagOf(c.character) })
+          .signers([caller])
+          .rpc(),
         "UntrustedCaller",
       );
     }
     assert.equal((await fetchCharacter(c.character)).core.alive, true);
+    assert.equal((await fetchSkills(c.character)).skills[0].powerBp, 10_000, "nothing burned");
   });
 
   it("unlock rejects an untrusted caller", async () => {
@@ -471,7 +480,7 @@ describe("session-only instructions: untrusted callers", { skip: NEEDS_CONFIG },
     await fails(
       program.methods
         .markDead()
-        .accountsStrict({ ...session(c.character, p.publicKey), config: fake.publicKey })
+        .accountsStrict({ ...session(c.character, p.publicKey), skillSet: skillsOf(c.character), bag: bagOf(c.character), config: fake.publicKey })
         .signers([p])
         .rpc(),
       "InvalidConfig",

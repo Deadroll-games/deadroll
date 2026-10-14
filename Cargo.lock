@@ -1271,11 +1271,11 @@ name = "deadroll-character"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
- "deadroll-registry",
  "deadroll-rules",
  "deadroll-skillcheck",
  "deadroll-types",
  "mpl-core",
+ "session-keys",
 ]
 
 [[package]]
@@ -1310,9 +1310,6 @@ name = "deadroll-items"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
- "deadroll-rules",
- "deadroll-types",
- "session-keys",
 ]
 
 [[package]]
@@ -1393,7 +1390,6 @@ dependencies = [
  "anchor-lang",
  "deadroll-character",
  "deadroll-combat",
- "deadroll-items",
  "deadroll-map",
  "deadroll-mapcheck",
  "deadroll-registry",
@@ -1411,7 +1407,7 @@ version = "0.1.0"
 dependencies = [
  "deadroll-character",
  "deadroll-combat",
- "deadroll-items",
+ "deadroll-registry",
  "deadroll-rules",
  "deadroll-session",
  "deadroll-skillcheck",

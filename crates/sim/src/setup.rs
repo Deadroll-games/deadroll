@@ -154,7 +154,7 @@ pub fn fighter(
     }
 }
 
-/// What a hero preset wears: its own list (each item checked by the items program's rule), or
+/// What a hero preset wears: its own list (each item checked by the character program's rule), or
 /// the class starter kit when it has none.
 pub fn equipment(
     id: &str,

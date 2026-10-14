@@ -142,8 +142,8 @@ pub struct HeroPreset {
     /// Skills written inline (random builds); used when an id is not in the skill presets.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub inline_skills: Vec<SkillPreset>,
-    /// What the hero wears, by slot. Left out = the class starter kit, as the items program
-    /// gives a new character (`init_loadout`); `{}` = nothing.
+    /// What the hero wears, by slot. Left out = the class starter kit, as the character program
+    /// gives a new character (`create_character`); `{}` = nothing.
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",

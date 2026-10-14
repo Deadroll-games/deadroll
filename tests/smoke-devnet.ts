@@ -1,5 +1,5 @@
-// Devnet smoke test for items and the real MagicBlock VRF: a warrior created together with its
-// starter kit (items init_loadout), unequip and equip, a tiny party, start_session, then turns until
+// Devnet smoke test for the character gear and the real MagicBlock VRF: a warrior created with its
+// starter kit (create_character), unequip and equip, a tiny party, set_ready with the 4 + 1 + 1 skills, start_session, then turns until
 // the warrior attacks a wolf; prints the oracle's InitiativeRolled and HitResolved transactions.
 // Needs tools/scripts/deploy-devnet.ts. The session must be the real-VRF build: nothing here plays the oracle.
 //
@@ -25,7 +25,6 @@ const REGISTRY = new PublicKey("dZ1jraMfS3bAUTkRw2TA1ddg8UDGzgUdFQz5pmBxjoG");
 const CHARACTER = new PublicKey("9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL");
 const MAP = new PublicKey("2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH");
 const SESSION = new PublicKey("3gzfih2WaBgXcYZ57jWokmZM3FDE6QHX5y4R9EvKZoNJ");
-const ITEMS = new PublicKey("48FtbrDegNrAUHFza9HdJzZAvUo3uUNqs1kNnZxFsqJS");
 const MPL_CORE = new PublicKey("CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d");
 const VRF_PROGRAM = new PublicKey("Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz");
 const ORACLE_QUEUE = new PublicKey("Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh");
@@ -59,9 +58,8 @@ const load = (n: string) => JSON.parse(readFileSync(new URL(`../target/idl/${n}.
 const session: any = new Program(load("deadroll_session"), provider);
 const characterProgram: any = new Program(load("deadroll_character"), provider);
 const mapProgram: any = new Program(load("deadroll_map"), provider);
-const itemsProgram: any = new Program(load("deadroll_items"), provider);
 const sessionEvents = new EventParser(SESSION, session.coder);
-const itemsEvents = new EventParser(ITEMS, itemsProgram.coder);
+const characterEvents = new EventParser(CHARACTER, characterProgram.coder);
 
 const config = pda([Buffer.from("config")], REGISTRY);
 const sessionAuthority = pda([Buffer.from("authority")], SESSION);
@@ -126,17 +124,12 @@ const playerActor = Keypair.generate();
 await fund(dm.publicKey, 0.1);
 await fund(player.publicKey, 0.15);
 
-// character + starter kit in one transaction
+// character with its starter kit in one transaction (create_character gives it, worn)
 const profile = pda([Buffer.from("profile"), player.publicKey.toBuffer()], CHARACTER);
 await characterProgram.methods.createProfile().accountsStrict({ owner: player.publicKey, profile, systemProgram: SystemProgram.programId }).signers([player]).rpc();
 const character = pda([Buffer.from("character"), player.publicKey.toBuffer(), Buffer.from([0])], CHARACTER);
-const loadout = pda([Buffer.from("loadout"), character.toBuffer()], ITEMS);
 const layer = { spriteId: 1, materialRamp: 2, accentRamp: 3, elementRamp: 0 };
 const asset = Keypair.generate();
-const initLoadout = await itemsProgram.methods
-  .initLoadout()
-  .accountsStrict({ owner: player.publicKey, character, loadout, systemProgram: SystemProgram.programId })
-  .instruction();
 const createSig = await characterProgram.methods
   .createCharacter({
     name: text("Smoke", 32), race: e("human"), class: e("warrior"), predisposition: e("piercing"),
@@ -149,26 +142,25 @@ const createSig = await characterProgram.methods
     bag: pda([Buffer.from("bag"), character.toBuffer()], CHARACTER),
     config, asset: asset.publicKey, mplCoreProgram: MPL_CORE, systemProgram: SystemProgram.programId,
   })
-  .postInstructions([initLoadout])
   .signers([player, asset])
   .rpc({ commitment: "confirmed" });
-console.log("character + Core NFT + loadout:", character.toBase58(), asset.publicKey.toBase58());
-console.log("create_character + init_loadout:", explorer(createSig));
-const created = [...itemsEvents.parseLogs(await logsOf(createSig))].find((x) => x.name === "loadoutCreated");
-assert.ok(created, "LoadoutCreated in the creation transaction");
+console.log("character + Core NFT + starter kit:", character.toBase58(), asset.publicKey.toBase58());
+console.log("create_character:", explorer(createSig));
+const created = [...characterEvents.parseLogs(await logsOf(createSig))].find((x) => x.name === "characterCreated");
+assert.ok(created, "CharacterCreated in the creation transaction");
 assert.equal(created.data.itemCount, 2);
-const kit = async () => (await itemsProgram.account.loadout.fetch(loadout)).core;
+const kit = async () => (await characterProgram.account.character.fetch(character)).gear;
 let l = await kit();
 assert.ok(l.items[0].base.sword !== undefined && l.items[1].base.leatherArmor !== undefined, "warrior kit: sword + leather armor");
 assert.ok(l.equipped[MAIN_HAND].source.soulbound !== undefined && l.equipped[BODY].source.soulbound !== undefined, "kit worn");
 console.log("starter kit: sword (main hand), leather armor (body)");
 
 // unequip and equip back, signed by the owner
-const item = (signer: Keypair) => ({ signer: signer.publicKey, character, loadout, sessionToken: null });
-const offSig = await itemsProgram.methods.unequip(e("body")).accountsStrict(item(player)).signers([player]).rpc({ commitment: "confirmed" });
+const item = (signer: Keypair) => ({ signer: signer.publicKey, character, sessionToken: null });
+const offSig = await characterProgram.methods.unequip(e("body")).accountsStrict(item(player)).signers([player]).rpc({ commitment: "confirmed" });
 l = await kit();
 assert.ok(l.equipped[BODY].source.empty !== undefined, "body empty after unequip");
-const onSig = await itemsProgram.methods.equip(1, e("body")).accountsStrict(item(player)).signers([player]).rpc({ commitment: "confirmed" });
+const onSig = await characterProgram.methods.equip(1, e("body")).accountsStrict(item(player)).signers([player]).rpc({ commitment: "confirmed" });
 l = await kit();
 assert.ok(l.equipped[BODY].source.soulbound !== undefined && l.equipped[BODY].index === 1, "leather armor worn again");
 console.log("unequip body:", explorer(offSig));
@@ -202,19 +194,26 @@ await session.methods
   .rpc();
 const participation = pda([Buffer.from("participation"), sessionPda.toBuffer(), character.toBuffer()], SESSION);
 const skillSet = pda([Buffer.from("skills"), character.toBuffer()], CHARACTER);
+const bag = pda([Buffer.from("bag"), character.toBuffer()], CHARACTER);
 await session.methods
   .joinSession(PRICE, playerActor.publicKey)
   .accountsStrict({
     player: player.publicKey, session: sessionPda, character, participation,
     stash: pda([Buffer.from("stash"), sessionPda.toBuffer(), character.toBuffer()], SESSION),
-    escrow, sessionAuthority, config, characterProgram: CHARACTER, systemProgram: SystemProgram.programId, loadout,
+    escrow, systemProgram: SystemProgram.programId,
   })
   .signers([player])
   .rpc();
 const part = () => session.account.participation.fetch(participation);
-assert.deepEqual((await part()).equipment, worn({ [MAIN_HAND]: SWORD, [BODY]: LEATHER }), "join_session snapshot of the worn items");
-console.log("join_session: equipment snapshot sword + leather armor");
-await session.methods.setReady(true).accountsStrict({ player: player.publicKey, session: sessionPda, participation }).signers([player]).rpc();
+// Ready: the 4 + 1 + 1 skills taken onto the map; the character is locked and its gear copied.
+await session.methods
+  .setReady(true, [0, 1, 2, 3, 4, 5])
+  .accountsStrict({ player: player.publicKey, session: sessionPda, participation, character, skillSet, sessionAuthority, config, characterProgram: CHARACTER })
+  .signers([player])
+  .rpc({ commitment: "confirmed" });
+assert.deepEqual((await part()).equipment, worn({ [MAIN_HAND]: SWORD, [BODY]: LEATHER }), "set_ready snapshot of the worn items");
+assert.deepEqual((await part()).skills, [0, 1, 2, 3, 4, 5], "map selection recorded");
+console.log("set_ready: equipment snapshot sword + leather armor, skills 4 + 1 + 1");
 
 const startSig = await session.methods
   .startSession()
@@ -290,7 +289,7 @@ for (let guard = 0; guard < 80; guard++) {
       .startTurn()
       .accountsStrict({
         session: sessionPda, monsters, participation: pl ? participation : null, character: pl ? character : null,
-        sessionAuthority, config, characterProgram: CHARACTER,
+        sessionAuthority, config, characterProgram: CHARACTER, skillSet: pl ? skillSet : null, bag: pl ? bag : null,
       })
       .rpc({ commitment: "confirmed" });
     continue;
@@ -331,7 +330,7 @@ for (let guard = 0; guard < 80; guard++) {
     const actSig = await session.methods
       .act(slot, target)
       .accountsStrict({
-        signer: player.publicKey, session: sessionPda, participation, character, skillSet, monsters,
+        signer: player.publicKey, session: sessionPda, participation, character, skillSet, bag, monsters,
         sessionToken: null, ...vrfAccounts, targetParticipation: null,
       })
       .signers([player])

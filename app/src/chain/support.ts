@@ -2,13 +2,14 @@
 // a skill targets, the EffectResolved / ModsTicked events in app shape, and their log lines.
 // Pure functions over decoded accounts and events.
 import type { Address } from "@solana/kit";
-import { ASPECT_KEYS, MOD_KEYS, bytesText, enumIndex, variantKey, type Enum, type SkillRecordAcc, type TimedModAcc } from "./game";
+import { ASPECT_KEYS, MOD_KEYS, bytesText, enumIndex, type Enum, type SkillRecordAcc, type TimedModAcc } from "./game";
 import { ASPECT_NAMES, effectAmount } from "./names";
-import { Effect, Form, Purpose, skillSide, usableInCombat, type Side, type SkillBlocks } from "./skillcheck";
+import { Effect, Form, Purpose, skillSide, usableInCombat, type Category, type Side, type SkillBlocks } from "./skillcheck";
 import { Applied, HitOutcome, type Aspect, type ModKind, type TimedMod } from "./types";
 
 const EFFECT_KEYS = ["none", "weakening", "slow", "vulnerability", "stun", "freeze", "haste", "empowerment", "protection", "heal"] as const;
 const PURPOSE_KEYS = ["damage", "buff", "debuff"] as const;
+const CATEGORY_KEYS = ["active", "reactive", "passive"] as const;
 const FORM_KEYS = ["strike", "projectile"] as const;
 const OUTCOMES = ["miss", "hit", "immune"];
 const APPLIED = ["none", "added", "refreshed", "froze"];
@@ -71,14 +72,15 @@ export function modsAt(events: readonly { name: string; data: any }[], index: nu
 // ---- skills in battle
 
 /** One SkillSet slot as the skill bar needs it. */
-export type CombatSkill = { slot: number; name: string; usable: boolean; purpose: Purpose; side: Side; form: Form; effect: Effect };
+export type CombatSkill = { slot: number; name: string; category: Category; usable: boolean; purpose: Purpose; side: Side; form: Form; effect: Effect };
 
 export function combatSkill(slot: number, k: SkillRecordAcc): CombatSkill {
   const purpose = enumIndex(k.blocks.purpose, PURPOSE_KEYS) as Purpose;
   const effect = enumIndex(k.blocks.effect, EFFECT_KEYS) as Effect;
   const form = enumIndex(k.blocks.form, FORM_KEYS) as Form;
-  const usable = usableInCombat({ category: variantKey(k.blocks.category) === "active" ? 0 : 1, purpose, effect } as SkillBlocks);
-  return { slot, name: bytesText(k.name), usable, purpose, side: skillSide(purpose), form, effect };
+  const category = enumIndex(k.blocks.category, CATEGORY_KEYS) as Category;
+  const usable = usableInCombat({ category, purpose, effect } as SkillBlocks);
+  return { slot, name: bytesText(k.name), category, usable, purpose, side: skillSide(purpose), form, effect };
 }
 
 // ---- EffectResolved

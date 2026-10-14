@@ -47,7 +47,7 @@ describe("skill side and reach", () => {
       cooldown: 1,
       name: textBytes("Mend", 24),
     } as unknown as SkillRecordAcc;
-    expect(combatSkill(3, rec)).toEqual({ slot: 3, name: "Mend", usable: true, purpose: Purpose.Buff, side: "ally", form: Form.Projectile, effect: Effect.Heal });
+    expect(combatSkill(3, rec)).toEqual({ slot: 3, name: "Mend", category: Category.Active, usable: true, purpose: Purpose.Buff, side: "ally", form: Form.Projectile, effect: Effect.Heal });
   });
 });
 

@@ -1,10 +1,11 @@
-// deadroll_items against the shared local validator: loadouts, the class starter kit, equip and
-// unequip by the owner or the game's session key.
+// The character's gear against the shared local validator (docs/CHARACTER.md 9-10,
+// ITEMS_AND_CRAFT.md 10): the class starter items that create_character gives, equip and unequip
+// by the owner or the game's session key (deadroll_character).
 //
 // Needs the character program and the registry GameConfig (tools/scripts deploy:local). The
-// in-session lock (CharacterLocked) and the dead character (CharacterDead) need a party: they run
+// in-session lock (AlreadyLocked) and the dead character (CharacterDead) need a party: they run
 // in tests/session.test.ts. LevelTooLow cannot happen with the level 1 starter items; the rule is
-// covered by the unit tests (programs/items/src/state/loadout.rs, crates/rules/tests/items.rs).
+// covered by the unit tests (programs/character/src/state/gear.rs, crates/rules/tests/items.rs).
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -36,31 +37,26 @@ const REGISTRY = new PublicKey("dZ1jraMfS3bAUTkRw2TA1ddg8UDGzgUdFQz5pmBxjoG");
 const SESSION_KEYS = new PublicKey("KeyspM2ssCJbqUhQ4k7sveSiY4WjnYsrXkC8oDbwde5");
 const MPL_CORE = new PublicKey("CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d");
 
-const ITEMS_IDL = new URL("../target/idl/deadroll_items.json", import.meta.url);
 const CHARACTER_IDL = new URL("../target/idl/deadroll_character.json", import.meta.url);
 
 const pda = (seeds: (Buffer | Uint8Array)[], programId: PublicKey) =>
   PublicKey.findProgramAddressSync(seeds, programId)[0];
 const sha256 = (data: Buffer | string) => createHash("sha256").update(data).digest();
 const config = pda([Buffer.from("config")], REGISTRY);
-const loadoutOf = (character: PublicKey) => pda([Buffer.from("loadout"), character.toBuffer()], ITEMS);
 
 async function isProgram(id: PublicKey): Promise<boolean> {
   return (await connection.getAccountInfo(id))?.executable ?? false;
 }
 
 const missing: string[] = [];
-if (!existsSync(ITEMS_IDL)) missing.push("target/idl/deadroll_items.json");
 if (!existsSync(CHARACTER_IDL)) missing.push("target/idl/deadroll_character.json");
-if (!(await isProgram(ITEMS))) missing.push("deadroll_items deployed");
 if (!(await isProgram(CHARACTER))) missing.push("deadroll_character deployed");
 if (!(await isProgram(SESSION_KEYS))) missing.push("session-keys program");
 if ((await connection.getAccountInfo(config))?.owner.equals(REGISTRY) !== true) missing.push("registry GameConfig");
 const SKIP = missing.length ? `run tools/scripts deploy:local first; missing: ${missing.join(", ")}` : false;
 
-const items: any = SKIP ? null : new Program(JSON.parse(readFileSync(ITEMS_IDL, "utf8")), provider);
 const character: any = SKIP ? null : new Program(JSON.parse(readFileSync(CHARACTER_IDL, "utf8")), provider);
-const itemEvents = SKIP ? null : new EventParser(ITEMS, items.coder);
+const characterEvents = SKIP ? null : new EventParser(CHARACTER, character.coder);
 
 // ---------------------------------------------------------------------------------------------
 // helpers
@@ -96,7 +92,7 @@ async function rejects(promise: Promise<unknown>, code: string): Promise<void> {
 
 async function eventsOf(sig: string) {
   const tx = await connection.getTransaction(sig, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
-  return [...itemEvents!.parseLogs(tx?.meta?.logMessages ?? [])];
+  return [...characterEvents!.parseLogs(tx?.meta?.logMessages ?? [])];
 }
 async function eventOf(sig: string, name: string) {
   const found = (await eventsOf(sig)).find((x) => x.name === name);
@@ -126,9 +122,8 @@ const PROFILES = {
   support: { race: "forestElf", predisposition: "lightning", stats: [5, 8, 12, 5], skill: skill("magical", "lightning", "buff", "haste", "projectile") }, // Quicken
 };
 
-/** A fresh character of `kind`; without a loadout unless `withLoadout` (then `init_loadout`
- * goes in the creation transaction, as the website sends it). */
-async function newCharacter(kind: Kind, withLoadout = false): Promise<{ owner: Keypair; character: PublicKey; sig: string }> {
+/** A fresh character of `kind`; its class starter items come with it. */
+async function newCharacter(kind: Kind): Promise<{ owner: Keypair; character: PublicKey; sig: string }> {
   const owner = await funded();
   const profile = pda([Buffer.from("profile"), owner.publicKey.toBuffer()], CHARACTER);
   if (!(await connection.getAccountInfo(profile))) {
@@ -142,10 +137,6 @@ async function newCharacter(kind: Kind, withLoadout = false): Promise<{ owner: K
   const c = pda([Buffer.from("character"), owner.publicKey.toBuffer(), Buffer.from([index])], CHARACTER);
   const p = PROFILES[kind];
   const asset = Keypair.generate();
-  const init = await items.methods
-    .initLoadout()
-    .accountsStrict({ owner: owner.publicKey, character: c, loadout: loadoutOf(c), systemProgram: SystemProgram.programId })
-    .instruction();
   const sig = await character.methods
     .createCharacter({
       name: text("Kit", 32),
@@ -167,43 +158,34 @@ async function newCharacter(kind: Kind, withLoadout = false): Promise<{ owner: K
       mplCoreProgram: MPL_CORE,
       systemProgram: SystemProgram.programId,
     })
-    .postInstructions(withLoadout ? [init] : [])
     .signers([owner, asset])
     .rpc();
   return { owner, character: c, sig };
 }
 
-function initLoadout(owner: Keypair, c: PublicKey, loadout = loadoutOf(c)) {
-  return items.methods
-    .initLoadout()
-    .accountsStrict({ owner: owner.publicKey, character: c, loadout, systemProgram: SystemProgram.programId })
-    .signers([owner])
-    .rpc();
-}
-
 function equip(signer: Keypair, c: PublicKey, index: number, slot: string, token: PublicKey | null = null) {
-  return items.methods
+  return character.methods
     .equip(index, e(slot))
-    .accountsStrict({ signer: signer.publicKey, character: c, loadout: loadoutOf(c), sessionToken: token })
+    .accountsStrict({ signer: signer.publicKey, character: c, sessionToken: token })
     .signers([signer])
     .rpc();
 }
 
 function unequip(signer: Keypair, c: PublicKey, slot: string, token: PublicKey | null = null) {
-  return items.methods
+  return character.methods
     .unequip(e(slot))
-    .accountsStrict({ signer: signer.publicKey, character: c, loadout: loadoutOf(c), sessionToken: token })
+    .accountsStrict({ signer: signer.publicKey, character: c, sessionToken: token })
     .signers([signer])
     .rpc();
 }
 
-const fetchLoadout = (c: PublicKey) => items.account.loadout.fetch(loadoutOf(c));
-/** Slot name -> worn base name, from a fetched loadout. */
-function wornOf(l: any): Record<string, string> {
-  const slots = items.idl.types.find((t: any) => t.name === "equipSlot").type.variants.map((v: any) => v.name);
+const fetchCharacter = (c: PublicKey) => character.account.character.fetch(c);
+/** Slot name -> worn base name, from a fetched character. */
+function wornOf(ch: any): Record<string, string> {
+  const slots = character.idl.types.find((t: any) => t.name === "equipSlot").type.variants.map((v: any) => v.name);
   const out: Record<string, string> = {};
-  l.core.equipped.forEach((r: any, i: number) => {
-    if (r.source.soulbound !== undefined) out[slots[i]] = variant(l.core.items[r.index].base);
+  ch.gear.equipped.forEach((r: any, i: number) => {
+    if (r.source.soulbound !== undefined) out[slots[i]] = variant(ch.gear.items[r.index].base);
   });
   return out;
 }
@@ -242,46 +224,63 @@ async function issueToken(
 // ---------------------------------------------------------------------------------------------
 // tests
 
-describe("deadroll_items: init_loadout", { skip: SKIP }, () => {
+describe("create_character: the class starter items", { skip: SKIP }, () => {
   for (const [kind, kit] of [
     ["warrior", { mainHand: "sword", body: "leatherArmor" }],
     ["mage", { mainHand: "staff", body: "robe" }],
     ["support", { mainHand: "wand", body: "lightLeatherArmor" }],
   ] as const) {
-    it(`a ${kind} gets its class starter kit, worn`, async () => {
-      const { owner, character: c } = await newCharacter(kind);
-      const sig = await initLoadout(owner, c);
-      const ev = await eventOf(sig, "loadoutCreated");
-      assert.ok(ev.character.equals(c) && ev.owner.equals(owner.publicKey));
+    it(`a ${kind} gets its class starter kit, worn, in the character account`, async () => {
+      const { character: c, sig } = await newCharacter(kind);
+      const ev = await eventOf(sig, "characterCreated");
       assert.equal(variant(ev.class), kind);
       assert.equal(ev.itemCount, 2);
-      const l = await fetchLoadout(c);
-      assert.equal(l.core.version, 1);
-      assert.ok(l.core.character.equals(c) && l.core.owner.equals(owner.publicKey));
-      assert.equal(l.core.itemCount, 2);
-      assert.deepEqual(l.core.items.slice(0, 2).map((r: any) => [variant(r.base), r.level]), [
+      const ch = await fetchCharacter(c);
+      assert.equal(ch.core.version, 2);
+      assert.equal(ch.gear.itemCount, 2);
+      assert.deepEqual(ch.gear.items.slice(0, 2).map((r: any) => [variant(r.base), r.level]), [
         [kit.mainHand, 1],
         [kit.body, 1],
       ]);
-      assert.deepEqual(wornOf(l), kit);
+      assert.deepEqual(wornOf(ch), kit);
     });
   }
+});
 
-  it("goes in the create_character transaction", async () => {
-    const { character: c, sig } = await newCharacter("warrior", true);
-    assert.ok((await eventOf(sig, "loadoutCreated")).character.equals(c));
-    assert.deepEqual(wornOf(await fetchLoadout(c)), { mainHand: "sword", body: "leatherArmor" });
-  });
-
-  it("rejects a second loadout", async () => {
+describe("equip and unequip", { skip: SKIP }, () => {
+  it("the owner takes items off and puts them back on", async () => {
     const { owner, character: c } = await newCharacter("warrior");
-    await initLoadout(owner, c);
-    await rejects(initLoadout(owner, c), "already in use");
+
+    const off = await eventOf(await unequip(owner, c, "body"), "itemUnequipped");
+    assert.deepEqual([variant(off.slot), variant(off.base)], ["body", "leatherArmor"]);
+    assert.deepEqual(wornOf(await fetchCharacter(c)), { mainHand: "sword" });
+
+    const on = await eventOf(await equip(owner, c, 1, "body"), "itemEquipped");
+    assert.deepEqual([variant(on.slot), on.itemIndex, variant(on.base), on.replaced], ["body", 1, "leatherArmor", null]);
+    assert.deepEqual(wornOf(await fetchCharacter(c)), { mainHand: "sword", body: "leatherArmor" });
+
+    // Wearing what is already worn reports it as replaced.
+    const again = await eventOf(await equip(owner, c, 0, "mainHand"), "itemEquipped");
+    assert.equal(variant(again.replaced), "sword");
   });
 
-  it("rejects someone who does not own the character", async () => {
-    const { character: c } = await newCharacter("mage");
-    await rejects(initLoadout(await funded(1), c), "NotOwner");
+  it("rejects a slot the item is not made for", async () => {
+    const { owner, character: c } = await newCharacter("mage");
+    await rejects(equip(owner, c, 0, "body"), "WrongSlot");
+    await rejects(equip(owner, c, 1, "mainHand"), "WrongSlot");
+  });
+
+  it("rejects an item the character does not have", async () => {
+    const { owner, character: c } = await newCharacter("support");
+    await rejects(equip(owner, c, 2, "ring1"), "NoSuchItem");
+    await rejects(equip(owner, c, 255, "mainHand"), "NoSuchItem");
+  });
+
+  it("rejects taking off what is not worn", async () => {
+    const { owner, character: c } = await newCharacter("warrior");
+    await rejects(unequip(owner, c, "helmet"), "SlotEmpty");
+    await unequip(owner, c, "mainHand");
+    await rejects(unequip(owner, c, "mainHand"), "SlotEmpty");
   });
 
   it("rejects an account that is not a character", async () => {
@@ -292,97 +291,27 @@ describe("deadroll_items: init_loadout", { skip: SKIP }, () => {
       .accountsStrict({ owner: owner.publicKey, profile, systemProgram: SystemProgram.programId })
       .signers([owner])
       .rpc();
-    await rejects(initLoadout(owner, profile), "InvalidCharacter");
-    await rejects(initLoadout(owner, owner.publicKey), "InvalidCharacter");
-  });
-
-  it("rejects a loadout at another address", async () => {
-    const { owner, character: c } = await newCharacter("warrior");
-    await rejects(initLoadout(owner, c, loadoutOf(Keypair.generate().publicKey)), "ConstraintSeeds");
+    await rejects(equip(owner, profile, 0, "mainHand"), "AccountDiscriminatorMismatch");
   });
 });
 
-describe("deadroll_items: equip and unequip", { skip: SKIP }, () => {
-  it("the owner takes items off and puts them back on", async () => {
-    const { owner, character: c } = await newCharacter("warrior");
-    await initLoadout(owner, c);
-
-    const off = await eventOf(await unequip(owner, c, "body"), "itemUnequipped");
-    assert.deepEqual([variant(off.slot), variant(off.base)], ["body", "leatherArmor"]);
-    assert.deepEqual(wornOf(await fetchLoadout(c)), { mainHand: "sword" });
-
-    const on = await eventOf(await equip(owner, c, 1, "body"), "itemEquipped");
-    assert.deepEqual([variant(on.slot), on.itemIndex, variant(on.base), on.replaced], ["body", 1, "leatherArmor", null]);
-    assert.deepEqual(wornOf(await fetchLoadout(c)), { mainHand: "sword", body: "leatherArmor" });
-
-    // Wearing what is already worn reports it as replaced.
-    const again = await eventOf(await equip(owner, c, 0, "mainHand"), "itemEquipped");
-    assert.equal(variant(again.replaced), "sword");
-  });
-
-  it("rejects a slot the item is not made for", async () => {
-    const { owner, character: c } = await newCharacter("mage");
-    await initLoadout(owner, c);
-    await rejects(equip(owner, c, 0, "body"), "WrongSlot");
-    await rejects(equip(owner, c, 1, "mainHand"), "WrongSlot");
-  });
-
-  it("rejects an item the loadout does not have", async () => {
-    const { owner, character: c } = await newCharacter("support");
-    await initLoadout(owner, c);
-    await rejects(equip(owner, c, 2, "ring1"), "NoSuchItem");
-    await rejects(equip(owner, c, 255, "mainHand"), "NoSuchItem");
-  });
-
-  it("rejects taking off what is not worn", async () => {
-    const { owner, character: c } = await newCharacter("warrior");
-    await initLoadout(owner, c);
-    await rejects(unequip(owner, c, "helmet"), "SlotEmpty");
-    await unequip(owner, c, "mainHand");
-    await rejects(unequip(owner, c, "mainHand"), "SlotEmpty");
-  });
-
-  it("rejects a character without a loadout", async () => {
-    const { owner, character: c } = await newCharacter("warrior");
-    await rejects(equip(owner, c, 0, "mainHand"), "AccountNotInitialized");
-  });
-
-  it("rejects another character's loadout", async () => {
-    const a = await newCharacter("warrior");
-    const b = await newCharacter("warrior");
-    await initLoadout(a.owner, a.character);
-    await initLoadout(b.owner, b.character);
-    await rejects(
-      items.methods
-        .unequip(e("body"))
-        .accountsStrict({ signer: a.owner.publicKey, character: a.character, loadout: loadoutOf(b.character), sessionToken: null })
-        .signers([a.owner])
-        .rpc(),
-      "ConstraintSeeds",
-    );
-  });
-});
-
-describe("deadroll_items: the session key", { skip: SKIP }, () => {
+describe("equip and unequip: the session key", { skip: SKIP }, () => {
   it("equips with the owner's game token (issued for the session program)", async () => {
     const { owner, character: c } = await newCharacter("warrior");
-    await initLoadout(owner, c);
     const key = await funded(1);
     const token = await issueToken(key, owner);
     await unequip(key, c, "body", token);
     await equip(key, c, 1, "body", token);
-    assert.deepEqual(wornOf(await fetchLoadout(c)), { mainHand: "sword", body: "leatherArmor" });
+    assert.deepEqual(wornOf(await fetchCharacter(c)), { mainHand: "sword", body: "leatherArmor" });
   });
 
   it("rejects anyone else without a token", async () => {
-    const { owner, character: c } = await newCharacter("warrior");
-    await initLoadout(owner, c);
+    const { character: c } = await newCharacter("warrior");
     await rejects(unequip(await funded(1), c, "body"), "SessionTokenMissing");
   });
 
   it("rejects a token of another wallet, for another program, or for another key", async () => {
     const { owner, character: c } = await newCharacter("warrior");
-    await initLoadout(owner, c);
     const key = await funded(1);
     const stranger = await funded(1);
     await rejects(unequip(key, c, "body", await issueToken(key, stranger)), "InvalidSessionToken");
@@ -390,12 +319,11 @@ describe("deadroll_items: the session key", { skip: SKIP }, () => {
     const other = await funded(1);
     await rejects(unequip(key, c, "body", await issueToken(other, owner)), "InvalidSessionToken");
     // An account that is not a session token at all.
-    await rejects(unequip(key, c, "body", loadoutOf(c)), "InvalidSessionToken");
+    await rejects(unequip(key, c, "body", c), "InvalidSessionToken");
   });
 
   it("rejects an expired token", async () => {
     const { owner, character: c } = await newCharacter("warrior");
-    await initLoadout(owner, c);
     const key = await funded(1);
     const now = (await connection.getBlockTime(await connection.getSlot())) ?? Math.floor(Date.now() / 1000);
     const token = await issueToken(key, owner, { validUntil: now - 60 });

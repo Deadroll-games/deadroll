@@ -16,6 +16,7 @@ import {
   pendingTargetOf,
   endTurnIx,
   joinSessionIx,
+  setReadyIx,
   mockVrfSigner,
   moveIx,
   startTurnIx,
@@ -26,7 +27,7 @@ import { toHitResolved } from "./hit";
 import { toEffectResolved } from "./support";
 import { Effect } from "./skillcheck";
 import { coders } from "./programs";
-import { gameConfigPda, loadoutPda, monstersPda, participationPda, programIdentityPda, sessionAuthorityPda, sessionTokenPda, skillSetPda } from "./pda";
+import { bagPda, gameConfigPda, monstersPda, participationPda, programIdentityPda, sessionAuthorityPda, sessionTokenPda, skillSetPda } from "./pda";
 import { affordable, pathArgs, reachable, route } from "./route";
 import { explainFailure } from "./send";
 import { Applied, Aspect, Class, HitOutcome, MAP_MAX, ModKind, Tile } from "./types";
@@ -44,7 +45,7 @@ function zero(coder: (typeof coders)["session"], t: IdlType): unknown {
   if ("array" in t) return t.array[0] === "u8" ? new Uint8Array(t.array[1]) : Array.from({ length: t.array[1] }, () => zero(coder, t.array[0]));
   if ("option" in t) return null;
   if ("vec" in t) return [];
-  const def = coder.idl.types.find((x) => x.name === t.defined.name)!;
+  const def = coder.idl.types!.find((x) => x.name === t.defined.name)!;
   if (def.type.kind === "enum") return 0;
   return Object.fromEntries((def.type.fields ?? []).map((f) => [camel(f.name), zero(coder, f.type)]));
 }
@@ -92,13 +93,15 @@ describe("session builders", () => {
     expect(toHex(ix.data as Uint8Array)).toBe(toHex(concat(ixDisc("act"), Uint8Array.of(1, 3))));
     const addrs = ix.accounts!.map((a) => a.address);
     expect(addrs[4]).toBe(await skillSetPda(character));
+    // The bag rides along to the callback, which burns it if the character dies.
+    expect(addrs[5]).toBe(await bagPda(character));
     // No session token: Anchor's None is the program id.
-    expect(addrs[6]).toBe(PROGRAMS.session);
-    expect(addrs.slice(7, 12)).toEqual([await programIdentityPda(), VRF.oracleQueue, VRF.program, VRF.slotHashes, "11111111111111111111111111111111"]);
-    expect(ix.accounts![8]!.role).toBe(AccountRole.WRITABLE);
+    expect(addrs[7]).toBe(PROGRAMS.session);
+    expect(addrs.slice(8, 13)).toEqual([await programIdentityPda(), VRF.oracleQueue, VRF.program, VRF.slotHashes, "11111111111111111111111111111111"]);
+    expect(ix.accounts![9]!.role).toBe(AccountRole.WRITABLE);
     // An enemy target (or a self-cast): no ally account, the trailing optional is None.
-    expect(ix.accounts).toHaveLength(13);
-    expect(ix.accounts![12]).toEqual({ address: PROGRAMS.session, role: AccountRole.READONLY });
+    expect(ix.accounts).toHaveLength(14);
+    expect(ix.accounts![13]).toEqual({ address: PROGRAMS.session, role: AccountRole.READONLY });
   });
 
   it("act: a buff on another ally targets its player slot and passes its participation last", async () => {
@@ -106,7 +109,7 @@ describe("session builders", () => {
     const ally = addrOf(14);
     const ix = await actIx({ signer, token: null }, session, character, 2, 1, ally);
     expect(toHex(ix.data as Uint8Array)).toBe(toHex(concat(ixDisc("act"), Uint8Array.of(2, 1))));
-    expect(ix.accounts![12]).toEqual({ address: ally, role: AccountRole.READONLY });
+    expect(ix.accounts![13]).toEqual({ address: ally, role: AccountRole.READONLY });
   });
 
   it("end_turn for a monster passes None for the participation", async () => {
@@ -116,7 +119,7 @@ describe("session builders", () => {
     expect(toHex(ix.data as Uint8Array)).toBe(toHex(ixDisc("end_turn")));
   });
 
-  it("start_turn: no args, no signer, the participation and character of a player turn", async () => {
+  it("start_turn: no args, no signer, the participation and character of a player turn, its SkillSet and Bag last", async () => {
     const participation = addrOf(13);
     const ix = await startTurnIx(session, { participation, character });
     expect(toHex(ix.data as Uint8Array)).toBe(toHex(ixDisc("start_turn")));
@@ -128,23 +131,47 @@ describe("session builders", () => {
       [await sessionAuthorityPda(), AccountRole.READONLY],
       [await gameConfigPda(), AccountRole.READONLY],
       [PROGRAMS.character, AccountRole.READONLY],
+      // Burned if over-time damage kills.
+      [await skillSetPda(character), AccountRole.WRITABLE],
+      [await bagPda(character), AccountRole.WRITABLE],
     ]);
   });
 
-  it("start_turn for a monster passes None for the participation and the character", async () => {
+  it("start_turn for a monster passes None for the participation, the character, SkillSet and Bag", async () => {
     const ix = await startTurnIx(session, null);
     expect(ix.accounts![2]).toEqual({ address: PROGRAMS.session, role: AccountRole.READONLY });
     expect(ix.accounts![3]).toEqual({ address: PROGRAMS.session, role: AccountRole.READONLY });
+    expect(ix.accounts![7]).toEqual({ address: PROGRAMS.session, role: AccountRole.READONLY });
+    expect(ix.accounts![8]).toEqual({ address: PROGRAMS.session, role: AccountRole.READONLY });
   });
 
-  it("join_session: contribution u64 LE and the actor key; the items loadout last", async () => {
+  it("join_session: contribution u64 LE and the actor key; no CPI, the character read only", async () => {
     const player = await generateKeyPairSigner();
     const ix = await joinSessionIx(player, session, character, 50_000_000n, addrOf(11));
-    expect(ix.accounts!.at(-1)).toEqual({ address: await loadoutPda(character), role: AccountRole.READONLY });
+    expect(ix.accounts![2]).toEqual({ address: character, role: AccountRole.READONLY });
+    expect(ix.accounts!.at(-1)).toEqual({ address: "11111111111111111111111111111111", role: AccountRole.READONLY });
     const amount = new Uint8Array(8);
     new DataView(amount.buffer).setBigUint64(0, 50_000_000n, true);
     expect(toHex(ix.data as Uint8Array)).toBe(toHex(concat(ixDisc("join_session"), amount, A(11))));
     expect(ix.accounts![0]!.role).toBe(AccountRole.WRITABLE_SIGNER);
+  });
+
+  it("set_ready: the flag and the 6-slot selection; the character (w) and its SkillSet for the lock CPI", async () => {
+    const player = await generateKeyPairSigner();
+    const ix = await setReadyIx(player, session, character, true, [0, 1, 2, 3, 4, 5]);
+    expect(toHex(ix.data as Uint8Array)).toBe(toHex(concat(ixDisc("set_ready"), Uint8Array.of(1, 0, 1, 2, 3, 4, 5))));
+    expect(ix.accounts!.map((a) => [a.address, a.role])).toEqual([
+      [player.address, AccountRole.READONLY_SIGNER],
+      [session, AccountRole.WRITABLE],
+      [await participationPda(session, character), AccountRole.WRITABLE],
+      [character, AccountRole.WRITABLE],
+      [await skillSetPda(character), AccountRole.READONLY],
+      [await sessionAuthorityPda(), AccountRole.READONLY],
+      [await gameConfigPda(), AccountRole.READONLY],
+      [PROGRAMS.character, AccountRole.READONLY],
+    ]);
+    const off = await setReadyIx(player, session, character, false, [0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
+    expect(toHex(off.data as Uint8Array)).toBe(toHex(concat(ixDisc("set_ready"), Uint8Array.of(0, 255, 255, 255, 255, 255, 255))));
   });
 
   it("consume_randomness is signed by the mock-vrf identity of programs/session/src/vrf.rs", async () => {
@@ -153,8 +180,10 @@ describe("session builders", () => {
     expect(toHex(ix.data as Uint8Array)).toBe(toHex(concat(ixDisc("consume_randomness"), A(0x5a))));
     expect(ix.accounts![0]!.role).toBe(AccountRole.READONLY_SIGNER);
     expect(ix.accounts![3]!.address).toBe(addrOf(12));
-    expect(ix.accounts).toHaveLength(10);
-    expect(ix.accounts![9]).toEqual({ address: PROGRAMS.session, role: AccountRole.READONLY });
+    // skill_set and bag of that character: burned by mark_dead if the roll kills it.
+    expect(ix.accounts!.slice(5, 7).map((a) => a.role)).toEqual([AccountRole.WRITABLE, AccountRole.WRITABLE]);
+    expect(ix.accounts).toHaveLength(11);
+    expect(ix.accounts![10]).toEqual({ address: PROGRAMS.session, role: AccountRole.READONLY });
   });
 
   it("consume_randomness passes GameSession.pendingTarget, writable, for a heal or buff on an ally", async () => {
@@ -162,7 +191,7 @@ describe("session builders", () => {
     expect(pendingTargetOf({ pendingTarget: DEFAULT_KEY } as never)).toBeNull();
     expect(pendingTargetOf({ pendingTarget: ally } as never)).toBe(ally);
     const ix = await consumeIx(session, addrOf(12), character, A(1), ally);
-    expect(ix.accounts![9]).toEqual({ address: ally, role: AccountRole.WRITABLE });
+    expect(ix.accounts![10]).toEqual({ address: ally, role: AccountRole.WRITABLE });
   });
 });
 
@@ -237,14 +266,17 @@ describe("decoders", () => {
       v.hpMax = 30;
       v.mods[ModKind.Weakening] = mod;
       v.equipment = Uint8Array.of(0, 0xff, 0xff, 3, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff);
+      v.skills = Uint8Array.of(2, 0, 0xff, 5, 1, 3);
     });
     expect(p.back.cooldowns).toHaveLength(16);
-    // cooldowns (16), hp_max (4), mods (6 x 8 bytes), equipment (11).
-    expect(Array.from(p.bytes.subarray(-79, -77))).toEqual([0, 2]);
-    expect(Array.from(p.bytes.subarray(-63, -59))).toEqual([30, 0, 0, 0]);
+    // cooldowns (16), hp_max (4), mods (6 x 8 bytes), equipment (11), skills (6).
+    expect(Array.from(p.bytes.subarray(-85, -83))).toEqual([0, 2]);
+    expect(Array.from(p.bytes.subarray(-69, -65))).toEqual([30, 0, 0, 0]);
     // TimedModData: kind, aspect, turns, power_bp u32, source = 8 bytes.
-    expect(Array.from(p.bytes.subarray(-59 + 8 * 3, -59 + 8 * 4))).toEqual([ModKind.Weakening, Aspect.Blood, 3, 0x08, 0x07, 0, 0, 2]);
-    expect(Array.from(p.bytes.subarray(-11))).toEqual([0, 0xff, 0xff, 3, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
+    expect(Array.from(p.bytes.subarray(-65 + 8 * 3, -65 + 8 * 4))).toEqual([ModKind.Weakening, Aspect.Blood, 3, 0x08, 0x07, 0, 0, 2]);
+    expect(Array.from(p.bytes.subarray(-17, -6))).toEqual([0, 0xff, 0xff, 3, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
+    expect(Array.from(p.bytes.subarray(-6))).toEqual([2, 0, 0xff, 5, 1, 3]);
+    expect(Array.from(p.back.skills)).toEqual([2, 0, 0xff, 5, 1, 3]);
     expect(p.back.hpMax).toBe(30);
     expect(Array.from(p.back.equipment)).toEqual([0, 0xff, 0xff, 3, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
     expect(p.back.mods[ModKind.Weakening]).toEqual({ ...mod, kind: { weakening: {} }, aspect: { blood: {} } });

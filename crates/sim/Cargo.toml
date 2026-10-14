@@ -19,5 +19,5 @@ serde_json = "1"
 [dev-dependencies]
 # Parity test only: the program's own code on the same dice. Anchor is never a normal dependency.
 deadroll-session.workspace = true
+deadroll-registry.workspace = true
 deadroll-character.workspace = true
-deadroll-items.workspace = true

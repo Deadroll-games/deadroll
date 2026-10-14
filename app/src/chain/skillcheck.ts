@@ -46,6 +46,14 @@ export const ACTIVE_MAX = 4;
 export const REACTIVE_MAX = 1;
 export const PASSIVE_MAX = 1;
 export const STARTING_MAX = ACTIVE_MAX + REACTIVE_MAX + PASSIVE_MAX;
+/** An empty slot of a map selection. */
+export const NO_SKILL = 0xff;
+/** Each category's first slot in a map selection and its number of slots (crates/skillcheck SELECTION_SLOTS). */
+export const SELECTION_SLOTS: readonly (readonly [Category, number, number])[] = [
+  [Category.Active, 0, ACTIVE_MAX],
+  [Category.Reactive, ACTIVE_MAX, REACTIVE_MAX],
+  [Category.Passive, ACTIVE_MAX + REACTIVE_MAX, PASSIVE_MAX],
+];
 /** programs/character state/skill_set.rs SKILL_NAME_LEN. */
 export const SKILL_NAME_LEN = 24;
 
@@ -94,7 +102,11 @@ export type SkillError =
   | "ClassPurpose"
   | "TooManyActive"
   | "TooManyReactive"
-  | "TooManyPassive";
+  | "TooManyPassive"
+  | "SelectionUnknownSkill"
+  | "SelectionRepeated"
+  | "SelectionCategory"
+  | "SelectionCount";
 
 /** One plain message per rule, for the builder UI. */
 export const SKILL_ERROR_MESSAGES: Record<SkillError, string> = {
@@ -117,6 +129,10 @@ export const SKILL_ERROR_MESSAGES: Record<SkillError, string> = {
   TooManyActive: `At most ${ACTIVE_MAX} active skills.`,
   TooManyReactive: `At most ${REACTIVE_MAX} reactive skill.`,
   TooManyPassive: `At most ${PASSIVE_MAX} passive skill.`,
+  SelectionUnknownSkill: "The character has no such skill.",
+  SelectionRepeated: "The same skill is chosen twice.",
+  SelectionCategory: "A skill is in a slot of another category.",
+  SelectionCount: `Take ${ACTIVE_MAX} active, ${REACTIVE_MAX} reactive and ${PASSIVE_MAX} passive skills (all of a kind if you have fewer).`,
 };
 
 export const isDebuff = (e: Effect): boolean =>
@@ -186,6 +202,39 @@ export function checkLoadout(categories: readonly Category[]): SkillError | null
   if (n(Category.Reactive) > REACTIVE_MAX) return "TooManyReactive";
   if (n(Category.Passive) > PASSIVE_MAX) return "TooManyPassive";
   return null;
+}
+
+/**
+ * The skills taken onto a map (crates/skillcheck check_map_selection): `owned` is the category of
+ * every SkillSet skill by index; slots 0-3 active, 4 reactive, 5 passive, NO_SKILL = empty.
+ * Each category must hold exactly min(slots, owned of it).
+ */
+export function checkMapSelection(owned: readonly Category[], selection: readonly number[]): SkillError | null {
+  for (let i = 0; i < selection.length; i++) {
+    if (selection[i] !== NO_SKILL && selection.indexOf(selection[i]!, i + 1) !== -1) return "SelectionRepeated";
+  }
+  for (const [category, start, slots] of SELECTION_SLOTS) {
+    let chosen = 0;
+    for (const index of selection.slice(start, start + slots)) {
+      if (index === NO_SKILL) continue;
+      const c = owned[index];
+      if (c === undefined) return "SelectionUnknownSkill";
+      if (c !== category) return "SelectionCategory";
+      chosen++;
+    }
+    if (chosen !== Math.min(slots, owned.filter((c) => c === category).length)) return "SelectionCount";
+  }
+  return null;
+}
+
+/** A full map selection: the first skills of each category in SkillSet order. */
+export function defaultMapSelection(owned: readonly Category[]): number[] {
+  const out: number[] = Array.from({ length: STARTING_MAX }, () => NO_SKILL);
+  for (const [category, start, slots] of SELECTION_SLOTS) {
+    const mine = owned.flatMap((c, i) => (c === category ? [i] : [])).slice(0, slots);
+    mine.forEach((index, k) => (out[start + k] = index));
+  }
+  return out;
 }
 
 export type Derived = { sharesBp: [number, number, number]; powerBp: number; fusion: number; cooldown: number };
