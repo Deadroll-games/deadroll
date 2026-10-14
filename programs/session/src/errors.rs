@@ -110,6 +110,13 @@ pub enum SessionError {
     UnexpectedAllyAccount,
     #[msg("Only the character's owner or their session key can claim its rewards")]
     NotRewardOwner,
+    /// No longer raised (the items `Loadout` is gone); the code stays reserved.
     #[msg("Not the character's items loadout")]
     InvalidLoadout,
+    #[msg("This skill was not taken onto the map (set_ready selection)")]
+    SkillNotSelected,
+    #[msg("Already in that ready state")]
+    ReadyUnchanged,
+    #[msg("A death needs the character's SkillSet and Bag")]
+    DeathAccountsMissing,
 }

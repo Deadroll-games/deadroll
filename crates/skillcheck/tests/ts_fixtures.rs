@@ -2,7 +2,8 @@
 //! Test-only: no crate logic lives here.
 //!
 //! The test builds the expected `validate`, `validate_starting` (every class), `derive` and
-//! `check_loadout` results for the presets, plus a seeded set of random blocks and loadouts, and
+//! `check_loadout` results for the presets, plus a seeded set of random blocks, loadouts and map
+//! selections (`check_map_selection`), and
 //! compares them with the committed JSON. When a rule changes, regenerate it and update the TS mirror:
 //!
 //! ```text
@@ -16,13 +17,15 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use deadroll_skillcheck::{
-    check_loadout, derive, presets, validate, validate_starting, Category, Effect, Purpose,
-    SkillBlocks, SkillError, Target, Trigger, SKILL_ASPECTS_MAX,
+    check_loadout, check_map_selection, derive, presets, validate, validate_starting, Category,
+    Effect, MapSelection, Purpose, SkillBlocks, SkillError, Target, Trigger, NO_SKILL,
+    SELECTION_SLOTS, SKILL_ASPECTS_MAX, STARTING_MAX,
 };
 use deadroll_types::{Aspect, Class, Form, Source};
 
 const RANDOM_SKILLS: usize = 2_000;
 const RANDOM_LOADOUTS: usize = 200;
+const RANDOM_SELECTIONS: usize = 400;
 /// Fixed seed; changing it rewrites the fixture.
 const SEED: u64 = 0xD3AD_0011_5EED_0001;
 
@@ -213,6 +216,45 @@ fn build() -> (String, Vec<String>) {
         ));
     }
     out += &lines.join(",\n");
+    out += "\n],\n\"selections\":[\n";
+    let mut lines = Vec::with_capacity(RANDOM_SELECTIONS);
+    for _ in 0..RANDOM_SELECTIONS {
+        let owned: Vec<Category> = (0..rng.below(10))
+            .map(|_| Category::ALL[rng.below(Category::COUNT)])
+            .collect();
+        // A valid selection (the first skills of each category), then maybe a mutation.
+        let mut sel: MapSelection = [NO_SKILL; STARTING_MAX];
+        for (category, start, slots) in SELECTION_SLOTS {
+            let mine = owned.iter().enumerate().filter(|(_, c)| **c == category);
+            for (slot, (index, _)) in sel[start..start + slots].iter_mut().zip(mine) {
+                *slot = index as u8;
+            }
+        }
+        if rng.chance(60) {
+            let a = rng.below(STARTING_MAX);
+            if rng.chance(50) {
+                sel.swap(a, rng.below(STARTING_MAX));
+            } else {
+                let v = rng.below(owned.len() + 3);
+                sel[a] = if v == owned.len() + 2 {
+                    NO_SKILL
+                } else {
+                    v as u8
+                };
+            }
+        }
+        let r = check_map_selection(&owned, &sel);
+        note(r);
+        let list: Vec<String> = owned.iter().map(|c| (*c as u8).to_string()).collect();
+        let picked: Vec<String> = sel.iter().map(|i| i.to_string()).collect();
+        lines.push(format!(
+            "{{\"categories\":[{}],\"selection\":[{}],\"result\":{}}}",
+            list.join(","),
+            picked.join(","),
+            result(r)
+        ));
+    }
+    out += &lines.join(",\n");
     out += "\n]\n}\n";
     (out, covered)
 }
@@ -242,6 +284,10 @@ fn ts_fixtures_are_current() {
         "TooManyActive",
         "TooManyReactive",
         "TooManyPassive",
+        "SelectionUnknownSkill",
+        "SelectionRepeated",
+        "SelectionCategory",
+        "SelectionCount",
     ];
     let missing: Vec<&str> = all
         .iter()

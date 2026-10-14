@@ -1,6 +1,7 @@
-//! Deadroll character: player profiles, characters, skills, bag.
+//! Deadroll character: player profiles, characters (with their gear), skills, bag.
 use anchor_lang::prelude::*;
 
+pub mod auth;
 // Outgoing CPI wrappers. Not named `cpi`: `#[program]` generates a crate-level `cpi` module.
 pub mod cpi_out;
 pub mod errors;
@@ -10,8 +11,9 @@ pub mod rules;
 pub mod state;
 pub mod trust;
 
+use deadroll_types::EquipSlot;
 use instructions::*;
-use state::RESOURCE_KINDS;
+use state::{MAP_SKILLS, RESOURCE_KINDS};
 
 declare_id!("9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL");
 
@@ -24,8 +26,9 @@ pub mod deadroll_character {
         create_profile::handler(ctx)
     }
 
-    /// Race, class, predisposition, stats, appearance and up to 6 starting skills, plus the Core
-    /// NFT (feature `nft`). Creates `Character`, `SkillSet` and `Bag`.
+    /// Race, class, predisposition, stats, appearance, up to 6 starting skills and the class
+    /// starter items (worn), plus the Core NFT (feature `nft`). Creates `Character`, `SkillSet`
+    /// and `Bag`.
     pub fn create_character(
         ctx: Context<CreateCharacter>,
         args: CreateCharacterArgs,
@@ -33,9 +36,25 @@ pub mod deadroll_character {
         create_character::handler(ctx, args)
     }
 
-    /// Session only (CPI at `join_session`): locks a living character into `session`.
-    pub fn lock_for_session(ctx: Context<LockForSession>, session: Pubkey) -> Result<()> {
-        lock_for_session::handler(ctx, session)
+    /// Owner or their session key: wears soulbound item `item_index` in `slot`. Not while the
+    /// character is in a session.
+    pub fn equip(ctx: Context<Equip>, item_index: u8, slot: EquipSlot) -> Result<()> {
+        equip::handler(ctx, item_index, slot)
+    }
+
+    /// Owner or their session key: empties `slot`. Not while the character is in a session.
+    pub fn unequip(ctx: Context<Unequip>, slot: EquipSlot) -> Result<()> {
+        unequip::handler(ctx, slot)
+    }
+
+    /// Session only (CPI at `set_ready(true)`): checks the skills taken onto the map and locks
+    /// a living character into `session`, which freezes its bag and gear.
+    pub fn lock_for_session(
+        ctx: Context<LockForSession>,
+        session: Pubkey,
+        selection: [u8; MAP_SKILLS],
+    ) -> Result<()> {
+        lock_for_session::handler(ctx, session, selection)
     }
 
     /// Session only: adds XP (level-ups) and resources to a locked, living character.
@@ -47,12 +66,14 @@ pub mod deadroll_character {
         grant_rewards::handler(ctx, xp, resources)
     }
 
-    /// Session only: the character dies and becomes a tombstone. No outgoing CPI.
+    /// Session only: the character dies and becomes a tombstone; its skills, bag and soulbound
+    /// items burn. No outgoing CPI.
     pub fn mark_dead(ctx: Context<MarkDead>) -> Result<()> {
         mark_dead::handler(ctx)
     }
 
-    /// Session only: releases the character from its session.
+    /// Session only: releases the character from its session (`set_ready(false)`, or the end of
+    /// the party).
     pub fn unlock(ctx: Context<Unlock>) -> Result<()> {
         unlock::handler(ctx)
     }

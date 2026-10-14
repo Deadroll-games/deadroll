@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { defaultMapSelection, NO_SKILL, type Category } from "../../chain/skillcheck";
 import { className, raceName } from "../../chain/names";
 import { formatSol, shortAddress } from "./format";
+import { MapSkillPicker, selectionError, selectionOf } from "./MapSkillPicker";
 import type { PartyLobbyProps } from "./types";
 import "./forms.css";
 
@@ -10,6 +12,24 @@ export function PartyLobby(p: PartyLobbyProps) {
   const full = p.players.length >= p.maxPlayers;
   const allReady = p.players.length > 0 && p.players.every((player) => player.ready);
   const me = p.players.find((player) => player.slot === p.mySlot);
+  // The map selection starts full (the first skills of each kind); the player may swap them.
+  const skills = p.mySkills ?? [];
+  const skillsKey = skills.map((s) => `${s.index}:${s.category}`).join(",");
+  const [checked, setChecked] = useState<ReadonlySet<number>>(new Set());
+  useEffect(() => {
+    const owned: Category[] = [];
+    for (const s of skills) owned[s.index] = s.category;
+    setChecked(new Set(defaultMapSelection(owned).filter((i) => i !== NO_SKILL)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [skillsKey]);
+  const toggle = (index: number) =>
+    setChecked((c) => {
+      const next = new Set(c);
+      if (!next.delete(index)) next.add(index);
+      return next;
+    });
+  const selection = selectionOf(skills, checked);
+  const pickError = p.mySkills ? selectionError(skills, selection) : null;
   const selected = p.myCharacters.some((character) => character.address === picked)
     ? picked
     : (p.myCharacters[0]?.address ?? "");
@@ -84,15 +104,21 @@ export function PartyLobby(p: PartyLobbyProps) {
         ) : null}
 
         {p.role === "player" ? (
-          <button
-            type="button"
-            className="btn primary"
-            disabled={locked || !me}
-            aria-pressed={Boolean(me?.ready)}
-            onClick={() => p.onReady(!me?.ready)}
-          >
-            {me?.ready ? "Not ready" : "Ready"}
-          </button>
+          <>
+            {!me?.ready && p.mySkills ? (
+              <MapSkillPicker skills={p.mySkills} checked={checked} disabled={locked} onToggle={toggle} />
+            ) : null}
+            {!me?.ready && pickError ? <p className="error">{pickError}</p> : null}
+            <button
+              type="button"
+              className="btn primary"
+              disabled={locked || !me || (!me.ready && pickError !== null)}
+              aria-pressed={Boolean(me?.ready)}
+              onClick={() => p.onReady(!me?.ready, selection)}
+            >
+              {me?.ready ? "Not ready" : "Ready"}
+            </button>
+          </>
         ) : null}
 
         {p.role === "dm" ? (

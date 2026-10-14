@@ -24,7 +24,7 @@ pub const PROGRAMS_COUNT: usize = 7;
 pub const STATS_COUNT: usize = 4;
 /// Bytes reserved for the NFT metadata uri prefix in `GameConfig`.
 pub const URI_BASE_LEN: usize = 64;
-/// Soulbound item records in a `Loadout` (class starter items, docs/ITEMS_AND_CRAFT.md, 10).
+/// Soulbound item records of a character (class starter items, docs/ITEMS_AND_CRAFT.md, 10).
 pub const SOULBOUND_MAX: usize = 4;
 /// Equipment slots, indexed by `EquipSlot` (`EquipSlot::COUNT`).
 pub const EQUIP_SLOTS: usize = 11;

@@ -59,7 +59,7 @@ import { toHitResolved } from "../chain/hit";
 import { bestiaryName, playerCritChanceBp } from "../chain/names";
 import { errorName } from "../chain/send";
 import { statusLabel, type SubStatus } from "../chain/subscribe";
-import { cooldownLabel, skillCooldowns, skillUsedText, skipText, startTurnFor, tickText, turnActed, turnStarted } from "../chain/turns";
+import { cooldownLabel, skillCooldowns, skillUsedText, skipText, startTurnFor, takenOntoMap, tickText, turnActed, turnStarted } from "../chain/turns";
 import { skillSetPda } from "../chain/pda";
 import { affordable, cheb, reachable, route, type Step } from "../chain/route";
 import { useAutoFreezeTombstone } from "../chain/useAutoFreezeTombstone";
@@ -480,8 +480,9 @@ function PartyView({ address }: { address: Address }) {
   // One attack or active skill per turn; movement spends the AP left before or after it.
   const acted = !!s && turnActed(s);
   const canAttack = canMove && !acted;
-  // Active skills of the current player; one on cooldown cannot be picked, the weapon never is.
-  const activeSkills = activePlayer ? (skillNames[activePlayer.character] ?? []).filter((k) => k.usable) : [];
+  // Active skills the current player took onto the map; one on cooldown cannot be picked, the
+  // weapon never is.
+  const activeSkills = activePlayer ? (skillNames[activePlayer.character] ?? []).filter((k) => k.usable && takenOntoMap(activePlayer.part, k.slot)) : [];
   const cooldowns = activePlayer && s ? skillCooldowns(activePlayer.part, events, activePlayer.slot, s.turnSeq) : [];
   const chosen = activeSkills.find((k) => k.slot === skill && !cooldowns[k.slot]) ?? null;
   const chosenSkill = chosen ? chosen.slot : BASE_ATTACK;
@@ -701,9 +702,10 @@ function PartyView({ address }: { address: Address }) {
           myCharacters={joinable}
           onJoin={(c) => void join(c)}
           joinLamports={contribution}
-          onReady={(ready) =>
+          mySkills={myJoined ? (skillNames[myJoined.character] ?? []).map((k) => ({ index: k.slot, name: k.name, category: k.category })) : undefined}
+          onReady={(ready, selection) =>
             myJoined &&
-            void send(ready ? "set_ready" : "set_ready(false)", wallet.signer, async () => [await setReadyIx(wallet.signer!, address, myJoined.character, ready)]).then(
+            void send(ready ? "set_ready" : "set_ready(false)", wallet.signer, async () => [await setReadyIx(wallet.signer!, address, myJoined.character, ready, selection)]).then(
               (r) => r && ingest(r.signature, r.events),
             )
           }

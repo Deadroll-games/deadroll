@@ -15,7 +15,6 @@ import { MPL_CORE_PROGRAM, PROGRAMS, SYSTEM_PROGRAM, VRF } from "../config";
 import { client } from "../wallet/client";
 import { characterAppearance } from "./appearance";
 import { fromBase64, sha256 } from "./bytes";
-import { initLoadoutIx } from "./items";
 import { buildInstruction, coders } from "./programs";
 import {
   bagPda,
@@ -24,7 +23,6 @@ import {
   escrowPda,
   gameConfigPda,
   layoutPda,
-  loadoutPda,
   mapPda,
   monstersPda,
   participationPda,
@@ -123,12 +121,20 @@ export type ParticipationAcc = {
   contribution: bigint;
   /** Per SkillSet slot: own turn starts until the skill is usable again, 0 = usable. */
   cooldowns: Uint8Array;
-  /** The character's maximum HP, copied at join_session (heals stop here). */
+  /** The character's maximum HP with its gear, copied at set_ready (heals stop here). */
   hpMax: number;
   /** Buffs and debuffs on this player (one per kind, any slot: read them with support.ts activeMods). */
   mods: TimedModAcc[];
-  /** What the character wears, `ItemBase` bytes by `EquipSlot` (0xFF = none), copied from its items loadout at join_session. */
+  /** What the character wears, `ItemBase` bytes by `EquipSlot` (0xFF = none), copied from `Character.gear` at set_ready. */
   equipment: Uint8Array;
+  /** Skills taken onto the map, SkillSet indexes: 0-3 active, 4 reactive, 5 passive (0xFF = empty). Set by set_ready. */
+  skills: Uint8Array;
+};
+/** programs/character `Gear`: soulbound starter items and what is worn, by `EquipSlot`. */
+export type GearAcc = {
+  items: { base: Enum; level: number }[];
+  itemCount: number;
+  equipped: { source: Enum; index: number; asset: Address }[];
 };
 export type CharacterAcc = {
   core: {
@@ -150,6 +156,7 @@ export type CharacterAcc = {
   name: Uint8Array;
   unspentPoints: number;
   nftFrozen: boolean;
+  gear: GearAcc;
 };
 /** programs/character SkillRecord: crates/skillcheck SkillBlocks + derived values. */
 export type SkillRecordAcc = {
@@ -275,13 +282,13 @@ export function createProfileIx(owner: TransactionSigner, profile: Address): Ins
 }
 
 /**
- * create_profile if missing, then create_character with a fresh Core NFT asset keypair and the
- * items loadout with the class starter kit (`loadoutIx`, sent in the same transaction as `ix`).
+ * create_profile if missing, then create_character with a fresh Core NFT asset keypair. The class
+ * starter items come with the character (`Character.gear`), worn.
  */
 export async function createCharacterIxs(
   owner: TransactionSigner,
   c: NewCharacter,
-): Promise<{ profileIx: Instruction | null; ix: Instruction; loadoutIx: Instruction; character: Address; asset: KeyPairSigner }> {
+): Promise<{ profileIx: Instruction | null; ix: Instruction; character: Address; asset: KeyPairSigner }> {
   const profile = await profilePda(owner.address);
   const prof = await getAccount<{ characterCount: number }>("character", "PlayerProfile", profile);
   const index = prof?.characterCount ?? 0;
@@ -309,7 +316,7 @@ export async function createCharacterIxs(
     mplCoreProgram: MPL_CORE_PROGRAM,
     systemProgram: SYSTEM_PROGRAM,
   });
-  return { profileIx: prof ? null : createProfileIx(owner, profile), ix, loadoutIx: await initLoadoutIx(owner, character), character, asset };
+  return { profileIx: prof ? null : createProfileIx(owner, profile), ix, character, asset };
 }
 
 /** All characters of `owner`, by profile count (indices 0..count). */
@@ -431,17 +438,33 @@ export async function joinSessionIx(player: TransactionSigner, session: Address,
       participation: await participationPda(session, character),
       stash: await stashPda(session, character),
       escrow: await escrowPda(session),
-      sessionAuthority: await sessionAuthorityPda(),
-      config: await gameConfigPda(),
-      characterProgram: PROGRAMS.character,
       systemProgram: SYSTEM_PROGRAM,
-      loadout: await loadoutPda(character),
     },
   );
 }
 
-export async function setReadyIx(player: TransactionSigner, session: Address, character: Address, ready: boolean): Promise<Instruction> {
-  return buildInstruction("session", "set_ready", { ready }, { player, session, participation: await participationPda(session, character) });
+/**
+ * Ready (true): takes `selection` onto the map (SkillSet indexes, 4 active + 1 reactive + 1 passive,
+ * NO_SKILL = empty; skillcheck.ts checkMapSelection) and locks the character, which freezes its bag
+ * and gear for the party. Unready (false) unlocks it; the selection is ignored.
+ */
+export async function setReadyIx(
+  player: TransactionSigner,
+  session: Address,
+  character: Address,
+  ready: boolean,
+  selection: readonly number[],
+): Promise<Instruction> {
+  return buildInstruction("session", "set_ready", { ready, selection: Uint8Array.from(selection) }, {
+    player,
+    session,
+    participation: await participationPda(session, character),
+    character,
+    skillSet: await skillSetPda(character),
+    sessionAuthority: await sessionAuthorityPda(),
+    config: await gameConfigPda(),
+    characterProgram: PROGRAMS.character,
+  });
 }
 
 export async function startSessionIx(dm: TransactionSigner, session: Address): Promise<Instruction> {
@@ -490,6 +513,7 @@ export async function actIx(
       participation: await participationPda(session, character),
       character,
       skillSet: await skillSetPda(character),
+      bag: await bagPda(character),
       monsters: await monstersPda(session),
       sessionToken: actor.token,
       ...(await vrfAccounts()),
@@ -522,6 +546,9 @@ export async function startTurnIx(session: Address, player: { participation: Add
     sessionAuthority: await sessionAuthorityPda(),
     config: await gameConfigPda(),
     characterProgram: PROGRAMS.character,
+    // Burned if over-time damage kills the player.
+    skillSet: player ? await skillSetPda(player.character) : null,
+    bag: player ? await bagPda(player.character) : null,
   });
 }
 
@@ -546,6 +573,8 @@ export async function monsterActIx(dmActor: Actor, session: Address, monster: nu
       monsters: await monstersPda(session),
       participation: await participationPda(session, targetCharacter),
       character: targetCharacter,
+      skillSet: await skillSetPda(targetCharacter),
+      bag: await bagPda(targetCharacter),
       sessionToken: dmActor.token,
       ...(await vrfAccounts()),
     },
@@ -611,6 +640,7 @@ export async function consumeIx(
     participation: pendingParticipation,
     character,
     skillSet: await skillSetPda(character),
+    bag: await bagPda(character),
     sessionAuthority: await sessionAuthorityPda(),
     config: await gameConfigPda(),
     characterProgram: PROGRAMS.character,

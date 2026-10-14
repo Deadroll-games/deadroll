@@ -16,6 +16,7 @@ import {
   variantKey,
   variantLabel,
   type CharacterAcc,
+  type GearAcc,
   type SkillRecordAcc,
   type SkillSetAcc,
 } from "../chain/game";
@@ -23,14 +24,11 @@ import {
   EQUIP_SLOTS,
   bonusText,
   equipIx,
-  getLoadout,
-  initLoadoutIx,
   inventory,
   itemLabel,
   itemRequest,
   slotsFor,
   unequipIx,
-  type LoadoutAcc,
 } from "../chain/items";
 import { useTx } from "../chain/useTx";
 import { Inventory } from "../components/items/Inventory";
@@ -47,13 +45,12 @@ import { SpriteCanvas } from "../raster/SpriteCanvas";
 /** Where this character is right now, read from the party it is in. */
 export type PartyInfo = { session: Address; status: string; slot: number; hp: number } | null;
 
-/** Equipment slots (`EquipSlot` from the items IDL, docs/ART_DESCRIPTION.md 6.3). */
+/** Equipment slots (`EquipSlot` from the character IDL, docs/ART_DESCRIPTION.md 6.3). */
 export const EQUIPMENT_SLOTS = EQUIP_SLOTS.map((key) => ({ key, label: itemLabel(key) }));
 
-/** The loadout as the inventory panel shows it; null when the character has none. */
-export function inventoryView(l: LoadoutAcc | null): InventoryItemView[] | null {
-  if (!l) return null;
-  return inventory(l).items.map((i) => ({
+/** The character's gear as the inventory panel shows it. */
+export function inventoryView(g: GearAcc): InventoryItemView[] {
+  return inventory(g).items.map((i) => ({
     index: i.index,
     base: i.base,
     label: itemLabel(i.base),
@@ -66,7 +63,7 @@ export function inventoryView(l: LoadoutAcc | null): InventoryItemView[] | null 
 
 /** The panel's state for a character: who may change it, and when not. */
 export function inventoryLock(c: CharacterAcc, viewer: Address | null): string | null {
-  if (!c.core.alive) return "A tombstone keeps what it wore.";
+  if (!c.core.alive) return "A tombstone: its soulbound items vanished with it.";
   if (viewer !== c.core.owner) return "Only the owner can change the equipment.";
   if (c.core.inSession) return "In a party: the equipment is locked until it ends.";
   return null;
@@ -99,7 +96,6 @@ export function CharacterDetailPage() {
   const [c, setC] = useState<CharacterAcc | null | "missing">(null);
   const [skills, setSkills] = useState<SkillRecordAcc[]>([]);
   const [party, setParty] = useState<PartyInfo>(null);
-  const [loadout, setLoadout] = useState<LoadoutAcc | null>(null);
   const [error, setError] = useState<string | null>(null);
   const wallet = useAppWallet();
   const sk = useSessionKey();
@@ -109,13 +105,11 @@ export function CharacterDetailPage() {
     if (DATA_SOURCE !== "chain" || !address) return;
     const addr = address as Address;
     try {
-      const [acc, set, items] = await Promise.all([
+      const [acc, set] = await Promise.all([
         getAccount<CharacterAcc>("character", "Character", addr),
         getAccount<SkillSetAcc>("character", "SkillSet", await skillSetPda(addr)),
-        getLoadout(addr),
       ]);
       setC(acc ?? "missing");
-      setLoadout(items);
       setSkills(set ? set.skills.slice(0, set.count) : []);
       const session = acc?.core.inSession ?? null;
       if (session) {
@@ -142,15 +136,11 @@ export function CharacterDetailPage() {
     c && c !== "missing"
       ? {
           slots: EQUIPMENT_SLOTS,
-          items: inventoryView(loadout),
+          items: inventoryView(c.gear),
           locked: inventoryLock(c, wallet.address ?? null),
           busy: busy !== null,
           onEquip: (index, slot) => void act(`Wear in ${itemLabel(slot)}`, () => equipIx(actor.signer!, addr, index, slot, actor.token)),
           onUnequip: (slot) => void act(`Take off ${itemLabel(slot)}`, () => unequipIx(actor.signer!, addr, slot, actor.token)),
-          onCreate: () =>
-            void (async () => {
-              if (wallet.signer && (await send("Class starter kit", wallet.signer, async () => [await initLoadoutIx(wallet.signer!, addr)]))) await load();
-            })(),
         }
       : null;
 

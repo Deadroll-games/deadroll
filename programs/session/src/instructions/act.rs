@@ -37,8 +37,21 @@ pub struct Act<'info> {
     /// CHECK: the participation's `Character`, decoded by the callback (passed on to it here).
     #[account(address = participation.core.character @ SessionError::InvalidCharacter)]
     pub character: UncheckedAccount<'info>,
-    /// CHECK: the character's `SkillSet`, checked by `read_skill` (any account for `BASE_ATTACK`).
+    /// CHECK: the character's `SkillSet` (address from the seeds); its skills are read by
+    /// `read_skill`, and the callback burns it if the character dies.
+    #[account(
+        seeds = [seeds::SKILLS, participation.core.character.as_ref()],
+        bump,
+        seeds::program = deadroll_character::ID,
+    )]
     pub skill_set: UncheckedAccount<'info>,
+    /// CHECK: the character's `Bag` (address from the seeds), passed on to the callback.
+    #[account(
+        seeds = [seeds::BAG, participation.core.character.as_ref()],
+        bump,
+        seeds::program = deadroll_character::ID,
+    )]
+    pub bag: UncheckedAccount<'info>,
     /// Read-only, never Borsh-decoded: owner and discriminator checked here, session in `Monsters`.
     pub monsters: LazyAccount<'info, MonsterState>,
     /// CHECK: MagicBlock `SessionTokenV2`, checked in `auth::check_actor`.
@@ -104,6 +117,11 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
     let skill = if skill_slot == BASE_ATTACK {
         None
     } else {
+        // Only the active skills taken onto this map (docs/SKILL_BUILDER.md, 3.4).
+        require!(
+            participation.active_selected(skill_slot),
+            SessionError::SkillNotSelected
+        );
         let skill = read_skill(
             &accounts.skill_set,
             &participation.core.character,
@@ -224,6 +242,7 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
             participation: participation.key(),
             character: accounts.character.key(),
             skill_set: accounts.skill_set.key(),
+            bag: accounts.bag.key(),
             target_participation: (pending_target != Pubkey::default()).then_some(pending_target),
         },
     )?;

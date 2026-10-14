@@ -10,7 +10,7 @@
     "test:map": "node --import tsx --test map.test.ts",
     "test:session": "node --import tsx --test session.test.ts",
     "test:demo": "node --import tsx --test demo.test.ts",
-    "test:items": "node --import tsx --test items.test.ts"
+    "test:gear": "node --import tsx --test gear.test.ts"
   },
   "devDependencies": {
     "@anchor-lang/core": "1.2.1",

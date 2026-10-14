@@ -181,7 +181,7 @@ shared! {
         pub bump: u8,
     }
 
-    /// A soulbound item record of a loadout (a class starter item).
+    /// A soulbound item record (a class starter item), in `deadroll_character` `Gear`.
     #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
     pub struct ItemRecord {
         pub base: ItemBase,
@@ -190,7 +190,8 @@ shared! {
     }
 
     /// What one equipment slot holds. `index` is the soulbound record for `Soulbound`; `asset`
-    /// is the item NFT for `Asset` (crafting, later), default otherwise.
+    /// is the item NFT for `Asset` (crafting, later), default otherwise. In `deadroll_character`
+    /// `Gear`.
     #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
     pub struct EquipRef {
         pub source: EquipSource,
@@ -198,7 +199,9 @@ shared! {
         pub asset: Pubkey,
     }
 
-    /// items `["loadout", character]`: the soulbound items and what is worn, by slot.
+    /// items `["loadout", character]`: the soulbound items and what is worn, by slot. Not used
+    /// since patch 1: the gear lives in the character account (`deadroll_character` `Gear`).
+    /// Kept because this crate only grows.
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub struct LoadoutData {
         pub version: u8,

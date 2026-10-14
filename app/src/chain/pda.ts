@@ -23,7 +23,6 @@ export const characterPda = (owner: Address, index: number) =>
 export const profilePda = (owner: Address) => pda(PROGRAMS.character, ["profile", enc.encode(owner) as Uint8Array]);
 export const skillSetPda = (character: Address) => pda(PROGRAMS.character, ["skills", enc.encode(character) as Uint8Array]);
 export const bagPda = (character: Address) => pda(PROGRAMS.character, ["bag", enc.encode(character) as Uint8Array]);
-export const loadoutPda = (character: Address) => pda(PROGRAMS.items, ["loadout", enc.encode(character) as Uint8Array]);
 
 export const bestiaryPda = () => pda(PROGRAMS.registry, ["bestiary"]);
 export const tilesetPda = () => pda(PROGRAMS.registry, ["tileset"]);

@@ -2,9 +2,8 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Address } from "@solana/kit";
-import { variantLabel, type CharacterAcc, type SkillRecordAcc } from "../chain/game";
+import { variantLabel, type CharacterAcc, type GearAcc, type SkillRecordAcc } from "../chain/game";
 import { CharacterDetailView, EQUIPMENT_SLOTS, inventoryLock, inventoryView, skillAspects, usableInCombat, type PartyInfo } from "./CharacterDetail";
-import type { LoadoutAcc } from "../chain/items";
 
 vi.mock("../raster/RasterizerProvider", () => ({ useRenderImage: () => ({ image: null, error: null }) }));
 
@@ -64,6 +63,7 @@ function character(over: Partial<CharacterAcc["core"]> = {}, frozen = false): Ch
     name: new TextEncoder().encode("Aria"),
     unspentPoints: 0,
     nftFrozen: frozen,
+    gear: gear(),
   };
 }
 
@@ -127,30 +127,24 @@ describe("CharacterDetailView", () => {
   });
 });
 
-function loadout(): LoadoutAcc {
+function gear(): GearAcc {
   const empty = { source: e("empty"), index: 0, asset: ADDR };
   return {
-    core: {
-      version: 1,
-      character: ADDR,
-      owner: ADDR,
-      items: [
-        { base: e("staff"), level: 1 },
-        { base: e("robe"), level: 1 },
-        { base: e("sword"), level: 0 },
-        { base: e("sword"), level: 0 },
-      ],
-      itemCount: 2,
-      equipped: EQUIPMENT_SLOTS.map((s) => (s.key === "mainHand" ? { source: e("soulbound"), index: 0, asset: ADDR } : empty)),
-      bump: 255,
-    },
+    items: [
+      { base: e("staff"), level: 1 },
+      { base: e("robe"), level: 1 },
+      { base: e("sword"), level: 0 },
+      { base: e("sword"), level: 0 },
+    ],
+    itemCount: 2,
+    equipped: EQUIPMENT_SLOTS.map((s) => (s.key === "mainHand" ? { source: e("soulbound"), index: 0, asset: ADDR } : empty)),
   };
 }
 
 describe("inventory", () => {
   it("lists the soulbound items, what they give and where they are worn", () => {
-    expect(inventoryView(null)).toBeNull();
-    expect(inventoryView(loadout())).toEqual([
+    expect(inventoryView({ ...gear(), itemCount: 0 })).toEqual([]);
+    expect(inventoryView(gear())).toEqual([
       { index: 0, base: "staff", label: "Staff", level: 1, bonus: "damage Blunt 3-6", fits: ["mainHand"], worn: "mainHand" },
       { index: 1, base: "robe", label: "Robe", level: 1, bonus: "+2 armor", fits: ["body"], worn: null },
     ]);
@@ -175,21 +169,20 @@ describe("inventory", () => {
           c={character()}
           skills={[]}
           party={null}
-          items={{ slots: EQUIPMENT_SLOTS, items: inventoryView(loadout()), locked: null, busy: false, onEquip, onUnequip }}
+          items={{ slots: EQUIPMENT_SLOTS, items: inventoryView(gear()), locked: null, busy: false, onEquip, onUnequip }}
         />
       </MemoryRouter>,
     );
     expect(screen.getByTestId("slot-mainHand").textContent).toContain("Staff");
     expect(screen.getByTestId("slot-body").textContent).toContain("empty");
-    expect(screen.getByText("in the bag")).toBeTruthy();
+    expect(screen.getByText("not worn")).toBeTruthy();
     screen.getByRole("button", { name: "Wear" }).click();
     expect(onEquip).toHaveBeenCalledWith(1, "body");
     screen.getByRole("button", { name: "Take off" }).click();
     expect(onUnequip).toHaveBeenCalledWith("mainHand");
   });
 
-  it("locked: the buttons are off and say why; no loadout offers the starter kit", () => {
-    const onCreate = vi.fn();
+  it("locked: the buttons are off and say why; a tombstone has no items left", () => {
     render(
       <MemoryRouter>
         <CharacterDetailView
@@ -197,7 +190,7 @@ describe("inventory", () => {
           c={character()}
           skills={[]}
           party={null}
-          items={{ slots: EQUIPMENT_SLOTS, items: inventoryView(loadout()), locked: "In a party: the equipment is locked until it ends.", busy: false, onEquip: vi.fn(), onUnequip: vi.fn() }}
+          items={{ slots: EQUIPMENT_SLOTS, items: inventoryView(gear()), locked: "In a party: the equipment is locked until it ends.", busy: false, onEquip: vi.fn(), onUnequip: vi.fn() }}
         />
       </MemoryRouter>,
     );
@@ -209,14 +202,15 @@ describe("inventory", () => {
       <MemoryRouter>
         <CharacterDetailView
           address={ADDR}
-          c={character()}
+          c={character({ alive: false })}
           skills={[]}
           party={null}
-          items={{ slots: EQUIPMENT_SLOTS, items: null, locked: null, busy: false, onEquip: vi.fn(), onUnequip: vi.fn(), onCreate }}
+          items={{ slots: EQUIPMENT_SLOTS, items: [], locked: inventoryLock(character({ alive: false }), ADDR), busy: false, onEquip: vi.fn(), onUnequip: vi.fn() }}
         />
       </MemoryRouter>,
     );
-    screen.getByRole("button", { name: "Get the class starter kit" }).click();
-    expect(onCreate).toHaveBeenCalled();
+    expect(screen.getByText(/vanished with it/)).toBeTruthy();
+    expect(screen.getByText("No items.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Take off" })).toBeNull();
   });
 });

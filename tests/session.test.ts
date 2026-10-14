@@ -45,7 +45,6 @@ const SESSION = program.programId;
 const CHARACTER = new PublicKey("9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL");
 const MAP = new PublicKey("2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH");
 const REGISTRY = new PublicKey("dZ1jraMfS3bAUTkRw2TA1ddg8UDGzgUdFQz5pmBxjoG");
-const ITEMS = new PublicKey("48FtbrDegNrAUHFza9HdJzZAvUo3uUNqs1kNnZxFsqJS");
 const SESSION_KEYS = new PublicKey("KeyspM2ssCJbqUhQ4k7sveSiY4WjnYsrXkC8oDbwde5");
 const MPL_CORE = new PublicKey("CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d");
 // MagicBlock VRF (ephemeral-vrf-sdk 0.17.3 consts); none of them has to exist under mock-vrf.
@@ -99,7 +98,6 @@ function sessionAccounts(map: PublicKey) {
   };
 }
 
-const loadoutOf = (character: PublicKey) => pda([Buffer.from("loadout"), character.toBuffer()], ITEMS);
 
 function playerAccounts(session: PublicKey, character: PublicKey) {
   return {
@@ -294,6 +292,8 @@ function consume(
     participation: PublicKey;
     character: PublicKey;
     skillSet: PublicKey;
+    /** The character's `Bag`, burned by `mark_dead` if the roll kills it. */
+    bag: PublicKey;
     /** The ally of a heal or buff on another player (`GameSession.pendingTarget`). */
     targetParticipation?: PublicKey | null;
   },
@@ -385,6 +385,7 @@ describe("deadroll_session: deployed program", () => {
         participation,
         character,
         skillSet,
+        bag,
         monsters,
         sessionToken: null,
         ...vrfAccounts,
@@ -398,6 +399,8 @@ describe("deadroll_session: deployed program", () => {
         monsters,
         participation,
         character,
+        skillSet,
+        bag,
         sessionToken: null,
         ...vrfAccounts,
       }),
@@ -443,11 +446,11 @@ describe("deadroll_session: deployed program", () => {
     const signer = await funded();
     const { session, monsters } = sessionAccounts(Keypair.generate().publicKey);
     const character = Keypair.generate().publicKey;
-    const { participation, skillSet } = playerAccounts(session, character);
+    const { participation, skillSet, bag } = playerAccounts(session, character);
     const act = (over: Record<string, PublicKey>) =>
       program.methods
         .act(BASE_ATTACK, 0)
-        .accountsStrict({ signer: signer.publicKey, session, participation, character, skillSet, monsters, sessionToken: null, targetParticipation: null, ...vrfAccounts, ...over })
+        .accountsStrict({ signer: signer.publicKey, session, participation, character, skillSet, bag, monsters, sessionToken: null, targetParticipation: null, ...vrfAccounts, ...over })
         .signers([signer])
         .rpc();
     // Session is checked first; these only prove the IDL carries the checked accounts.
@@ -461,8 +464,8 @@ describe("deadroll_session: deployed program", () => {
     // a mock-vrf build, ConstraintAddress otherwise) shows only with a real session: part 2.
     const { session, monsters } = sessionAccounts(Keypair.generate().publicKey);
     const character = Keypair.generate().publicKey;
-    const { participation, skillSet } = playerAccounts(session, character);
-    const accounts = { session, monsters, participation, character, skillSet };
+    const { participation, skillSet, bag } = playerAccounts(session, character);
+    const accounts = { session, monsters, participation, character, skillSet, bag };
     await rejects(consume(await funded(1), accounts, CRIT).rpc(), "AccountNotInitialized");
     await rejects(consume(MOCK_VRF, accounts, CRIT).rpc(), "AccountNotInitialized");
   });
@@ -491,7 +494,6 @@ describe("deadroll_session: deployed program", () => {
 
 const CHARACTER_IDL = new URL("../target/idl/deadroll_character.json", import.meta.url);
 const MAP_IDL = new URL("../target/idl/deadroll_map.json", import.meta.url);
-const ITEMS_IDL = new URL("../target/idl/deadroll_items.json", import.meta.url);
 const missing: string[] = [];
 if ((await connection.getAccountInfo(config))?.owner.equals(REGISTRY) !== true)
   missing.push("registry GameConfig (L4)");
@@ -500,8 +502,6 @@ for (const [name, table] of [["bestiary", bestiary], ["tileset", tileset]] as co
     missing.push(`registry ${name} table seeded (tools/scripts/seed-registry.ts)`);
 if (!(await isProgram(CHARACTER))) missing.push("deadroll_character deployed");
 if (!(await isProgram(MAP))) missing.push("deadroll_map deployed");
-if (!(await isProgram(ITEMS))) missing.push("deadroll_items deployed");
-if (!existsSync(ITEMS_IDL)) missing.push("target/idl/deadroll_items.json");
 if (!existsSync(CHARACTER_IDL)) missing.push("target/idl/deadroll_character.json");
 if (!existsSync(MAP_IDL)) missing.push("target/idl/deadroll_map.json");
 const SKIP_PARTY = missing.length ? `needs ${missing.join(", ")}` : false;
@@ -510,17 +510,27 @@ const characterProgram: any = SKIP_PARTY
   ? null
   : new Program(JSON.parse(readFileSync(CHARACTER_IDL, "utf8")), provider);
 const mapProgram: any = SKIP_PARTY ? null : new Program(JSON.parse(readFileSync(MAP_IDL, "utf8")), provider);
-const itemsProgram: any = SKIP_PARTY ? null : new Program(JSON.parse(readFileSync(ITEMS_IDL, "utf8")), provider);
 
-/** items `unequip` by the owner (or `signer` with `token`). */
+const EQUIP_SLOT_NAMES = ["mainHand", "offHand", "helmet", "body"];
+/** character `unequip` by the owner (or `signer` with `token`). */
 function unequip(owner: Keypair, character: PublicKey, slot: number, signer = owner, token: PublicKey | null = null) {
-  const slots = ["mainHand", "offHand", "helmet", "body"];
-  return itemsProgram.methods
-    .unequip(e(slots[slot]))
-    .accountsStrict({ signer: signer.publicKey, character, loadout: loadoutOf(character), sessionToken: token })
+  return characterProgram.methods
+    .unequip(e(EQUIP_SLOT_NAMES[slot]))
+    .accountsStrict({ signer: signer.publicKey, character, sessionToken: token })
     .signers([signer])
     .rpc();
 }
+/** character `equip` of soulbound item `item` by the owner. */
+function equip(owner: Keypair, character: PublicKey, item: number, slot: number) {
+  return characterProgram.methods
+    .equip(item, e(EQUIP_SLOT_NAMES[slot]))
+    .accountsStrict({ signer: owner.publicKey, character, sessionToken: null })
+    .signers([owner])
+    .rpc();
+}
+/** Every skill of a starter set taken onto the map: 4 active, 1 reactive, 1 passive. */
+const FULL_SELECTION = [0, 1, 2, 3, 4, 5];
+const NO_SKILL = 0xff;
 
 // The map lane's demo preset (tests/map.test.ts): 16x16 room in a wall ring.
 const TILE = { Floor: 0, Wall: 1, Entrance: 4, Exit: 5 };
@@ -632,9 +642,8 @@ const PROFILES = {
   mage: { name: "Ilyra", race: "forestElf", predisposition: "cold", stats: [5, 7, 13, 5], skills: MAGE_SKILLS },
   support: { name: "Senna", race: "forestElf", predisposition: "lightning", stats: [5, 8, 12, 5], skills: SUPPORT_SKILLS },
 };
-/** A character of `kind` with its items loadout (`init_loadout` in the creation transaction, as
- * the website sends it); `loadout: false` for one created before items existed. */
-async function createCharacter(owner: Keypair, kind: Kind, opts: { loadout?: boolean } = {}): Promise<PublicKey> {
+/** A character of `kind`: the class starter items come with it, worn (create_character). */
+async function createCharacter(owner: Keypair, kind: Kind): Promise<PublicKey> {
   const profile = pda([Buffer.from("profile"), owner.publicKey.toBuffer()], CHARACTER);
   if (!(await connection.getAccountInfo(profile))) {
     await characterProgram.methods
@@ -657,10 +666,6 @@ async function createCharacter(owner: Keypair, kind: Kind, opts: { loadout?: boo
     skills: p.skills.map(([name, b]) => ({ blocks: structuredClone(b), name: text(name, 24) })),
   };
   const asset = Keypair.generate();
-  const initLoadout = await itemsProgram.methods
-    .initLoadout()
-    .accountsStrict({ owner: owner.publicKey, character, loadout: loadoutOf(character), systemProgram: SystemProgram.programId })
-    .instruction();
   await characterProgram.methods
     .createCharacter(args)
     .accountsStrict({
@@ -674,7 +679,6 @@ async function createCharacter(owner: Keypair, kind: Kind, opts: { loadout?: boo
       mplCoreProgram: MPL_CORE,
       systemProgram: SystemProgram.programId,
     })
-    .postInstructions(opts.loadout === false ? [] : [initLoadout])
     .signers([owner, asset])
     .rpc();
   return character;
@@ -720,15 +724,14 @@ class Party {
   acc!: ReturnType<typeof sessionAccounts>;
   players: Player[] = [];
 
-  /** `noLoadout`: player indexes created without an items loadout. */
-  static async create(kinds: Kind[], noLoadout: number[] = []): Promise<Party> {
+  static async create(kinds: Kind[]): Promise<Party> {
     const p = new Party();
     [p.dm, p.dmActor] = await Promise.all([funded(), funded(1)]);
     p.fixture = await createFinalizedMap(p.dm);
     p.acc = sessionAccounts(p.fixture.map);
     for (const kind of kinds) {
       const [wallet, actor] = await Promise.all([funded(), funded(1)]);
-      const character = await createCharacter(wallet, kind, { loadout: !noLoadout.includes(p.players.length) });
+      const character = await createCharacter(wallet, kind);
       p.players.push({ kind, wallet, actor, character, ...playerAccounts(p.acc.session, character) });
     }
     return p;
@@ -748,21 +751,29 @@ class Party {
         participation: pl.participation,
         stash: pl.stash,
         escrow: this.acc.escrow,
-        sessionAuthority,
-        config,
-        characterProgram: CHARACTER,
         systemProgram: SystemProgram.programId,
-        loadout: loadoutOf(pl.character),
       })
       .signers([signer])
       .rpc();
   }
-  ready(who: number, signer: Keypair, value: boolean) {
+  /** Ready takes `selection` onto the map and locks the character; unready unlocks it. */
+  ready(who: number, signer: Keypair, value: boolean, selection = FULL_SELECTION, over: Record<string, PublicKey> = {}) {
+    const pl = this.players[who];
     return program.methods
-      .setReady(value)
-      .accountsStrict({ player: signer.publicKey, session: this.acc.session, participation: this.players[who].participation })
+      .setReady(value, selection)
+      .accountsStrict({
+        player: signer.publicKey,
+        session: this.acc.session,
+        participation: pl.participation,
+        character: pl.character,
+        skillSet: pl.skillSet,
+        sessionAuthority,
+        config,
+        characterProgram: CHARACTER,
+        ...over,
+      })
       .signers([signer])
-      .rpc();
+      .rpc({ commitment: "confirmed" });
   }
   start(signer: Keypair) {
     return program.methods
@@ -809,6 +820,9 @@ class Party {
         sessionAuthority,
         config,
         characterProgram: CHARACTER,
+        // Burned if over-time damage kills the player.
+        skillSet: pl?.skillSet ?? null,
+        bag: pl?.bag ?? null,
         ...over,
       })
       .rpc({ commitment: "confirmed" });
@@ -848,6 +862,7 @@ class Party {
       participation: pl.participation,
       character: pl.character,
       skillSet: pl.skillSet,
+      bag: pl.bag,
     };
     // Simulated through the connection (no signature check): Anchor's `simulate()` re-signs with
     // the extra signer after the wallet and loses the fee payer's signature.
@@ -937,6 +952,7 @@ class Party {
         participation: pl.participation,
         character: pl.character,
         skillSet: pl.skillSet,
+        bag: pl.bag,
         monsters: this.acc.monsters,
         sessionToken: token,
         ...vrfAccounts,
@@ -955,6 +971,8 @@ class Party {
         monsters: this.acc.monsters,
         participation: pl.participation,
         character: pl.character,
+        skillSet: pl.skillSet,
+        bag: pl.bag,
         sessionToken: token,
         ...vrfAccounts,
       })
@@ -976,6 +994,7 @@ class Party {
         participation: pl.participation,
         character: pl.character,
         skillSet: pl.skillSet,
+        bag: pl.bag,
         targetParticipation: ally,
       },
       seed,
@@ -1185,7 +1204,7 @@ describe("deadroll_session: lobby, auth and movement on the demo map", { skip: S
     await rejects(party.open().rpc(), "already in use");
   });
 
-  it("join_session: owner only (also signs character.lock_for_session), pays only the missing part", async () => {
+  it("join_session: owner only, pays only the missing part; the character is not locked yet", async () => {
     const [p0, p1] = party.players;
     await rejects(party.join(0, p1.wallet, PRICE), "NotCharacterOwner");
     const before = await connection.getBalance(party.acc.escrow);
@@ -1194,21 +1213,65 @@ describe("deadroll_session: lobby, auth and movement on the demo map", { skip: S
     await party.join(1, p1.wallet, PRICE);
     const [a, b] = await Promise.all([party.part(0), party.part(1)]);
     assert.ok(a.contribution.eq(PRICE) && b.contribution.eqn(0));
-    assert.equal(a.core.hp, (await party.character(0)).core.hpMax);
-    assert.ok((await party.character(0)).core.inSession.equals(party.acc.session));
-    // The worn starter kits are copied from the items loadouts.
-    assert.deepEqual(a.equipment, worn({ [MAIN_HAND]: SWORD, [BODY]: LEATHER }));
-    assert.deepEqual(b.equipment, worn({ [MAIN_HAND]: STAFF, [BODY]: ROBE }));
-    // From here until the party ends the loadout is locked.
-    await rejects(unequip(p0.wallet, p0.character, BODY), "CharacterLocked");
+    // HP, gear and skills come with Ready.
+    assert.equal(a.core.hp, 0);
+    assert.deepEqual(a.equipment, worn({}));
+    assert.deepEqual(a.skills, new Array(6).fill(NO_SKILL));
+    assert.equal((await party.character(0)).core.inSession, null);
+    // Until Ready the gear can still change.
+    await unequip(p0.wallet, p0.character, BODY);
+    await equip(p0.wallet, p0.character, 1, BODY);
   });
 
-  it("set_ready / start_session", async () => {
+  it("set_ready: checks the map selection, locks the character, copies HP, gear and skills; unready unlocks", async () => {
     const [p0, p1] = party.players;
     await rejects(party.ready(0, p0.actor, true), "NotPlayer");
+    await rejects(party.ready(0, p0.wallet, false), "ReadyUnchanged");
+    // docs/SKILL_BUILDER.md 13: every category full, own skills only, no repeats.
+    for (const bad of [
+      [0, 1, 2, NO_SKILL, 4, 5],
+      [0, 1, 2, 3, NO_SKILL, 5],
+      [0, 1, 2, 3, 5, 4],
+      [0, 1, 2, 2, 4, 5],
+      [0, 1, 2, 9, 4, 5],
+    ]) {
+      await rejects(party.ready(0, p0.wallet, true, bad), "InvalidSkillSelection");
+    }
+    // The SkillSet of another character: the character program checks its seeds.
+    await rejects(party.ready(0, p0.wallet, true, FULL_SELECTION, { skillSet: p1.skillSet }), "ConstraintSeeds");
+    await rejects(party.ready(0, p0.wallet, true, FULL_SELECTION, { character: p1.character }), "InvalidCharacter");
+
+    const order = [3, 1, 0, 2, 4, 5];
+    const sig = await party.ready(0, p0.wallet, true, order);
+    const ev = await eventOf(sig, "playerReady");
+    assert.deepEqual([ev.slot, ev.ready, ev.skills], [0, true, order]);
+    const a = await party.part(0);
+    const c = await party.character(0);
+    assert.deepEqual(a.skills, order);
+    assert.equal(a.core.hp, c.core.hpMax);
+    assert.equal(a.hpMax, c.core.hpMax);
+    assert.ok(a.maxAp >= 1);
+    // The worn starter kits, copied from the characters.
+    assert.deepEqual(a.equipment, worn({ [MAIN_HAND]: SWORD, [BODY]: LEATHER }));
+    assert.ok(c.core.inSession.equals(party.acc.session));
+    // From here until the party ends the bag and the gear are frozen.
+    await rejects(unequip(p0.wallet, p0.character, BODY), "AlreadyLocked");
+    await rejects(party.ready(0, p0.wallet, true), "ReadyUnchanged");
+
+    // Unready: unlocked again, the selection is gone.
+    await party.ready(0, p0.wallet, false);
+    assert.equal((await party.character(0)).core.inSession, null);
+    assert.deepEqual((await party.part(0)).skills, new Array(6).fill(NO_SKILL));
+    await unequip(p0.wallet, p0.character, BODY);
+    await equip(p0.wallet, p0.character, 1, BODY);
+  });
+
+  it("start_session", async () => {
+    const [p0, p1] = party.players;
     await party.ready(0, p0.wallet, true);
     await rejects(party.start(party.dm), "NotAllReady");
     await party.ready(1, p1.wallet, true);
+    assert.deepEqual((await party.part(1)).equipment, worn({ [MAIN_HAND]: STAFF, [BODY]: ROBE }));
     await rejects(party.start(party.dmActor), "NotDm");
     await party.start(party.dm);
     let s = await party.state();
@@ -1320,8 +1383,9 @@ describe("deadroll_session: combat, death, victory and payouts", { skip: SKIP_PA
     await rejects(party.act(0, p1.wallet, RANGED_SLOT.warrior, 0), "Unauthorized");
     await rejects(party.act(0, p0.wallet, 0, 0), "OutOfRange"); // Piercing Thrust is a strike
     await rejects(party.act(0, p0.wallet, BASE_ATTACK, 0), "OutOfRange");
-    await rejects(party.act(0, p0.wallet, REACTIVE_SLOT, 0), "InvalidSkill");
-    await rejects(party.act(0, p0.wallet, 9, 0), "InvalidSkill");
+    // Only the active skills taken onto the map (set_ready); a reactive one is not an action.
+    await rejects(party.act(0, p0.wallet, REACTIVE_SLOT, 0), "SkillNotSelected");
+    await rejects(party.act(0, p0.wallet, 9, 0), "SkillNotSelected");
     await rejects(party.act(0, p0.wallet, RANGED_SLOT.warrior, 50), "InvalidTarget");
   });
 
@@ -1442,7 +1506,22 @@ describe("deadroll_session: combat, death, victory and payouts", { skip: SKIP_PA
     assert.ok(!c.core.alive);
     assert.ok(c.core.inSession.equals(party.acc.session), "a tombstone stays locked to its last session");
     assert.equal(c.core.stateVersion, 1);
+    // docs/CHARACTER.md 11: the soulbound starter items vanish with the character.
+    assert.equal(c.gear.itemCount, 0);
+    assert.ok(c.gear.equipped.every((r: any) => r.source.empty !== undefined));
+    // The skills burn: no mechanics left, the names stay as the tombstone's memorial.
     const mage = party.players[1];
+    const set = await characterProgram.account.skillSet.fetch(mage.skillSet);
+    assert.equal(set.count, MAGE_SKILLS.length);
+    for (const [i, k] of set.skills.slice(0, set.count).entries()) {
+      assert.equal(k.powerBp, 0);
+      assert.equal(k.blocks.aspectCount, 0);
+      assert.equal(Buffer.from(k.name).toString("ascii").replace(/\0+$/, ""), MAGE_SKILLS[i]![0]);
+    }
+    // The bag burns.
+    const bag = await characterProgram.account.bag.fetch(mage.bag);
+    assert.ok(bag.resources.every((r: number) => r === 0));
+    assert.equal(bag.itemCount, 0);
     await rejects(unequip(mage.wallet, mage.character, BODY), "CharacterDead");
   });
 
@@ -1792,7 +1871,7 @@ describe("deadroll_session: support and control skills", { skip: SKIP_PARTY }, (
     await rejects(party.act(SUPPORT, w, BASE_ATTACK, 0, null, p0.participation), "UnexpectedAllyAccount");
     await rejects(party.act(SUPPORT, w, SAP, 50), "InvalidTarget");
     // Reactive and passive skills are not actions.
-    await rejects(party.act(SUPPORT, w, 4, SUPPORT), "InvalidSkill");
+    await rejects(party.act(SUPPORT, w, 4, SUPPORT), "SkillNotSelected");
     const s = await party.state();
     assert.equal(s.actedSeq === s.turnSeq, false, "nothing was used");
   });
@@ -1940,59 +2019,35 @@ describe("deadroll_session: support and control skills", { skip: SKIP_PARTY }, (
   });
 });
 
-describe("deadroll_session: equipment from the items loadout", { skip: SKIP_PARTY }, () => {
+describe("deadroll_session: equipment from the character's gear", { skip: SKIP_PARTY }, () => {
   let party: Party;
-  const [ARMORLESS, NO_LOADOUT] = [0, 1];
+  const [ARMORLESS, BARE] = [0, 1];
 
   before(async () => {
-    party = await Party.create(["warrior", "warrior"], [NO_LOADOUT]);
+    party = await Party.create(["warrior", "warrior"]);
     const p = party.players[ARMORLESS];
     await unequip(p.wallet, p.character, BODY);
+    const b = party.players[BARE];
+    await unequip(b.wallet, b.character, BODY);
+    await unequip(b.wallet, b.character, MAIN_HAND);
     await party.startAll();
   });
 
-  it("join_session copies what is worn; no loadout means bare hands", async () => {
-    const [a, b] = await Promise.all([party.part(ARMORLESS), party.part(NO_LOADOUT)]);
+  it("set_ready copies what is worn; nothing worn means bare hands", async () => {
+    const [a, b] = await Promise.all([party.part(ARMORLESS), party.part(BARE)]);
     assert.deepEqual(a.equipment, worn({ [MAIN_HAND]: SWORD }));
     assert.deepEqual(b.equipment, worn({}));
     // The starter kit adds no HP: both start at the stored maximum.
     assert.equal(a.hpMax, (await party.character(ARMORLESS)).core.hpMax);
-    assert.equal(b.hpMax, (await party.character(NO_LOADOUT)).core.hpMax);
-  });
-
-  it("join_session rejects a loadout at another address", async () => {
-    const extra = await Party.create(["warrior"]);
-    await extra.open().rpc();
-    const pl = extra.players[0];
-    const other = loadoutOf(party.players[ARMORLESS].character);
-    await rejects(
-      program.methods
-        .joinSession(PRICE, pl.actor.publicKey)
-        .accountsStrict({
-          player: pl.wallet.publicKey,
-          session: extra.acc.session,
-          character: pl.character,
-          participation: pl.participation,
-          stash: pl.stash,
-          escrow: extra.acc.escrow,
-          sessionAuthority,
-          config,
-          characterProgram: CHARACTER,
-          systemProgram: SystemProgram.programId,
-          loadout: other,
-        })
-        .signers([pl.wallet])
-        .rpc(),
-      "ConstraintSeeds",
-    );
+    assert.equal(b.hpMax, (await party.character(BARE)).core.hpMax);
   });
 
   it("hits carry the items of both sides", async () => {
-    await party.skipTo(NO_LOADOUT);
-    const p = party.players[NO_LOADOUT];
-    await party.act(NO_LOADOUT, p.wallet, RANGED_SLOT.warrior, 0);
-    const hit = await eventOf(await party.consume(NO_LOADOUT, CRIT), "hitResolved");
-    assert.equal(hit.attacker, NO_LOADOUT);
+    await party.skipTo(BARE);
+    const p = party.players[BARE];
+    await party.act(BARE, p.wallet, RANGED_SLOT.warrior, 0);
+    const hit = await eventOf(await party.consume(BARE, CRIT), "hitResolved");
+    assert.equal(hit.attacker, BARE);
     assert.equal(hit.items.attacker.weapon, null, "bare hands");
     assert.equal(hit.items.attacker.armor, 0);
   });

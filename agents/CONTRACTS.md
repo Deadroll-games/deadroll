@@ -40,7 +40,7 @@ Every program exposes `pub const ID` and a `cpi` feature so other programs can d
 | `SkillSet` | character | `["skills", character]` |
 | `Bag` | character | `["bag", character]` |
 | `ItemState` | items | `["item", asset]` |
-| `Loadout` | items | `["loadout", character]` |
+| `Loadout` | items | `["loadout", character]` (removed in patch 1, see section 8) |
 | `Map` | map | `["map", dm, map_index: u32 LE]` |
 | `MapLayout` | map | `["layout", map]` |
 | `GameSession` | session | `["session", map]` |
@@ -115,7 +115,7 @@ GameSession     { version, map, dm, status, price_lamports: u64, players: [Pubke
 Participation   { version, session, character, actor: Pubkey, slot: u8, x: u8, y: u8, hp: u32,
                   action_points: u8, states: [ActiveState; 6], ready: bool, bump }
 MonsterState    { version, session, monsters: [Monster; 24], count: u8, bump }
-Loadout         { version, character, owner, items: [ItemRecord; 4], item_count: u8,
+Loadout         { version, character, owner, items: [ItemRecord; 4], item_count: u8,      (removed in patch 1, section 8)
                   equipped: [EquipRef; 11], bump }                     (items lane)
 ItemRecord      { base: ItemBase, level: u8 }
 EquipRef        { source: EquipSource, index: u8 (soulbound record), asset: Pubkey (item NFT, later) }
@@ -177,3 +177,45 @@ Accounts after the VRF identity: `session, monsters, participation, character, s
 ## 7. Events (all programs)
 
 `CharacterCreated, CharacterDied, MapFinalized, SessionOpened, PlayerJoined, TurnStarted, Moved, ActionRequested, HitResolved { rolls, packets, resonance, states, damage }, EffectResolved, MonsterKilled, SessionEnded, RewardsGranted, RasterizerFinalized`.
+
+## 8. Patch 1: gear in the character, map skills at Ready, death burns
+
+Supersedes the `Loadout` lines above (sections 2, 4, 6) and adds to sections 4-6. The `crates/types`
+items (`LoadoutData`, `seeds::LOADOUT`) stay, unused (this crate only grows).
+
+```
+Character (program struct, after the frozen core): ... nft_frozen: bool,
+                gear: Gear { items: [ItemRecord; 4], item_count: u8, equipped: [EquipRef; 11] }
+                CharacterData.version = 2 for characters created with gear
+Participation (program struct, appended):  ... equipment: [u8; 11], skills: [u8; 6]
+                skills = SkillSet indexes taken onto the map: 0-3 active, 4 reactive, 5 passive, 0xFF empty
+```
+
+CPI surface (section 5) after patch 1:
+
+| Caller | Callee instruction | Accounts |
+|---|---|---|
+| session `set_ready(true)` | `character::lock_for_session(session, selection: [u8; 6])` | `character, session_authority, config, owner, skill_set` |
+| session `set_ready(false)` | `character::unlock()` | `character, session_authority, config` |
+| session (callback, `start_turn`) | `character::mark_dead()`: burns skills (names kept), bag, gear | `character, session_authority, config, skill_set (w), bag (w)` |
+
+Character instructions added: `equip(item_index, slot)`, `unequip(slot)` (owner or session key,
+`signer, character (w), session_token (optional)`). The items program has no instructions.
+
+Session flow (section 6) after patch 1:
+
+```
+join_session(contribution, actor)    player; pays into Escrow; creates Participation, TempStash. No CPI,
+                                     the character is not locked.
+set_ready(ready, selection)          player main wallet, Lobby only. true: CPI character.lock_for_session
+                                     (character and map skills checked, character locked: bag and gear
+                                     frozen), copies HP, AP, initiative and Character.gear into
+                                     Participation, writes Participation.skills. false: CPI character.unlock,
+                                     clears the selection.
+act(skill_slot, target)              skill_slot must be one of Participation.skills[0..4] (or 0xFF = weapon).
+```
+
+`consume_randomness` accounts after the VRF identity: `session, monsters, participation, character,
+skill_set (w), bag (w), session_authority, config, character_program, target_participation`.
+`act` and `monster_act` take `skill_set` and `bag` of the participation's character (seeds checked);
+`start_turn` takes them as trailing optional accounts, required when over-time damage kills.

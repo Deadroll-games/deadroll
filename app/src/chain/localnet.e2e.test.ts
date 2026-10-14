@@ -35,7 +35,11 @@ import {
   playerAp,
   readParty,
   sessionAccounts,
+  getAccount,
   setReadyIx,
+  variantKey,
+  type CharacterAcc,
+  type SkillSetAcc,
   startSessionIx,
   startTurnIx,
   status,
@@ -44,11 +48,12 @@ import {
 } from "./game";
 import { presetToLayout, type MapPresetData } from "./mock";
 import { coders } from "./programs";
-import { equipIx, equipmentOf, getLoadout, inventory, unequipIx } from "./items";
+import { equipIx, equipmentOf, inventory, unequipIx } from "./items";
+import { skillSetPda } from "./pda";
 import { affordable, cheb, route } from "./route";
 import { sendTx } from "./send";
 import { toHitResolved } from "./hit";
-import { Category, Effect, Form, Purpose, Source, makeBlocks, type NamedSkill } from "./skillcheck";
+import { Category, Effect, Form, Purpose, Source, defaultMapSelection, makeBlocks, type NamedSkill } from "./skillcheck";
 import { activeMods, toEffectResolved } from "./support";
 import { turnStarted } from "./turns";
 import { Applied, Aspect, Class, HitOutcome, MAP_MAX, ModKind, Race } from "./types";
@@ -67,6 +72,17 @@ async function funded(sol = 10): Promise<KeyPairSigner> {
     await new Promise((r) => setTimeout(r, 300));
   }
   return kp;
+}
+
+async function gearOf(character: Address) {
+  return (await getAccount<CharacterAcc>("character", "Character", character))!.gear;
+}
+
+/** A full map selection of the character's skills: the first of each kind, in SkillSet order. */
+async function mapSelection(character: Address): Promise<number[]> {
+  const set = (await getAccount<SkillSetAcc>("character", "SkillSet", await skillSetPda(character)))!;
+  const kinds = ["active", "reactive", "passive"];
+  return defaultMapSelection(set.skills.slice(0, set.count).map((k) => kinds.indexOf(variantKey(k.blocks.category)) as Category));
 }
 
 const IDS = { session: PROGRAMS.session, character: PROGRAMS.character, items: PROGRAMS.items, map: PROGRAMS.map };
@@ -90,12 +106,12 @@ async function openParty(specs: Spec[]) {
       const [wallet, key] = await Promise.all([funded(), funded(1)]);
       const c = await createCharacterIxs(wallet, { name, race, class: cls, predisposition: pred, stats: [...stats], skills });
       if (c.profileIx) await send(wallet, [c.profileIx]);
-      const evs = await send(wallet, [c.ix, c.loadoutIx]);
+      const evs = await send(wallet, [c.ix]);
       const created = evs.find((e) => e.name === "CharacterCreated")!.data;
       expect(created.nft).toBe(c.asset.address);
-      // The class starter kit in the same transaction, worn; the owner takes it off and back on.
-      expect(evs.find((e) => e.name === "LoadoutCreated")!.data.itemCount).toBe(2);
-      expect(inventory((await getLoadout(c.character))!).items.every((i) => i.worn !== null)).toBe(true);
+      // The class starter items come with the character, worn; the owner takes one off and back on.
+      expect(created.itemCount).toBe(2);
+      expect(inventory((await gearOf(c.character))).items.every((i) => i.worn !== null)).toBe(true);
       const off = await send(wallet, [await unequipIx(wallet, c.character, "body", null)]);
       expect(off.find((e) => e.name === "ItemUnequipped")).toBeTruthy();
       await send(wallet, [await equipIx(wallet, c.character, 1, "body", null)]);
@@ -124,13 +140,14 @@ async function openParty(specs: Spec[]) {
     const dmTok = await createSessionV2Instruction({ authority: dm, sessionSigner: dmKey, targetProgram: PROGRAMS.session, validUntil: BigInt(Math.floor(Date.now() / 1000) + 3600) });
     await send(dm, [dmTok.instruction]);
     const dmActor: Actor = { signer: dmKey, token: dmTok.sessionToken };
-    for (const pl of players) await send(pl.wallet, [await setReadyIx(pl.wallet, acc.session, pl.character, true)]);
+    // Ready takes the skills onto the map (the first of each kind) and locks the character.
+    for (const pl of players) await send(pl.wallet, [await setReadyIx(pl.wallet, acc.session, pl.character, true, await mapSelection(pl.character))]);
     await send(dm, [await startSessionIx(dm, acc.session)]);
 
     const party = (await readParty(acc.session))!;
     expect(status(party.session)).toBe("active");
-    // join_session copied what each character wears.
-    for (const pl of party.players) expect(Array.from(pl.part.equipment)).toEqual(equipmentOf((await getLoadout(pl.character))!));
+    // set_ready copied what each character wears.
+    for (const pl of party.players) expect(Array.from(pl.part.equipment)).toEqual(equipmentOf(await gearOf(pl.character)));
     expect(party.session.core.pendingVrf).toBe(true);
     // The localnet oracle: the ally of a pending heal or buff rides along (GameSession.pendingTarget).
     const oracle = async (seed: Uint8Array): Promise<ChainEvent[]> => {
@@ -261,6 +278,10 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
             if (evs.some((e) => e.name === "PlayerDied")) {
               mageDied = true;
               expect(evs.some((e) => e.name === "CharacterDied")).toBe(true);
+              // The skills burn (names stay as a memorial), the soulbound items vanish.
+              const burned = (await getAccount<SkillSetAcc>("character", "SkillSet", await skillSetPda(mage.character)))!;
+              expect(burned.skills.slice(0, burned.count).every((k) => k.powerBp === 0 && k.name[0] !== 0)).toBe(true);
+              expect((await gearOf(mage.character)).itemCount).toBe(0);
               await send(dmKey, [freezeTombstoneIx(mage.character, players[MAGE]!.asset, dmKey)]);
             }
           }

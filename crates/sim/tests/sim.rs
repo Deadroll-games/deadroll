@@ -359,7 +359,7 @@ fn hero_equipment_is_json_by_name_and_checked() {
         .to_string();
     assert!(err.contains("unknown ItemBase `Axe`"), "{err}");
 
-    // The same rule as the items program: a sword is not body armor.
+    // The same rule as the character program: a sword is not body armor.
     let mut wrong = bare.clone();
     let mut eq = Equipment::EMPTY;
     eq.set(EquipSlot::Body, Some(ItemBase::Sword));

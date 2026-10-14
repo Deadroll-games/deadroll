@@ -8,6 +8,7 @@
 //! - [`validate`]: the builder rules of SKILL_BUILDER.md, section 13.
 //! - [`validate_starting`]: the class limits on the first six skills (section 10.1).
 //! - [`check_loadout`]: at most 4 active, 1 reactive, 1 passive (section 3.4).
+//! - [`check_map_selection`]: the skills taken onto a map, 4 + 1 + 1 (sections 3.4, 13).
 //! - [`derive`]: shares, power, fusion and cooldown, computed once at creation and stored.
 //! - [`presets`]: starter sets per class for the demo.
 //!
@@ -69,6 +70,7 @@ pub mod rules;
 pub use blocks::*;
 pub use derive::{derive, derive_with, fusion_id, Derived, SkillTuning};
 pub use rules::{
-    check_loadout, validate, validate_starting, SkillError, ACTIVE_MAX, AURA_RADIUS_MAX,
-    PASSIVE_MAX, REACTIVE_MAX, STARTING_MAX,
+    check_loadout, check_map_selection, validate, validate_starting, MapSelection, SkillError,
+    ACTIVE_MAX, AURA_RADIUS_MAX, NO_SKILL, PASSIVE_MAX, REACTIVE_MAX, SELECTION_SLOTS,
+    STARTING_MAX,
 };

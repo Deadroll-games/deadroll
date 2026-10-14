@@ -8,6 +8,8 @@ import {
   blocksFromArray,
   blocksToArray,
   checkLoadout,
+  checkMapSelection,
+  defaultMapSelection,
   derive,
   skillNameValid,
   validate,
@@ -61,13 +63,28 @@ describe("skillcheck mirror vs Rust fixtures", () => {
     }
   });
 
+  it("random map selections agree", () => {
+    expect(fixture.selections.length).toBeGreaterThanOrEqual(100);
+    for (const s of fixture.selections) {
+      expect(ok(checkMapSelection(s.categories as Category[], s.selection)), JSON.stringify(s)).toBe(s.result);
+    }
+  });
+
+  it("the default map selection is always valid", () => {
+    for (const s of fixture.selections) {
+      const owned = s.categories as Category[];
+      expect(checkMapSelection(owned, defaultMapSelection(owned)), JSON.stringify(owned)).toBeNull();
+    }
+  });
+
   it("every rule the fixture hits has a message", () => {
     const errors = new Set<string>([
       ...fixture.skills.flatMap((s) => [s.validate, ...s.starting]),
       ...fixture.loadouts.map((l) => l.result),
+      ...fixture.selections.map((s) => s.result),
     ]);
     errors.delete("Ok");
-    expect(errors.size).toBe(19);
+    expect(errors.size).toBe(23);
     for (const e of errors) expect(SKILL_ERROR_MESSAGES[e as SkillError], e).toBeTruthy();
   });
 });

@@ -28,7 +28,8 @@ export type Idl = {
   accounts?: { name: string; discriminator: number[] }[];
   events?: { name: string; discriminator: number[] }[];
   errors?: { code: number; name: string; msg?: string }[];
-  types: IdlTypeDef[];
+  /** Absent when a program declares no types (the items program for now). */
+  types?: IdlTypeDef[];
 };
 
 export const camel = (s: string): string => s.replace(/_([a-z0-9])/g, (_, c: string) => c.toUpperCase());
@@ -60,7 +61,7 @@ class Reader {
 export class Coder {
   private readonly types = new Map<string, IdlTypeDef>();
   constructor(readonly idl: Idl) {
-    for (const t of idl.types) this.types.set(t.name, t);
+    for (const t of idl.types ?? []) this.types.set(t.name, t);
   }
 
   private def(name: string): IdlTypeDef {
@@ -288,7 +289,7 @@ export class Coder {
 
 /** Index of a unit enum value decoded as `{ variant: {} }`. */
 export function variantIndex(coder: Coder, typeName: string, value: unknown): number {
-  const t = coder.idl.types.find((x) => x.name === typeName);
+  const t = coder.idl.types?.find((x) => x.name === typeName);
   if (!t || t.type.kind !== "enum") throw new Error(`${typeName} is not an enum`);
   const key = typeof value === "string" ? value : Object.keys(value as object)[0] ?? "";
   return t.type.variants.findIndex((v) => lowerFirst(v.name) === lowerFirst(key));

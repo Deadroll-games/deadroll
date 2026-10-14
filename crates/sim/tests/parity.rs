@@ -6,16 +6,16 @@
 //! not move this test) and the default `BalanceConfig` loaded from JSON, and rolls with
 //! `VrfRoll` (`crates/combat`), the same stream as `SyscallRoll`.
 //!
-//! Equipment: the program side wears what the items program's own loadout code gives
-//! (`deadroll_items::state::loadout`: the starter kit, then unequip), snapshotted the way
-//! `join_session` does (`Participation::hero`); the simulator side wears the hero preset's
+//! Equipment: the program side wears what the character program's own gear code gives
+//! (`deadroll_character::state::Gear`: the starter kit, then unequip), snapshotted the way
+//! `set_ready` does (`Participation::hero`); the simulator side wears the hero preset's
 //! `equipment` (left out = the starter kit). Every hero fights in each [`Gear`].
+use deadroll_character::state::Gear as CharacterGear;
 use deadroll_character::state::SkillRecord;
 use deadroll_combat::{
     resolve_hit, resolve_hit_into, HitInput, HitResult, ModKind, RollSource, TimedMod, TimedMods,
     VrfRoll,
 };
-use deadroll_items::state::loadout as items_program;
 use deadroll_rules::{
     input::{self, effect_action, EffectAction},
     items::Equipment,
@@ -33,8 +33,7 @@ use deadroll_sim::{
 };
 use deadroll_skillcheck::{derive, presets as skill_presets, Purpose};
 use deadroll_types::{
-    ActiveState, Aspect, CharacterData, Class, EquipSlot, ItemBase, Monster, Pubkey, Race,
-    STATES_MAX,
+    ActiveState, Aspect, CharacterData, Class, EquipSlot, ItemBase, Monster, Race, STATES_MAX,
 };
 
 #[path = "../../combat/tests/golden.rs"]
@@ -69,7 +68,7 @@ fn round_trip<T: serde::Serialize + serde::de::DeserializeOwned>(v: &T) -> T {
 /// What a hero wears in a parity fight.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Gear {
-    /// The class starter kit, as `init_loadout` gives it.
+    /// The class starter kit, as `create_character` gives it.
     Kit,
     /// The kit with the body armor taken off.
     WeaponOnly,
@@ -79,14 +78,14 @@ enum Gear {
 
 const GEARS: [Gear; 3] = [Gear::Kit, Gear::WeaponOnly, Gear::Bare];
 
-/// Program side: the items program's loadout code, then the session's snapshot.
+/// Program side: the character program's gear code, then the session's snapshot.
 fn program_hero(c: &CharacterData, gear: Gear) -> HeroStats {
-    let mut l = items_program::starter(Pubkey::default(), c.owner, c.class, 255);
+    let mut l = CharacterGear::starter(c.class);
     if gear != Gear::Kit {
-        items_program::unequip(&mut l, EquipSlot::Body).unwrap();
+        l.unequip(EquipSlot::Body).unwrap();
     }
     if gear == Gear::Bare {
-        items_program::unequip(&mut l, EquipSlot::MainHand).unwrap();
+        l.unequip(EquipSlot::MainHand).unwrap();
     }
     hero_of(c, &l.equipment())
 }
@@ -591,13 +590,10 @@ fn gear_changes_the_fight() {
 }
 
 #[test]
-fn the_items_program_ids_match() {
-    use deadroll_items::external;
-    assert_eq!(external::CHARACTER_PROGRAM, deadroll_character::ID);
-    assert_eq!(external::SESSION_PROGRAM, deadroll_session::ID);
-    // The session program checks its copy against `Character::DISCRIMINATOR`.
+fn the_character_program_constants_match() {
+    // `equip` / `unequip` accept session tokens issued for the session program.
     assert_eq!(
-        external::CHARACTER_DISCRIMINATOR,
-        deadroll_session::state::external::CHARACTER_DISCRIMINATOR
+        deadroll_character::auth::SESSION_PROGRAM,
+        deadroll_session::ID
     );
 }

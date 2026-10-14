@@ -93,8 +93,11 @@ pub struct CallbackAccounts {
     pub monsters: Pubkey,
     pub participation: Pubkey,
     pub character: Pubkey,
-    /// The attacking player's `SkillSet`; any key when a monster attacks (not read).
+    /// The `SkillSet` of the participation's character (the caster, or a monster's target):
+    /// read for a skill, burned with a death.
     pub skill_set: Pubkey,
+    /// The `Bag` of the participation's character, burned with a death.
+    pub bag: Pubkey,
     /// The ally of a heal or buff that is not the caster (`GameSession.pending_target`).
     pub target_participation: Option<Pubkey>,
 }
@@ -110,7 +113,8 @@ pub fn callback_metas(a: &CallbackAccounts) -> Vec<SerializableAccountMeta> {
         meta(&a.monsters, true),
         meta(&a.participation, true),
         meta(&a.character, true),
-        meta(&a.skill_set, false),
+        meta(&a.skill_set, true),
+        meta(&a.bag, true),
         meta(&SESSION_AUTHORITY, false),
         meta(&GAME_CONFIG, false),
         meta(&deadroll_character::ID, false),
@@ -224,14 +228,15 @@ mod tests {
 
     #[test]
     fn callback_metas_follow_consume_randomness() {
-        let keys: Vec<Pubkey> = (0..6).map(|_| Pubkey::new_unique()).collect();
-        for ally in [None, Some(keys[5])] {
+        let keys: Vec<Pubkey> = (0..7).map(|_| Pubkey::new_unique()).collect();
+        for ally in [None, Some(keys[6])] {
             let ours = callback_metas(&CallbackAccounts {
                 session: keys[0],
                 monsters: keys[1],
                 participation: keys[2],
                 character: keys[3],
                 skill_set: keys[4],
+                bag: keys[5],
                 target_participation: ally,
             });
             let anchors = crate::accounts::ConsumeRandomness {
@@ -241,6 +246,7 @@ mod tests {
                 participation: keys[2],
                 character: keys[3],
                 skill_set: keys[4],
+                bag: keys[5],
                 session_authority: SESSION_AUTHORITY,
                 config: GAME_CONFIG,
                 character_program: deadroll_character::ID,

@@ -9,7 +9,7 @@ use deadroll_types::{seeds, SessionStatus};
 
 use crate::{
     combat_input::{effect_action, skill_stats, EffectAction},
-    cpi_out::SessionSigner,
+    cpi_out::{character::DeathAccounts, SessionSigner},
     errors::SessionError,
     events::EffectResolved,
     hit_event::{emit_hit_resolved, HitItemsData, ItemBonusData},
@@ -51,8 +51,14 @@ pub struct ConsumeRandomness<'info> {
     /// `character::mark_dead`.
     #[account(mut, address = participation.core.character @ SessionError::InvalidPendingAccounts)]
     pub character: UncheckedAccount<'info>,
-    /// CHECK: the attacking player's `SkillSet`, checked by `read_skill` (unused for monsters).
+    /// CHECK: the `SkillSet` of the participation's character (recorded by `act` / `monster_act`
+    /// from its seeds): skills read by `read_skill`; burned by `character::mark_dead`.
+    #[account(mut)]
     pub skill_set: UncheckedAccount<'info>,
+    /// CHECK: the `Bag` of the participation's character (recorded from its seeds); burned by
+    /// `character::mark_dead`.
+    #[account(mut)]
+    pub bag: UncheckedAccount<'info>,
     /// CHECK: session `["authority"]` PDA, address checked (signs `mark_dead`).
     #[account(address = vrf::SESSION_AUTHORITY)]
     pub session_authority: UncheckedAccount<'info>,
@@ -177,7 +183,11 @@ pub fn handler(ctx: Context<ConsumeRandomness>, randomness: [u8; 32]) -> Result<
                     config: &accounts.config,
                     bump: vrf::SESSION_AUTHORITY_BUMP,
                 },
-                &accounts.character,
+                &DeathAccounts {
+                    character: &accounts.character,
+                    skill_set: &accounts.skill_set,
+                    bag: &accounts.bag,
+                },
             )?;
         }
         _ => return err!(SessionError::InvalidPendingAccounts),
@@ -387,7 +397,7 @@ fn monster_attack<'info>(
     participation: &mut Participation,
     hero: &HeroStats,
     signer: &SessionSigner<'_, 'info>,
-    character_info: &AccountInfo<'info>,
+    death: &DeathAccounts<'_, 'info>,
 ) -> Result<()> {
     let mut input = Box::<HitInput>::default();
     let mut result = Box::<HitResult>::default();
@@ -416,7 +426,7 @@ fn monster_attack<'info>(
             slot,
             roll.pending.attacker,
             signer,
-            character_info,
+            death,
         )?;
     }
     emit_hit_resolved(

@@ -63,7 +63,7 @@ u8_enum!(
     ItemBase { Sword, Staff, Wand, LeatherArmor, Robe, LightLeatherArmor }
 );
 u8_enum!(
-    /// What an equipment slot holds: nothing, a soulbound record of the loadout, or an item NFT
+    /// What an equipment slot holds: nothing, a soulbound record of the character, or an item NFT
     /// (crafting, later).
     EquipSource { Empty, Soulbound, Asset }
 );

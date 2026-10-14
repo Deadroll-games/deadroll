@@ -10,7 +10,8 @@
     {
       "name": "act",
       "docs": [
-        "Player attacks a monster with a skill slot (`0xFF` = weapon): spends AP, requests VRF."
+        "Player attacks with the weapon (`0xFF`) or one of the active skills taken onto the map:",
+        "spends AP, requests VRF."
       ],
       "discriminator": [
         114,
@@ -95,7 +96,124 @@
           "name": "character"
         },
         {
-          "name": "skill_set"
+          "name": "skill_set",
+          "docs": [
+            "`read_skill`, and the callback burns it if the character dies."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  107,
+                  105,
+                  108,
+                  108,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "participation.core.character",
+                "account": "Participation"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                132,
+                79,
+                200,
+                222,
+                125,
+                119,
+                176,
+                36,
+                2,
+                248,
+                81,
+                254,
+                245,
+                232,
+                116,
+                196,
+                19,
+                216,
+                176,
+                11,
+                37,
+                101,
+                255,
+                203,
+                101,
+                107,
+                25,
+                128,
+                35,
+                254,
+                139,
+                255
+              ]
+            }
+          }
+        },
+        {
+          "name": "bag",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  97,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "participation.core.character",
+                "account": "Participation"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                132,
+                79,
+                200,
+                222,
+                125,
+                119,
+                176,
+                36,
+                2,
+                248,
+                81,
+                254,
+                245,
+                232,
+                116,
+                196,
+                19,
+                216,
+                176,
+                11,
+                37,
+                101,
+                255,
+                203,
+                101,
+                107,
+                25,
+                128,
+                35,
+                254,
+                139,
+                255
+              ]
+            }
+          }
         },
         {
           "name": "monsters",
@@ -629,7 +747,18 @@
           "writable": true
         },
         {
-          "name": "skill_set"
+          "name": "skill_set",
+          "docs": [
+            "from its seeds): skills read by `read_skill`; burned by `character::mark_dead`."
+          ],
+          "writable": true
+        },
+        {
+          "name": "bag",
+          "docs": [
+            "`character::mark_dead`."
+          ],
+          "writable": true
         },
         {
           "name": "session_authority",
@@ -861,7 +990,7 @@
     {
       "name": "join_session",
       "docs": [
-        "Player joins with a character, pays a share of the price into escrow, locks the character."
+        "Player joins with a character and pays a share of the price into escrow."
       ],
       "discriminator": [
         23,
@@ -908,11 +1037,7 @@
           }
         },
         {
-          "name": "character",
-          "docs": [
-            "the character CPI."
-          ],
-          "writable": true
+          "name": "character"
         },
         {
           "name": "participation",
@@ -998,151 +1123,8 @@
           }
         },
         {
-          "name": "session_authority",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  97,
-                  117,
-                  116,
-                  104,
-                  111,
-                  114,
-                  105,
-                  116,
-                  121
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "config",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ],
-            "program": {
-              "kind": "const",
-              "value": [
-                9,
-                93,
-                27,
-                37,
-                218,
-                79,
-                221,
-                125,
-                83,
-                7,
-                123,
-                151,
-                252,
-                231,
-                65,
-                177,
-                65,
-                225,
-                242,
-                116,
-                20,
-                215,
-                178,
-                225,
-                173,
-                88,
-                9,
-                192,
-                113,
-                184,
-                209,
-                219
-              ]
-            }
-          }
-        },
-        {
-          "name": "character_program",
-          "address": "9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL"
-        },
-        {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
-        },
-        {
-          "name": "loadout",
-          "docs": [
-            "`external::read_equipment`, empty when the character has none yet."
-          ],
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  108,
-                  111,
-                  97,
-                  100,
-                  111,
-                  117,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "character"
-              }
-            ],
-            "program": {
-              "kind": "const",
-              "value": [
-                46,
-                110,
-                246,
-                85,
-                187,
-                203,
-                138,
-                176,
-                77,
-                64,
-                218,
-                134,
-                80,
-                136,
-                141,
-                232,
-                187,
-                100,
-                61,
-                216,
-                141,
-                60,
-                83,
-                159,
-                130,
-                57,
-                10,
-                1,
-                201,
-                51,
-                118,
-                67
-              ]
-            }
-          }
         }
       ],
       "args": [
@@ -1248,6 +1230,123 @@
         },
         {
           "name": "character"
+        },
+        {
+          "name": "skill_set",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  107,
+                  105,
+                  108,
+                  108,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "participation.core.character",
+                "account": "Participation"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                132,
+                79,
+                200,
+                222,
+                125,
+                119,
+                176,
+                36,
+                2,
+                248,
+                81,
+                254,
+                245,
+                232,
+                116,
+                196,
+                19,
+                216,
+                176,
+                11,
+                37,
+                101,
+                255,
+                203,
+                101,
+                107,
+                25,
+                128,
+                35,
+                254,
+                139,
+                255
+              ]
+            }
+          }
+        },
+        {
+          "name": "bag",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  97,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "participation.core.character",
+                "account": "Participation"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                132,
+                79,
+                200,
+                222,
+                125,
+                119,
+                176,
+                36,
+                2,
+                248,
+                81,
+                254,
+                245,
+                232,
+                116,
+                196,
+                19,
+                216,
+                176,
+                11,
+                37,
+                101,
+                255,
+                203,
+                101,
+                107,
+                25,
+                128,
+                35,
+                254,
+                139,
+                255
+              ]
+            }
+          }
         },
         {
           "name": "session_token",
@@ -1708,7 +1807,9 @@
     {
       "name": "set_ready",
       "docs": [
-        "Player marks (or unmarks) ready in the lobby. Main wallet only."
+        "Player marks (or unmarks) ready in the lobby, main wallet only. Ready takes `selection`",
+        "onto the map (4 active, 1 reactive, 1 passive `SkillSet` indexes) and locks the character;",
+        "unready unlocks it."
       ],
       "discriminator": [
         105,
@@ -1787,12 +1888,108 @@
               }
             ]
           }
+        },
+        {
+          "name": "character",
+          "writable": true
+        },
+        {
+          "name": "skill_set"
+        },
+        {
+          "name": "session_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                9,
+                93,
+                27,
+                37,
+                218,
+                79,
+                221,
+                125,
+                83,
+                7,
+                123,
+                151,
+                252,
+                231,
+                65,
+                177,
+                65,
+                225,
+                242,
+                116,
+                20,
+                215,
+                178,
+                225,
+                173,
+                88,
+                9,
+                192,
+                113,
+                184,
+                209,
+                219
+              ]
+            }
+          }
+        },
+        {
+          "name": "character_program",
+          "address": "9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL"
         }
       ],
       "args": [
         {
           "name": "ready",
           "type": "bool"
+        },
+        {
+          "name": "selection",
+          "type": {
+            "array": [
+              "u8",
+              6
+            ]
+          }
         }
       ]
     },
@@ -2020,6 +2217,19 @@
         {
           "name": "character_program",
           "address": "9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL"
+        },
+        {
+          "name": "skill_set",
+          "docs": [
+            "`SkillSet`, burned by `character::mark_dead` (which checks its seeds)."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "bag",
+          "writable": true,
+          "optional": true
         }
       ],
       "args": []
@@ -2616,6 +2826,21 @@
       "code": 6054,
       "name": "InvalidLoadout",
       "msg": "Not the character's items loadout"
+    },
+    {
+      "code": 6055,
+      "name": "SkillNotSelected",
+      "msg": "This skill was not taken onto the map (set_ready selection)"
+    },
+    {
+      "code": 6056,
+      "name": "ReadyUnchanged",
+      "msg": "Already in that ready state"
+    },
+    {
+      "code": 6057,
+      "name": "DeathAccountsMissing",
+      "msg": "A death needs the character's SkillSet and Bag"
     }
   ],
   "types": [
@@ -4275,7 +4500,7 @@
           {
             "name": "hp_max",
             "docs": [
-              "The character's maximum HP, copied at `join_session` (heals stop here)."
+              "The character's maximum HP with its gear, copied at `set_ready(true)` (heals stop here)."
             ],
             "type": "u32"
           },
@@ -4300,13 +4525,27 @@
             "name": "equipment",
             "docs": [
               "What the character wears, `ItemBase` bytes by `EquipSlot` (`EMPTY_ITEM` = none), copied",
-              "from its items `Loadout` at `join_session`. The items program locks the loadout while",
-              "the character is in a session, so the copy stays exact."
+              "from `Character.gear` at `set_ready(true)`. The character program refuses gear changes",
+              "while the character is locked into a session, so the copy stays exact."
             ],
             "type": {
               "array": [
                 "u8",
                 11
+              ]
+            }
+          },
+          {
+            "name": "skills",
+            "docs": [
+              "The skills taken onto this map, `SkillSet` indexes: slots `0..4` active, `4` reactive,",
+              "`5` passive, `NO_SKILL` = empty (docs/SKILL_BUILDER.md, 3.4). Written at",
+              "`set_ready(true)` after the character program checked it; cleared by `set_ready(false)`."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                6
               ]
             }
           }
@@ -4500,6 +4739,25 @@
           {
             "name": "ready",
             "type": "bool"
+          },
+          {
+            "name": "skills",
+            "docs": [
+              "The skills taken onto the map (`Participation.skills`), empty when not ready."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                6
+              ]
+            }
+          },
+          {
+            "name": "hp",
+            "docs": [
+              "HP with the gear, copied at ready."
+            ],
+            "type": "u32"
           }
         ]
       }

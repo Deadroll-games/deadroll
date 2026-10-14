@@ -2,17 +2,19 @@ use anchor_lang::{
     prelude::*,
     system_program::{transfer, Transfer},
 };
-use deadroll_rules::HeroStats;
-use deadroll_types::{seeds, ActiveState, ParticipationData, SessionStatus, PARTY_MAX, STATES_MAX};
+use deadroll_character::state::MAP_SKILLS;
+use deadroll_skillcheck::NO_SKILL;
+use deadroll_types::{
+    seeds, ActiveState, ParticipationData, SessionStatus, EMPTY_ITEM, EQUIP_SLOTS, PARTY_MAX,
+    STATES_MAX,
+};
 
 use crate::{
-    cpi_out::{self, SessionSigner},
     errors::SessionError,
     events::PlayerJoined,
-    rules::{hero_ap, hero_initiative, party_hp_max},
     state::{
-        external::{read_character, read_equipment},
-        Escrow, GameSession, Participation, TempStash, ACCOUNT_VERSION, STASH_RESOURCES,
+        external::read_character, Escrow, GameSession, Participation, TempStash, ACCOUNT_VERSION,
+        STASH_RESOURCES,
     },
 };
 
@@ -27,9 +29,7 @@ pub struct JoinSession<'info> {
         bump = session.core.bump,
     )]
     pub session: Box<Account<'info, GameSession>>,
-    /// CHECK: `deadroll_character` `Character`, owner and fields checked in the handler; written by
-    /// the character CPI.
-    #[account(mut)]
+    /// CHECK: `deadroll_character` `Character`, owner and fields checked in the handler.
     pub character: UncheckedAccount<'info>,
     #[account(
         init,
@@ -53,28 +53,15 @@ pub struct JoinSession<'info> {
         bump = escrow.bump,
     )]
     pub escrow: Box<Account<'info, Escrow>>,
-    /// CHECK: signer PDA for CPI into other game programs.
-    #[account(seeds = [seeds::AUTHORITY], bump)]
-    pub session_authority: UncheckedAccount<'info>,
-    /// CHECK: registry `GameConfig`, forwarded to the callee, which checks the trust list.
-    #[account(seeds = [seeds::CONFIG], bump, seeds::program = deadroll_registry::ID)]
-    pub config: UncheckedAccount<'info>,
-    /// CHECK: the character program.
-    #[account(address = deadroll_character::ID)]
-    pub character_program: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
-    /// CHECK: the character's items `Loadout` (address from the seeds); read in
-    /// `external::read_equipment`, empty when the character has none yet.
-    #[account(
-        seeds = [seeds::LOADOUT, character.key().as_ref()],
-        bump,
-        seeds::program = deadroll_items::ID,
-    )]
-    pub loadout: UncheckedAccount<'info>,
 }
 
 /// `contribution` is the player's share of the party price; only what is still missing is taken.
 /// `actor` is the session key that will act for this character (`Pubkey::default()` = none).
+///
+/// Joining takes a place and pays; the character is not locked yet. `set_ready(true)` takes the
+/// skills onto the map, locks the character (its bag and gear freeze) and copies its stats
+/// (docs/PARTY_AND_TURNS.md, 2.1).
 pub fn handler(ctx: Context<JoinSession>, contribution: u64, actor: Pubkey) -> Result<()> {
     let accounts = ctx.accounts;
     let session_key = accounts.session.key();
@@ -87,11 +74,6 @@ pub fn handler(ctx: Context<JoinSession>, contribution: u64, actor: Pubkey) -> R
     );
     require!(character.alive, SessionError::CharacterDead);
     require!(character.in_session.is_none(), SessionError::CharacterBusy);
-    // Equipment is locked from here until the party ends (items program), so one snapshot of
-    // it serves the whole party.
-    let equipment = read_equipment(&accounts.loadout)?;
-    let hero = HeroStats::from(&character).with_equipment(equipment);
-    let hp_max = party_hp_max(character.hp_max, &hero);
 
     let session = &mut accounts.session;
     require!(
@@ -128,8 +110,8 @@ pub fn handler(ctx: Context<JoinSession>, contribution: u64, actor: Pubkey) -> R
     session.core.player_count = slot + 1;
     session.player_pos[slot as usize] = session.entrance;
     session.alive_mask |= 1 << slot;
-    session.player_initiative[slot as usize] = hero_initiative(&hero);
 
+    // HP, AP, initiative and gear come with `set_ready(true)`.
     let participation = &mut accounts.participation;
     participation.core = ParticipationData {
         version: ACCOUNT_VERSION,
@@ -139,18 +121,17 @@ pub fn handler(ctx: Context<JoinSession>, contribution: u64, actor: Pubkey) -> R
         slot,
         x: session.entrance.x,
         y: session.entrance.y,
-        hp: hp_max,
+        hp: 0,
         action_points: 0,
         states: [ActiveState::default(); STATES_MAX],
         ready: false,
         bump: ctx.bumps.participation,
     };
     participation.player = accounts.player.key();
-    participation.max_ap = hero_ap(&hero);
     participation.ap_seq = 0;
     participation.contribution = paid;
-    participation.hp_max = hp_max;
-    participation.equipment = equipment.0;
+    participation.equipment = [EMPTY_ITEM; EQUIP_SLOTS];
+    participation.skills = [NO_SKILL; MAP_SKILLS];
 
     let stash = &mut accounts.stash;
     stash.version = ACCOUNT_VERSION;
@@ -159,17 +140,6 @@ pub fn handler(ctx: Context<JoinSession>, contribution: u64, actor: Pubkey) -> R
     stash.xp = 0;
     stash.resources = [0; STASH_RESOURCES];
     stash.bump = ctx.bumps.stash;
-
-    cpi_out::character::lock_for_session(
-        &SessionSigner {
-            session_authority: &accounts.session_authority,
-            config: &accounts.config,
-            bump: ctx.bumps.session_authority,
-        },
-        &accounts.character,
-        &accounts.player,
-        session_key,
-    )?;
 
     emit!(PlayerJoined {
         session: session_key,

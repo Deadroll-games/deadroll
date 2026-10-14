@@ -1,15 +1,23 @@
 use anchor_lang::prelude::*;
-use deadroll_character::{cpi, cpi::accounts, state::RESOURCE_KINDS};
+use deadroll_character::{
+    cpi,
+    cpi::accounts,
+    state::{MAP_SKILLS, RESOURCE_KINDS},
+};
 
 use super::{signed, SessionSigner};
 
-/// `character::lock_for_session(session)` at `join_session`; `owner` (the player, signer of
-/// `join_session`) must sign too, so a session cannot lock someone else's character.
+/// `character::lock_for_session(session, selection)` at `set_ready(true)`: the character program
+/// checks the character and the skills taken onto the map against `skill_set`. `owner` (the
+/// player, signer of `set_ready`) must sign too, so a session cannot lock someone else's
+/// character.
 pub fn lock_for_session<'info>(
     s: &SessionSigner<'_, 'info>,
     character: &AccountInfo<'info>,
     owner: &AccountInfo<'info>,
+    skill_set: &AccountInfo<'info>,
     session: Pubkey,
+    selection: [u8; MAP_SKILLS],
 ) -> Result<()> {
     signed(s.bump, |seeds| {
         cpi::lock_for_session(
@@ -20,27 +28,36 @@ pub fn lock_for_session<'info>(
                     session_authority: s.authority(),
                     config: s.config(),
                     owner: owner.clone(),
+                    skill_set: skill_set.clone(),
                 },
                 seeds,
             ),
             session,
+            selection,
         )
     })
 }
 
-/// `character::mark_dead()` when a player's HP reaches 0 (inside the VRF callback). It only flips
-/// state; the NFT freeze is the permissionless `character::freeze_tombstone`.
-pub fn mark_dead<'info>(
-    s: &SessionSigner<'_, 'info>,
-    character: &AccountInfo<'info>,
-) -> Result<()> {
+/// The accounts a death burns: the character (soulbound items), its `SkillSet` and its `Bag`.
+pub struct DeathAccounts<'a, 'info> {
+    pub character: &'a AccountInfo<'info>,
+    pub skill_set: &'a AccountInfo<'info>,
+    pub bag: &'a AccountInfo<'info>,
+}
+
+/// `character::mark_dead()` when a player's HP reaches 0 (inside the VRF callback or
+/// `start_turn`): the tombstone, and the skills, bag and soulbound items burn. The NFT freeze is
+/// the permissionless `character::freeze_tombstone`.
+pub fn mark_dead<'info>(s: &SessionSigner<'_, 'info>, d: &DeathAccounts<'_, 'info>) -> Result<()> {
     signed(s.bump, |seeds| {
         cpi::mark_dead(CpiContext::new_with_signer(
             deadroll_character::ID,
             accounts::MarkDead {
-                character: character.clone(),
+                character: d.character.clone(),
                 session_authority: s.authority(),
                 config: s.config(),
+                skill_set: d.skill_set.clone(),
+                bag: d.bag.clone(),
             },
             seeds,
         ))
@@ -73,7 +90,7 @@ pub fn grant_rewards<'info>(
     })
 }
 
-/// `character::unlock()` when the party ends for a living character.
+/// `character::unlock()` when the party ends for a living character, or at `set_ready(false)`.
 pub fn unlock<'info>(s: &SessionSigner<'_, 'info>, character: &AccountInfo<'info>) -> Result<()> {
     signed(s.bump, |seeds| {
         cpi::unlock(CpiContext::new_with_signer(

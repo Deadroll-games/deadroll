@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
 
-/// Append only: the codes are part of the client contract.
+/// Append only: the codes are part of the client contract. Most were used by the removed
+/// `Loadout` instructions (now `deadroll_character` equip / unequip); the codes stay reserved.
 #[error_code]
 pub enum ItemsError {
     #[msg("Caller is not authorized for this instruction")]

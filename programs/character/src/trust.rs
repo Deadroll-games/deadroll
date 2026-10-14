@@ -8,12 +8,17 @@ use deadroll_types::{seeds, GameConfigData, ProgramIdx};
 
 use crate::errors::CharacterError;
 
+/// `deadroll_registry::ID`, the owner of `GameConfig`. A constant, not a dependency on the registry
+/// crate (whose SBF build clashes with this program's mpl-core and session-keys graph);
+/// `crates/sim/tests/parity.rs` checks it.
+pub const REGISTRY_PROGRAM: Pubkey = pubkey!("dZ1jraMfS3bAUTkRw2TA1ddg8UDGzgUdFQz5pmBxjoG");
+
 /// Decodes `GameConfig` and checks it is the registry's `["config"]` PDA (owner, then address
 /// with the stored bump: one hash instead of a bump search).
 pub fn read_config(info: &AccountInfo) -> Result<GameConfigData> {
     require_keys_eq!(
         *info.owner,
-        deadroll_registry::ID,
+        REGISTRY_PROGRAM,
         CharacterError::InvalidConfig
     );
     let config = {
@@ -26,7 +31,7 @@ pub fn read_config(info: &AccountInfo) -> Result<GameConfigData> {
             .map_err(|_| error!(CharacterError::InvalidConfig))?
     };
     let address =
-        Pubkey::create_program_address(&[seeds::CONFIG, &[config.bump]], &deadroll_registry::ID)
+        Pubkey::create_program_address(&[seeds::CONFIG, &[config.bump]], &REGISTRY_PROGRAM)
             .map_err(|_| error!(CharacterError::InvalidConfig))?;
     require_keys_eq!(*info.key, address, CharacterError::InvalidConfig);
     Ok(config)
