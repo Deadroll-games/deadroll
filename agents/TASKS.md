@@ -17,7 +17,9 @@ Then:
 - [ ] Map visuals.
 - [ ] Monster sprites in the map editor.
 - [ ] A boss that takes 2 cells.
-- [ ] Items and craft (`programs/items`, `docs/ITEMS_AND_CRAFT.md`).
+- [x] Items, part 1: loadouts, class starter kits, equip / unequip, equipment in combat and in the balance bench (`programs/items`, `crates/rules` items).
+- [ ] Items, part 2: loot from monsters.
+- [ ] Items and craft (`ItemState` NFTs, affixes, crafting; `docs/ITEMS_AND_CRAFT.md`).
 - [ ] Auras and passive skills in combat (the skill builder already accepts reactive and passive skills and auras; combat uses only Active skills).
 
 ## Decision: dependencies and toolchain (L0.4, 2026-10-11, lead)
