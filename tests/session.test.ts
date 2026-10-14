@@ -45,6 +45,7 @@ const SESSION = program.programId;
 const CHARACTER = new PublicKey("9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL");
 const MAP = new PublicKey("2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH");
 const REGISTRY = new PublicKey("dZ1jraMfS3bAUTkRw2TA1ddg8UDGzgUdFQz5pmBxjoG");
+const ITEMS = new PublicKey("48FtbrDegNrAUHFza9HdJzZAvUo3uUNqs1kNnZxFsqJS");
 const SESSION_KEYS = new PublicKey("KeyspM2ssCJbqUhQ4k7sveSiY4WjnYsrXkC8oDbwde5");
 const MPL_CORE = new PublicKey("CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d");
 // MagicBlock VRF (ephemeral-vrf-sdk 0.17.3 consts); none of them has to exist under mock-vrf.
@@ -59,6 +60,12 @@ const MAX_PATH = 16;
 const EMPTY_UNIT = 0xff;
 const BASE_ATTACK = 0xff;
 const MONSTER_BASE = 4;
+/** `EMPTY_ITEM`, and `ItemBase` / `EquipSlot` discriminants (crates/types). */
+const EMPTY_ITEM = 0xff;
+const [SWORD, STAFF, , LEATHER, ROBE] = [0, 1, 2, 3, 4];
+const [MAIN_HAND, , , BODY] = [0, 1, 2, 3];
+/** What a worn-items snapshot holds with only `worn` (slot -> base) on. */
+const worn = (on: Record<number, number>) => Array.from({ length: 11 }, (_, i) => on[i] ?? EMPTY_ITEM);
 
 // ---------------------------------------------------------------------------------------------
 // helpers
@@ -91,6 +98,8 @@ function sessionAccounts(map: PublicKey) {
     escrow: pda([Buffer.from("escrow"), session.toBuffer()], SESSION),
   };
 }
+
+const loadoutOf = (character: PublicKey) => pda([Buffer.from("loadout"), character.toBuffer()], ITEMS);
 
 function playerAccounts(session: PublicKey, character: PublicKey) {
   return {
@@ -482,6 +491,7 @@ describe("deadroll_session: deployed program", () => {
 
 const CHARACTER_IDL = new URL("../target/idl/deadroll_character.json", import.meta.url);
 const MAP_IDL = new URL("../target/idl/deadroll_map.json", import.meta.url);
+const ITEMS_IDL = new URL("../target/idl/deadroll_items.json", import.meta.url);
 const missing: string[] = [];
 if ((await connection.getAccountInfo(config))?.owner.equals(REGISTRY) !== true)
   missing.push("registry GameConfig (L4)");
@@ -490,6 +500,8 @@ for (const [name, table] of [["bestiary", bestiary], ["tileset", tileset]] as co
     missing.push(`registry ${name} table seeded (tools/scripts/seed-registry.ts)`);
 if (!(await isProgram(CHARACTER))) missing.push("deadroll_character deployed");
 if (!(await isProgram(MAP))) missing.push("deadroll_map deployed");
+if (!(await isProgram(ITEMS))) missing.push("deadroll_items deployed");
+if (!existsSync(ITEMS_IDL)) missing.push("target/idl/deadroll_items.json");
 if (!existsSync(CHARACTER_IDL)) missing.push("target/idl/deadroll_character.json");
 if (!existsSync(MAP_IDL)) missing.push("target/idl/deadroll_map.json");
 const SKIP_PARTY = missing.length ? `needs ${missing.join(", ")}` : false;
@@ -498,6 +510,17 @@ const characterProgram: any = SKIP_PARTY
   ? null
   : new Program(JSON.parse(readFileSync(CHARACTER_IDL, "utf8")), provider);
 const mapProgram: any = SKIP_PARTY ? null : new Program(JSON.parse(readFileSync(MAP_IDL, "utf8")), provider);
+const itemsProgram: any = SKIP_PARTY ? null : new Program(JSON.parse(readFileSync(ITEMS_IDL, "utf8")), provider);
+
+/** items `unequip` by the owner (or `signer` with `token`). */
+function unequip(owner: Keypair, character: PublicKey, slot: number, signer = owner, token: PublicKey | null = null) {
+  const slots = ["mainHand", "offHand", "helmet", "body"];
+  return itemsProgram.methods
+    .unequip(e(slots[slot]))
+    .accountsStrict({ signer: signer.publicKey, character, loadout: loadoutOf(character), sessionToken: token })
+    .signers([signer])
+    .rpc();
+}
 
 // The map lane's demo preset (tests/map.test.ts): 16x16 room in a wall ring.
 const TILE = { Floor: 0, Wall: 1, Entrance: 4, Exit: 5 };
@@ -609,7 +632,9 @@ const PROFILES = {
   mage: { name: "Ilyra", race: "forestElf", predisposition: "cold", stats: [5, 7, 13, 5], skills: MAGE_SKILLS },
   support: { name: "Senna", race: "forestElf", predisposition: "lightning", stats: [5, 8, 12, 5], skills: SUPPORT_SKILLS },
 };
-async function createCharacter(owner: Keypair, kind: Kind): Promise<PublicKey> {
+/** A character of `kind` with its items loadout (`init_loadout` in the creation transaction, as
+ * the website sends it); `loadout: false` for one created before items existed. */
+async function createCharacter(owner: Keypair, kind: Kind, opts: { loadout?: boolean } = {}): Promise<PublicKey> {
   const profile = pda([Buffer.from("profile"), owner.publicKey.toBuffer()], CHARACTER);
   if (!(await connection.getAccountInfo(profile))) {
     await characterProgram.methods
@@ -632,6 +657,10 @@ async function createCharacter(owner: Keypair, kind: Kind): Promise<PublicKey> {
     skills: p.skills.map(([name, b]) => ({ blocks: structuredClone(b), name: text(name, 24) })),
   };
   const asset = Keypair.generate();
+  const initLoadout = await itemsProgram.methods
+    .initLoadout()
+    .accountsStrict({ owner: owner.publicKey, character, loadout: loadoutOf(character), systemProgram: SystemProgram.programId })
+    .instruction();
   await characterProgram.methods
     .createCharacter(args)
     .accountsStrict({
@@ -645,6 +674,7 @@ async function createCharacter(owner: Keypair, kind: Kind): Promise<PublicKey> {
       mplCoreProgram: MPL_CORE,
       systemProgram: SystemProgram.programId,
     })
+    .postInstructions(opts.loadout === false ? [] : [initLoadout])
     .signers([owner, asset])
     .rpc();
   return character;
@@ -690,14 +720,15 @@ class Party {
   acc!: ReturnType<typeof sessionAccounts>;
   players: Player[] = [];
 
-  static async create(kinds: Kind[]): Promise<Party> {
+  /** `noLoadout`: player indexes created without an items loadout. */
+  static async create(kinds: Kind[], noLoadout: number[] = []): Promise<Party> {
     const p = new Party();
     [p.dm, p.dmActor] = await Promise.all([funded(), funded(1)]);
     p.fixture = await createFinalizedMap(p.dm);
     p.acc = sessionAccounts(p.fixture.map);
     for (const kind of kinds) {
       const [wallet, actor] = await Promise.all([funded(), funded(1)]);
-      const character = await createCharacter(wallet, kind);
+      const character = await createCharacter(wallet, kind, { loadout: !noLoadout.includes(p.players.length) });
       p.players.push({ kind, wallet, actor, character, ...playerAccounts(p.acc.session, character) });
     }
     return p;
@@ -721,6 +752,7 @@ class Party {
         config,
         characterProgram: CHARACTER,
         systemProgram: SystemProgram.programId,
+        loadout: loadoutOf(pl.character),
       })
       .signers([signer])
       .rpc();
@@ -1164,6 +1196,11 @@ describe("deadroll_session: lobby, auth and movement on the demo map", { skip: S
     assert.ok(a.contribution.eq(PRICE) && b.contribution.eqn(0));
     assert.equal(a.core.hp, (await party.character(0)).core.hpMax);
     assert.ok((await party.character(0)).core.inSession.equals(party.acc.session));
+    // The worn starter kits are copied from the items loadouts.
+    assert.deepEqual(a.equipment, worn({ [MAIN_HAND]: SWORD, [BODY]: LEATHER }));
+    assert.deepEqual(b.equipment, worn({ [MAIN_HAND]: STAFF, [BODY]: ROBE }));
+    // From here until the party ends the loadout is locked.
+    await rejects(unequip(p0.wallet, p0.character, BODY), "CharacterLocked");
   });
 
   it("set_ready / start_session", async () => {
@@ -1318,6 +1355,10 @@ describe("deadroll_session: combat, death, victory and payouts", { skip: SKIP_PA
     assert.ok(r.crit);
     assert.ok(r.damage >= 1);
     assert.ok(r.packetCount >= 1 && r.rollsUsed >= 2);
+    // What the worn items put into the hit: the warrior's sword, nothing on the wolf.
+    assert.ok(hit.items.attacker.weapon.sword !== undefined);
+    assert.equal(hit.items.defender.weapon, null);
+    assert.equal(hit.items.defender.armor, 0);
     const wolf = (await party.monsters()).core.monsters[0];
     assert.equal(wolf.hp, Math.max(0, before - r.damage));
     s = await party.state();
@@ -1401,6 +1442,8 @@ describe("deadroll_session: combat, death, victory and payouts", { skip: SKIP_PA
     assert.ok(!c.core.alive);
     assert.ok(c.core.inSession.equals(party.acc.session), "a tombstone stays locked to its last session");
     assert.equal(c.core.stateVersion, 1);
+    const mage = party.players[1];
+    await rejects(unequip(mage.wallet, mage.character, BODY), "CharacterDead");
   });
 
   it("killing the goblin chieftain wins the party", async () => {
@@ -1894,5 +1937,63 @@ describe("deadroll_session: support and control skills", { skip: SKIP_PARTY }, (
     const dead = party.players[MAGE].participation;
     await rejects(party.act(SUPPORT, party.players[SUPPORT].wallet, buff, MAGE, null, dead), "InvalidAllyTarget");
     await rejects(party.act(SUPPORT, party.players[SUPPORT].wallet, buff, MAGE), "InvalidAllyTarget");
+  });
+});
+
+describe("deadroll_session: equipment from the items loadout", { skip: SKIP_PARTY }, () => {
+  let party: Party;
+  const [ARMORLESS, NO_LOADOUT] = [0, 1];
+
+  before(async () => {
+    party = await Party.create(["warrior", "warrior"], [NO_LOADOUT]);
+    const p = party.players[ARMORLESS];
+    await unequip(p.wallet, p.character, BODY);
+    await party.startAll();
+  });
+
+  it("join_session copies what is worn; no loadout means bare hands", async () => {
+    const [a, b] = await Promise.all([party.part(ARMORLESS), party.part(NO_LOADOUT)]);
+    assert.deepEqual(a.equipment, worn({ [MAIN_HAND]: SWORD }));
+    assert.deepEqual(b.equipment, worn({}));
+    // The starter kit adds no HP: both start at the stored maximum.
+    assert.equal(a.hpMax, (await party.character(ARMORLESS)).core.hpMax);
+    assert.equal(b.hpMax, (await party.character(NO_LOADOUT)).core.hpMax);
+  });
+
+  it("join_session rejects a loadout at another address", async () => {
+    const extra = await Party.create(["warrior"]);
+    await extra.open().rpc();
+    const pl = extra.players[0];
+    const other = loadoutOf(party.players[ARMORLESS].character);
+    await rejects(
+      program.methods
+        .joinSession(PRICE, pl.actor.publicKey)
+        .accountsStrict({
+          player: pl.wallet.publicKey,
+          session: extra.acc.session,
+          character: pl.character,
+          participation: pl.participation,
+          stash: pl.stash,
+          escrow: extra.acc.escrow,
+          sessionAuthority,
+          config,
+          characterProgram: CHARACTER,
+          systemProgram: SystemProgram.programId,
+          loadout: other,
+        })
+        .signers([pl.wallet])
+        .rpc(),
+      "ConstraintSeeds",
+    );
+  });
+
+  it("hits carry the items of both sides", async () => {
+    await party.skipTo(NO_LOADOUT);
+    const p = party.players[NO_LOADOUT];
+    await party.act(NO_LOADOUT, p.wallet, RANGED_SLOT.warrior, 0);
+    const hit = await eventOf(await party.consume(NO_LOADOUT, CRIT), "hitResolved");
+    assert.equal(hit.attacker, NO_LOADOUT);
+    assert.equal(hit.items.attacker.weapon, null, "bare hands");
+    assert.equal(hit.items.attacker.armor, 0);
   });
 });

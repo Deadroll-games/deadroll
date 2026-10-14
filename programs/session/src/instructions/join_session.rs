@@ -2,18 +2,17 @@ use anchor_lang::{
     prelude::*,
     system_program::{transfer, Transfer},
 };
-use deadroll_types::{
-    seeds, ActiveState, ParticipationData, SessionStatus, Stat, PARTY_MAX, STATES_MAX,
-};
+use deadroll_rules::HeroStats;
+use deadroll_types::{seeds, ActiveState, ParticipationData, SessionStatus, PARTY_MAX, STATES_MAX};
 
 use crate::{
     cpi_out::{self, SessionSigner},
     errors::SessionError,
     events::PlayerJoined,
-    rules::{player_ap, player_initiative},
+    rules::{hero_ap, hero_initiative, party_hp_max},
     state::{
-        external::read_character, Escrow, GameSession, Participation, TempStash, ACCOUNT_VERSION,
-        STASH_RESOURCES,
+        external::{read_character, read_equipment},
+        Escrow, GameSession, Participation, TempStash, ACCOUNT_VERSION, STASH_RESOURCES,
     },
 };
 
@@ -64,6 +63,14 @@ pub struct JoinSession<'info> {
     #[account(address = deadroll_character::ID)]
     pub character_program: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
+    /// CHECK: the character's items `Loadout` (address from the seeds); read in
+    /// `external::read_equipment`, empty when the character has none yet.
+    #[account(
+        seeds = [seeds::LOADOUT, character.key().as_ref()],
+        bump,
+        seeds::program = deadroll_items::ID,
+    )]
+    pub loadout: UncheckedAccount<'info>,
 }
 
 /// `contribution` is the player's share of the party price; only what is still missing is taken.
@@ -80,6 +87,11 @@ pub fn handler(ctx: Context<JoinSession>, contribution: u64, actor: Pubkey) -> R
     );
     require!(character.alive, SessionError::CharacterDead);
     require!(character.in_session.is_none(), SessionError::CharacterBusy);
+    // Equipment is locked from here until the party ends (items program), so one snapshot of
+    // it serves the whole party.
+    let equipment = read_equipment(&accounts.loadout)?;
+    let hero = HeroStats::from(&character).with_equipment(equipment);
+    let hp_max = party_hp_max(character.hp_max, &hero);
 
     let session = &mut accounts.session;
     require!(
@@ -116,7 +128,7 @@ pub fn handler(ctx: Context<JoinSession>, contribution: u64, actor: Pubkey) -> R
     session.core.player_count = slot + 1;
     session.player_pos[slot as usize] = session.entrance;
     session.alive_mask |= 1 << slot;
-    session.player_initiative[slot as usize] = player_initiative(&character.stats);
+    session.player_initiative[slot as usize] = hero_initiative(&hero);
 
     let participation = &mut accounts.participation;
     participation.core = ParticipationData {
@@ -127,21 +139,18 @@ pub fn handler(ctx: Context<JoinSession>, contribution: u64, actor: Pubkey) -> R
         slot,
         x: session.entrance.x,
         y: session.entrance.y,
-        hp: character.hp_max,
+        hp: hp_max,
         action_points: 0,
         states: [ActiveState::default(); STATES_MAX],
         ready: false,
         bump: ctx.bumps.participation,
     };
     participation.player = accounts.player.key();
-    participation.max_ap = player_ap(
-        character.race,
-        character.class,
-        character.stats[Stat::Dexterity as usize],
-    );
+    participation.max_ap = hero_ap(&hero);
     participation.ap_seq = 0;
     participation.contribution = paid;
-    participation.hp_max = character.hp_max;
+    participation.hp_max = hp_max;
+    participation.equipment = equipment.0;
 
     let stash = &mut accounts.stash;
     stash.version = ACCOUNT_VERSION;

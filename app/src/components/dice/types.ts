@@ -1,6 +1,9 @@
 // Props contract for the dice cascade and hit breakdown (L9.4). Written by the lane owner.
 import type { EffectResolved } from "../../chain/support";
-import type { HitResult, TimedMod } from "../../chain/types";
+import type { HitResult, ItemBonusView, TimedMod } from "../../chain/types";
+
+/** What each side's worn items put into the hit (HitResolved.items); null for a monster side. */
+export type HitItemSides = { attacker: ItemBonusView | null; target: ItemBonusView | null };
 
 /** Buffs and debuffs on both sides when the hit rolled (not in HitResolved: the app snapshots them). */
 export type HitMods = { attacker: TimedMod[]; target: TimedMod[] };
@@ -31,6 +34,8 @@ export type HitBreakdownProps = {
   defaultOpen?: boolean;
   /** When given, a "Modifiers" section says where each mod went (or why it did nothing). */
   mods?: HitMods;
+  /** When given, an "Items" section says what the worn items put into the hit. */
+  items?: HitItemSides;
 };
 
 export type EffectCascadeProps = {

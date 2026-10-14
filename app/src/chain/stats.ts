@@ -1,8 +1,9 @@
 // A unit's combat stats with its buffs and debuffs, as the battle screen shows them.
-// Pure functions. The numbers mirror programs/session/src/rules.rs (monster_profile,
-// player_defense, monster_ap) and crates/combat support.rs (apply_to_attacker /
-// apply_to_defender / speed_ap): keep them in sync. TODO(balance): every rules.rs number is a
-// placeholder; stats.test.ts pins the current ones.
+// Pure functions. Player defense and armor come from balance.json (deadroll_rules defaults,
+// through ./items); the monster numbers mirror programs/session/src/rules.rs (monster_profile,
+// monster_ap) and crates/combat support.rs (apply_to_attacker / apply_to_defender / speed_ap):
+// keep them in sync. TODO(balance): stats.test.ts pins the current numbers.
+import { heroDefense } from "./items";
 import { MOD_NAMES } from "./support";
 import { Aspect, Class, ModKind, type TimedMod } from "./types";
 
@@ -22,9 +23,10 @@ export const MONSTER_DEFENSE: Readonly<Record<number, DefenseProfile>> = {
   4: { defense: 10, armor: 5, resist: [Aspect.Fire, 5_000] }, // goblin shaman
 };
 
-/** rules.rs player_defense: 10 + Dexterity / 5; warriors wear 30 armor, others 5. */
-export function playerDefense(cls: Class, stats: readonly number[]): DefenseProfile {
-  return { defense: 10 + Math.floor((stats[1] ?? 0) / 5), armor: cls === Class.Warrior ? 30 : 5, resist: null };
+/** deadroll_rules hero::defense: base + Dexterity / div, class armor, plus what `equipment` (the
+ * Participation snapshot, ItemBase bytes by slot) adds. Without it: no items. */
+export function playerDefense(cls: Class, stats: readonly number[], equipment: ArrayLike<number> = []): DefenseProfile {
+  return { ...heroDefense(cls, stats, equipment), resist: null };
 }
 
 /** rules.rs monster_ap: the bestiary speed, 1..12. */

@@ -114,6 +114,7 @@ function errorLogs(e: unknown): string[] {
 const PROGRAM_CODERS: Record<string, keyof typeof coders> = {
   [PROGRAMS.session]: "session",
   [PROGRAMS.character]: "character",
+  [PROGRAMS.items]: "items",
   [PROGRAMS.map]: "map",
 };
 

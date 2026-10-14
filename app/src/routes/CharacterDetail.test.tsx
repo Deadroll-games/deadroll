@@ -3,7 +3,8 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Address } from "@solana/kit";
 import { variantLabel, type CharacterAcc, type SkillRecordAcc } from "../chain/game";
-import { CharacterDetailView, EQUIPMENT_SLOTS, skillAspects, usableInCombat, type PartyInfo } from "./CharacterDetail";
+import { CharacterDetailView, EQUIPMENT_SLOTS, inventoryLock, inventoryView, skillAspects, usableInCombat, type PartyInfo } from "./CharacterDetail";
+import type { LoadoutAcc } from "../chain/items";
 
 vi.mock("../raster/RasterizerProvider", () => ({ useRenderImage: () => ({ image: null, error: null }) }));
 
@@ -93,7 +94,7 @@ describe("helpers", () => {
 });
 
 describe("CharacterDetailView", () => {
-  it("shows identity, stats, skills and empty equipment", () => {
+  it("shows identity, stats, skills; the inventory once loaded", () => {
     view(character(), [skill("Frost Bolt"), skill("Cold Mind", { category: e("passive"), purpose: e("buff"), effect: e("empowerment") })]);
     expect(screen.getByRole("heading", { name: "Aria" })).toBeTruthy();
     expect(screen.getByText("Forest elf Mage · Cold predisposition")).toBeTruthy();
@@ -103,8 +104,9 @@ describe("CharacterDetailView", () => {
     expect(screen.getByText("Frost Bolt")).toBeTruthy();
     expect(screen.getAllByText(/not usable in combat/)).toHaveLength(1);
     expect(screen.getByText("Empowerment")).toBeTruthy();
-    expect(screen.getAllByRole("listitem")).toHaveLength(EQUIPMENT_SLOTS.length);
-    expect(screen.getByText("Items coming soon.")).toBeTruthy();
+    expect(screen.getByText("Loading items…")).toBeTruthy();
+    expect(EQUIPMENT_SLOTS).toHaveLength(11);
+    expect(EQUIPMENT_SLOTS[0]).toEqual({ key: "mainHand", label: "Main hand" });
     expect(screen.getByText("Not in a party.")).toBeTruthy();
   });
 
@@ -122,5 +124,99 @@ describe("CharacterDetailView", () => {
     view(character({ alive: false }, true), [], null);
     expect(screen.getByText("Tombstone · NFT frozen")).toBeTruthy();
     expect(screen.getByText("0 / 30")).toBeTruthy();
+  });
+});
+
+function loadout(): LoadoutAcc {
+  const empty = { source: e("empty"), index: 0, asset: ADDR };
+  return {
+    core: {
+      version: 1,
+      character: ADDR,
+      owner: ADDR,
+      items: [
+        { base: e("staff"), level: 1 },
+        { base: e("robe"), level: 1 },
+        { base: e("sword"), level: 0 },
+        { base: e("sword"), level: 0 },
+      ],
+      itemCount: 2,
+      equipped: EQUIPMENT_SLOTS.map((s) => (s.key === "mainHand" ? { source: e("soulbound"), index: 0, asset: ADDR } : empty)),
+      bump: 255,
+    },
+  };
+}
+
+describe("inventory", () => {
+  it("lists the soulbound items, what they give and where they are worn", () => {
+    expect(inventoryView(null)).toBeNull();
+    expect(inventoryView(loadout())).toEqual([
+      { index: 0, base: "staff", label: "Staff", level: 1, bonus: "damage Blunt 3-6", fits: ["mainHand"], worn: "mainHand" },
+      { index: 1, base: "robe", label: "Robe", level: 1, bonus: "+2 armor", fits: ["body"], worn: null },
+    ]);
+  });
+
+  it("only the owner changes it, never in a party or on a tombstone", () => {
+    const OTHER = "Othr111111111111111111111111111111111111111" as Address;
+    expect(inventoryLock(character(), ADDR)).toBeNull();
+    expect(inventoryLock(character(), OTHER)).toMatch(/Only the owner/);
+    expect(inventoryLock(character(), null)).toMatch(/Only the owner/);
+    expect(inventoryLock(character({ inSession: SESSION }), ADDR)).toMatch(/locked until it ends/);
+    expect(inventoryLock(character({ alive: false }), ADDR)).toMatch(/tombstone/);
+  });
+
+  it("the panel wears and takes off through its callbacks", () => {
+    const onEquip = vi.fn();
+    const onUnequip = vi.fn();
+    render(
+      <MemoryRouter>
+        <CharacterDetailView
+          address={ADDR}
+          c={character()}
+          skills={[]}
+          party={null}
+          items={{ slots: EQUIPMENT_SLOTS, items: inventoryView(loadout()), locked: null, busy: false, onEquip, onUnequip }}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId("slot-mainHand").textContent).toContain("Staff");
+    expect(screen.getByTestId("slot-body").textContent).toContain("empty");
+    expect(screen.getByText("in the bag")).toBeTruthy();
+    screen.getByRole("button", { name: "Wear" }).click();
+    expect(onEquip).toHaveBeenCalledWith(1, "body");
+    screen.getByRole("button", { name: "Take off" }).click();
+    expect(onUnequip).toHaveBeenCalledWith("mainHand");
+  });
+
+  it("locked: the buttons are off and say why; no loadout offers the starter kit", () => {
+    const onCreate = vi.fn();
+    render(
+      <MemoryRouter>
+        <CharacterDetailView
+          address={ADDR}
+          c={character()}
+          skills={[]}
+          party={null}
+          items={{ slots: EQUIPMENT_SLOTS, items: inventoryView(loadout()), locked: "In a party: the equipment is locked until it ends.", busy: false, onEquip: vi.fn(), onUnequip: vi.fn() }}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText(/locked until it ends/)).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Take off" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Wear" }) as HTMLButtonElement).disabled).toBe(true);
+    cleanup();
+    render(
+      <MemoryRouter>
+        <CharacterDetailView
+          address={ADDR}
+          c={character()}
+          skills={[]}
+          party={null}
+          items={{ slots: EQUIPMENT_SLOTS, items: null, locked: null, busy: false, onEquip: vi.fn(), onUnequip: vi.fn(), onCreate }}
+        />
+      </MemoryRouter>,
+    );
+    screen.getByRole("button", { name: "Get the class starter kit" }).click();
+    expect(onCreate).toHaveBeenCalled();
   });
 });

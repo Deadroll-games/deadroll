@@ -7,7 +7,7 @@ import { decodeEvents, type ChainEvent } from "./events";
 import { coders } from "./programs";
 import { sendTx } from "./send";
 
-const IDS = { session: PROGRAMS.session, character: PROGRAMS.character, map: PROGRAMS.map };
+const IDS = { session: PROGRAMS.session, character: PROGRAMS.character, items: PROGRAMS.items, map: PROGRAMS.map };
 
 export type TxResult = { signature: string; events: ChainEvent[] };
 

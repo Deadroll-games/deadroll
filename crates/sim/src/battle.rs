@@ -12,15 +12,15 @@ use deadroll_combat::{
     speed_ap, HitInput, HitResult, Outcome as HitOutcome, RollSource, SeededRoll, States, TimedMods,
 };
 use deadroll_rules::{
+    input::hero,
     input::{effect_action, EffectAction},
     monster::monster_ap,
-    player::{player_ap, player_initiative},
     resolve,
     units::{cooldown_after_use, roll_initiative},
     BalanceConfig, MonsterProfile, Unit,
 };
 use deadroll_skillcheck::ACTIVE_MAX;
-use deadroll_types::{ActiveState, Cell, Monster, Stat, BP, PARTY_MAX, STATES_MAX};
+use deadroll_types::{ActiveState, Cell, Monster, BP, PARTY_MAX, STATES_MAX};
 
 use crate::setup::{Fight, Fighter};
 
@@ -179,13 +179,8 @@ impl<'a> Battle<'a> {
                     states: [ActiveState::default(); STATES_MAX],
                     mods: NO_MODS,
                     cooldowns: [0; ACTIVE_MAX],
-                    max_ap: player_ap(
-                        f.hero.race,
-                        f.hero.class,
-                        f.hero.stats[Stat::Dexterity as usize],
-                        &cfg.players,
-                    ),
-                    initiative: player_initiative(&f.hero.stats, &cfg.players),
+                    max_ap: hero::ap(cfg, &f.hero),
+                    initiative: hero::initiative(cfg, &f.hero),
                 }
             })
             .collect();
@@ -547,10 +542,11 @@ mod tests {
             stats: [8, 8, 8, 6],
             predisposition: Aspect::Blunt,
             predisposition_tier: 14,
+            equipment: deadroll_rules::items::starter_loadout(class, &CFG.items).equipment(),
         };
         Fighter {
             name: format!("{class:?}"),
-            hp_max: deadroll_rules::player::hp_max(class, &hero.stats, 1, &CFG.players),
+            hp_max: hero::hp_max(CFG, &hero),
             hero,
             skills: skills
                 .into_iter()

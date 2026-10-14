@@ -288,7 +288,7 @@ impl Battle<'_> {
             return 0;
         };
         let ally = &self.heroes[a];
-        let (lo, hi) = effect_range(self.cfg, fighter.hero.class, st.power_bp, effect);
+        let (lo, hi) = effect_range(self.cfg, &fighter.hero, st.power_bp, effect);
         let avg = (lo as u64 + hi as u64) / 2;
         match effect {
             EffectAction::Heal => {
@@ -319,8 +319,8 @@ impl Battle<'_> {
     /// Expected value x 400 of `effect` landing on monster `i`.
     fn foe_effect_value(&self, s: usize, power_bp: u32, effect: EffectAction, i: usize) -> u64 {
         let foe = &self.foes[i];
-        let class = self.party[self.heroes[s].fighter].hero.class;
-        let (lo, hi) = effect_range(self.cfg, class, power_bp, effect);
+        let caster = &self.party[self.heroes[s].fighter].hero;
+        let (lo, hi) = effect_range(self.cfg, caster, power_bp, effect);
         let avg = (lo as u64 + hi as u64) / 2;
         let controlled = foe
             .m

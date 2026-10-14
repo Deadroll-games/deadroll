@@ -110,4 +110,6 @@ pub enum SessionError {
     UnexpectedAllyAccount,
     #[msg("Only the character's owner or their session key can claim its rewards")]
     NotRewardOwner,
+    #[msg("Not the character's items loadout")]
+    InvalidLoadout,
 }

@@ -40,6 +40,7 @@ Every program exposes `pub const ID` and a `cpi` feature so other programs can d
 | `SkillSet` | character | `["skills", character]` |
 | `Bag` | character | `["bag", character]` |
 | `ItemState` | items | `["item", asset]` |
+| `Loadout` | items | `["loadout", character]` |
 | `Map` | map | `["map", dm, map_index: u32 LE]` |
 | `MapLayout` | map | `["layout", map]` |
 | `GameSession` | session | `["session", map]` |
@@ -68,12 +69,16 @@ SessionStatus  Lobby, Active, Victory, Wiped, Fled, Abandoned
 MapStatus   Draft, Finalized, InSession, Finished
 Stat        Strength, Dexterity, Intelligence, Endurance      (index into Character.stats)
 ProgramIdx  Registry, Render, Character, Items, Map, Session, City   (index into GameConfig.programs)
+EquipSlot   MainHand, OffHand, Helmet, Body, Pants, Boots, Gloves, Necklace, Cloak, Ring1, Ring2   (items lane)
+ItemBase    Sword, Staff, Wand, LeatherArmor, Robe, LightLeatherArmor   (items lane, recipes append)
+EquipSource Empty, Soulbound, Asset   (items lane)
 ```
 
 Discriminants are sequential from 0 in the listed order and are part of the on-chain format: append only.
 `Tier` is a validation type (`Tier::new(u8)`), not serialized; accounts and args carry a raw `u8`.
 
 Constants: `BP = 10_000`, `MAP_MAX = 32`, `PARTY_MAX = 4`, `MONSTERS_MAX = 24`, `SKILL_SLOTS_ACTIVE = 4`, `BAG_SLOTS = 20`.
+Added by the items lane: `SOULBOUND_MAX = 4`, `EQUIP_SLOTS = 11`, `EMPTY_ITEM = 0xFF`.
 Added at L0: `MAP_CELLS = 1024`, `SPAWNS_MAX = 24`, `TURN_ORDER_MAX = 28`, `STATES_MAX = 6`, `LAYERS_MAX = 20`, `PROGRAMS_COUNT = 7`, `STATS_COUNT = 4`, `URI_BASE_LEN = 64`.
 PDA seed prefixes from section 2 are constants in `deadroll_types::seeds` (`seeds::CHARACTER`, ...). Use them, never string literals.
 
@@ -110,6 +115,10 @@ GameSession     { version, map, dm, status, price_lamports: u64, players: [Pubke
 Participation   { version, session, character, actor: Pubkey, slot: u8, x: u8, y: u8, hp: u32,
                   action_points: u8, states: [ActiveState; 6], ready: bool, bump }
 MonsterState    { version, session, monsters: [Monster; 24], count: u8, bump }
+Loadout         { version, character, owner, items: [ItemRecord; 4], item_count: u8,
+                  equipped: [EquipRef; 11], bump }                     (items lane)
+ItemRecord      { base: ItemBase, level: u8 }
+EquipRef        { source: EquipSource, index: u8 (soulbound record), asset: Pubkey (item NFT, later) }
 ```
 
 ### 4.1 How programs use these layouts
@@ -148,7 +157,8 @@ Borsh adds no bytes for the wrapper, so `version` stays the first byte after the
 
 ```
 open_session(map, price)             DM; creates GameSession, MonsterState, Escrow; CPI map.set_status(InSession)
-join_session(character, actor)       player; pays price to Escrow; creates Participation, TempStash; CPI character.lock_for_session
+join_session(character, actor)       player; pays price to Escrow; creates Participation, TempStash; CPI character.lock_for_session;
+                                     reads the items Loadout (last account) into Participation.equipment
 set_ready / start_session            all ready -> roll initiative (VRF) -> Active
 move(path)                           actor; spends action points; no rolls
 act(skill_slot | base_attack, target) actor; requests VRF -> callback resolves hit via deadroll_combat;

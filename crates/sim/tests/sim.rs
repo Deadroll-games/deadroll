@@ -58,7 +58,7 @@ fn a_fight_is_deterministic_and_ends() {
         }
     }
     // A round cap of 1 against the boss pack cannot be won in time.
-    let (f, _) = resolve_fight(&p, "chieftain");
+    let (f, _) = resolve_fight(&p, "wolves");
     let short = Settings {
         max_rounds: 1,
         ..Settings::default()
@@ -314,5 +314,134 @@ fn hero_warnings_follow_the_creation_rules() {
     assert!(
         w.contains("predisposition") && w.contains("tier") && w.contains("stats"),
         "{w}"
+    );
+}
+
+#[test]
+fn hero_equipment_is_json_by_name_and_checked() {
+    use deadroll_rules::items::Equipment;
+    use deadroll_sim::setup::{fighter, Issues};
+    use deadroll_types::{EquipSlot, ItemBase};
+
+    let p = shipped();
+    let cfg = BalanceConfig::DEFAULT;
+    // Left out: the class starter kit. The shipped armorless warrior: a sword only.
+    let kit = &p.heroes["human_warrior"];
+    assert_eq!(kit.equipment, None);
+    let bare = &p.heroes["human_warrior_unarmed"];
+    let mut sword = Equipment::EMPTY;
+    sword.set(EquipSlot::MainHand, Some(ItemBase::Sword));
+    assert_eq!(bare.equipment, Some(sword));
+    let mut issues = Issues::default();
+    let with_kit = fighter(&p, "human_warrior", kit, &cfg, &mut issues);
+    let without = fighter(&p, "human_warrior_unarmed", bare, &cfg, &mut issues);
+    assert!(issues.errors.is_empty(), "{:?}", issues.errors);
+    assert_eq!(
+        with_kit.hero.equipment.get(EquipSlot::Body),
+        Some(ItemBase::LeatherArmor)
+    );
+    assert_eq!(without.hero.equipment.get(EquipSlot::Body), None);
+
+    // By name in JSON; `{}` is nothing worn.
+    let json = serde_json::to_value(bare).unwrap();
+    assert_eq!(json["equipment"], serde_json::json!({"MainHand": "Sword"}));
+    let mut naked = bare.clone();
+    naked.equipment = Some(Equipment::EMPTY);
+    assert_eq!(
+        serde_json::to_value(&naked).unwrap()["equipment"],
+        serde_json::json!({})
+    );
+    let bad = serde_json::json!({"MainHand": "Axe"});
+    let mut v = json.clone();
+    v["equipment"] = bad;
+    let err = serde_json::from_value::<HeroPreset>(v)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("unknown ItemBase `Axe`"), "{err}");
+
+    // The same rule as the items program: a sword is not body armor.
+    let mut wrong = bare.clone();
+    let mut eq = Equipment::EMPTY;
+    eq.set(EquipSlot::Body, Some(ItemBase::Sword));
+    wrong.equipment = Some(eq);
+    let mut issues = Issues::default();
+    let f = fighter(&p, "wrong", &wrong, &cfg, &mut issues);
+    assert!(f.hero.equipment.is_empty());
+    assert!(
+        issues.errors.iter().any(|e| e.contains("Sword in Body")),
+        "{:?}",
+        issues.errors
+    );
+}
+
+#[test]
+fn armor_changes_the_fights() {
+    let p = shipped();
+    let cfg = BalanceConfig::DEFAULT;
+    let (f, _) = resolve_fight(&p, "chieftain");
+    let f = f.unwrap();
+    let run = |hero: &str| {
+        let (team, issues) = resolve_party(&p, &[hero.to_string()], &cfg);
+        assert!(issues.errors.is_empty(), "{:?}", issues.errors);
+        run_batch(
+            &cfg,
+            &team,
+            &f,
+            Settings::default(),
+            400,
+            9,
+            &Progress::default(),
+        )
+        .unwrap()
+    };
+    let armored = run("human_warrior");
+    let bare = run("human_warrior_unarmed");
+    // Same seeds, same sword: only the leather armor differs.
+    assert!(
+        armored.win_rate > bare.win_rate,
+        "win rate {} vs {}",
+        armored.win_rate,
+        bare.win_rate
+    );
+    assert!(armored.slots[0].death_rate < bare.slots[0].death_rate);
+}
+
+#[test]
+fn shipped_item_preset_and_app_table_match_the_defaults() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let read = |rel: &str| {
+        std::fs::read_to_string(root.join(rel))
+            .unwrap()
+            .replace("\r\n", "\n")
+    };
+    let hint = "stale: regenerate with `cargo run -p deadroll-sim --example export_balance`";
+    assert_eq!(
+        read("tools/balance/presets/items/default.json"),
+        config_io::items_to_json(&BalanceConfig::DEFAULT.items),
+        "{hint} -- items"
+    );
+    assert_eq!(
+        read("app/src/chain/balance.json"),
+        config_io::to_json(&BalanceConfig::DEFAULT),
+        "{hint} -- config"
+    );
+    // An item file laid over the defaults: a partial one keeps the rest.
+    let items =
+        config_io::items_from_json(r#"{"bases": {"Robe": {"armor": 9}}, "level_gap": 2}"#).unwrap();
+    assert_eq!(
+        items.bases[deadroll_types::ItemBase::Robe as usize].armor,
+        9
+    );
+    assert_eq!(items.level_gap, 2);
+    assert_eq!(
+        items.starter_kits,
+        BalanceConfig::DEFAULT.items.starter_kits
+    );
+    let kits =
+        config_io::items_from_json(r#"{"starter_kits": {"Mage": ["Wand", null, null, null]}}"#)
+            .unwrap();
+    assert_eq!(
+        kits.starter_kits[Class::Mage as usize],
+        [Some(deadroll_types::ItemBase::Wand), None, None, None]
     );
 }

@@ -275,6 +275,7 @@ fn save_build(app: &mut BalanceApp, hero: &HeroPreset) -> String {
     let preset = HeroPreset {
         skills: skill_ids,
         inline_skills: vec![],
+        equipment: None,
         ..hero.clone()
     };
     let id = widgets::free_id(&app.presets.heroes, &preset.name);

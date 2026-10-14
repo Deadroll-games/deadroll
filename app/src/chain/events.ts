@@ -32,9 +32,9 @@ export function eventsFromLogs(logs: readonly string[], program: Address): Uint8
   return out;
 }
 
-export type ChainEvent = { program: "session" | "character" | "map"; name: string; data: any };
+export type ChainEvent = { program: "session" | "character" | "items" | "map"; name: string; data: any };
 
-/** Every session, character and map event in a transaction's logs, in log order. */
+/** Every session, character, items and map event in a transaction's logs, in log order. */
 export function decodeEvents(logs: readonly string[], coders: Record<ChainEvent["program"], { decodeEvent(p: Uint8Array): { name: string; data: any } | null }>, ids: Record<ChainEvent["program"], Address>): ChainEvent[] {
   const out: ChainEvent[] = [];
   const stack: string[] = [];

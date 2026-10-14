@@ -53,6 +53,21 @@ u8_enum!(
     ProgramIdx { Registry, Render, Character, Items, Map, Session, City }
 );
 
+u8_enum!(
+    /// Equipment slot (docs/ART_DESCRIPTION.md, section 6.3); rings take two slots.
+    EquipSlot { MainHand, OffHand, Helmet, Body, Pants, Boots, Gloves, Necklace, Cloak, Ring1, Ring2 }
+);
+u8_enum!(
+    /// Item base: the type of an item, its slot and base numbers (`deadroll_rules::ItemTuning`).
+    /// P0 has the class starter bases (docs/ITEMS_AND_CRAFT.md, section 10); recipes append more.
+    ItemBase { Sword, Staff, Wand, LeatherArmor, Robe, LightLeatherArmor }
+);
+u8_enum!(
+    /// What an equipment slot holds: nothing, a soulbound record of the loadout, or an item NFT
+    /// (crafting, later).
+    EquipSource { Empty, Soulbound, Asset }
+);
+
 /// Predisposition tier, `1..=14`, 1 is best. Accounts and instruction args carry a raw `u8`;
 /// `Tier::new` validates it. No borsh on purpose: deserializing must not skip the check.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]

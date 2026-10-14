@@ -123,6 +123,7 @@ fn the_config_drives_the_rules() {
         stats: [10, 7, 5, 8],
         predisposition: Aspect::Piercing,
         predisposition_tier: 14,
+        equipment: Default::default(),
     };
     let cleave = presets::WARRIOR[3].blocks;
     let a = player_attacker(
@@ -166,7 +167,7 @@ fn effects_map_to_actions_and_sides() {
     assert_eq!(effect_action(Effect::None), None);
     let cfg = BalanceConfig::DEFAULT;
     assert_eq!(
-        effect_range(&cfg, Class::Mage, 10_000, EffectAction::Stun),
+        effect_range(&cfg, &mage(), 10_000, EffectAction::Stun),
         (0, 0)
     );
     let mut states = [ActiveState::default(); STATES_MAX];
@@ -233,4 +234,16 @@ fn config_serializes() {
     let text = serde_json::to_string(&cfg).unwrap();
     assert!(text.contains("\"armor_k\":100"));
     assert_eq!(serde_json::from_str::<BalanceConfig>(&text).unwrap(), cfg);
+}
+
+fn mage() -> HeroStats {
+    HeroStats {
+        race: Race::ForestElf,
+        class: Class::Mage,
+        level: 1,
+        stats: [5, 7, 10, 8],
+        predisposition: Aspect::Cold,
+        predisposition_tier: 14,
+        equipment: Default::default(),
+    }
 }

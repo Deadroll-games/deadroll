@@ -6,7 +6,9 @@
 //! until balancing, tuned in `tools/balance`); the wrappers below keep one call per rule.
 use deadroll_combat::{DamageRange, RollSource};
 use deadroll_mapcheck::roster::{p0_role, Role};
-use deadroll_rules::{config::BalanceConfig, monster, player, units};
+use deadroll_rules::{
+    config::BalanceConfig, input::hero, items, monster, player, units, HeroStats,
+};
 use deadroll_types::{Aspect, Cell, Class, Form, Race, Source, Tile, STATS_COUNT};
 
 pub use deadroll_rules::units::{
@@ -52,9 +54,44 @@ pub fn step_cost(tile: Tile, costs: &[u8; Tile::COUNT]) -> Option<u8> {
     }
 }
 
-/// Initiative of a player (docs/CHARACTER.md, 3.2: Intelligence; items and effects in P1).
+/// Initiative of a player (docs/CHARACTER.md, 3.2: Intelligence; effects in P1).
 pub fn player_initiative(stats: &[u16; STATS_COUNT]) -> u16 {
     player::player_initiative(stats, &BALANCE.players)
+}
+
+/// Action points per turn of a hero with what it wears.
+pub fn hero_ap(h: &HeroStats) -> u8 {
+    hero::ap(BALANCE, h)
+}
+
+/// Initiative of a hero with what it wears.
+pub fn hero_initiative(h: &HeroStats) -> u16 {
+    hero::initiative(BALANCE, h)
+}
+
+/// HP the worn items add on top of the stored `CharacterData.hp_max`.
+pub fn item_hp(h: &HeroStats) -> u32 {
+    hero::item_hp(BALANCE, h)
+}
+
+/// Maximum HP in a party: the stored `CharacterData.hp_max` plus what the items add.
+pub fn party_hp_max(stored: u32, h: &HeroStats) -> u32 {
+    stored.saturating_add(item_hp(h))
+}
+
+/// The damage base of a hero: the main-hand weapon, or bare hands.
+pub fn hero_weapon(h: &HeroStats) -> DamageRange {
+    hero::weapon(BALANCE, h)
+}
+
+/// What a new character of `class` wears (the items program's `init_loadout`).
+pub fn starter_equipment(class: Class) -> items::Equipment {
+    items::starter_loadout(class, &BALANCE.items).equipment()
+}
+
+/// Everything worn items add, for the hit breakdown.
+pub fn item_bonus(h: &HeroStats) -> items::ItemBonus {
+    items::item_bonus(&h.equipment, &BALANCE.items)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -73,7 +110,7 @@ pub const PROJECTILE_RANGE: u8 = BALANCE.players.projectile_range;
 /// Native state chance of a skill / basic attack (crates/combat `Skill::state_chance_bp`).
 pub const SKILL_STATE_CHANCE_BP: u32 = BALANCE.players.skill_state_chance_bp;
 pub const BASIC_STATE_CHANCE_BP: u32 = BALANCE.players.basic_state_chance_bp;
-/// HP a heal restores per point of the class weapon's range, bp.
+/// HP a heal restores per point of the weapon's range, bp.
 pub const HEAL_WEAPON_BP: u32 = BALANCE.players.heal_weapon_bp;
 
 /// Whether `form` reaches from `from` to `to` (Chebyshev distance, never the own cell).
@@ -91,11 +128,6 @@ pub fn class_source(class: Class) -> Source {
     player::class_source(class)
 }
 
-/// Starting weapon until items exist (P0 has no equipment). Skills convert its base.
-pub fn class_weapon(class: Class) -> DamageRange {
-    player::class_weapon(class, &BALANCE.players)
-}
-
 /// Class tag increase in bp and the source it applies to (docs/CHARACTER.md, section 8.1).
 pub fn class_increase(class: Class) -> Option<(Source, u32)> {
     player::class_increase(class, &BALANCE.players)
@@ -106,9 +138,10 @@ pub fn support_increase(class: Class) -> u32 {
     player::support_increase(class, &BALANCE.players)
 }
 
-/// HP range of a heal skill with `power_bp` (see `deadroll_rules::player::heal_range`).
-pub fn heal_range(class: Class, power_bp: u32) -> (u32, u32) {
-    player::heal_range(class, power_bp, &BALANCE.players)
+/// HP range of a heal skill with `power_bp` from `weapon` (see
+/// `deadroll_rules::player::heal_range`).
+pub fn heal_range(class: Class, weapon: DamageRange, power_bp: u32) -> (u32, u32) {
+    player::heal_range(class, weapon, power_bp, &BALANCE.players)
 }
 
 /// Race trait: flat added damage of the predisposition aspect (docs/CHARACTER.md, 6.2, 7.1).
@@ -126,7 +159,7 @@ pub fn player_crit_bp(stats: &[u16; STATS_COUNT]) -> u32 {
     player::player_crit_bp(stats, &BALANCE.players)
 }
 
-/// Defense threshold and armor of a player (warriors have high base armor, CHARACTER 8.1).
+/// Defense threshold and base armor of a player before items (CHARACTER 8.1).
 pub fn player_defense(class: Class, stats: &[u16; STATS_COUNT]) -> (u32, u32) {
     player::player_defense(class, stats, &BALANCE.players)
 }
@@ -330,15 +363,20 @@ mod tests {
         );
     }
 
+    fn kit_weapon(class: Class) -> DamageRange {
+        items::weapon_range(&starter_equipment(class), &BALANCE.items)
+    }
+
     #[test]
     fn heal_scales_with_power_and_support() {
-        // Support weapon 2..5, x2, +20%.
-        assert_eq!(heal_range(Class::Support, BP), (4, 12));
-        // Mage weapon 3..6, x2.
-        assert_eq!(heal_range(Class::Mage, BP), (6, 12));
-        assert_eq!(heal_range(Class::Warrior, 5_000), (4, 8));
-        assert_eq!(heal_range(Class::Warrior, 0), (1, 1));
-        assert_eq!(heal_range(Class::Support, u32::MAX).1, 5_153_960);
+        let heal = |class, power| heal_range(class, kit_weapon(class), power);
+        // Support wand 2..5, x2, +20%.
+        assert_eq!(heal(Class::Support, BP), (4, 12));
+        // Mage staff 3..6, x2.
+        assert_eq!(heal(Class::Mage, BP), (6, 12));
+        assert_eq!(heal(Class::Warrior, 5_000), (4, 8));
+        assert_eq!(heal(Class::Warrior, 0), (1, 1));
+        assert_eq!(heal(Class::Support, u32::MAX).1, 5_153_960);
         assert_eq!(support_increase(Class::Support), 2_000);
         assert_eq!(support_increase(Class::Mage), 0);
     }

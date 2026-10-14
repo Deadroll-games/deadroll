@@ -26,7 +26,7 @@ import { toHitResolved } from "./hit";
 import { toEffectResolved } from "./support";
 import { Effect } from "./skillcheck";
 import { coders } from "./programs";
-import { gameConfigPda, monstersPda, participationPda, programIdentityPda, sessionAuthorityPda, sessionTokenPda, skillSetPda } from "./pda";
+import { gameConfigPda, loadoutPda, monstersPda, participationPda, programIdentityPda, sessionAuthorityPda, sessionTokenPda, skillSetPda } from "./pda";
 import { affordable, pathArgs, reachable, route } from "./route";
 import { explainFailure } from "./send";
 import { Applied, Aspect, Class, HitOutcome, MAP_MAX, ModKind, Tile } from "./types";
@@ -137,9 +137,10 @@ describe("session builders", () => {
     expect(ix.accounts![3]).toEqual({ address: PROGRAMS.session, role: AccountRole.READONLY });
   });
 
-  it("join_session: contribution u64 LE and the actor key", async () => {
+  it("join_session: contribution u64 LE and the actor key; the items loadout last", async () => {
     const player = await generateKeyPairSigner();
     const ix = await joinSessionIx(player, session, character, 50_000_000n, addrOf(11));
+    expect(ix.accounts!.at(-1)).toEqual({ address: await loadoutPda(character), role: AccountRole.READONLY });
     const amount = new Uint8Array(8);
     new DataView(amount.buffer).setBigUint64(0, 50_000_000n, true);
     expect(toHex(ix.data as Uint8Array)).toBe(toHex(concat(ixDisc("join_session"), amount, A(11))));
@@ -235,14 +236,17 @@ describe("decoders", () => {
       v.cooldowns[1] = 2;
       v.hpMax = 30;
       v.mods[ModKind.Weakening] = mod;
+      v.equipment = Uint8Array.of(0, 0xff, 0xff, 3, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff);
     });
     expect(p.back.cooldowns).toHaveLength(16);
-    // cooldowns (16), hp_max (4), mods (6 x 8 bytes).
-    expect(Array.from(p.bytes.subarray(-68, -66))).toEqual([0, 2]);
-    expect(Array.from(p.bytes.subarray(-52, -48))).toEqual([30, 0, 0, 0]);
+    // cooldowns (16), hp_max (4), mods (6 x 8 bytes), equipment (11).
+    expect(Array.from(p.bytes.subarray(-79, -77))).toEqual([0, 2]);
+    expect(Array.from(p.bytes.subarray(-63, -59))).toEqual([30, 0, 0, 0]);
     // TimedModData: kind, aspect, turns, power_bp u32, source = 8 bytes.
-    expect(Array.from(p.bytes.subarray(-48 + 8 * 3, -48 + 8 * 4))).toEqual([ModKind.Weakening, Aspect.Blood, 3, 0x08, 0x07, 0, 0, 2]);
+    expect(Array.from(p.bytes.subarray(-59 + 8 * 3, -59 + 8 * 4))).toEqual([ModKind.Weakening, Aspect.Blood, 3, 0x08, 0x07, 0, 0, 2]);
+    expect(Array.from(p.bytes.subarray(-11))).toEqual([0, 0xff, 0xff, 3, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
     expect(p.back.hpMax).toBe(30);
+    expect(Array.from(p.back.equipment)).toEqual([0, 0xff, 0xff, 3, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
     expect(p.back.mods[ModKind.Weakening]).toEqual({ ...mod, kind: { weakening: {} }, aspect: { blood: {} } });
     const m = roundTrip("MonsterState", (v) => {
       v.cooldowns[2] = Uint8Array.of(1, 0, 3, 0);
@@ -255,7 +259,7 @@ describe("decoders", () => {
     expect(Array.from(m.bytes.subarray(-1152 + 2 * 48 + 8, -1152 + 2 * 48 + 11))).toEqual([ModKind.Slow, Aspect.Cold, 2]);
     expect(m.back.mods[2][ModKind.Slow].turns).toBe(2);
     // A pre-upgrade account (no trailing fields) no longer decodes.
-    expect(() => c.decodeAccount("Participation", p.bytes.subarray(0, -52))).toThrow(/read past end/);
+    expect(() => c.decodeAccount("Participation", p.bytes.subarray(0, -11))).toThrow(/read past end/);
   });
 
   it("decodes TurnTicked, TurnSkipped and SkillUsed", () => {
@@ -340,6 +344,8 @@ describe("decoders", () => {
     r.packets[1].rolled = 30_000n;
     r.damage = 8;
     r.states[0] = { kind: "chill", turns: 2, power: 1000, source: 1 };
+    ev.items.attacker = { weapon: "sword", armor: 0, defense: 0, attack: 1 };
+    ev.items.defender.armor = 10;
     const out: Uint8Array[] = [Uint8Array.from(c.idl.events!.find((e) => e.name === "HitResolved")!.discriminator)];
     c.encode({ defined: { name: "HitResolved" } }, ev, out);
     const decoded = c.decodeEvent(concat(...out))!;
@@ -354,6 +360,10 @@ describe("decoders", () => {
     expect(h.result.packets[1]).toMatchObject({ aspect: Aspect.Fire, rolled: 30_000n });
     expect(h.result.states).toHaveLength(1);
     expect(h.result.damage).toBe(8);
+    // HitResolved.items, after the result: weapon Option<ItemBase>, armor, defense, attack.
+    expect(h.items).toEqual({ attacker: { weapon: "sword", armor: 0, defense: 0, attack: 1 }, defender: { weapon: null, armor: 10, defense: 0, attack: 0 } });
+    const tail = concat(...out).subarray(-2 * 13 - 1);
+    expect(Array.from(tail.subarray(0, 2))).toEqual([1, 0]);
   });
 
   it("decodeEvents reads session events inside the session invocation only", () => {
@@ -372,7 +382,7 @@ describe("decoders", () => {
       `Program ${PROGRAMS.character} success`,
       `Program ${PROGRAMS.session} success`,
     ];
-    const evs = decodeEvents(logs, coders, { session: PROGRAMS.session, character: PROGRAMS.character, map: PROGRAMS.map });
+    const evs = decodeEvents(logs, coders, { session: PROGRAMS.session, character: PROGRAMS.character, items: PROGRAMS.items, map: PROGRAMS.map });
     expect(evs.map((e) => [e.program, e.name])).toEqual([["session", "PlayerDied"]]);
     expect(evs[0]!.data.slot).toBe(1);
   });

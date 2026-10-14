@@ -160,6 +160,16 @@ export type HitResult = {
  * callback; until its IDL exists this is the app-side shape. Units are turn-order ids:
  * 0..4 player slot, 4 + i monster i.
  */
+/** What one side's worn items put into a hit (session `ItemBonusData`); all zero for a monster. */
+export type ItemBonusView = {
+  /** The main-hand weapon (an `ItemBase` key like "sword"), null = bare hands or a monster. */
+  weapon: string | null;
+  armor: number;
+  defense: number;
+  attack: number;
+};
+export type HitItems = { attacker: ItemBonusView; defender: ItemBonusView };
+
 export type HitResolved = {
   session: string;
   attacker: number;
@@ -168,6 +178,8 @@ export type HitResolved = {
   seed: Uint8Array;
   actionCounter: number;
   result: HitResult;
+  /** The players' worn items in this hit. */
+  items: HitItems;
 };
 
 // ---- buffs and debuffs (deadroll_combat::support, session TimedModData) ----

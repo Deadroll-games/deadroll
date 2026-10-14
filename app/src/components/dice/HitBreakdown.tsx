@@ -1,9 +1,10 @@
 import { Applied, HitOutcome, ModKind, type HitResult, type PacketResult, type StateRoll, type TimedMod } from "../../chain/types";
 import { aspectName, carrierName, formatBp, formatScaled, resonanceName, stateName } from "../../chain/names";
 import { MOD_NAMES, modEffectText } from "../../chain/support";
+import { itemLabel, UNARMED, weaponText } from "../../chain/items";
 import { chanceView, tintLabel, tintView, type ChanceView } from "./cascade";
 import { RollBar } from "./RollBar";
-import type { HitBreakdownProps, HitMods } from "./types";
+import type { HitBreakdownProps, HitItemSides, HitMods } from "./types";
 import "./dice.css";
 
 function outcomeLabel(outcome: HitOutcome): string {
@@ -66,6 +67,31 @@ export function modLines(hit: HitResult, mods: HitMods): ModLine[] {
   return out;
 }
 
+/** What the worn items of each player side put into this hit (HitResolved.items). */
+export function itemLines(hit: HitResult, items: HitItemSides): ModLine[] {
+  const out: ModLine[] = [];
+  const a = items.attacker;
+  if (a) {
+    out.push({
+      side: "Attacker",
+      text: a.weapon ? `${itemLabel(a.weapon)}: the damage base (${weaponText(a.weapon) ?? "?"})` : `bare hands: the damage base (Blunt ${UNARMED[0]}-${UNARMED[1]})`,
+      applied: true,
+    });
+    if (a.attack > 0) out.push({ side: "Attacker", text: `+${a.attack} attack from items, in the total ${hit.attackTotal}`, applied: true });
+  }
+  const t = items.target;
+  if (t) {
+    const physical = hit.packets.some((p) => !p.immune && p.armor > 0);
+    out.push({
+      side: "Target",
+      text: t.armor > 0 ? `+${t.armor} armor from items${physical ? ", in Armor of the physical packets" : ", no physical packet in this hit"}` : "no armor from items",
+      applied: t.armor > 0 && physical,
+    });
+    if (t.defense > 0) out.push({ side: "Target", text: `+${t.defense} defense from items, in the defense ${hit.defense}`, applied: true });
+  }
+  return out;
+}
+
 /** " (incl. Vulnerability 25%)" after a packet row the mod fed. */
 function note(mods: HitMods | undefined, row: "increased" | "weaken" | "resist" | "vuln", p: PacketResult): string {
   const m =
@@ -77,8 +103,10 @@ function note(mods: HitMods | undefined, row: "increased" | "weaken" | "resist" 
   return ` (incl. ${MOD_NAMES[m.kind]} ${formatBp(m.powerBp)})`;
 }
 
-export function HitBreakdown({ hit, defaultOpen = true, critChanceBp, mods }: HitBreakdownProps) {
+export function HitBreakdown({ hit, defaultOpen = true, critChanceBp, mods, items }: HitBreakdownProps) {
   const lines = mods ? modLines(hit, mods) : [];
+  const gear = items ? itemLines(hit, items) : [];
+  const itemArmor = items?.target?.armor ?? 0;
   const resonances = hit.resonances.filter((r) => r != null);
   const stateRolls = [...hit.packets.map((p) => p.state), ...hit.resonanceStates].filter((roll) => roll.rolled);
 
@@ -150,7 +178,10 @@ export function HitBreakdown({ hit, defaultOpen = true, critChanceBp, mods }: Hi
               </tr>
               <tr>
                 <th scope="row">Armor</th>
-                <td>{packet.armor}</td>
+                <td>
+                  {packet.armor}
+                  {itemArmor > 0 && packet.armor > 0 ? ` (incl. items ${itemArmor})` : ""}
+                </td>
               </tr>
               <tr>
                 <th scope="row">Resist</th>
@@ -173,6 +204,23 @@ export function HitBreakdown({ hit, defaultOpen = true, critChanceBp, mods }: Hi
             </tbody>
           </table>
         ))}
+
+        {items && (
+          <section data-testid="hit-items">
+            <h3 className="dice-subhead">Items</h3>
+            {gear.length === 0 ? (
+              <p className="muted dice-line">None</p>
+            ) : (
+              <ul className="dice-list">
+                {gear.map((l, i) => (
+                  <li key={i} className={l.applied ? "" : "muted"}>
+                    {l.side}: {l.text}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        )}
 
         {mods && (
           <section data-testid="hit-mods">

@@ -44,6 +44,7 @@ import {
 } from "./game";
 import { presetToLayout, type MapPresetData } from "./mock";
 import { coders } from "./programs";
+import { equipIx, equipmentOf, getLoadout, inventory, unequipIx } from "./items";
 import { affordable, cheb, route } from "./route";
 import { sendTx } from "./send";
 import { toHitResolved } from "./hit";
@@ -68,7 +69,7 @@ async function funded(sol = 10): Promise<KeyPairSigner> {
   return kp;
 }
 
-const IDS = { session: PROGRAMS.session, character: PROGRAMS.character, map: PROGRAMS.map };
+const IDS = { session: PROGRAMS.session, character: PROGRAMS.character, items: PROGRAMS.items, map: PROGRAMS.map };
 async function send(payer: KeyPairSigner, ixs: Parameters<typeof sendTx>[1]): Promise<ChainEvent[]> {
   const { logs } = await sendTx(payer, ixs);
   return decodeEvents(logs, coders, IDS);
@@ -89,9 +90,15 @@ async function openParty(specs: Spec[]) {
       const [wallet, key] = await Promise.all([funded(), funded(1)]);
       const c = await createCharacterIxs(wallet, { name, race, class: cls, predisposition: pred, stats: [...stats], skills });
       if (c.profileIx) await send(wallet, [c.profileIx]);
-      const evs = await send(wallet, [c.ix]);
+      const evs = await send(wallet, [c.ix, c.loadoutIx]);
       const created = evs.find((e) => e.name === "CharacterCreated")!.data;
       expect(created.nft).toBe(c.asset.address);
+      // The class starter kit in the same transaction, worn; the owner takes it off and back on.
+      expect(evs.find((e) => e.name === "LoadoutCreated")!.data.itemCount).toBe(2);
+      expect(inventory((await getLoadout(c.character))!).items.every((i) => i.worn !== null)).toBe(true);
+      const off = await send(wallet, [await unequipIx(wallet, c.character, "body", null)]);
+      expect(off.find((e) => e.name === "ItemUnequipped")).toBeTruthy();
+      await send(wallet, [await equipIx(wallet, c.character, 1, "body", null)]);
       players.push({ wallet, key, character: c.character, asset: c.asset.address, actor: { signer: key, token: null } });
     }
 
@@ -122,6 +129,8 @@ async function openParty(specs: Spec[]) {
 
     const party = (await readParty(acc.session))!;
     expect(status(party.session)).toBe("active");
+    // join_session copied what each character wears.
+    for (const pl of party.players) expect(Array.from(pl.part.equipment)).toEqual(equipmentOf((await getLoadout(pl.character))!));
     expect(party.session.core.pendingVrf).toBe(true);
     // The localnet oracle: the ally of a pending heal or buff rides along (GameSession.pendingTarget).
     const oracle = async (seed: Uint8Array): Promise<ChainEvent[]> => {

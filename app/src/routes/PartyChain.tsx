@@ -7,7 +7,7 @@ import type { Address, TransactionSigner } from "@solana/kit";
 import { DiceCascade } from "../components/dice/DiceCascade";
 import { EffectCascade } from "../components/dice/EffectCascade";
 import { HitBreakdown } from "../components/dice/HitBreakdown";
-import type { HitMods } from "../components/dice/types";
+import type { HitItemSides, HitMods } from "../components/dice/types";
 import { StatsPanel } from "../components/stats/StatsPanel";
 import type { StatsUnit } from "../components/stats/types";
 import { Grid } from "../components/grid/Grid";
@@ -193,7 +193,7 @@ function PartyPicker({ map }: { map: Address | null }) {
 // ---------------------------------------------------------------------------------------------
 // one party
 
-type Hit = { result: HitResult; attacker: string; target: string; critChanceBp?: number; mods: HitMods };
+type Hit = { result: HitResult; attacker: string; target: string; critChanceBp?: number; mods: HitMods; items: HitItemSides };
 type EffectView = { effect: EffectResolved; caster: string; target: string; skill: string; critChanceBp?: number };
 /** The dice panel: a hit, a heal / buff / debuff, or a hit followed by its skill's effect. */
 type Roll = { key: string; hit: Hit | null; effect: EffectView | null };
@@ -300,7 +300,9 @@ function PartyView({ address }: { address: Address }) {
     const hitView = (data: unknown, at: number): Hit => {
       const h = toHitResolved(data);
       const mods = { attacker: modsAt(events, at, h.attacker, modsNow(h.attacker)), target: modsAt(events, at, h.target, modsNow(h.target)) };
-      return { result: h.result, attacker: label(h.attacker), target: label(h.target), critChanceBp: critOf(h.attacker), mods };
+      // Items only for player sides: a monster wears nothing.
+      const items = { attacker: h.attacker < MONSTER_BASE ? h.items.attacker : null, target: h.target < MONSTER_BASE ? h.items.defender : null };
+      return { result: h.result, attacker: label(h.attacker), target: label(h.target), critChanceBp: critOf(h.attacker), mods, items };
     };
     if (ev.name === "HitResolved") return setRoll({ key, hit: hitView(ev.data, i), effect: null });
     const e = toEffectResolved(ev.data);
@@ -861,7 +863,7 @@ function PartyView({ address }: { address: Address }) {
           {roll?.hit && (
             <>
               <DiceCascade key={roll.key} hit={roll.hit.result} attackerLabel={roll.hit.attacker} targetLabel={roll.hit.target} critChanceBp={roll.hit.critChanceBp} />
-              <HitBreakdown hit={roll.hit.result} defaultOpen={false} critChanceBp={roll.hit.critChanceBp} mods={roll.hit.mods} />
+              <HitBreakdown hit={roll.hit.result} defaultOpen={false} critChanceBp={roll.hit.critChanceBp} mods={roll.hit.mods} items={roll.hit.items} />
             </>
           )}
           {roll?.effect && (
@@ -1035,7 +1037,7 @@ function statsUnits(party: Party, label: (u: number) => string): StatsUnit[] {
         hpMax: p.part.hpMax || p.char.core.hpMax,
         apBase: p.part.maxAp,
         apNow: mine ? playerAp(p.part, s) : null,
-        profile: playerDefense(enumIndex(p.char.core.class, CLASS_KEYS) as Class, p.char.core.stats),
+        profile: playerDefense(enumIndex(p.char.core.class, CLASS_KEYS) as Class, p.char.core.stats, p.part.equipment),
         mods: activeMods(p.part.mods),
       });
       return { unit: p.slot, label: label(p.slot), kind: "player", current: current === p.slot, stats };

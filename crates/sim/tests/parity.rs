@@ -5,24 +5,37 @@
 //! The simulator side starts from JSON presets (round-tripped, so edits to the preset folder do
 //! not move this test) and the default `BalanceConfig` loaded from JSON, and rolls with
 //! `VrfRoll` (`crates/combat`), the same stream as `SyscallRoll`.
+//!
+//! Equipment: the program side wears what the items program's own loadout code gives
+//! (`deadroll_items::state::loadout`: the starter kit, then unequip), snapshotted the way
+//! `join_session` does (`Participation::hero`); the simulator side wears the hero preset's
+//! `equipment` (left out = the starter kit). Every hero fights in each [`Gear`].
 use deadroll_character::state::SkillRecord;
 use deadroll_combat::{
     resolve_hit, resolve_hit_into, HitInput, HitResult, ModKind, RollSource, TimedMod, TimedMods,
     VrfRoll,
 };
+use deadroll_items::state::loadout as items_program;
 use deadroll_rules::{
     input::{self, effect_action, EffectAction},
+    items::Equipment,
     monster::p0,
-    resolve, BalanceConfig, MonsterProfile,
+    resolve, BalanceConfig, HeroStats, MonsterProfile,
 };
-use deadroll_session::{combat_input as program, rules as program_rules, vrf::SyscallRoll};
+use deadroll_session::{
+    combat_input as program, rules as program_rules, state::participation::hero_of,
+    vrf::SyscallRoll,
+};
 use deadroll_sim::{
     config_io,
     presets::{HeroPreset, MonsterPreset, Presets, SkillPreset},
     setup::{fighter, Fighter, Issues},
 };
 use deadroll_skillcheck::{derive, presets as skill_presets, Purpose};
-use deadroll_types::{ActiveState, Aspect, CharacterData, Class, Monster, Race, STATES_MAX};
+use deadroll_types::{
+    ActiveState, Aspect, CharacterData, Class, EquipSlot, ItemBase, Monster, Pubkey, Race,
+    STATES_MAX,
+};
 
 #[path = "../../combat/tests/golden.rs"]
 #[allow(dead_code)]
@@ -51,6 +64,47 @@ fn seed(i: u8) -> [u8; 32] {
 
 fn round_trip<T: serde::Serialize + serde::de::DeserializeOwned>(v: &T) -> T {
     serde_json::from_str(&serde_json::to_string(v).unwrap()).unwrap()
+}
+
+/// What a hero wears in a parity fight.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Gear {
+    /// The class starter kit, as `init_loadout` gives it.
+    Kit,
+    /// The kit with the body armor taken off.
+    WeaponOnly,
+    /// Everything taken off: bare hands.
+    Bare,
+}
+
+const GEARS: [Gear; 3] = [Gear::Kit, Gear::WeaponOnly, Gear::Bare];
+
+/// Program side: the items program's loadout code, then the session's snapshot.
+fn program_hero(c: &CharacterData, gear: Gear) -> HeroStats {
+    let mut l = items_program::starter(Pubkey::default(), c.owner, c.class, 255);
+    if gear != Gear::Kit {
+        items_program::unequip(&mut l, EquipSlot::Body).unwrap();
+    }
+    if gear == Gear::Bare {
+        items_program::unequip(&mut l, EquipSlot::MainHand).unwrap();
+    }
+    hero_of(c, &l.equipment())
+}
+
+/// Simulator side: the hero preset's `equipment` (written out, not taken from the rules).
+fn preset_equipment(class: Class, gear: Gear) -> Option<Equipment> {
+    let weapon = match class {
+        Class::Warrior => ItemBase::Sword,
+        Class::Mage => ItemBase::Staff,
+        Class::Support => ItemBase::Wand,
+    };
+    let mut eq = Equipment::EMPTY;
+    match gear {
+        Gear::Kit => return None,
+        Gear::WeaponOnly => eq.set(EquipSlot::MainHand, Some(weapon)),
+        Gear::Bare => {}
+    }
+    Some(eq)
 }
 
 /// The two demo characters, as the character program stores them.
@@ -104,7 +158,12 @@ fn record(p: &skill_presets::Preset) -> SkillRecord {
 }
 
 /// The same character and skills as JSON presets, resolved by the simulator.
-fn sim_fighter(c: &CharacterData, set: &[skill_presets::Preset], cfg: &BalanceConfig) -> Fighter {
+fn sim_fighter(
+    c: &CharacterData,
+    set: &[skill_presets::Preset],
+    cfg: &BalanceConfig,
+    gear: Gear,
+) -> Fighter {
     let mut presets = Presets::default();
     let mut ids = Vec::new();
     for (i, p) in set.iter().enumerate() {
@@ -125,6 +184,7 @@ fn sim_fighter(c: &CharacterData, set: &[skill_presets::Preset], cfg: &BalanceCo
         tier: c.predisposition_tier,
         skills: ids,
         inline_skills: vec![],
+        equipment: preset_equipment(c.class, gear),
     });
     let mut issues = Issues::default();
     let f = fighter(&presets, "demo", &hero, cfg, &mut issues);
@@ -224,7 +284,18 @@ fn syscall_and_vrf_streams_match() {
 #[test]
 fn table_numbers_match_the_program() {
     let cfg = sim_config();
-    for (c, _) in demo() {
+    for (c, set) in demo() {
+        for gear in GEARS {
+            let f = sim_fighter(&c, set, &cfg, gear);
+            let h = program_hero(&c, gear);
+            assert_eq!(f.hero, h, "{gear:?}");
+            assert_eq!(input::hero::ap(&cfg, &f.hero), program_rules::hero_ap(&h));
+            assert_eq!(
+                input::hero::initiative(&cfg, &f.hero),
+                program_rules::hero_initiative(&h)
+            );
+            assert_eq!(f.hp_max, program_rules::party_hp_max(c.hp_max, &h));
+        }
         let dex = c.stats[deadroll_types::Stat::Dexterity as usize];
         assert_eq!(
             deadroll_rules::player::player_ap(c.race, c.class, dex, &cfg.players),
@@ -260,9 +331,11 @@ fn table_numbers_match_the_program() {
 fn heroes_and_skills_resolve_like_the_character_program() {
     let cfg = sim_config();
     for (c, set) in demo() {
-        let f = sim_fighter(&c, set, &cfg);
+        let f = sim_fighter(&c, set, &cfg, Gear::Kit);
+        // The starter kit adds no HP: the stored maximum is the party maximum.
         assert_eq!(f.hp_max, c.hp_max);
-        assert_eq!(f.hero, (&c).into());
+        assert_eq!(f.hero, program_hero(&c, Gear::Kit));
+        assert_eq!(f.hero, HeroStats::from(&c).with_equipment(f.hero.equipment));
         let usable: Vec<SkillRecord> = set
             .iter()
             .map(record)
@@ -280,8 +353,12 @@ fn every_demo_attack_deals_the_same_damage() {
     let cfg = sim_config();
     let monsters = sim_monsters(&cfg);
     let (warrior, _) = &demo()[0];
-    for (c, set) in demo() {
-        let f = sim_fighter(&c, set, &cfg);
+    for ((c, set), gear) in demo()
+        .into_iter()
+        .flat_map(|d| GEARS.map(|g| (d.clone(), g)))
+    {
+        let f = sim_fighter(&c, set, &cfg, gear);
+        let ph = program_hero(&c, gear);
         let records: Vec<SkillRecord> = set
             .iter()
             .map(record)
@@ -296,7 +373,7 @@ fn every_demo_attack_deals_the_same_damage() {
         for (rec, stats) in &choices {
             for &(id, profile, hp) in &monsters {
                 let prog_input = HitInput {
-                    attacker: program::player_attacker(0, &c, rec.as_ref(), &NONE),
+                    attacker: program::player_attacker(0, &ph, rec.as_ref(), &NONE),
                     defender: program::monster_defender(&monster(id, hp), &NONE).unwrap(),
                 };
                 let sim_input = HitInput {
@@ -307,7 +384,12 @@ fn every_demo_attack_deals_the_same_damage() {
                         &NONE,
                     ),
                 };
-                assert_eq!(sim_input, prog_input, "{:?} vs {id}", rec.map(|r| r.blocks));
+                assert_eq!(
+                    sim_input,
+                    prog_input,
+                    "{gear:?} {:?} vs {id}",
+                    rec.map(|r| r.blocks)
+                );
                 for i in 0..SEEDS {
                     // Program: what `consume_randomness` runs.
                     let (mut pm, mut pmods) = (monster(id, hp), NONE);
@@ -315,7 +397,7 @@ fn every_demo_attack_deals_the_same_damage() {
                     let p_out = resolve::attack_monster(
                         program_rules::BALANCE,
                         0,
-                        &(&c).into(),
+                        &ph,
                         rec.as_ref().map(program::skill_stats).as_ref(),
                         &NONE,
                         &program_rules::monster_profile(id, 1).unwrap(),
@@ -349,20 +431,28 @@ fn every_demo_attack_deals_the_same_damage() {
             }
         }
     }
-    // Every monster's natural attack on the warrior.
-    let wf = sim_fighter(warrior, &skill_presets::WARRIOR, &cfg);
-    for &(id, profile, hp) in &monsters {
+    // Every monster's natural attack on the warrior, in each gear (armor cuts the bite).
+    for (gear, &(id, profile, hp)) in GEARS
+        .iter()
+        .flat_map(|g| monsters.iter().map(move |m| (*g, m)))
+    {
+        let wf = sim_fighter(warrior, &skill_presets::WARRIOR, &cfg, gear);
         let unit = deadroll_rules::MONSTER_UNIT_BASE;
         let prog = program::monster_attacker(unit, &monster(id, hp), &NONE).unwrap();
         assert_eq!(input::monster_attacker(&cfg, unit, &profile, &NONE), prog);
-        let program_hero = warrior.into();
+        let ph = program_hero(warrior, gear);
+        let states = [ActiveState::default(); STATES_MAX];
+        assert_eq!(
+            input::player_defender(&cfg, &wf.hero, &states, &NONE),
+            program::player_defender(&ph, &states, &NONE)
+        );
         let program_profile = program_rules::monster_profile(id, 1).unwrap();
         for i in 0..SEEDS {
             let p = bite(
                 program_rules::BALANCE,
                 &program_profile,
-                &program_hero,
-                warrior.hp_max,
+                &ph,
+                program_rules::party_hp_max(warrior.hp_max, &ph),
                 &mut SyscallRoll::new(seed(i)),
             );
             let s = bite(
@@ -372,7 +462,7 @@ fn every_demo_attack_deals_the_same_damage() {
                 wf.hp_max,
                 &mut VrfRoll::new(seed(i)),
             );
-            assert_eq!(s, p, "monster {id}, seed {i}");
+            assert_eq!(s, p, "{gear:?}, monster {id}, seed {i}");
         }
     }
 }
@@ -381,8 +471,12 @@ fn every_demo_attack_deals_the_same_damage() {
 fn every_support_effect_lands_the_same() {
     let cfg = sim_config();
     let monsters = sim_monsters(&cfg);
-    for (c, set) in demo() {
-        let f = sim_fighter(&c, set, &cfg);
+    for ((c, set), gear) in demo()
+        .into_iter()
+        .flat_map(|d| GEARS.map(|g| (d.clone(), g)))
+    {
+        let f = sim_fighter(&c, set, &cfg, gear);
+        let ph = program_hero(&c, gear);
         let records: Vec<SkillRecord> = set
             .iter()
             .map(record)
@@ -393,8 +487,8 @@ fn every_support_effect_lands_the_same() {
                 continue;
             };
             assert_eq!(
-                input::effect_range(&cfg, c.class, sim.stats.power_bp, effect),
-                program::effect_range(c.class, rec.power_bp, effect)
+                input::effect_range(&cfg, &f.hero, sim.stats.power_bp, effect),
+                program::effect_range(&ph, rec.power_bp, effect)
             );
             match rec.blocks.purpose {
                 Purpose::Debuff => {
@@ -404,7 +498,7 @@ fn every_support_effect_lands_the_same() {
                             let p = resolve::debuff_monster(
                                 program_rules::BALANCE,
                                 0,
-                                &(&c).into(),
+                                &ph,
                                 &program::skill_stats(rec),
                                 effect,
                                 &program_rules::monster_profile(id, 1).unwrap(),
@@ -435,7 +529,7 @@ fn every_support_effect_lands_the_same() {
                         let p = resolve::support_ally(
                             program_rules::BALANCE,
                             0,
-                            &(&c).into(),
+                            &ph,
                             &program::skill_stats(rec),
                             effect,
                             &mut ally.0,
@@ -463,11 +557,47 @@ fn every_support_effect_lands_the_same() {
             }
         }
     }
-    // A heal (no starting preset has one): same strength range both ways.
-    for class in [Class::Warrior, Class::Mage, Class::Support] {
+    // A heal (no starting preset has one): same strength range both ways, from the weapon.
+    for ((c, set), gear) in demo()
+        .into_iter()
+        .flat_map(|d| GEARS.map(|g| (d.clone(), g)))
+    {
+        let f = sim_fighter(&c, set, &cfg, gear);
         assert_eq!(
-            input::effect_range(&cfg, class, 10_000, EffectAction::Heal),
-            program::effect_range(class, 10_000, EffectAction::Heal)
+            input::effect_range(&cfg, &f.hero, 10_000, EffectAction::Heal),
+            program::effect_range(&program_hero(&c, gear), 10_000, EffectAction::Heal)
         );
     }
+}
+
+#[test]
+fn gear_changes_the_fight() {
+    // The parity above would also pass with equipment ignored on both sides; it is not.
+    let (warrior, _) = &demo()[0];
+    let kit = program_hero(warrior, Gear::Kit);
+    let bare = program_hero(warrior, Gear::Bare);
+    let states = [ActiveState::default(); STATES_MAX];
+    let armor = |h: &HeroStats| program::player_defender(h, &states, &NONE).armor;
+    assert_eq!(armor(&kit), 30);
+    assert_eq!(armor(&program_hero(warrior, Gear::WeaponOnly)), 20);
+    assert_eq!(armor(&bare), 20);
+    let weapon = |h: &HeroStats| program::player_attacker(0, h, None, &NONE).weapon;
+    assert_eq!((weapon(&kit).min, weapon(&kit).max), (4, 8));
+    let unarmed = program_rules::BALANCE.items.unarmed;
+    assert_eq!(
+        (weapon(&bare).min, weapon(&bare).max),
+        (unarmed[0], unarmed[1])
+    );
+}
+
+#[test]
+fn the_items_program_ids_match() {
+    use deadroll_items::external;
+    assert_eq!(external::CHARACTER_PROGRAM, deadroll_character::ID);
+    assert_eq!(external::SESSION_PROGRAM, deadroll_session::ID);
+    // The session program checks its copy against `Character::DISCRIMINATOR`.
+    assert_eq!(
+        external::CHARACTER_DISCRIMINATOR,
+        deadroll_session::state::external::CHARACTER_DISCRIMINATOR
+    );
 }

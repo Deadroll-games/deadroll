@@ -1,9 +1,15 @@
 use anchor_lang::prelude::*;
 use deadroll_character::state::SKILLS_MAX;
 use deadroll_combat::{speed_ap, TimedMods, MODS_MAX};
-use deadroll_types::ParticipationData;
+use deadroll_rules::{items::Equipment, HeroStats};
+use deadroll_types::{CharacterData, ParticipationData, EQUIP_SLOTS};
 
 use super::mods::{self, TimedModData};
+
+/// A character with an equipment snapshot (`Participation.equipment`), as the rules see it.
+pub fn hero_of(c: &CharacterData, equipment: &[u8; EQUIP_SLOTS]) -> HeroStats {
+    HeroStats::from(c).with_equipment(Equipment(*equipment))
+}
 
 /// `["participation", session, character]`: one character in one party.
 #[account]
@@ -27,6 +33,10 @@ pub struct Participation {
     /// Buffs and debuffs on this player (`deadroll_combat::support`), one slot per kind;
     /// `start_turn` counts them down.
     pub mods: [TimedModData; MODS_MAX],
+    /// What the character wears, `ItemBase` bytes by `EquipSlot` (`EMPTY_ITEM` = none), copied
+    /// from its items `Loadout` at `join_session`. The items program locks the loadout while
+    /// the character is in a session, so the copy stays exact.
+    pub equipment: [u8; EQUIP_SLOTS],
 }
 
 impl Participation {
@@ -37,6 +47,11 @@ impl Participation {
             self.ap_seq = turn_seq;
             self.core.action_points = speed_ap(self.max_ap, &self.combat_mods());
         }
+    }
+
+    /// The rules' view of this participant: the character with what it wears.
+    pub fn hero(&self, c: &CharacterData) -> HeroStats {
+        hero_of(c, &self.equipment)
     }
 
     pub fn combat_mods(&self) -> TimedMods {

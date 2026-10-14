@@ -1,15 +1,17 @@
-// Instruction builders for character, map and session, from the IDL snapshot. Account names and
+// Instruction builders for character, items, map and session, from the IDL snapshot. Account names and
 // order are the IDL's (camelCase, as `accountsStrict` in tests/demo.test.ts); every account must
 // be given, optional ones as null (Anchor passes the program id for None).
 import { AccountRole, type AccountMeta, type AccountSignerMeta, type Address, type Instruction, type TransactionSigner } from "@solana/kit";
 import { PROGRAMS } from "../config";
 import { Coder, camel, type Idl } from "./coder";
 import characterIdl from "./idl/deadroll_character.json";
+import itemsIdl from "./idl/deadroll_items.json";
 import mapIdl from "./idl/deadroll_map.json";
 import sessionIdl from "./idl/deadroll_session.json";
 
 export const coders = {
   character: new Coder(characterIdl as unknown as Idl),
+  items: new Coder(itemsIdl as unknown as Idl),
   map: new Coder(mapIdl as unknown as Idl),
   session: new Coder(sessionIdl as unknown as Idl),
 } as const;

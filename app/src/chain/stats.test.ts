@@ -10,8 +10,12 @@ describe("stats mirror of rules.rs", () => {
     expect(MONSTER_DEFENSE[2]).toEqual({ defense: 13, armor: 40, resist: [Aspect.Piercing, 5_000] });
     expect(Object.keys(MONSTER_DEFENSE)).toHaveLength(5);
     // rules.rs test: warrior with Dex 10 has defense 12, armor 30.
-    expect(playerDefense(Class.Warrior, [10, 10, 10, 10])).toEqual({ defense: 12, armor: 30, resist: null });
-    expect(playerDefense(Class.Mage, [5, 7, 13, 5]).armor).toBe(5);
+    // Class armor, then the starter kit on top (sword + leather armor 10, staff + robe 2).
+    expect(playerDefense(Class.Warrior, [10, 10, 10, 10])).toEqual({ defense: 12, armor: 20, resist: null });
+    const kit = (weapon: number, body: number) => [weapon, 0xff, 0xff, body, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
+    expect(playerDefense(Class.Warrior, [10, 10, 10, 10], kit(0, 3))).toEqual({ defense: 12, armor: 30, resist: null });
+    expect(playerDefense(Class.Mage, [5, 7, 13, 5], kit(1, 4)).armor).toBe(5);
+    expect(playerDefense(Class.Support, [5, 8, 12, 5], kit(2, 5)).armor).toBe(5);
     expect([monsterBaseAp(0), monsterBaseAp(6), monsterBaseAp(200)]).toEqual([1, 6, 12]);
   });
 

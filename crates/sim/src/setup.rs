@@ -1,8 +1,8 @@
 //! From presets to fight inputs, with every problem explained. Invalid skills never reach a
 //! fight: they are dropped with the reason (`skillcheck` rules, the same as in the game).
 use deadroll_rules::{
-    input::{skill_use, SkillStats, SkillUse},
-    player::hp_max,
+    input::{hero, skill_use, SkillStats, SkillUse},
+    items::{check_equip, starter_loadout, EquipError, Equipment},
     BalanceConfig, HeroStats, MonsterBase,
 };
 use deadroll_skillcheck::{check_loadout, Category, SkillBlocks, ACTIVE_MAX};
@@ -136,20 +136,51 @@ pub fn fighter(
         }
     }
     skills.truncate(ACTIVE_MAX);
+    let level = p.level.max(1);
     let hero = HeroStats {
         race: p.race,
         class: p.class,
-        level: p.level.max(1),
+        level,
         stats: p.stats,
         predisposition: p.predisposition,
         predisposition_tier: p.tier.clamp(1, 14),
+        equipment: equipment(id, p, level, cfg, issues),
     };
     Fighter {
         name: p.name.clone(),
-        hp_max: hp_max(hero.class, &hero.stats, hero.level, &cfg.players),
+        hp_max: hero::hp_max(cfg, &hero),
         hero,
         skills,
     }
+}
+
+/// What a hero preset wears: its own list (each item checked by the items program's rule), or
+/// the class starter kit when it has none.
+pub fn equipment(
+    id: &str,
+    p: &HeroPreset,
+    level: u16,
+    cfg: &BalanceConfig,
+    issues: &mut Issues,
+) -> Equipment {
+    let Some(listed) = p.equipment else {
+        return starter_loadout(p.class, &cfg.items).equipment();
+    };
+    let mut out = Equipment::EMPTY;
+    for (slot, base) in listed.worn() {
+        let item_level = cfg.items.base(base).level;
+        match check_equip(level, base, item_level, slot, &cfg.items) {
+            Ok(()) => out.set(slot, Some(base)),
+            Err(e) => issues.errors.push(format!(
+                "hero `{id}`: {base:?} in {slot:?}: {}, not worn",
+                match e {
+                    EquipError::WrongSlot => "not worn in this slot",
+                    EquipError::LevelTooLow => "character level too low",
+                }
+            )),
+        }
+    }
+    out
 }
 
 /// A party from hero ids (at most `PARTY_MAX`).

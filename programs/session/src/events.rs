@@ -9,7 +9,7 @@ use deadroll_types::{ActiveState, SessionStatus, StateKind, STATES_MAX, TURN_ORD
 use deadroll_skillcheck::Effect;
 
 use crate::{
-    hit_event::{Applied, EffectRollData, HitResultData},
+    hit_event::{Applied, EffectRollData, HitItemsData, HitResultData},
     state::TimedModData,
 };
 
@@ -148,6 +148,8 @@ pub struct HitResolved {
     /// `GameSession.action_counter` of this action, the same number as its `ActionRequested`.
     pub action_counter: u32,
     pub result: HitResultData,
+    /// What the players' worn items put into this hit (weapon base, armor, defense, attack).
+    pub items: HitItemsData,
 }
 
 /// A resolved heal, buff or debuff (`act` with such a skill: instead of `HitResolved`), or the

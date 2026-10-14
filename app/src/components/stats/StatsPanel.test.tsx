@@ -15,7 +15,7 @@ describe("StatsPanel", () => {
   });
 
   it("shows base -> final with the mod that moved it", () => {
-    const mira = unitStats({ hp: 18, hpMax: 24, apBase: 3, apNow: 4, profile: playerDefense(Class.Support, [5, 7, 13, 5]), mods: [mod(ModKind.Haste, 3_400), mod(ModKind.Protection, 2_000)] });
+    const mira = unitStats({ hp: 18, hpMax: 24, apBase: 3, apNow: 4, profile: playerDefense(Class.Support, [5, 7, 13, 5], [2, 0xff, 0xff, 5, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]), mods: [mod(ModKind.Haste, 3_400), mod(ModKind.Protection, 2_000)] });
     const wolf = unitStats({ hp: 8, hpMax: 15, apBase: 6, apNow: null, profile: MONSTER_DEFENSE[0]!, mods: [mod(ModKind.Vulnerability, 2_500), mod(ModKind.Weakening, 1_800)] });
     render(
       <StatsPanel

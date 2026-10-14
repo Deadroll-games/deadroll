@@ -1310,7 +1310,9 @@ name = "deadroll-items"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
+ "deadroll-rules",
  "deadroll-types",
+ "session-keys",
 ]
 
 [[package]]
@@ -1391,6 +1393,7 @@ dependencies = [
  "anchor-lang",
  "deadroll-character",
  "deadroll-combat",
+ "deadroll-items",
  "deadroll-map",
  "deadroll-mapcheck",
  "deadroll-registry",
@@ -1408,6 +1411,7 @@ version = "0.1.0"
 dependencies = [
  "deadroll-character",
  "deadroll-combat",
+ "deadroll-items",
  "deadroll-rules",
  "deadroll-session",
  "deadroll-skillcheck",

@@ -30,6 +30,8 @@ pub const SKILLS: &[u8] = b"skills";
 pub const BAG: &[u8] = b"bag";
 /// `["item", asset]` in items.
 pub const ITEM: &[u8] = b"item";
+/// `["loadout", character]` in items.
+pub const LOADOUT: &[u8] = b"loadout";
 /// `["map", dm, map_index: u32]` in map.
 pub const MAP: &[u8] = b"map";
 /// `["layout", map]` in map.
