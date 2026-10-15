@@ -57,7 +57,7 @@ Borsh rules: integers are little endian; `bool` is 1 byte; fixed arrays have no 
 
 ```
 Attacker {
-  slot: u8, attack_bonus: u32, crit_chance_bp: u32,
+  slot: u8, attack_bonus: u32, crit_chance_pct: u32,          // crit chance, percent; 0 = natural 20 only
   weapon: DamageRange,
   skill: Skill,
   added: [DamageRange; 3],
@@ -65,11 +65,12 @@ Attacker {
   more: [Mod; 4],
   weaken_bp: u32, penetration_bp: u32, state_chance_bonus_bp: u32,
   tints: [Tint; 4],
+  tempo_bonus_bp: u32,                                          // Dexterity increase on Chill
 }
 DamageRange { aspect: Aspect, min: u32, max: u32 }            // min == max == 0: empty slot
 Skill {
   aspects: [Aspect; 3], aspect_count: u8,                      // 0 = basic attack (weapon aspect)
-  shares_bp: [u32; 3], power_bp: u32, source: Source, form: Form, state_chance_bp: u32,
+  shares_bp: [u32; 3], power_bp: u32, source: Source, form: Form, state_chance_pct: u32,
 }
 Mod { filter: ModFilter, bp: u32 }                             // bp == 0: empty slot
 ModFilter = 0 Any | 1 Aspect(Aspect) | 2 Family(Family) | 3 Source(Source) | 4 Form(Form)
@@ -81,7 +82,7 @@ Defender {
   defense: u32, armor: u32,
   resist_bp: [u32; 6], vuln_bp: [u32; 6],                      // indexed by Aspect
   immune_aspects: u8, immune_states: u8,                        // bit 1 << Aspect / 1 << StateKind
-  state_resist_bp: [u32; 6],                                    // indexed by StateKind
+  state_resist_bp: [u32; 7],                                    // indexed by StateKind (Penetration is 6)
   states: [ActiveState; 6],
 }
 ActiveState { kind: StateKind, turns: u8, power: u32, source: u8 }   // turns == 0: empty slot
@@ -116,7 +117,7 @@ HeroSheet {
   martial_strike_bp: u32, martial_projectile_bp: u32, magical_bp: u32,    // damage increase
   martial_state_bp: u32, magical_state_bp: u32, tempo_state_bp: u32,      // state chance increase
   self_buff_turns: u8,
-  crit_roll_bp: u32,                                            // the crit roll's chance, 0 = none
+  crit_roll_bp: u32,                                            // d100 crit chance in percent, 0 = none
 }
 ```
 
@@ -154,7 +155,7 @@ HitResult {
   damage: u32,
   rolls_used: u32,
 }
-TintRoll { base: Aspect, tint: Aspect, carrier: Carrier, tier: u8, chance_bp: u32, roll: u16, success: bool }
+TintRoll { base: Aspect, tint: Aspect, carrier: Carrier, tier: u8, chance_pct: u32, roll: u16, success: bool }
 Resonance { base: Aspect, tint: Aspect, tier: u8, carrier: Carrier, id: u8, active: bool, second_tint: Option<Aspect> }
 PacketResult {
   aspect: Aspect, immune: bool,
@@ -164,9 +165,10 @@ PacketResult {
   armor: u32, resist_bp: u32, vuln_bp: u32,
   after_defense: u64,                                           // scaled x10_000
   state: StateRoll,
+  pen_attacker_bp: u32, pen_state_bp: u32, vuln_shock_bp: u32,
 }
-StateRoll { kind: StateKind, rolled: bool, chance_bp: u32, roll: u16, success: bool, applied: Applied }
+StateRoll { kind: StateKind, rolled: bool, chance_pct: u32, roll: u16, success: bool, applied: Applied }
 Applied = 0 None | 1 Added | 2 Refreshed | 3 Froze
 ```
 
-Packet values are scaled by 10 000 (`5 damage == 50_000`). `damage` is the final rounded value. The resonance `id` is `base * 6 + tint`, which the UI uses to look up the name. The roll order is documented in `crates/combat/src/hit.rs`. `crates/combat/tests/golden.rs` holds the reference hits, including raw `roll_u64` values to check a TS replay against.
+Chance rolls (crit, tint, state) are a d100, `0..=100`; success is `roll < chance_pct`. Packet values are scaled by 10 000 (`5 damage == 50_000`). `damage` is the final rounded value. The resonance `id` is `base * 6 + tint`, which the UI uses to look up the name. The roll order is documented in `crates/combat/src/hit.rs`. `crates/combat/tests/golden.rs` holds the reference hits, including raw `roll_u64` values to check a TS replay against.

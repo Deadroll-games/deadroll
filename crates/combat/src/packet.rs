@@ -52,13 +52,13 @@ pub struct Skill {
     pub power_bp: u32,
     pub source: Source,
     pub form: Form,
-    /// Base chance of each packet's native state, bp.
-    pub state_chance_bp: u32,
+    /// Base chance of each packet's native state, percent.
+    pub state_chance_pct: u32,
 }
 
 impl Skill {
     /// The weapon's basic attack.
-    pub const fn basic(source: Source, form: Form, state_chance_bp: u32) -> Self {
+    pub const fn basic(source: Source, form: Form, state_chance_pct: u32) -> Self {
         Self {
             aspects: [Aspect::Fire; SKILL_ASPECTS_MAX],
             aspect_count: 0,
@@ -66,7 +66,7 @@ impl Skill {
             power_bp: BP,
             source,
             form,
-            state_chance_bp,
+            state_chance_pct,
         }
     }
 

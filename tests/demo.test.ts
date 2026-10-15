@@ -87,21 +87,21 @@ function rollAt(seed: Buffer, index: number): bigint {
   i.writeUInt32LE(index);
   return sha256(Buffer.concat([seed, i])).readBigUInt64LE(0);
 }
-function seedWhere(pred: (seed: Buffer) => boolean): Buffer {
-  for (;;) {
-    const seed = randomBytes(32);
-    if (pred(seed)) return seed;
-  }
+/** First four bytes are `n` little endian. The same n always yields the same VRF value. */
+function fixedSeed(n: number): Buffer {
+  const seed = Buffer.alloc(32);
+  seed.writeUInt32LE(n, 0);
+  return seed;
 }
-const d20 = (seed: Buffer) => Number(rollAt(seed, 0) % 20n) + 1;
 /** Natural 20: always a hit and a crit. */
-const CRIT = seedWhere((s) => d20(s) === 20);
-const MISS = seedWhere((s) => d20(s) === 1);
+const CRIT = fixedSeed(9);
+/** Natural 1: always a miss. */
+const MISS = fixedSeed(17);
 /**
- * A crit whose first tint roll (roll 1: a natural 20 makes no crit-chance roll) is below 1%, so
- * any tint with a real chance succeeds (crates/combat hit order, steps 1-3).
+ * A crit whose first tint roll (roll 1: a natural 20 makes no crit-chance roll) is a d100 under 5,
+ * so any tint with a real chance succeeds (crates/combat hit order, steps 1-3).
  */
-const RESONANT = seedWhere((s) => d20(s) === 20 && rollAt(s, 1) % 10_000n < 100n);
+const RESONANT = fixedSeed(567);
 
 const signatures: { what: string; sig: string }[] = [];
 /** Every VRF callback, read back from the chain right after it landed. */

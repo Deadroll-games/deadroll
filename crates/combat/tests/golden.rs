@@ -7,7 +7,10 @@ use deadroll_types::{ActiveState, Aspect, Form, Source, StateKind};
 
 pub const SEED: [u8; 32] = [7; 32];
 /// A seed on which both tints of the mage succeed: two resonances in one cast.
-pub const RESONANCE_SEED: [u8; 32] = [9; 32];
+/// First four bytes are `1` little endian, the rest are zero.
+pub const RESONANCE_SEED: [u8; 32] = [
+    1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+];
 
 /// Human warrior, Piercing predisposition (race, tier 10), sword Piercing 4-8 (item tint
 /// Piercing, tier 12), +1-2 Piercing added, basic attack, vs a wolf.
@@ -16,7 +19,7 @@ pub fn warrior_vs_wolf() -> HitInput {
     let a = &mut input.attacker;
     a.slot = 0;
     a.attack_bonus = 3;
-    a.crit_chance_bp = 500;
+    a.crit_chance_pct = 5;
     a.weapon = DamageRange::new(Aspect::Piercing, 4, 8);
     a.skill = Skill::basic(Source::Combat, Form::Strike, 0);
     a.added[0] = DamageRange::new(Aspect::Piercing, 1, 2);
@@ -37,7 +40,7 @@ pub fn mage_vs_goblin() -> HitInput {
     let a = &mut input.attacker;
     a.slot = 1;
     a.attack_bonus = 4;
-    a.crit_chance_bp = 500;
+    a.crit_chance_pct = 5;
     a.weapon = DamageRange::new(Aspect::Lightning, 5, 8);
     a.skill = Skill {
         aspects: [Aspect::Cold, Aspect::Lightning, Aspect::Fire],
@@ -46,7 +49,7 @@ pub fn mage_vs_goblin() -> HitInput {
         power_bp: 15_000,
         source: Source::Magical,
         form: Form::Projectile,
-        state_chance_bp: 4_000,
+        state_chance_pct: 40,
     };
     a.increased[0] = Mod::new(ModFilter::Source(Source::Magical), 2_000);
     a.tints[0] = Tint::new(Aspect::Cold, 8, Carrier::Race);
@@ -93,8 +96,8 @@ fn vrf_rolls_are_pinned() {
     assert_eq!(VrfRoll::roll_at(&SEED, 1), 0x8ea1_504a_a556_6f46);
     assert_eq!(VrfRoll::roll_at(&SEED, 2), 0xd45b_ec64_28c8_aa07);
     assert_eq!(VrfRoll::roll_at(&SEED, 3), 0xc662_133b_338c_7890);
-    assert_eq!(VrfRoll::roll_at(&RESONANCE_SEED, 0), 0x0d60_61ea_8126_d559);
-    assert_eq!(VrfRoll::roll_at(&RESONANCE_SEED, 1), 0x3c4b_3144_0021_8eb1);
+    assert_eq!(VrfRoll::roll_at(&RESONANCE_SEED, 0), 0x9c32_2602_5c11_bc11);
+    assert_eq!(VrfRoll::roll_at(&RESONANCE_SEED, 1), 0x6d34_82d5_e7ef_6947);
 }
 
 #[test]
@@ -105,9 +108,9 @@ fn golden_warrior_vs_wolf() {
         &mut VrfRoll::new(SEED),
     );
     assert_eq!(r.outcome, Outcome::Hit);
-    // d20 10 + 3 = 13 >= 11; crit chance 5%, roll 9734: no crit.
+    // d20 10 + 3 = 13 >= 11; crit chance 5%, roll 35: no crit.
     assert_eq!((r.d20, r.attack_total, r.defense), (10, 13, 11));
-    assert_eq!((r.crit, r.crit_roll), (false, Some(9_734)));
+    assert_eq!((r.crit, r.crit_roll), (false, Some(35)));
     // Both tints are Piercing = pure pairs with base Piercing: no tint dice.
     assert_eq!(r.tint_roll_count, 0);
     assert_eq!(r.resonances, [None; 3]);
@@ -130,7 +133,7 @@ fn golden_warrior_vs_wolf() {
             84_333
         )]
     );
-    // Piercing has no P0 native state.
+    // State chance is 0, so Penetration is not rolled.
     assert!(!r.packets()[0].state.rolled);
     assert_eq!(r.damage, 8);
     assert!(active(&r).is_empty());
@@ -148,10 +151,10 @@ fn golden_mage_vs_goblin() {
     assert_eq!(r.outcome, Outcome::Hit);
     assert_eq!(
         (r.d20, r.attack_total, r.crit, r.crit_roll),
-        (10, 14, false, Some(9_734))
+        (10, 14, false, Some(35))
     );
-    // Base Cold: the Lightning item tint rolls (tier 11, 14.50%); the Cold race tint is a pure pair.
-    // Base Lightning: the Cold race tint rolls (tier 8, 22.00%); the Lightning item tint is a pure pair.
+    // Base Cold: the Lightning item tint rolls (tier 11, 15%); the Cold race tint is a pure pair.
+    // Base Lightning: the Cold race tint rolls (tier 8, 22%); the Lightning item tint is a pure pair.
     let tints: Vec<_> = r
         .tint_rolls()
         .iter()
@@ -161,7 +164,7 @@ fn golden_mage_vs_goblin() {
                 t.tint,
                 t.carrier,
                 t.tier,
-                t.chance_bp,
+                t.chance_pct,
                 t.roll,
                 t.success,
             )
@@ -175,8 +178,8 @@ fn golden_mage_vs_goblin() {
                 Aspect::Lightning,
                 Carrier::Item,
                 11,
-                1_450,
-                6_231,
+                15,
+                84,
                 false
             ),
             (
@@ -184,8 +187,8 @@ fn golden_mage_vs_goblin() {
                 Aspect::Cold,
                 Carrier::Race,
                 8,
-                2_200,
-                7_744,
+                22,
+                38,
                 false
             ),
         ]
@@ -227,25 +230,46 @@ fn golden_mage_vs_goblin() {
     );
     // 9.4752 + 3.6916 = 13.1668 -> 13
     assert_eq!(r.damage, 13);
-    // Chill: 40% x (1 + pure pair tier 8 = 38%) = 55.20%, roll 1188 succeeds;
-    // buildup 50% x 1.38 = 69%.
+    // Chill: 40% x (1 + pure pair tier 8 = 38%) = 55%, roll 40 succeeds.
+    // Buildup 5000 x 1.38 = 6900. Lightning is a pure pair too, so Shock rolls:
+    // 40% x 1.29 / 1.10 (10% lightning resist) = 46%, roll 40 succeeds.
+    // Shock strength 2000 x 1.29 / 1.10 = 2345.
     let s = r.packets()[0].state;
     assert_eq!(
-        (s.kind, s.rolled, s.chance_bp, s.roll, s.success, s.applied),
-        (StateKind::Chill, true, 5_520, 1_188, true, Applied::Added)
+        (s.kind, s.rolled, s.chance_pct, s.roll, s.success, s.applied),
+        (StateKind::Chill, true, 55, 40, true, Applied::Added)
     );
-    assert!(!r.packets()[1].state.rolled);
+    let shock = r.packets()[1].state;
+    assert_eq!(
+        (
+            shock.kind,
+            shock.rolled,
+            shock.chance_pct,
+            shock.roll,
+            shock.success,
+            shock.applied
+        ),
+        (StateKind::Shock, true, 46, 40, true, Applied::Added)
+    );
     assert_eq!(
         active(&r),
-        [ActiveState {
-            kind: StateKind::Chill,
-            turns: 3,
-            power: 6_900,
-            source: 1
-        }]
+        [
+            ActiveState {
+                kind: StateKind::Chill,
+                turns: 3,
+                power: 6_900,
+                source: 1
+            },
+            ActiveState {
+                kind: StateKind::Shock,
+                turns: 2,
+                power: 2_345,
+                source: 1
+            },
+        ]
     );
-    // d20, crit, 2 tints, d100, chill
-    assert_eq!(r.rolls_used, 6);
+    // d20, crit, 2 tints, d100, chill, shock
+    assert_eq!(r.rolls_used, 7);
 }
 
 #[test]
@@ -258,14 +282,14 @@ fn golden_mage_double_resonance() {
     assert_eq!(r.outcome, Outcome::Hit);
     assert_eq!(
         (r.d20, r.attack_total, r.crit, r.crit_roll),
-        (10, 14, false, Some(1_729))
+        (6, 10, false, Some(6))
     );
     let tints: Vec<_> = r
         .tint_rolls()
         .iter()
-        .map(|t| (t.chance_bp, t.roll, t.success))
+        .map(|t| (t.chance_pct, t.roll, t.success))
         .collect();
-    assert_eq!(tints, [(1_450, 759, true), (2_200, 1_745, true)]);
+    assert_eq!(tints, [(15, 13, true), (22, 8, true)]);
     // No cap: each base gets its own pair. Cold + Lightning (Ringing Ice, id 8) and
     // Lightning + Cold (Frost Spark, id 13).
     let res: Vec<_> = r
@@ -307,9 +331,9 @@ fn golden_mage_double_resonance() {
             ),
         ]
     );
-    assert_eq!(r.d100, 72);
-    // Cold: 6.3-10.08 x1.16 (tier 11) = 7.308-11.6928; d100 72 -> 7.308 + 4.3848 x 0.72 = 10.4650
-    // Lightning: 2.7-4.32 x1.22 (tier 8) = 3.294-5.2704; d100 72 -> 4.7170; resist 10% -> 4.2881
+    assert_eq!(r.d100, 47);
+    // Cold: 7.308-11.6928; d100 47 -> 7.308 + 4.3848 x 0.47 = 9.3688.
+    // Lightning: 3.294-5.2704; d100 47 -> 4.2229; resist 10% -> 3.8390.
     assert_eq!(
         rows(&r),
         [
@@ -321,10 +345,10 @@ fn golden_mage_double_resonance() {
                 11_600,
                 73_080,
                 116_928,
-                104_650,
+                93_688,
                 0,
                 0,
-                104_650
+                93_688
             ),
             (
                 Aspect::Lightning,
@@ -334,32 +358,42 @@ fn golden_mage_double_resonance() {
                 12_200,
                 32_940,
                 52_704,
-                47_170,
+                42_229,
                 0,
                 1_000,
-                42_881
+                38_390
             ),
         ]
     );
-    // 10.4650 + 4.2881 = 14.7531 -> 14
-    assert_eq!(r.damage, 14);
+    // 9.3688 + 3.8390 = 13.2078 -> 13
+    assert_eq!(r.damage, 13);
     // Generic pairs carry no state effect in P0.
     assert_eq!(r.resonance_states, [StateRoll::default(); 3]);
     let s = r.packets()[0].state;
+    assert_eq!((s.chance_pct, s.roll, s.applied), (55, 37, Applied::Added));
+    let shock = r.packets()[1].state;
     assert_eq!(
-        (s.chance_bp, s.roll, s.applied),
-        (5_520, 1_669, Applied::Added)
+        (shock.chance_pct, shock.roll, shock.applied),
+        (46, 13, Applied::Added)
     );
     assert_eq!(
         active(&r),
-        [ActiveState {
-            kind: StateKind::Chill,
-            turns: 3,
-            power: 6_900,
-            source: 1
-        }]
+        [
+            ActiveState {
+                kind: StateKind::Chill,
+                turns: 3,
+                power: 6_900,
+                source: 1
+            },
+            ActiveState {
+                kind: StateKind::Shock,
+                turns: 2,
+                power: 2_345,
+                source: 1
+            },
+        ]
     );
-    assert_eq!(r.rolls_used, 6);
+    assert_eq!(r.rolls_used, 7);
 }
 
 #[test]

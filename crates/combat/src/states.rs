@@ -3,8 +3,9 @@
 //! P0: Burning, Chill -> Freeze, Bleeding. One instance per kind: a new application keeps
 //! the stronger power and refreshes the duration to the longer one.
 //!
-//! `ActiveState.power` means: damage per target turn for Burning and Bleeding (unscaled),
-//! buildup in bp for Chill, unused (0) for Freeze.
+//! `ActiveState.power` means: damage per target turn for Burning and Bleeding,
+//! buildup in bp for Chill, vulnerability bp for Shock, armor counterweight bp for Penetration,
+//! unused (0) for Freeze and Stun.
 
 use deadroll_types::{ActiveState, Aspect, StateKind, BP, STATES_MAX};
 
@@ -13,14 +14,15 @@ use crate::balance::Balance;
 /// A unit's state slots.
 pub type States = [ActiveState; STATES_MAX];
 
-/// Native state of an aspect. P0 covers Fire, Cold and Blood.
-/// TODO(post-demo): Lightning -> Shock, Blunt -> Stun, Piercing -> armor Penetration.
+/// Native state of an aspect (docs/DAMAGE_TYPES_AND_MIXES.md, sections 3.2 and 5).
 pub const fn native_state(aspect: Aspect) -> Option<StateKind> {
     match aspect {
         Aspect::Fire => Some(StateKind::Burning),
         Aspect::Cold => Some(StateKind::Chill),
+        Aspect::Lightning => Some(StateKind::Shock),
         Aspect::Blood => Some(StateKind::Bleeding),
-        Aspect::Lightning | Aspect::Blunt | Aspect::Piercing => None,
+        Aspect::Blunt => Some(StateKind::Stun),
+        Aspect::Piercing => Some(StateKind::Penetration),
     }
 }
 
@@ -168,7 +170,7 @@ pub fn tick_turn_start(states: &mut States) -> Tick {
                 tick.dot_damage = tick.dot_damage.saturating_add(s.power);
             }
             StateKind::Freeze | StateKind::Stun => tick.skip_action = true,
-            StateKind::Chill | StateKind::Shock => {}
+            StateKind::Chill | StateKind::Shock | StateKind::Penetration => {}
         }
         s.turns -= 1;
         if s.turns == 0 {
@@ -177,6 +179,11 @@ pub fn tick_turn_start(states: &mut States) -> Tick {
         }
     }
     tick
+}
+
+/// Power of the live instance of `kind`, or 0.
+pub fn power_of(states: &States, kind: StateKind) -> u32 {
+    find(states, kind).map(|i| states[i].power).unwrap_or(0)
 }
 
 /// Speed counterweight from Chill (soft control, section 7.4), bp.
@@ -208,10 +215,10 @@ mod tests {
     fn natives() {
         assert_eq!(native_state(Aspect::Fire), Some(StateKind::Burning));
         assert_eq!(native_state(Aspect::Cold), Some(StateKind::Chill));
+        assert_eq!(native_state(Aspect::Lightning), Some(StateKind::Shock));
         assert_eq!(native_state(Aspect::Blood), Some(StateKind::Bleeding));
-        assert_eq!(native_state(Aspect::Piercing), None);
-        assert_eq!(native_state(Aspect::Blunt), None);
-        assert_eq!(native_state(Aspect::Lightning), None);
+        assert_eq!(native_state(Aspect::Blunt), Some(StateKind::Stun));
+        assert_eq!(native_state(Aspect::Piercing), Some(StateKind::Penetration));
         assert_eq!(state_bit(StateKind::Chill), 0b10);
         assert_eq!(aspect_bit(Aspect::Piercing), 0b10_0000);
     }

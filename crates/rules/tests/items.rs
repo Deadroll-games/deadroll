@@ -169,7 +169,7 @@ fn every_item_number_reaches_the_hero() {
     robe.stats[Stat::Dexterity as usize] = 10;
     robe.stats[Stat::Endurance as usize] = 4;
     robe.stats[Stat::Intelligence as usize] = 6;
-    robe.crit_bp = 700;
+    robe.crit_pct = 7;
     robe.speed = 5;
     robe.speed_counter_bp = 10_000;
     robe.initiative = 4;
@@ -192,7 +192,7 @@ fn every_item_number_reaches_the_hero() {
     // Accuracy: +2 flat, and Dexterity 7 + 10 = 17: 17 / 5 = 3 against 7 / 5 = 1.
     assert_eq!(a.attack_bonus, a0.attack_bonus + 2 + 2);
     // Crit comes from items only.
-    assert_eq!((a0.crit_chance_bp, a.crit_chance_bp), (0, 700));
+    assert_eq!((a0.crit_chance_pct, a.crit_chance_pct), (0, 7));
 
     let states = [ActiveState::default(); STATES_MAX];
     let d = player_defender(&cfg, &dressed, &states, &NONE);

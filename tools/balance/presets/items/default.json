@@ -18,7 +18,7 @@
         "Endurance": 0
       },
       "hp": 0,
-      "crit_bp": 0,
+      "crit_pct": 0,
       "speed": 0,
       "speed_counter_bp": 0,
       "initiative": 0
@@ -41,7 +41,7 @@
         "Endurance": 0
       },
       "hp": 0,
-      "crit_bp": 0,
+      "crit_pct": 0,
       "speed": 0,
       "speed_counter_bp": 0,
       "initiative": 0
@@ -64,7 +64,7 @@
         "Endurance": 0
       },
       "hp": 0,
-      "crit_bp": 0,
+      "crit_pct": 0,
       "speed": 0,
       "speed_counter_bp": 0,
       "initiative": 0
@@ -87,7 +87,7 @@
         "Endurance": 0
       },
       "hp": 0,
-      "crit_bp": 0,
+      "crit_pct": 0,
       "speed": 0,
       "speed_counter_bp": 0,
       "initiative": 0
@@ -110,7 +110,7 @@
         "Endurance": 0
       },
       "hp": 0,
-      "crit_bp": 0,
+      "crit_pct": 0,
       "speed": 0,
       "speed_counter_bp": 0,
       "initiative": 0
@@ -133,7 +133,7 @@
         "Endurance": 0
       },
       "hp": 0,
-      "crit_bp": 0,
+      "crit_pct": 0,
       "speed": 0,
       "speed_counter_bp": 0,
       "initiative": 0

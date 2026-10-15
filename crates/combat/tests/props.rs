@@ -92,14 +92,14 @@ fn arb_skill() -> impl Strategy<Value = Skill> {
         any::<u32>(),
     )
         .prop_map(
-            |(aspects, aspect_count, shares_bp, power_bp, source, form, state_chance_bp)| Skill {
+            |(aspects, aspect_count, shares_bp, power_bp, source, form, state_chance_pct)| Skill {
                 aspects,
                 aspect_count,
                 shares_bp,
                 power_bp,
                 source,
                 form,
-                state_chance_bp,
+                state_chance_pct,
             },
         )
 }
@@ -145,12 +145,12 @@ fn arb_attacker() -> impl Strategy<Value = Attacker> {
     )
         .prop_map(
             |(
-                (slot, attack_bonus, crit_chance_bp, weapon, skill),
+                (slot, attack_bonus, crit_chance_pct, weapon, skill),
                 (added, increased, more, weaken_bp, penetration_bp, state_chance_bonus_bp, tints),
             )| Attacker {
                 slot,
                 attack_bonus,
-                crit_chance_bp,
+                crit_chance_pct,
                 weapon,
                 skill,
                 added,
@@ -160,6 +160,7 @@ fn arb_attacker() -> impl Strategy<Value = Attacker> {
                 penetration_bp,
                 state_chance_bonus_bp,
                 tints,
+                tempo_bonus_bp: 0,
             },
         )
 }
@@ -172,7 +173,7 @@ fn arb_defender() -> impl Strategy<Value = Defender> {
         any::<[u32; 6]>(),
         any::<u8>(),
         any::<u8>(),
-        any::<[u32; 6]>(),
+        any::<[u32; StateKind::COUNT]>(),
         arb_states(),
     )
         .prop_map(
@@ -228,18 +229,18 @@ fn reported_dice(r: &HitResult) -> u32 {
 }
 
 fn chance_in_bounds(r: &HitResult) -> bool {
-    let lo = B.chance_min_bp;
-    let hi = B.chance_max_bp;
-    let ok = |bp: u32| bp >= lo && bp <= hi;
-    r.tint_rolls().iter().all(|t| ok(t.chance_bp))
+    let lo = B.chance_min_pct;
+    let hi = B.chance_max_pct;
+    let ok = |pct: u32| pct >= lo && pct <= hi;
+    r.tint_rolls().iter().all(|t| ok(t.chance_pct))
         && r.packets()
             .iter()
             .filter(|p| p.state.rolled)
-            .all(|p| ok(p.state.chance_bp))
+            .all(|p| ok(p.state.chance_pct))
         && r.resonance_states
             .iter()
             .filter(|s| s.rolled)
-            .all(|s| ok(s.chance_bp))
+            .all(|s| ok(s.chance_pct))
 }
 
 fn check_result(input: &HitInput, r: &HitResult) -> Result<(), TestCaseError> {

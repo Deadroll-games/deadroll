@@ -4,7 +4,6 @@
 //! 8 bytes (little endian) of `sha256(seed ‖ i as u32 LE)`. The website replays a hit from the
 //! seed in the `HitResolved` event with the same code (WASM).
 
-use deadroll_types::BP;
 use sha2::{Digest, Sha256};
 
 /// A stream of uniform `u64` values, one per roll of the current action.
@@ -98,11 +97,12 @@ pub fn d100(src: &mut impl RollSource) -> u8 {
     (src.next_u64() % 101) as u8
 }
 
-/// A chance check in basis points. Returns `(success, roll)` with `roll` in `0..BP`;
-/// success when `roll < chance_bp`.
-pub fn chance(src: &mut impl RollSource, chance_bp: u32) -> (bool, u16) {
-    let roll = (src.next_u64() % BP as u64) as u16;
-    ((roll as u32) < chance_bp, roll)
+/// A chance check on a d100 (`0..=100`, the same die as a point in a range).
+/// Returns `(success, roll)`. Success when `roll < chance_pct`. A chance of 100 still fails on
+/// a roll of 100, and chances are clamped below that (COMBAT_MATH §5, §10).
+pub fn chance(src: &mut impl RollSource, chance_pct: u32) -> (bool, u16) {
+    let roll = u16::from(d100(src));
+    ((roll as u32) < chance_pct, roll)
 }
 
 #[cfg(test)]
@@ -171,10 +171,11 @@ mod tests {
 
     #[test]
     fn chance_bounds() {
-        let mut src = ScriptedRoll::new([0, 9_999, 2_499, 2_500]);
+        // roll 100 against 100 fails: success is `roll < chance`.
+        let mut src = ScriptedRoll::new([0, 100, 24, 25]);
         assert_eq!(chance(&mut src, 0), (false, 0));
-        assert_eq!(chance(&mut src, BP), (true, 9_999));
-        assert_eq!(chance(&mut src, 2_500), (true, 2_499));
-        assert_eq!(chance(&mut src, 2_500), (false, 2_500));
+        assert_eq!(chance(&mut src, 100), (false, 100));
+        assert_eq!(chance(&mut src, 25), (true, 24));
+        assert_eq!(chance(&mut src, 25), (false, 25));
     }
 }

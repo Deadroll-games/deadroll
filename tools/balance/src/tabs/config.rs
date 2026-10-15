@@ -123,17 +123,19 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                                 &mut c.combat.resist_cap_bp,
                                 d.combat.resist_cap_bp,
                             );
-                            bp_row(
+                            int_row(
                                 ui,
-                                "Chance floor",
-                                &mut c.combat.chance_min_bp,
-                                d.combat.chance_min_bp,
+                                "Chance floor, percent",
+                                &mut c.combat.chance_min_pct,
+                                d.combat.chance_min_pct,
+                                0..=100,
                             );
-                            bp_row(
+                            int_row(
                                 ui,
-                                "Chance ceiling",
-                                &mut c.combat.chance_max_bp,
-                                d.combat.chance_max_bp,
+                                "Chance ceiling, percent",
+                                &mut c.combat.chance_max_pct,
+                                d.combat.chance_max_pct,
+                                0..=100,
                             );
                             int_row(
                                 ui,
@@ -173,6 +175,25 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                                 &mut c.combat.chill_slow_share_bp,
                                 d.combat.chill_slow_share_bp,
                             );
+                            bp_row(
+                                ui,
+                                "Shock vulnerability",
+                                &mut c.combat.shock_vuln_bp,
+                                d.combat.shock_vuln_bp,
+                            );
+                            bp_row(
+                                ui,
+                                "Penetration strength",
+                                &mut c.combat.penetration_power_bp,
+                                d.combat.penetration_power_bp,
+                            );
+                            int_row(
+                                ui,
+                                "Extra state chance, percent",
+                                &mut c.combat.extra_state_chance_pct,
+                                d.combat.extra_state_chance_pct,
+                                0..=100,
+                            );
                         });
                     by_variant::<StateKind, u8>(
                         ui,
@@ -191,12 +212,16 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                             ui.label(format!("t{t}"));
                         }
                         ui.end_row();
+                        widgets::label(
+                            ui,
+                            "Tint chance, percent",
+                            c.combat.tint_chance_pct != d.combat.tint_chance_pct,
+                        );
+                        for v in c.combat.tint_chance_pct.iter_mut() {
+                            widgets::int(ui, v, 0..=100);
+                        }
+                        ui.end_row();
                         let rows: [(&str, &mut [u32; 14], &[u32; 14]); 3] = [
-                            (
-                                "Tint chance",
-                                &mut c.combat.tint_chance_bp,
-                                &d.combat.tint_chance_bp,
-                            ),
                             (
                                 "Resonance more",
                                 &mut c.combat.resonance_more_bp,
@@ -206,6 +231,11 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                                 "Pure pair",
                                 &mut c.combat.pure_pair_bp,
                                 &d.combat.pure_pair_bp,
+                            ),
+                            (
+                                "Keenness penetration",
+                                &mut c.combat.keenness_pen_bp,
+                                &d.combat.keenness_pen_bp,
                             ),
                         ];
                         for (name, values, defaults) in rows {
@@ -225,11 +255,12 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                         .num_columns(2)
                         .striped(true)
                         .show(ui, |ui| {
-                            bp_row(
+                            int_row(
                                 ui,
-                                "Skill effect chance on a hit",
-                                &mut c.support.rider_chance_bp,
-                                d.support.rider_chance_bp,
+                                "Skill effect chance on a hit, percent",
+                                &mut c.support.rider_chance_pct,
+                                d.support.rider_chance_pct,
+                                0..=100,
                             );
                         });
                     egui::Grid::new("mods").striped(true).show(ui, |ui| {
@@ -371,17 +402,19 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                                 dp.projectile_range,
                                 1..=30,
                             );
-                            bp_row(
+                            int_row(
                                 ui,
-                                "Skill state chance",
-                                &mut p.skill_state_chance_bp,
-                                dp.skill_state_chance_bp,
+                                "Skill state chance, percent",
+                                &mut p.skill_state_chance_pct,
+                                dp.skill_state_chance_pct,
+                                0..=100,
                             );
-                            bp_row(
+                            int_row(
                                 ui,
-                                "Weapon state chance",
-                                &mut p.basic_state_chance_bp,
-                                dp.basic_state_chance_bp,
+                                "Weapon state chance, percent",
+                                &mut p.basic_state_chance_pct,
+                                dp.basic_state_chance_pct,
+                                0..=100,
                             );
                             bp_row(
                                 ui,

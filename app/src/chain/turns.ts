@@ -55,7 +55,7 @@ export const cooldownLabel = (n: number): string => `ready in ${n} turn${n === 1
 // ---- battle log texts for the turn-rule events
 
 /** StateKind variants in on-chain order; `expired` bit i is `1 << i` (deadroll_combat::states::state_bit). */
-const STATE_KEYS = ["burning", "chill", "freeze", "bleeding", "shock", "stun"] as const;
+const STATE_KEYS = ["burning", "chill", "freeze", "bleeding", "shock", "stun", "penetration"] as const;
 const DOT_KEYS: readonly string[] = ["burning", "bleeding"];
 const kindOf = (e: unknown): string => Object.keys(e as object)[0] ?? "";
 

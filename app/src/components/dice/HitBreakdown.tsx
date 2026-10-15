@@ -181,6 +181,8 @@ export function HitBreakdown({ hit, defaultOpen = true, critChanceBp, mods, item
                 <td>
                   {packet.armor}
                   {itemArmor > 0 && packet.armor > 0 ? ` (incl. items ${itemArmor})` : ""}
+                  {packet.penAttackerBp > 0 ? `, attacker ${formatBp(packet.penAttackerBp)}` : ""}
+                  {packet.penStateBp > 0 ? `, state ${formatBp(packet.penStateBp)}` : ""}
                 </td>
               </tr>
               <tr>
@@ -195,6 +197,7 @@ export function HitBreakdown({ hit, defaultOpen = true, critChanceBp, mods, item
                 <td>
                   {formatBp(packet.vulnBp)}
                   {note(mods, "vuln", packet)}
+                  {packet.vulnShockBp > 0 ? `, Shock ${formatBp(packet.vulnShockBp)}` : ""}
                 </td>
               </tr>
               <tr>

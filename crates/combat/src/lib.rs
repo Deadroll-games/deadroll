@@ -34,7 +34,10 @@ pub use resonance::{
     RESONANCES,
 };
 pub use rng::{chance, d100, d20, RollSource, ScriptedRoll, SeededRoll, VrfRoll};
-pub use states::{apply_chill, apply_state, native_state, tick_turn_start, Applied, States, Tick};
+pub use states::{
+    apply_chill, apply_state, chill_slow_bp, native_state, power_of, tick_turn_start, Applied,
+    States, Tick,
+};
 pub use support::{
     apply_mod, apply_to_attacker, apply_to_defender, mod_range, mod_turns, resolve_rider,
     resolve_support, speed_ap, tick_mods, EffectRoll, ModKind, SupportBalance, SupportInput,

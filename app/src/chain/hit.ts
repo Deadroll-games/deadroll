@@ -6,7 +6,7 @@ import { enumIndex, type Enum } from "./game";
 import type { ActiveState, HitItems, HitResolved, HitResult, ItemBonusView, PacketResult, Resonance, StateRoll, TintRoll } from "./types";
 
 const ASPECTS = ["fire", "cold", "lightning", "blood", "blunt", "piercing"];
-const STATES = ["burning", "chill", "freeze", "bleeding", "shock", "stun"];
+const STATES = ["burning", "chill", "freeze", "bleeding", "shock", "stun", "penetration"];
 const CARRIERS = ["race", "class", "item"];
 const OUTCOMES = ["miss", "hit", "immune"];
 const APPLIED = ["none", "added", "refreshed", "froze"];
@@ -63,6 +63,9 @@ export function toHitResult(r: any): HitResult {
     vulnBp: p.vulnBp,
     afterDefense: p.afterDefense,
     state: stateRoll(p.state),
+    penAttackerBp: p.penAttackerBp ?? 0,
+    penStateBp: p.penStateBp ?? 0,
+    vulnShockBp: p.vulnShockBp ?? 0,
   }));
   const states: ActiveState[] = (r.states as any[])
     .filter((s) => s.turns > 0)

@@ -48,6 +48,7 @@ export const STATE_KIND: Record<string, number> = {
   Bleeding: 3,
   Shock: 4,
   Stun: 5,
+  Penetration: 6,
 };
 export const TILE: Record<string, number> = {
   Floor: 0,
