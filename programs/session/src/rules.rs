@@ -108,8 +108,8 @@ pub const STRIKE_RANGE: u8 = BALANCE.players.strike_range;
 /// Projectiles reach this far (Chebyshev distance). TODO(P1): line of sight.
 pub const PROJECTILE_RANGE: u8 = BALANCE.players.projectile_range;
 /// Native state chance of a skill / basic attack (crates/combat `Skill::state_chance_bp`).
-pub const SKILL_STATE_CHANCE_BP: u32 = BALANCE.players.skill_state_chance_bp;
-pub const BASIC_STATE_CHANCE_BP: u32 = BALANCE.players.basic_state_chance_bp;
+pub const SKILL_STATE_CHANCE_PCT: u32 = BALANCE.players.skill_state_chance_pct;
+pub const BASIC_STATE_CHANCE_PCT: u32 = BALANCE.players.basic_state_chance_pct;
 /// HP a heal restores per point of the weapon's range, bp.
 pub const HEAL_WEAPON_BP: u32 = BALANCE.players.heal_weapon_bp;
 

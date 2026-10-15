@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 use deadroll_character::state::SKILLS_MAX;
-use deadroll_combat::speed_ap;
+use deadroll_combat::{chill_slow_bp, speed_ap};
 use deadroll_types::{seeds, SessionStatus};
 
 use crate::{
@@ -141,8 +141,12 @@ pub fn handler(ctx: Context<StartTurn>) -> Result<()> {
             let start = turns::start_of_turn(&mut monster.states, &mut mods, &mut own, monster.hp);
             monster.hp = start.hp;
             // `advance` granted the base AP; Haste and Slow apply after the tick.
-            monster.action_points =
-                speed_ap(monster_ap(session.monster_speed[index as usize]), &mods);
+            let chill = chill_slow_bp(&monster.states, &crate::rules::BALANCE.combat);
+            monster.action_points = speed_ap(
+                monster_ap(session.monster_speed[index as usize]),
+                &mods,
+                chill,
+            );
             if start.died {
                 // No VRF value of its own: the reward seed of a boss killed this way is the
                 // latest one, already public but out of anyone's hands by now.

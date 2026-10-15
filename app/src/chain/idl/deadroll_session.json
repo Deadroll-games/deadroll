@@ -4433,6 +4433,27 @@
                 "name": "StateRollData"
               }
             }
+          },
+          {
+            "name": "pen_attacker_bp",
+            "docs": [
+              "Attacker's penetration on this packet, bp. 0 when armor does not apply."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "pen_state_bp",
+            "docs": [
+              "Penetration state already on the target, bp."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "vuln_shock_bp",
+            "docs": [
+              "Shock already on the target, bp."
+            ],
+            "type": "u32"
           }
         ]
       }
@@ -4992,7 +5013,7 @@
     {
       "name": "StateKind",
       "docs": [
-        "P0 uses Burning, Chill, Freeze, Bleeding."
+        "Burning, Chill, Freeze, Bleeding, Shock, Stun, then Penetration (patch 3, append only)."
       ],
       "repr": {
         "kind": "rust"
@@ -5017,6 +5038,9 @@
           },
           {
             "name": "Stun"
+          },
+          {
+            "name": "Penetration"
           }
         ]
       }

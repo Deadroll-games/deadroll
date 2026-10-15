@@ -1,4 +1,4 @@
-import { ASPECT_NAMES, formatBp } from "../../chain/names";
+import { ASPECT_NAMES, formatBp, stateName } from "../../chain/names";
 import { deltaText, type AspectStat, type UnitStats } from "../../chain/stats";
 import { modIsBuff, modLabel } from "../../chain/support";
 import type { StatsPanelProps, StatsUnit } from "./types";
@@ -60,14 +60,21 @@ function UnitRow({ u }: { u: StatsUnit }) {
         {s.increasedBp === 0 && s.weakenBp === 0 && <span className="muted">Damage x1</span>}
       </td>
       <td>
-        {s.mods.length === 0 ? (
+        {s.mods.length === 0 && s.states.length === 0 ? (
           <span className="muted">none</span>
         ) : (
-          s.mods.map((m) => (
-            <span key={m.kind} className={`stats-mod ${modIsBuff(m.kind) ? "good" : "bad"}`}>
-              {modLabel(m)}
-            </span>
-          ))
+          <>
+            {s.states.map((st) => (
+              <span key={st.kind} className="stats-mod bad">
+                {stateName(st.kind)} {st.turns}t
+              </span>
+            ))}
+            {s.mods.map((m) => (
+              <span key={m.kind} className={`stats-mod ${modIsBuff(m.kind) ? "good" : "bad"}`}>
+                {modLabel(m)}
+              </span>
+            ))}
+          </>
         )}
       </td>
     </tr>

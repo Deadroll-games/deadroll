@@ -58,7 +58,7 @@ import {
 } from "../chain/game";
 import { toHitResolved } from "../chain/hit";
 import { bestiaryName } from "../chain/names";
-import { heroInputOf, previewOnMonster, previewText, useCombat } from "../chain/combatWasm";
+import { heroInputOf, previewOnMonster, previewText, statesOf, useCombat } from "../chain/combatWasm";
 import { errorName } from "../chain/send";
 import { statusLabel, type SubStatus } from "../chain/subscribe";
 import { cooldownLabel, skillCooldowns, skillUsedText, skipText, startTurnFor, takenOntoMap, tickText, turnActed, turnStarted } from "../chain/turns";
@@ -1078,6 +1078,7 @@ function statsUnits(party: Party, label: (u: number) => string): StatsUnit[] {
         apNow: mine ? playerAp(p.part, s) : null,
         profile: playerDefense(enumIndex(p.char.core.class, CLASS_KEYS) as Class, p.char.core.stats, p.part.equipment),
         mods: activeMods(p.part.mods),
+        states: statesOf(p.part.core.states),
       });
       return { unit: p.slot, label: label(p.slot), kind: "player", current: current === p.slot, stats };
     });
@@ -1092,6 +1093,7 @@ function statsUnits(party: Party, label: (u: number) => string): StatsUnit[] {
       apNow: current === u && running ? m.actionPoints : null,
       profile,
       mods: activeMods(party.monsterMods[i]),
+      states: statesOf(m.states),
     });
     return [{ unit: u, label: label(u), kind: "monster", current: current === u, stats }];
   });

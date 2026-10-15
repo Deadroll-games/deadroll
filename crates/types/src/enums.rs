@@ -23,8 +23,8 @@ u8_enum!(Source { Magical, Combat });
 u8_enum!(Form { Strike, Projectile });
 u8_enum!(TimeTag { Instant, DoT });
 u8_enum!(
-    /// P0 uses Burning, Chill, Freeze, Bleeding.
-    StateKind { Burning, Chill, Freeze, Bleeding, Shock, Stun }
+    /// Burning, Chill, Freeze, Bleeding, Shock, Stun, then Penetration (patch 3, append only).
+    StateKind { Burning, Chill, Freeze, Bleeding, Shock, Stun, Penetration }
 );
 u8_enum!(
     /// One map cell. `MapLayout.tiles` stores these as raw `u8`.

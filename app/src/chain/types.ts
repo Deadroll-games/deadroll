@@ -6,7 +6,7 @@ export const Aspect = { Fire: 0, Cold: 1, Lightning: 2, Blood: 3, Blunt: 4, Pier
 export type Aspect = (typeof Aspect)[keyof typeof Aspect];
 export const ASPECT_COUNT = 6;
 
-export const StateKind = { Burning: 0, Chill: 1, Freeze: 2, Bleeding: 3, Shock: 4, Stun: 5 } as const;
+export const StateKind = { Burning: 0, Chill: 1, Freeze: 2, Bleeding: 3, Shock: 4, Stun: 5, Penetration: 6 } as const;
 export type StateKind = (typeof StateKind)[keyof typeof StateKind];
 
 export const Race = { Human: 0, ForestElf: 1 } as const;
@@ -132,6 +132,12 @@ export type PacketResult = {
   /** Scaled x10_000. */
   afterDefense: bigint;
   state: StateRoll;
+  /** Attacker's penetration on this packet, bp. 0 when armor does not apply. */
+  penAttackerBp: number;
+  /** Penetration already on the target, bp. */
+  penStateBp: number;
+  /** Shock already on the target, a second vulnerability multiplier, bp. */
+  vulnShockBp: number;
 };
 
 /** Hit breakdown, in roll order (crates/combat/src/hit.rs). Arrays hold only the used entries. */

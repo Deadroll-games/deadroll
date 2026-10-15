@@ -125,7 +125,7 @@ describe("effectText", () => {
   });
 
   it("the effect of a damage skill", () => {
-    const ice = { ...base, caster: 1, target: 4, rider: true, effect: Effect.Freeze, applied: Applied.Froze, roll: { ...base.roll, critRoll: null, chanceBp: 2_500, chanceRoll: 100, d100: 0, amount: 0 } };
+    const ice = { ...base, caster: 1, target: 4, rider: true, effect: Effect.Freeze, applied: Applied.Froze, roll: { ...base.roll, critRoll: null, chanceBp: 25, chanceRoll: 10, d100: 0, amount: 0 } };
     expect(effectText(ice, "Ilyra", "Wolf 0", "Ice Prison")).toBe("Ice Prison effect on Wolf 0: chance 25%, Freeze (froze)");
   });
 });

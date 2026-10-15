@@ -40,9 +40,9 @@ const effect = (over: Partial<EffectResolved> = {}): EffectResolved => ({
 
 describe("effectSteps", () => {
   it("a heal has no d20: crit roll, heal d100, the HP after", () => {
-    const steps = effectSteps(effect({ roll: roll({ critRoll: 9_000, d100: 70, amount: 7 }), hp: 25 }), 500);
+    const steps = effectSteps(effect({ roll: roll({ critRoll: 90, d100: 70, amount: 7 }), hp: 25 }), 5);
     expect(steps.map((s) => s.kind)).toEqual(["crit", "d100", "damage"]);
-    expect(steps[0]).toMatchObject({ success: false, target: "needs 95.00+" });
+    expect(steps[0]).toMatchObject({ success: false, target: "needs 96+" });
     expect(steps[1]).toMatchObject({ label: "Heal d100", value: "70" });
     expect(steps[2]).toMatchObject({ label: "Healed", value: "+7 hp", target: "25 hp" });
   });
@@ -63,7 +63,7 @@ describe("effectSteps", () => {
   });
 
   it("a rider rolls its chance, certain on a crit; Freeze has no d100", () => {
-    const rolled = effectSteps(effect({ effect: Effect.Freeze, rider: true, applied: Applied.Froze, roll: roll({ chanceBp: 2_500, chanceRoll: 100 }) }));
+    const rolled = effectSteps(effect({ effect: Effect.Freeze, rider: true, applied: Applied.Froze, roll: roll({ chanceBp: 25, chanceRoll: 10 }) }));
     expect(rolled.map((s) => s.kind)).toEqual(["chance", "damage"]);
     expect(rolled[0]).toMatchObject({ label: "Freeze chance", success: true });
     expect(rolled[1]).toMatchObject({ value: "Freeze", target: "froze" });

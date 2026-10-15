@@ -245,3 +245,23 @@ Level-up numbers moved into `BalanceConfig.players` (`level_xp`, `stat_points_pe
 `crates/combat` (not a frozen contract, listed for the WASM layout): `ModFilter::SourceForm(Source,
 Form)` appended as variant 5; `preview_hit` / `HitPreview` added. The website ships
 `app/src/chain/wasm/combat.wasm` (ABI 2, `crates/combat/wasm/README.md`).
+
+## 10. Patch 3: dice and states
+
+`crates/types`: `StateKind::Penetration` appended (discriminant 6). `STATES_MAX` stays 6: the
+state array sits in the middle of `ParticipationData` and `Monster`, so a seventh slot is not
+added. A unit that already holds six states cannot take a seventh until one ends.
+
+No account fields added. `Participation`, `GameSession` and `MonsterState` keep their layout, so
+sessions opened before this upgrade still decode. The program logic, the hit event and the combat
+WASM change, so the programs still need a devnet upgrade before the public site can use them.
+
+Chance rolls (crit, resonance tint, state application, skill-effect rider) are a d100, `0..=100`,
+success when `roll < chance`. Those chances in `BalanceConfig` are percents. Shares, multipliers
+and counterweights stay in basis points.
+
+`Attacker` gains `tempo_bonus_bp` at the end (Dexterity increase on Chill). `PacketResult` gains
+`pen_attacker_bp`, `pen_state_bp`, `vuln_shock_bp` at the end. The session hit event mirrors them.
+`StateKind` in the IDL gains `Penetration`.
+
+Combat WASM ABI 3 (`crates/combat/wasm/README.md`).

@@ -5,7 +5,7 @@ use deadroll_sim::{
     presets::{HeroPreset, SkillPreset},
     BuildScore, Histogram, Percentiles,
 };
-use deadroll_types::PARTY_MAX;
+use deadroll_types::{StateKind, PARTY_MAX};
 use eframe::egui::{self, Ui};
 use egui_plot::{Bar, BarChart, Plot};
 
@@ -136,6 +136,18 @@ fn batch(app: &mut BalanceApp, ui: &mut Ui) {
             pct(r.control_uptime),
             "monster turns lost to Freeze / Stun",
         );
+    });
+    ui.add_space(8.0);
+    ui.strong("States landed per fight");
+    ui.horizontal_wrapped(|ui| {
+        for kind in StateKind::ALL {
+            card(
+                ui,
+                &kind.name(),
+                format!("{:.2}", r.states_per_fight[*kind as usize]),
+                "applications that landed, per fight",
+            );
+        }
     });
     ui.add_space(8.0);
     ui.strong("By hero");

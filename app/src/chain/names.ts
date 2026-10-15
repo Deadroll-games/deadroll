@@ -4,7 +4,7 @@ import type { EffectResolved } from "./support";
 import { ASPECT_COUNT, HitOutcome, type Aspect, type Carrier, type Class, type Race, type StateKind, type Tile } from "./types";
 
 export const ASPECT_NAMES = ["Fire", "Cold", "Lightning", "Blood", "Blunt", "Piercing"] as const;
-export const STATE_NAMES = ["Burning", "Chill", "Freeze", "Bleeding", "Shock", "Stun"] as const;
+export const STATE_NAMES = ["Burning", "Chill", "Freeze", "Bleeding", "Shock", "Stun", "Penetration"] as const;
 export const RACE_NAMES = ["Human", "Forest elf"] as const;
 export const CLASS_NAMES = ["Warrior", "Mage", "Support"] as const;
 export const TILE_NAMES = ["Floor", "Wall", "Water", "Door", "Entrance", "Exit", "Trap"] as const;
@@ -52,17 +52,17 @@ export function formatHundredths(v: number): string {
 }
 
 /*
- * Chance rolls are shown "high roll wins", like the d20. On-chain a raw roll in 0..9_999 passes when
- * raw < chance (crates/combat/src/rng.rs). Shown = 9_999 - raw and needed = 10_000 - chance, so
- * shown >= needed exactly when raw < chance.
+ * Chance rolls are a d100, 0..=100, shown "high roll wins". On-chain success is raw < chance
+ * (crates/combat/src/rng.rs). Shown = 100 - raw and needed = 101 - chance, so shown >= needed
+ * exactly when raw < chance.
  */
-export const shownRoll = (raw: number): number => 9_999 - raw;
-export const neededRoll = (chanceBp: number): number => 10_000 - chanceBp;
+export const shownRoll = (raw: number): number => 100 - raw;
+export const neededRoll = (chancePct: number): number => 101 - chancePct;
 
 /** Tooltip with the raw on-chain numbers behind a shown chance roll. */
-export function rollTitle(raw: number, chanceBp: number | null): string {
-  const pass = chanceBp == null ? "" : `, passes when raw < ${formatHundredths(chanceBp)}%`;
-  return `on-chain raw roll ${formatHundredths(raw)}%, shown as 99.99 - raw${pass}`;
+export function rollTitle(raw: number, chancePct: number | null): string {
+  const pass = chancePct == null ? "" : `, passes when raw < ${chancePct}`;
+  return `on-chain raw roll ${raw}, shown as 100 - raw${pass}`;
 }
 
 export const effectName = (e: Effect): string => EFFECT_NAMES[e] ?? `effect ${e}`;

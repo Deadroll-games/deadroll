@@ -31,7 +31,7 @@ use deadroll_types::{
 };
 
 /// Bumped on any change of the exports or the byte layouts.
-pub const ABI_VERSION: u32 = 2;
+pub const ABI_VERSION: u32 = 3;
 /// Size of the input and output buffers.
 pub const BUFFER_LEN: usize = 4096;
 
@@ -144,7 +144,7 @@ pub fn hero_sheet(h: &HeroStats) -> HeroSheet {
         accuracy: hero::accuracy(CFG, h),
         evasion,
         armor,
-        crit_bp: hero::crit_bp(CFG, h),
+        crit_bp: hero::crit_pct(CFG, h).saturating_mul(100),
         hp_max: hero::hp_max(CFG, h),
         action_points: hero::ap(CFG, h),
         initiative: hero::initiative(CFG, h),
@@ -155,9 +155,10 @@ pub fn hero_sheet(h: &HeroStats) -> HeroSheet {
         magical_state_bp: hero::state_chance(CFG, h, Stat::Intelligence),
         tempo_state_bp: hero::state_chance(CFG, h, Stat::Dexterity),
         self_buff_turns: hero::self_buff_turns(CFG, h),
-        crit_roll_bp: match hero::crit_bp(CFG, h) {
+        // Percent the d100 crit roll is compared with. 0 when only a natural 20 crits.
+        crit_roll_bp: match hero::crit_pct(CFG, h) {
             0 => 0,
-            bp => CFG.combat.clamp_chance(bp),
+            pct => CFG.combat.clamp_chance(pct),
         },
     }
 }

@@ -83,8 +83,8 @@ pub enum ResonanceEffect {
     Multiplier(u32),
     /// On a crit the state is applied without a roll (if the target is not immune).
     StateOnCrit(StateKind),
-    /// One more state roll with this chance (bp), against the target's state resistance.
-    ExtraStateChance(StateKind, u32),
+    /// One more state roll. The chance is `Balance::extra_state_chance_pct`.
+    ExtraStateChance(StateKind),
 }
 
 /// A row of the resonance table.
@@ -179,7 +179,7 @@ pub const RESONANCES: [[ResonanceEntry; Aspect::COUNT]; Aspect::COUNT] = [
         generic(C::HasArmor),
         with(
             C::HasArmor,
-            ResonanceEffect::ExtraStateChance(StateKind::Chill, 3_000),
+            ResonanceEffect::ExtraStateChance(StateKind::Chill),
         ),
         generic(C::HasArmor),
         generic(C::CanBleed),
@@ -237,8 +237,8 @@ pub struct TintRoll {
     pub tint: Aspect,
     pub carrier: Carrier,
     pub tier: u8,
-    pub chance_bp: u32,
-    /// `0..BP`; success when `roll < chance_bp`.
+    /// Percent. Success when `roll < chance_pct` (`roll` is a d100, `0..=100`).
+    pub chance_pct: u32,
     pub roll: u16,
     pub success: bool,
 }
@@ -297,15 +297,15 @@ pub fn roll_tints(
                 out.pure_pair_bp[i] = out.pure_pair_bp[i].max(balance.pure_pair(tier));
                 continue;
             }
-            let chance_bp = balance.clamp_chance(balance.tint_chance(tier));
-            let (success, roll) = chance(src, chance_bp);
+            let chance_pct = balance.clamp_chance(balance.tint_chance(tier));
+            let (success, roll) = chance(src, chance_pct);
             if (out.roll_count as usize) < TINT_ROLLS_MAX {
                 out.rolls[out.roll_count as usize] = TintRoll {
                     base,
                     tint: t.aspect,
                     carrier: t.carrier,
                     tier: t.tier,
-                    chance_bp,
+                    chance_pct,
                     roll,
                     success,
                 };
@@ -314,7 +314,7 @@ pub fn roll_tints(
             if !success {
                 continue;
             }
-            let candidate = (chance_bp - roll as u32, t.carrier, j);
+            let candidate = (chance_pct - roll as u32, t.carrier, j);
             let better =
                 |a: &(u32, Carrier, usize), b: &(u32, Carrier, usize)| (a.0, a.1) > (b.0, b.1);
             match best {
@@ -391,7 +391,7 @@ mod tests {
         );
         assert_eq!(
             entry(Aspect::Piercing, Aspect::Cold).effects[1],
-            ResonanceEffect::ExtraStateChance(StateKind::Chill, 3_000)
+            ResonanceEffect::ExtraStateChance(StateKind::Chill)
         );
         assert_eq!(resonance_id(Aspect::Cold, Aspect::Piercing), 11);
         assert_eq!(resonance_id(Aspect::Piercing, Aspect::Cold), 31);
@@ -432,11 +432,11 @@ mod tests {
     #[test]
     fn pair_on_success() {
         let tints = [Tint::new(Aspect::Piercing, 1, Carrier::Race)];
-        // chance tier 1 = 3_950; roll 100 succeeds.
-        let mut src = ScriptedRoll::new([100]);
+        // chance tier 1 = 40; roll 0 succeeds.
+        let mut src = ScriptedRoll::new([0]);
         let out = roll_tints(&[Aspect::Cold], &tints, 0, &view(&[]), &B, &mut src);
         assert_eq!(out.roll_count, 1);
-        assert_eq!(out.rolls[0].chance_bp, 3_950);
+        assert_eq!(out.rolls[0].chance_pct, 40);
         assert!(out.rolls[0].success);
         let r = out.resonances[0].unwrap();
         assert_eq!(
@@ -484,13 +484,13 @@ mod tests {
     #[test]
     fn best_margin_wins_then_carrier_priority() {
         let tints = [
-            Tint::new(Aspect::Fire, 14, Carrier::Race),  // chance 700
-            Tint::new(Aspect::Blood, 1, Carrier::Class), // chance 3_950
-            Tint::new(Aspect::Lightning, 1, Carrier::Item), // chance 3_950
-            Tint::default(),                             // empty (tier 0)
+            Tint::new(Aspect::Fire, 14, Carrier::Race),     // chance 7
+            Tint::new(Aspect::Blood, 1, Carrier::Class),    // chance 40
+            Tint::new(Aspect::Lightning, 1, Carrier::Item), // chance 40
+            Tint::default(),                                // empty (tier 0)
         ];
-        // margins: 700-0=700, 3950-3000=950, 3950-3000=950 -> tie, Item beats Class.
-        let mut src = ScriptedRoll::new([0, 3_000, 3_000]);
+        // margins: 7-0=7, 40-10=30, 40-10=30 -> tie, Item beats Class.
+        let mut src = ScriptedRoll::new([0, 10, 10]);
         let out = roll_tints(&[Aspect::Cold], &tints, 0, &view(&[]), &B, &mut src);
         assert_eq!(out.roll_count, 3);
         let r = out.resonances[0].unwrap();
