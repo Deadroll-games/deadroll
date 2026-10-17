@@ -1,10 +1,53 @@
 {
+  "note": "docs/DAMAGE_TYPES_AND_MIXES.md 3.2 and 10.1: family, native state, tint trait, the condition of generated pairs.",
   "records": [
-    { "aspect": "Fire", "family": "Elemental", "flags": 0 },
-    { "aspect": "Cold", "family": "Elemental", "flags": 0 },
-    { "aspect": "Lightning", "family": "Elemental", "flags": 0 },
-    { "aspect": "Blood", "family": "Physical", "flags": 0 },
-    { "aspect": "Blunt", "family": "Physical", "flags": 0 },
-    { "aspect": "Piercing", "family": "Physical", "flags": 0 }
+    {
+      "aspect": "Fire",
+      "family": "Elemental",
+      "flags": 0,
+      "native": "Burning",
+      "trait": "Fury",
+      "condition": "CanBurn"
+    },
+    {
+      "aspect": "Cold",
+      "family": "Elemental",
+      "flags": 0,
+      "native": "Chill",
+      "trait": "Composure",
+      "condition": "CanBeFrozen"
+    },
+    {
+      "aspect": "Lightning",
+      "family": "Elemental",
+      "flags": 0,
+      "native": "Shock",
+      "trait": "Swiftness",
+      "condition": "CanBeShocked"
+    },
+    {
+      "aspect": "Blood",
+      "family": "Physical",
+      "flags": 0,
+      "native": "Bleeding",
+      "trait": "Wasting",
+      "condition": "CanBleed"
+    },
+    {
+      "aspect": "Blunt",
+      "family": "Physical",
+      "flags": 0,
+      "native": "Stun",
+      "trait": "Crushing",
+      "condition": "CanBeStunned"
+    },
+    {
+      "aspect": "Piercing",
+      "family": "Physical",
+      "flags": 0,
+      "native": "Penetration",
+      "trait": "Keenness",
+      "condition": "HasArmor"
+    }
   ]
 }

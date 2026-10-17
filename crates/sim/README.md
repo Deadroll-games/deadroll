@@ -5,6 +5,8 @@ Balance simulator: whole fights on the session program's rules, many of them in 
 - **Rules**: every rule call goes through `deadroll-rules` and `deadroll-combat`, the code the program runs. Only the orchestration lives here: the turn loop (`battle.rs`), a simple AI (`ai.rs`), seeded dice instead of VRF (one seed per action), statistics (`stats.rs`) and rayon batches (`run.rs`).
 - **Numbers**: one `BalanceConfig` (`config_io` reads JSON over the defaults, so old files keep loading).
 - **Content**: heroes, skills, monsters and encounters are JSON presets (`presets.rs`, `tools/balance/presets/`). Enums are written by variant name and listed from their `ALL` (`named.rs`).
+- **Registry data**: aspects, tint traits, resonance pairs and monster defenses come from `assets/registry/*.json` (`deadroll_rules::registry`), the bytes the seed script uploads and the program copies at `open_session`. A monster preset with a `bestiary_id` takes its defenses from `bestiary.json`. `DEADROLL_REGISTRY` points at another folder.
+- **Report**: `cargo run -p deadroll-sim --release --example report` prints the balance table attached to a PR that changes balance (docs/ARCHITECTURE.md 5.1).
 - **Validation**: skills go through `skillcheck::validate_starting` and `check_loadout` like in the game (`setup.rs`); an invalid skill never fights, the reason is reported.
 
 ```rust

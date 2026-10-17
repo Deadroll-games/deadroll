@@ -189,6 +189,8 @@ await session.methods
     dm: dm.publicKey, map, layout, session: sessionPda, monsters, escrow, sessionAuthority, config,
     bestiary: pda([Buffer.from("bestiary")], REGISTRY), tileset: pda([Buffer.from("tileset")], REGISTRY),
     mapProgram: MAP, systemProgram: SystemProgram.programId,
+    aspects: pda([Buffer.from("aspects")], REGISTRY), traits: pda([Buffer.from("traits")], REGISTRY),
+    resonances: pda([Buffer.from("resonances")], REGISTRY),
   })
   .signers([dm])
   .rpc();

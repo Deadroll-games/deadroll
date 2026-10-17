@@ -13,6 +13,11 @@ import {
   encodeBestiary,
   encodeTileset,
   encodePrefabs,
+  encodeTraits,
+  TRAIT_SIZE,
+  OP_KIND,
+  NATIVE,
+  CRIT_ONLY,
   encodeMonster,
   encodeTile,
   validate_record,
@@ -30,6 +35,8 @@ test("JSON files encode to the exact table sizes", () => {
   const bestiary = encodeBestiary(load("bestiary.json"));
   const tileset = encodeTileset(load("tileset.json"));
   const prefabs = encodePrefabs(load("prefabs.json"));
+  const traits = encodeTraits(load("traits.json"));
+  assert.equal(traits.length, 6 * TRAIT_SIZE);
   assert.equal(aspects.length, 48);
   assert.equal(aspects.length, 6 * ASPECT_SIZE);
   assert.equal(resonances.length, 576);
@@ -82,19 +89,20 @@ test("passable tile with cost 0 throws", () => {
   assert.throws(() => encodeTile(json.records[0]), /passable tile with cost 0/);
 });
 
-test("Piercing+Cold ExtraStateChance(Chill, 3000) at effect 1", () => {
+test("Piercing+Cold (Icy Point): an override, Penetration chills", () => {
   const bytes = encodeResonances(load("resonances.json"));
   const index = 5 * 6 + 1;
   const rec = bytes.subarray(index * RESONANCE_SIZE, (index + 1) * RESONANCE_SIZE);
   assert.equal(rec.length, 16);
-  // effect 0 at bytes 2..8: Multiplier 10000
-  assert.equal(rec[2], 1);
-  assert.equal(rec[3], 0);
+  // condition HasArmor, override flag
+  assert.equal(rec[0], 8);
+  assert.equal(rec[1], 1);
+  // op 0 at bytes 2..8: Linked(Chill, 10000)
+  assert.equal(rec[2], OP_KIND.Linked);
+  assert.equal(rec[3], 1);
   assert.equal(rec[4] | (rec[5] << 8) | (rec[6] << 16) | (rec[7] << 24), 10000);
-  // effect 1 at bytes 8..14: ExtraStateChance(Chill, 3000)
-  assert.equal(rec[8], 3);
-  assert.equal(rec[9], 1);
-  assert.equal(rec[10] | (rec[11] << 8) | (rec[12] << 16) | (rec[13] << 24), 3000);
+  // op 1 empty
+  assert.deepEqual([...rec.subarray(8, 16)], [0, 0, 0, 0, 0, 0, 0, 0]);
 });
 
 test("wolf is record 0 with role 1", () => {
@@ -103,4 +111,45 @@ test("wolf is record 0 with role 1", () => {
   assert.equal(wolf[0], 1);
   assert.equal(wolf[1], 1);
   assert.equal(validate_record(TableKind.Bestiary, 0, wolf), true);
+});
+
+test("the encoder gives the bytes deadroll-rules reads (sim and program)", () => {
+  const fixture = JSON.parse(
+    readFileSync(new URL("./__fixtures__/registry-tables.json", import.meta.url), "utf8"),
+  ) as Record<string, string>;
+  const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
+  assert.equal(hex(encodeAspects(load("aspects.json"))), fixture.aspects);
+  assert.equal(hex(encodeTraits(load("traits.json"))), fixture.traits);
+  assert.equal(hex(encodeResonances(load("resonances.json"))), fixture.resonances);
+  assert.equal(hex(encodeBestiary(load("bestiary.json"))), fixture.bestiary);
+});
+
+test("ops: args by kind, crit flag, bad ops refused", () => {
+  const r = new Uint8Array(RESONANCE_SIZE);
+  r[0] = 1;
+  r[1] = 1;
+  r[2] = OP_KIND.Jump;
+  r[3] = NATIVE;
+  r[8] = OP_KIND.NativeTurns | CRIT_ONLY;
+  assert.equal(validate_record(TableKind.Resonances, 0, r), true);
+  const bad = (at: number, v: number) => {
+    const x = r.slice();
+    x[at] = v;
+    return validate_record(TableKind.Resonances, 0, x);
+  };
+  assert.equal(bad(9, 1), false, "NativeTurns takes no arg");
+  assert.equal(bad(2, 21), false, "unknown op");
+  assert.equal(bad(1, 2), false, "unknown flag");
+  assert.equal(bad(3, 7), false, "unknown state");
+  assert.throws(() =>
+    encodeResonances({
+      records: Array.from({ length: 36 }, (_, i) => ({
+        base: ["Fire", "Cold", "Lightning", "Blood", "Blunt", "Piercing"][Math.floor(i / 6)],
+        tint: ["Fire", "Cold", "Lightning", "Blood", "Blunt", "Piercing"][i % 6],
+        override: true,
+        condition: "Always",
+        ops: [{ kind: "Linked" }],
+      })),
+    }),
+  );
 });

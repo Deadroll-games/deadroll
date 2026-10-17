@@ -21,25 +21,24 @@ pub mod resonance;
 pub mod rng;
 pub mod states;
 pub mod support;
+pub mod tables;
 
 pub use balance::Balance;
 pub use hit::{
     preview_hit, preview_range, resolve_hit, resolve_hit_into, Attacker, Defender, HitInput,
-    HitPreview, HitResult, Outcome, PacketResult, StateRoll,
+    HitPreview, HitResult, Jump, JumpMode, OpOrigin, OpResult, Outcome, PacketResult, PreviewTint,
+    StateRoll, JUMPS_MAX, RES_OPS_MAX, TARGET_MODS_MAX,
 };
 pub use modifiers::{family_of, is_physical, Mod, ModFilter};
 pub use packet::{build_packets, DamageRange, Packet, Packets, Skill};
-pub use resonance::{
-    resonance_id, Carrier, Resonance, ResonanceCondition, ResonanceEffect, Tint, TintRoll,
-    RESONANCES,
-};
+pub use resonance::{resonance_id, Carrier, Resonance, ResonanceCondition, Tint, TintRoll};
 pub use rng::{chance, d100, d20, RollSource, ScriptedRoll, SeededRoll, VrfRoll};
 pub use states::{
-    apply_chill, apply_state, chill_slow_bp, native_state, power_of, tick_turn_start, Applied,
-    States, Tick,
+    apply_chill, apply_state, chill_slow_bp, power_of, tick_turn_start, Applied, States, Tick,
 };
 pub use support::{
     apply_mod, apply_to_attacker, apply_to_defender, mod_range, mod_turns, resolve_rider,
-    resolve_support, speed_ap, tick_mods, EffectRoll, ModKind, SupportBalance, SupportInput,
-    TimedMod, TimedMods, MODS_MAX,
+    resolve_support, speed_ap, tick_mods, AccuracyBuff, EffectRoll, ModKind, SupportBalance,
+    SupportInput, TimedMod, TimedMods, MODS_MAX,
 };
+pub use tables::{Op, OpKind, ResonanceTables, TableError};

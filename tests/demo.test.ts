@@ -71,6 +71,9 @@ const sighash = (preimage: string) => sha256(preimage).subarray(0, 8);
 const config = pda([Buffer.from("config")], REGISTRY);
 const bestiary = pda([Buffer.from("bestiary")], REGISTRY);
 const tileset = pda([Buffer.from("tileset")], REGISTRY);
+const aspects = pda([Buffer.from("aspects")], REGISTRY);
+const traits = pda([Buffer.from("traits")], REGISTRY);
+const resonances = pda([Buffer.from("resonances")], REGISTRY);
 const sessionAuthority = pda([Buffer.from("authority")], SESSION);
 const MOCK_VRF = Keypair.fromSeed(sha256("deadroll:mock-vrf"));
 const vrfAccounts = {
@@ -98,10 +101,12 @@ const CRIT = fixedSeed(9);
 /** Natural 1: always a miss. */
 const MISS = fixedSeed(17);
 /**
- * A crit whose first tint roll (roll 1: a natural 20 makes no crit-chance roll) is a d100 under 5,
- * so any tint with a real chance succeeds (crates/combat hit order, steps 1-3).
+ * A crit for the mage's Frost Burn (crates/combat hit order, steps 1-3; a natural 20 makes no
+ * crit-chance roll): roll 1 is the Cold base's staff tint (Blunt, fails), roll 2 the Fire base's
+ * race tint (Cold, a d100 under 5: Pale Flame), roll 3 the Fire base's staff tint (fails, so no
+ * Blasting Flame knockback moves the wolf).
  */
-const RESONANT = fixedSeed(567);
+const RESONANT = fixedSeed(128);
 
 const signatures: { what: string; sig: string }[] = [];
 /** Every VRF callback, read back from the chain right after it landed. */
@@ -195,7 +200,13 @@ for (const [name, id] of [["registry", REGISTRY], ["character", CHARACTER], ["ma
 const cfg = await connection.getAccountInfo(config);
 if (!cfg?.owner.equals(REGISTRY)) missing.push("registry GameConfig");
 else if (!new PublicKey(cfg.data.subarray(41 + 5 * 32, 41 + 6 * 32)).equals(SESSION)) missing.push("GameConfig trusting session");
-for (const [name, table] of [["bestiary", bestiary], ["tileset", tileset]] as const) {
+for (const [name, table] of [
+  ["bestiary", bestiary],
+  ["tileset", tileset],
+  ["aspects", aspects],
+  ["traits", traits],
+  ["resonances", resonances],
+] as const) {
   if (!(await connection.getAccountInfo(table))?.owner.equals(REGISTRY)) missing.push(`registry ${name} table`);
 }
 const SKIP = missing.length ? `run tools/scripts/deploy-local.ts first; missing: ${missing.join(", ")}` : false;
@@ -489,6 +500,7 @@ class Demo {
         config,
         characterProgram: CHARACTER,
         targetParticipation: null,
+        layout: this.layout,
       })
       .signers([MOCK_VRF])
       .rpc({ commitment: "confirmed" })
@@ -668,6 +680,9 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
         tileset,
         mapProgram: MAP,
         systemProgram: SystemProgram.programId,
+        aspects,
+        traits,
+        resonances,
       })
       .signers([demo.dm])
       .rpc({ commitment: "confirmed" })
@@ -800,13 +815,14 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
       } else if (unit === MAGE) {
         const target = livingWolves[livingWolves.length - 1];
         if (!resonanceShown && target !== undefined && cheb(s.playerPos[MAGE], ms[target]) <= 6) {
-          // Frost Burn (cold + fire) with the mage's cold race tint: the fire base rolls the tint.
+          // Frost Burn (cold + fire) with the mage's cold race tint: the fire base rolls it (Pale Flame).
           const { hit } = await demo.attack(MAGE, FROST_BURN, target, RESONANT);
           const r = hit.result;
           assert.ok(r.outcome.hit);
           const res = r.resonances.filter((x: any) => x !== null);
           console.log(`  mage Frost Burn: damage ${r.damage}, resonances ${JSON.stringify(res.map((x: any) => ({ id: x.id, active: x.active })))}`);
-          assert.ok(r.tintRollCount >= 1 && r.tintRolls[0].success, "the tint roll succeeded");
+          const fireCold = r.tintRolls.slice(0, r.tintRollCount).find((t: any) => t.base.fire && t.tint.cold);
+          assert.ok(fireCold?.success, "the Fire base's Cold tint roll succeeded");
           assert.ok(res.some((x: any) => x.active), "a resonance triggered");
           resonanceShown = true;
         }

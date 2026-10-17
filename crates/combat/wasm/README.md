@@ -18,25 +18,27 @@ cargo build -p deadroll-combat-wasm --target wasm32-unknown-unknown --profile wa
 # -> target/wasm32-unknown-unknown/wasm/deadroll_combat_wasm.wasm
 ```
 
-There are no imports. The module exports `memory` plus the functions below. Balance numbers are always `BalanceConfig::DEFAULT`, the numbers the programs use.
+There are no imports. The module exports `memory` plus the functions below. Balance numbers are always `BalanceConfig::DEFAULT`, the numbers the programs use. Resonance tables and monster defenses are registry data, not compiled in: the page loads the tables a session copied at `open_session` (`MonsterState.res_aspects ‖ res_traits ‖ res_pairs`, 816 bytes) with `set_tables` before `resolve`, `preview_hit` or `preview_attack`, and passes each monster's `MonsterState.defense`.
 
 ## Exports
 
 | Export | Signature | What it does |
 |---|---|---|
-| `abi_version` | `() -> u32` | `2`; bumped on any change of exports or layouts |
+| `abi_version` | `() -> u32` | `4`; bumped on any change of exports or layouts |
 | `buffer_len` | `() -> u32` | size of the input and output buffers (4096) |
 | `input_ptr` | `() -> *mut u8` | where to write the borsh input |
 | `seed_ptr` | `() -> *mut u8` | where to write the 32-byte VRF seed |
 | `output_ptr` | `() -> *const u8` | where results are read from |
-| `resolve` | `(input_len: u32) -> i32` | `HitInput` in: `resolve_hit(input, DEFAULT, VrfRoll(seed))`, writes a borsh `HitResult`, returns its length |
+| `set_tables` | `(input_len: u32) -> i32` | the 816 table bytes in: decodes and keeps them, returns 0 (or `-5`, then none are kept) |
+| `resolve` | `(input_len: u32) -> i32` | `HitInput` in: `resolve_hit(input, DEFAULT, tables, VrfRoll(seed))`, writes a borsh `HitResult`, returns its length |
 | `preview` | `(input_len: u32) -> i32` | `HitInput` in: writes `min: u32 LE, max: u32 LE`, returns 8 |
 | `preview_hit` | `(input_len: u32) -> i32` | `HitInput` in: writes a borsh `HitPreview` |
 | `hero_sheet` | `(input_len: u32) -> i32` | `HeroInput` in: writes a borsh `HeroSheet` |
 | `preview_attack` | `(input_len: u32) -> i32` | `AttackRequest` in: builds the hit input as the session program does, writes a borsh `HitPreview` |
+| `monster_sheet` | `(input_len: u32) -> i32` | `MonsterInput` in: the template at a level with its registry defenses, writes a borsh `MonsterSheet` |
 | `roll_u64` | `(index: u32) -> u64` (BigInt) | roll number `index` of the seed: first 8 bytes LE of `sha256(seed ‖ index u32 LE)` |
 
-Negative returns: `-1` input longer than the buffer, `-2` input is not valid borsh of the expected type (trailing bytes count as invalid), `-3` output does not fit, `-4` the target's bestiary id has no template.
+Negative returns: `-1` input longer than the buffer, `-2` input is not valid borsh of the expected type (trailing bytes count as invalid), `-3` output does not fit, `-4` the target's bestiary id has no template, `-5` no resonance tables (call `set_tables`), or they do not decode.
 
 ```ts
 const { instance } = await WebAssembly.instantiate(bytes, {});
@@ -98,6 +100,13 @@ HitPreview {
   crit_bp: u32,                                                 // natural 20 + plain hits x crit roll
   min: u32, max: u32,                                           // damage of a hit, no resonance
   crit_min: u32, crit_max: u32,                                 // the same with the crit multiplier
+  tints: [PreviewTint; 12], tint_count: u8,                     // bases in skill order, tints in slot order
+}
+PreviewTint {
+  base: Aspect, tint: Aspect, carrier: Carrier, tier: u8,
+  pure: bool,                                                   // tint == base: no roll, native state stronger
+  chance_pct: u32, id: u8, generated: bool, condition_met: bool,
+  min: u32, max: u32,                                           // damage if this tint alone triggers
 }
 ```
 
@@ -129,9 +138,17 @@ AttackRequest {
   hero_mods: [TimedMod; 6],                                     // the attacker's buffs and debuffs
   skill: Option<SkillInput>,                                    // None = the weapon's basic attack
   target: TargetInput,
+  accuracy: AccuracyBuff,                                       // Participation.accuracy
 }
+AccuracyBuff { aspect: Aspect, turns: u8, bonus: u32 }          // turns == 0: none
 SkillInput { blocks: SkillBlocks, shares_bp: [u32; 3], power_bp: u32 }  // SkillRecord without the name
-TargetInput { bestiary_id: u8, level: u8, states: [ActiveState; 6], mods: [TimedMod; 6] }
+TargetInput { bestiary_id: u8, level: u8, states: [ActiveState; 6], mods: [TimedMod; 6], defense: DefenseInput }
+DefenseInput { resist: u8, immune_aspects: u8, immune_states: u8 }   // MonsterState.defense: bits
+MonsterInput { bestiary_id: u8, level: u8, defense: DefenseInput }
+MonsterSheet {
+  weapon: DamageRange, attack_bonus: u32, evasion: u32, armor: u32,
+  resist_bp: [u32; 6], immune_aspects: u8, immune_states: u8, resist_cap_bp: u32,
+}
 TimedMod { kind: ModKind, aspect: Aspect, turns: u8, power_bp: u32, source: u8 }   // turns == 0: empty
 SkillBlocks {
   category: u8, purpose: u8, source: Source, form: Form, target: u8,
@@ -154,9 +171,24 @@ HitResult {
   states: [ActiveState; 6],                                     // target after the hit
   damage: u32,
   rolls_used: u32,
+  res_ops: [[OpResult; 6]; 3],                                  // per base slot, kind None after the used ones
+  jumps: [Jump; 4], jump_count: u8,                             // states the program passes on (ResonanceSpread)
+  knockback: u8, ignite_power: u32,
+  target_mods: [TimedMod; 3], target_mod_count: u8,
+  accuracy_buff: AccuracyBuff,
+  landed: u8,                                                   // bit 1 << StateKind of what landed
 }
+OpResult {
+  kind: u8 (deadroll_combat::tables::OpKind), crit_only: bool, arg: u8,
+  origin: u8 (0 Pair, 1 Template, 2 Trait), tint: Aspect, carrier: Carrier, tier: u8,
+  acted: bool, state: StateRoll, amount: u32, amount_max: u32,
+}
+Jump { mode: u8 (0 Adjacent, 1 Chain, 2 Line), state: ActiveState, filter: StateKind, limit: u8, base: Aspect }
 TintRoll { base: Aspect, tint: Aspect, carrier: Carrier, tier: u8, chance_pct: u32, roll: u16, success: bool }
-Resonance { base: Aspect, tint: Aspect, tier: u8, carrier: Carrier, id: u8, active: bool, second_tint: Option<Aspect> }
+Resonance {
+  base: Aspect, tint: Aspect, tier: u8, carrier: Carrier, id: u8, active: bool,
+  second_tint: Option<Aspect>, second_tier: u8, second_carrier: Carrier, generated: bool,
+}
 PacketResult {
   aspect: Aspect, immune: bool,
   base_min: u64, base_max: u64,                                 // scaled x10_000

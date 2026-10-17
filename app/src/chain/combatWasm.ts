@@ -5,6 +5,10 @@
 //
 // The shipped module is ./wasm/combat.wasm, rebuilt by `bash crates/combat/wasm/build.sh` (CI
 // fails when it is stale). __fixtures__/combat-wasm.json pins the byte layouts and the results.
+//
+// Resonance tables and monster defenses are registry data: the page loads the tables the session
+// copied at open_session (`MonsterState.res_*`, `setTables`) and passes each monster's defenses
+// from the same account, so no copy of the registry lives in the app.
 import { useEffect, useState } from "react";
 import wasmUrl from "./wasm/combat.wasm?url";
 import { Reader, concat, u16le, u32le } from "./bytes";
@@ -13,7 +17,9 @@ import characterIdl from "./idl/deadroll_character.json";
 import type { ActiveState, TimedMod } from "./types";
 
 /** `ABI_VERSION` of the module this wrapper speaks. */
-export const COMBAT_ABI = 3;
+export const COMBAT_ABI = 4;
+/** Bytes of the resonance tables: the registry `aspects`, `traits` and `resonances` bodies. */
+export const COMBAT_TABLES_LEN = 48 + 192 + 576;
 export const COMBAT_STATS = 4;
 export const COMBAT_EQUIP_SLOTS = 11;
 export const COMBAT_STATES = 6;
@@ -36,11 +42,34 @@ export type HeroInput = {
 /** A `SkillRecord` without the name: blocks as discriminants in `SkillBlocks` field order. */
 export type SkillInput = { blocks: readonly number[]; sharesBp: readonly number[]; powerBp: number };
 
+/** A monster's registry defenses (`MonsterState.defense`): bits by aspect and by state. */
+export type DefenseInput = { resist: number; immuneAspects: number; immuneStates: number };
+
 export type TargetInput = {
   bestiaryId: number;
   level: number;
   states: readonly ActiveState[];
   mods: readonly TimedMod[];
+  defense: DefenseInput;
+};
+
+/** A resonance's accuracy buff on the attacker (`Participation.accuracy`). */
+export type AccuracyInput = { aspect: number; turns: number; bonus: number };
+export const NO_ACCURACY: AccuracyInput = { aspect: 0, turns: 0, bonus: 0 };
+
+export type MonsterInput = { bestiaryId: number; level: number; defense: DefenseInput };
+
+/** What the rules make of a monster at a level with its defenses. */
+export type MonsterSheet = {
+  weapon: { aspect: number; min: number; max: number };
+  attackBonus: number;
+  evasion: number;
+  armor: number;
+  /** Resistance per aspect, bp, before the cap. */
+  resistBp: number[];
+  immuneAspects: number;
+  immuneStates: number;
+  resistCapBp: number;
 };
 
 export type AttackRequest = {
@@ -49,6 +78,7 @@ export type AttackRequest = {
   /** null = the weapon's basic attack. */
   skill: SkillInput | null;
   target: TargetInput;
+  accuracy: AccuracyInput;
 };
 
 export type HeroSheet = {
@@ -70,6 +100,22 @@ export type HeroSheet = {
   critRollBp: number;
 };
 
+/** One tint candidate of an attack: its chance, and the damage if it triggers alone. */
+export type PreviewTint = {
+  base: number;
+  tint: number;
+  carrier: number;
+  tier: number;
+  pure: boolean;
+  chancePct: number;
+  /** `base * 6 + tint`. */
+  id: number;
+  generated: boolean;
+  conditionMet: boolean;
+  min: number;
+  max: number;
+};
+
 export type HitPreview = {
   immune: boolean;
   hitBp: number;
@@ -78,6 +124,7 @@ export type HitPreview = {
   max: number;
   critMin: number;
   critMax: number;
+  tints: PreviewTint[];
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -133,8 +180,37 @@ export function encodeAttack(r: AttackRequest): Uint8Array {
     u8(r.target.level),
     encodeStates(r.target.states),
     encodeMods(r.target.mods),
+    encodeDefense(r.target.defense),
+    u8(r.accuracy.aspect),
+    u8(r.accuracy.turns),
+    u32le(r.accuracy.bonus),
   );
 }
+
+function encodeDefense(d: DefenseInput): Uint8Array {
+  return concat(u8(d.resist), u8(d.immuneAspects), u8(d.immuneStates));
+}
+
+export function encodeMonster(m: MonsterInput): Uint8Array {
+  return concat(u8(m.bestiaryId), u8(m.level), encodeDefense(m.defense));
+}
+
+export function decodeMonsterSheet(bytes: Uint8Array): MonsterSheet {
+  const r = new Reader(bytes);
+  return {
+    weapon: { aspect: r.u8(), min: r.u32(), max: r.u32() },
+    attackBonus: r.u32(),
+    evasion: r.u32(),
+    armor: r.u32(),
+    resistBp: Array.from({ length: 6 }, () => r.u32()),
+    immuneAspects: r.u8(),
+    immuneStates: r.u8(),
+    resistCapBp: r.u32(),
+  };
+}
+
+/** The tint candidates of a preview: up to 12 slots, `count` used. */
+const PREVIEW_TINTS = 12;
 
 export function decodeSheet(bytes: Uint8Array): HeroSheet {
   const r = new Reader(bytes);
@@ -159,7 +235,7 @@ export function decodeSheet(bytes: Uint8Array): HeroSheet {
 
 export function decodePreview(bytes: Uint8Array): HitPreview {
   const r = new Reader(bytes);
-  return {
+  const head = {
     immune: r.bool(),
     hitBp: r.u32(),
     critBp: r.u32(),
@@ -168,6 +244,21 @@ export function decodePreview(bytes: Uint8Array): HitPreview {
     critMin: r.u32(),
     critMax: r.u32(),
   };
+  const all: PreviewTint[] = Array.from({ length: PREVIEW_TINTS }, () => ({
+    base: r.u8(),
+    tint: r.u8(),
+    carrier: r.u8(),
+    tier: r.u8(),
+    pure: r.bool(),
+    chancePct: r.u32(),
+    id: r.u8(),
+    generated: r.bool(),
+    conditionMet: r.bool(),
+    min: r.u32(),
+    max: r.u32(),
+  }));
+  const count = r.u8();
+  return { ...head, tints: all.slice(0, count) };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -181,6 +272,8 @@ type Exports = {
   buffer_len(): number;
   hero_sheet(len: number): number;
   preview_attack(len: number): number;
+  set_tables(len: number): number;
+  monster_sheet(len: number): number;
 };
 
 const ERRORS: Record<number, string> = {
@@ -188,6 +281,7 @@ const ERRORS: Record<number, string> = {
   [-2]: "input is not valid borsh",
   [-3]: "output does not fit",
   [-4]: "unknown monster",
+  [-5]: "no resonance tables (setTables first)",
 };
 
 export class CombatWasm {
@@ -216,6 +310,16 @@ export class CombatWasm {
 
   previewAttack(r: AttackRequest): HitPreview {
     return decodePreview(this.call(this.x.preview_attack, encodeAttack(r)));
+  }
+
+  /** The resonance tables of a session (`MonsterState.res_aspects ‖ res_traits ‖ res_pairs`). */
+  setTables(tables: Uint8Array): void {
+    if (tables.length !== COMBAT_TABLES_LEN) throw new Error(`combat wasm: tables are ${COMBAT_TABLES_LEN} bytes`);
+    this.call(this.x.set_tables, tables);
+  }
+
+  monsterSheet(m: MonsterInput): MonsterSheet {
+    return decodeMonsterSheet(this.call(this.x.monster_sheet, encodeMonster(m)));
   }
 }
 
@@ -316,7 +420,8 @@ export function statesOf(states: readonly ActiveStateAcc[]): ActiveState[] {
   return states.map((s) => ({ kind: enumIndex(s.kind, STATE_KEYS), turns: s.turns, power: s.power, source: s.source }) as ActiveState);
 }
 
-/** An attack of `hero` (with its buffs and debuffs) on a live monster, before the dice. */
+/** An attack of `hero` (with its buffs and debuffs and resonance accuracy) on a live monster with
+ * its registry defenses, before the dice. The session's tables must be loaded (`setTables`). */
 export function previewOnMonster(
   combat: CombatWasm,
   hero: HeroInput,
@@ -324,13 +429,16 @@ export function previewOnMonster(
   skill: SkillRecordAcc | null,
   monster: MonsterAcc,
   monsterMods: readonly TimedMod[],
+  defense: DefenseInput,
+  accuracy: AccuracyInput = NO_ACCURACY,
 ): HitPreview | null {
   try {
     return combat.previewAttack({
       hero,
       heroMods,
       skill: skill ? skillInputOf(skill) : null,
-      target: { bestiaryId: monster.bestiaryId, level: monster.level, states: statesOf(monster.states), mods: monsterMods },
+      target: { bestiaryId: monster.bestiaryId, level: monster.level, states: statesOf(monster.states), mods: monsterMods, defense },
+      accuracy,
     });
   } catch {
     // An unknown bestiary id: no preview rather than a wrong one.

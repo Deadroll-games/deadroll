@@ -113,6 +113,15 @@ pub struct Report {
     pub control_uptime: f64,
     /// States landed per fight, indexed by `StateKind`.
     pub states_per_fight: [f64; StateKind::COUNT],
+    /// Resonances (pairs and triples) that triggered, per fight, and the triples among them.
+    pub resonances_per_fight: f64,
+    pub triples_per_fight: f64,
+    /// Per fight: states passed on to other monsters, knockbacks, burning cells, units burned by
+    /// stepping into one.
+    pub jumps_per_fight: f64,
+    pub knockbacks_per_fight: f64,
+    pub cells_per_fight: f64,
+    pub cell_burns_per_fight: f64,
 }
 
 fn ratio(a: u64, b: u64) -> f64 {
@@ -200,6 +209,8 @@ impl Report {
         for slot in &mut states_per_fight {
             *slot = ratio(*slot as u64, n as u64);
         }
+        let per_fight =
+            |g: fn(&BattleStats) -> u32| ratio(fights.iter().map(|f| g(f) as u64).sum(), n as u64);
         Report {
             fights: n as u32,
             victories,
@@ -217,6 +228,12 @@ impl Report {
             effect_share: ratio(dot, total),
             control_uptime: ratio(skipped, monster_turns),
             states_per_fight,
+            resonances_per_fight: per_fight(|f| f.resonances),
+            triples_per_fight: per_fight(|f| f.triples),
+            jumps_per_fight: per_fight(|f| f.jumps),
+            knockbacks_per_fight: per_fight(|f| f.knockbacks),
+            cells_per_fight: per_fight(|f| f.cells_ignited),
+            cell_burns_per_fight: per_fight(|f| f.burned_by_cells),
         }
     }
 }

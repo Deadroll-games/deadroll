@@ -198,6 +198,69 @@ pub fn speed_ap(base: u8, mods: &TimedMods, slow_extra_bp: u32) -> u8 {
     ratio(base as u64, haste, slow).clamp(1, u8::MAX as u64) as u8
 }
 
+/// A timed bonus to the d20 of the bearer's attacks that carry a packet of `aspect` (a resonance,
+/// docs/DAMAGE_TYPES_AND_MIXES.md 6.4, Pale Flame). `turns == 0` is none.
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AccuracyBuff {
+    pub aspect: Aspect,
+    /// Own turn starts of the bearer until it ends, as [`TimedMod::turns`].
+    pub turns: u8,
+    /// Added to the d20.
+    pub bonus: u32,
+}
+
+impl AccuracyBuff {
+    pub const fn is_empty(&self) -> bool {
+        self.turns == 0
+    }
+
+    /// One buff: a new one of another aspect or a stronger one replaces it, the same strength
+    /// refreshes the duration to the longer one.
+    pub fn apply(&mut self, new: AccuracyBuff) -> Applied {
+        if new.turns == 0 {
+            return Applied::None;
+        }
+        if self.is_empty() {
+            *self = new;
+            return Applied::Added;
+        }
+        if new.aspect != self.aspect || new.bonus > self.bonus {
+            let turns = if new.aspect == self.aspect {
+                self.turns.max(new.turns)
+            } else {
+                new.turns
+            };
+            *self = AccuracyBuff { turns, ..new };
+        } else {
+            self.turns = self.turns.max(new.turns);
+        }
+        Applied::Refreshed
+    }
+
+    /// Start of the bearer's own turn; true when it ended.
+    pub fn tick(&mut self) -> bool {
+        if self.turns == 0 {
+            return false;
+        }
+        self.turns -= 1;
+        if self.turns == 0 {
+            *self = AccuracyBuff::default();
+            return true;
+        }
+        false
+    }
+
+    /// Its d20 bonus for an attack with these `bases` (the skill's aspects, or the weapon's).
+    pub fn bonus_for(&self, bases: &[Aspect]) -> u32 {
+        if !self.is_empty() && bases.contains(&self.aspect) {
+            self.bonus
+        } else {
+            0
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Rolls
 
@@ -427,6 +490,28 @@ mod tests {
     }
 
     #[test]
+    fn accuracy_buff_stacks_as_one_and_ticks() {
+        let mut b = AccuracyBuff::default();
+        let fire = |turns, bonus| AccuracyBuff {
+            aspect: Aspect::Fire,
+            turns,
+            bonus,
+        };
+        assert_eq!(b.apply(fire(0, 3)), Applied::None);
+        assert_eq!(b.apply(fire(3, 2)), Applied::Added);
+        assert_eq!(b.apply(fire(2, 1)), Applied::Refreshed);
+        assert_eq!((b.turns, b.bonus), (3, 2));
+        b.apply(fire(1, 4));
+        assert_eq!((b.turns, b.bonus), (3, 4));
+        assert_eq!(b.bonus_for(&[Aspect::Cold, Aspect::Fire]), 4);
+        assert_eq!(b.bonus_for(&[Aspect::Cold]), 0);
+        assert!(!b.tick() && !b.tick());
+        assert!(b.tick());
+        assert!(b.is_empty() && !b.tick());
+        assert_eq!(b.bonus_for(&[Aspect::Fire]), 0);
+    }
+
+    #[test]
     fn one_instance_per_kind_strongest_stays_longest_duration() {
         let mut mods = TimedMods::default();
         assert_eq!(
@@ -539,7 +624,13 @@ mod tests {
     }
 
     fn damage(input: &HitInput) -> u32 {
-        resolve_hit(input, &B, &mut ScriptedRoll::new([10, 50, 50, 50])).damage
+        resolve_hit(
+            input,
+            &B,
+            &crate::ResonanceTables::default(),
+            &mut ScriptedRoll::new([10, 50, 50, 50]),
+        )
+        .damage
     }
 
     #[test]

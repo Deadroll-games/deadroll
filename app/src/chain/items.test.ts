@@ -138,13 +138,13 @@ describe("Character.gear", () => {
 });
 
 describe("item numbers (balance.json = deadroll_rules defaults)", () => {
-  it("starter weapons keep the old class weapons, armor adds flat", () => {
-    expect(weaponText("sword")).toBe("Blunt 4-8");
+  it("starter weapons keep the old class numbers with their own aspects, armor adds flat", () => {
+    expect(weaponText("sword")).toBe("Piercing 4-8");
     expect(weaponText("staff")).toBe("Blunt 3-6");
-    expect(weaponText("wand")).toBe("Blunt 2-5");
+    expect(weaponText("wand")).toBe("Lightning 2-5");
     expect(weaponText("robe")).toBeNull();
     expect(bonusText("leatherArmor")).toBe("+10 armor");
-    expect(bonusText("sword")).toBe("damage Blunt 4-8");
+    expect(bonusText("sword")).toBe("damage Piercing 4-8");
     expect(slotsFor("sword")).toEqual(["mainHand"]);
     expect(slotsFor("lightLeatherArmor")).toEqual(["body"]);
   });

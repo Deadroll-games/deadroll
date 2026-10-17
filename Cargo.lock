@@ -1340,6 +1340,7 @@ version = "0.1.0"
 dependencies = [
  "anchor-lang",
  "bytemuck",
+ "deadroll-combat",
  "deadroll-types",
  "solana-sha256-hasher",
 ]

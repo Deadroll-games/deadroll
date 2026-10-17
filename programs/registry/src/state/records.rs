@@ -3,7 +3,8 @@
 //! Pure functions, no account access: shared by `write_table`, the seed script spec and tests.
 
 use anchor_lang::prelude::*;
-use deadroll_types::{seeds, Aspect, Family, Form, Source, StateKind, Tile};
+use deadroll_combat::tables::{self, decode_aspect, decode_pair, decode_trait};
+use deadroll_types::{seeds, Aspect, Form, Source, StateKind, Tile};
 
 /// Which table an instruction works on. Discriminants are part of the format: append only.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -14,6 +15,8 @@ pub enum TableKind {
     Bestiary,
     Tileset,
     Prefabs,
+    /// Tint traits (docs/DAMAGE_TYPES_AND_MIXES.md 3.2), patch 4.
+    Traits,
 }
 
 impl TableKind {
@@ -24,6 +27,7 @@ impl TableKind {
             2 => Self::Bestiary,
             3 => Self::Tileset,
             4 => Self::Prefabs,
+            5 => Self::Traits,
             _ => return None,
         })
     }
@@ -36,6 +40,7 @@ impl TableKind {
             Self::Bestiary => seeds::BESTIARY,
             Self::Tileset => seeds::TILESET,
             Self::Prefabs => seeds::PREFABS,
+            Self::Traits => seeds::TRAITS,
         }
     }
 
@@ -47,6 +52,7 @@ impl TableKind {
             Self::Bestiary => MONSTER_SIZE,
             Self::Tileset => TILE_SIZE,
             Self::Prefabs => 1,
+            Self::Traits => TRAIT_SIZE,
         }
     }
 
@@ -58,19 +64,19 @@ impl TableKind {
             Self::Bestiary => BESTIARY_MAX * MONSTER_SIZE,
             Self::Tileset => Tile::COUNT * TILE_SIZE,
             Self::Prefabs => crate::state::TABLE_CAP,
+            Self::Traits => tables::TRAITS_LEN,
         }
     }
 }
 
-pub const ASPECT_SIZE: usize = 8;
-pub const RESONANCE_SIZE: usize = 16;
+pub const ASPECT_SIZE: usize = tables::ASPECT_RECORD;
+pub const RESONANCE_SIZE: usize = tables::PAIR_RECORD;
+pub const TRAIT_SIZE: usize = tables::TRAIT_RECORD;
 pub const MONSTER_SIZE: usize = 48;
 pub const TILE_SIZE: usize = 8;
 /// Bestiary ids are record indices. P0: 0 wolf, 1 goblin, 2 goblin chieftain, 3 goblin warrior, 4 goblin shaman.
 pub const BESTIARY_MAX: usize = 32;
 
-/// `ResonanceCondition` variants in `crates/combat/src/resonance.rs`.
-const RESONANCE_CONDITIONS: u8 = 9;
 /// `Role` variants in `crates/mapcheck/src/roster.rs`: Swarm, Fast, Tank, Loner, Boss, Helper.
 const ROLES: u8 = 6;
 const BIOMES: u8 = 2;
@@ -91,26 +97,16 @@ pub fn validate_record(kind: TableKind, index: usize, r: &[u8]) -> bool {
         return false;
     }
     match kind {
-        // [aspect, family, flags, reserved x5]; the record at index i describes Aspect i.
-        TableKind::Aspects => r[0] as usize == index && is::<Aspect>(r[0]) && is::<Family>(r[1]),
-        // [condition, reserved, effect0 x6, effect1 x6, reserved x2]
-        // effect: [kind, state, value u32 LE]
-        TableKind::Resonances => {
-            r[0] < RESONANCE_CONDITIONS && validate_effect(&r[2..8]) && validate_effect(&r[8..14])
-        }
+        // The resonance tables decode with the code every reader uses (`deadroll_combat::tables`):
+        // a record the registry accepts is a record the session, the simulator and the website
+        // read the same way.
+        TableKind::Aspects => decode_aspect(index, r).is_some(),
+        TableKind::Resonances => decode_pair(r).is_some(),
+        TableKind::Traits => decode_trait(r).is_some(),
         TableKind::Bestiary => validate_monster(r),
         // [passable, move_cost, blocks_los, flags, reserved x4]
         TableKind::Tileset => r[0] <= 1 && r[2] <= 1 && (r[0] == 0 || r[1] >= 1),
         TableKind::Prefabs => true,
-    }
-}
-
-/// Effect kinds: 0 None, 1 Multiplier(bp), 2 StateOnCrit(state), 3 ExtraStateChance(state, bp).
-fn validate_effect(e: &[u8]) -> bool {
-    match e[0] {
-        0 | 1 => true,
-        2 | 3 => is::<StateKind>(e[1]),
-        _ => false,
     }
 }
 
@@ -122,6 +118,7 @@ fn validate_monster(r: &[u8]) -> bool {
     let (role, biome, size, min_tier, speed) = (r[1], r[2], r[3], r[4], r[5]);
     let predisposition_ok = r[9] == NO_ASPECT || is::<Aspect>(r[9]);
     let aspect_mask = (1u8 << Aspect::COUNT) - 1;
+    let state_mask = ((1u16 << StateKind::COUNT) - 1) as u8;
     r[0] == 1
         && role < ROLES
         && biome < BIOMES
@@ -134,6 +131,8 @@ fn validate_monster(r: &[u8]) -> bool {
         && predisposition_ok
         && r[10] & !aspect_mask == 0
         && r[11] & !aspect_mask == 0
+        && r[38] & !state_mask == 0
+        && r[39..].iter().all(|&b| b == 0)
         && u16_at(r, 30) <= u16_at(r, 32)
 }
 
@@ -188,8 +187,9 @@ mod tests {
         r
     }
 
+    /// Aspect `i`: elemental, native state Burning, trait `i`, condition Always.
     fn aspect(i: u8) -> [u8; ASPECT_SIZE] {
-        [i, 0, 0, 0, 0, 0, 0, 0]
+        [i, 0, 0, 0, i, 0, 0, 0]
     }
 
     #[test]
@@ -200,12 +200,14 @@ mod tests {
             TableKind::Bestiary,
             TableKind::Tileset,
             TableKind::Prefabs,
+            TableKind::Traits,
         ] {
             assert!(k.max_len() <= crate::state::TABLE_CAP);
             assert_eq!(k.max_len() % k.record_size(), 0);
             assert_eq!(TableKind::from_u8(k as u8), Some(k));
         }
-        assert_eq!(TableKind::from_u8(5), None);
+        assert_eq!(TableKind::from_u8(6), None);
+        assert_eq!(TableKind::Traits.seed(), b"traits");
     }
 
     #[test]
@@ -233,25 +235,67 @@ mod tests {
         bad_family[1] = 99;
         assert!(!validate_write(TableKind::Aspects, 0, &bad_family));
         assert!(!validate_write(TableKind::Aspects, 48, &aspect(6)));
+        let bad = |at: usize, v: u8| {
+            let mut r = aspect(0);
+            r[at] = v;
+            !validate_write(TableKind::Aspects, 0, &r)
+        };
+        assert!(bad(3, 7), "unknown native state");
+        assert!(!bad(3, tables::NO_STATE), "no native state is allowed");
+        assert!(bad(4, 6), "unknown trait");
+        assert!(bad(5, 9), "unknown condition");
+        assert!(bad(6, 1), "reserved byte");
     }
 
     #[test]
     fn resonance_records() {
+        use tables::OpKind;
         let mut r = [0u8; RESONANCE_SIZE];
         assert!(validate_record(TableKind::Resonances, 0, &r));
-        r[2] = 1; // Multiplier
+        r[1] = tables::PAIR_OVERRIDE;
+        r[2] = OpKind::Multiplier as u8;
+        r[3] = tables::ANY_STATE;
         r[4..8].copy_from_slice(&10_000u32.to_le_bytes());
-        r[8] = 3; // ExtraStateChance
+        r[8] = OpKind::Linked as u8 | tables::CRIT_ONLY;
         r[9] = StateKind::Chill as u8;
         assert!(validate_record(TableKind::Resonances, 0, &r));
-        r[9] = 200;
-        assert!(!validate_record(TableKind::Resonances, 0, &r));
-        r[9] = 0;
-        r[0] = RESONANCE_CONDITIONS;
-        assert!(!validate_record(TableKind::Resonances, 0, &r));
-        r[0] = 0;
-        r[2] = 4;
-        assert!(!validate_record(TableKind::Resonances, 0, &r));
+        let bad = |at: usize, v: u8| {
+            let mut x = r;
+            x[at] = v;
+            !validate_record(TableKind::Resonances, 0, &x)
+        };
+        assert!(bad(9, 200), "unknown state");
+        assert!(bad(0, 9), "unknown condition");
+        assert!(bad(1, 2), "unknown flag");
+        assert!(bad(2, OpKind::COUNT), "unknown op");
+        assert!(bad(14, 1), "reserved byte");
+    }
+
+    #[test]
+    fn trait_records() {
+        use tables::OpKind;
+        let k = TableKind::Traits;
+        assert!(validate_record(k, 0, &[0; TRAIT_SIZE]), "absent trait");
+        let mut r = [0u8; TRAIT_SIZE];
+        r[0] = 1;
+        r[2] = OpKind::AddPacket as u8;
+        r[3] = Aspect::Fire as u8;
+        r[8] = OpKind::Jump as u8;
+        r[9] = tables::NATIVE;
+        assert!(validate_record(k, 0, &r));
+        let bad = |at: usize, v: u8| {
+            let mut x = r;
+            x[at] = v;
+            !validate_record(k, 0, &x)
+        };
+        assert!(bad(0, 2), "present flag");
+        assert!(bad(3, 6), "unknown aspect");
+        assert!(bad(14, 99), "unknown op");
+        assert!(bad(31, 1), "reserved byte");
+        assert_eq!(
+            check_range(k, 0, TRAIT_SIZE * 7),
+            Err(RangeError::OutOfBounds)
+        );
     }
 
     #[test]
@@ -291,6 +335,15 @@ mod tests {
             "resist bit past the aspects"
         );
         assert!(!mutate(|r| r[11] = 0b100_0000));
+        assert!(
+            mutate(|r| r[38] = 1 << StateKind::Freeze as u8),
+            "state immunity"
+        );
+        assert!(
+            !mutate(|r| r[38] = 0b1000_0000),
+            "state bit past the states"
+        );
+        assert!(!mutate(|r| r[40] = 1), "reserved byte");
         assert!(!mutate(|r| r[30] = 9), "damage min above max");
     }
 

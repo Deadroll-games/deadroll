@@ -6,9 +6,16 @@
 //! 3. tint rolls: bases in skill order, tints in slot order ([`crate::resonance::roll_tints`]);
 //! 4. one `d100` for the point in every packet's range;
 //! 5. native state rolls, one per packet in packet order (only where a roll is needed);
-//! 6. resonance state rolls, bases in skill order, effects in table order.
+//! 6. resonance state rolls, bases in skill order, ops in plan order (only the ops that roll:
+//!    `ExtraStateChance`, and `LinkedChance` once the native state landed).
 //!
 //! A miss stops after roll 1. Rolls that are not needed are not made.
+//!
+//! What a resonance does comes from [`ResonanceTables`]: the plan of one resonance is the
+//! pair's ops, the hit part of the best tint's trait, and for a triple the second tint's trait
+//! template and hit part (docs/DAMAGE_TYPES_AND_MIXES.md, sections 6.3-6.5). Ops that change
+//! damage act in steps 9-14, ops on the native state in step 20, the rest in step 21. What
+//! needs the map (jumps to other units, knockback, burning cells) is returned for the caller.
 
 use deadroll_types::{ActiveState, Aspect, StateKind, Tier, BP, STATES_MAX};
 
@@ -17,16 +24,19 @@ use crate::modifiers::{
     armor_cut, counter, effective_armor, is_physical, more, product_matching, ratio, resist_cut,
     sum_matching, Mod,
 };
-use crate::packet::{build_packets, DamageRange, Skill, ADDED_MAX, PACKETS_MAX, SKILL_ASPECTS_MAX};
+use crate::packet::{
+    build_packets, DamageRange, Packets, Skill, ADDED_MAX, PACKETS_MAX, SKILL_ASPECTS_MAX,
+};
 use crate::resonance::{
-    entry, multiplier_bp, roll_tints, Resonance, ResonanceEffect, TargetView, Tint, TintRoll,
-    TINTS_MAX, TINT_ROLLS_MAX,
+    roll_tints, Carrier, Resonance, TargetView, Tint, TintRoll, TINTS_MAX, TINT_ROLLS_MAX,
 };
 use crate::rng::{chance, d100, d20, RollSource};
 use crate::states::{
-    apply_chill, apply_state, aspect_bit, freeze, native_state, power_of, state_bit, Applied,
-    States,
+    apply_chill_for, apply_state, aspect_bit, find, freeze_for, power_of, remove, state_bit,
+    Applied, States,
 };
+use crate::support::{mod_turns, AccuracyBuff, ModKind, TimedMod};
+use crate::tables::{Op, OpKind, ResonanceTables, ANY_STATE, PAIR_OPS, TEMPLATE_OPS};
 
 #[cfg(feature = "borsh")]
 use borsh::{BorshDeserialize, BorshSerialize};
@@ -35,6 +45,12 @@ use borsh::{BorshDeserialize, BorshSerialize};
 pub const INCREASED_MAX: usize = 8;
 /// "More" modifier slots of an attacker (crit and resonance are added by the crate).
 pub const MORE_MAX: usize = 4;
+/// Ops of one resonance: the pair, the best tint's trait, a triple's second trait.
+pub const RES_OPS_MAX: usize = PAIR_OPS + 1 + TEMPLATE_OPS + 1;
+/// States one hit can pass on to other units.
+pub const JUMPS_MAX: usize = 4;
+/// Timed modifiers one hit can put on its target.
+pub const TARGET_MODS_MAX: usize = 3;
 
 /// Everything about the attacker that matters for one hit.
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
@@ -154,6 +170,70 @@ pub struct PacketResult {
     pub vuln_shock_bp: u32,
 }
 
+/// Where an op of a resonance comes from.
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
+pub enum OpOrigin {
+    /// The pair (its record, or generated from the best tint's trait).
+    #[default]
+    Pair,
+    /// The second tint's trait template: a triple.
+    Template,
+    /// A tint trait's hit part (Fury, Keenness), best or second tint.
+    Trait,
+}
+
+/// What one op of a resonance did, for the breakdown.
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct OpResult {
+    pub kind: OpKind,
+    pub crit_only: bool,
+    pub arg: u8,
+    pub origin: OpOrigin,
+    /// The tint whose tier gives the strength.
+    pub tint: Aspect,
+    pub carrier: Carrier,
+    pub tier: u8,
+    /// It acted on this hit (its trigger happened).
+    pub acted: bool,
+    /// The state it applied, with its roll (`kind` default when none).
+    pub state: StateRoll,
+    /// What it added: bp (multiplier, penetration, power, modifier), turns, damage, cells, the
+    /// d20 bonus or the minimum of an added packet.
+    pub amount: u32,
+    /// The maximum of an added packet.
+    pub amount_max: u32,
+}
+
+/// How a state goes on to other units.
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
+pub enum JumpMode {
+    /// One adjacent enemy of the target.
+    #[default]
+    Adjacent,
+    /// Adjacent enemies that have `filter`, one after another, up to `limit`.
+    Chain,
+    /// The enemy right behind the target, seen from the attacker.
+    Line,
+}
+
+/// A state the caller passes on to other units (it knows the map).
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Jump {
+    pub mode: JumpMode,
+    /// What lands on each unit it reaches (Chill: the buildup of this hit).
+    pub state: ActiveState,
+    pub filter: StateKind,
+    pub limit: u8,
+    /// The base of the resonance.
+    pub base: Aspect,
+}
+
 /// The full hit breakdown (docs/COMBAT_MATH.md, section 12).
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -173,7 +253,8 @@ pub struct HitResult {
     pub d100: u8,
     pub packets: [PacketResult; PACKETS_MAX],
     pub packet_count: u8,
-    /// Resonance state checks, per skill base slot (one state effect per resonance).
+    /// Per skill base slot: the first state a resonance op applied (the full list is
+    /// `res_ops`).
     pub resonance_states: [StateRoll; SKILL_ASPECTS_MAX],
     /// Target states after the hit.
     pub states: States,
@@ -181,6 +262,23 @@ pub struct HitResult {
     pub damage: u32,
     /// Dice used from the roll source.
     pub rolls_used: u32,
+    /// Per skill base slot, the ops of its resonance in plan order (`kind == None` after them).
+    pub res_ops: [[OpResult; RES_OPS_MAX]; SKILL_ASPECTS_MAX],
+    /// States passed on to other units, `jumps[..jump_count]`.
+    pub jumps: [Jump; JUMPS_MAX],
+    pub jump_count: u8,
+    /// Cells the target is pushed away from the attacker (0 = none).
+    pub knockback: u8,
+    /// Burning of this power on the cells around the target (0 = none), for
+    /// `Balance::burning_cell_rounds`.
+    pub ignite_power: u32,
+    /// Timed modifiers on the target, `target_mods[..target_mod_count]`.
+    pub target_mods: [TimedMod; TARGET_MODS_MAX],
+    pub target_mod_count: u8,
+    /// A buff on the attacker (empty when `turns == 0`).
+    pub accuracy_buff: AccuracyBuff,
+    /// `state_bit`s of the states that landed on the target in this hit.
+    pub landed: u8,
 }
 
 impl HitResult {
@@ -190,6 +288,21 @@ impl HitResult {
 
     pub fn tint_rolls(&self) -> &[TintRoll] {
         &self.tint_rolls[..self.tint_roll_count as usize]
+    }
+
+    pub fn jumps(&self) -> &[Jump] {
+        &self.jumps[..self.jump_count as usize]
+    }
+
+    pub fn target_mods(&self) -> &[TimedMod] {
+        &self.target_mods[..self.target_mod_count as usize]
+    }
+
+    /// The ops of base slot `slot` that are set.
+    pub fn ops(&self, slot: usize) -> impl Iterator<Item = &OpResult> {
+        self.res_ops[slot]
+            .iter()
+            .take_while(|o| o.kind != OpKind::None)
     }
 }
 
@@ -206,10 +319,123 @@ impl<R: RollSource> RollSource for Counted<'_, R> {
     }
 }
 
+/// One op of a resonance plan with the tint that powers it.
+#[derive(Clone, Copy, Debug, Default)]
+struct Planned {
+    op: Op,
+    origin: OpOrigin,
+    tint: Tint,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct Plan {
+    ops: [Planned; RES_OPS_MAX],
+    len: usize,
+}
+
+impl Plan {
+    fn push(&mut self, op: Op, origin: OpOrigin, tint: Tint) {
+        if !op.is_none() && self.len < RES_OPS_MAX {
+            self.ops[self.len] = Planned { op, origin, tint };
+            self.len += 1;
+        }
+    }
+
+    fn of(res: &Resonance, tables: &ResonanceTables) -> Plan {
+        let mut plan = Plan::default();
+        let best = Tint::new(res.tint, res.tier, res.carrier);
+        for op in tables.pair(res.base, res.tint).ops {
+            plan.push(op, OpOrigin::Pair, best);
+        }
+        plan.push(tables.trait_of(res.tint).hit, OpOrigin::Trait, best);
+        if let Some(second) = res.second_tint {
+            let s = Tint::new(second, res.second_tier, res.second_carrier);
+            let t = tables.trait_of(second);
+            for op in t.template {
+                plan.push(op, OpOrigin::Template, s);
+            }
+            plan.push(t.hit, OpOrigin::Trait, s);
+        }
+        plan
+    }
+
+    fn as_slice(&self) -> &[Planned] {
+        &self.ops[..self.len]
+    }
+}
+
+/// `curve x value / BP`, saturating.
+fn scale(curve: u32, value: u32) -> u32 {
+    (curve as u64 * value as u64 / BP as u64).min(u32::MAX as u64) as u32
+}
+
+fn tier_of(t: &Tint) -> Tier {
+    Tier::new(t.tier).unwrap_or(Tier::WORST)
+}
+
+/// Changes a resonance makes to the native state of its base.
+#[derive(Clone, Copy, Debug, Default)]
+struct NativeMods {
+    extra_turns: u8,
+    power_bp: u32,
+    rate: u32,
+}
+
+/// Native-state ops of `plan` that act on this hit (`crit`, target `armor`).
+fn native_mods(
+    plan: &Plan,
+    crit: bool,
+    armor: u32,
+    balance: &Balance,
+    ops: &mut [OpResult; RES_OPS_MAX],
+) -> NativeMods {
+    let mut m = NativeMods {
+        rate: 1,
+        ..NativeMods::default()
+    };
+    for (k, p) in plan.as_slice().iter().enumerate() {
+        if p.op.crit_only && !crit {
+            continue;
+        }
+        let tier = tier_of(&p.tint);
+        let amount = match p.op.kind {
+            OpKind::NativeTurns => {
+                let t = scale(balance.res_turns(tier) as u32, p.op.value).min(u8::MAX as u32);
+                m.extra_turns = m.extra_turns.saturating_add(t as u8);
+                t
+            }
+            OpKind::NativePower => {
+                let bp = scale(balance.res_power(tier), p.op.value);
+                m.power_bp = m.power_bp.saturating_add(bp);
+                bp
+            }
+            OpKind::NativePowerArmor => {
+                let k = balance.armor_k.max(1) as u64;
+                let bp = (scale(balance.res_power(tier), p.op.value) as u64 * armor as u64
+                    / (armor as u64 + k)) as u32;
+                m.power_bp = m.power_bp.saturating_add(bp);
+                bp
+            }
+            OpKind::NativeFaster => {
+                m.rate = m.rate.max(p.op.value.max(1));
+                p.op.value
+            }
+            _ => continue,
+        };
+        ops[k].amount = amount;
+    }
+    m
+}
+
 /// Resolves one attack. See the module docs for the roll order.
-pub fn resolve_hit(input: &HitInput, balance: &Balance, src: &mut impl RollSource) -> HitResult {
+pub fn resolve_hit(
+    input: &HitInput,
+    balance: &Balance,
+    tables: &ResonanceTables,
+    src: &mut impl RollSource,
+) -> HitResult {
     let mut out = HitResult::default();
-    resolve_hit_into(input, balance, src, &mut out);
+    resolve_hit_into(input, balance, tables, src, &mut out);
     out
 }
 
@@ -218,6 +444,7 @@ pub fn resolve_hit(input: &HitInput, balance: &Balance, src: &mut impl RollSourc
 pub fn resolve_hit_into(
     input: &HitInput,
     balance: &Balance,
+    tables: &ResonanceTables,
     src: &mut impl RollSource,
     out: &mut HitResult,
 ) {
@@ -230,17 +457,12 @@ pub fn resolve_hit_into(
     let d = &input.defender;
     out.defense = d.defense;
     out.states = d.states;
+    let immune = |aspect: Aspect| d.immune_aspects & aspect_bit(aspect) != 0;
 
-    // Steps 3, 9: packets and immunity.
-    let packets = build_packets(a.weapon, &a.skill, &a.added);
-    out.packet_count = packets.count;
-    for (r, p) in out.packets.iter_mut().zip(packets.as_slice()) {
-        r.aspect = p.aspect;
-        r.immune = d.immune_aspects & aspect_bit(p.aspect) != 0;
-        r.base_min = p.min;
-        r.base_max = p.max;
-    }
-    if out.packets().iter().all(|p| p.immune) {
+    // Step 3: immunity to every packet.
+    let mut packets = build_packets(a.weapon, &a.skill, &a.added);
+    fill_packets(out, &packets, d.immune_aspects);
+    if packets.as_slice().iter().all(|p| immune(p.aspect)) {
         out.outcome = Outcome::Immune;
         return;
     }
@@ -265,6 +487,7 @@ pub fn resolve_hit_into(
         out.crit = crit;
         out.crit_roll = Some(roll);
     }
+    let crit = out.crit;
 
     // Steps 6-8: resonance.
     let (bases, base_count) = a.skill.bases(a.weapon.aspect);
@@ -274,13 +497,80 @@ pub fn resolve_hit_into(
         armor: d.armor,
         states: &d.states,
     };
-    let tints = roll_tints(bases, &a.tints, d.immune_aspects, &view, balance, &mut src);
+    let tints = roll_tints(
+        bases,
+        &a.tints,
+        d.immune_aspects,
+        &view,
+        balance,
+        tables,
+        &mut src,
+    );
     out.tint_rolls = tints.rolls;
     out.tint_roll_count = tints.roll_count;
     out.resonances = tints.resonances;
+    let mut plans = [Plan::default(); SKILL_ASPECTS_MAX];
+    for (slot, res) in tints.resonances.iter().enumerate() {
+        let Some(res) = res.filter(|r| r.active) else {
+            continue;
+        };
+        plans[slot] = Plan::of(&res, tables);
+        for (k, p) in plans[slot].as_slice().iter().enumerate() {
+            out.res_ops[slot][k] = OpResult {
+                kind: p.op.kind,
+                crit_only: p.op.crit_only,
+                arg: p.op.arg,
+                origin: p.origin,
+                tint: p.tint.aspect,
+                carrier: p.tint.carrier,
+                tier: p.tint.tier,
+                ..OpResult::default()
+            };
+        }
+    }
+    let acts = |op: &Op| !op.crit_only || crit;
 
-    // Steps 10-12: attacker modifiers, per packet.
+    // Step 9: Addition from tint traits (Fury).
+    for (slot, plan) in plans.iter().enumerate() {
+        for (k, p) in plan.as_slice().iter().enumerate() {
+            if p.op.kind != OpKind::AddPacket || !acts(&p.op) {
+                continue;
+            }
+            let Ok(aspect) = Aspect::try_from(p.op.arg) else {
+                continue;
+            };
+            let [min, max] = balance.tint_added(tier_of(&p.tint));
+            let (min, max) = (scale(min, p.op.value), scale(max, p.op.value));
+            packets.add(
+                aspect,
+                min as u64 * BP as u64,
+                max.max(min) as u64 * BP as u64,
+            );
+            let o = &mut out.res_ops[slot][k];
+            (o.acted, o.amount, o.amount_max) = (true, min, max.max(min));
+        }
+    }
+    fill_packets(out, &packets, d.immune_aspects);
+
+    // Steps 10-12: attacker modifiers, per packet. A resonance's multiplier is on its base.
     let (source, form) = (a.skill.source, a.skill.form);
+    let mut res_more = [BP as u64; SKILL_ASPECTS_MAX];
+    for (slot, plan) in plans.iter().enumerate() {
+        for (k, p) in plan.as_slice().iter().enumerate() {
+            if p.op.kind != OpKind::Multiplier || !acts(&p.op) {
+                continue;
+            }
+            let required = p.op.arg == ANY_STATE
+                || StateKind::try_from(p.op.arg).is_ok_and(|kind| view.has(kind));
+            if !required {
+                continue;
+            }
+            let bp = scale(balance.resonance_more(tier_of(&p.tint)), p.op.value);
+            res_more[slot] = more(res_more[slot], bp);
+            let o = &mut out.res_ops[slot][k];
+            (o.acted, o.amount) = (true, bp);
+        }
+    }
     for r in out
         .packets
         .iter_mut()
@@ -289,12 +579,13 @@ pub fn resolve_hit_into(
     {
         r.increased_bp = sum_matching(&a.increased, r.aspect, source, form);
         let mut mult = product_matching(&a.more, r.aspect, source, form) as u64;
-        if out.crit {
+        if crit {
             mult = more(mult, balance.crit_more_bp);
         }
-        for res in tints.resonances.iter().flatten() {
-            if res.active && res.base == r.aspect {
-                mult = more(mult, multiplier_bp(res, balance));
+        for (slot, res) in tints.resonances.iter().enumerate() {
+            if res.is_some_and(|res| res.active && res.base == r.aspect) {
+                mult = (mult as u128 * res_more[slot] as u128 / BP as u128).min(u64::MAX as u128)
+                    as u64;
             }
         }
         r.more_bp = mult.min(u32::MAX as u64) as u32;
@@ -309,7 +600,17 @@ pub fn resolve_hit_into(
     }
 
     // Keenness: a triggered Piercing tint penetrates on this hit (steps 6-8 are already done).
-    let pen_attacker = keenness(a.penetration_bp, &tints.resonances, balance);
+    let mut pen_attacker = a.penetration_bp;
+    for (slot, plan) in plans.iter().enumerate() {
+        for (k, p) in plan.as_slice().iter().enumerate() {
+            if p.op.kind == OpKind::Penetrate && acts(&p.op) {
+                let bp = scale(balance.keenness_pen(tier_of(&p.tint)), p.op.value);
+                pen_attacker = pen_attacker.saturating_add(bp);
+                let o = &mut out.res_ops[slot][k];
+                (o.acted, o.amount) = (true, bp);
+            }
+        }
+    }
     // States already on the target. The ones this hit applies land after defense.
     let pen_state = power_of(&d.states, StateKind::Penetration);
     let shock = power_of(&d.states, StateKind::Shock);
@@ -348,24 +649,34 @@ pub fn resolve_hit_into(
     let damage = (total / BP as u128).min(u32::MAX as u128) as u32;
     out.damage = damage.max(balance.min_damage);
 
-    // Step 20: native states, one check per packet.
-    let mut states = d.states;
+    let mut lands = Landing {
+        states: d.states,
+        landed: 0,
+        now: [ActiveState::default(); StateKind::COUNT],
+    };
+
+    // Step 20: native states, one check per packet; a resonance on the packet's base changes
+    // what lands (longer, stronger, faster).
     for i in 0..packets.count as usize {
         let r = out.packets[i];
         if r.immune {
             continue;
         }
-        let Some(kind) = native_state(r.aspect) else {
+        let Some(kind) = tables.native(r.aspect) else {
             continue;
         };
         if d.immune_states & state_bit(kind) != 0 || a.skill.state_chance_pct == 0 {
             continue;
         }
-        let pure = bases
-            .iter()
-            .position(|b| *b == r.aspect)
-            .map(|slot| tints.pure_pair_bp[slot])
-            .unwrap_or(0);
+        let slot = bases.iter().position(|b| *b == r.aspect);
+        let pure = slot.map(|s| tints.pure_pair_bp[s]).unwrap_or(0);
+        let mods = match slot {
+            Some(s) => native_mods(&plans[s], crit, d.armor, balance, &mut out.res_ops[s]),
+            None => NativeMods {
+                rate: 1,
+                ..NativeMods::default()
+            },
+        };
         let stat_bonus = state_stat_bonus(kind, a);
         let increase = stat_bonus.saturating_add(pure);
         let aspect_resist = d.resist_bp[r.aspect as usize].min(balance.resist_cap_bp);
@@ -382,8 +693,7 @@ pub fn resolve_hit_into(
             applied: Applied::None,
         };
         if success {
-            roll_result.applied = apply_kind(
-                &mut states,
+            roll_result.applied = lands.apply(
                 kind,
                 StateApply {
                     packet_damage: r.after_defense,
@@ -391,14 +701,32 @@ pub fn resolve_hit_into(
                     pure_bp: pure,
                     aspect_resist_bp: aspect_resist,
                     source: a.slot,
+                    extra_turns: mods.extra_turns,
+                    power_bp: mods.power_bp,
+                    rate: mods.rate,
                 },
                 balance,
             );
+            if let Some(s) = slot {
+                let applied = roll_result.applied != Applied::None;
+                for (k, p) in plans[s].as_slice().iter().enumerate() {
+                    let native_op = matches!(
+                        p.op.kind,
+                        OpKind::NativeTurns
+                            | OpKind::NativePower
+                            | OpKind::NativePowerArmor
+                            | OpKind::NativeFaster
+                    );
+                    if native_op && acts(&p.op) {
+                        out.res_ops[s][k].acted = applied;
+                    }
+                }
+            }
         }
         out.packets[i].state = roll_result;
     }
 
-    // Step 21: resonance states.
+    // Step 21: the resonance's own states and effects.
     for (slot, res) in tints.resonances.iter().enumerate() {
         let Some(res) = res.filter(|r| r.active) else {
             continue;
@@ -409,75 +737,231 @@ pub fn resolve_hit_into(
             .find(|p| p.aspect == res.base)
             .map(|p| p.after_defense)
             .unwrap_or(0);
-        for effect in entry(res.base, res.tint).effects {
-            let roll_result = match effect {
-                ResonanceEffect::StateOnCrit(kind)
-                    if out.crit && d.immune_states & state_bit(kind) == 0 =>
-                {
-                    let aspect_resist = d.resist_bp[res.base as usize].min(balance.resist_cap_bp);
-                    let applied = apply_kind(
-                        &mut states,
-                        kind,
-                        StateApply {
-                            packet_damage: base_damage,
-                            stat_bonus_bp: state_stat_bonus(kind, a),
-                            pure_bp: 0,
-                            aspect_resist_bp: aspect_resist,
-                            source: a.slot,
-                        },
-                        balance,
-                    );
-                    StateRoll {
+        let native = tables.native(res.base);
+        let native_landed = native.is_some_and(|k| lands.landed & state_bit(k) != 0);
+        let aspect_resist = d.resist_bp[res.base as usize].min(balance.resist_cap_bp);
+        let mut removals: [Option<(usize, StateKind)>; RES_OPS_MAX] = [None; RES_OPS_MAX];
+        for (k, p) in plans[slot].as_slice().iter().enumerate() {
+            if !acts(&p.op) {
+                continue;
+            }
+            let tier = tier_of(&p.tint);
+            let state = p.op.state(native);
+            let can = |kind: StateKind| d.immune_states & state_bit(kind) == 0;
+            let o = &mut out.res_ops[slot][k];
+            let apply_of = |kind: StateKind, damage: u64| StateApply {
+                packet_damage: damage,
+                stat_bonus_bp: state_stat_bonus(kind, a),
+                pure_bp: balance.res_power(tier),
+                aspect_resist_bp: aspect_resist,
+                source: a.slot,
+                extra_turns: 0,
+                power_bp: 0,
+                rate: 1,
+            };
+            match p.op.kind {
+                OpKind::StateOnCrit => {
+                    let Some(kind) = state.filter(|k| crit && can(*k)) else {
+                        continue;
+                    };
+                    let applied = lands.apply(kind, apply_of(kind, base_damage), balance);
+                    o.acted = true;
+                    o.state = StateRoll {
                         kind,
                         rolled: false,
                         chance_pct: 100,
                         roll: 0,
                         success: true,
                         applied,
-                    }
+                    };
                 }
-                ResonanceEffect::ExtraStateChance(kind)
-                    if d.immune_states & state_bit(kind) == 0 =>
-                {
+                OpKind::Linked => {
+                    let Some(kind) =
+                        state.filter(|k| native_landed && can(*k) && Some(*k) != native)
+                    else {
+                        continue;
+                    };
+                    let damage = (base_damage as u128 * p.op.value as u128 / BP as u128)
+                        .min(u64::MAX as u128) as u64;
+                    let applied = lands.apply(kind, apply_of(kind, damage), balance);
+                    o.acted = true;
+                    o.state = StateRoll {
+                        kind,
+                        rolled: false,
+                        chance_pct: 100,
+                        roll: 0,
+                        success: true,
+                        applied,
+                    };
+                }
+                OpKind::ExtraStateChance | OpKind::LinkedChance => {
+                    let linked = p.op.kind == OpKind::LinkedChance;
+                    let Some(kind) = state.filter(|k| can(*k) && (!linked || native_landed)) else {
+                        continue;
+                    };
                     let stat_bonus = state_stat_bonus(kind, a);
-                    let aspect_resist = d.resist_bp[res.base as usize].min(balance.resist_cap_bp);
                     let resist = d.state_resist_bp[kind as usize].saturating_add(aspect_resist);
-                    let raw = ratio(balance.extra_state_chance_pct as u64, stat_bonus, resist);
+                    let base = scale(balance.extra_state_chance_pct, p.op.value);
+                    let raw = ratio(base as u64, stat_bonus, resist);
                     let chance_pct = balance.clamp_chance(raw.min(u32::MAX as u64) as u32);
                     let (success, roll) = chance(&mut src, chance_pct);
                     let applied = if success {
-                        apply_kind(
-                            &mut states,
-                            kind,
-                            StateApply {
-                                packet_damage: base_damage,
-                                stat_bonus_bp: stat_bonus,
-                                pure_bp: 0,
-                                aspect_resist_bp: aspect_resist,
-                                source: a.slot,
-                            },
-                            balance,
-                        )
+                        lands.apply(kind, apply_of(kind, base_damage), balance)
                     } else {
                         Applied::None
                     };
-                    StateRoll {
+                    o.acted = true;
+                    o.state = StateRoll {
                         kind,
                         rolled: true,
                         chance_pct,
                         roll,
                         success,
                         applied,
+                    };
+                }
+                OpKind::LinkedMod => {
+                    let Some(kind) = ModKind::ALL.get(p.op.arg as usize).copied() else {
+                        continue;
+                    };
+                    if !native_landed || out.target_mod_count as usize >= TARGET_MODS_MAX {
+                        continue;
+                    }
+                    let stat = match kind {
+                        ModKind::Haste | ModKind::Slow => a.tempo_bonus_bp,
+                        _ => a.state_chance_bonus_bp,
+                    };
+                    let power = counter(
+                        more(scale(balance.res_mod(tier), p.op.value) as u64, stat),
+                        aspect_resist,
+                    )
+                    .clamp(1, u32::MAX as u64) as u32;
+                    out.target_mods[out.target_mod_count as usize] = TimedMod {
+                        kind,
+                        aspect: res.base,
+                        turns: mod_turns(balance.res_mod_turns),
+                        power_bp: power,
+                        source: a.slot,
+                    };
+                    out.target_mod_count += 1;
+                    (o.acted, o.amount) = (true, power);
+                }
+                OpKind::ThawDamage => {
+                    if lands.landed & state_bit(StateKind::Freeze) == 0 {
+                        continue;
+                    }
+                    let Some(i) = find(&lands.states, StateKind::Freeze) else {
+                        continue;
+                    };
+                    let thaw = base_damage as u128 * p.op.value as u128 / (BP as u128 * BP as u128);
+                    let thaw = more(thaw.min(u64::MAX as u128) as u64, balance.res_power(tier))
+                        .clamp(1, u32::MAX as u64) as u32;
+                    let f = &mut lands.states[i];
+                    f.power = f.power.max(thaw);
+                    (o.acted, o.amount) = (true, f.power);
+                }
+                OpKind::RemoveState => {
+                    if let Some(kind) = state {
+                        removals[k] = Some((k, kind));
                     }
                 }
-                _ => continue,
-            };
-            out.resonance_states[slot] = roll_result;
+                OpKind::Jump | OpKind::JumpLine | OpKind::JumpChain => {
+                    let (moving, filter, limit) = match p.op.kind {
+                        OpKind::JumpChain => match (native, StateKind::try_from(p.op.arg)) {
+                            (Some(n), Ok(f)) => (n, f, p.op.value.min(u8::MAX as u32) as u8),
+                            _ => continue,
+                        },
+                        _ => match state {
+                            Some(s) => (s, s, 1),
+                            None => continue,
+                        },
+                    };
+                    if lands.landed & state_bit(moving) == 0
+                        || out.jump_count as usize >= JUMPS_MAX
+                        || limit == 0
+                    {
+                        continue;
+                    }
+                    out.jumps[out.jump_count as usize] = Jump {
+                        mode: match p.op.kind {
+                            OpKind::JumpChain => JumpMode::Chain,
+                            OpKind::JumpLine => JumpMode::Line,
+                            _ => JumpMode::Adjacent,
+                        },
+                        state: lands.now[moving as usize],
+                        filter,
+                        limit,
+                        base: res.base,
+                    };
+                    out.jump_count += 1;
+                    (o.acted, o.amount) = (true, limit as u32);
+                }
+                OpKind::Knockback => {
+                    let cells = p.op.value.min(u8::MAX as u32) as u8;
+                    out.knockback = out.knockback.max(cells);
+                    (o.acted, o.amount) = (true, cells as u32);
+                }
+                OpKind::IgniteCells => {
+                    let damage = base_damage as u128 * p.op.value as u128 / BP as u128;
+                    let per_turn =
+                        more(damage.min(u64::MAX as u128) as u64, balance.res_power(tier)) as u128
+                            * balance.dot_share_bp as u128
+                            / (BP as u128 * BP as u128);
+                    let power = (per_turn.min(u32::MAX as u128) as u32).max(1);
+                    out.ignite_power = out.ignite_power.max(power);
+                    (o.acted, o.amount) = (true, power);
+                }
+                OpKind::AccuracyBuff => {
+                    let Ok(aspect) = Aspect::try_from(p.op.arg) else {
+                        continue;
+                    };
+                    let bonus = scale(balance.res_accuracy(tier), p.op.value);
+                    out.accuracy_buff.apply(AccuracyBuff {
+                        aspect,
+                        turns: mod_turns(balance.res_accuracy_turns),
+                        bonus,
+                    });
+                    (o.acted, o.amount) = (true, bonus);
+                }
+                OpKind::None
+                | OpKind::Multiplier
+                | OpKind::NativeTurns
+                | OpKind::NativePower
+                | OpKind::NativeFaster
+                | OpKind::NativePowerArmor
+                | OpKind::AddPacket
+                | OpKind::Penetrate => {}
+            }
         }
+        // "Removes Freeze" comes after the hit's own states (Cleaving Ice).
+        for (k, kind) in removals.iter().flatten() {
+            if remove(&mut lands.states, *kind) {
+                let o = &mut out.res_ops[slot][*k];
+                o.acted = true;
+            }
+        }
+        let first = out
+            .ops(slot)
+            .find(|o| o.state.success || o.state.rolled)
+            .map(|o| o.state)
+            .unwrap_or_default();
+        out.resonance_states[slot] = first;
     }
 
-    out.states = states;
+    out.states = lands.states;
+    out.landed = lands.landed;
     out.rolls_used = src.used;
+}
+
+/// Step 9 numbers of every packet (the added ones included).
+fn fill_packets(out: &mut HitResult, packets: &Packets, immune_aspects: u8) {
+    out.packet_count = packets.count;
+    for (r, p) in out.packets.iter_mut().zip(packets.as_slice()) {
+        r.aspect = p.aspect;
+        r.immune = immune_aspects & aspect_bit(p.aspect) != 0;
+        r.base_min = p.min;
+        r.base_max = p.max;
+    }
 }
 
 /// Chill scales with Dexterity. Every other state scales with the skill's source stat.
@@ -489,98 +973,142 @@ fn state_stat_bonus(kind: StateKind, attacker: &Attacker) -> u32 {
     }
 }
 
-/// Armor penetration from the attacker plus Keenness on each active Piercing-tint resonance.
-fn keenness(base: u32, resonances: &[Option<Resonance>], balance: &Balance) -> u32 {
-    resonances
-        .iter()
-        .flatten()
-        .filter(|r| r.active && r.tint == Aspect::Piercing)
-        .fold(base, |acc, r| match Tier::new(r.tier) {
-            Ok(tier) => acc.saturating_add(balance.keenness_pen(tier)),
-            Err(_) => acc,
-        })
-}
-
 /// Numbers a state application reads besides the kind.
 struct StateApply {
     packet_damage: u64,
     stat_bonus_bp: u32,
+    /// Pure pair, or the tint tier's power for a resonance's own state.
     pure_bp: u32,
     aspect_resist_bp: u32,
     source: u8,
+    /// From the resonance on the base: more turns, more power, faster ticks.
+    extra_turns: u8,
+    power_bp: u32,
+    rate: u32,
 }
 
-/// Applies a state of `kind`. Over-time strength is a share of the packet damage (section 7.1).
-/// Chill, Shock and Penetration scale with the stat bonus and the pure pair, then the aspect
-/// resistance divides them (DAMAGE_TYPES §9).
+/// The target's states during step 20-21 and what landed on them.
+struct Landing {
+    states: States,
+    /// `state_bit`s.
+    landed: u8,
+    /// What each kind's last landing put on the target.
+    now: [ActiveState; StateKind::COUNT],
+}
+
+impl Landing {
+    fn apply(&mut self, kind: StateKind, s: StateApply, balance: &Balance) -> Applied {
+        let (applied, inst) = apply_kind(&mut self.states, kind, s, balance);
+        if applied == Applied::None {
+            return applied;
+        }
+        self.landed |= state_bit(kind);
+        self.now[kind as usize] = inst;
+        if applied == Applied::Froze {
+            self.landed |= state_bit(StateKind::Freeze);
+            if let Some(i) = find(&self.states, StateKind::Freeze) {
+                self.now[StateKind::Freeze as usize] = self.states[i];
+            }
+        }
+        applied
+    }
+}
+
+/// Applies a state of `kind` and returns what it put on (before merging with an existing
+/// instance). Over-time strength is a share of the packet damage (section 7.1). Chill, Shock
+/// and Penetration scale with the stat bonus and the pure pair, then the aspect resistance
+/// divides them (DAMAGE_TYPES §9).
 fn apply_kind(
     states: &mut [ActiveState; STATES_MAX],
     kind: StateKind,
     apply: StateApply,
     balance: &Balance,
-) -> Applied {
+) -> (Applied, ActiveState) {
     let StateApply {
         packet_damage,
         stat_bonus_bp,
         pure_bp,
         aspect_resist_bp,
         source,
+        extra_turns,
+        power_bp,
+        rate,
     } = apply;
+    let turns = balance
+        .turns(kind)
+        .saturating_add(extra_turns)
+        .min(balance.state_turns_max);
     let scaled = |base: u32| {
-        let increase = stat_bonus_bp.saturating_add(pure_bp);
+        let increase = stat_bonus_bp
+            .saturating_add(pure_bp)
+            .saturating_add(power_bp);
         counter(more(base as u64, increase), aspect_resist_bp).min(u32::MAX as u64) as u32
     };
+    let inst = |power: u32, turns: u8| ActiveState {
+        kind,
+        turns,
+        power,
+        source,
+    };
     match kind {
-        StateKind::Chill => apply_chill(states, scaled(balance.chill_buildup_bp), source, balance),
-        StateKind::Freeze => freeze(states, source, balance),
-        StateKind::Burning | StateKind::Bleeding => {
-            let per_turn = more(packet_damage, pure_bp) as u128 * balance.dot_share_bp as u128
-                / (BP as u128 * BP as u128);
-            let power = (per_turn.min(u32::MAX as u128) as u32).max(1);
-            apply_state(
-                states,
-                ActiveState {
-                    kind,
-                    turns: balance.turns(kind),
-                    power,
-                    source,
-                },
-            )
+        StateKind::Chill => {
+            let s = inst(scaled(balance.chill_buildup_bp), turns);
+            (apply_chill_for(states, s.power, turns, source, balance), s)
         }
-        StateKind::Shock => apply_state(
-            states,
-            ActiveState {
-                kind,
-                turns: balance.turns(kind),
-                power: scaled(balance.shock_vuln_bp),
-                source,
-            },
-        ),
-        StateKind::Stun => apply_state(
-            states,
-            ActiveState {
-                kind,
-                turns: balance.turns(kind),
-                power: 0,
-                source,
-            },
-        ),
-        StateKind::Penetration => apply_state(
-            states,
-            ActiveState {
-                kind,
-                turns: balance.turns(kind),
-                power: scaled(balance.penetration_power_bp),
-                source,
-            },
-        ),
+        StateKind::Freeze => (freeze_for(states, turns, source), inst(0, turns)),
+        StateKind::Burning | StateKind::Bleeding => {
+            let increase = pure_bp.saturating_add(power_bp);
+            let per_turn = more(packet_damage, increase) as u128 * balance.dot_share_bp as u128
+                / (BP as u128 * BP as u128);
+            let rate = rate.max(1);
+            let power = (per_turn.saturating_mul(rate as u128).min(u32::MAX as u128) as u32).max(1);
+            let turns = (turns as u32).div_ceil(rate).max(1) as u8;
+            let s = inst(power, turns);
+            (apply_state(states, s), s)
+        }
+        StateKind::Shock => {
+            let s = inst(scaled(balance.shock_vuln_bp), turns);
+            (apply_state(states, s), s)
+        }
+        StateKind::Stun => {
+            let s = inst(0, turns);
+            (apply_state(states, s), s)
+        }
+        StateKind::Penetration => {
+            let s = inst(scaled(balance.penetration_power_bp), turns);
+            (apply_state(states, s), s)
+        }
     }
 }
 
 /// Damage hint without dice (website preview): total min and max after attacker modifiers
 /// and target defense, no crit, no resonance, rounded down. Immune packets count as zero.
 pub fn preview_range(input: &HitInput, balance: &Balance) -> (u32, u32) {
-    damage_range(input, balance, false)
+    damage_range(input, balance, false, &Extra::NONE)
+}
+
+/// One tint candidate in the preview.
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PreviewTint {
+    pub base: Aspect,
+    pub tint: Aspect,
+    pub carrier: Carrier,
+    pub tier: u8,
+    /// The tint equals the base: no roll, the native state is stronger.
+    pub pure: bool,
+    /// Chance to trigger, percent (0 for a pure pair).
+    pub chance_pct: u32,
+    /// `resonance_id(base, tint)`.
+    pub id: u8,
+    /// The pair has no record: the tint's trait.
+    pub generated: bool,
+    /// The target meets the pair's condition.
+    pub condition_met: bool,
+    /// Damage of a hit without a crit when this tint alone triggers (its added packet,
+    /// multiplier and penetration).
+    pub min: u32,
+    pub max: u32,
 }
 
 /// What an attack would do, before any die is rolled (docs/COMBAT_MATH.md, section 13).
@@ -599,10 +1127,13 @@ pub struct HitPreview {
     pub max: u32,
     pub crit_min: u32,
     pub crit_max: u32,
+    /// The tint candidates, `tints[..tint_count]`, bases in skill order, tints in slot order.
+    pub tints: [PreviewTint; TINT_ROLLS_MAX],
+    pub tint_count: u8,
 }
 
 /// Chances and damage of `input` without dice, by the same rules as [`resolve_hit`].
-pub fn preview_hit(input: &HitInput, balance: &Balance) -> HitPreview {
+pub fn preview_hit(input: &HitInput, balance: &Balance, tables: &ResonanceTables) -> HitPreview {
     let a = &input.attacker;
     let d = &input.defender;
     let packets = build_packets(a.weapon, &a.skill, &a.added);
@@ -625,9 +1156,9 @@ pub fn preview_hit(input: &HitInput, balance: &Balance) -> HitPreview {
     } else {
         0
     };
-    let (min, max) = damage_range(input, balance, false);
-    let (crit_min, crit_max) = damage_range(input, balance, true);
-    HitPreview {
+    let (min, max) = damage_range(input, balance, false, &Extra::NONE);
+    let (crit_min, crit_max) = damage_range(input, balance, true, &Extra::NONE);
+    let mut out = HitPreview {
         immune: false,
         hit_bp: (plain_hits + 1) * BP / 20,
         crit_bp: (BP + plain_hits * crit_roll) / 20,
@@ -635,17 +1166,124 @@ pub fn preview_hit(input: &HitInput, balance: &Balance) -> HitPreview {
         max,
         crit_min,
         crit_max,
+        ..HitPreview::default()
+    };
+    let view = TargetView {
+        immune_states: d.immune_states,
+        armor: d.armor,
+        states: &d.states,
+    };
+    let (bases, base_count) = a.skill.bases(a.weapon.aspect);
+    for (i, &base) in bases[..base_count].iter().enumerate() {
+        if d.immune_aspects & aspect_bit(base) != 0 || bases[..i].contains(&base) {
+            continue;
+        }
+        for t in a.tints.iter() {
+            let Ok(tier) = Tier::new(t.tier) else {
+                continue;
+            };
+            if out.tint_count as usize >= TINT_ROLLS_MAX {
+                break;
+            }
+            let pure = t.aspect == base;
+            let mechanics = tables.pair(base, t.aspect);
+            let condition_met = crate::resonance::condition_met(mechanics.condition, &view);
+            let (min, max) = if pure || !condition_met {
+                (min, max)
+            } else {
+                let mut extra = Extra::NONE;
+                let ops = mechanics
+                    .ops
+                    .iter()
+                    .chain(core::iter::once(&tables.trait_of(t.aspect).hit));
+                for op in ops.filter(|op| !op.crit_only) {
+                    match op.kind {
+                        OpKind::AddPacket => {
+                            if let Ok(aspect) = Aspect::try_from(op.arg) {
+                                let [lo, hi] = balance.tint_added(tier);
+                                extra.added = DamageRange::new(
+                                    aspect,
+                                    scale(lo, op.value),
+                                    scale(hi, op.value),
+                                );
+                            }
+                        }
+                        OpKind::Multiplier
+                            if op.arg == ANY_STATE
+                                || StateKind::try_from(op.arg).is_ok_and(|k| view.has(k)) =>
+                        {
+                            extra.more_aspect = base;
+                            extra.more =
+                                more(extra.more, scale(balance.resonance_more(tier), op.value));
+                        }
+                        OpKind::Penetrate => {
+                            extra.pen_bp = extra
+                                .pen_bp
+                                .saturating_add(scale(balance.keenness_pen(tier), op.value));
+                        }
+                        _ => {}
+                    }
+                }
+                damage_range(input, balance, false, &extra)
+            };
+            out.tints[out.tint_count as usize] = PreviewTint {
+                base,
+                tint: t.aspect,
+                carrier: t.carrier,
+                tier: t.tier,
+                pure,
+                chance_pct: if pure {
+                    0
+                } else {
+                    balance.clamp_chance(balance.tint_chance(tier))
+                },
+                id: crate::resonance::resonance_id(base, t.aspect),
+                generated: mechanics.generated,
+                condition_met,
+                min,
+                max,
+            };
+            out.tint_count += 1;
+        }
     }
+    out
+}
+
+/// What a triggered tint adds to the preview.
+struct Extra {
+    added: DamageRange,
+    more_aspect: Aspect,
+    /// Combined resonance multiplier on `more_aspect`, bp (`BP` = x1).
+    more: u64,
+    pen_bp: u32,
+}
+
+impl Extra {
+    const NONE: Extra = Extra {
+        added: DamageRange::new(Aspect::Fire, 0, 0),
+        more_aspect: Aspect::Fire,
+        more: BP as u64,
+        pen_bp: 0,
+    };
 }
 
 /// Total min and max of a hit after attacker modifiers (with the crit multiplier when `crit`)
 /// and target defense, rounded down once.
-fn damage_range(input: &HitInput, balance: &Balance, crit: bool) -> (u32, u32) {
+fn damage_range(input: &HitInput, balance: &Balance, crit: bool, extra: &Extra) -> (u32, u32) {
     let a = &input.attacker;
     let d = &input.defender;
-    let packets = build_packets(a.weapon, &a.skill, &a.added);
+    let mut packets: Packets = build_packets(a.weapon, &a.skill, &a.added);
+    if !extra.added.is_empty() {
+        let r = extra.added;
+        packets.add(
+            r.aspect,
+            r.min as u64 * BP as u64,
+            r.max.max(r.min) as u64 * BP as u64,
+        );
+    }
     let pen = a
         .penetration_bp
+        .saturating_add(extra.pen_bp)
         .saturating_add(power_of(&d.states, StateKind::Penetration));
     let shock = power_of(&d.states, StateKind::Shock);
     let (mut lo, mut hi) = (0u128, 0u128);
@@ -657,6 +1295,9 @@ fn damage_range(input: &HitInput, balance: &Balance, crit: bool) -> (u32, u32) {
         let mut mult = product_matching(&a.more, p.aspect, a.skill.source, a.skill.form) as u64;
         if crit {
             mult = more(mult, balance.crit_more_bp);
+        }
+        if p.aspect == extra.more_aspect {
+            mult = (mult as u128 * extra.more as u128 / BP as u128).min(u64::MAX as u128) as u64;
         }
         // As `resolve_hit` stores it (`PacketResult::more_bp`).
         let mult = mult.min(u32::MAX as u64);
@@ -679,474 +1320,5 @@ fn damage_range(input: &HitInput, balance: &Balance, crit: bool) -> (u32, u32) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::resonance::Carrier;
-    use crate::rng::{ScriptedRoll, VrfRoll};
-    use crate::states::has;
-    use crate::ModFilter;
-    use deadroll_types::{Form, Source};
-
-    const B: Balance = Balance::DEFAULT;
-
-    fn basic(aspect: Aspect, min: u32, max: u32, state_chance_pct: u32) -> HitInput {
-        let mut input = HitInput::default();
-        input.attacker.weapon = DamageRange::new(aspect, min, max);
-        input.attacker.skill = Skill::basic(Source::Combat, Form::Strike, state_chance_pct);
-        input.defender.defense = 10;
-        input
-    }
-
-    fn cold_bolt(tint: Aspect) -> HitInput {
-        let mut input = basic(Aspect::Lightning, 10, 10, 0);
-        let s = &mut input.attacker.skill;
-        s.aspects[0] = Aspect::Cold;
-        s.aspect_count = 1;
-        s.shares_bp[0] = BP;
-        s.source = Source::Magical;
-        s.form = Form::Projectile;
-        input.attacker.tints[0] = Tint::new(tint, 1, Carrier::Race);
-        input
-    }
-
-    fn find(states: &States, kind: StateKind) -> ActiveState {
-        *states
-            .iter()
-            .find(|s| s.kind == kind && s.turns > 0)
-            .unwrap()
-    }
-
-    #[test]
-    fn plain_hit() {
-        let input = basic(Aspect::Piercing, 4, 8, 0);
-        // d20 = 15, d100 = 50
-        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 50]));
-        assert_eq!(r.outcome, Outcome::Hit);
-        assert_eq!(
-            (r.d20, r.attack_total, r.crit, r.crit_roll),
-            (15, 15, false, None)
-        );
-        assert_eq!(r.d100, 50);
-        let p = r.packets()[0];
-        assert_eq!(
-            (p.base_min, p.base_max, p.min, p.max),
-            (40_000, 80_000, 40_000, 80_000)
-        );
-        assert_eq!((p.rolled, p.after_defense), (60_000, 60_000));
-        assert_eq!(p.more_bp, BP);
-        assert_eq!(r.damage, 6);
-        assert_eq!(r.rolls_used, 2);
-        assert_eq!(r.states, input.defender.states);
-    }
-
-    #[test]
-    fn misses() {
-        let mut input = basic(Aspect::Piercing, 4, 8, 0);
-        input.defender.defense = 16;
-        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 50]));
-        assert_eq!((r.outcome, r.damage, r.rolls_used), (Outcome::Miss, 0, 1));
-        // Natural 1 misses whatever the bonus.
-        input.attacker.attack_bonus = 1_000;
-        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([0]));
-        assert_eq!((r.outcome, r.d20), (Outcome::Miss, 1));
-    }
-
-    #[test]
-    fn natural_20_hits_and_crits() {
-        let mut input = basic(Aspect::Piercing, 10, 10, 0);
-        input.defender.defense = u32::MAX;
-        input.attacker.crit_chance_pct = 5_000;
-        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([19, 0]));
-        assert_eq!((r.outcome, r.crit, r.crit_roll), (Outcome::Hit, true, None));
-        assert_eq!(r.packets()[0].more_bp, 15_000);
-        assert_eq!(r.damage, 15);
-        assert_eq!(r.rolls_used, 2);
-    }
-
-    #[test]
-    fn crit_chance_is_clamped_and_rolled() {
-        let mut input = basic(Aspect::Piercing, 10, 10, 0);
-        input.attacker.crit_chance_pct = 100;
-        // Clamped to 95. Roll 94 passes, roll 95 does not.
-        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 94, 0]));
-        assert!(r.crit);
-        assert_eq!(r.crit_roll, Some(94));
-        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 95, 0]));
-        assert!(!r.crit);
-        assert_eq!(r.rolls_used, 3);
-    }
-
-    #[test]
-    fn armor_and_penetration() {
-        let mut input = basic(Aspect::Piercing, 6, 6, 0);
-        input.defender.armor = 100;
-        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0]));
-        assert_eq!((r.packets()[0].armor, r.damage), (100, 3));
-        input.attacker.penetration_bp = BP;
-        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0]));
-        assert_eq!((r.packets()[0].armor, r.damage), (50, 4));
-    }
-
-    #[test]
-    fn resistance_vulnerability_elemental() {
-        let mut input = basic(Aspect::Fire, 10, 10, 0);
-        // Armor never cuts elemental packets.
-        input.defender.armor = 1_000;
-        input.defender.resist_bp[Aspect::Fire as usize] = BP;
-        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0]));
-        assert_eq!((r.packets()[0].armor, r.damage), (0, 5));
-        input.defender.vuln_bp[Aspect::Fire as usize] = BP;
-        assert_eq!(
-            resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0])).damage,
-            10
-        );
-        // Resistance is capped: 75% at most.
-        input.defender.vuln_bp = [0; 6];
-        input.defender.resist_bp[Aspect::Fire as usize] = u32::MAX;
-        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0]));
-        assert_eq!((r.packets()[0].resist_bp, r.damage), (30_000, 2));
-    }
-
-    #[test]
-    fn increase_more_weaken() {
-        let mut input = basic(Aspect::Blunt, 10, 10, 0);
-        input.attacker.increased[0] = Mod::new(ModFilter::Any, 5_000);
-        input.attacker.increased[1] = Mod::new(ModFilter::Source(Source::Combat), 5_000);
-        input.attacker.more[0] = Mod::new(ModFilter::Aspect(Aspect::Blunt), 5_000);
-        input.attacker.weaken_bp = 20_000;
-        // 10 x2.0 x1.5 / 3.0 = 10
-        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0]));
-        let p = r.packets()[0];
-        assert_eq!(
-            (p.increased_bp, p.more_bp, p.weaken_bp),
-            (10_000, 15_000, 20_000)
-        );
-        assert_eq!(r.damage, 10);
-    }
-
-    #[test]
-    fn minimum_damage_on_hit() {
-        let mut input = basic(Aspect::Fire, 1, 1, 0);
-        input.attacker.weaken_bp = u32::MAX;
-        assert_eq!(
-            resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0])).damage,
-            1
-        );
-    }
-
-    #[test]
-    fn full_immunity_rolls_nothing() {
-        let mut input = basic(Aspect::Fire, 10, 10, 5_000);
-        input.defender.immune_aspects = aspect_bit(Aspect::Fire);
-        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0, 0]));
-        assert_eq!(
-            (r.outcome, r.damage, r.rolls_used, r.d20),
-            (Outcome::Immune, 0, 0, 0)
-        );
-    }
-
-    #[test]
-    fn partial_immunity() {
-        let mut input = basic(Aspect::Fire, 10, 10, 0);
-        input.attacker.added[0] = DamageRange::new(Aspect::Cold, 5, 5);
-        input.defender.immune_aspects = aspect_bit(Aspect::Cold);
-        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0]));
-        assert_eq!(r.packet_count, 2);
-        assert!(r.packets()[1].immune);
-        assert_eq!(r.packets()[1].after_defense, 0);
-        assert_eq!(r.damage, 10);
-    }
-
-    #[test]
-    fn native_state_burning_power_from_damage() {
-        let input = basic(Aspect::Fire, 10, 10, 50);
-        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0, 0]));
-        let s = r.packets()[0].state;
-        assert_eq!(
-            (s.kind, s.rolled, s.chance_pct, s.success),
-            (StateKind::Burning, true, 50, true)
-        );
-        assert_eq!(s.applied, Applied::Added);
-        let burning = find(&r.states, StateKind::Burning);
-        assert_eq!((burning.power, burning.turns), (3, 3));
-        assert_eq!(r.rolls_used, 3);
-    }
-
-    #[test]
-    fn native_state_failure_resistance_and_immunity() {
-        let mut input = basic(Aspect::Blood, 10, 10, 50);
-        input.defender.state_resist_bp[StateKind::Bleeding as usize] = BP;
-        // 50 * BP / (BP + BP) = 25; roll 25 fails.
-        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0, 25]));
-        let s = r.packets()[0].state;
-        assert_eq!(
-            (s.chance_pct, s.success, s.applied),
-            (25, false, Applied::None)
-        );
-        assert!(!has(&r.states, StateKind::Bleeding));
-        input.defender.immune_states = state_bit(StateKind::Bleeding);
-        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0, 0]));
-        assert!(!r.packets()[0].state.rolled);
-        assert_eq!(r.rolls_used, 2);
-    }
-
-    #[test]
-    fn piercing_frost_crit_freezes() {
-        let input = cold_bolt(Aspect::Piercing);
-        // nat 20, tint roll 0 (success), d100 0.
-        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([19, 0, 0]));
-        let res = r.resonances[0].unwrap();
-        assert_eq!(
-            (res.base, res.tint, res.active, res.id),
-            (Aspect::Cold, Aspect::Piercing, true, 11)
-        );
-        // x1.5 crit, x1.36 resonance
-        assert_eq!(r.packets()[0].more_bp, 20_400);
-        assert_eq!(r.damage, 20);
-        let s = r.resonance_states[0];
-        assert_eq!(
-            (s.kind, s.rolled, s.success, s.applied),
-            (StateKind::Freeze, false, true, Applied::Froze)
-        );
-        assert!(has(&r.states, StateKind::Freeze));
-        assert_eq!(r.rolls_used, 3);
-    }
-
-    #[test]
-    fn piercing_frost_without_crit_only_multiplies() {
-        let input = cold_bolt(Aspect::Piercing);
-        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0, 0]));
-        assert_eq!(r.packets()[0].more_bp, 13_600);
-        assert_eq!(r.damage, 13);
-        assert_eq!(r.resonance_states[0], StateRoll::default());
-        assert!(!has(&r.states, StateKind::Freeze));
-    }
-
-    #[test]
-    fn icy_point_chills_through_armor() {
-        let mut input = basic(Aspect::Piercing, 10, 10, 0);
-        input.attacker.tints[0] = Tint::new(Aspect::Cold, 1, Carrier::Class);
-        input.defender.armor = 100;
-        // d20 15, tint 0, d100 0, extra state roll 0.
-        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0, 0, 0]));
-        assert!(r.resonances[0].unwrap().active);
-        // 10 x1.36 = 13.6, armor halves: 6.8
-        assert_eq!(r.damage, 6);
-        let s = r.resonance_states[0];
-        assert_eq!(
-            (s.kind, s.rolled, s.chance_pct, s.applied),
-            (StateKind::Chill, true, 30, Applied::Added)
-        );
-        assert_eq!(r.rolls_used, 4);
-        // No armor: condition fails, no multiplier, no extra roll.
-        input.defender.armor = 0;
-        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0, 0, 0]));
-        assert!(!r.resonances[0].unwrap().active);
-        assert_eq!((r.damage, r.rolls_used), (10, 3));
-    }
-
-    #[test]
-    fn pure_pair_boosts_native_state() {
-        let mut input = cold_bolt(Aspect::Cold);
-        input.attacker.skill.state_chance_pct = 20;
-        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0, 0]));
-        assert_eq!(r.tint_roll_count, 0);
-        // 20% x1.59 = 31%; buildup 5000 x1.59 = 7950
-        let s = r.packets()[0].state;
-        assert_eq!((s.chance_pct, s.success), (31, true));
-        assert_eq!(find(&r.states, StateKind::Chill).power, 7_950);
-    }
-
-    #[test]
-    fn deterministic_per_seed() {
-        let mut input = cold_bolt(Aspect::Piercing);
-        input.attacker.skill.state_chance_pct = 4_000;
-        input.attacker.crit_chance_pct = 1_000;
-        let a = resolve_hit(&input, &B, &mut VrfRoll::new([3; 32]));
-        let b = resolve_hit(&input, &B, &mut VrfRoll::new([3; 32]));
-        assert_eq!(a, b);
-    }
-
-    #[test]
-    fn preview() {
-        let mut input = basic(Aspect::Piercing, 4, 8, 0);
-        assert_eq!(preview_range(&input, &B), (4, 8));
-        input.defender.armor = 100;
-        assert_eq!(preview_range(&input, &B), (2, 4));
-        input.defender.immune_aspects = aspect_bit(Aspect::Piercing);
-        assert_eq!(preview_range(&input, &B), (0, 0));
-    }
-
-    #[test]
-    fn preview_hit_chances_and_ranges() {
-        let mut input = basic(Aspect::Piercing, 4, 8, 0);
-        // Faces 10..=19 and the natural 20 hit defense 10: 11 of 20.
-        let p = preview_hit(&input, &B);
-        assert_eq!((p.immune, p.hit_bp, p.crit_bp), (false, 5_500, 500));
-        assert_eq!((p.min, p.max, p.crit_min, p.crit_max), (4, 8, 6, 12));
-        // 10 plain hits x 10% + the natural 20.
-        input.attacker.crit_chance_pct = 10;
-        assert_eq!(preview_hit(&input, &B).crit_bp, 1_000);
-        // The crit roll is clamped like in the hit.
-        input.attacker.crit_chance_pct = BP;
-        assert_eq!(preview_hit(&input, &B).crit_bp, (BP + 10 * 9_500) / 20);
-        // A natural 1 always misses, a natural 20 always hits.
-        input.attacker.attack_bonus = 1_000;
-        assert_eq!(preview_hit(&input, &B).hit_bp, 9_500);
-        input.attacker.attack_bonus = 0;
-        input.defender.defense = u32::MAX;
-        assert_eq!(preview_hit(&input, &B).hit_bp, 500);
-        input.defender.immune_aspects = aspect_bit(Aspect::Piercing);
-        assert_eq!(
-            preview_hit(&input, &B),
-            HitPreview {
-                immune: true,
-                ..HitPreview::default()
-            }
-        );
-    }
-
-    #[test]
-    fn preview_hit_matches_every_d20_face() {
-        for (bonus, defense) in [(0, 10), (3, 14), (7, 2), (0, 25), (12, 30)] {
-            let mut input = basic(Aspect::Blunt, 3, 9, 0);
-            input.attacker.attack_bonus = bonus;
-            input.defender.defense = defense;
-            let hits = (0..20u64)
-                .filter(|face| {
-                    let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([*face, 0]));
-                    r.outcome == Outcome::Hit
-                })
-                .count() as u32;
-            assert_eq!(
-                preview_hit(&input, &B).hit_bp,
-                hits * BP / 20,
-                "{bonus} vs {defense}"
-            );
-        }
-    }
-
-    #[test]
-    fn preview_hit_damage_matches_the_hit_ends() {
-        let mut input = cold_bolt(Aspect::Fire);
-        input.attacker.added[0] = DamageRange::new(Aspect::Piercing, 2, 5);
-        input.attacker.increased[0] = Mod::new(ModFilter::Any, 3_000);
-        input.defender.armor = 40;
-        input.defender.resist_bp[Aspect::Cold as usize] = 5_000;
-        let p = preview_hit(&input, &B);
-        // Tint chance of tier 1 is 40; roll 40 fails. d100 0 and 100 are the range ends.
-        let at = |face: u64, point: u64| {
-            resolve_hit(&input, &B, &mut ScriptedRoll::new([face, 40, point])).damage
-        };
-        assert_eq!((p.min, p.max), (at(14, 0), at(14, 100)));
-        let nat20 =
-            |point: u64| resolve_hit(&input, &B, &mut ScriptedRoll::new([19, 40, point])).damage;
-        assert_eq!((p.crit_min, p.crit_max), (nat20(0), nat20(100)));
-    }
-
-    #[test]
-    fn state_chance_bonus_reaches_resonance_states() {
-        let mut input = basic(Aspect::Piercing, 10, 10, 0);
-        input.attacker.tints[0] = Tint::new(Aspect::Cold, 1, Carrier::Class);
-        // Chill is tempo: the Dexterity bonus, not the source-stat bonus.
-        input.attacker.tempo_bonus_bp = BP;
-        input.defender.armor = 100;
-        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0, 0, 0]));
-        // 30% x2 = 60%.
-        assert_eq!(r.resonance_states[0].chance_pct, 60);
-    }
-
-    #[test]
-    fn shock_multiplies_the_next_hit_and_the_preview() {
-        let input = basic(Aspect::Lightning, 10, 10, 50);
-        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0, 0]));
-        let shock = find(&r.states, StateKind::Shock);
-        assert_eq!((shock.power, shock.turns), (B.shock_vuln_bp, 2));
-        let mut next = basic(Aspect::Fire, 10, 10, 0);
-        next.defender.states = r.states;
-        let hit = resolve_hit(&next, &B, &mut ScriptedRoll::new([14, 0]));
-        assert_eq!(hit.packets()[0].vuln_shock_bp, B.shock_vuln_bp);
-        assert_eq!(hit.damage, 12);
-        assert_eq!(preview_range(&next, &B), (12, 12));
-    }
-
-    #[test]
-    fn penetration_lowers_armor_on_the_next_physical_hit() {
-        let mut input = basic(Aspect::Piercing, 10, 10, 50);
-        input.defender.armor = 100;
-        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0, 0]));
-        assert_eq!(
-            find(&r.states, StateKind::Penetration).power,
-            B.penetration_power_bp
-        );
-        // The hit that applies it does not benefit.
-        assert_eq!(
-            (r.packets()[0].pen_state_bp, r.packets()[0].armor),
-            (0, 100)
-        );
-        assert_eq!(r.damage, 5);
-        let mut next = basic(Aspect::Blunt, 10, 10, 0);
-        next.defender.armor = 100;
-        next.defender.states = r.states;
-        let hit = resolve_hit(&next, &B, &mut ScriptedRoll::new([14, 0]));
-        let p = hit.packets()[0];
-        assert_eq!((p.pen_state_bp, p.pen_attacker_bp, p.armor), (5_000, 0, 66));
-        assert_eq!(hit.damage, 6);
-        assert_eq!(preview_range(&next, &B), (6, 6));
-    }
-
-    #[test]
-    fn keenness_penetrates_the_hit_that_triggered_it() {
-        let mut input = basic(Aspect::Fire, 10, 10, 0);
-        input.attacker.added[0] = DamageRange::new(Aspect::Piercing, 10, 10);
-        input.attacker.tints[0] = Tint::new(Aspect::Piercing, 1, Carrier::Race);
-        input.defender.armor = 100;
-        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0, 0]));
-        assert!(r.resonances[0].unwrap().active);
-        let p = r
-            .packets()
-            .iter()
-            .find(|p| p.aspect == Aspect::Piercing)
-            .unwrap();
-        assert_eq!(p.pen_attacker_bp, B.keenness_pen(Tier::BEST));
-        assert!(p.armor < 100);
-        assert_eq!(r.packets()[0].pen_attacker_bp, 0);
-    }
-
-    #[test]
-    fn aspect_resistance_lowers_chill_chance_and_buildup() {
-        let mut input = basic(Aspect::Cold, 10, 10, 50);
-        input.defender.resist_bp[Aspect::Cold as usize] = BP;
-        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0, 0]));
-        assert_eq!(
-            (
-                r.packets()[0].state.chance_pct,
-                r.packets()[0].state.success
-            ),
-            (25, true)
-        );
-        assert_eq!(find(&r.states, StateKind::Chill).power, 2_500);
-    }
-
-    #[test]
-    fn chill_scales_with_the_tempo_bonus() {
-        let mut input = basic(Aspect::Cold, 10, 10, 20);
-        input.attacker.state_chance_bonus_bp = BP;
-        let plain = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0, 0]));
-        assert_eq!(plain.packets()[0].state.chance_pct, 20);
-        // Half again: still under the freeze threshold (a full doubling of buildup freezes).
-        input.attacker.tempo_bonus_bp = 5_000;
-        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0, 0]));
-        assert_eq!(r.packets()[0].state.chance_pct, 30);
-        assert_eq!(find(&r.states, StateKind::Chill).power, 7_500);
-    }
-
-    #[test]
-    fn blunt_stun_still_skips_the_turn() {
-        let input = basic(Aspect::Blunt, 10, 10, 50);
-        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0, 0]));
-        assert_eq!(find(&r.states, StateKind::Stun).power, 0);
-        let mut states = r.states;
-        assert!(crate::tick_turn_start(&mut states).skip_action);
-    }
-}
+#[path = "hit_tests.rs"]
+mod tests;

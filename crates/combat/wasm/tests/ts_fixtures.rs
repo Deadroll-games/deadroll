@@ -13,11 +13,12 @@
 
 use std::path::PathBuf;
 
-use deadroll_combat::{ModKind, TimedMod, TimedMods, MODS_MAX};
+use deadroll_combat::{AccuracyBuff, HitPreview, ModKind, TimedMod, TimedMods, MODS_MAX};
 use deadroll_combat_wasm::{
-    attack_input, hero_sheet, AttackRequest, HeroInput, HeroSheet, SkillInput, TargetInput,
+    attack_input, hero_sheet, monster_sheet, AttackRequest, DefenseInput, HeroInput, HeroSheet,
+    MonsterInput, SkillInput, TargetInput,
 };
-use deadroll_rules::{items::starter_loadout, BalanceConfig};
+use deadroll_rules::{items::starter_loadout, registry::Registry, BalanceConfig};
 use deadroll_skillcheck::{derive, presets, Category, Purpose};
 use deadroll_types::{ActiveState, Aspect, Class, Race, StateKind, STATES_MAX};
 use serde_json::{json, Value};
@@ -107,6 +108,54 @@ fn sheet_json(s: &HeroSheet) -> Value {
     })
 }
 
+fn defense_of(r: &Registry, id: u8) -> DefenseInput {
+    let d = r.defense_of(id);
+    DefenseInput {
+        resist: d.resist,
+        immune_aspects: d.immune_aspects,
+        immune_states: d.immune_states,
+    }
+}
+
+fn defense_json(d: &DefenseInput) -> Value {
+    json!({
+        "resist": d.resist,
+        "immuneAspects": d.immune_aspects,
+        "immuneStates": d.immune_states,
+    })
+}
+
+fn preview_json(p: &HitPreview) -> Value {
+    let tints: Vec<Value> = p.tints[..p.tint_count as usize]
+        .iter()
+        .map(|t| {
+            json!({
+                "base": t.base as u8,
+                "tint": t.tint as u8,
+                "carrier": t.carrier as u8,
+                "tier": t.tier,
+                "pure": t.pure,
+                "chancePct": t.chance_pct,
+                "id": t.id,
+                "generated": t.generated,
+                "conditionMet": t.condition_met,
+                "min": t.min,
+                "max": t.max,
+            })
+        })
+        .collect();
+    json!({
+        "immune": p.immune,
+        "hitBp": p.hit_bp,
+        "critBp": p.crit_bp,
+        "min": p.min,
+        "max": p.max,
+        "critMin": p.crit_min,
+        "critMax": p.crit_max,
+        "tints": tints,
+    })
+}
+
 fn heroes() -> Vec<HeroInput> {
     let mut out = Vec::new();
     for (i, class) in Class::ALL.iter().enumerate() {
@@ -132,7 +181,7 @@ fn heroes() -> Vec<HeroInput> {
     out
 }
 
-fn requests(heroes: &[HeroInput]) -> Vec<AttackRequest> {
+fn requests(heroes: &[HeroInput], registry: &Registry) -> Vec<AttackRequest> {
     let mut chill = [ActiveState::default(); STATES_MAX];
     chill[0] = ActiveState {
         kind: StateKind::Chill,
@@ -173,12 +222,21 @@ fn requests(heroes: &[HeroInput]) -> Vec<AttackRequest> {
             });
         for (k, skill) in core::iter::once(None).chain(damage_skills).enumerate() {
             let m = n + k;
+            let id = (m % 5) as u8;
+            let accuracy = match m % 4 {
+                1 => AccuracyBuff {
+                    aspect: skill.map_or(Aspect::Fire, |s| s.blocks.aspects[0]),
+                    turns: 2,
+                    bonus: 3,
+                },
+                _ => AccuracyBuff::default(),
+            };
             out.push(AttackRequest {
                 hero: *h,
                 hero_mods: if m % 3 == 1 { empowered } else { NO_MODS },
                 skill,
                 target: TargetInput {
-                    bestiary_id: (m % 5) as u8,
+                    bestiary_id: id,
                     level: 1 + (m % 3) as u8,
                     states: if m % 4 == 3 {
                         chill
@@ -186,7 +244,9 @@ fn requests(heroes: &[HeroInput]) -> Vec<AttackRequest> {
                         [ActiveState::default(); STATES_MAX]
                     },
                     mods: if m % 5 == 4 { protected } else { NO_MODS },
+                    defense: defense_of(registry, id),
                 },
+                accuracy,
             });
         }
     }
@@ -194,6 +254,13 @@ fn requests(heroes: &[HeroInput]) -> Vec<AttackRequest> {
 }
 
 fn build() -> Value {
+    let registry = Registry::shipped().unwrap();
+    let tables = [
+        registry.aspects.clone(),
+        registry.traits.clone(),
+        registry.resonances.clone(),
+    ]
+    .concat();
     let heroes = heroes();
     let sheets: Vec<Value> = heroes
         .iter()
@@ -205,10 +272,14 @@ fn build() -> Value {
             })
         })
         .collect();
-    let attacks: Vec<Value> = requests(&heroes)
+    let attacks: Vec<Value> = requests(&heroes, &registry)
         .iter()
         .map(|r| {
-            let p = deadroll_combat::preview_hit(&attack_input(r).unwrap(), &CFG.combat);
+            let p = deadroll_combat::preview_hit(
+                &attack_input(r).unwrap(),
+                &CFG.combat,
+                &registry.tables,
+            );
             json!({
                 "input": {
                     "hero": hero_json(&r.hero),
@@ -219,25 +290,54 @@ fn build() -> Value {
                         "level": r.target.level,
                         "states": states_json(&r.target.states),
                         "mods": mods_json(&r.target.mods),
+                        "defense": defense_json(&r.target.defense),
+                    },
+                    "accuracy": {
+                        "aspect": r.accuracy.aspect as u8,
+                        "turns": r.accuracy.turns,
+                        "bonus": r.accuracy.bonus,
                     },
                 },
                 "bytes": hex(&borsh::to_vec(r).unwrap()),
-                "preview": {
-                    "immune": p.immune,
-                    "hitBp": p.hit_bp,
-                    "critBp": p.crit_bp,
-                    "min": p.min,
-                    "max": p.max,
-                    "critMin": p.crit_min,
-                    "critMax": p.crit_max,
+                "preview": preview_json(&p),
+            })
+        })
+        .collect();
+    let monsters: Vec<Value> = (0..5u8)
+        .flat_map(|id| [1u8, 3].map(move |level| (id, level)))
+        .map(|(id, level)| {
+            let input = MonsterInput {
+                bestiary_id: id,
+                level,
+                defense: defense_of(&registry, id),
+            };
+            let m = monster_sheet(&input).unwrap();
+            json!({
+                "input": {
+                    "bestiaryId": id,
+                    "level": level,
+                    "defense": defense_json(&input.defense),
+                },
+                "bytes": hex(&borsh::to_vec(&input).unwrap()),
+                "sheet": {
+                    "weapon": { "aspect": m.weapon.aspect as u8, "min": m.weapon.min, "max": m.weapon.max },
+                    "attackBonus": m.attack_bonus,
+                    "evasion": m.evasion,
+                    "armor": m.armor,
+                    "resistBp": m.resist_bp,
+                    "immuneAspects": m.immune_aspects,
+                    "immuneStates": m.immune_states,
+                    "resistCapBp": m.resist_cap_bp,
                 },
             })
         })
         .collect();
     json!({
         "abiVersion": deadroll_combat_wasm::ABI_VERSION,
+        "tables": hex(&tables),
         "sheets": sheets,
         "attacks": attacks,
+        "monsters": monsters,
     })
 }
 

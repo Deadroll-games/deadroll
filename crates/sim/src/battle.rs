@@ -9,16 +9,17 @@
 //! Ends: a boss dies (or every monster, when there is no boss) = victory, every hero dead =
 //! defeat, `max_rounds` = draw.
 use deadroll_combat::{
-    chill_slow_bp, speed_ap, Applied, HitInput, HitResult, Outcome as HitOutcome, RollSource,
-    SeededRoll, StateRoll, States, TimedMods,
+    chill_slow_bp, speed_ap, AccuracyBuff, Applied, HitInput, HitResult, OpKind,
+    Outcome as HitOutcome, ResonanceTables, RollSource, SeededRoll, StateRoll, States, TimedMods,
 };
 use deadroll_rules::{
     input::hero,
     input::{effect_action, EffectAction},
     monster::monster_ap,
     resolve,
+    spread::{spread, step_into, BurningCell, Field, BURNING_CELLS_MAX},
     units::{cooldown_after_use, roll_initiative},
-    BalanceConfig, MonsterProfile, Unit,
+    BalanceConfig, MonsterDefense, MonsterProfile, Unit,
 };
 use deadroll_skillcheck::ACTIVE_MAX;
 use deadroll_types::{ActiveState, Cell, Monster, StateKind, BP, PARTY_MAX, STATES_MAX};
@@ -83,6 +84,17 @@ pub struct BattleStats {
     pub monster_turns_skipped: u32,
     /// States that landed, indexed by `StateKind` (Added, Refreshed or Froze).
     pub states_landed: [u32; StateKind::COUNT],
+    /// Resonances that triggered (their target condition met), pairs and triples.
+    pub resonances: u32,
+    pub triples: u32,
+    /// Ops of those resonances that acted, indexed by `OpKind`.
+    pub ops_acted: [u32; OpKind::COUNT as usize],
+    /// States a resonance passed on to other monsters, knockbacks, cells set on fire, and
+    /// units that stepped into a burning cell.
+    pub jumps: u32,
+    pub knockbacks: u32,
+    pub cells_ignited: u32,
+    pub burned_by_cells: u32,
 }
 
 pub(crate) struct Hero {
@@ -96,10 +108,13 @@ pub(crate) struct Hero {
     pub cooldowns: [u8; ACTIVE_MAX],
     pub max_ap: u8,
     pub initiative: u16,
+    /// From a resonance (Pale Flame).
+    pub accuracy: AccuracyBuff,
 }
 
 pub(crate) struct Foe {
     pub m: Monster,
+    pub defense: MonsterDefense,
     pub mods: TimedMods,
     pub profile: MonsterProfile,
     pub boss: bool,
@@ -127,6 +142,9 @@ pub(crate) struct Battle<'a> {
     pub height: u8,
     pub heroes: Vec<Hero>,
     pub foes: Vec<Foe>,
+    tables: ResonanceTables,
+    cells: [BurningCell; BURNING_CELLS_MAX],
+    round: u16,
     rng: SeededRoll,
     input: Box<HitInput>,
     result: Box<HitResult>,
@@ -184,6 +202,7 @@ impl<'a> Battle<'a> {
                     cooldowns: [0; ACTIVE_MAX],
                     max_ap: hero::ap(cfg, &f.hero),
                     initiative: hero::initiative(cfg, &f.hero),
+                    accuracy: AccuracyBuff::default(),
                 }
             })
             .collect();
@@ -211,7 +230,8 @@ impl<'a> Battle<'a> {
                         ..Monster::default()
                     },
                     mods: NO_MODS,
-                    profile: s.base.profile(s.level, &cfg.monsters),
+                    defense: s.defense,
+                    profile: s.base.profile(s.level, &cfg.monsters, &s.defense),
                     boss: s.base.boss,
                     max_ap: monster_ap(s.base.speed, &cfg.monsters),
                     initiative: s.base.initiative,
@@ -227,6 +247,9 @@ impl<'a> Battle<'a> {
             height: arena.height,
             heroes,
             foes,
+            tables: fight.tables,
+            cells: [BurningCell::default(); BURNING_CELLS_MAX],
+            round: 1,
             rng: SeededRoll::new(seed),
             input: Box::default(),
             result: Box::default(),
@@ -238,6 +261,13 @@ impl<'a> Battle<'a> {
                 monster_turns: 0,
                 monster_turns_skipped: 0,
                 states_landed: [0; StateKind::COUNT],
+                resonances: 0,
+                triples: 0,
+                ops_acted: [0; OpKind::COUNT as usize],
+                jumps: 0,
+                knockbacks: 0,
+                cells_ignited: 0,
+                burned_by_cells: 0,
             },
             boss_dead: false,
         }
@@ -280,6 +310,7 @@ impl<'a> Battle<'a> {
             if index == len {
                 index = 0;
                 round += 1;
+                self.round = round;
             }
         }
     }
@@ -313,6 +344,7 @@ impl<'a> Battle<'a> {
                     h.hp,
                 );
                 h.hp = start.hp;
+                h.accuracy.tick();
                 self.stats.slots[s].turns += 1;
                 self.credit_dot(start.dot_source, start.dot_damage);
                 if start.died {
@@ -395,14 +427,17 @@ impl<'a> Battle<'a> {
             Action::Attack { skill, target } => {
                 let skill = skill.map(skill_of);
                 let hero_mods = self.heroes[s].mods;
+                let mut accuracy = self.heroes[s].accuracy;
                 let foe = &mut self.foes[target];
                 foe.attacks_taken = foe.attacks_taken.saturating_add(1);
                 let out = resolve::attack_monster(
                     cfg,
+                    &self.tables,
                     caster,
                     &fighter.hero,
                     skill.as_ref(),
                     &hero_mods,
+                    &mut accuracy,
                     &foe.profile,
                     &mut foe.m,
                     &mut foe.mods,
@@ -425,10 +460,12 @@ impl<'a> Battle<'a> {
                 if out.rider.is_some_and(|r| r.roll.outcome == HitOutcome::Hit) {
                     slot.effects_landed += 1;
                 }
-                note_states(&mut self.stats.states_landed, &self.result);
+                self.heroes[s].accuracy = accuracy;
+                note_states(&mut self.stats, &self.result);
                 if out.died {
                     self.foe_died(target);
                 }
+                self.spread(s, target, caster);
             }
             Action::Debuff { skill, target } => {
                 let stats = skill_of(skill);
@@ -495,6 +532,7 @@ impl<'a> Battle<'a> {
         let hero_mods = h.mods;
         let died = resolve::monster_attack(
             cfg,
+            &self.tables,
             Unit::Monster(i as u8).id(),
             &foe.profile,
             &foe.mods,
@@ -509,21 +547,134 @@ impl<'a> Battle<'a> {
         if died {
             self.hero_died(s);
         }
-        note_states(&mut self.stats.states_landed, &self.result);
+        note_states(&mut self.stats, &self.result);
+    }
+
+    /// The jumps, knockback and burning cells of hero `s`'s last hit on monster `target`
+    /// (`deadroll_rules::spread`, the code the program runs).
+    fn spread(&mut self, s: usize, target: usize, caster: u8) {
+        let r = &self.result;
+        if r.jump_count == 0 && r.knockback == 0 && r.ignite_power == 0 {
+            return;
+        }
+        let mut monsters: Vec<Monster> = self.foes.iter().map(|f| f.m).collect();
+        let defense: Vec<MonsterDefense> = self.foes.iter().map(|f| f.defense).collect();
+        let field = OpenArena {
+            width: self.width,
+            height: self.height,
+            units: self
+                .heroes
+                .iter()
+                .filter(|h| h.alive)
+                .map(|h| h.cell)
+                .chain(
+                    monsters
+                        .iter()
+                        .filter(|m| m.alive)
+                        .map(|m| Cell { x: m.x, y: m.y }),
+                )
+                .collect(),
+        };
+        let out = spread(
+            self.cfg,
+            r,
+            self.heroes[s].cell,
+            target,
+            &mut monsters,
+            &defense,
+            &field,
+            &mut self.cells,
+            self.round,
+            caster,
+        );
+        for (f, m) in self.foes.iter_mut().zip(monsters) {
+            f.m = m;
+        }
+        for h in out.hits() {
+            if h.applied != Applied::None {
+                self.stats.states_landed[h.kind as usize] += 1;
+            }
+        }
+        self.stats.jumps += out.hit_count as u32;
+        self.stats.knockbacks += out.moved.is_some() as u32;
+        self.stats.cells_ignited += out.ignited_count as u32;
+    }
+
+    /// Hero `s` moves to `cell`; a burning cell sets it on fire. The simulator moves in one
+    /// jump, so only the cell it ends on counts (the program checks every step).
+    pub(crate) fn move_hero(&mut self, s: usize, cell: Cell) {
+        let h = &mut self.heroes[s];
+        if h.cell == cell {
+            return;
+        }
+        h.cell = cell;
+        if step_into(&self.cells, cell, self.round, &mut h.states, 0, self.cfg).is_some() {
+            self.stats.burned_by_cells += 1;
+        }
+    }
+
+    /// Monster `i` moves to `cell`, as [`Self::move_hero`].
+    pub(crate) fn move_foe(&mut self, i: usize, cell: Cell) {
+        let f = &mut self.foes[i];
+        if (f.m.x, f.m.y) == (cell.x, cell.y) {
+            return;
+        }
+        f.m.x = cell.x;
+        f.m.y = cell.y;
+        let immune = f.defense.immune_states;
+        if step_into(
+            &self.cells,
+            cell,
+            self.round,
+            &mut f.m.states,
+            immune,
+            self.cfg,
+        )
+        .is_some()
+        {
+            self.stats.burned_by_cells += 1;
+        }
     }
 }
 
-fn note_states(counts: &mut [u32; StateKind::COUNT], result: &HitResult) {
+/// The open arena as the spread sees it: no walls, living units block.
+struct OpenArena {
+    width: u8,
+    height: u8,
+    units: Vec<Cell>,
+}
+
+impl Field for OpenArena {
+    fn passable(&self, c: Cell) -> bool {
+        c.x < self.width && c.y < self.height
+    }
+
+    fn occupied(&self, c: Cell) -> bool {
+        self.units.contains(&c)
+    }
+}
+
+fn note_states(stats: &mut BattleStats, result: &HitResult) {
     let land = |counts: &mut [u32; StateKind::COUNT], roll: &StateRoll| {
         if roll.success && roll.applied != Applied::None {
             counts[roll.kind as usize] = counts[roll.kind as usize].saturating_add(1);
         }
     };
     for packet in result.packets() {
-        land(counts, &packet.state);
+        land(&mut stats.states_landed, &packet.state);
     }
-    for roll in &result.resonance_states {
-        land(counts, roll);
+    for (slot, res) in result.resonances.iter().enumerate() {
+        let Some(res) = res.filter(|r| r.active) else {
+            continue;
+        };
+        stats.resonances += 1;
+        stats.triples += res.second_tint.is_some() as u32;
+        for op in result.ops(slot) {
+            land(&mut stats.states_landed, &op.state);
+            if op.acted {
+                stats.ops_acted[op.kind as usize] += 1;
+            }
+        }
     }
 }
 
@@ -589,6 +740,7 @@ mod tests {
                 .map(|_| Spawn {
                     name: "goblin".into(),
                     base: p0::monster_base(1).unwrap(),
+                    defense: deadroll_rules::MonsterDefense::NONE,
                     level: 1,
                 })
                 .collect(),
@@ -597,6 +749,9 @@ mod tests {
                 height: 6,
                 gap: 3,
             },
+            tables: deadroll_rules::registry::Registry::shipped()
+                .unwrap()
+                .tables,
         }
     }
 

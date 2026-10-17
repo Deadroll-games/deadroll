@@ -26,6 +26,10 @@ export const bagPda = (character: Address) => pda(PROGRAMS.character, ["bag", en
 
 export const bestiaryPda = () => pda(PROGRAMS.registry, ["bestiary"]);
 export const tilesetPda = () => pda(PROGRAMS.registry, ["tileset"]);
+/** Registry resonance tables, copied into the session at open_session (patch 4). */
+export const aspectsPda = () => pda(PROGRAMS.registry, ["aspects"]);
+export const traitsPda = () => pda(PROGRAMS.registry, ["traits"]);
+export const resonancesPda = () => pda(PROGRAMS.registry, ["resonances"]);
 
 export const mapPda = (dm: Address, index: number) => pda(PROGRAMS.map, ["map", enc.encode(dm) as Uint8Array, u32le(index)]);
 export const layoutPda = (map: Address) => pda(PROGRAMS.map, ["layout", enc.encode(map) as Uint8Array]);

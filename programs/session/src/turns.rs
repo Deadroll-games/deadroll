@@ -167,6 +167,7 @@ mod tests {
             start,
             TurnStart {
                 dot_damage: 0,
+                thaw_damage: 0,
                 hp: 10,
                 died: false,
                 skip: None,

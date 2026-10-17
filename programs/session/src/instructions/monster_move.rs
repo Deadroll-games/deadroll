@@ -5,7 +5,7 @@ use crate::{
     auth,
     errors::SessionError,
     events::Moved,
-    movement::{walk_path, Path},
+    movement::{burn_on_path, walk_path, Path},
     rules::{Unit, MAX_PATH},
     state::{external::MapLayoutView, GameSession, Monsters},
 };
@@ -58,17 +58,30 @@ pub fn handler(
     require!(state.alive, SessionError::UnitDead);
 
     let layout = MapLayoutView::load(&accounts.layout)?;
+    let start = Cell {
+        x: state.x,
+        y: state.y,
+    };
+    let path = Path { steps: &steps, len };
     let (end, action_points) = walk_path(
         session,
         &layout,
         &monsters,
         unit,
-        Cell {
-            x: state.x,
-            y: state.y,
-        },
+        start,
         Path { steps: &steps, len },
         state.action_points,
+    )?;
+    let immune = monsters.defense(monster)?.immune_states;
+    burn_on_path(
+        session,
+        session.key(),
+        &monsters.burning_cells()?,
+        unit,
+        start,
+        &path,
+        &mut state.states,
+        immune,
     )?;
 
     state.x = end.x;

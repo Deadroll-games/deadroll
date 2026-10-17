@@ -55,9 +55,9 @@ export function chanceView(raw: number, chanceBp: number | null, success: boolea
   };
 }
 
-/** e.g. "Resonance (Piercing tint on Lightning, tier 14)". */
+/** e.g. "Resonance (Piercing tint from the race on Lightning, tier 14)". */
 export function tintLabel(tint: TintRoll): string {
-  return `Resonance (${aspectName(tint.tint)} tint on ${aspectName(tint.base)}, tier ${tint.tier})`;
+  return `Resonance (${aspectName(tint.tint)} tint from the ${carrierName(tint.carrier).toLowerCase()} on ${aspectName(tint.base)}, tier ${tint.tier})`;
 }
 
 export function tintView(tint: TintRoll): ChanceView {
@@ -118,8 +118,8 @@ export function cascadeSteps(hit: HitResult, critChanceBp?: number): CascadeStep
     steps.push({
       key: `resonance-${i}`,
       kind: "resonance",
-      label: `Resonance ${resonanceName(resonance.id)}`,
-      value: `tier ${resonance.tier}`,
+      label: `Resonance ${resonanceName(resonance.id, resonance.secondTint)}`,
+      value: `${carrierName(resonance.carrier)}, tier ${resonance.tier}`,
       success: true,
     });
   });

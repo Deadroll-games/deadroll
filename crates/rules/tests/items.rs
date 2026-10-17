@@ -1,5 +1,5 @@
 //! Equipment rules: starter kits, where items fit, what worn items add to a hero.
-use deadroll_combat::{ModKind, TimedMod, TimedMods, MODS_MAX};
+use deadroll_combat::{AccuracyBuff, ModKind, TimedMod, TimedMods, MODS_MAX};
 use deadroll_rules::{
     input::{effect_range, hero, player_attacker, player_defender, EffectAction, HeroStats},
     items::{
@@ -121,20 +121,21 @@ fn equipment_bytes_round_trip() {
 
 #[test]
 fn the_starter_kit_keeps_the_old_class_numbers() {
-    // Before items: class weapon Blunt 4-8 / 3-6 / 2-5 and armor 30 / 5 / 5.
+    // Before items: class weapon 4-8 / 3-6 / 2-5 and armor 30 / 5 / 5. Since patch 4 the
+    // weapons have their own aspects: a Piercing sword, a Blunt staff, a Lightning wand.
     let cfg = BalanceConfig::DEFAULT;
     let old = [
-        (Class::Warrior, [4, 8], 30),
-        (Class::Mage, [3, 6], 5),
-        (Class::Support, [2, 5], 5),
+        (Class::Warrior, Aspect::Piercing, [4, 8], 30),
+        (Class::Mage, Aspect::Blunt, [3, 6], 5),
+        (Class::Support, Aspect::Lightning, [2, 5], 5),
     ];
     let states = [ActiveState::default(); STATES_MAX];
-    for (class, [min, max], armor) in old {
+    for (class, aspect, [min, max], armor) in old {
         let h = hero_of(class, kit(class));
-        let a = player_attacker(&cfg, 0, &h, None, &NONE);
+        let a = player_attacker(&cfg, 0, &h, None, &NONE, &AccuracyBuff::default());
         assert_eq!(
             (a.weapon.aspect, a.weapon.min, a.weapon.max),
-            (Aspect::Blunt, min, max)
+            (aspect, min, max)
         );
         let d = player_defender(&cfg, &h, &states, &NONE);
         assert_eq!(d.armor, armor, "{class:?}");
@@ -146,10 +147,64 @@ fn the_starter_kit_keeps_the_old_class_numbers() {
 }
 
 #[test]
+fn the_weapon_tints_skills_but_not_its_own_basic_attack() {
+    use deadroll_combat::{Carrier, Tint};
+    use deadroll_rules::input::{SkillStats, ITEM_TINT, RACE_TINT};
+    let cfg = BalanceConfig::DEFAULT;
+    let h = hero_of(Class::Mage, kit(Class::Mage));
+    let basic = player_attacker(&cfg, 0, &h, None, &NONE, &AccuracyBuff::default());
+    assert_eq!(basic.tints[ITEM_TINT], Tint::default());
+    assert_eq!(basic.tints[RACE_TINT].carrier, Carrier::Race);
+    let skill = SkillStats::derive(deadroll_skillcheck::presets::MAGE[0].blocks, &cfg.skills);
+    let cast = player_attacker(&cfg, 0, &h, Some(&skill), &NONE, &AccuracyBuff::default());
+    assert_eq!(
+        cast.tints[ITEM_TINT],
+        Tint::new(Aspect::Blunt, 14, Carrier::Item)
+    );
+    // The class slot is empty in the first version (CHARACTER 8.1: no class aspect).
+    assert_eq!(cast.tints[1], Tint::default());
+    // Armor carries no aspect; bare hands neither.
+    let bare = hero_of(Class::Mage, Equipment::EMPTY);
+    let cast = player_attacker(
+        &cfg,
+        0,
+        &bare,
+        Some(&skill),
+        &NONE,
+        &AccuracyBuff::default(),
+    );
+    assert_eq!(cast.tints[ITEM_TINT], Tint::default());
+}
+
+#[test]
+fn an_accuracy_buff_helps_only_attacks_of_its_aspect() {
+    use deadroll_rules::input::SkillStats;
+    let cfg = BalanceConfig::DEFAULT;
+    let h = hero_of(Class::Mage, kit(Class::Mage));
+    let skill = SkillStats::derive(deadroll_skillcheck::presets::MAGE[0].blocks, &cfg.skills);
+    let plain = player_attacker(&cfg, 0, &h, Some(&skill), &NONE, &AccuracyBuff::default());
+    let buff = |aspect| AccuracyBuff {
+        aspect,
+        turns: 2,
+        bonus: 3,
+    };
+    let base = skill.blocks.aspects[0];
+    let on = player_attacker(&cfg, 0, &h, Some(&skill), &NONE, &buff(base));
+    assert_eq!(on.attack_bonus, plain.attack_bonus + 3);
+    let other = Aspect::ALL
+        .iter()
+        .copied()
+        .find(|a| !skill.blocks.aspects[..skill.blocks.aspect_count as usize].contains(a))
+        .unwrap();
+    let off = player_attacker(&cfg, 0, &h, Some(&skill), &NONE, &buff(other));
+    assert_eq!(off.attack_bonus, plain.attack_bonus);
+}
+
+#[test]
 fn without_a_weapon_the_hero_fights_bare_handed() {
     let cfg = BalanceConfig::DEFAULT;
     let h = hero_of(Class::Warrior, Equipment::EMPTY);
-    let w = player_attacker(&cfg, 0, &h, None, &NONE).weapon;
+    let w = player_attacker(&cfg, 0, &h, None, &NONE, &AccuracyBuff::default()).weapon;
     assert_eq!((w.min, w.max), (cfg.items.unarmed[0], cfg.items.unarmed[1]));
     assert_eq!(item_bonus(&h.equipment, &cfg.items).weapon, None);
     // Armor in the main hand is not a weapon.
@@ -183,8 +238,8 @@ fn every_item_number_reaches_the_hero() {
     let bare = hero_of(Class::Mage, Equipment::EMPTY);
     let dressed = hero_of(Class::Mage, eq);
 
-    let a = player_attacker(&cfg, 0, &dressed, None, &NONE);
-    let a0 = player_attacker(&cfg, 0, &bare, None, &NONE);
+    let a = player_attacker(&cfg, 0, &dressed, None, &NONE, &AccuracyBuff::default());
+    let a0 = player_attacker(&cfg, 0, &bare, None, &NONE, &AccuracyBuff::default());
     assert_eq!(
         (a.weapon.aspect, a.weapon.min, a.weapon.max),
         (Aspect::Piercing, 5, 9)

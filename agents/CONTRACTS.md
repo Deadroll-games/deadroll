@@ -31,6 +31,7 @@ Every program exposes `pub const ID` and a `cpi` feature so other programs can d
 | `Bestiary` | registry | `["bestiary"]` |
 | `Tileset` | registry | `["tileset"]` |
 | `PrefabBook` | registry | `["prefabs"]` |
+| `TraitTable` | registry | `["traits"]` (patch 4) |
 | program signer | each program | `["authority"]` (used to sign CPI into other game programs) |
 | `RasterizerCode` | render | `["rasterizer", version: u16 LE]` (created by client with SystemProgram, see `rasterizer` skill) |
 | `Palette` | render | `["palette", version: u16 LE]` |
@@ -265,3 +266,51 @@ and counterweights stay in basis points.
 `StateKind` in the IDL gains `Penetration`.
 
 Combat WASM ABI 3 (`crates/combat/wasm/README.md`).
+
+## 11. Patch 4: resonances and tints
+
+`crates/types`: seed `TRAITS = b"traits"` added (registry `["traits"]`). Nothing renamed or
+removed.
+
+Registry tables (`programs/registry/README.md`), validated with the decoder every reader uses
+(`deadroll_combat::tables`):
+
+```
+TableKind::Traits = 5            ["traits"], 6 x 32 B: present, 0, hit op, template op x2, 12 x 0
+Aspects record (8 B)             [aspect, family, flags, native state (0xFF none), trait id,
+                                  condition of generated pairs, 0, 0]
+Resonances record (16 B)         [condition, flags (bit 0: override), op 0, op 1, 0, 0]
+Op (6 B)                         [kind | 0x80 crit only, arg, value u32 LE]; kinds 0..=20
+                                  (deadroll_combat::tables::OpKind), arg 0xFF = the native state
+Bestiary record                  byte 38: state immunity mask (bit = StateKind); 39..48 zero
+```
+
+`open_session` takes three more accounts at the end: `aspects`, `traits`, `resonances` (registry
+table PDAs, address-checked, `InvalidRegistryTable` otherwise). It copies their bodies and each
+spawn's bestiary defenses into `MonsterState`:
+
+```
+MonsterState (program struct, appended after mods):
+  defense: [MonsterDefenseData { resist, immune_aspects, immune_states }; 24]
+  res_aspects: [u8; 48], res_traits: [u8; 192], res_pairs: [u8; 576]
+  burning_cells: [BurningCellData { x, y, until_round: u16, power: u32, source }; 16]
+Participation (program struct, appended after class_tier):
+  accuracy: AccuracyBuffData { aspect, turns, bonus: u32 }
+```
+
+`GameSession` is unchanged. `MonsterState` and `Participation` grow, so sessions opened before
+this upgrade no longer load.
+
+`consume_randomness` takes `layout` (the session's `MapLayout`, read-only) after
+`target_participation`; `vrf::callback_metas` and every request (`act`, `monster_act`,
+`start_session`) pass it.
+
+Events: `HitResolved.result` gains `res_ops`, `jumps`, `jump_count`, `knockback`, `ignite_power`,
+`target_mods`, `target_mod_count`, `accuracy_buff`, `landed`; `ResonanceData` gains
+`second_tier`, `second_carrier`, `generated`. New `ResonanceSpread` (after a player's hit, when
+a state jumped, the target was pushed, cells caught fire or the attacker got an accuracy buff)
+and `CellBurned` (`move_unit` / `monster_move` into a burning cell). `TurnTicked` gains
+`thaw_damage` at the end.
+
+Combat WASM ABI 4: `set_tables`, `monster_sheet`; `TargetInput.defense` and
+`AttackRequest.accuracy` appended; `HitPreview.tints` (`crates/combat/wasm/README.md`).

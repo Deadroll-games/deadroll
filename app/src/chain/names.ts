@@ -1,14 +1,19 @@
 // Display names for enum values. English UI strings; keep in sync with chain/types.ts.
 import { EFFECT_NAMES, Effect } from "./skillcheck";
 import type { EffectResolved } from "./support";
-import { ASPECT_COUNT, HitOutcome, type Aspect, type Carrier, type Class, type Race, type StateKind, type Tile } from "./types";
+import aspectsJson from "../../../assets/registry/aspects.json";
+import resonancesJson from "../../../assets/registry/resonances.json";
+import traitsJson from "../../../assets/registry/traits.json";
+import { MOD_NAMES } from "./support";
+import { ASPECT_COUNT, HitOutcome, OP_NATIVE, OpKind, OpOrigin, type Aspect, type Carrier, type Class, type ModKind, type OpResult, type Race, type StateKind, type Tile } from "./types";
 
 export const ASPECT_NAMES = ["Fire", "Cold", "Lightning", "Blood", "Blunt", "Piercing"] as const;
 export const STATE_NAMES = ["Burning", "Chill", "Freeze", "Bleeding", "Shock", "Stun", "Penetration"] as const;
 export const RACE_NAMES = ["Human", "Forest elf"] as const;
 export const CLASS_NAMES = ["Warrior", "Mage", "Support"] as const;
 export const TILE_NAMES = ["Floor", "Wall", "Water", "Door", "Entrance", "Exit", "Trap"] as const;
-export const CARRIER_NAMES = ["Race", "Class", "Item"] as const;
+/** Where a tint comes from. Only weapons carry an aspect in the first version (CHARACTER 8.1: no class aspect). */
+export const CARRIER_NAMES = ["Race", "Class", "Weapon"] as const;
 export const STAT_NAMES = ["Strength", "Dexterity", "Intelligence", "Endurance"] as const;
 
 /** Placeholder names for the demo bestiary ids until the registry Bestiary account is read (L9.6). */
@@ -28,11 +33,108 @@ export const tileName = (t: Tile): string => TILE_NAMES[t] ?? `tile ${t}`;
 export const carrierName = (c: Carrier): string => CARRIER_NAMES[c] ?? `carrier ${c}`;
 export const bestiaryName = (id: number): string => BESTIARY_NAMES[id] ?? `monster #${id}`;
 
-/** Resonance id is base * 6 + tint (crates/combat). */
-export function resonanceName(id: number): string {
+// Resonance and trait names are off-chain text (docs/DAMAGE_TYPES_AND_MIXES.md 10.1): they live
+// in assets/registry next to the records the chain holds, read here, not copied.
+const PAIR_NAMES: (string | null)[] = resonancesJson.records.map((r) => r.name);
+const TRAITS: { trait: string; epithet: string }[] = traitsJson.records;
+const ASPECT_TRAIT: string[] = aspectsJson.records.map((r) => r.trait);
+const NATIVE: (StateKind | null)[] = aspectsJson.records.map((r) => (r.native ? (STATE_NAMES.indexOf(r.native as (typeof STATE_NAMES)[number]) as StateKind) : null));
+
+/** The tint trait an aspect brings ("Fury", ...). */
+export const traitName = (a: Aspect): string => ASPECT_TRAIT[a] ?? `trait ${a}`;
+const epithet = (a: Aspect): string => TRAITS.find((t) => t.trait === ASPECT_TRAIT[a])?.epithet ?? "";
+
+/** The native state of an aspect (registry `aspects`). */
+export const nativeState = (a: Aspect): StateKind | null => NATIVE[a] ?? null;
+
+/** Resonance id is base * 6 + tint (crates/combat). A triple adds the second tint's epithet
+ * ("Piercing Frost of the Storm", docs 6.5). */
+export function resonanceName(id: number, secondTint: Aspect | null = null): string {
   const base = Math.floor(id / ASPECT_COUNT) as Aspect;
   const tint = (id % ASPECT_COUNT) as Aspect;
-  return `${aspectName(base)} + ${aspectName(tint)}`;
+  const name = PAIR_NAMES[id] ?? `${aspectName(base)} + ${aspectName(tint)}`;
+  return secondTint == null ? name : `${name} ${epithet(secondTint)}`;
+}
+
+const argState = (op: OpResult, base: Aspect): string => {
+  const kind = op.arg === OP_NATIVE ? nativeState(base) : (op.arg as StateKind);
+  return kind == null ? "its state" : stateName(kind);
+};
+const pct = (bp: number) => `${Math.round(bp / 100)}%`;
+
+/** What one op of a resonance on `base` did, e.g. "Burning +2 turns", "Shock brings Burning". */
+export function opText(op: OpResult, base: Aspect): string {
+  const native = argState({ ...op, arg: OP_NATIVE }, base);
+  const state = argState(op, base);
+  let text: string;
+  switch (op.kind) {
+    case OpKind.Multiplier:
+      text = `+${pct(op.amount)} ${aspectName(base)} damage${op.arg === OP_NATIVE ? "" : ` on a target with ${state}`}`;
+      break;
+    case OpKind.StateOnCrit:
+      text = `a crit applies ${state}`;
+      break;
+    case OpKind.ExtraStateChance:
+      text = `a chance of ${state}`;
+      break;
+    case OpKind.Linked:
+      text = `${native} brings ${state}`;
+      break;
+    case OpKind.LinkedChance:
+      text = `${native} with a chance of ${state}`;
+      break;
+    case OpKind.LinkedMod:
+      text = `${native} brings ${MOD_NAMES[op.arg as ModKind] ?? "a modifier"} ${pct(op.amount)}`;
+      break;
+    case OpKind.NativeTurns:
+      text = `${native} +${op.amount} turns`;
+      break;
+    case OpKind.NativePower:
+    case OpKind.NativePowerArmor:
+      text = `${native} +${pct(op.amount)} power${op.kind === OpKind.NativePowerArmor ? " (heavier armor, more)" : ""}`;
+      break;
+    case OpKind.NativeFaster:
+      text = `${native} ticks ${op.amount}x per turn, shorter`;
+      break;
+    case OpKind.ThawDamage:
+      text = `Freeze deals ${op.amount} when it thaws`;
+      break;
+    case OpKind.RemoveState:
+      text = `removes ${state}`;
+      break;
+    case OpKind.Jump:
+      text = `${state} jumps to an adjacent enemy`;
+      break;
+    case OpKind.JumpChain:
+      text = `${native} jumps along enemies with ${stateName(op.arg as StateKind)} (up to ${op.amount})`;
+      break;
+    case OpKind.JumpLine:
+      text = `${state} passes to the enemy behind`;
+      break;
+    case OpKind.Knockback:
+      text = `knocks back ${op.amount} cell${op.amount === 1 ? "" : "s"}`;
+      break;
+    case OpKind.IgniteCells:
+      text = `sets the cells around on fire (${op.amount} per turn)`;
+      break;
+    case OpKind.AddPacket:
+      text = `+${op.amount}-${op.amountMax} ${aspectName(op.arg as Aspect)} damage`;
+      break;
+    case OpKind.Penetrate:
+      text = `+${pct(op.amount)} armor penetration`;
+      break;
+    case OpKind.AccuracyBuff:
+      text = `+${op.amount} accuracy to ${aspectName(op.arg as Aspect)} attacks`;
+      break;
+    default:
+      text = "nothing";
+  }
+  const from =
+    op.origin === OpOrigin.Trait ? `${traitName(op.tint)}: `
+    : op.origin === OpOrigin.Template ? `${traitName(op.tint)} (triple): `
+    : "";
+  const crit = op.critOnly ? "on a crit, " : "";
+  return `${from}${crit}${text}${op.acted ? "" : " (did not trigger)"}`;
 }
 
 /** Formats a value scaled x10_000 with one decimal, e.g. 52_500n -> "5.3". */

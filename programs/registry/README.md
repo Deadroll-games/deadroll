@@ -8,7 +8,7 @@ programs read without CPI (`docs/ARCHITECTURE.md` 4.2, 4.3). Owner lane: L4.
 | Account | Seeds | Body |
 |---|---|---|
 | `GameConfig` | `["config"]` | `GameConfigData` from `crates/types` (frozen), nothing appended |
-| `Table` (aspects, resonances, bestiary, tileset, prefabs) | `["aspects"]`, `["resonances"]`, `["bestiary"]`, `["tileset"]`, `["prefabs"]` | 8-byte header + 4096-byte body, zero copy |
+| `Table` (aspects, resonances, bestiary, tileset, prefabs, traits) | `["aspects"]`, `["resonances"]`, `["bestiary"]`, `["tileset"]`, `["prefabs"]`, `["traits"]` | 8-byte header + 4096-byte body, zero copy |
 
 `Table` data: 8 discriminator, `version u8`, `kind u8`, `bump u8`, `pad u8`, `len u32 LE` (highest end offset
 written), then the body at offset 16. Readers take records straight from the body at `16 + index * record_size`.
@@ -24,19 +24,23 @@ written), then the body at offset 16. Readers take records straight from the bod
 | `init_table(kind)` | authority | creates an empty table |
 | `write_table(kind, offset, bytes)` | authority | whole, aligned, valid records only; tables stay editable |
 
-`TableKind`: 0 Aspects, 1 Resonances, 2 Bestiary, 3 Tileset, 4 Prefabs (append only).
+`TableKind`: 0 Aspects, 1 Resonances, 2 Bestiary, 3 Tileset, 4 Prefabs, 5 Traits (append only).
 TODO(post-demo): the same pull for `SpriteBook` (`GameConfigData` has no field for it).
 
 ## Record layouts (little-endian, validated by `write_table`, source: `src/state/records.rs`)
 
 Index of a record = its position in the table. Reserved bytes are zero.
 
-**Aspects** (6 x 8 B): `[0] aspect id (= index, Aspect order Fire, Cold, Lightning, Blood, Blunt, Piercing)`, `[1] Family`, `[2] flags`, `[3..8]` reserved.
+The aspect, trait and resonance records are the format of `crates/combat/src/tables.rs`: `write_table` validates them with its decoder, the one the session (its copy at `open_session`), the simulator and the website use.
+
+**Aspects** (6 x 8 B): `[0] aspect id (= index, Aspect order Fire, Cold, Lightning, Blood, Blunt, Piercing)`, `[1] Family`, `[2] flags`, `[3] native state` (`StateKind`, `0xFF` = none), `[4] trait id` (index into Traits: 0 Fury, 1 Composure, 2 Swiftness, 3 Wasting, 4 Crushing, 5 Keenness), `[5] condition` of the pairs generated from this base, `[6..8]` reserved.
+
+**Traits** (6 x 32 B, index = trait id; all zero = absent): `[0] present (1)`, `[1]` reserved, `[2..8] hit op` (acts whenever the tint triggers), `[8..14]`, `[14..20]` template ops (the trait on the base's native state: generated pairs, the second tint of a triple), `[20..32]` reserved.
 
 **Resonances** (36 x 16 B, index = `base * 6 + tint`, same as `deadroll_combat::resonance_id`):
 `[0] condition` (0 Always, 1 CanBurn, 2 CanBeChilled, 3 CanBeFrozen, 4 IsFrozen, 5 CanBeShocked, 6 CanBleed, 7 CanBeStunned, 8 HasArmor),
-`[1]` reserved, `[2..8] effect 0`, `[8..14] effect 1`, `[14..16]` reserved.
-Effect (6 B): `[0] kind` (0 None, 1 Multiplier, 2 StateOnCrit, 3 ExtraStateChance), `[1] StateKind` (kinds 2 and 3), `[2..6] value u32` (Multiplier scale in bp, ExtraStateChance chance in bp).
+`[1] flags` (bit 0: this record overrides the generated mechanics), `[2..8] op 0`, `[8..14] op 1`, `[14..16]` reserved.
+Op (6 B): `[0] kind` (`deadroll_combat::tables::OpKind`, 0..=20; bit 7 = only on a crit), `[1] arg` (a `StateKind`, `ModKind` or `Aspect` by kind; `0xFF` = the base's native state, or any state for a Multiplier), `[2..6] value u32` (a scale in bp of the `Balance` curve the kind names, or a count).
 
 **Bestiary** (32 x 48 B, index = bestiary id: 0 wolf, 1 goblin, 2 goblin chieftain, 3 goblin warrior, 4 goblin shaman; an all-zero record is an empty slot):
 
@@ -64,7 +68,8 @@ Effect (6 B): `[0] kind` (0 None, 1 Multiplier, 2 StateOnCrit, 3 ExtraStateChanc
 | 30 | attack damage min (<= max) | u16 |
 | 32 | attack damage max | u16 |
 | 34 | xp reward | u32 |
-| 38..48 | reserved | |
+| 38 | state immunity mask, bit i = `StateKind` i | u8 |
+| 39..48 | reserved | |
 
 **Tileset** (7 x 8 B in `Tile` order): `[0] passable (0/1)`, `[1] move cost in action points (>= 1 if passable)`, `[2] blocks line of sight (0/1)`, `[3] flags`, `[4..8]` reserved.
 

@@ -14,6 +14,64 @@ fn proptest_config() -> ProptestConfig {
     }
 }
 
+/// Native states only.
+fn natives() -> ResonanceTables {
+    let mut t = ResonanceTables::default();
+    let natives = [
+        StateKind::Burning,
+        StateKind::Chill,
+        StateKind::Shock,
+        StateKind::Bleeding,
+        StateKind::Stun,
+        StateKind::Penetration,
+    ];
+    for (i, e) in t.aspects.iter_mut().enumerate() {
+        e.native = Some(natives[i]);
+        e.trait_id = i as u8;
+    }
+    t
+}
+
+/// A valid op of any kind, or none.
+fn arb_op() -> impl Strategy<Value = Op> {
+    (
+        0u8..OpKind::COUNT,
+        any::<bool>(),
+        prop_oneof![0u8..8, Just(0xFFu8)],
+        prop_oneof![0u32..40_000, Just(u32::MAX)],
+    )
+        .prop_map(|(kind, crit, arg, value)| {
+            let v = value.to_le_bytes();
+            let k = kind | if crit { tables::CRIT_ONLY } else { 0 };
+            Op::decode(&[k, arg, v[0], v[1], v[2], v[3]]).unwrap_or(Op::NONE)
+        })
+}
+
+/// Natives plus random pair records and traits: every op kind the decoder accepts.
+fn arb_tables() -> impl Strategy<Value = ResonanceTables> {
+    (
+        proptest::collection::vec((0u8..9, any::<bool>(), arb_op(), arb_op()), 36),
+        proptest::collection::vec((arb_op(), arb_op(), arb_op()), 6),
+    )
+        .prop_map(|(pairs, traits)| {
+            let mut t = natives();
+            for (i, (cond, set, a, b)) in pairs.into_iter().enumerate() {
+                let r = [cond, set as u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+                let mut e = tables::decode_pair(&r).expect("valid record");
+                e.ops = [a, b];
+                t.pairs[i / 6][i % 6] = e;
+            }
+            for (i, (hit, a, b)) in traits.into_iter().enumerate() {
+                t.traits[i] = tables::TraitEntry {
+                    present: true,
+                    hit,
+                    template: [a, b],
+                };
+            }
+            t
+        })
+}
+
 fn arb_aspect() -> impl Strategy<Value = Aspect> {
     (0..Aspect::COUNT).prop_map(|i| Aspect::ALL[i])
 }
@@ -224,8 +282,17 @@ fn reported_dice(r: &HitResult) -> u32 {
     n += u32::from(r.tint_roll_count);
     n += 1;
     n += r.packets().iter().filter(|p| p.state.rolled).count() as u32;
-    n += r.resonance_states.iter().filter(|s| s.rolled).count() as u32;
+    // Every op of every resonance that rolled a die.
+    n += op_rolls(r).count() as u32;
     n
+}
+
+fn op_rolls(r: &HitResult) -> impl Iterator<Item = &StateRoll> {
+    r.res_ops
+        .iter()
+        .flatten()
+        .map(|o| &o.state)
+        .filter(|s| s.rolled)
 }
 
 fn chance_in_bounds(r: &HitResult) -> bool {
@@ -237,10 +304,7 @@ fn chance_in_bounds(r: &HitResult) -> bool {
             .iter()
             .filter(|p| p.state.rolled)
             .all(|p| ok(p.state.chance_pct))
-        && r.resonance_states
-            .iter()
-            .filter(|s| s.rolled)
-            .all(|s| ok(s.chance_pct))
+        && op_rolls(r).all(|s| ok(s.chance_pct))
 }
 
 fn check_result(input: &HitInput, r: &HitResult) -> Result<(), TestCaseError> {
@@ -283,23 +347,24 @@ proptest! {
     #[test]
     fn resolve_hit_never_panics_and_is_deterministic(
         input in arb_hit_input(),
+        tables in arb_tables(),
         vrf_seed in any::<[u8; 32]>(),
         seeded in any::<u64>(),
     ) {
-        let a = resolve_hit(&input, &B, &mut VrfRoll::new(vrf_seed));
-        let b = resolve_hit(&input, &B, &mut VrfRoll::new(vrf_seed));
+        let a = resolve_hit(&input, &B, &tables, &mut VrfRoll::new(vrf_seed));
+        let b = resolve_hit(&input, &B, &tables, &mut VrfRoll::new(vrf_seed));
         prop_assert_eq!(a, b);
         check_result(&input, &a)?;
 
-        let c = resolve_hit(&input, &B, &mut SeededRoll::new(seeded));
-        let d = resolve_hit(&input, &B, &mut SeededRoll::new(seeded));
+        let c = resolve_hit(&input, &B, &tables, &mut SeededRoll::new(seeded));
+        let d = resolve_hit(&input, &B, &tables, &mut SeededRoll::new(seeded));
         prop_assert_eq!(c, d);
         check_result(&input, &c)?;
     }
 
     #[test]
     fn hit_ordering_nat1_miss_nat20_crit(input in arb_hit_input()) {
-        let miss = resolve_hit(&input, &B, &mut ScriptedRoll::new([0u64]));
+        let miss = resolve_hit(&input, &B, &natives(), &mut ScriptedRoll::new([0u64]));
         if miss.outcome != Outcome::Immune {
             prop_assert_eq!(miss.d20, 1);
             prop_assert_eq!(miss.outcome, Outcome::Miss);
@@ -308,7 +373,7 @@ proptest! {
             prop_assert_eq!(miss.states, input.defender.states);
         }
 
-        let hit = resolve_hit(&input, &B, &mut ScriptedRoll::new([19u64]));
+        let hit = resolve_hit(&input, &B, &natives(), &mut ScriptedRoll::new([19u64]));
         if hit.outcome != Outcome::Immune {
             prop_assert_eq!(hit.d20, 20);
             prop_assert_eq!(hit.outcome, Outcome::Hit);
@@ -323,11 +388,11 @@ proptest! {
         seed in any::<[u8; 32]>(),
         extra in 1u32..=u32::MAX,
     ) {
-        let base = resolve_hit(&input, &B, &mut VrfRoll::new(seed));
+        let base = resolve_hit(&input, &B, &natives(), &mut VrfRoll::new(seed));
 
         let mut weaker = input;
         weaker.attacker.weaken_bp = input.attacker.weaken_bp.saturating_add(extra);
-        let rw = resolve_hit(&weaker, &B, &mut VrfRoll::new(seed));
+        let rw = resolve_hit(&weaker, &B, &natives(), &mut VrfRoll::new(seed));
         prop_assert_eq!(rw.d20, base.d20);
         prop_assert_eq!(rw.outcome, base.outcome);
         prop_assert!(rw.damage <= base.damage);
@@ -336,7 +401,7 @@ proptest! {
         for v in resist.defender.resist_bp.iter_mut() {
             *v = v.saturating_add(extra);
         }
-        let rr = resolve_hit(&resist, &B, &mut VrfRoll::new(seed));
+        let rr = resolve_hit(&resist, &B, &natives(), &mut VrfRoll::new(seed));
         prop_assert_eq!(rr.d20, base.d20);
         prop_assert_eq!(rr.outcome, base.outcome);
         prop_assert!(rr.damage <= base.damage);
@@ -344,7 +409,7 @@ proptest! {
         if input.defender.armor > 0 {
             let mut armored = input;
             armored.defender.armor = input.defender.armor.saturating_add(extra);
-            let ra = resolve_hit(&armored, &B, &mut VrfRoll::new(seed));
+            let ra = resolve_hit(&armored, &B, &natives(), &mut VrfRoll::new(seed));
             prop_assert_eq!(ra.d20, base.d20);
             prop_assert_eq!(ra.outcome, base.outcome);
             prop_assert!(ra.damage <= base.damage);

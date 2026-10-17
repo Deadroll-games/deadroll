@@ -154,7 +154,7 @@ async function openParty(specs: Spec[]) {
       const p = (await readParty(acc.session, party.tiles))!;
       const pendingPart = p.session.pending.participation;
       const pl = p.players.find((x) => x.participation === pendingPart)!;
-      return send(dmKey, [await consumeIx(acc.session, pendingPart, pl.character, seed, pendingTargetOf(p.session))]);
+      return send(dmKey, [await consumeIx(acc.session, pendingPart, pl.character, seed, pendingTargetOf(p.session), p.session.layout)]);
     };
     const init = await oracle(await pickSeed("random"));
     expect(init.some((e) => e.name === "InitiativeRolled")).toBe(true);
@@ -363,7 +363,9 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
           expect([fx.caster, fx.target, fx.effect, fx.rider, fx.applied, fx.roll.d20]).toEqual([SUPPORT, SUPPORT, Effect.Haste, false, Applied.Added, 0]);
           // Slots hold one mod per kind in the first free slot: find it by kind.
           const haste = activeMods((await readParty(acc.session, tiles))!.players[SUPPORT]!.part.mods).find((m) => m.kind === ModKind.Haste)!;
-          expect([haste.turns, haste.powerBp, haste.source]).toEqual([3, fx.roll.amount, SUPPORT]);
+          // Haste lasts 2 own turns, a self-cast adds Endurance 5 / self_buff_end_div 5 = 1 (patch 2),
+          // stored as duration + 1 (mod_turns).
+          expect([haste.turns, haste.powerBp, haste.source]).toEqual([4, fx.roll.amount, SUPPORT]);
           hasted = Math.min(255, Math.max(1, Math.floor((me.part.maxAp * (10_000 + fx.roll.amount)) / 10_000)));
           expect(hasted).toBeGreaterThan(me.part.maxAp);
           phase = "mend";
@@ -427,7 +429,7 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
     const supportSkills = SKILL_PRESETS[Class.Support];
     const EXPOSE = supportSkills.findIndex((k) => k.name === "Expose");
     expect(EXPOSE).toBeGreaterThanOrEqual(0);
-    // A Fire predisposition (forest elf) gives the warrior's basic hit a Fire packet next to the Blunt weapon.
+    // A Fire predisposition (forest elf) gives the warrior's basic hit a Fire packet next to the Piercing sword.
     const { dmKey, dmActor, players, acc, oracle, party: first } = await openParty([
       { cls: Class.Warrior, race: Race.ForestElf, pred: Aspect.Fire, stats: [10, 7, 5, 8], name: "Bran" },
       { cls: Class.Support, race: Race.Human, pred: Aspect.Blood, stats: [5, 7, 13, 5], name: "Mira", skills: supportSkills },
@@ -484,10 +486,10 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
             continue;
           }
           const fire = hit.packets.find((p) => p.aspect === Aspect.Fire)!;
-          const blunt = hit.packets.find((p) => p.aspect === Aspect.Blunt)!;
-          // Vulnerability is to its aspect only: the Fire packet carries it, the Blunt one does not.
+          const piercing = hit.packets.find((p) => p.aspect === Aspect.Piercing)!;
+          // Vulnerability is to its aspect only: the Fire packet carries it, the Piercing one does not.
           expect(fire.vulnBp).toBe(v.powerBp);
-          expect(blunt.vulnBp).toBe(0);
+          expect(piercing.vulnBp).toBe(0);
           // Fire is not physical and the wolf resists only Cold: after defense = rolled x (1 + vuln).
           expect([fire.armor, fire.resistBp]).toEqual([0, 0]);
           const fireAfter = (BigInt(fire.rolled) * BigInt(10_000 + v.powerBp)) / 10_000n;
@@ -499,7 +501,7 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
           const withoutVuln = Number((total - BigInt(fire.afterDefense) + BigInt(fire.rolled)) / 10_000n);
           console.log(
             `[vuln check] Vulnerability Fire +${v.powerBp / 100}%: Fire rolled ${Number(fire.rolled) / 10_000} -> ${Number(fire.afterDefense) / 10_000}, ` +
-              `Blunt ${Number(blunt.afterDefense) / 10_000} (vuln ${blunt.vulnBp}), damage ${hit.damage} (without vuln ${Math.max(1, withoutVuln)}), wolf HP ${hpBefore} -> ${hpAfter}`,
+              `Piercing ${Number(piercing.afterDefense) / 10_000} (vuln ${piercing.vulnBp}), damage ${hit.damage} (without vuln ${Math.max(1, withoutVuln)}), wolf HP ${hpBefore} -> ${hpAfter}`,
           );
           phase = "done";
         }

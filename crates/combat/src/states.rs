@@ -14,18 +14,6 @@ use crate::balance::Balance;
 /// A unit's state slots.
 pub type States = [ActiveState; STATES_MAX];
 
-/// Native state of an aspect (docs/DAMAGE_TYPES_AND_MIXES.md, sections 3.2 and 5).
-pub const fn native_state(aspect: Aspect) -> Option<StateKind> {
-    match aspect {
-        Aspect::Fire => Some(StateKind::Burning),
-        Aspect::Cold => Some(StateKind::Chill),
-        Aspect::Lightning => Some(StateKind::Shock),
-        Aspect::Blood => Some(StateKind::Bleeding),
-        Aspect::Blunt => Some(StateKind::Stun),
-        Aspect::Piercing => Some(StateKind::Penetration),
-    }
-}
-
 /// Bit of a state kind in an immunity mask.
 pub const fn state_bit(kind: StateKind) -> u8 {
     1 << kind as u8
@@ -99,7 +87,23 @@ pub fn apply_state(states: &mut States, new: ActiveState) -> Applied {
 /// Adds Chill buildup (docs/COMBAT_MATH.md, section 7.3). Buildup accumulates; when it reaches
 /// the threshold the target is frozen and the buildup resets.
 pub fn apply_chill(states: &mut States, buildup_bp: u32, source: u8, balance: &Balance) -> Applied {
-    let turns = balance.turns(StateKind::Chill);
+    apply_chill_for(
+        states,
+        buildup_bp,
+        balance.turns(StateKind::Chill),
+        source,
+        balance,
+    )
+}
+
+/// [`apply_chill`] lasting `turns` (a resonance can lengthen it).
+pub fn apply_chill_for(
+    states: &mut States,
+    buildup_bp: u32,
+    turns: u8,
+    source: u8,
+    balance: &Balance,
+) -> Applied {
     if turns == 0 {
         return Applied::None;
     }
@@ -133,8 +137,12 @@ pub fn apply_chill(states: &mut States, buildup_bp: u32, source: u8, balance: &B
 /// Applies Freeze directly (threshold reached or a resonance effect); clears Chill buildup.
 /// TODO(post-demo): temporary tenacity against repeated hard control (section 7.4).
 pub fn freeze(states: &mut States, source: u8, balance: &Balance) -> Applied {
+    freeze_for(states, balance.turns(StateKind::Freeze), source)
+}
+
+/// [`freeze`] lasting `turns` (a resonance can lengthen it).
+pub fn freeze_for(states: &mut States, turns: u8, source: u8) -> Applied {
     remove(states, StateKind::Chill);
-    let turns = balance.turns(StateKind::Freeze);
     match apply_state(
         states,
         ActiveState {
@@ -152,8 +160,10 @@ pub fn freeze(states: &mut States, source: u8, balance: &Balance) -> Applied {
 /// Result of the start of a unit's turn.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Tick {
-    /// Damage over time dealt now (Burning + Bleeding).
+    /// Damage over time dealt now (Burning + Bleeding + a thawing Freeze).
     pub dot_damage: u32,
+    /// The part of `dot_damage` from a Freeze that thawed (its power).
+    pub thaw_damage: u32,
     /// Hard control: the unit skips its action this turn.
     pub skip_action: bool,
     /// Bits (`state_bit`) of the states that ended with this tick.
@@ -161,7 +171,8 @@ pub struct Tick {
 }
 
 /// Start of the target's turn (section 7.5): over-time damage, hard control, then every
-/// duration goes down by one and finished states are removed.
+/// duration goes down by one and finished states are removed. A Freeze with power deals it as it
+/// thaws (DAMAGE_TYPES_AND_MIXES 6.4, Burning Frost).
 pub fn tick_turn_start(states: &mut States) -> Tick {
     let mut tick = Tick::default();
     for s in states.iter_mut().filter(|s| s.turns > 0) {
@@ -174,6 +185,10 @@ pub fn tick_turn_start(states: &mut States) -> Tick {
         }
         s.turns -= 1;
         if s.turns == 0 {
+            if s.kind == StateKind::Freeze && s.power > 0 {
+                tick.thaw_damage = tick.thaw_damage.saturating_add(s.power);
+                tick.dot_damage = tick.dot_damage.saturating_add(s.power);
+            }
             tick.expired |= state_bit(s.kind);
             *s = ActiveState::default();
         }
@@ -212,13 +227,7 @@ mod tests {
     }
 
     #[test]
-    fn natives() {
-        assert_eq!(native_state(Aspect::Fire), Some(StateKind::Burning));
-        assert_eq!(native_state(Aspect::Cold), Some(StateKind::Chill));
-        assert_eq!(native_state(Aspect::Lightning), Some(StateKind::Shock));
-        assert_eq!(native_state(Aspect::Blood), Some(StateKind::Bleeding));
-        assert_eq!(native_state(Aspect::Blunt), Some(StateKind::Stun));
-        assert_eq!(native_state(Aspect::Piercing), Some(StateKind::Penetration));
+    fn bits() {
         assert_eq!(state_bit(StateKind::Chill), 0b10);
         assert_eq!(aspect_bit(Aspect::Piercing), 0b10_0000);
     }
@@ -314,12 +323,27 @@ mod tests {
             t,
             Tick {
                 dot_damage: 4,
+                thaw_damage: 0,
                 skip_action: false,
                 expired: state_bit(StateKind::Burning)
             }
         );
         assert_eq!(tick_turn_start(&mut s), Tick::default());
         assert!(s.iter().all(|x| x.turns == 0));
+    }
+
+    #[test]
+    fn a_powered_freeze_deals_its_power_when_it_thaws() {
+        let mut s = States::default();
+        apply_state(&mut s, st(StateKind::Freeze, 2, 6));
+        let t = tick_turn_start(&mut s);
+        assert_eq!((t.dot_damage, t.thaw_damage, t.skip_action), (0, 0, true));
+        let t = tick_turn_start(&mut s);
+        assert_eq!((t.dot_damage, t.thaw_damage), (6, 6));
+        assert_eq!(t.expired, state_bit(StateKind::Freeze));
+        // A plain Freeze thaws for nothing.
+        freeze(&mut s, 0, &B);
+        assert_eq!(tick_turn_start(&mut s).thaw_damage, 0);
     }
 
     #[test]

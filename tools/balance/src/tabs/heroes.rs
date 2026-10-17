@@ -314,7 +314,10 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                 .or_else(|| app.presets.monsters.values().next());
             if let Some(m) = target {
                 let level = u8::try_from(h.level).unwrap_or(u8::MAX);
-                let profile = m.base().profile(level, &cfg.monsters);
+                let profile =
+                    m.base()
+                        .profile(level, &cfg.monsters, &m.defense(&app.presets.registry));
+                let tables = &app.presets.registry.tables;
                 ui.add_space(4.0);
                 ui.strong(format!("Preview against {} (level {level})", m.name));
                 egui::Grid::new("hero_preview")
@@ -328,16 +331,44 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                             .chain(f.skills.iter().map(|s| (s.name.clone(), Some(s.stats))));
                         for (name, skill) in actions {
                             let input = HitInput {
-                                attacker: player_attacker(&cfg, 0, h, skill.as_ref(), &NO_MODS),
+                                attacker: player_attacker(
+                                    &cfg,
+                                    0,
+                                    h,
+                                    skill.as_ref(),
+                                    &NO_MODS,
+                                    &Default::default(),
+                                ),
                                 defender: monster_defender(&profile, &Default::default(), &NO_MODS),
                             };
-                            let p = preview_hit(&input, &cfg.combat);
+                            let p = preview_hit(&input, &cfg.combat, tables);
                             ui.label(name);
                             ui.label(pct(p.hit_bp));
                             ui.label(pct(p.crit_bp));
                             ui.label(format!("{}-{}", p.min, p.max));
                             ui.label(format!("{}-{}", p.crit_min, p.crit_max));
                             ui.end_row();
+                            // Each tint: its chance and the damage if it alone triggers.
+                            for t in &p.tints[..p.tint_count as usize] {
+                                ui.label(format!(
+                                    "  {} + {} ({:?} t{})",
+                                    t.base.name(),
+                                    t.tint.name(),
+                                    t.carrier,
+                                    t.tier
+                                ));
+                                if t.pure {
+                                    ui.label("pure pair");
+                                } else if !t.condition_met {
+                                    ui.label(format!("{}%, condition not met", t.chance_pct));
+                                } else {
+                                    ui.label(format!("{}%", t.chance_pct));
+                                }
+                                ui.label("");
+                                ui.label(format!("{}-{}", t.min, t.max));
+                                ui.label("");
+                                ui.end_row();
+                            }
                         }
                     });
             }

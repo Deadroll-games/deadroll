@@ -32,6 +32,8 @@ fn base_row(ui: &mut Ui, base: ItemBase, b: &mut ItemBaseStats, d: &ItemBaseStat
     widgets::pick(ui, ("item_slot", base as u8), &mut b.slot);
     widgets::int(ui, &mut b.level, 1..=99);
     widgets::pick(ui, ("item_aspect", base as u8), &mut b.aspect);
+    // Tint tier of the aspect (0 = not a carrier).
+    widgets::int(ui, &mut b.aspect_tier, 0..=14);
     widgets::int(ui, &mut b.damage[0], 0..=10_000);
     widgets::int(ui, &mut b.damage[1], 0..=10_000);
     widgets::int(ui, &mut b.armor, 0..=10_000);
@@ -110,7 +112,7 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                 ui.label("A base with damage max > 0 is a weapon: in the main hand its damage replaces bare hands as the base of every attack and skill. Everything else adds flat.");
                 egui::Grid::new("item_bases").striped(true).show(ui, |ui| {
                     for h in [
-                        "", "slot", "level", "aspect", "dmg min", "dmg max", "armor", "evasion",
+                        "", "slot", "level", "aspect", "tint tier", "dmg min", "dmg max", "armor", "evasion",
                         "accuracy",
                     ] {
                         ui.strong(h);

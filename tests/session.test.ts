@@ -78,6 +78,10 @@ const sessionAuthority = pda([Buffer.from("authority")], SESSION);
 const config = pda([Buffer.from("config")], REGISTRY);
 const bestiary = pda([Buffer.from("bestiary")], REGISTRY);
 const tileset = pda([Buffer.from("tileset")], REGISTRY);
+// Patch 4: the resonance tables open_session copies into the session's MonsterState.
+const aspects = pda([Buffer.from("aspects")], REGISTRY);
+const traits = pda([Buffer.from("traits")], REGISTRY);
+const resonances = pda([Buffer.from("resonances")], REGISTRY);
 const programIdentity = pda([Buffer.from("identity")], SESSION);
 /** `MOCK_VRF_IDENTITY` of programs/session/src/vrf.rs: a public test key, mock-vrf builds only. */
 const MOCK_VRF = Keypair.fromSeed(sha256("deadroll:mock-vrf"));
@@ -280,6 +284,9 @@ function openSession(dm: Keypair, map: PublicKey, layout: PublicKey, price: BN, 
       tileset,
       mapProgram: MAP,
       systemProgram: SystemProgram.programId,
+      aspects,
+      traits,
+      resonances,
     })
     .signers([dm]);
 }
@@ -297,6 +304,8 @@ function consume(
     bag: PublicKey;
     /** The ally of a heal or buff on another player (`GameSession.pendingTarget`). */
     targetParticipation?: PublicKey | null;
+    /** The session's `MapLayout` (patch 4: knockback and burning cells). */
+    layout: PublicKey;
   },
   seed: Buffer,
 ) {
@@ -344,7 +353,14 @@ describe("deadroll_session: deployed program", () => {
   it("open_session rejects registry tables at other addresses", async () => {
     const dm = await funded();
     const map = Keypair.generate().publicKey;
-    for (const over of [{ bestiary: tileset }, { tileset: bestiary }, { bestiary: config }]) {
+    for (const over of [
+      { bestiary: tileset },
+      { tileset: bestiary },
+      { bestiary: config },
+      { aspects: resonances },
+      { traits: aspects },
+      { resonances: traits },
+    ]) {
       await rejects(
         openSession(dm, map, map, PRICE, PublicKey.default).accountsPartial(over).rpc(),
         "InvalidRegistryTable",
@@ -466,7 +482,7 @@ describe("deadroll_session: deployed program", () => {
     const { session, monsters } = sessionAccounts(Keypair.generate().publicKey);
     const character = Keypair.generate().publicKey;
     const { participation, skillSet, bag } = playerAccounts(session, character);
-    const accounts = { session, monsters, participation, character, skillSet, bag };
+    const accounts = { session, monsters, participation, character, skillSet, bag, layout: Keypair.generate().publicKey };
     await rejects(consume(await funded(1), accounts, CRIT).rpc(), "AccountNotInitialized");
     await rejects(consume(MOCK_VRF, accounts, CRIT).rpc(), "AccountNotInitialized");
   });
@@ -498,7 +514,13 @@ const MAP_IDL = new URL("../target/idl/deadroll_map.json", import.meta.url);
 const missing: string[] = [];
 if ((await connection.getAccountInfo(config))?.owner.equals(REGISTRY) !== true)
   missing.push("registry GameConfig (L4)");
-for (const [name, table] of [["bestiary", bestiary], ["tileset", tileset]] as const)
+for (const [name, table] of [
+  ["bestiary", bestiary],
+  ["tileset", tileset],
+  ["aspects", aspects],
+  ["traits", traits],
+  ["resonances", resonances],
+] as const)
   if ((await connection.getAccountInfo(table))?.owner.equals(REGISTRY) !== true)
     missing.push(`registry ${name} table seeded (tools/scripts/seed-registry.ts)`);
 if (!(await isProgram(CHARACTER))) missing.push("deadroll_character deployed");
@@ -643,15 +665,18 @@ const SUPPORT_SKILLS: [string, any][] = [
 ];
 const [QUICKEN, SAP, MEND, SHELTER] = [0, 1, 2, 3];
 /** Projectile skill slot per class: Javelin, Frost Bolt, Sap (a debuff, it rolls like an attack). */
-const RANGED_SLOT = { warrior: 2, mage: 0, support: SAP };
+const RANGED_SLOT = { warrior: 2, mage: 0, support: SAP, stormMage: 0 };
 const REACTIVE_SLOT = 4;
 
-type Kind = "warrior" | "mage" | "support";
+type Kind = "warrior" | "mage" | "support" | "stormMage";
 const PROFILES = {
   warrior: { name: "Bran", race: "human", predisposition: "piercing", stats: [10, 7, 5, 8], skills: WARRIOR_SKILLS },
   mage: { name: "Ilyra", race: "forestElf", predisposition: "cold", stats: [5, 7, 13, 5], skills: MAGE_SKILLS },
   support: { name: "Senna", race: "forestElf", predisposition: "lightning", stats: [5, 8, 12, 5], skills: SUPPORT_SKILLS },
+  // A mage with a Lightning predisposition: its Fire and Cold get Swiftness (states jump).
+  stormMage: { name: "Vael", race: "forestElf", predisposition: "lightning", stats: [5, 7, 13, 5], skills: MAGE_SKILLS },
 };
+const CLASS_OF: Record<Kind, string> = { warrior: "warrior", mage: "mage", support: "support", stormMage: "mage" };
 /** A character of `kind`: the class starter items come with it, worn (create_character). */
 async function createCharacter(owner: Keypair, kind: Kind): Promise<PublicKey> {
   const profile = pda([Buffer.from("profile"), owner.publicKey.toBuffer()], CHARACTER);
@@ -669,7 +694,7 @@ async function createCharacter(owner: Keypair, kind: Kind): Promise<PublicKey> {
   const args = {
     name: text(p.name, 32),
     race: e(p.race),
-    class: e(kind),
+    class: e(CLASS_OF[kind]),
     predisposition: e(p.predisposition),
     stats: p.stats,
     appearance: new Array(20).fill(layer),
@@ -873,6 +898,7 @@ class Party {
       character: pl.character,
       skillSet: pl.skillSet,
       bag: pl.bag,
+      layout: this.fixture.layout,
     };
     // Simulated through the connection (no signature check): Anchor's `simulate()` re-signs with
     // the extra signer after the wallet and loses the fee payer's signature.
@@ -1006,6 +1032,7 @@ class Party {
         skillSet: pl.skillSet,
         bag: pl.bag,
         targetParticipation: ally,
+        layout: this.fixture.layout,
       },
       seed,
     );
@@ -2149,5 +2176,86 @@ describe("deadroll_session: equipment from the character's gear", { skip: SKIP_P
     assert.equal(hit.attacker, BARE);
     assert.equal(hit.items.attacker.weapon, null, "bare hands");
     assert.equal(hit.items.attacker.armor, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Patch 4: resonances that reach beyond their target (docs/DAMAGE_TYPES_AND_MIXES.md 6.4)
+
+/** Compute units the transaction `sig` used (the VRF callback's budget is the default 200k). */
+async function unitsOf(sig: string): Promise<number> {
+  const tx = await connection.getTransaction(sig, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
+  return tx?.meta?.computeUnitsConsumed ?? 0;
+}
+
+describe("deadroll_session: resonances on the map", { skip: SKIP_PARTY }, () => {
+  const FROST_BURN = 1;
+  const MAGE = 1;
+  const [WOLF0, WOLF1] = [0, 1];
+  const N = 0;
+
+  it("Blasting Flame (Fire with the staff's Blunt tint) knocks the wolf back and sets the cells around it on fire", async () => {
+    const party = await Party.create(["warrior", "mage"]);
+    await party.startAll();
+    await party.endTurn(party.players[0].wallet, 0);
+    await party.begin();
+    const mage = party.players[MAGE];
+    // The second wolf at (7, 3): seen from the entrance, the cell behind it is free.
+    const before = (await party.monsters()).core.monsters[WOLF1];
+    await party.act(MAGE, mage.wallet, FROST_BURN, WOLF1);
+
+    // The callback must get the session's own layout.
+    const other = await createFinalizedMap(party.dm);
+    const a = {
+      session: party.acc.session,
+      monsters: party.acc.monsters,
+      participation: mage.participation,
+      character: mage.character,
+      skillSet: mage.skillSet,
+      bag: mage.bag,
+      layout: other.layout,
+    };
+    await rejects(consume(MOCK_VRF, a, CRIT).rpc(), "InvalidLayout");
+
+    const done = await party.consumeWhere(MAGE, (r) => r.knockback > 0 && r.ignitePower > 0 && r.damage < before.hp, 2_000);
+    assert.ok(done, "no VRF value triggers Blasting Flame");
+    const spread = await eventOf(done.sig, "resonanceSpread");
+    assert.equal(spread.moved, true, "the wolf is pushed one cell away");
+    const after = (await party.monsters()).core.monsters[WOLF1];
+    assert.deepEqual([after.x, after.y], [spread.movedTo.x, spread.movedTo.y]);
+    assert.equal(cheb(after, before), 1);
+    assert.ok(spread.ignitedCount > 0);
+    const state = await party.monsters();
+    const burning = state.burningCells.filter((c: any) => c.power > 0);
+    assert.equal(burning.length, spread.ignitedCount);
+    console.log(`CU consume_randomness, Blasting Flame (knockback + ${spread.ignitedCount} burning cells): ${await unitsOf(done.sig)}`);
+
+    // The wolf steps out on its turn and catches fire.
+    await party.untilStartOf(MONSTER_BASE + WOLF1);
+    await party.begin();
+    const sig = await party.monsterMove(party.dm, WOLF1, [N]);
+    const burned = (await eventsOf(sig)).find((x) => x.name.toLowerCase() === "cellburned");
+    assert.ok(burned, "stepping into a burning cell writes CellBurned");
+    const wolf = (await party.monsters()).core.monsters[WOLF1];
+    assert.ok(hasState(wolf.states, "burning"));
+  });
+
+  it("Stormfire (Fire with the race's Lightning tint) passes Burning to the adjacent wolf", async () => {
+    const party = await Party.create(["warrior", "stormMage"]);
+    await party.startAll();
+    await party.endTurn(party.players[0].wallet, 0);
+    await party.begin();
+    const mage = party.players[MAGE];
+    const wolf = (await party.monsters()).core.monsters[WOLF0];
+    await party.act(MAGE, mage.wallet, FROST_BURN, WOLF0);
+    const done = await party.consumeWhere(MAGE, (r) => r.jumpCount > 0 && r.damage < wolf.hp, 3_000);
+    assert.ok(done, "no VRF value makes a state jump");
+    const spread = await eventOf(done.sig, "resonanceSpread");
+    assert.ok(spread.hitCount > 0);
+    const hit = spread.hits[0];
+    assert.equal(hit.monster, WOLF1, "the wolf next to the target");
+    const other = (await party.monsters()).core.monsters[WOLF1];
+    assert.ok(other.states.some((x: any) => x.turns > 0 && Object.keys(x.kind)[0] === Object.keys(hit.kind)[0]));
+    console.log(`CU consume_randomness, a jump (${Object.keys(hit.kind)[0]} to wolf ${hit.monster}): ${await unitsOf(done.sig)}`);
   });
 });

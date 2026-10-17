@@ -19,7 +19,10 @@ pub mod input;
 pub mod items;
 pub mod monster;
 pub mod player;
+#[cfg(feature = "serde")]
+pub mod registry;
 pub mod resolve;
+pub mod spread;
 pub mod turn;
 pub mod units;
 
@@ -28,7 +31,7 @@ pub use config::{
 };
 pub use input::{EffectAction, HeroStats, Side, SkillStats, SkillUse};
 pub use items::{EquipError, Equipment, ItemBonus};
-pub use monster::{MonsterBase, MonsterProfile};
+pub use monster::{MonsterBase, MonsterDefense, MonsterProfile};
 pub use player::SpendError;
 pub use resolve::{AttackOutcome, RiderOutcome};
 pub use turn::{start_of_turn, TurnStart};

@@ -43,7 +43,7 @@ describe("cascadeSteps", () => {
     ]);
     expect(steps[0]?.success).toBe(true);
     expect(steps[1]?.success).toBe(false);
-    expect(steps[2]?.label).toBe("Resonance (Fire tint on Cold, tier 9)");
+    expect(steps[2]?.label).toBe("Resonance (Fire tint from the race on Cold, tier 9)");
     expect(steps[2]?.value).toBe("rolled 90");
     expect(steps[2]?.target).toBe("needs 83+");
     expect(steps[2]?.flag).toBe("RESONANCE!");
@@ -51,8 +51,8 @@ describe("cascadeSteps", () => {
     expect(steps[2]?.title).toBe("on-chain raw roll 10, shown as 100 - raw, passes when raw < 18, carrier Race");
     expect(steps[2]?.success).toBe(true);
     expect(steps[3]?.success).toBe(false);
-    expect(steps[4]?.label).toBe("Resonance Cold + Fire");
-    expect(steps[4]?.value).toBe("tier 9");
+    expect(steps[4]?.label).toBe("Resonance Burning Frost");
+    expect(steps[4]?.value).toBe("Race, tier 9");
     expect(steps[4]?.success).toBe(true);
     expect(steps[5]?.label).toBe("Damage d100");
     expect(steps[5]?.value).toBe("63");
@@ -183,9 +183,14 @@ describe("HitBreakdown", () => {
     const resonance = render(<HitBreakdown hit={MOCK_HITS.resonance} />);
     expect(resonance.container.querySelectorAll('[data-testid="packet"]')).toHaveLength(2);
     expect(resonance.getByText("Hit breakdown")).toBeTruthy();
-    expect(resonance.getByText("Cold + Fire, tier 9, Race, second tint none")).toBeTruthy();
+    // The pair by its registry name, the carrier and trait, and what each op did.
+    expect(resonance.getByText("Burning Frost")).toBeTruthy();
+    const res = resonance.getByTestId("resonance").textContent ?? "";
+    expect(res).toContain("Cold with a Fire tint from the race (tier 9, Fury)");
+    const ops = resonance.getAllByTestId("resonance-op").map((li) => li.textContent);
+    expect(ops).toEqual(["Freeze deals 0 when it thaws (did not trigger)", "Fury: +2-4 Fire damage"]);
     expect(resonance.getByText("Total damage: 9")).toBeTruthy();
-    expect(resonance.getByText("Resonance (Fire tint on Cold, tier 9): needs 83+, rolled 90, RESONANCE!")).toBeTruthy();
+    expect(resonance.getByText("Resonance (Fire tint from the race on Cold, tier 9): needs 83+, rolled 90, RESONANCE!")).toBeTruthy();
     expect(resonance.getByText("Crit: needs ?+, rolled 96, fail")).toBeTruthy();
     expect(resonance.getByText(/Shock 20%/)).toBeTruthy();
     expect(resonance.getByText("Rolls used: 9")).toBeTruthy();
@@ -278,7 +283,7 @@ describe("HitBreakdown items", () => {
     // The crit mock is a single Piercing packet with armor in it.
     const items = { attacker: { weapon: "sword", armor: 0, defense: 0, attack: 2 }, target: { weapon: "staff", armor: 10, defense: 1, attack: 0 } };
     expect(itemLines(MOCK_HITS.crit, items)).toEqual([
-      { side: "Attacker", text: "Sword: the damage base (Blunt 4-8)", applied: true },
+      { side: "Attacker", text: "Sword: the damage base (Piercing 4-8)", applied: true },
       { side: "Attacker", text: `+2 attack from items, in the total ${MOCK_HITS.crit.attackTotal}`, applied: true },
       { side: "Target", text: "+10 armor from items, in Armor of the physical packets", applied: MOCK_HITS.crit.packets.some((p) => p.armor > 0) },
       { side: "Target", text: `+1 defense from items, in the defense ${MOCK_HITS.crit.defense}`, applied: true },

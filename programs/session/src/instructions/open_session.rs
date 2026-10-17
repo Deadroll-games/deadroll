@@ -1,4 +1,6 @@
 use anchor_lang::prelude::*;
+use deadroll_combat::ResonanceTables;
+use deadroll_registry::state::TableKind;
 use deadroll_types::{
     seeds, ActiveState, GameSessionData, MapStatus, Monster, SessionStatus, MAP_MAX, MONSTERS_MAX,
     PARTY_MAX, STATES_MAX, TURN_ORDER_MAX,
@@ -11,9 +13,11 @@ use crate::{
     rules::{monster_hp, EMPTY_UNIT, MIN_PRICE_LAMPORTS},
     state::{
         external::{
-            read_bestiary, read_map, read_tile_costs, MapLayoutView, BESTIARY_TABLE, TILESET_TABLE,
+            read_bestiary, read_map, read_table_body, read_tile_costs, MapLayoutView,
+            ASPECTS_TABLE, BESTIARY_TABLE, RESONANCES_TABLE, TILESET_TABLE, TRAITS_TABLE,
         },
-        Escrow, GameSession, Monsters, ACCOUNT_VERSION,
+        Escrow, GameSession, Monsters, ACCOUNT_VERSION, RES_ASPECTS_LEN, RES_PAIRS_LEN,
+        RES_TRAITS_LEN,
     },
 };
 
@@ -61,6 +65,15 @@ pub struct OpenSession<'info> {
     #[account(address = deadroll_map::ID)]
     pub map_program: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
+    /// CHECK: registry `["aspects"]` table (patch 4), copied into `MonsterState`.
+    #[account(address = ASPECTS_TABLE @ SessionError::InvalidRegistryTable)]
+    pub aspects: UncheckedAccount<'info>,
+    /// CHECK: registry `["traits"]` table, copied into `MonsterState`.
+    #[account(address = TRAITS_TABLE @ SessionError::InvalidRegistryTable)]
+    pub traits: UncheckedAccount<'info>,
+    /// CHECK: registry `["resonances"]` table, copied into `MonsterState`.
+    #[account(address = RESONANCES_TABLE @ SessionError::InvalidRegistryTable)]
+    pub resonances: UncheckedAccount<'info>,
 }
 
 pub fn handler(ctx: Context<OpenSession>, price_lamports: u64, dm_actor: Pubkey) -> Result<()> {
@@ -124,12 +137,19 @@ pub fn handler(ctx: Context<OpenSession>, price_lamports: u64, dm_actor: Pubkey)
         &session_key,
         ctx.bumps.monsters,
     )?;
+    copy_tables(
+        &accounts.aspects,
+        &accounts.traits,
+        &accounts.resonances,
+        &monsters,
+    )?;
     for i in 0..spawn_count {
         let spawn = layout.spawn(i as usize)?;
         let record = read_bestiary(&accounts.bestiary, spawn.bestiary_id)?;
         let hp = monster_hp(&record, spawn.level);
         session.monster_speed[i as usize] = record.speed;
         session.monster_initiative[i as usize] = record.initiative;
+        monsters.set_defense(i, &record.defense)?;
         monsters.set(
             i,
             &Monster {
@@ -175,4 +195,25 @@ pub fn handler(ctx: Context<OpenSession>, price_lamports: u64, dm_actor: Pubkey)
         monsters: spawn_count,
     });
     Ok(())
+}
+
+/// Copies the registry resonance tables into the session's `MonsterState` (fixed for the party,
+/// read by every hit). They must decode: the callback would refuse them later otherwise.
+#[inline(never)]
+fn copy_tables(
+    aspects: &AccountInfo,
+    traits: &AccountInfo,
+    resonances: &AccountInfo,
+    monsters: &Monsters,
+) -> Result<()> {
+    let aspects: [u8; RES_ASPECTS_LEN] =
+        read_table_body(aspects, &ASPECTS_TABLE, TableKind::Aspects)?;
+    let traits: [u8; RES_TRAITS_LEN] = read_table_body(traits, &TRAITS_TABLE, TableKind::Traits)?;
+    let pairs: [u8; RES_PAIRS_LEN] =
+        read_table_body(resonances, &RESONANCES_TABLE, TableKind::Resonances)?;
+    let mut tables = Box::<ResonanceTables>::default();
+    tables
+        .decode_into(&aspects, &traits, &pairs)
+        .map_err(|_| error!(SessionError::InvalidRegistryTable))?;
+    monsters.set_tables(&aspects, &traits, &pairs)
 }

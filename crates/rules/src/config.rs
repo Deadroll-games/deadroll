@@ -214,6 +214,9 @@ pub struct MonsterScaling {
     /// Action points per turn from the bestiary speed, clamped here.
     pub ap_min: u8,
     pub ap_max: u8,
+    /// The "resistance" level of a bestiary record (docs/DAMAGE_TYPES_AND_MIXES.md 9): the
+    /// counterweight on each aspect the monster resists, bp.
+    pub resist_bp: u32,
 }
 
 impl MonsterScaling {
@@ -223,6 +226,7 @@ impl MonsterScaling {
         attack_per_level_bp: 10_000,
         ap_min: 1,
         ap_max: 12,
+        resist_bp: 5_000,
     };
 }
 
@@ -244,6 +248,10 @@ pub struct ItemBaseStats {
     /// Weapon damage aspect.
     #[cfg_attr(feature = "serde", serde(with = "names::variant"))]
     pub aspect: Aspect,
+    /// Tier of the item as a carrier of `aspect` (a resonance tint, docs/SKILL_BUILDER.md 5.2,
+    /// DAMAGE_TYPES_AND_MIXES.md 4), `1..=14`; 0 = not a carrier.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub aspect_tier: u8,
     /// Weapon damage `[min, max]`; `[0, 0]` = not a weapon. The main-hand weapon is the damage
     /// base of every attack and skill.
     pub damage: [u32; 2],
@@ -282,12 +290,24 @@ pub struct ItemTuning {
     pub level_gap: u8,
 }
 
+/// The tier of a starter weapon's aspect (CHARACTER 6.3: carriers start low).
+const STARTER_ASPECT_TIER: u8 = 14;
+
+const fn weapon(aspect: Aspect, damage: [u32; 2]) -> ItemBaseStats {
+    ItemBaseStats {
+        aspect,
+        aspect_tier: STARTER_ASPECT_TIER,
+        ..base(EquipSlot::MainHand, damage, 0)
+    }
+}
+
 const fn base(slot: EquipSlot, damage: [u32; 2], armor: u32) -> ItemBaseStats {
     ItemBaseStats {
         slot,
         level: 1,
-        // Blunt until balancing: the starter weapons keep the numbers of the old class weapon.
+        // Not a carrier: `aspect` is the weapon damage aspect only.
         aspect: Aspect::Blunt,
+        aspect_tier: 0,
         damage,
         armor,
         defense: 0,
@@ -305,9 +325,10 @@ impl ItemTuning {
     //                                                   Sword  Staff  Wand  Leather  Robe  Light
     pub const DEFAULT: ItemTuning = ItemTuning {
         bases: [
-            base(EquipSlot::MainHand, [4, 8], 0),
-            base(EquipSlot::MainHand, [3, 6], 0),
-            base(EquipSlot::MainHand, [2, 5], 0),
+            // A Piercing sword, a Blunt staff, a Lightning wand (SKILL_BUILDER 5.1).
+            weapon(Aspect::Piercing, [4, 8]),
+            weapon(Aspect::Blunt, [3, 6]),
+            weapon(Aspect::Lightning, [2, 5]),
             base(EquipSlot::Body, [0, 0], 10),
             base(EquipSlot::Body, [0, 0], 2),
             base(EquipSlot::Body, [0, 0], 5),
@@ -528,6 +549,14 @@ mod remote {
         pub penetration_power_bp: u32,
         pub keenness_pen_bp: [u32; 14],
         pub extra_state_chance_pct: u32,
+        pub res_turns: [u8; 14],
+        pub res_power_bp: [u32; 14],
+        pub res_mod_bp: [u32; 14],
+        pub res_mod_turns: u8,
+        pub tint_added: [[u32; 2]; 14],
+        pub res_accuracy: [u32; 14],
+        pub res_accuracy_turns: u8,
+        pub burning_cell_rounds: u8,
     }
 
     #[derive(Serialize, Deserialize)]

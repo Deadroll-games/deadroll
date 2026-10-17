@@ -1,5 +1,5 @@
 import { Applied, HitOutcome, ModKind, type HitResult, type PacketResult, type StateRoll, type TimedMod } from "../../chain/types";
-import { aspectName, carrierName, formatBp, formatScaled, resonanceName, stateName } from "../../chain/names";
+import { aspectName, carrierName, formatBp, formatScaled, opText, resonanceName, stateName, traitName } from "../../chain/names";
 import { MOD_NAMES, modEffectText } from "../../chain/support";
 import { itemLabel, UNARMED, weaponText } from "../../chain/items";
 import { chanceView, tintLabel, tintView, type ChanceView } from "./cascade";
@@ -108,7 +108,7 @@ export function HitBreakdown({ hit, defaultOpen = true, critChanceBp, mods, item
   const gear = items ? itemLines(hit, items) : [];
   const itemArmor = items?.target?.armor ?? 0;
   const resonances = hit.resonances.filter((r) => r != null);
-  const stateRolls = [...hit.packets.map((p) => p.state), ...hit.resonanceStates].filter((roll) => roll.rolled);
+  const stateRolls = [...hit.packets.map((p) => p.state), ...hit.resOps.flat().map((o) => o.state)].filter((roll) => roll.rolled);
 
   return (
     <details className="dice-breakdown panel" open={defaultOpen}>
@@ -250,10 +250,23 @@ export function HitBreakdown({ hit, defaultOpen = true, critChanceBp, mods, item
             <ul className="dice-list">
               {hit.resonances.map((resonance, i) =>
                 resonance == null ? null : (
-                  <li key={i}>
-                    {resonanceName(resonance.id)}, tier {resonance.tier}, {carrierName(resonance.carrier)}, second tint{" "}
-                    {resonance.secondTint == null ? "none" : aspectName(resonance.secondTint)}
-                    {resonance.active ? "" : ", inactive"}
+                  <li key={i} data-testid="resonance">
+                    <strong>{resonanceName(resonance.id, resonance.secondTint)}</strong>: {aspectName(resonance.base)} with a {aspectName(resonance.tint)} tint from the{" "}
+                    {carrierName(resonance.carrier).toLowerCase()} (tier {resonance.tier}, {traitName(resonance.tint)})
+                    {resonance.secondTint == null
+                      ? ""
+                      : `, and ${aspectName(resonance.secondTint)} from the ${carrierName(resonance.secondCarrier).toLowerCase()} (tier ${resonance.secondTier}, ${traitName(resonance.secondTint)})`}
+                    {resonance.generated ? ", from the trait" : ""}
+                    {resonance.active ? "" : ", inactive: the target does not meet its condition"}
+                    {resonance.active && (hit.resOps[i]?.length ?? 0) > 0 && (
+                      <ul className="dice-list">
+                        {hit.resOps[i]!.map((op, k) => (
+                          <li key={k} className={op.acted ? "" : "muted"} data-testid="resonance-op">
+                            {opText(op, resonance.base)}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </li>
                 ),
               )}

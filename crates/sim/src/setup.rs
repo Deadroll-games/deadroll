@@ -3,7 +3,7 @@
 use deadroll_rules::{
     input::{hero, skill_use, SkillStats, SkillUse},
     items::{check_equip, starter_loadout, EquipError, Equipment},
-    BalanceConfig, HeroStats, MonsterBase,
+    BalanceConfig, HeroStats, MonsterBase, MonsterDefense,
 };
 use deadroll_skillcheck::{check_loadout, Category, SkillBlocks, ACTIVE_MAX};
 use deadroll_types::{MONSTERS_MAX, PARTY_MAX};
@@ -51,6 +51,8 @@ pub struct Skill {
 pub struct Spawn {
     pub name: String,
     pub base: MonsterBase,
+    /// From the registry bestiary record (or the preset's own lists).
+    pub defense: MonsterDefense,
     pub level: u8,
 }
 
@@ -60,6 +62,8 @@ pub struct Fight {
     pub name: String,
     pub spawns: Vec<Spawn>,
     pub arena: Arena,
+    /// The registry resonance tables (`Presets::registry`).
+    pub tables: deadroll_combat::ResonanceTables,
 }
 
 /// One hero preset with its skills looked up in `presets`.
@@ -235,6 +239,7 @@ pub fn resolve_fight(presets: &Presets, id: &str) -> (Option<Fight>, Issues) {
             spawns.push(Spawn {
                 name: m.name.clone(),
                 base: m.base(),
+                defense: m.defense(&presets.registry),
                 level: slot.level,
             });
         }
@@ -270,6 +275,7 @@ pub fn resolve_fight(presets: &Presets, id: &str) -> (Option<Fight>, Issues) {
             name: e.name.clone(),
             spawns,
             arena,
+            tables: presets.registry.tables,
         }),
         issues,
     )

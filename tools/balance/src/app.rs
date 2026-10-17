@@ -530,7 +530,7 @@ mod tests {
         h.get_all_by_label("Heroes").next().unwrap().click();
         h.run();
         h.get_by_label("Class starter kit");
-        h.get_by_label("Sword Blunt 4-8");
+        h.get_by_label("Sword Piercing 4-8");
         h.get_by_label("+13 armor");
         h.get_by_label("Results").click();
         h.run();

@@ -5,6 +5,24 @@ use deadroll_types::{ActiveState, Aspect, Form, Source, StateKind, BP, STATES_MA
 
 const B: Balance = Balance::DEFAULT;
 
+/// Native states only, no pair records and no traits.
+fn natives() -> ResonanceTables {
+    let mut t = ResonanceTables::default();
+    let natives = [
+        StateKind::Burning,
+        StateKind::Chill,
+        StateKind::Shock,
+        StateKind::Bleeding,
+        StateKind::Stun,
+        StateKind::Penetration,
+    ];
+    for (i, e) in t.aspects.iter_mut().enumerate() {
+        e.native = Some(natives[i]);
+        e.trait_id = i as u8;
+    }
+    t
+}
+
 fn st(kind: StateKind, turns: u8, power: u32) -> ActiveState {
     ActiveState {
         kind,
@@ -91,6 +109,7 @@ fn skill_three_aspects_shares_sum_to_bp() {
     let r = resolve_hit(
         &hit_input(weapon, s),
         &B,
+        &natives(),
         &mut ScriptedRoll::new([14u64, 0]),
     );
     assert_eq!(r.outcome, Outcome::Hit);
@@ -116,6 +135,7 @@ fn skill_aspect_count_above_three_is_clamped() {
     let r = resolve_hit(
         &hit_input(weapon, s),
         &B,
+        &natives(),
         &mut ScriptedRoll::new([19u64, 0]),
     );
     assert_eq!(r.outcome, Outcome::Hit);
@@ -145,7 +165,7 @@ fn zero_weapon_range_still_min_damage_on_hit() {
         DamageRange::new(Aspect::Fire, 0, 0),
         Skill::basic(Source::Combat, Form::Strike, 0),
     );
-    let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([19u64, 0]));
+    let r = resolve_hit(&input, &B, &natives(), &mut ScriptedRoll::new([19u64, 0]));
     assert_eq!(r.outcome, Outcome::Hit);
     assert_eq!(r.damage, B.min_damage);
     assert_eq!(r.damage, 1);
@@ -168,7 +188,7 @@ fn u32_max_weapon_power_shares_increased_more_saturates() {
     for slot in &mut input.attacker.more {
         *slot = Mod::new(ModFilter::Any, u32::MAX);
     }
-    let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([19u64, 0]));
+    let r = resolve_hit(&input, &B, &natives(), &mut ScriptedRoll::new([19u64, 0]));
     assert_eq!(r.outcome, Outcome::Hit);
     assert_eq!(r.damage, u32::MAX);
     let (lo, hi) = preview_range(&input, &B);
@@ -192,7 +212,17 @@ fn freeze_when_six_distinct_slots_are_full() {
     );
     input.attacker.tints[0] = Tint::new(Aspect::Piercing, 1, Carrier::Race);
     fill_distinct(&mut input.defender.states);
-    let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([19u64, 0, 0]));
+    // Piercing Frost: a crit freezes.
+    let mut t = natives();
+    t.pairs[Aspect::Cold as usize][Aspect::Piercing as usize] = tables::PairEntry {
+        condition: ResonanceCondition::CanBeFrozen,
+        set: true,
+        ops: [
+            Op::new(OpKind::StateOnCrit, StateKind::Freeze as u8, BP),
+            Op::NONE,
+        ],
+    };
+    let r = resolve_hit(&input, &B, &t, &mut ScriptedRoll::new([19u64, 0, 0]));
     assert_eq!(r.outcome, Outcome::Hit);
     assert!(r.crit);
     assert_eq!(r.resonance_states[0].kind, StateKind::Freeze);
@@ -207,7 +237,12 @@ fn chill_buildup_reaches_freeze_then_tick_skips_and_expires() {
         DamageRange::new(Aspect::Cold, 10, 10),
         Skill::basic(Source::Magical, Form::Projectile, 5_000),
     );
-    let r1 = resolve_hit(&input, &B, &mut ScriptedRoll::new([14u64, 0, 0]));
+    let r1 = resolve_hit(
+        &input,
+        &B,
+        &natives(),
+        &mut ScriptedRoll::new([14u64, 0, 0]),
+    );
     assert_eq!(r1.outcome, Outcome::Hit);
     assert_eq!(r1.packets()[0].state.applied, Applied::Added);
     assert!(has(&r1.states, StateKind::Chill));
@@ -215,7 +250,12 @@ fn chill_buildup_reaches_freeze_then_tick_skips_and_expires() {
     assert_eq!(find(&r1.states, StateKind::Chill).power, B.chill_buildup_bp);
 
     input.defender.states = r1.states;
-    let r2 = resolve_hit(&input, &B, &mut ScriptedRoll::new([14u64, 0, 0]));
+    let r2 = resolve_hit(
+        &input,
+        &B,
+        &natives(),
+        &mut ScriptedRoll::new([14u64, 0, 0]),
+    );
     assert_eq!(r2.packets()[0].state.applied, Applied::Froze);
     assert!(!has(&r2.states, StateKind::Chill));
     assert!(has(&r2.states, StateKind::Freeze));
@@ -237,14 +277,24 @@ fn weaker_burning_refresh_keeps_stronger_power() {
         DamageRange::new(Aspect::Fire, 100, 100),
         Skill::basic(Source::Magical, Form::Projectile, 5_000),
     );
-    let r1 = resolve_hit(&input, &B, &mut ScriptedRoll::new([14u64, 0, 0]));
+    let r1 = resolve_hit(
+        &input,
+        &B,
+        &natives(),
+        &mut ScriptedRoll::new([14u64, 0, 0]),
+    );
     assert_eq!(r1.packets()[0].state.applied, Applied::Added);
     let strong = find(&r1.states, StateKind::Burning);
     assert!(strong.power > 1);
 
     input.attacker.weapon = DamageRange::new(Aspect::Fire, 1, 1);
     input.defender.states = r1.states;
-    let r2 = resolve_hit(&input, &B, &mut ScriptedRoll::new([14u64, 0, 0]));
+    let r2 = resolve_hit(
+        &input,
+        &B,
+        &natives(),
+        &mut ScriptedRoll::new([14u64, 0, 0]),
+    );
     assert_eq!(r2.packets()[0].state.applied, Applied::Refreshed);
     let kept = find(&r2.states, StateKind::Burning);
     assert_eq!(kept.power, strong.power);
@@ -273,7 +323,7 @@ fn tint_tier_0_or_15_is_ignored() {
     );
     input.attacker.tints[0] = Tint::new(Aspect::Cold, 0, Carrier::Race);
     input.attacker.tints[1] = Tint::new(Aspect::Lightning, 15, Carrier::Class);
-    let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14u64, 0]));
+    let r = resolve_hit(&input, &B, &natives(), &mut ScriptedRoll::new([14u64, 0]));
     assert_eq!(r.outcome, Outcome::Hit);
     assert_eq!(r.tint_roll_count, 0);
     assert_eq!(r.rolls_used, 2);
@@ -287,8 +337,15 @@ fn resonance_is_frozen_only_when_defender_already_has_freeze() {
         skill(&[Aspect::Cold], &[BP], BP, 1),
     );
     input.attacker.tints[0] = Tint::new(Aspect::Blunt, 1, Carrier::Race);
+    // Cleaving Ice needs a frozen target.
+    let mut t = natives();
+    t.pairs[Aspect::Cold as usize][Aspect::Blunt as usize] = tables::PairEntry {
+        condition: ResonanceCondition::IsFrozen,
+        set: true,
+        ops: [Op::new(OpKind::Multiplier, tables::ANY_STATE, BP), Op::NONE],
+    };
 
-    let cold = resolve_hit(&input, &B, &mut ScriptedRoll::new([14u64, 0, 0]));
+    let cold = resolve_hit(&input, &B, &t, &mut ScriptedRoll::new([14u64, 0, 0]));
     assert_eq!(cold.outcome, Outcome::Hit);
     let res = cold.resonances[0].expect("pair rolled");
     assert_eq!((res.base, res.tint), (Aspect::Cold, Aspect::Blunt));
@@ -296,7 +353,7 @@ fn resonance_is_frozen_only_when_defender_already_has_freeze() {
     assert!(!res.active);
 
     input.defender.states[0] = st(StateKind::Freeze, 1, 0);
-    let frozen = resolve_hit(&input, &B, &mut ScriptedRoll::new([14u64, 0, 0]));
+    let frozen = resolve_hit(&input, &B, &t, &mut ScriptedRoll::new([14u64, 0, 0]));
     let res = frozen.resonances[0].expect("pair rolled");
     assert!(res.active);
 }

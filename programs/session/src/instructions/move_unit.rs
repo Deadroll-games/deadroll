@@ -5,7 +5,7 @@ use crate::{
     auth,
     errors::SessionError,
     events::Moved,
-    movement::{walk_path, Path},
+    movement::{burn_on_path, walk_path, Path},
     rules::{Unit, MAX_PATH},
     state::{external::MapLayoutView, GameSession, MonsterState, Monsters, Participation},
 };
@@ -72,6 +72,7 @@ pub fn handler(ctx: Context<MoveUnit>, steps: [u8; MAX_PATH], len: u8) -> Result
         x: participation.core.x,
         y: participation.core.y,
     };
+    let path = Path { steps: &steps, len };
     let (end, action_points) = walk_path(
         session,
         &layout,
@@ -80,6 +81,16 @@ pub fn handler(ctx: Context<MoveUnit>, steps: [u8; MAX_PATH], len: u8) -> Result
         start,
         Path { steps: &steps, len },
         participation.core.action_points,
+    )?;
+    burn_on_path(
+        session,
+        session.key(),
+        &monsters.burning_cells()?,
+        unit,
+        start,
+        &path,
+        &mut participation.core.states,
+        0,
     )?;
 
     participation.core.x = end.x;

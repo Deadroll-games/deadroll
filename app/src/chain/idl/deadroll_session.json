@@ -697,7 +697,7 @@
             "The VRF program's identity for this program (`mock-vrf`: the fixed test identity)."
           ],
           "signer": true,
-          "address": "5RotSMue7vx9xBPp3L8iQEKbKSc3ezbY4GqiJxDEe6sN"
+          "address": "Bj7XBktwDmAg6J4FohS6oRHbevD6MMd8jnCZKvzKPiKV"
         },
         {
           "name": "session",
@@ -780,6 +780,12 @@
           ],
           "writable": true,
           "optional": true
+        },
+        {
+          "name": "layout",
+          "docs": [
+            "need the walls. Address pinned at `open_session`, read by `MapLayoutView`."
+          ]
         }
       ],
       "args": [
@@ -1791,6 +1797,18 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "aspects",
+          "address": "9MkMBjPca7x6iZV1rKaCT7mn3BmezhXF4DAvFeTpa7aJ"
+        },
+        {
+          "name": "traits",
+          "address": "3yqgW5wFnwbqWAoGvvA1cAmw9gQxqz8TKA4vHX62GxoC"
+        },
+        {
+          "name": "resonances",
+          "address": "5wvxCqYJgp3gckLyZeNz3md4g8qmRxd7nenhkqtBNXjG"
         }
       ],
       "args": [
@@ -2317,6 +2335,19 @@
       ]
     },
     {
+      "name": "CellBurned",
+      "discriminator": [
+        149,
+        22,
+        45,
+        253,
+        36,
+        237,
+        180,
+        116
+      ]
+    },
+    {
       "name": "EffectResolved",
       "discriminator": [
         122,
@@ -2457,6 +2488,19 @@
         189,
         35,
         91
+      ]
+    },
+    {
+      "name": "ResonanceSpread",
+      "discriminator": [
+        96,
+        94,
+        172,
+        88,
+        183,
+        79,
+        167,
+        126
       ]
     },
     {
@@ -2845,6 +2889,42 @@
   ],
   "types": [
     {
+      "name": "AccuracyBuffData",
+      "docs": [
+        "`deadroll_combat::AccuracyBuff`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "aspect",
+            "docs": [
+              "Attacks with a packet of this aspect get the bonus."
+            ],
+            "type": {
+              "defined": {
+                "name": "Aspect"
+              }
+            }
+          },
+          {
+            "name": "turns",
+            "docs": [
+              "Own turn starts until it ends."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "bonus",
+            "docs": [
+              "Added to the d20."
+            ],
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
       "name": "ActionRequested",
       "docs": [
         "An attack waits for its VRF value."
@@ -2978,6 +3058,46 @@
       }
     },
     {
+      "name": "BurningCellData",
+      "docs": [
+        "`deadroll_rules::spread::BurningCell`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "x",
+            "type": "u8"
+          },
+          {
+            "name": "y",
+            "type": "u8"
+          },
+          {
+            "name": "until_round",
+            "docs": [
+              "Burns through this round."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "power",
+            "docs": [
+              "Burning per turn on whoever steps in."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "source",
+            "docs": [
+              "Turn-order id of the unit that set it on fire."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
       "name": "Carrier",
       "docs": [
         "`deadroll_combat::Carrier`."
@@ -3012,6 +3132,60 @@
           {
             "name": "y",
             "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CellBurned",
+      "docs": [
+        "A unit stepped into a burning cell and caught fire (`move_unit`, `monster_move`)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "unit",
+            "docs": [
+              "Turn-order id."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "x",
+            "type": "u8"
+          },
+          {
+            "name": "y",
+            "type": "u8"
+          },
+          {
+            "name": "applied",
+            "type": {
+              "defined": {
+                "name": "Applied"
+              }
+            }
+          },
+          {
+            "name": "states",
+            "docs": [
+              "The unit's states after."
+            ],
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "ActiveState"
+                  }
+                },
+                6
+              ]
+            }
           }
         ]
       }
@@ -3893,6 +4067,87 @@
           {
             "name": "rolls_used",
             "type": "u32"
+          },
+          {
+            "name": "res_ops",
+            "docs": [
+              "Patch 4: per base slot the ops of its resonance (`kind == None` after them)."
+            ],
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    {
+                      "defined": {
+                        "name": "OpResultData"
+                      }
+                    },
+                    6
+                  ]
+                },
+                3
+              ]
+            }
+          },
+          {
+            "name": "jumps",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "JumpData"
+                  }
+                },
+                4
+              ]
+            }
+          },
+          {
+            "name": "jump_count",
+            "type": "u8"
+          },
+          {
+            "name": "knockback",
+            "type": "u8"
+          },
+          {
+            "name": "ignite_power",
+            "type": "u32"
+          },
+          {
+            "name": "target_mods",
+            "docs": [
+              "Timed modifiers on the target (`target_mods[..target_mod_count]`)."
+            ],
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "TimedModData"
+                  }
+                },
+                3
+              ]
+            }
+          },
+          {
+            "name": "target_mod_count",
+            "type": "u8"
+          },
+          {
+            "name": "accuracy_buff",
+            "type": {
+              "defined": {
+                "name": "AccuracyBuffData"
+              }
+            }
+          },
+          {
+            "name": "landed",
+            "docs": [
+              "`state_bit`s of the states that landed on the target."
+            ],
+            "type": "u8"
           }
         ]
       }
@@ -4036,6 +4291,73 @@
               "Flat `d20` attack bonus (stat bonuses are already in the totals)."
             ],
             "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "JumpData",
+      "docs": [
+        "`deadroll_combat::Jump`: a state for the program to pass on (`ResonanceSpread` says where)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mode",
+            "type": {
+              "defined": {
+                "name": "JumpMode"
+              }
+            }
+          },
+          {
+            "name": "state",
+            "type": {
+              "defined": {
+                "name": "ActiveState"
+              }
+            }
+          },
+          {
+            "name": "filter",
+            "type": {
+              "defined": {
+                "name": "StateKind"
+              }
+            }
+          },
+          {
+            "name": "limit",
+            "type": "u8"
+          },
+          {
+            "name": "base",
+            "type": {
+              "defined": {
+                "name": "Aspect"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "JumpMode",
+      "docs": [
+        "`deadroll_combat::JumpMode`."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Adjacent"
+          },
+          {
+            "name": "Chain"
+          },
+          {
+            "name": "Line"
           }
         ]
       }
@@ -4190,6 +4512,29 @@
       }
     },
     {
+      "name": "MonsterDefenseData",
+      "docs": [
+        "`deadroll_rules::MonsterDefense`: bits by `Aspect` / `StateKind`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "resist",
+            "type": "u8"
+          },
+          {
+            "name": "immune_aspects",
+            "type": "u8"
+          },
+          {
+            "name": "immune_states",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
       "name": "MonsterKilled",
       "type": {
         "kind": "struct",
@@ -4286,6 +4631,69 @@
                 24
               ]
             }
+          },
+          {
+            "name": "defense",
+            "docs": [
+              "Per monster: the defenses of its bestiary record."
+            ],
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "MonsterDefenseData"
+                  }
+                },
+                24
+              ]
+            }
+          },
+          {
+            "name": "res_aspects",
+            "docs": [
+              "The registry `aspects`, `traits` and `resonances` table bodies",
+              "(`deadroll_combat::tables`)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                48
+              ]
+            }
+          },
+          {
+            "name": "res_traits",
+            "type": {
+              "array": [
+                "u8",
+                192
+              ]
+            }
+          },
+          {
+            "name": "res_pairs",
+            "type": {
+              "array": [
+                "u8",
+                576
+              ]
+            }
+          },
+          {
+            "name": "burning_cells",
+            "docs": [
+              "Cells set on fire by a resonance (`deadroll_rules::spread`); `power == 0` is free."
+            ],
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "BurningCellData"
+                  }
+                },
+                16
+              ]
+            }
           }
         ]
       }
@@ -4354,6 +4762,178 @@
           {
             "name": "action_points",
             "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "OpKind",
+      "docs": [
+        "`deadroll_combat::tables::OpKind`."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "None"
+          },
+          {
+            "name": "Multiplier"
+          },
+          {
+            "name": "StateOnCrit"
+          },
+          {
+            "name": "ExtraStateChance"
+          },
+          {
+            "name": "Linked"
+          },
+          {
+            "name": "LinkedChance"
+          },
+          {
+            "name": "LinkedMod"
+          },
+          {
+            "name": "NativeTurns"
+          },
+          {
+            "name": "NativePower"
+          },
+          {
+            "name": "NativeFaster"
+          },
+          {
+            "name": "NativePowerArmor"
+          },
+          {
+            "name": "ThawDamage"
+          },
+          {
+            "name": "RemoveState"
+          },
+          {
+            "name": "Jump"
+          },
+          {
+            "name": "JumpChain"
+          },
+          {
+            "name": "JumpLine"
+          },
+          {
+            "name": "Knockback"
+          },
+          {
+            "name": "IgniteCells"
+          },
+          {
+            "name": "AddPacket"
+          },
+          {
+            "name": "Penetrate"
+          },
+          {
+            "name": "AccuracyBuff"
+          }
+        ]
+      }
+    },
+    {
+      "name": "OpOrigin",
+      "docs": [
+        "`deadroll_combat::OpOrigin`."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Pair"
+          },
+          {
+            "name": "Template"
+          },
+          {
+            "name": "Trait"
+          }
+        ]
+      }
+    },
+    {
+      "name": "OpResultData",
+      "docs": [
+        "`deadroll_combat::OpResult`: what one op of a resonance did."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "kind",
+            "type": {
+              "defined": {
+                "name": "OpKind"
+              }
+            }
+          },
+          {
+            "name": "crit_only",
+            "type": "bool"
+          },
+          {
+            "name": "arg",
+            "docs": [
+              "A `StateKind`, `ModKind` or `Aspect` by kind; 255 = the base's native state (or any)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "origin",
+            "type": {
+              "defined": {
+                "name": "OpOrigin"
+              }
+            }
+          },
+          {
+            "name": "tint",
+            "type": {
+              "defined": {
+                "name": "Aspect"
+              }
+            }
+          },
+          {
+            "name": "carrier",
+            "type": {
+              "defined": {
+                "name": "Carrier"
+              }
+            }
+          },
+          {
+            "name": "tier",
+            "type": "u8"
+          },
+          {
+            "name": "acted",
+            "type": "bool"
+          },
+          {
+            "name": "state",
+            "type": {
+              "defined": {
+                "name": "StateRollData"
+              }
+            }
+          },
+          {
+            "name": "amount",
+            "type": "u32"
+          },
+          {
+            "name": "amount_max",
+            "type": "u32"
           }
         ]
       }
@@ -4577,6 +5157,17 @@
               "with the gear; the locked character cannot change it during the party."
             ],
             "type": "u8"
+          },
+          {
+            "name": "accuracy",
+            "docs": [
+              "Patch 4: a resonance's accuracy buff on this player (Pale Flame), `turns == 0` = none."
+            ],
+            "type": {
+              "defined": {
+                "name": "AccuracyBuffData"
+              }
+            }
           }
         ]
       }
@@ -4847,6 +5438,137 @@
                 }
               }
             }
+          },
+          {
+            "name": "second_tier",
+            "docs": [
+              "Patch 4: the second tint of a triple, and a pair with no record (its tint's trait)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "second_carrier",
+            "type": {
+              "defined": {
+                "name": "Carrier"
+              }
+            }
+          },
+          {
+            "name": "generated",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ResonanceSpread",
+      "docs": [
+        "What a player's hit did beyond its target (docs/DAMAGE_TYPES_AND_MIXES.md 6.4), right after",
+        "its `HitResolved`: states that jumped to other monsters, a knockback, burning cells, and the",
+        "accuracy buff the attacker got. Only written when something happened."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "action_counter",
+            "type": "u32"
+          },
+          {
+            "name": "attacker",
+            "docs": [
+              "Turn-order ids."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "target",
+            "type": "u8"
+          },
+          {
+            "name": "hits",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "SpreadHitData"
+                  }
+                },
+                8
+              ]
+            }
+          },
+          {
+            "name": "hit_count",
+            "type": "u8"
+          },
+          {
+            "name": "moved",
+            "docs": [
+              "The target was pushed from `moved_from` to `moved_to`."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "moved_from",
+            "type": {
+              "defined": {
+                "name": "Cell"
+              }
+            }
+          },
+          {
+            "name": "moved_to",
+            "type": {
+              "defined": {
+                "name": "Cell"
+              }
+            }
+          },
+          {
+            "name": "ignited",
+            "docs": [
+              "Cells set on fire (`ignited[..ignited_count]`): Burning of `ignite_power` on whoever",
+              "steps in, through round `until_round`."
+            ],
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "Cell"
+                  }
+                },
+                8
+              ]
+            }
+          },
+          {
+            "name": "ignited_count",
+            "type": "u8"
+          },
+          {
+            "name": "ignite_power",
+            "type": "u32"
+          },
+          {
+            "name": "until_round",
+            "type": "u16"
+          },
+          {
+            "name": "accuracy",
+            "docs": [
+              "The attacker's accuracy buff after the hit."
+            ],
+            "type": {
+              "defined": {
+                "name": "AccuracyBuffData"
+              }
+            }
           }
         ]
       }
@@ -5004,6 +5726,56 @@
               "array": [
                 "u8",
                 16
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "SpreadHitData",
+      "docs": [
+        "One monster a resonance passed a state on to (`deadroll_rules::spread`)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "monster",
+            "docs": [
+              "Monster index."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "kind",
+            "type": {
+              "defined": {
+                "name": "StateKind"
+              }
+            }
+          },
+          {
+            "name": "applied",
+            "type": {
+              "defined": {
+                "name": "Applied"
+              }
+            }
+          },
+          {
+            "name": "states",
+            "docs": [
+              "The monster's states after."
+            ],
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "ActiveState"
+                  }
+                },
+                6
               ]
             }
           }
@@ -5376,6 +6148,13 @@
                 16
               ]
             }
+          },
+          {
+            "name": "thaw_damage",
+            "docs": [
+              "Patch 4: the part of `dot_damage` from a Freeze that thawed (Burning Frost)."
+            ],
+            "type": "u32"
           }
         ]
       }
