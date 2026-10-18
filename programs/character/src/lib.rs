@@ -11,7 +11,7 @@ pub mod rules;
 pub mod state;
 pub mod trust;
 
-use deadroll_types::EquipSlot;
+use deadroll_types::{EquipSlot, STATS_COUNT};
 use instructions::*;
 use state::{MAP_SKILLS, RESOURCE_KINDS};
 
@@ -45,6 +45,15 @@ pub mod deadroll_character {
     /// Owner or their session key: empties `slot`. Not while the character is in a session.
     pub fn unequip(ctx: Context<Unequip>, slot: EquipSlot) -> Result<()> {
         unequip::handler(ctx, slot)
+    }
+
+    /// Owner's main wallet only: spends level-up stat points, `points` per `Stat`, all at once.
+    /// Not while the character is in a session.
+    pub fn spend_stat_points(
+        ctx: Context<SpendStatPoints>,
+        points: [u16; STATS_COUNT],
+    ) -> Result<()> {
+        spend_stat_points::handler(ctx, points)
     }
 
     /// Session only (CPI at `set_ready(true)`): checks the skills taken onto the map and locks

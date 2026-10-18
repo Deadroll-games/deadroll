@@ -396,7 +396,11 @@ pub fn resolve_hit_into(
                 ResonanceEffect::ExtraStateChance(kind, bp)
                     if d.immune_states & state_bit(kind) == 0 =>
                 {
-                    let raw = ratio(bp as u64, 0, d.state_resist_bp[kind as usize]);
+                    let raw = ratio(
+                        bp as u64,
+                        a.state_chance_bonus_bp,
+                        d.state_resist_bp[kind as usize],
+                    );
                     let chance_bp = balance.clamp_chance(raw.min(u32::MAX as u64) as u32);
                     let (success, roll) = chance(&mut src, chance_bp);
                     let applied = if success {
@@ -470,6 +474,67 @@ fn apply_kind(
 /// Damage hint without dice (website preview): total min and max after attacker modifiers
 /// and target defense, no crit, no resonance, rounded down. Immune packets count as zero.
 pub fn preview_range(input: &HitInput, balance: &Balance) -> (u32, u32) {
+    damage_range(input, balance, false)
+}
+
+/// What an attack would do, before any die is rolled (docs/COMBAT_MATH.md, section 13).
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HitPreview {
+    /// The target is immune to every packet: no roll is made.
+    pub immune: bool,
+    /// Chance to hit, bp: the d20 faces that hit (a natural 1 always misses, a natural 20 always
+    /// hits), out of 20.
+    pub hit_bp: u32,
+    /// Chance to crit, bp: a natural 20, or a hit on another face that wins the crit roll.
+    pub crit_bp: u32,
+    /// Damage of a hit without and with a crit; no resonance (its tints are rolled).
+    pub min: u32,
+    pub max: u32,
+    pub crit_min: u32,
+    pub crit_max: u32,
+}
+
+/// Chances and damage of `input` without dice, by the same rules as [`resolve_hit`].
+pub fn preview_hit(input: &HitInput, balance: &Balance) -> HitPreview {
+    let a = &input.attacker;
+    let d = &input.defender;
+    let packets = build_packets(a.weapon, &a.skill, &a.added);
+    if packets
+        .as_slice()
+        .iter()
+        .all(|p| d.immune_aspects & aspect_bit(p.aspect) != 0)
+    {
+        return HitPreview {
+            immune: true,
+            ..HitPreview::default()
+        };
+    }
+    // Faces 2..=19 hit on the threshold; 20 always hits.
+    let plain_hits = (2u32..=19)
+        .filter(|face| face.saturating_add(a.attack_bonus) >= d.defense)
+        .count() as u32;
+    let crit_roll = if a.crit_chance_bp > 0 {
+        balance.clamp_chance(a.crit_chance_bp)
+    } else {
+        0
+    };
+    let (min, max) = damage_range(input, balance, false);
+    let (crit_min, crit_max) = damage_range(input, balance, true);
+    HitPreview {
+        immune: false,
+        hit_bp: (plain_hits + 1) * BP / 20,
+        crit_bp: (BP + plain_hits * crit_roll) / 20,
+        min,
+        max,
+        crit_min,
+        crit_max,
+    }
+}
+
+/// Total min and max of a hit after attacker modifiers (with the crit multiplier when `crit`)
+/// and target defense, rounded down once.
+fn damage_range(input: &HitInput, balance: &Balance, crit: bool) -> (u32, u32) {
     let a = &input.attacker;
     let d = &input.defender;
     let packets = build_packets(a.weapon, &a.skill, &a.added);
@@ -479,7 +544,12 @@ pub fn preview_range(input: &HitInput, balance: &Balance) -> (u32, u32) {
             continue;
         }
         let incr = sum_matching(&a.increased, p.aspect, a.skill.source, a.skill.form);
-        let mult = product_matching(&a.more, p.aspect, a.skill.source, a.skill.form);
+        let mut mult = product_matching(&a.more, p.aspect, a.skill.source, a.skill.form) as u64;
+        if crit {
+            mult = more(mult, balance.crit_more_bp);
+        }
+        // As `resolve_hit` stores it (`PacketResult::more_bp`).
+        let mult = mult.min(u32::MAX as u64);
         let defend = |v: u64| {
             let v = more(v, incr);
             let v = (v as u128 * mult as u128 / BP as u128).min(u64::MAX as u128) as u64;
@@ -793,5 +863,83 @@ mod tests {
         assert_eq!(preview_range(&input, &B), (2, 4));
         input.defender.immune_aspects = aspect_bit(Aspect::Piercing);
         assert_eq!(preview_range(&input, &B), (0, 0));
+    }
+
+    #[test]
+    fn preview_hit_chances_and_ranges() {
+        let mut input = basic(Aspect::Piercing, 4, 8, 0);
+        // Faces 10..=19 and the natural 20 hit defense 10: 11 of 20.
+        let p = preview_hit(&input, &B);
+        assert_eq!((p.immune, p.hit_bp, p.crit_bp), (false, 5_500, 500));
+        assert_eq!((p.min, p.max, p.crit_min, p.crit_max), (4, 8, 6, 12));
+        // 10 plain hits x 10% + the natural 20.
+        input.attacker.crit_chance_bp = 1_000;
+        assert_eq!(preview_hit(&input, &B).crit_bp, 1_000);
+        // The crit roll is clamped like in the hit.
+        input.attacker.crit_chance_bp = BP;
+        assert_eq!(preview_hit(&input, &B).crit_bp, (BP + 10 * 9_500) / 20);
+        // A natural 1 always misses, a natural 20 always hits.
+        input.attacker.attack_bonus = 1_000;
+        assert_eq!(preview_hit(&input, &B).hit_bp, 9_500);
+        input.attacker.attack_bonus = 0;
+        input.defender.defense = u32::MAX;
+        assert_eq!(preview_hit(&input, &B).hit_bp, 500);
+        input.defender.immune_aspects = aspect_bit(Aspect::Piercing);
+        assert_eq!(
+            preview_hit(&input, &B),
+            HitPreview {
+                immune: true,
+                ..HitPreview::default()
+            }
+        );
+    }
+
+    #[test]
+    fn preview_hit_matches_every_d20_face() {
+        for (bonus, defense) in [(0, 10), (3, 14), (7, 2), (0, 25), (12, 30)] {
+            let mut input = basic(Aspect::Blunt, 3, 9, 0);
+            input.attacker.attack_bonus = bonus;
+            input.defender.defense = defense;
+            let hits = (0..20u64)
+                .filter(|face| {
+                    let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([*face, 0]));
+                    r.outcome == Outcome::Hit
+                })
+                .count() as u32;
+            assert_eq!(
+                preview_hit(&input, &B).hit_bp,
+                hits * BP / 20,
+                "{bonus} vs {defense}"
+            );
+        }
+    }
+
+    #[test]
+    fn preview_hit_damage_matches_the_hit_ends() {
+        let mut input = cold_bolt(Aspect::Fire);
+        input.attacker.added[0] = DamageRange::new(Aspect::Piercing, 2, 5);
+        input.attacker.increased[0] = Mod::new(ModFilter::Any, 3_000);
+        input.defender.armor = 40;
+        input.defender.resist_bp[Aspect::Cold as usize] = 5_000;
+        let p = preview_hit(&input, &B);
+        // Tint roll fails (9_999), d100 0 or 100 (the range ends); crit on a natural 20.
+        let at = |face: u64, d100: u64| {
+            resolve_hit(&input, &B, &mut ScriptedRoll::new([face, 9_999, d100])).damage
+        };
+        assert_eq!((p.min, p.max), (at(14, 0), at(14, 100)));
+        let nat20 =
+            |d100: u64| resolve_hit(&input, &B, &mut ScriptedRoll::new([19, 9_999, d100])).damage;
+        assert_eq!((p.crit_min, p.crit_max), (nat20(0), nat20(100)));
+    }
+
+    #[test]
+    fn state_chance_bonus_reaches_resonance_states() {
+        let mut input = basic(Aspect::Piercing, 10, 10, 0);
+        input.attacker.tints[0] = Tint::new(Aspect::Cold, 1, Carrier::Class);
+        input.attacker.state_chance_bonus_bp = BP;
+        input.defender.armor = 100;
+        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0, 0, 0]));
+        // Icy Point: 3000 x2.
+        assert_eq!(r.resonance_states[0].chance_bp, 6_000);
     }
 }

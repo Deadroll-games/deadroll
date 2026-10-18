@@ -144,6 +144,7 @@ pub fn fighter(
         stats: p.stats,
         predisposition: p.predisposition,
         predisposition_tier: p.tier.clamp(1, 14),
+        class_tier: p.class_tier.clamp(1, 14),
         equipment: equipment(id, p, level, cfg, issues),
     };
     Fighter {

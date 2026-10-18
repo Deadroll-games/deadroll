@@ -10,7 +10,7 @@ use crate::{
     cpi_out::nft::MPL_CORE_ID,
     errors::CharacterError,
     events::CharacterCreated,
-    rules::{self, ACCOUNT_VERSION, CHARACTER_VERSION, START_TIER},
+    rules::{self, ACCOUNT_VERSION, CHARACTER_VERSION, CLASS_START_TIER, START_TIER},
     state::{
         Bag, Character, Gear, PlayerProfile, SkillRecord, SkillSet, NAME_LEN, RESOURCE_KINDS,
         SKILLS_MAX, SKILL_NAME_LEN,
@@ -160,6 +160,7 @@ pub fn handler(ctx: Context<CreateCharacter>, args: CreateCharacterArgs) -> Resu
         unspent_points: 0,
         nft_frozen: false,
         gear,
+        class_tier: CLASS_START_TIER,
     });
     ctx.accounts.skill_set.set_inner(SkillSet {
         version: ACCOUNT_VERSION,

@@ -54,3 +54,35 @@
 .stats-mod {
   display: block;
 }
+
+/* Character screen: core stats with the point plan, then the derived stats. */
+.hero-sheet .char-stats dd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.stat-plan {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.btn.small {
+  padding: 0 8px;
+  min-width: 28px;
+  line-height: 24px;
+}
+
+.stat-points {
+  margin: 10px 0;
+}
+
+.hero-sheet-table td.muted {
+  font-size: 12px;
+}
+
+.hero-sheet .good {
+  color: var(--good);
+}

@@ -131,6 +131,8 @@ pub fn handler(ctx: Context<JoinSession>, contribution: u64, actor: Pubkey) -> R
     participation.ap_seq = 0;
     participation.contribution = paid;
     participation.equipment = [EMPTY_ITEM; EQUIP_SLOTS];
+    // Copied from the character at `set_ready(true)`, with the gear.
+    participation.class_tier = 0;
     participation.skills = [NO_SKILL; MAP_SKILLS];
 
     let stash = &mut accounts.stash;

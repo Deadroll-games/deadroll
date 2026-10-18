@@ -23,10 +23,13 @@ pub mod resolve;
 pub mod turn;
 pub mod units;
 
-pub use config::{BalanceConfig, ItemBaseStats, ItemTuning, MonsterScaling, PlayerTuning};
+pub use config::{
+    BalanceConfig, ItemBaseStats, ItemTuning, MonsterScaling, PlayerTuning, LEVELS, TIERS,
+};
 pub use input::{EffectAction, HeroStats, Side, SkillStats, SkillUse};
 pub use items::{EquipError, Equipment, ItemBonus};
 pub use monster::{MonsterBase, MonsterProfile};
+pub use player::SpendError;
 pub use resolve::{AttackOutcome, RiderOutcome};
 pub use turn::{start_of_turn, TurnStart};
 pub use units::{Initiative, Unit, EMPTY_UNIT, MONSTER_UNIT_BASE};

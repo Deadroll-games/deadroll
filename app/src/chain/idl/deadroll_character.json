@@ -502,6 +502,44 @@
       "args": []
     },
     {
+      "name": "spend_stat_points",
+      "docs": [
+        "Owner's main wallet only: spends level-up stat points, `points` per `Stat`, all at once.",
+        "Not while the character is in a session."
+      ],
+      "discriminator": [
+        37,
+        222,
+        1,
+        215,
+        239,
+        167,
+        137,
+        5
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true
+        },
+        {
+          "name": "character",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "points",
+          "type": {
+            "array": [
+              "u16",
+              4
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "unequip",
       "docs": [
         "Owner or their session key: empties `slot`. Not while the character is in a session."
@@ -752,6 +790,19 @@
       ]
     },
     {
+      "name": "StatPointsSpent",
+      "discriminator": [
+        46,
+        143,
+        87,
+        245,
+        219,
+        75,
+        149,
+        42
+      ]
+    },
+    {
       "name": "TombstoneFrozen",
       "discriminator": [
         29,
@@ -905,6 +956,16 @@
       "code": 6027,
       "name": "SessionTokenExpired",
       "msg": "Session token expired"
+    },
+    {
+      "code": 6028,
+      "name": "NoPointsSpent",
+      "msg": "No stat points chosen"
+    },
+    {
+      "code": 6029,
+      "name": "NotEnoughStatPoints",
+      "msg": "More stat points chosen than the character has unspent"
     }
   ],
   "types": [
@@ -1065,6 +1126,14 @@
                 "name": "Gear"
               }
             }
+          },
+          {
+            "name": "class_tier",
+            "docs": [
+              "Class trait tier, `1..=14` (1 best), next to the race trait tier `core.predisposition_tier`",
+              "(docs/CHARACTER.md, sections 6.3 and 10). Starts low, grows only deterministically."
+            ],
+            "type": "u8"
           }
         ]
       }
@@ -2180,6 +2249,53 @@
           },
           {
             "name": "Combat"
+          }
+        ]
+      }
+    },
+    {
+      "name": "StatPointsSpent",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "character",
+            "type": "pubkey"
+          },
+          {
+            "name": "points",
+            "docs": [
+              "Points added, by `Stat`."
+            ],
+            "type": {
+              "array": [
+                "u16",
+                4
+              ]
+            }
+          },
+          {
+            "name": "stats",
+            "docs": [
+              "The core stats after spending, by `Stat`."
+            ],
+            "type": {
+              "array": [
+                "u16",
+                4
+              ]
+            }
+          },
+          {
+            "name": "unspent_points",
+            "type": "u8"
+          },
+          {
+            "name": "hp_max",
+            "docs": [
+              "The stored maximum HP after spending (Endurance raises it)."
+            ],
+            "type": "u32"
           }
         ]
       }

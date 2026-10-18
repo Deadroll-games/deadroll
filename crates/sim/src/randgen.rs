@@ -85,6 +85,7 @@ pub fn random_hero(rng: &mut SeededRoll, cfg: &BalanceConfig, class: Option<Clas
         stats,
         predisposition,
         tier: t.start_tier,
+        class_tier: t.class_start_tier,
         skills: inline_skills.iter().map(|s| s.name.clone()).collect(),
         inline_skills,
         equipment: None,

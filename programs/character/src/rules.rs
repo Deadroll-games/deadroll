@@ -1,6 +1,6 @@
 //! Creation and growth rules (docs/CHARACTER.md, sections 2, 4, 5, 6.3, 7).
 //! Creation and HP numbers come from `deadroll_rules::PlayerTuning::DEFAULT` (shared with the
-//! session program and `tools/balance`); the rest marked BALANCE are placeholders.
+//! session program and `tools/balance`).
 
 use deadroll_rules::{player, BalanceConfig, PlayerTuning};
 use deadroll_types::{Aspect, Class, Race, STATS_COUNT};
@@ -12,8 +12,8 @@ const TUNING: &PlayerTuning = &BALANCE.players;
 
 /// Account layout version written by this program.
 pub const ACCOUNT_VERSION: u8 = 1;
-/// `Character` layout version: 2 has `gear` after `nft_frozen`.
-pub const CHARACTER_VERSION: u8 = 2;
+/// `Character` layout version: 2 has `gear` after `nft_frozen`, 3 has `class_tier` after `gear`.
+pub const CHARACTER_VERSION: u8 = 3;
 
 /// Every stat starts here before the player spends points.
 pub const STAT_BASE: u16 = TUNING.stat_base;
@@ -21,20 +21,18 @@ pub const STAT_BASE: u16 = TUNING.stat_base;
 pub const STAT_POINTS_START: u16 = TUNING.stat_points_start;
 /// Highest value of one stat at creation.
 pub const STAT_MAX_START: u16 = TUNING.stat_max_start;
-/// Stat points per level gained. BALANCE.
-pub const STAT_POINTS_PER_LEVEL: u8 = 2;
 
 /// HP: class base + Endurance x per point + per level, indexed by `Class`.
 pub const CLASS_HP_BASE: [u32; Class::COUNT] = TUNING.hp_base;
 pub const HP_PER_ENDURANCE: u32 = TUNING.hp_per_endurance;
 pub const CLASS_HP_PER_LEVEL: [u32; Class::COUNT] = TUNING.hp_per_level;
 
-/// Total XP needed for each level, levels 1..=4 in the first version (section 5). BALANCE.
-pub const LEVEL_XP: [u32; 4] = [0, 100, 300, 600];
-pub const LEVEL_MAX: u16 = LEVEL_XP.len() as u16;
+/// Highest level in the first version (section 5).
+pub const LEVEL_MAX: u16 = TUNING.level_xp.len() as u16;
 
 /// Race and class trait tiers start low and only grow deterministically (section 6.3).
 pub const START_TIER: u8 = TUNING.start_tier;
+pub const CLASS_START_TIER: u8 = TUNING.class_start_tier;
 
 /// Section 7.1: humans pick a physical aspect, forest elves an elemental one.
 pub const fn predisposition_allowed(race: Race, aspect: Aspect) -> bool {
@@ -50,9 +48,23 @@ pub fn hp_max(class: Class, stats: &[u16; STATS_COUNT], level: u16) -> u32 {
     player::hp_max(class, stats, level, TUNING)
 }
 
-/// The level reached with `xp` total experience.
+/// The level reached with `xp` total experience (`PlayerTuning.level_xp`).
 pub fn level_for(xp: u32) -> u16 {
-    LEVEL_XP.iter().take_while(|need| xp >= **need).count() as u16
+    player::level_for(xp, TUNING)
+}
+
+/// Stat points for going from level `from` to `to`; `None` on overflow.
+pub fn level_up_points(from: u16, to: u16) -> Option<u8> {
+    player::level_up_points(from, to, TUNING)
+}
+
+/// Spends level-up points: the new stats and the points left.
+pub fn spend_points(
+    stats: &[u16; STATS_COUNT],
+    unspent: u8,
+    add: &[u16; STATS_COUNT],
+) -> core::result::Result<([u16; STATS_COUNT], u8), player::SpendError> {
+    player::spend_points(stats, unspent, add)
 }
 
 /// Name rules: printable ASCII, not empty, zero-padded after the text (one canonical encoding).

@@ -49,6 +49,7 @@ fn arb_mod_filter() -> impl Strategy<Value = ModFilter> {
         arb_family().prop_map(ModFilter::Family),
         arb_source().prop_map(ModFilter::Source),
         arb_form().prop_map(ModFilter::Form),
+        (arb_source(), arb_form()).prop_map(|(s, f)| ModFilter::SourceForm(s, f)),
     ]
 }
 

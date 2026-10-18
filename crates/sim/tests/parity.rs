@@ -10,6 +10,7 @@
 //! (`deadroll_character::state::Gear`: the starter kit, then unequip), snapshotted the way
 //! `set_ready` does (`Participation::hero`); the simulator side wears the hero preset's
 //! `equipment` (left out = the starter kit). Every hero fights in each [`Gear`].
+use deadroll_character::rules::CLASS_START_TIER;
 use deadroll_character::state::Gear as CharacterGear;
 use deadroll_character::state::SkillRecord;
 use deadroll_combat::{
@@ -87,7 +88,7 @@ fn program_hero(c: &CharacterData, gear: Gear) -> HeroStats {
     if gear == Gear::Bare {
         l.unequip(EquipSlot::MainHand).unwrap();
     }
-    hero_of(c, &l.equipment())
+    hero_of(c, CLASS_START_TIER, &l.equipment())
 }
 
 /// Simulator side: the hero preset's `equipment` (written out, not taken from the rules).
@@ -181,6 +182,7 @@ fn sim_fighter(
         stats: c.stats,
         predisposition: c.predisposition,
         tier: c.predisposition_tier,
+        class_tier: CLASS_START_TIER,
         skills: ids,
         inline_skills: vec![],
         equipment: preset_equipment(c.class, gear),
@@ -304,7 +306,29 @@ fn table_numbers_match_the_program() {
             deadroll_rules::player::player_initiative(&c.stats, &cfg.players),
             program_rules::player_initiative(&c.stats)
         );
+        assert_eq!(
+            deadroll_rules::player::player_accuracy(&c.stats, &cfg.players),
+            program_rules::player_accuracy(&c.stats)
+        );
+        // Level-ups and spending points: the character program reads the same table.
+        for xp in [0, 99, 100, 299, 300, 600, u32::MAX] {
+            assert_eq!(
+                deadroll_rules::player::level_for(xp, &cfg.players),
+                deadroll_character::rules::level_for(xp)
+            );
+        }
+        assert_eq!(
+            deadroll_rules::player::level_up_points(1, 3, &cfg.players),
+            deadroll_character::rules::level_up_points(1, 3)
+        );
+        for add in [[1, 0, 2, 1], [0; 4], [5, 0, 0, 0]] {
+            assert_eq!(
+                deadroll_rules::player::spend_points(&c.stats, 4, &add),
+                deadroll_character::rules::spend_points(&c.stats, 4, &add)
+            );
+        }
     }
+    assert_eq!(cfg.players.class_start_tier, CLASS_START_TIER);
     for (id, profile, hp) in sim_monsters(&cfg) {
         assert_eq!(
             Some(profile),
@@ -334,7 +358,10 @@ fn heroes_and_skills_resolve_like_the_character_program() {
         // The starter kit adds no HP: the stored maximum is the party maximum.
         assert_eq!(f.hp_max, c.hp_max);
         assert_eq!(f.hero, program_hero(&c, Gear::Kit));
-        assert_eq!(f.hero, HeroStats::from(&c).with_equipment(f.hero.equipment));
+        assert_eq!(
+            f.hero,
+            HeroStats::new(&c, CLASS_START_TIER).with_equipment(f.hero.equipment)
+        );
         let usable: Vec<SkillRecord> = set
             .iter()
             .map(record)
@@ -522,7 +549,8 @@ fn every_support_effect_lands_the_same() {
                     }
                 }
                 Purpose::Buff | Purpose::Damage => {
-                    for i in 0..SEEDS {
+                    // On an ally, and on the caster itself (Endurance lengthens own buffs).
+                    for (i, on_self) in (0..SEEDS).flat_map(|i| [(i, false), (i, true)]) {
                         let start = c.hp_max / 3;
                         let mut ally = (start, [ActiveState::default(); STATES_MAX], NONE);
                         let p = resolve::support_ally(
@@ -531,6 +559,7 @@ fn every_support_effect_lands_the_same() {
                             &ph,
                             &program::skill_stats(rec),
                             effect,
+                            on_self,
                             &mut ally.0,
                             c.hp_max,
                             &mut ally.1,
@@ -544,13 +573,14 @@ fn every_support_effect_lands_the_same() {
                             &f.hero,
                             &sim.stats,
                             effect,
+                            on_self,
                             &mut sim_ally.0,
                             f.hp_max,
                             &mut sim_ally.1,
                             &mut sim_ally.2,
                             &mut VrfRoll::new(seed(i)),
                         );
-                        assert_eq!((s, sim_ally), (p, ally));
+                        assert_eq!((s, sim_ally), (p, ally), "on self: {on_self}");
                     }
                 }
             }

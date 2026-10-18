@@ -42,9 +42,7 @@ pub fn handler(
     c.xp = c.xp.checked_add(xp).ok_or(CharacterError::MathOverflow)?;
     let level = rules::level_for(c.xp);
     if level > c.level {
-        let gained = u8::try_from(level - c.level).map_err(|_| CharacterError::MathOverflow)?;
-        character.unspent_points = gained
-            .checked_mul(rules::STAT_POINTS_PER_LEVEL)
+        character.unspent_points = rules::level_up_points(c.level, level)
             .and_then(|p| character.unspent_points.checked_add(p))
             .ok_or(CharacterError::MathOverflow)?;
         c.level = level;

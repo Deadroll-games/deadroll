@@ -335,7 +335,7 @@ describe("create_character", { skip: NEEDS_CONFIG }, () => {
     const c = await create(p, warrior());
     const ch = await fetchCharacter(c.character);
     const core = ch.core;
-    assert.equal(core.version, 2); // 2: the gear follows the core
+    assert.equal(core.version, 3); // 2: the gear follows the core; 3: then the class trait tier
     assert.ok(core.owner.equals(p.publicKey));
     assert.equal(core.index, 0);
     assert.ok(core.nft.equals(c.asset.publicKey));
@@ -349,6 +349,8 @@ describe("create_character", { skip: NEEDS_CONFIG }, () => {
     assert.deepEqual(core.appearance[0], layer);
     assert.equal(Buffer.from(ch.name).toString().replace(/\0+$/, ""), "Bran");
     assert.deepEqual([ch.unspentPoints, ch.nftFrozen], [0, false]);
+    // Race and class trait tiers are separate and both start at the worst tier (CHARACTER 6.3).
+    assert.equal(ch.classTier, 14);
     // The class starter items come with the character, worn (docs/CHARACTER.md 9, step 5).
     assert.equal(ch.gear.itemCount, 2);
     assert.deepEqual(ch.gear.items.slice(0, 2).map((r: any) => Object.keys(r.base)[0]), ["sword", "leatherArmor"]);
@@ -417,6 +419,48 @@ describe("create_character", { skip: NEEDS_CONFIG }, () => {
     const p = await newPlayer();
     await create(p, warrior());
     await fails(createIx(p, 0, mage()).call.rpc(), "ConstraintSeeds");
+  });
+});
+
+/** `spend_stat_points`: the owner's main wallet, all points at once (`Stat` order). */
+function spend(signer: Keypair, character: PublicKey, points: number[]) {
+  return program.methods
+    .spendStatPoints(points)
+    .accountsStrict({ owner: signer.publicKey, character })
+    .signers([signer])
+    .rpc();
+}
+
+// The happy path, death and the party lock need a character that gained a level: session.test.ts.
+describe("spend_stat_points: rejections", { skip: NEEDS_CONFIG }, () => {
+  it("rejects choosing no points", async () => {
+    const p = await newPlayer();
+    const c = await create(p, warrior());
+    await fails(spend(p, c.character, [0, 0, 0, 0]), "NoPointsSpent");
+  });
+
+  it("rejects more points than unspent (a new character has none)", async () => {
+    const p = await newPlayer();
+    const c = await create(p, warrior());
+    await fails(spend(p, c.character, [1, 0, 0, 0]), "NotEnoughStatPoints");
+    const ch = await fetchCharacter(c.character);
+    assert.deepEqual([ch.core.stats, ch.unspentPoints], [[10, 7, 5, 8], 0]);
+  });
+
+  it("rejects anyone but the owner's main wallet, a session key included", async () => {
+    const p = await newPlayer();
+    const c = await create(p, warrior());
+    const stranger = await newPlayer();
+    await fails(spend(stranger, c.character, [1, 0, 0, 0]), "NotOwner");
+    // There is no session token path: a game key is just another signer.
+    const key = await newPlayer();
+    await fails(spend(key, c.character, [1, 0, 0, 0]), "NotOwner");
+  });
+
+  it("rejects an account that is not a character", async () => {
+    const p = await newPlayer();
+    const profile = PublicKey.findProgramAddressSync([Buffer.from("profile"), p.publicKey.toBuffer()], ID)[0];
+    await fails(spend(p, profile, [1, 0, 0, 0]), "AccountDiscriminatorMismatch");
   });
 });
 

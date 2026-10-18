@@ -31,6 +31,11 @@ import {
   unequipIx,
 } from "../chain/items";
 import { useTx } from "../chain/useTx";
+import { heroInputOf, useCombat } from "../chain/combatWasm";
+import { spendStatPointsIx } from "../chain/game";
+import { equipmentOf } from "../chain/items";
+import { HeroSheetPanel } from "../components/stats/HeroSheetPanel";
+import type { HeroSheetPanelProps } from "../components/stats/types";
 import { Inventory } from "../components/items/Inventory";
 import type { InventoryItemView, InventoryProps } from "../components/items/types";
 import { useSessionKey } from "../session-key/SessionKeyProvider";
@@ -69,6 +74,15 @@ export function inventoryLock(c: CharacterAcc, viewer: Address | null): string |
   return null;
 }
 
+/** Why level-up points cannot be spent from this screen (null = they can): the owner's main
+ * wallet only, a living character outside a party (programs/character spend_stat_points). */
+export function spendLock(c: CharacterAcc, viewer: Address | null): string | null {
+  if (!c.core.alive) return "A tombstone spends nothing.";
+  if (viewer !== c.core.owner) return "Only the owner's wallet can spend them.";
+  if (c.core.inSession) return "In a party: spend them after it ends.";
+  return null;
+}
+
 /** An item's own sprite from the on-chain sprite book. */
 function ItemIcon({ base }: { base: string }) {
   const img = useRenderImage(itemRequest(base));
@@ -100,6 +114,9 @@ export function CharacterDetailPage() {
   const wallet = useAppWallet();
   const sk = useSessionKey();
   const { send, busy } = useTx();
+  const combat = useCombat();
+  // Level-up points placed but not saved yet, by Stat; Save sends them all at once.
+  const [plan, setPlan] = useState<number[]>([0, 0, 0, 0]);
 
   const load = useCallback(async () => {
     if (DATA_SOURCE !== "chain" || !address) return;
@@ -110,6 +127,7 @@ export function CharacterDetailPage() {
         getAccount<SkillSetAcc>("character", "SkillSet", await skillSetPda(addr)),
       ]);
       setC(acc ?? "missing");
+      setPlan([0, 0, 0, 0]);
       setSkills(set ? set.skills.slice(0, set.count) : []);
       const session = acc?.core.inSession ?? null;
       if (session) {
@@ -143,6 +161,34 @@ export function CharacterDetailPage() {
           onUnequip: (slot) => void act(`Take off ${itemLabel(slot)}`, () => unequipIx(actor.signer!, addr, slot, actor.token)),
         }
       : null;
+  // Derived stats from the combat module (the rules the programs run), now and with the plan.
+  const sheet: HeroSheetPanelProps | null =
+    c && c !== "missing"
+      ? (() => {
+          const equipment = equipmentOf(c.gear);
+          const plannedStats = c.core.stats.map((s, i) => s + (plan[i] ?? 0));
+          return {
+            stats: c.core.stats,
+            plan,
+            unspent: c.unspentPoints,
+            sheet: combat ? combat.heroSheet(heroInputOf(c, equipment)) : null,
+            planned: combat ? combat.heroSheet(heroInputOf(c, equipment, plannedStats)) : null,
+            locked: spendLock(c, wallet.address ?? null),
+            busy: busy !== null,
+            onPlan: (stat, delta) =>
+              setPlan((p) => {
+                const left = c.unspentPoints - p.reduce((a, b) => a + b, 0);
+                const next = [...p];
+                next[stat] = Math.max(0, (next[stat] ?? 0) + (delta > 0 && left === 0 ? 0 : delta));
+                return next;
+              }),
+            onReset: () => setPlan([0, 0, 0, 0]),
+            // The owner's main wallet: spending points is not a game move (no session key).
+            onSave: () =>
+              void send("Spend stat points", wallet.signer, async () => [spendStatPointsIx(wallet.signer!, addr, plan)]).then((ok) => ok && load()),
+          };
+        })()
+      : null;
 
   if (DATA_SOURCE !== "chain") return <p className="muted">Character details need chain mode.</p>;
   return (
@@ -156,7 +202,7 @@ export function CharacterDetailPage() {
       {error && <p className="error">{error}</p>}
       {c === null && !error && <p className="muted">Loading…</p>}
       {c === "missing" && <p className="error">No character at this address.</p>}
-      {c && c !== "missing" && <CharacterDetailView address={address as Address} c={c} skills={skills} party={party} items={items} />}
+      {c && c !== "missing" && <CharacterDetailView address={address as Address} c={c} skills={skills} party={party} items={items} sheet={sheet} />}
     </section>
   );
 }
@@ -167,6 +213,7 @@ export function CharacterDetailView({
   skills,
   party,
   items = null,
+  sheet = null,
 }: {
   address: Address;
   c: CharacterAcc;
@@ -174,6 +221,8 @@ export function CharacterDetailView({
   party: PartyInfo;
   /** The inventory panel; null while it loads. */
   items?: Omit<InventoryProps, "icon"> | null;
+  /** Derived stats and the level-up point plan; null: the core stats only. */
+  sheet?: HeroSheetPanelProps | null;
 }) {
   const dead = !c.core.alive;
   const img = useRenderImage(dead ? TOMBSTONE : renderRequest(c.core.appearance, false));
@@ -191,6 +240,9 @@ export function CharacterDetailView({
           <h1>{name}</h1>
           <p>
             {raceName(race)} {className(cls)} · {aspectName(pred)} predisposition
+          </p>
+          <p className="muted">
+            Trait tiers (1 best): race {c.core.predispositionTier} · class {c.classTier}
           </p>
           <p className="muted">
             Level {c.core.level} · {c.core.xp} XP{c.unspentPoints > 0 ? ` · ${c.unspentPoints} unspent points` : ""}
@@ -216,18 +268,19 @@ export function CharacterDetailView({
 
       <section className="panel">
         <h2>Stats</h2>
-        <dl className="char-stats">
-          {STAT_NAMES.map((s, i) => (
-            <div key={s}>
-              <dt>{s}</dt>
-              <dd>{c.core.stats[i] ?? 0}</dd>
-            </div>
-          ))}
-          <div>
-            <dt>HP</dt>
-            <dd>{hp}</dd>
-          </div>
-        </dl>
+        <p className="muted">HP {hp}</p>
+        {sheet ? (
+          <HeroSheetPanel {...sheet} />
+        ) : (
+          <dl className="char-stats">
+            {STAT_NAMES.map((s, i) => (
+              <div key={s}>
+                <dt>{s}</dt>
+                <dd>{c.core.stats[i] ?? 0}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
       </section>
 
       <section className="panel">

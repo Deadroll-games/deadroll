@@ -17,7 +17,11 @@
         "Intelligence": 0,
         "Endurance": 0
       },
-      "hp": 0
+      "hp": 0,
+      "crit_bp": 0,
+      "speed": 0,
+      "speed_counter_bp": 0,
+      "initiative": 0
     },
     "Staff": {
       "slot": "MainHand",
@@ -36,7 +40,11 @@
         "Intelligence": 0,
         "Endurance": 0
       },
-      "hp": 0
+      "hp": 0,
+      "crit_bp": 0,
+      "speed": 0,
+      "speed_counter_bp": 0,
+      "initiative": 0
     },
     "Wand": {
       "slot": "MainHand",
@@ -55,7 +63,11 @@
         "Intelligence": 0,
         "Endurance": 0
       },
-      "hp": 0
+      "hp": 0,
+      "crit_bp": 0,
+      "speed": 0,
+      "speed_counter_bp": 0,
+      "initiative": 0
     },
     "LeatherArmor": {
       "slot": "Body",
@@ -74,7 +86,11 @@
         "Intelligence": 0,
         "Endurance": 0
       },
-      "hp": 0
+      "hp": 0,
+      "crit_bp": 0,
+      "speed": 0,
+      "speed_counter_bp": 0,
+      "initiative": 0
     },
     "Robe": {
       "slot": "Body",
@@ -93,7 +109,11 @@
         "Intelligence": 0,
         "Endurance": 0
       },
-      "hp": 0
+      "hp": 0,
+      "crit_bp": 0,
+      "speed": 0,
+      "speed_counter_bp": 0,
+      "initiative": 0
     },
     "LightLeatherArmor": {
       "slot": "Body",
@@ -112,7 +132,11 @@
         "Intelligence": 0,
         "Endurance": 0
       },
-      "hp": 0
+      "hp": 0,
+      "crit_bp": 0,
+      "speed": 0,
+      "speed_counter_bp": 0,
+      "initiative": 0
     }
   },
   "starter_kits": {

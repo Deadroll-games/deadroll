@@ -53,9 +53,10 @@ pub fn read_character(info: &AccountInfo) -> Result<CharacterData> {
         .ok_or(error!(SessionError::InvalidCharacter))
 }
 
-/// A `deadroll_character` `Character` with what it wears (`Character.gear`): the whole account,
-/// not only the frozen core. Read once per party, at `set_ready(true)`.
-pub fn read_character_gear(info: &AccountInfo) -> Result<(CharacterData, Equipment)> {
+/// A `deadroll_character` `Character` with what it wears (`Character.gear`) and its class trait
+/// tier (`Character.class_tier`): the whole account, not only the frozen core. Read once per
+/// party, at `set_ready(true)`.
+pub fn read_character_gear(info: &AccountInfo) -> Result<(CharacterData, Equipment, u8)> {
     require!(
         info.owner == &deadroll_character::ID,
         SessionError::InvalidCharacter
@@ -68,6 +69,7 @@ pub fn read_character_gear(info: &AccountInfo) -> Result<(CharacterData, Equipme
     Ok((
         character.core.clone(),
         Equipment(character.gear.equipment()),
+        character.class_tier,
     ))
 }
 

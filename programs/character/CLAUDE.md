@@ -12,7 +12,7 @@ from `crates/skillcheck`, item rules from `crates/rules` (`items`, `BalanceConfi
 - Docs: `docs/CHARACTER.md`, `docs/SKILL_BUILDER.md` sections 3.4 and 10-13,
   `docs/ITEMS_AND_CRAFT.md` 2, 6 and 10, `docs/STORAGE_AND_DELIVERY.md` 6.2.
 - Accounts owned here: `PlayerProfile`, `Character`, `SkillSet`, `Bag` (seeds in CONTRACTS.md 2).
-  `Character.core` is the frozen `CharacterData`; only append fields after it (`gear` is last now).
+  `Character.core` is the frozen `CharacterData`; only append fields after it (`class_tier` is last now).
 - Gear changes only outside a session: `in_session` freezes the bag and the gear. Keep the gear logic
   pure in `src/state/gear.rs`; `crates/sim/tests/parity.rs` runs it.
 - CPI out: mpl-core only (`src/cpi_out/nft.rs`, feature `nft`). No CPI into game programs, and none
@@ -34,5 +34,5 @@ pnpm --filter @deadroll/tests run test:gear
 ## Done means
 - builds, all tests green, clippy clean
 - every instruction has happy path + rejection tests in `tests/character.test.ts` / `tests/gear.test.ts`
-  (in-session, selection and death in `tests/session.test.ts`)
+  (in-session, selection, death and spending level-up points in `tests/session.test.ts`)
 - events emitted for every state change

@@ -96,9 +96,11 @@ fn the_config_drives_the_rules() {
     cfg.players.ap_dex_div = 0;
     assert_eq!(player_ap(Race::Human, Class::Warrior, 3, &cfg.players), 7);
 
-    assert_eq!(class_increase(Class::Support, &cfg.players), None);
-    cfg.players.class_increase_bp[Class::Support as usize] = 1_500;
-    assert!(class_increase(Class::Support, &cfg.players).is_some());
+    assert_eq!(class_increase(Class::Support, 14, &cfg.players), None);
+    cfg.players.class_increase_by_tier_bp[Class::Support as usize][13] = 1_500;
+    assert!(class_increase(Class::Support, 14, &cfg.players).is_some());
+    // Each tier reads its own entry.
+    assert_eq!(class_increase(Class::Support, 13, &cfg.players), None);
 
     cfg.players.strike_range = 2;
     assert!(in_range(
@@ -123,6 +125,7 @@ fn the_config_drives_the_rules() {
         stats: [10, 7, 5, 8],
         predisposition: Aspect::Piercing,
         predisposition_tier: 14,
+        class_tier: 14,
         equipment: Default::default(),
     };
     let cleave = presets::WARRIOR[3].blocks;
@@ -180,6 +183,7 @@ fn effects_map_to_actions_and_sides() {
         3_000,
         Aspect::Cold,
         1,
+        0,
         &mut states,
         &mut mods,
     );
@@ -191,6 +195,7 @@ fn effects_map_to_actions_and_sides() {
         0,
         Aspect::Blunt,
         1,
+        0,
         &mut states,
         &mut mods,
     );
@@ -244,6 +249,7 @@ fn mage() -> HeroStats {
         stats: [5, 7, 10, 8],
         predisposition: Aspect::Cold,
         predisposition_tier: 14,
+        class_tier: 14,
         equipment: Default::default(),
     }
 }

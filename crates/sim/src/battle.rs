@@ -457,6 +457,7 @@ impl<'a> Battle<'a> {
                     &fighter.hero,
                     &stats,
                     effect,
+                    ally == s,
                     &mut a.hp,
                     a.hp_max,
                     &mut a.states,
@@ -542,6 +543,7 @@ mod tests {
             stats: [8, 8, 8, 6],
             predisposition: Aspect::Blunt,
             predisposition_tier: 14,
+            class_tier: 14,
             equipment: deadroll_rules::items::starter_loadout(class, &CFG.items).equipment(),
         };
         Fighter {
