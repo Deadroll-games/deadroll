@@ -7,7 +7,6 @@ import {
   carrierName,
   effectAmount,
   effectName,
-  formatHundredths,
   formatScaled,
   neededRoll,
   resonanceName,
@@ -16,7 +15,7 @@ import {
   stateName,
 } from "../../chain/names";
 
-/** Shown roll and needed roll, both in hundredths 0..9_999 / 1..10_000 (see shownRoll in chain/names). */
+/** Shown roll and needed roll on a d100 (see shownRoll in chain/names). */
 export type RollBarData = { shown: number; needed: number | null; success: boolean };
 
 export type CascadeStep = {
@@ -47,8 +46,8 @@ export function chanceView(raw: number, chanceBp: number | null, success: boolea
   const shown = shownRoll(raw);
   const needed = chanceBp == null ? null : neededRoll(chanceBp);
   return {
-    value: `rolled ${formatHundredths(shown)}`,
-    target: `needs ${needed == null ? "?" : formatHundredths(needed)}+`,
+    value: `rolled ${shown}`,
+    target: `needs ${needed == null ? "?" : needed}+`,
     success,
     flag: success ? passWord : "fail",
     title: rollTitle(raw, chanceBp),

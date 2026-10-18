@@ -665,20 +665,22 @@ export async function rollAt(seed: Uint8Array, index: number): Promise<bigint> {
 
 export type SeedKind = "random" | "crit" | "miss" | "resonant";
 
+/** First four bytes are `n` little endian. Same constants as tests/demo.test.ts. */
+function fixedSeed(n: number): Uint8Array {
+  const seed = new Uint8Array(32);
+  new DataView(seed.buffer).setUint32(0, n, true);
+  return seed;
+}
+
 /**
- * Localnet oracle seeds. "random" is a plain VRF stand-in; the others search seeds the way
- * tests/demo.test.ts does (natural 20, natural 1, crit + first tint roll under 1%).
+ * Localnet oracle seeds. "random" is a plain VRF stand-in. The others are fixed:
+ * natural 20, natural 1, and a crit whose first tint d100 is under 5.
  */
 export async function pickSeed(kind: SeedKind): Promise<Uint8Array> {
-  for (let i = 0; i < 200_000; i++) {
-    const seed = crypto.getRandomValues(new Uint8Array(32));
-    if (kind === "random") return seed;
-    const d20 = Number((await rollAt(seed, 0)) % 20n) + 1;
-    if (kind === "crit" && d20 === 20) return seed;
-    if (kind === "miss" && d20 === 1) return seed;
-    if (kind === "resonant" && d20 === 20 && (await rollAt(seed, 1)) % 10_000n < 100n) return seed;
-  }
-  throw new Error(`no ${kind} seed found`);
+  if (kind === "crit") return fixedSeed(9);
+  if (kind === "miss") return fixedSeed(17);
+  if (kind === "resonant") return fixedSeed(567);
+  return crypto.getRandomValues(new Uint8Array(32));
 }
 
 // ---------------------------------------------------------------------------------------------

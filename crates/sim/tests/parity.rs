@@ -251,7 +251,7 @@ fn golden_fixtures_give_the_same_damage() {
     for (input, s, damage) in [
         (golden::warrior_vs_wolf(), golden::SEED, 8),
         (golden::mage_vs_goblin(), golden::SEED, 13),
-        (golden::mage_vs_goblin(), golden::RESONANCE_SEED, 14),
+        (golden::mage_vs_goblin(), golden::RESONANCE_SEED, 13),
     ] {
         let mut on_chain = HitResult::default();
         resolve_hit_into(

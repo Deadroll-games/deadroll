@@ -2,7 +2,7 @@
 //!
 //! Roll order (the website replays it from the VRF seed, keep it stable):
 //! 1. `d20` hit roll (none if the target is immune to every packet);
-//! 2. crit chance roll, only on a hit that is not a natural 20 and with `crit_chance_bp > 0`;
+//! 2. crit chance roll, only on a hit that is not a natural 20 and with `crit_chance_pct > 0`;
 //! 3. tint rolls: bases in skill order, tints in slot order ([`crate::resonance::roll_tints`]);
 //! 4. one `d100` for the point in every packet's range;
 //! 5. native state rolls, one per packet in packet order (only where a roll is needed);
@@ -10,7 +10,7 @@
 //!
 //! A miss stops after roll 1. Rolls that are not needed are not made.
 
-use deadroll_types::{ActiveState, Aspect, StateKind, BP, STATES_MAX};
+use deadroll_types::{ActiveState, Aspect, StateKind, Tier, BP, STATES_MAX};
 
 use crate::balance::Balance;
 use crate::modifiers::{
@@ -24,7 +24,8 @@ use crate::resonance::{
 };
 use crate::rng::{chance, d100, d20, RollSource};
 use crate::states::{
-    apply_chill, apply_state, aspect_bit, freeze, native_state, state_bit, Applied, States,
+    apply_chill, apply_state, aspect_bit, freeze, native_state, power_of, state_bit, Applied,
+    States,
 };
 
 #[cfg(feature = "borsh")]
@@ -43,8 +44,8 @@ pub struct Attacker {
     pub slot: u8,
     /// Added to the d20.
     pub attack_bonus: u32,
-    /// Crit chance besides a natural 20, bp. 0 = only natural 20.
-    pub crit_chance_bp: u32,
+    /// Crit chance besides a natural 20, percent. 0 = only natural 20.
+    pub crit_chance_pct: u32,
     pub weapon: DamageRange,
     pub skill: Skill,
     pub added: [DamageRange; ADDED_MAX],
@@ -54,9 +55,12 @@ pub struct Attacker {
     pub weaken_bp: u32,
     /// Armor penetration (counterweight on target armor).
     pub penetration_bp: u32,
-    /// "Increase" on native state chances.
+    /// "Increase" on native state chances and on the strength of Shock, Stun and Penetration.
+    /// From the skill's source stat (Strength or Intelligence).
     pub state_chance_bonus_bp: u32,
     pub tints: [Tint; TINTS_MAX],
+    /// "Increase" on Chill's chance and strength, from Dexterity (tempo).
+    pub tempo_bonus_bp: u32,
 }
 
 /// Everything about the target that matters for one hit.
@@ -105,7 +109,8 @@ pub struct StateRoll {
     pub kind: StateKind,
     /// A die was rolled. False with `success` = guaranteed (e.g. on a crit).
     pub rolled: bool,
-    pub chance_bp: u32,
+    /// Percent. Success when `roll < chance_pct`.
+    pub chance_pct: u32,
     pub roll: u16,
     pub success: bool,
     pub applied: Applied,
@@ -141,6 +146,12 @@ pub struct PacketResult {
     pub after_defense: u64,
     /// Step 20: native state check (`rolled == false && !success` = no check).
     pub state: StateRoll,
+    /// Step 14: the attacker's penetration (its own, plus Keenness), bp. 0 on elemental packets.
+    pub pen_attacker_bp: u32,
+    /// Step 14: Penetration already on the target, bp. 0 on elemental packets.
+    pub pen_state_bp: u32,
+    /// Step 16: Shock already on the target, a second vulnerability multiplier, bp.
+    pub vuln_shock_bp: u32,
 }
 
 /// The full hit breakdown (docs/COMBAT_MATH.md, section 12).
@@ -249,8 +260,8 @@ pub fn resolve_hit_into(
     }
     out.outcome = Outcome::Hit;
     out.crit = out.d20 == 20;
-    if !out.crit && a.crit_chance_bp > 0 {
-        let (crit, roll) = chance(&mut src, balance.clamp_chance(a.crit_chance_bp));
+    if !out.crit && a.crit_chance_pct > 0 {
+        let (crit, roll) = chance(&mut src, balance.clamp_chance(a.crit_chance_pct));
         out.crit = crit;
         out.crit_roll = Some(roll);
     }
@@ -297,6 +308,13 @@ pub fn resolve_hit_into(
         r.max = apply(r.base_max).max(r.min);
     }
 
+    // Keenness: a triggered Piercing tint penetrates on this hit (steps 6-8 are already done).
+    let pen_attacker = keenness(a.penetration_bp, &tints.resonances, balance);
+    // States already on the target. The ones this hit applies land after defense.
+    let pen_state = power_of(&d.states, StateKind::Penetration);
+    let shock = power_of(&d.states, StateKind::Shock);
+    let pen = pen_attacker.saturating_add(pen_state);
+
     // Step 13: one d100 for every packet.
     out.d100 = d100(&mut src);
     // Steps 14-16: target defense, per packet.
@@ -311,13 +329,17 @@ pub fn resolve_hit_into(
         r.rolled = (r.min as u128 + span).min(u64::MAX as u128) as u64;
         let mut v = r.rolled;
         if is_physical(r.aspect) {
-            r.armor = effective_armor(d.armor, a.penetration_bp);
-            v = armor_cut(v, d.armor, a.penetration_bp, balance.armor_k);
+            r.armor = effective_armor(d.armor, pen);
+            r.pen_attacker_bp = pen_attacker;
+            r.pen_state_bp = pen_state;
+            v = armor_cut(v, d.armor, pen, balance.armor_k);
         }
         r.resist_bp = d.resist_bp[r.aspect as usize].min(balance.resist_cap_bp);
         v = resist_cut(v, r.resist_bp, balance.resist_cap_bp);
         r.vuln_bp = d.vuln_bp[r.aspect as usize];
+        r.vuln_shock_bp = shock;
         v = more(v, r.vuln_bp);
+        v = more(v, shock);
         r.after_defense = v;
         total += v as u128;
     }
@@ -336,7 +358,7 @@ pub fn resolve_hit_into(
         let Some(kind) = native_state(r.aspect) else {
             continue;
         };
-        if d.immune_states & state_bit(kind) != 0 || a.skill.state_chance_bp == 0 {
+        if d.immune_states & state_bit(kind) != 0 || a.skill.state_chance_pct == 0 {
             continue;
         }
         let pure = bases
@@ -344,25 +366,34 @@ pub fn resolve_hit_into(
             .position(|b| *b == r.aspect)
             .map(|slot| tints.pure_pair_bp[slot])
             .unwrap_or(0);
-        let bonus = a.state_chance_bonus_bp.saturating_add(pure);
-        let raw = ratio(
-            a.skill.state_chance_bp as u64,
-            bonus,
-            d.state_resist_bp[kind as usize],
-        );
-        let chance_bp = balance.clamp_chance(raw.min(u32::MAX as u64) as u32);
-        let (success, roll) = chance(&mut src, chance_bp);
+        let stat_bonus = state_stat_bonus(kind, a);
+        let increase = stat_bonus.saturating_add(pure);
+        let aspect_resist = d.resist_bp[r.aspect as usize].min(balance.resist_cap_bp);
+        let resist = d.state_resist_bp[kind as usize].saturating_add(aspect_resist);
+        let raw = ratio(a.skill.state_chance_pct as u64, increase, resist);
+        let chance_pct = balance.clamp_chance(raw.min(u32::MAX as u64) as u32);
+        let (success, roll) = chance(&mut src, chance_pct);
         let mut roll_result = StateRoll {
             kind,
             rolled: true,
-            chance_bp,
+            chance_pct,
             roll,
             success,
             applied: Applied::None,
         };
         if success {
-            roll_result.applied =
-                apply_kind(&mut states, kind, r.after_defense, pure, a.slot, balance);
+            roll_result.applied = apply_kind(
+                &mut states,
+                kind,
+                StateApply {
+                    packet_damage: r.after_defense,
+                    stat_bonus_bp: stat_bonus,
+                    pure_bp: pure,
+                    aspect_resist_bp: aspect_resist,
+                    source: a.slot,
+                },
+                balance,
+            );
         }
         out.packets[i].state = roll_result;
     }
@@ -383,35 +414,57 @@ pub fn resolve_hit_into(
                 ResonanceEffect::StateOnCrit(kind)
                     if out.crit && d.immune_states & state_bit(kind) == 0 =>
                 {
-                    let applied = apply_kind(&mut states, kind, base_damage, 0, a.slot, balance);
+                    let aspect_resist = d.resist_bp[res.base as usize].min(balance.resist_cap_bp);
+                    let applied = apply_kind(
+                        &mut states,
+                        kind,
+                        StateApply {
+                            packet_damage: base_damage,
+                            stat_bonus_bp: state_stat_bonus(kind, a),
+                            pure_bp: 0,
+                            aspect_resist_bp: aspect_resist,
+                            source: a.slot,
+                        },
+                        balance,
+                    );
                     StateRoll {
                         kind,
                         rolled: false,
-                        chance_bp: BP,
+                        chance_pct: 100,
                         roll: 0,
                         success: true,
                         applied,
                     }
                 }
-                ResonanceEffect::ExtraStateChance(kind, bp)
+                ResonanceEffect::ExtraStateChance(kind)
                     if d.immune_states & state_bit(kind) == 0 =>
                 {
-                    let raw = ratio(
-                        bp as u64,
-                        a.state_chance_bonus_bp,
-                        d.state_resist_bp[kind as usize],
-                    );
-                    let chance_bp = balance.clamp_chance(raw.min(u32::MAX as u64) as u32);
-                    let (success, roll) = chance(&mut src, chance_bp);
+                    let stat_bonus = state_stat_bonus(kind, a);
+                    let aspect_resist = d.resist_bp[res.base as usize].min(balance.resist_cap_bp);
+                    let resist = d.state_resist_bp[kind as usize].saturating_add(aspect_resist);
+                    let raw = ratio(balance.extra_state_chance_pct as u64, stat_bonus, resist);
+                    let chance_pct = balance.clamp_chance(raw.min(u32::MAX as u64) as u32);
+                    let (success, roll) = chance(&mut src, chance_pct);
                     let applied = if success {
-                        apply_kind(&mut states, kind, base_damage, 0, a.slot, balance)
+                        apply_kind(
+                            &mut states,
+                            kind,
+                            StateApply {
+                                packet_damage: base_damage,
+                                stat_bonus_bp: stat_bonus,
+                                pure_bp: 0,
+                                aspect_resist_bp: aspect_resist,
+                                source: a.slot,
+                            },
+                            balance,
+                        )
                     } else {
                         Applied::None
                     };
                     StateRoll {
                         kind,
                         rolled: true,
-                        chance_bp,
+                        chance_pct,
                         roll,
                         success,
                         applied,
@@ -427,25 +480,60 @@ pub fn resolve_hit_into(
     out.rolls_used = src.used;
 }
 
-/// Applies a state of `kind` from a packet that dealt `packet_damage` (scaled), with a pure
-/// pair bonus `pure_bp` on its strength.
+/// Chill scales with Dexterity. Every other state scales with the skill's source stat.
+fn state_stat_bonus(kind: StateKind, attacker: &Attacker) -> u32 {
+    if kind == StateKind::Chill {
+        attacker.tempo_bonus_bp
+    } else {
+        attacker.state_chance_bonus_bp
+    }
+}
+
+/// Armor penetration from the attacker plus Keenness on each active Piercing-tint resonance.
+fn keenness(base: u32, resonances: &[Option<Resonance>], balance: &Balance) -> u32 {
+    resonances
+        .iter()
+        .flatten()
+        .filter(|r| r.active && r.tint == Aspect::Piercing)
+        .fold(base, |acc, r| match Tier::new(r.tier) {
+            Ok(tier) => acc.saturating_add(balance.keenness_pen(tier)),
+            Err(_) => acc,
+        })
+}
+
+/// Numbers a state application reads besides the kind.
+struct StateApply {
+    packet_damage: u64,
+    stat_bonus_bp: u32,
+    pure_bp: u32,
+    aspect_resist_bp: u32,
+    source: u8,
+}
+
+/// Applies a state of `kind`. Over-time strength is a share of the packet damage (section 7.1).
+/// Chill, Shock and Penetration scale with the stat bonus and the pure pair, then the aspect
+/// resistance divides them (DAMAGE_TYPES §9).
 fn apply_kind(
     states: &mut [ActiveState; STATES_MAX],
     kind: StateKind,
-    packet_damage: u64,
-    pure_bp: u32,
-    source: u8,
+    apply: StateApply,
     balance: &Balance,
 ) -> Applied {
+    let StateApply {
+        packet_damage,
+        stat_bonus_bp,
+        pure_bp,
+        aspect_resist_bp,
+        source,
+    } = apply;
+    let scaled = |base: u32| {
+        let increase = stat_bonus_bp.saturating_add(pure_bp);
+        counter(more(base as u64, increase), aspect_resist_bp).min(u32::MAX as u64) as u32
+    };
     match kind {
-        StateKind::Chill => {
-            let buildup =
-                more(balance.chill_buildup_bp as u64, pure_bp).min(u32::MAX as u64) as u32;
-            apply_chill(states, buildup, source, balance)
-        }
+        StateKind::Chill => apply_chill(states, scaled(balance.chill_buildup_bp), source, balance),
         StateKind::Freeze => freeze(states, source, balance),
         StateKind::Burning | StateKind::Bleeding => {
-            // Strength from the hit (section 7.1): a share of the packet damage per turn.
             let per_turn = more(packet_damage, pure_bp) as u128 * balance.dot_share_bp as u128
                 / (BP as u128 * BP as u128);
             let power = (per_turn.min(u32::MAX as u128) as u32).max(1);
@@ -459,12 +547,30 @@ fn apply_kind(
                 },
             )
         }
-        StateKind::Shock | StateKind::Stun => apply_state(
+        StateKind::Shock => apply_state(
+            states,
+            ActiveState {
+                kind,
+                turns: balance.turns(kind),
+                power: scaled(balance.shock_vuln_bp),
+                source,
+            },
+        ),
+        StateKind::Stun => apply_state(
             states,
             ActiveState {
                 kind,
                 turns: balance.turns(kind),
                 power: 0,
+                source,
+            },
+        ),
+        StateKind::Penetration => apply_state(
+            states,
+            ActiveState {
+                kind,
+                turns: balance.turns(kind),
+                power: scaled(balance.penetration_power_bp),
                 source,
             },
         ),
@@ -514,8 +620,8 @@ pub fn preview_hit(input: &HitInput, balance: &Balance) -> HitPreview {
     let plain_hits = (2u32..=19)
         .filter(|face| face.saturating_add(a.attack_bonus) >= d.defense)
         .count() as u32;
-    let crit_roll = if a.crit_chance_bp > 0 {
-        balance.clamp_chance(a.crit_chance_bp)
+    let crit_roll = if a.crit_chance_pct > 0 {
+        balance.clamp_chance(a.crit_chance_pct).saturating_mul(100)
     } else {
         0
     };
@@ -538,6 +644,10 @@ fn damage_range(input: &HitInput, balance: &Balance, crit: bool) -> (u32, u32) {
     let a = &input.attacker;
     let d = &input.defender;
     let packets = build_packets(a.weapon, &a.skill, &a.added);
+    let pen = a
+        .penetration_bp
+        .saturating_add(power_of(&d.states, StateKind::Penetration));
+    let shock = power_of(&d.states, StateKind::Shock);
     let (mut lo, mut hi) = (0u128, 0u128);
     for p in packets.as_slice() {
         if d.immune_aspects & aspect_bit(p.aspect) != 0 {
@@ -555,10 +665,11 @@ fn damage_range(input: &HitInput, balance: &Balance, crit: bool) -> (u32, u32) {
             let v = (v as u128 * mult as u128 / BP as u128).min(u64::MAX as u128) as u64;
             let mut v = counter(v, a.weaken_bp);
             if is_physical(p.aspect) {
-                v = armor_cut(v, d.armor, a.penetration_bp, balance.armor_k);
+                v = armor_cut(v, d.armor, pen, balance.armor_k);
             }
             v = resist_cut(v, d.resist_bp[p.aspect as usize], balance.resist_cap_bp);
-            more(v, d.vuln_bp[p.aspect as usize]) as u128
+            let v = more(v, d.vuln_bp[p.aspect as usize]);
+            more(v, shock) as u128
         };
         lo += defend(p.min);
         hi += defend(p.max.max(p.min));
@@ -578,10 +689,10 @@ mod tests {
 
     const B: Balance = Balance::DEFAULT;
 
-    fn basic(aspect: Aspect, min: u32, max: u32, state_chance_bp: u32) -> HitInput {
+    fn basic(aspect: Aspect, min: u32, max: u32, state_chance_pct: u32) -> HitInput {
         let mut input = HitInput::default();
         input.attacker.weapon = DamageRange::new(aspect, min, max);
-        input.attacker.skill = Skill::basic(Source::Combat, Form::Strike, state_chance_bp);
+        input.attacker.skill = Skill::basic(Source::Combat, Form::Strike, state_chance_pct);
         input.defender.defense = 10;
         input
     }
@@ -644,7 +755,7 @@ mod tests {
     fn natural_20_hits_and_crits() {
         let mut input = basic(Aspect::Piercing, 10, 10, 0);
         input.defender.defense = u32::MAX;
-        input.attacker.crit_chance_bp = 5_000;
+        input.attacker.crit_chance_pct = 5_000;
         let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([19, 0]));
         assert_eq!((r.outcome, r.crit, r.crit_roll), (Outcome::Hit, true, None));
         assert_eq!(r.packets()[0].more_bp, 15_000);
@@ -655,11 +766,12 @@ mod tests {
     #[test]
     fn crit_chance_is_clamped_and_rolled() {
         let mut input = basic(Aspect::Piercing, 10, 10, 0);
-        input.attacker.crit_chance_bp = BP;
-        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 9_499, 0]));
+        input.attacker.crit_chance_pct = 100;
+        // Clamped to 95. Roll 94 passes, roll 95 does not.
+        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 94, 0]));
         assert!(r.crit);
-        assert_eq!(r.crit_roll, Some(9_499));
-        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 9_500, 0]));
+        assert_eq!(r.crit_roll, Some(94));
+        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 95, 0]));
         assert!(!r.crit);
         assert_eq!(r.rolls_used, 3);
     }
@@ -747,12 +859,12 @@ mod tests {
 
     #[test]
     fn native_state_burning_power_from_damage() {
-        let input = basic(Aspect::Fire, 10, 10, 5_000);
+        let input = basic(Aspect::Fire, 10, 10, 50);
         let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0, 0]));
         let s = r.packets()[0].state;
         assert_eq!(
-            (s.kind, s.rolled, s.chance_bp, s.success),
-            (StateKind::Burning, true, 5_000, true)
+            (s.kind, s.rolled, s.chance_pct, s.success),
+            (StateKind::Burning, true, 50, true)
         );
         assert_eq!(s.applied, Applied::Added);
         let burning = find(&r.states, StateKind::Burning);
@@ -762,14 +874,14 @@ mod tests {
 
     #[test]
     fn native_state_failure_resistance_and_immunity() {
-        let mut input = basic(Aspect::Blood, 10, 10, 5_000);
+        let mut input = basic(Aspect::Blood, 10, 10, 50);
         input.defender.state_resist_bp[StateKind::Bleeding as usize] = BP;
-        // 5000 / 2 = 2500; roll 2500 fails.
-        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0, 2_500]));
+        // 50 * BP / (BP + BP) = 25; roll 25 fails.
+        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0, 25]));
         let s = r.packets()[0].state;
         assert_eq!(
-            (s.chance_bp, s.success, s.applied),
-            (2_500, false, Applied::None)
+            (s.chance_pct, s.success, s.applied),
+            (25, false, Applied::None)
         );
         assert!(!has(&r.states, StateKind::Bleeding));
         input.defender.immune_states = state_bit(StateKind::Bleeding);
@@ -822,8 +934,8 @@ mod tests {
         assert_eq!(r.damage, 6);
         let s = r.resonance_states[0];
         assert_eq!(
-            (s.kind, s.rolled, s.chance_bp, s.applied),
-            (StateKind::Chill, true, 3_000, Applied::Added)
+            (s.kind, s.rolled, s.chance_pct, s.applied),
+            (StateKind::Chill, true, 30, Applied::Added)
         );
         assert_eq!(r.rolls_used, 4);
         // No armor: condition fails, no multiplier, no extra roll.
@@ -836,20 +948,20 @@ mod tests {
     #[test]
     fn pure_pair_boosts_native_state() {
         let mut input = cold_bolt(Aspect::Cold);
-        input.attacker.skill.state_chance_bp = 2_000;
+        input.attacker.skill.state_chance_pct = 20;
         let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0, 0]));
         assert_eq!(r.tint_roll_count, 0);
-        // 2000 x1.59 = 3180; buildup 5000 x1.59 = 7950
+        // 20% x1.59 = 31%; buildup 5000 x1.59 = 7950
         let s = r.packets()[0].state;
-        assert_eq!((s.chance_bp, s.success), (3_180, true));
+        assert_eq!((s.chance_pct, s.success), (31, true));
         assert_eq!(find(&r.states, StateKind::Chill).power, 7_950);
     }
 
     #[test]
     fn deterministic_per_seed() {
         let mut input = cold_bolt(Aspect::Piercing);
-        input.attacker.skill.state_chance_bp = 4_000;
-        input.attacker.crit_chance_bp = 1_000;
+        input.attacker.skill.state_chance_pct = 4_000;
+        input.attacker.crit_chance_pct = 1_000;
         let a = resolve_hit(&input, &B, &mut VrfRoll::new([3; 32]));
         let b = resolve_hit(&input, &B, &mut VrfRoll::new([3; 32]));
         assert_eq!(a, b);
@@ -873,10 +985,10 @@ mod tests {
         assert_eq!((p.immune, p.hit_bp, p.crit_bp), (false, 5_500, 500));
         assert_eq!((p.min, p.max, p.crit_min, p.crit_max), (4, 8, 6, 12));
         // 10 plain hits x 10% + the natural 20.
-        input.attacker.crit_chance_bp = 1_000;
+        input.attacker.crit_chance_pct = 10;
         assert_eq!(preview_hit(&input, &B).crit_bp, 1_000);
         // The crit roll is clamped like in the hit.
-        input.attacker.crit_chance_bp = BP;
+        input.attacker.crit_chance_pct = BP;
         assert_eq!(preview_hit(&input, &B).crit_bp, (BP + 10 * 9_500) / 20);
         // A natural 1 always misses, a natural 20 always hits.
         input.attacker.attack_bonus = 1_000;
@@ -922,13 +1034,13 @@ mod tests {
         input.defender.armor = 40;
         input.defender.resist_bp[Aspect::Cold as usize] = 5_000;
         let p = preview_hit(&input, &B);
-        // Tint roll fails (9_999), d100 0 or 100 (the range ends); crit on a natural 20.
-        let at = |face: u64, d100: u64| {
-            resolve_hit(&input, &B, &mut ScriptedRoll::new([face, 9_999, d100])).damage
+        // Tint chance of tier 1 is 40; roll 40 fails. d100 0 and 100 are the range ends.
+        let at = |face: u64, point: u64| {
+            resolve_hit(&input, &B, &mut ScriptedRoll::new([face, 40, point])).damage
         };
         assert_eq!((p.min, p.max), (at(14, 0), at(14, 100)));
         let nat20 =
-            |d100: u64| resolve_hit(&input, &B, &mut ScriptedRoll::new([19, 9_999, d100])).damage;
+            |point: u64| resolve_hit(&input, &B, &mut ScriptedRoll::new([19, 40, point])).damage;
         assert_eq!((p.crit_min, p.crit_max), (nat20(0), nat20(100)));
     }
 
@@ -936,10 +1048,105 @@ mod tests {
     fn state_chance_bonus_reaches_resonance_states() {
         let mut input = basic(Aspect::Piercing, 10, 10, 0);
         input.attacker.tints[0] = Tint::new(Aspect::Cold, 1, Carrier::Class);
-        input.attacker.state_chance_bonus_bp = BP;
+        // Chill is tempo: the Dexterity bonus, not the source-stat bonus.
+        input.attacker.tempo_bonus_bp = BP;
         input.defender.armor = 100;
         let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0, 0, 0]));
-        // Icy Point: 3000 x2.
-        assert_eq!(r.resonance_states[0].chance_bp, 6_000);
+        // 30% x2 = 60%.
+        assert_eq!(r.resonance_states[0].chance_pct, 60);
+    }
+
+    #[test]
+    fn shock_multiplies_the_next_hit_and_the_preview() {
+        let input = basic(Aspect::Lightning, 10, 10, 50);
+        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0, 0]));
+        let shock = find(&r.states, StateKind::Shock);
+        assert_eq!((shock.power, shock.turns), (B.shock_vuln_bp, 2));
+        let mut next = basic(Aspect::Fire, 10, 10, 0);
+        next.defender.states = r.states;
+        let hit = resolve_hit(&next, &B, &mut ScriptedRoll::new([14, 0]));
+        assert_eq!(hit.packets()[0].vuln_shock_bp, B.shock_vuln_bp);
+        assert_eq!(hit.damage, 12);
+        assert_eq!(preview_range(&next, &B), (12, 12));
+    }
+
+    #[test]
+    fn penetration_lowers_armor_on_the_next_physical_hit() {
+        let mut input = basic(Aspect::Piercing, 10, 10, 50);
+        input.defender.armor = 100;
+        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0, 0]));
+        assert_eq!(
+            find(&r.states, StateKind::Penetration).power,
+            B.penetration_power_bp
+        );
+        // The hit that applies it does not benefit.
+        assert_eq!(
+            (r.packets()[0].pen_state_bp, r.packets()[0].armor),
+            (0, 100)
+        );
+        assert_eq!(r.damage, 5);
+        let mut next = basic(Aspect::Blunt, 10, 10, 0);
+        next.defender.armor = 100;
+        next.defender.states = r.states;
+        let hit = resolve_hit(&next, &B, &mut ScriptedRoll::new([14, 0]));
+        let p = hit.packets()[0];
+        assert_eq!((p.pen_state_bp, p.pen_attacker_bp, p.armor), (5_000, 0, 66));
+        assert_eq!(hit.damage, 6);
+        assert_eq!(preview_range(&next, &B), (6, 6));
+    }
+
+    #[test]
+    fn keenness_penetrates_the_hit_that_triggered_it() {
+        let mut input = basic(Aspect::Fire, 10, 10, 0);
+        input.attacker.added[0] = DamageRange::new(Aspect::Piercing, 10, 10);
+        input.attacker.tints[0] = Tint::new(Aspect::Piercing, 1, Carrier::Race);
+        input.defender.armor = 100;
+        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0, 0]));
+        assert!(r.resonances[0].unwrap().active);
+        let p = r
+            .packets()
+            .iter()
+            .find(|p| p.aspect == Aspect::Piercing)
+            .unwrap();
+        assert_eq!(p.pen_attacker_bp, B.keenness_pen(Tier::BEST));
+        assert!(p.armor < 100);
+        assert_eq!(r.packets()[0].pen_attacker_bp, 0);
+    }
+
+    #[test]
+    fn aspect_resistance_lowers_chill_chance_and_buildup() {
+        let mut input = basic(Aspect::Cold, 10, 10, 50);
+        input.defender.resist_bp[Aspect::Cold as usize] = BP;
+        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0, 0]));
+        assert_eq!(
+            (
+                r.packets()[0].state.chance_pct,
+                r.packets()[0].state.success
+            ),
+            (25, true)
+        );
+        assert_eq!(find(&r.states, StateKind::Chill).power, 2_500);
+    }
+
+    #[test]
+    fn chill_scales_with_the_tempo_bonus() {
+        let mut input = basic(Aspect::Cold, 10, 10, 20);
+        input.attacker.state_chance_bonus_bp = BP;
+        let plain = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0, 0]));
+        assert_eq!(plain.packets()[0].state.chance_pct, 20);
+        // Half again: still under the freeze threshold (a full doubling of buildup freezes).
+        input.attacker.tempo_bonus_bp = 5_000;
+        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0, 0]));
+        assert_eq!(r.packets()[0].state.chance_pct, 30);
+        assert_eq!(find(&r.states, StateKind::Chill).power, 7_500);
+    }
+
+    #[test]
+    fn blunt_stun_still_skips_the_turn() {
+        let input = basic(Aspect::Blunt, 10, 10, 50);
+        let r = resolve_hit(&input, &B, &mut ScriptedRoll::new([14, 0, 0]));
+        assert_eq!(find(&r.states, StateKind::Stun).power, 0);
+        let mut states = r.states;
+        assert!(crate::tick_turn_start(&mut states).skip_action);
     }
 }

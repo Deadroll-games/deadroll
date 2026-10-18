@@ -203,7 +203,7 @@ enum_tests! {
     source: Source, 2;
     form: Form, 2;
     time_tag: TimeTag, 2;
-    state_kind: StateKind, 6;
+    state_kind: StateKind, 7;
     tile: Tile, 7;
     session_status: SessionStatus, 6;
     map_status: MapStatus, 4;
@@ -216,6 +216,7 @@ fn enum_discriminants_match_contract_order() {
     assert_eq!(Aspect::Piercing as u8, 5);
     assert_eq!(Race::ForestElf as u8, 1);
     assert_eq!(StateKind::Bleeding as u8, 3);
+    assert_eq!(StateKind::Penetration as u8, 6);
     assert_eq!(Tile::Trap as u8, 6);
     assert_eq!(SessionStatus::Abandoned as u8, 5);
     assert_eq!(MapStatus::Finished as u8, 3);

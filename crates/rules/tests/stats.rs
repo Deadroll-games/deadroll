@@ -133,15 +133,15 @@ fn accuracy_from_dexterity_and_items_only() {
 fn crit_only_from_items() {
     let mut cfg = CFG;
     let nimble = hero(Class::Warrior, [5, 30, 5, 5]);
-    assert_eq!(hero::crit_bp(&cfg, &nimble), 0);
-    cfg.items.bases[ItemBase::Sword as usize].crit_bp = 600;
+    assert_eq!(hero::crit_pct(&cfg, &nimble), 0);
+    cfg.items.bases[ItemBase::Sword as usize].crit_pct = 6;
     let mut eq = Equipment::EMPTY;
     eq.set(deadroll_types::EquipSlot::MainHand, Some(ItemBase::Sword));
     let armed = nimble.with_equipment(eq);
-    assert_eq!(hero::crit_bp(&cfg, &armed), 600);
+    assert_eq!(hero::crit_pct(&cfg, &armed), 6);
     assert_eq!(
-        player_attacker(&cfg, 0, &armed, None, &NONE).crit_chance_bp,
-        600
+        player_attacker(&cfg, 0, &armed, None, &NONE).crit_chance_pct,
+        6
     );
 }
 
@@ -176,7 +176,7 @@ fn the_source_picks_the_state_stat() {
 #[test]
 fn effect_chance_by_effect_stat() {
     let t = &CFG.players;
-    let rider = CFG.support.rider_chance_bp;
+    let rider = CFG.support.rider_chance_pct;
     let scaled = |stat_points: u32, per: u32| {
         (rider as u64 * (BP as u64 + (stat_points * per) as u64) / BP as u64) as u32
     };

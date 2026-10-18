@@ -41,7 +41,7 @@ fn base_row(ui: &mut Ui, base: ItemBase, b: &mut ItemBaseStats, d: &ItemBaseStat
         widgets::int(ui, &mut b.stats[stat as usize], 0..=999);
     }
     widgets::int(ui, &mut b.hp, 0..=100_000);
-    widgets::bp(ui, &mut b.crit_bp);
+    widgets::int(ui, &mut b.crit_pct, 0..=100);
     widgets::int(ui, &mut b.speed, 0..=100);
     widgets::bp(ui, &mut b.speed_counter_bp);
     widgets::int(ui, &mut b.initiative, 0..=1_000);

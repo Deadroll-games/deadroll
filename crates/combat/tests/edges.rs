@@ -26,7 +26,8 @@ fn find(states: &States, kind: StateKind) -> ActiveState {
 }
 
 fn fill_distinct(states: &mut States) {
-    for (i, &kind) in StateKind::ALL.iter().enumerate() {
+    // Six slots, seven kinds: the last kind waits for a free slot.
+    for (i, &kind) in StateKind::ALL.iter().take(STATES_MAX).enumerate() {
         states[i] = st(kind, 2, 1);
     }
 }

@@ -154,15 +154,15 @@ function rollAt(seed: Buffer, index: number): bigint {
   return sha256(Buffer.concat([seed, i])).readBigUInt64LE(0);
 }
 const d20Of = (seed: Buffer) => Number(rollAt(seed, 0) % 20n) + 1;
-function seedWhere(pred: (d20: number) => boolean): Buffer {
-  for (;;) {
-    const seed = randomBytes(32);
-    if (pred(d20Of(seed))) return seed;
-  }
+/** First four bytes are `n` little endian. */
+function fixedSeed(n: number): Buffer {
+  const seed = Buffer.alloc(32);
+  seed.writeUInt32LE(n, 0);
+  return seed;
 }
 /** Natural 20: always a hit and a crit. Natural 1: always a miss. */
-const CRIT = seedWhere((d) => d === 20);
-const MISS = seedWhere((d) => d === 1);
+const CRIT = fixedSeed(9);
+const MISS = fixedSeed(17);
 
 /**
  * `rules::roll_initiative`: unit `i` (players by slot, then living monsters by index) rolls
@@ -187,11 +187,12 @@ function initiativeUnits(s: any, monsters: any): [number, number][] {
  * deterministic: player 0 acts first, then player 1, then the monsters). */
 function playersFirstSeed(units: [number, number][], players: number): Buffer {
   const want = units.slice(0, players).map(([u]) => u);
-  for (;;) {
-    const seed = randomBytes(32);
+  for (let n = 0; n < 200_000; n++) {
+    const seed = fixedSeed(n);
     const { order } = initiativeOrder(seed, units);
     if (want.every((u, i) => order[i] === u)) return seed;
   }
+  throw new Error("no players-first seed");
 }
 
 const parser = new EventParser(SESSION, program.coder);
@@ -1755,7 +1756,15 @@ describe("deadroll_session: turn start, cooldowns and over-time damage", { skip:
       const p1 = party.players[MAGE];
       let wolf = (await party.monsters()).core.monsters[WOLF0];
       await party.act(MAGE, p1.wallet, FROST_BOLT, WOLF0);
-      const chilled = await party.consumeWhere(MAGE, (r) => r.damage < wolf.hp && hasState(r.states, "chill"));
+      // The lightest chill that still lands: two harder hits leave the wolf too low for the
+      // freezing Frost Burn to spare it.
+      const light = (ok: boolean, damage: number) => (ok ? 10_000 - damage : -Infinity);
+      const chilled = await party.consumeBest(
+        MAGE,
+        (r) => light(r.damage < wolf.hp && hasState(r.states, "chill"), r.damage),
+        400,
+        10_000 - 2,
+      );
       assert.ok(chilled, "no VRF value chills the wolf");
 
       await party.untilStartOf(MAGE);
@@ -1763,7 +1772,31 @@ describe("deadroll_session: turn start, cooldowns and over-time damage", { skip:
       wolf = (await party.monsters()).core.monsters[WOLF0];
       assert.ok(hasState(wolf.states, "chill"), "Chill lasts 3 of the wolf's turns");
       await rejects(party.act(MAGE, p1.wallet, FROST_BOLT, WOLF0), "SkillOnCooldown");
-      await party.act(MAGE, p1.wallet, FROST_BURN, WOLF0); // Cold + Fire
+      // The wolf resists Cold, so one Chill is 4700 buildup and two are 9400, under the
+      // 10000 freeze threshold. Ice Prison's Freeze rider would wipe that buildup, so the
+      // second and third applications are Frost Bolt (no rider) and then Frost Burn.
+      // This turn is the bolt's cooldown: pass it.
+      await party.untilStartOf(MAGE);
+      await party.begin();
+      wolf = (await party.monsters()).core.monsters[WOLF0];
+      assert.ok(hasState(wolf.states, "chill"), "Chill outlasts the cooldown turn");
+      const chillPower = (states: any[]) =>
+        states.find((x) => x.turns > 0 && x.kind.chill !== undefined)?.power ?? 0;
+      const had = chillPower(wolf.states);
+      await party.act(MAGE, p1.wallet, FROST_BOLT, WOLF0);
+      const stacked = await party.consumeBest(
+        MAGE,
+        (r) => light(r.damage < wolf.hp && chillPower(r.states) > had, r.damage),
+        400,
+        10_000 - 2,
+      );
+      assert.ok(stacked, "no VRF value stacks chill on the wolf");
+
+      await party.untilStartOf(MAGE);
+      await party.begin();
+      wolf = (await party.monsters()).core.monsters[WOLF0];
+      assert.ok(chillPower(wolf.states) > had, "the second Chill is still there");
+      await party.act(MAGE, p1.wallet, FROST_BURN, WOLF0); // Cold + Fire: the third Chill freezes
       const frozen = await party.consumeWhere(
         MAGE,
         (r) =>

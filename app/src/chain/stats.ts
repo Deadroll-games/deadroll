@@ -5,7 +5,9 @@
 // keep them in sync. TODO(balance): stats.test.ts pins the current numbers.
 import { heroDefense } from "./items";
 import { MOD_NAMES } from "./support";
-import { Aspect, Class, ModKind, type TimedMod } from "./types";
+import { Aspect, Class, ModKind, StateKind, type TimedMod } from "./types";
+
+export type LiveState = { kind: StateKind; turns: number; power: number };
 
 export const BP = 10_000;
 /** crates/combat Balance::resist_cap_bp: a hit never uses more resistance than this. */
@@ -37,9 +39,20 @@ export function modPower(mods: readonly TimedMod[], kind: ModKind): number {
   return mods.find((m) => m.turns > 0 && m.kind === kind)?.powerBp ?? 0;
 }
 
-/** support.rs speed_ap: Haste multiplies, Slow divides, rounded down, 1..255. */
-export function speedAp(base: number, mods: readonly TimedMod[]): number {
-  const v = Math.floor((base * (BP + modPower(mods, ModKind.Haste))) / (BP + modPower(mods, ModKind.Slow)));
+/** Chill buildup, times the balance share, is a speed counterweight (COMBAT_MATH 7.4). */
+export const CHILL_SLOW_SHARE_BP = 10_000;
+
+/** Slow from a live Chill: power x share / 10_000. */
+export function chillSlowBp(states: readonly LiveState[]): number {
+  const chill = states.find((s) => s.turns > 0 && s.kind === StateKind.Chill);
+  if (!chill) return 0;
+  return Math.floor((chill.power * CHILL_SLOW_SHARE_BP) / BP);
+}
+
+/** support.rs speed_ap: Haste multiplies, Slow and Chill divide, rounded down, 1..255. */
+export function speedAp(base: number, mods: readonly TimedMod[], chillBp = 0): number {
+  const slow = modPower(mods, ModKind.Slow) + chillBp;
+  const v = Math.floor((base * (BP + modPower(mods, ModKind.Haste))) / (BP + slow));
   return Math.min(255, Math.max(1, v));
 }
 
@@ -62,6 +75,8 @@ export type UnitStats = {
   increasedBp: number;
   weakenBp: number;
   mods: TimedMod[];
+  /** Live states: kind and turns left. */
+  states: LiveState[];
 };
 
 export type UnitStatsInput = {
@@ -72,15 +87,18 @@ export type UnitStatsInput = {
   apNow: number | null;
   profile: DefenseProfile;
   mods: readonly TimedMod[];
+  states?: readonly LiveState[];
 };
 
 const name = (k: ModKind) => MOD_NAMES[k];
 
-export function unitStats({ hp, hpMax, apBase, apNow, profile, mods }: UnitStatsInput): UnitStats {
+export function unitStats({ hp, hpMax, apBase, apNow, profile, mods, states = [] }: UnitStatsInput): UnitStats {
   const live = mods.filter((m) => m.turns > 0);
+  const liveStates = states.filter((s) => s.turns > 0);
   const haste = modPower(live, ModKind.Haste);
   const slow = modPower(live, ModKind.Slow);
-  const apBy = [...(haste ? [name(ModKind.Haste)] : []), ...(slow ? [name(ModKind.Slow)] : [])];
+  const chill = chillSlowBp(liveStates);
+  const apBy = [...(haste ? [name(ModKind.Haste)] : []), ...(slow ? [name(ModKind.Slow)] : []), ...(chill ? ["Chill"] : [])];
   const protection = modPower(live, ModKind.Protection);
   const vulnMod = live.find((m) => m.kind === ModKind.Vulnerability);
   const resist: AspectStat[] = [];
@@ -95,7 +113,7 @@ export function unitStats({ hp, hpMax, apBase, apNow, profile, mods }: UnitStats
   return {
     hp,
     hpMax,
-    ap: { base: apBase, final: speedAp(apBase, live), by: apBy, now: apNow },
+    ap: { base: apBase, final: speedAp(apBase, live, chill), by: apBy, now: apNow },
     defense: profile.defense,
     armor: profile.armor,
     resist,
@@ -103,6 +121,7 @@ export function unitStats({ hp, hpMax, apBase, apNow, profile, mods }: UnitStats
     increasedBp: modPower(live, ModKind.Empowerment),
     weakenBp: modPower(live, ModKind.Weakening),
     mods: live,
+    states: liveStates,
   };
 }
 

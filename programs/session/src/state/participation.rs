@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 use deadroll_character::state::{MAP_SKILLS, SKILLS_MAX};
-use deadroll_combat::{speed_ap, TimedMods, MODS_MAX};
+use deadroll_combat::{chill_slow_bp, speed_ap, TimedMods, MODS_MAX};
 use deadroll_rules::{items::Equipment, HeroStats};
 use deadroll_skillcheck::{ACTIVE_MAX, NO_SKILL};
 use deadroll_types::{CharacterData, ParticipationData, EQUIP_SLOTS};
@@ -54,7 +54,8 @@ impl Participation {
     pub fn refresh_ap(&mut self, turn_seq: u32) {
         if self.ap_seq != turn_seq {
             self.ap_seq = turn_seq;
-            self.core.action_points = speed_ap(self.max_ap, &self.combat_mods());
+            let chill = chill_slow_bp(&self.core.states, &crate::rules::BALANCE.combat);
+            self.core.action_points = speed_ap(self.max_ap, &self.combat_mods(), chill);
         }
     }
 

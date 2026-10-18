@@ -15,7 +15,7 @@
 //! Roll order of one support action (the website replays it from the VRF seed, keep it stable):
 //! 1. hostile only (a debuff on an enemy): `d20` hit roll against the target's defense,
 //!    natural 1 misses, natural 20 lands and crits; a miss stops here;
-//! 2. crit chance roll, unless the d20 was a natural 20 and only with `crit_chance_bp > 0`;
+//! 2. crit chance roll, unless the d20 was a natural 20 and only with `crit_chance_pct > 0`;
 //! 3. one `d100` for the point in the strength range, only when there is a range (hard control
 //!    has none). A crit multiplies the point by `Balance::crit_more_bp`.
 //!
@@ -190,11 +190,11 @@ pub fn apply_to_defender(defender: &mut Defender, mods: &TimedMods) {
     }
 }
 
-/// Action points of a turn: Haste multiplies, Slow divides (opposing pair), rounded down, never
-/// below 1 (hard control is a separate rule).
-pub fn speed_ap(base: u8, mods: &TimedMods) -> u8 {
+/// Action points of a turn: Haste multiplies, Slow and `slow_extra_bp` (Chill) divide as one
+/// counterweight, rounded down, never below 1 (hard control is a separate rule).
+pub fn speed_ap(base: u8, mods: &TimedMods, slow_extra_bp: u32) -> u8 {
     let haste = mod_power(mods, ModKind::Haste);
-    let slow = mod_power(mods, ModKind::Slow);
+    let slow = mod_power(mods, ModKind::Slow).saturating_add(slow_extra_bp);
     ratio(base as u64, haste, slow).clamp(1, u8::MAX as u64) as u8
 }
 
@@ -209,8 +209,8 @@ pub struct SupportBalance {
     pub mod_max_bp: [u32; MODS_MAX],
     /// Duration in the bearer's own turns, indexed by `ModKind`.
     pub mod_duration: [u8; MODS_MAX],
-    /// Native chance of a damage skill's effect on a hit (a crit makes it certain).
-    pub rider_chance_bp: u32,
+    /// Native chance of a damage skill's effect on a hit (a crit makes it certain), percent.
+    pub rider_chance_pct: u32,
 }
 
 impl SupportBalance {
@@ -219,7 +219,7 @@ impl SupportBalance {
         mod_min_bp: [2_500, 2_500, 2_000, 2_500, 2_000, 2_000],
         mod_max_bp: [5_000, 5_000, 4_000, 5_000, 4_000, 4_000],
         mod_duration: [2, 2, 2, 2, 2, 2],
-        rider_chance_bp: 3_000,
+        rider_chance_pct: 30,
     };
 
     pub const fn duration(&self, kind: ModKind) -> u8 {
@@ -241,8 +241,8 @@ pub struct SupportInput {
     pub hostile: bool,
     pub attack_bonus: u32,
     pub defense: u32,
-    /// Crit chance besides a natural 20, bp.
-    pub crit_chance_bp: u32,
+    /// Crit chance besides a natural 20, percent.
+    pub crit_chance_pct: u32,
     /// Strength range: HP for a heal, bp for a modifier. `max == 0`: no strength (hard control).
     pub min: u32,
     pub max: u32,
@@ -260,8 +260,8 @@ pub struct EffectRoll {
     pub defense: u32,
     pub crit: bool,
     pub crit_roll: Option<u16>,
-    /// Effect chance of a damage skill's effect (0 for support actions).
-    pub chance_bp: u32,
+    /// Effect chance of a damage skill's effect (0 for support actions), percent.
+    pub chance_pct: u32,
     /// The chance roll, `None` when not rolled (support action, or certain on a crit).
     pub chance_roll: Option<u16>,
     pub d100: u8,
@@ -324,8 +324,8 @@ pub fn resolve_support(
         out.crit = out.d20 == 20;
     }
     out.outcome = Outcome::Hit;
-    if !out.crit && input.crit_chance_bp > 0 {
-        let (crit, roll) = chance(&mut src, balance.clamp_chance(input.crit_chance_bp));
+    if !out.crit && input.crit_chance_pct > 0 {
+        let (crit, roll) = chance(&mut src, balance.clamp_chance(input.crit_chance_pct));
         out.crit = crit;
         out.crit_roll = Some(roll);
     }
@@ -337,7 +337,7 @@ pub fn resolve_support(
 /// The effect of a damage skill after a hit (`hit_crit` = that hit's crit). `min..=max` as in
 /// [`SupportInput`]. Roll it on the same seed after the hit's `rolls_used`.
 pub fn resolve_rider(
-    chance_bp: u32,
+    chance_pct: u32,
     hit_crit: bool,
     min: u32,
     max: u32,
@@ -350,13 +350,13 @@ pub fn resolve_rider(
     };
     let mut out = EffectRoll {
         crit: hit_crit,
-        chance_bp: balance.clamp_chance(chance_bp),
+        chance_pct: balance.clamp_chance(chance_pct),
         ..EffectRoll::default()
     };
     let lands = if hit_crit {
         true
     } else {
-        let (ok, roll) = chance(&mut src, out.chance_bp);
+        let (ok, roll) = chance(&mut src, out.chance_pct);
         out.chance_roll = Some(roll);
         ok
     };
@@ -510,16 +510,18 @@ mod tests {
 
     #[test]
     fn haste_and_slow_are_an_opposing_pair() {
-        assert_eq!(speed_ap(4, &TimedMods::default()), 4);
-        assert_eq!(speed_ap(4, &with(&[m(ModKind::Haste, 2, 5_000)])), 6);
-        assert_eq!(speed_ap(4, &with(&[m(ModKind::Slow, 2, 10_000)])), 2);
+        assert_eq!(speed_ap(4, &TimedMods::default(), 0), 4);
+        assert_eq!(speed_ap(4, &with(&[m(ModKind::Haste, 2, 5_000)]), 0), 6);
+        assert_eq!(speed_ap(4, &with(&[m(ModKind::Slow, 2, 10_000)]), 0), 2);
+        // Chill is the same counterweight as Slow: 100% halves speed.
+        assert_eq!(speed_ap(4, &TimedMods::default(), 10_000), 2);
         let both = with(&[m(ModKind::Haste, 2, 4_000), m(ModKind::Slow, 2, 4_000)]);
-        assert_eq!(speed_ap(5, &both), 5);
+        assert_eq!(speed_ap(5, &both, 0), 5);
         // Never below 1, never past u8.
-        assert_eq!(speed_ap(1, &with(&[m(ModKind::Slow, 2, u32::MAX)])), 1);
-        assert_eq!(speed_ap(0, &TimedMods::default()), 1);
+        assert_eq!(speed_ap(1, &with(&[m(ModKind::Slow, 2, u32::MAX)]), 0), 1);
+        assert_eq!(speed_ap(0, &TimedMods::default(), 0), 1);
         assert_eq!(
-            speed_ap(200, &with(&[m(ModKind::Haste, 2, u32::MAX)])),
+            speed_ap(200, &with(&[m(ModKind::Haste, 2, u32::MAX)]), 0),
             u8::MAX
         );
     }
@@ -632,23 +634,23 @@ mod tests {
     #[test]
     fn friendly_support_rolls_crit_then_strength() {
         let heal = SupportInput {
-            crit_chance_bp: 1_000,
+            crit_chance_pct: 10,
             min: 4,
             max: 12,
             ..SupportInput::default()
         };
-        // crit roll 5_000 (no crit), d100 = 50.
-        let r = resolve_support(&heal, &B, &mut ScriptedRoll::new([5_000, 50]));
+        // crit roll 10 is not < 10, d100 = 50.
+        let r = resolve_support(&heal, &B, &mut ScriptedRoll::new([10, 50]));
         assert_eq!(r.outcome, Outcome::Hit);
-        assert_eq!((r.d20, r.crit, r.crit_roll), (0, false, Some(5_000)));
+        assert_eq!((r.d20, r.crit, r.crit_roll), (0, false, Some(10)));
         assert_eq!((r.d100, r.amount, r.rolls_used), (50, 8, 2));
-        // Crit roll 999 < 1_000: x1.5.
-        let r = resolve_support(&heal, &B, &mut ScriptedRoll::new([999, 100]));
+        // Crit roll 9 < 10: x1.5.
+        let r = resolve_support(&heal, &B, &mut ScriptedRoll::new([9, 100]));
         assert!(r.crit);
         assert_eq!((r.d100, r.amount), (100, 18));
         // No crit chance: only the d100.
         let plain = SupportInput {
-            crit_chance_bp: 0,
+            crit_chance_pct: 0,
             ..heal
         };
         let r = resolve_support(&plain, &B, &mut ScriptedRoll::new([0]));
@@ -664,7 +666,7 @@ mod tests {
             hostile: true,
             attack_bonus: 3,
             defense: 12,
-            crit_chance_bp: 0,
+            crit_chance_pct: 0,
             min: 2_000,
             max: 4_000,
         };
@@ -684,7 +686,7 @@ mod tests {
         // Natural 1 misses whatever the bonus, natural 20 lands and crits without a crit roll.
         let sure = SupportInput {
             attack_bonus: 1_000,
-            crit_chance_bp: 5_000,
+            crit_chance_pct: 50,
             ..sap
         };
         assert_eq!(
@@ -711,40 +713,26 @@ mod tests {
 
     #[test]
     fn riders_roll_their_chance_unless_the_hit_crit() {
-        let r = resolve_rider(
-            3_000,
-            false,
-            2_000,
-            4_000,
-            &B,
-            &mut ScriptedRoll::new([2_999, 0]),
-        );
+        let r = resolve_rider(30, false, 2_000, 4_000, &B, &mut ScriptedRoll::new([29, 0]));
         assert_eq!(
-            (r.outcome, r.chance_bp, r.chance_roll),
-            (Outcome::Hit, 3_000, Some(2_999))
+            (r.outcome, r.chance_pct, r.chance_roll),
+            (Outcome::Hit, 30, Some(29))
         );
         assert_eq!((r.amount, r.rolls_used), (2_000, 2));
-        let r = resolve_rider(
-            3_000,
-            false,
-            2_000,
-            4_000,
-            &B,
-            &mut ScriptedRoll::new([3_000]),
-        );
+        let r = resolve_rider(30, false, 2_000, 4_000, &B, &mut ScriptedRoll::new([30]));
         assert_eq!((r.outcome, r.amount, r.rolls_used), (Outcome::Miss, 0, 1));
-        let r = resolve_rider(3_000, true, 2_000, 4_000, &B, &mut ScriptedRoll::new([100]));
+        let r = resolve_rider(30, true, 2_000, 4_000, &B, &mut ScriptedRoll::new([100]));
         assert_eq!(
             (r.outcome, r.chance_roll, r.amount),
             (Outcome::Hit, None, 6_000)
         );
         // Freeze / Stun riders: chance only.
-        let r = resolve_rider(3_000, false, 0, 0, &B, &mut ScriptedRoll::new([0, 0]));
+        let r = resolve_rider(30, false, 0, 0, &B, &mut ScriptedRoll::new([0, 0]));
         assert_eq!((r.outcome, r.rolls_used), (Outcome::Hit, 1));
         // The chance is clamped like every rolled chance.
         assert_eq!(
-            resolve_rider(0, false, 0, 0, &B, &mut ScriptedRoll::new([0])).chance_bp,
-            B.chance_min_bp
+            resolve_rider(0, false, 0, 0, &B, &mut ScriptedRoll::new([0])).chance_pct,
+            B.chance_min_pct
         );
     }
 
@@ -754,7 +742,7 @@ mod tests {
             hostile: true,
             attack_bonus: 4,
             defense: 11,
-            crit_chance_bp: 2_000,
+            crit_chance_pct: 20,
             min: 1_000,
             max: 3_000,
         };
@@ -774,7 +762,7 @@ mod tests {
         let huge = SupportInput {
             min: u32::MAX,
             max: u32::MAX,
-            crit_chance_bp: 10_000,
+            crit_chance_pct: 100,
             ..SupportInput::default()
         };
         assert_eq!(

@@ -263,7 +263,7 @@ impl Battle<'_> {
         if let Some(st) = stats {
             if let Some(effect) = effect_action(st.blocks.effect) {
                 let value = self.foe_effect_value(s, st.power_bp, effect, i);
-                score += value * f / 20 * self.cfg.support.rider_chance_bp as u64 / BP as u64;
+                score += value * f / 20 * self.cfg.support.rider_chance_pct as u64 / 100;
             }
         }
         score

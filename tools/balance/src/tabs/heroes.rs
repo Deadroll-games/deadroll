@@ -256,7 +256,10 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                         rules_hero::accuracy(&cfg, h).to_string(),
                     );
                     row("Evasion / armor", format!("{defense} / {armor}"));
-                    row("Crit chance (items)", pct(rules_hero::crit_bp(&cfg, h)));
+                    row(
+                        "Crit chance (items)",
+                        format!("{}%", rules_hero::crit_pct(&cfg, h)),
+                    );
                     let increases =
                         stat_damage_increases(&rules_hero::stats(&cfg, h), &cfg.players);
                     row(
@@ -372,8 +375,8 @@ fn item_summary(b: &deadroll_rules::ItemBonus) -> String {
             parts.push(format!("+{v} {name}"));
         }
     }
-    if b.crit_bp > 0 {
-        parts.push(format!("+{} crit", pct(b.crit_bp)));
+    if b.crit_pct > 0 {
+        parts.push(format!("+{}% crit", b.crit_pct));
     }
     if b.speed_counter_bp > 0 {
         parts.push(format!("speed / (1 + {})", pct(b.speed_counter_bp)));

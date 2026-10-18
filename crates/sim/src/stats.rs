@@ -1,4 +1,6 @@
 //! Aggregates over many fights. Floats only here, for the report: the fights are integers.
+use deadroll_types::StateKind;
+
 use crate::battle::{BattleStats, Outcome};
 
 /// p10 / p50 / p90 (nearest rank) and the mean; all 0 without samples.
@@ -109,6 +111,8 @@ pub struct Report {
     pub effect_share: f64,
     /// Monster turns lost to Freeze / Stun.
     pub control_uptime: f64,
+    /// States landed per fight, indexed by `StateKind`.
+    pub states_per_fight: [f64; StateKind::COUNT],
 }
 
 fn ratio(a: u64, b: u64) -> f64 {
@@ -187,6 +191,15 @@ impl Report {
         let monster_turns: u64 = fights.iter().map(|f| f.monster_turns as u64).sum();
         let skipped: u64 = fights.iter().map(|f| f.monster_turns_skipped as u64).sum();
         let victories = count(Outcome::Victory);
+        let mut states_per_fight = [0.0; StateKind::COUNT];
+        for fight in fights {
+            for (slot, count) in states_per_fight.iter_mut().zip(fight.states_landed) {
+                *slot += count as f64;
+            }
+        }
+        for slot in &mut states_per_fight {
+            *slot = ratio(*slot as u64, n as u64);
+        }
         Report {
             fights: n as u32,
             victories,
@@ -203,6 +216,7 @@ impl Report {
             crit_share: ratio(crit, total),
             effect_share: ratio(dot, total),
             control_uptime: ratio(skipped, monster_turns),
+            states_per_fight,
         }
     }
 }

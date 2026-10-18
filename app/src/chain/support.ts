@@ -159,7 +159,7 @@ export function effectText(e: EffectResolved, caster: string, target: string, sk
   const head = e.rider ? `${skill} effect on ${target}` : e.caster === e.target ? `${caster} uses ${skill} on self` : `${caster} uses ${skill} on ${target}`;
   const dice: string[] = [];
   if (e.roll.d20 > 0) dice.push(`d20 ${e.roll.d20} (${e.roll.attackTotal} vs ${e.roll.defense})`);
-  if (e.roll.chanceRoll !== null) dice.push(`chance ${Math.round(e.roll.chanceBp / 100)}%`);
+  if (e.roll.chanceRoll !== null) dice.push(`chance ${e.roll.chanceBp}%`);
   if (e.roll.d100 > 0) dice.push(`d100 ${e.roll.d100}`);
   const crit = e.roll.crit ? " CRIT" : "";
   const word = APPLIED_WORDS[e.applied] ?? "";

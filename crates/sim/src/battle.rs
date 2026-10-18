@@ -9,7 +9,8 @@
 //! Ends: a boss dies (or every monster, when there is no boss) = victory, every hero dead =
 //! defeat, `max_rounds` = draw.
 use deadroll_combat::{
-    speed_ap, HitInput, HitResult, Outcome as HitOutcome, RollSource, SeededRoll, States, TimedMods,
+    chill_slow_bp, speed_ap, Applied, HitInput, HitResult, Outcome as HitOutcome, RollSource,
+    SeededRoll, StateRoll, States, TimedMods,
 };
 use deadroll_rules::{
     input::hero,
@@ -20,7 +21,7 @@ use deadroll_rules::{
     BalanceConfig, MonsterProfile, Unit,
 };
 use deadroll_skillcheck::ACTIVE_MAX;
-use deadroll_types::{ActiveState, Cell, Monster, BP, PARTY_MAX, STATES_MAX};
+use deadroll_types::{ActiveState, Cell, Monster, StateKind, BP, PARTY_MAX, STATES_MAX};
 
 use crate::setup::{Fight, Fighter};
 
@@ -80,6 +81,8 @@ pub struct BattleStats {
     pub monster_turns: u32,
     /// Monster turns lost to Freeze / Stun.
     pub monster_turns_skipped: u32,
+    /// States that landed, indexed by `StateKind` (Added, Refreshed or Froze).
+    pub states_landed: [u32; StateKind::COUNT],
 }
 
 pub(crate) struct Hero {
@@ -234,6 +237,7 @@ impl<'a> Battle<'a> {
                 kills: Vec::new(),
                 monster_turns: 0,
                 monster_turns_skipped: 0,
+                states_landed: [0; StateKind::COUNT],
             },
             boss_dead: false,
         }
@@ -318,7 +322,8 @@ impl<'a> Battle<'a> {
                 if start.skip.is_some() {
                     return;
                 }
-                let ap = speed_ap(self.heroes[s].max_ap, &self.heroes[s].mods);
+                let chill = chill_slow_bp(&self.heroes[s].states, &self.cfg.combat);
+                let ap = speed_ap(self.heroes[s].max_ap, &self.heroes[s].mods, chill);
                 self.hero_turn(s, ap);
             }
             Unit::Monster(i) => {
@@ -342,7 +347,8 @@ impl<'a> Battle<'a> {
                     self.stats.monster_turns_skipped += 1;
                     return;
                 }
-                let ap = speed_ap(self.foes[i].max_ap, &self.foes[i].mods);
+                let chill = chill_slow_bp(&self.foes[i].m.states, &self.cfg.combat);
+                let ap = speed_ap(self.foes[i].max_ap, &self.foes[i].mods, chill);
                 self.foe_turn(i, ap);
             }
         }
@@ -419,6 +425,7 @@ impl<'a> Battle<'a> {
                 if out.rider.is_some_and(|r| r.roll.outcome == HitOutcome::Hit) {
                     slot.effects_landed += 1;
                 }
+                note_states(&mut self.stats.states_landed, &self.result);
                 if out.died {
                     self.foe_died(target);
                 }
@@ -502,6 +509,21 @@ impl<'a> Battle<'a> {
         if died {
             self.hero_died(s);
         }
+        note_states(&mut self.stats.states_landed, &self.result);
+    }
+}
+
+fn note_states(counts: &mut [u32; StateKind::COUNT], result: &HitResult) {
+    let land = |counts: &mut [u32; StateKind::COUNT], roll: &StateRoll| {
+        if roll.success && roll.applied != Applied::None {
+            counts[roll.kind as usize] = counts[roll.kind as usize].saturating_add(1);
+        }
+    };
+    for packet in result.packets() {
+        land(counts, &packet.state);
+    }
+    for roll in &result.resonance_states {
+        land(counts, roll);
     }
 }
 

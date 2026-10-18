@@ -85,8 +85,8 @@ pub mod hero {
 
     /// Crit chance besides a natural 20: items (traits and skills give none in the first
     /// version).
-    pub fn crit_bp(cfg: &BalanceConfig, c: &HeroStats) -> u32 {
-        item_bonus(&c.equipment, &cfg.items).crit_bp
+    pub fn crit_pct(cfg: &BalanceConfig, c: &HeroStats) -> u32 {
+        item_bonus(&c.equipment, &cfg.items).crit_pct
     }
 
     /// Evasion (the hit threshold) and armor: class and stats, plus items.
@@ -257,18 +257,19 @@ pub fn player_attacker(
             power_bp: s.power_bp,
             source,
             form: s.blocks.form,
-            state_chance_bp: t.skill_state_chance_bp,
+            state_chance_pct: t.skill_state_chance_pct,
         },
-        None => Skill::basic(source, Form::Strike, t.basic_state_chance_bp),
+        None => Skill::basic(source, Form::Strike, t.basic_state_chance_pct),
     };
     let mut attacker = Attacker {
         slot: unit,
         attack_bonus: hero::accuracy(cfg, c),
-        crit_chance_bp: hero::crit_bp(cfg, c),
+        crit_chance_pct: hero::crit_pct(cfg, c),
         weapon: hero::weapon(cfg, c),
         skill: combat_skill,
         // The source picks the stat that scales its states; the aspect picks the state.
         state_chance_bonus_bp: hero::state_chance(cfg, c, source_stat(source)),
+        tempo_bonus_bp: hero::state_chance(cfg, c, Stat::Dexterity),
         ..Attacker::default()
     };
     // Race trait: the predisposition adds a flat packet and tints resonances (CHARACTER 6.2),
@@ -314,7 +315,7 @@ pub fn monster_attacker(
         slot: unit,
         attack_bonus: p.attack_bonus,
         weapon: p.weapon,
-        skill: Skill::basic(p.source, p.form, cfg.players.basic_state_chance_bp),
+        skill: Skill::basic(p.source, p.form, cfg.players.basic_state_chance_pct),
         ..Attacker::default()
     };
     apply_to_attacker(&mut attacker, mods);
@@ -374,7 +375,7 @@ pub fn support_input(
         hostile: defense.is_some(),
         attack_bonus: hero::accuracy(cfg, c),
         defense: defense.unwrap_or(0),
-        crit_chance_bp: hero::crit_bp(cfg, c),
+        crit_chance_pct: hero::crit_pct(cfg, c),
         min,
         max,
     }
@@ -383,7 +384,7 @@ pub fn support_input(
 /// Chance of a damage skill's effect on a hit (the rider): the native chance, increased by the
 /// stat of the effect (Dexterity for tempo, else the skill's source).
 pub fn effect_chance(cfg: &BalanceConfig, c: &HeroStats, skill: &SkillStats) -> u32 {
-    let base = cfg.support.rider_chance_bp;
+    let base = cfg.support.rider_chance_pct;
     match effect_stat(skill.blocks.effect, skill.blocks.source) {
         Some(stat) => {
             let bonus = hero::state_chance(cfg, c, stat);

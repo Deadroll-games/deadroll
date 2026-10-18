@@ -93,6 +93,9 @@ function packet(p: Partial<PacketResult> & Pick<PacketResult, "aspect">): Packet
     vulnBp: 0,
     afterDefense: 0n,
     state: NO_STATE,
+    penAttackerBp: 0,
+    penStateBp: 0,
+    vulnShockBp: 0,
     ...p,
   };
 }
@@ -104,10 +107,10 @@ export const MOCK_HIT_RESONANCE: HitResult = {
   attackTotal: 19,
   defense: 12,
   crit: false,
-  critRoll: 412,
+  critRoll: 4,
   tintRolls: [
-    { base: Aspect.Cold, tint: Aspect.Fire, carrier: Carrier.Race, tier: 9, chanceBp: 1_800, roll: 977, success: true },
-    { base: Aspect.Cold, tint: Aspect.Lightning, carrier: Carrier.Item, tier: 12, chanceBp: 900, roll: 6_120, success: false },
+    { base: Aspect.Cold, tint: Aspect.Fire, carrier: Carrier.Race, tier: 9, chanceBp: 18, roll: 10, success: true },
+    { base: Aspect.Cold, tint: Aspect.Lightning, carrier: Carrier.Item, tier: 12, chanceBp: 9, roll: 61, success: false },
   ],
   resonances: [
     { base: Aspect.Cold, tint: Aspect.Fire, tier: 9, carrier: Carrier.Race, id: Aspect.Cold * 6 + Aspect.Fire, active: true, secondTint: null },
@@ -128,7 +131,8 @@ export const MOCK_HIT_RESONANCE: HitResult = {
       armor: 1,
       resistBp: 1_000,
       afterDefense: 71_685n,
-      state: { kind: StateKind.Chill, rolled: true, chanceBp: 3_500, roll: 1_204, success: true, applied: Applied.Added },
+      vulnShockBp: 2_000,
+      state: { kind: StateKind.Chill, rolled: true, chanceBp: 35, roll: 12, success: true, applied: Applied.Added },
     }),
     packet({
       aspect: Aspect.Fire,
@@ -142,7 +146,7 @@ export const MOCK_HIT_RESONANCE: HitResult = {
     }),
   ],
   resonanceStates: [
-    { kind: StateKind.Burning, rolled: true, chanceBp: 2_000, roll: 7_431, success: false, applied: Applied.None },
+    { kind: StateKind.Burning, rolled: true, chanceBp: 20, roll: 74, success: false, applied: Applied.None },
   ],
   states: [{ kind: StateKind.Chill, turns: 2, power: 2_000, source: 1 }],
   damage: 9,
@@ -174,7 +178,7 @@ export const MOCK_HIT_CRIT: HitResult = {
   attackTotal: 24,
   defense: 15,
   crit: true,
-  critRoll: 211,
+  critRoll: 2,
   tintRolls: [],
   resonances: [null, null, null],
   d100: 91,
@@ -191,7 +195,9 @@ export const MOCK_HIT_CRIT: HitResult = {
       armor: 3,
       resistBp: 500,
       afterDefense: 159_300n,
-      state: { kind: StateKind.Bleeding, rolled: true, chanceBp: 4_000, roll: 2_990, success: true, applied: Applied.Added },
+      penAttackerBp: 3_600,
+      penStateBp: 5_000,
+      state: { kind: StateKind.Bleeding, rolled: true, chanceBp: 40, roll: 30, success: true, applied: Applied.Added },
     }),
   ],
   resonanceStates: [],

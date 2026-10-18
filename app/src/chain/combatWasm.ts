@@ -13,7 +13,7 @@ import characterIdl from "./idl/deadroll_character.json";
 import type { ActiveState, TimedMod } from "./types";
 
 /** `ABI_VERSION` of the module this wrapper speaks. */
-export const COMBAT_ABI = 2;
+export const COMBAT_ABI = 3;
 export const COMBAT_STATS = 4;
 export const COMBAT_EQUIP_SLOTS = 11;
 export const COMBAT_STATES = 6;
@@ -309,7 +309,7 @@ export function skillInputOf(k: SkillRecordAcc): SkillInput {
   };
 }
 
-const STATE_KEYS = ["burning", "chill", "freeze", "bleeding", "shock", "stun"] as const;
+const STATE_KEYS = ["burning", "chill", "freeze", "bleeding", "shock", "stun", "penetration"] as const;
 
 /** Account states (`ActiveStateData`) as the module's states. */
 export function statesOf(states: readonly ActiveStateAcc[]): ActiveState[] {

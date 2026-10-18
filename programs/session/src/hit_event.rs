@@ -95,6 +95,12 @@ pub struct PacketResultData {
     pub vuln_bp: u32,
     pub after_defense: u64,
     pub state: StateRollData,
+    /// Attacker's penetration on this packet, bp. 0 when armor does not apply.
+    pub pen_attacker_bp: u32,
+    /// Penetration state already on the target, bp.
+    pub pen_state_bp: u32,
+    /// Shock already on the target, bp.
+    pub vuln_shock_bp: u32,
 }
 
 /// `deadroll_combat::HitResult`: every roll and per-packet step, in roll order. Arrays are full
@@ -201,7 +207,7 @@ impl From<&EffectRoll> for EffectRollData {
             defense: r.defense,
             crit: r.crit,
             crit_roll: r.crit_roll,
-            chance_bp: r.chance_bp,
+            chance_bp: r.chance_pct,
             chance_roll: r.chance_roll,
             d100: r.d100,
             amount: r.amount,
@@ -270,7 +276,7 @@ mod tests {
             hostile: true,
             attack_bonus: 3,
             defense: 12,
-            crit_chance_bp: 2_000,
+            crit_chance_pct: 20,
             min: 1_000,
             max: 3_000,
         };

@@ -72,9 +72,9 @@ pub struct PlayerTuning {
     /// Reach in cells (Chebyshev distance) of strikes and projectiles.
     pub strike_range: u8,
     pub projectile_range: u8,
-    /// Native state chance of a skill and of the basic attack.
-    pub skill_state_chance_bp: u32,
-    pub basic_state_chance_bp: u32,
+    /// Native state chance of a skill and of the basic attack, percent.
+    pub skill_state_chance_pct: u32,
+    pub basic_state_chance_pct: u32,
     /// Class trait: tag increase on the class's own source, by class then tier (0 = none).
     pub class_increase_by_tier_bp: [[u32; TIERS]; Class::COUNT],
     /// Class trait: increase on heal, buff and debuff power, by class then tier.
@@ -145,8 +145,8 @@ impl PlayerTuning {
         act_ap: 2,
         strike_range: 1,
         projectile_range: 6,
-        skill_state_chance_bp: 2_000,
-        basic_state_chance_bp: 1_000,
+        skill_state_chance_pct: 20,
+        basic_state_chance_pct: 10,
         class_increase_by_tier_bp: [CLASS_TIERS, CLASS_TIERS, [0; TIERS]],
         support_increase_by_tier_bp: [[0; TIERS], [0; TIERS], CLASS_TIERS],
         heal_weapon_bp: 20_000,
@@ -256,8 +256,8 @@ pub struct ItemBaseStats {
     #[cfg_attr(feature = "serde", serde(with = "names::by_stat"))]
     pub stats: [u16; STATS_COUNT],
     pub hp: u32,
-    /// Crit chance besides a natural 20, bp (CHARACTER 3: items are a crit source).
-    pub crit_bp: u32,
+    /// Crit chance besides a natural 20, percent (CHARACTER 3: items are a crit source).
+    pub crit_pct: u32,
     /// Added to speed before the counterweights (light trousers and footwear, CHARACTER 3.1).
     pub speed: u16,
     /// Speed counterweight, bp: heavy armor divides speed, never to zero (CHARACTER 3.1).
@@ -294,7 +294,7 @@ const fn base(slot: EquipSlot, damage: [u32; 2], armor: u32) -> ItemBaseStats {
         attack: 0,
         stats: [0; STATS_COUNT],
         hp: 0,
-        crit_bp: 0,
+        crit_pct: 0,
         speed: 0,
         speed_counter_bp: 0,
         initiative: 0,
@@ -512,10 +512,10 @@ mod remote {
         pub crit_more_bp: u32,
         pub armor_k: u32,
         pub resist_cap_bp: u32,
-        pub chance_min_bp: u32,
-        pub chance_max_bp: u32,
+        pub chance_min_pct: u32,
+        pub chance_max_pct: u32,
         pub min_damage: u32,
-        pub tint_chance_bp: [u32; 14],
+        pub tint_chance_pct: [u32; 14],
         pub resonance_more_bp: [u32; 14],
         pub pure_pair_bp: [u32; 14],
         pub state_turns: [u8; StateKind::COUNT],
@@ -524,6 +524,10 @@ mod remote {
         pub chill_buildup_bp: u32,
         pub freeze_threshold_bp: u32,
         pub chill_slow_share_bp: u32,
+        pub shock_vuln_bp: u32,
+        pub penetration_power_bp: u32,
+        pub keenness_pen_bp: [u32; 14],
+        pub extra_state_chance_pct: u32,
     }
 
     #[derive(Serialize, Deserialize)]
@@ -532,7 +536,7 @@ mod remote {
         pub mod_min_bp: [u32; deadroll_combat::MODS_MAX],
         pub mod_max_bp: [u32; deadroll_combat::MODS_MAX],
         pub mod_duration: [u8; deadroll_combat::MODS_MAX],
-        pub rider_chance_bp: u32,
+        pub rider_chance_pct: u32,
     }
 
     #[derive(Serialize, Deserialize)]
