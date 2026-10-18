@@ -30,3 +30,10 @@ pub const SOULBOUND_MAX: usize = 4;
 pub const EQUIP_SLOTS: usize = 11;
 /// An empty slot in a raw equipment snapshot (`[u8; EQUIP_SLOTS]` of `ItemBase` bytes).
 pub const EMPTY_ITEM: u8 = 0xFF;
+/// `Spawn.flags` / `Monster.flags` bit: the elite version (docs/BESTIARY.md, section 5).
+pub const SPAWN_ELITE: u8 = 1;
+/// Skill slots of one monster in a session (docs/BESTIARY.md 3.2, the boss's): `0..5` active,
+/// `5` reactive, `6` passive.
+pub const MONSTER_SLOTS: usize = 7;
+/// Distinct monster skills one session copies from the registry (`MonsterState.skill_table`).
+pub const SESSION_SKILLS_MAX: usize = 32;

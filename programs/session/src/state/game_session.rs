@@ -1,8 +1,10 @@
 use anchor_lang::prelude::*;
-use deadroll_rules::aura::{AuraField, PartyAuras, AURAS_PER_PLAYER};
+use deadroll_rules::aura::{AuraField, MonsterAuraField, PartyAuras, AURAS_PER_PLAYER};
 use deadroll_types::{Cell, GameSessionData, Tile, MONSTERS_MAX, PARTY_MAX};
 
-use super::{auras_to_rules, AuraData, PendingReactiveData, ReactiveData};
+use super::{
+    auras_to_rules, AuraData, PendingMonsterReactiveData, PendingReactiveData, ReactiveData,
+};
 use crate::rules::{Unit, EMPTY_UNIT};
 
 /// The roll waiting for its VRF value (`core.pending_vrf`), resolved by `consume_randomness`:
@@ -105,6 +107,14 @@ pub struct GameSession {
     /// A pending roll that only resolves reactives (`monster_move`, `start_turn`); `kind == NONE`
     /// for every other roll.
     pub pending_reactive: PendingReactiveData,
+    // Patch 6: monster skills (docs/BESTIARY.md 3).
+    /// A pending roll that only resolves monster reactives (`move_unit`, `start_turn`);
+    /// `kind == NONE` for every other roll.
+    pub pending_monster_reactive: PendingMonsterReactiveData,
+    /// Players down in a VRF callback whose death is not finalized yet (`character.mark_dead`),
+    /// one bit per slot: the queue `start_turn` and the claims finalize first, in slot order.
+    /// While it is not empty no turn starts and no action is taken.
+    pub pending_deaths: u8,
 }
 
 impl GameSession {
@@ -144,12 +154,17 @@ impl GameSession {
         auras_to_rules(&self.auras)
     }
 
-    /// The party's auras over the living players' cells.
-    pub fn aura_field<'a>(&'a self, auras: &'a PartyAuras) -> AuraField<'a> {
+    /// The party's auras over the living players' cells, and the monsters' (`Monsters::bearers`).
+    pub fn aura_field<'a>(
+        &'a self,
+        auras: &'a PartyAuras,
+        monsters: MonsterAuraField<'a>,
+    ) -> AuraField<'a> {
         AuraField {
             auras,
             cells: &self.player_pos,
             alive: self.alive_mask,
+            monsters,
         }
     }
 }

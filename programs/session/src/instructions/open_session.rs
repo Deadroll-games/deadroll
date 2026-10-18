@@ -1,20 +1,27 @@
 use anchor_lang::prelude::*;
 use deadroll_combat::ResonanceTables;
 use deadroll_registry::state::TableKind;
+use deadroll_rules::{
+    aura::{monster_passive_aura, Aura, AURAS_PER_PLAYER, PASSIVE_AURA},
+    monster::{select_skills, NO_SKILL, PASSIVE_SLOT},
+    MonsterTemplate,
+};
+use deadroll_skillcheck::{monster::POOL_MAX, Category};
 use deadroll_types::{
-    seeds, ActiveState, GameSessionData, MapStatus, Monster, SessionStatus, MAP_MAX, MONSTERS_MAX,
-    PARTY_MAX, STATES_MAX, TURN_ORDER_MAX,
+    seeds, ActiveState, GameSessionData, MapStatus, Monster, SessionStatus, Spawn, MAP_MAX,
+    MONSTERS_MAX, MONSTER_SLOTS, PARTY_MAX, STATES_MAX, TURN_ORDER_MAX,
 };
 
 use crate::{
     cpi_out::{self, SessionSigner},
     errors::SessionError,
     events::SessionOpened,
-    rules::{monster_hp, EMPTY_UNIT, MIN_PRICE_LAMPORTS},
+    rules::{BALANCE, EMPTY_UNIT, MIN_PRICE_LAMPORTS},
     state::{
         external::{
-            read_bestiary, read_map, read_table_body, read_tile_costs, MapLayoutView,
-            ASPECTS_TABLE, BESTIARY_TABLE, RESONANCES_TABLE, TILESET_TABLE, TRAITS_TABLE,
+            read_bestiary, read_map, read_monster_skill, read_table_body, read_tile_costs,
+            MapLayoutView, ASPECTS_TABLE, BESTIARY_TABLE, MONSTER_SKILLS_TABLE, RESONANCES_TABLE,
+            TILESET_TABLE, TRAITS_TABLE,
         },
         Escrow, GameSession, Monsters, ACCOUNT_VERSION, RES_ASPECTS_LEN, RES_PAIRS_LEN,
         RES_TRAITS_LEN,
@@ -55,7 +62,8 @@ pub struct OpenSession<'info> {
     /// CHECK: registry `GameConfig`, forwarded to the callee, which checks the trust list.
     #[account(seeds = [seeds::CONFIG], bump, seeds::program = deadroll_registry::ID)]
     pub config: UncheckedAccount<'info>,
-    /// CHECK: registry `["bestiary"]` table, checked by `read_bestiary` (HP, speed, initiative).
+    /// CHECK: registry `["bestiary"]` table, checked by `read_bestiary`: every record a spawn names
+    /// is copied into `MonsterState.records`.
     #[account(address = BESTIARY_TABLE @ SessionError::InvalidRegistryTable)]
     pub bestiary: UncheckedAccount<'info>,
     /// CHECK: registry `["tileset"]` table, checked by `read_tile_costs`.
@@ -74,6 +82,10 @@ pub struct OpenSession<'info> {
     /// CHECK: registry `["resonances"]` table, copied into `MonsterState`.
     #[account(address = RESONANCES_TABLE @ SessionError::InvalidRegistryTable)]
     pub resonances: UncheckedAccount<'info>,
+    /// CHECK: registry `["monster_skills"]` table (patch 6): the skills the spawns took from their
+    /// pools, copied into `MonsterState`.
+    #[account(address = MONSTER_SKILLS_TABLE @ SessionError::InvalidRegistryTable)]
+    pub monster_skills: UncheckedAccount<'info>,
 }
 
 pub fn handler(ctx: Context<OpenSession>, price_lamports: u64, dm_actor: Pubkey) -> Result<()> {
@@ -145,11 +157,13 @@ pub fn handler(ctx: Context<OpenSession>, price_lamports: u64, dm_actor: Pubkey)
     )?;
     for i in 0..spawn_count {
         let spawn = layout.spawn(i as usize)?;
-        let record = read_bestiary(&accounts.bestiary, spawn.bestiary_id)?;
-        let hp = monster_hp(&record, spawn.level);
-        session.monster_speed[i as usize] = record.speed;
-        session.monster_initiative[i as usize] = record.initiative;
-        monsters.set_defense(i, &record.defense)?;
+        let (record, template) = read_bestiary(&accounts.bestiary, spawn.bestiary_id)?;
+        let hp = template.hp_at(spawn.level, spawn.flags, &BALANCE.monsters);
+        session.monster_speed[i as usize] = template.speed;
+        session.monster_initiative[i as usize] = template.initiative;
+        monsters.set_record(i, &record)?;
+        monsters.set_defense(i, &template.defense)?;
+        copy_skills(&monsters, i, &spawn, &template, &accounts.monster_skills)?;
         monsters.set(
             i,
             &Monster {
@@ -216,4 +230,56 @@ fn copy_tables(
         .decode_into(&aspects, &traits, &pairs)
         .map_err(|_| error!(SessionError::InvalidRegistryTable))?;
     monsters.set_tables(&aspects, &traits, &pairs)
+}
+
+/// The skills spawn `index` took from its template's pool (docs/BESTIARY.md 3.2, MAP_DESCRIPTION.md
+/// 7.2): the mask's pool bits, at most the rank's slots (`finalize_map` checked the count; a map
+/// finalized before patch 6 has none), copied once into the session table. The passive skill
+/// starts its permanent aura here (docs/SKILL_BUILDER.md 3.3).
+#[inline(never)]
+fn copy_skills(
+    monsters: &Monsters,
+    index: u8,
+    spawn: &Spawn,
+    template: &MonsterTemplate,
+    table: &AccountInfo,
+) -> Result<()> {
+    let len = (template.pool_len as usize).min(POOL_MAX);
+    let mut pool = [None; POOL_MAX];
+    let mut categories = [Category::Active; POOL_MAX];
+    for (i, (slot, category)) in pool
+        .iter_mut()
+        .zip(categories.iter_mut())
+        .take(len)
+        .enumerate()
+    {
+        // Only the chosen bits are read: an unchosen pool skill costs nothing.
+        if spawn.skills & (1 << i) == 0 {
+            continue;
+        }
+        let skill = read_monster_skill(table, template.pool_start as usize + i)?;
+        *category = skill.blocks.category;
+        *slot = Some(skill);
+    }
+    // Unchosen pool entries keep a category that never takes a slot: their mask bit is clear.
+    let chosen = select_skills(
+        &categories[..len],
+        spawn.skills,
+        template.slots(spawn.flags, &BALANCE.monsters),
+    );
+    let mut slots = [NO_SKILL; MONSTER_SLOTS];
+    for (slot, &p) in slots.iter_mut().zip(chosen.iter()) {
+        if let Some(skill) = (p != NO_SKILL).then(|| pool[p as usize]).flatten() {
+            *slot = monsters.add_skill(&skill)?;
+        }
+    }
+    monsters.set_skill_slots(index, &slots)?;
+    let mut auras = [Aura::default(); AURAS_PER_PLAYER];
+    if let Some(skill) = monsters.skill(index, PASSIVE_SLOT as u8)? {
+        let profile = template.profile(spawn.level, &BALANCE.monsters);
+        if let Some(a) = monster_passive_aura(BALANCE, &profile, &skill) {
+            auras[PASSIVE_AURA] = a;
+        }
+    }
+    monsters.set_auras(index, &auras)
 }

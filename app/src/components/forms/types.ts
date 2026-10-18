@@ -54,6 +54,8 @@ export type MapPaletteProps = {
   /** Current spawns, listed with a remove button each. */
   spawns: Spawn[];
   onRemoveSpawn: (index: number) => void;
+  /** Optional editor under a spawn (level, elite, skills). */
+  renderSpawn?: (spawn: Spawn, index: number) => ReactNode;
   /** Validation errors from crates/mapcheck (shown as a list); empty = valid. */
   errors: string[];
   onValidate: () => void;

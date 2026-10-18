@@ -1,5 +1,5 @@
 {
-  "note": "placeholder, tune in sim",
+  "note": "placeholder, tune in sim. pool_start/pool_len: a run of monster_skills.json; kin: the family kin-only skills reach",
   "records": [
     {
       "id": 0,
@@ -17,15 +17,18 @@
       "immunity": [],
       "state_immunity": [],
       "traits": ["hunt"],
-      "armor": 1,
-      "evasion": 6,
-      "accuracy": 7,
+      "armor": 5,
+      "evasion": 10,
+      "accuracy": 2,
       "initiative": 6,
       "hp": 12,
       "hp_per_level": 3,
       "damage_min": 2,
       "damage_max": 4,
-      "xp": 6
+      "xp": 10,
+      "pool_start": 0,
+      "pool_len": 4,
+      "kin": "Wolf"
     },
     {
       "id": 1,
@@ -43,15 +46,18 @@
       "immunity": [],
       "state_immunity": [],
       "traits": ["swarm"],
-      "armor": 0,
-      "evasion": 4,
-      "accuracy": 5,
+      "armor": 5,
+      "evasion": 9,
+      "accuracy": 1,
       "initiative": 6,
       "hp": 8,
       "hp_per_level": 2,
       "damage_min": 1,
-      "damage_max": 2,
-      "xp": 3
+      "damage_max": 3,
+      "xp": 6,
+      "pool_start": 4,
+      "pool_len": 2,
+      "kin": "Goblin"
     },
     {
       "id": 2,
@@ -69,15 +75,18 @@
       "immunity": [],
       "state_immunity": [],
       "traits": ["leader"],
-      "armor": 5,
-      "evasion": 3,
-      "accuracy": 9,
+      "armor": 40,
+      "evasion": 13,
+      "accuracy": 4,
       "initiative": 8,
       "hp": 28,
       "hp_per_level": 6,
-      "damage_min": 5,
+      "damage_min": 4,
       "damage_max": 8,
-      "xp": 20
+      "xp": 50,
+      "pool_start": 6,
+      "pool_len": 5,
+      "kin": "Goblin"
     },
     {
       "id": 3,
@@ -95,15 +104,18 @@
       "immunity": [],
       "state_immunity": [],
       "traits": [],
-      "armor": 3,
-      "evasion": 3,
-      "accuracy": 6,
+      "armor": 25,
+      "evasion": 11,
+      "accuracy": 3,
       "initiative": 5,
       "hp": 14,
       "hp_per_level": 3,
-      "damage_min": 3,
+      "damage_min": 2,
       "damage_max": 5,
-      "xp": 5
+      "xp": 15,
+      "pool_start": 4,
+      "pool_len": 2,
+      "kin": "Goblin"
     },
     {
       "id": 4,
@@ -121,15 +133,18 @@
       "immunity": [],
       "state_immunity": [],
       "traits": [],
-      "armor": 1,
-      "evasion": 5,
-      "accuracy": 6,
+      "armor": 5,
+      "evasion": 10,
+      "accuracy": 2,
       "initiative": 6,
       "hp": 10,
       "hp_per_level": 2,
-      "damage_min": 1,
-      "damage_max": 3,
-      "xp": 5
+      "damage_min": 2,
+      "damage_max": 4,
+      "xp": 15,
+      "pool_start": 11,
+      "pool_len": 3,
+      "kin": "Goblin"
     }
   ]
 }

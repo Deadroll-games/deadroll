@@ -6,7 +6,7 @@ use deadroll_combat::{
 };
 use deadroll_rules::aura::{passive_aura, reactive_aura};
 use deadroll_rules::{
-    aura::{tick_auras, Aura, AuraField, PartyAuras, PERMANENT},
+    aura::{tick_auras, Aura, AuraField, MonsterAuraField, PartyAuras, PERMANENT},
     input::{action_ap, effect_range, EffectAction, HeroStats, SkillStats},
     items::starter_loadout,
     line::{line_cells, targets_on_line},
@@ -89,6 +89,7 @@ fn aura(kind: ModKind, power_bp: u32, radius: u8) -> Aura {
         hostile: false,
         passive: true,
         self_only: false,
+        kin_only: false,
     }
 }
 
@@ -101,6 +102,7 @@ fn an_aura_reaches_its_bearer_and_allies_in_its_radius() {
         auras: &auras,
         cells: &cells,
         alive: 0b1111,
+        monsters: MonsterAuraField::EMPTY,
     };
     assert_eq!(
         power(
@@ -144,7 +146,10 @@ fn an_aura_reaches_its_bearer_and_allies_in_its_radius() {
     );
     // Monsters never take a friendly aura.
     assert_eq!(
-        power(&field.monster_mods(&none(), cells[1]), ModKind::Protection),
+        power(
+            &field.monster_mods(&none(), 0, cells[1], 0, false),
+            ModKind::Protection
+        ),
         0
     );
 }
@@ -164,6 +169,7 @@ fn identical_auras_do_not_stack_the_strongest_acts() {
         auras: &auras,
         cells: &cells,
         alive: 0b1111,
+        monsters: MonsterAuraField::EMPTY,
     };
     let mods = field.hero_mods(&none(), 3, cells[3], false);
     assert_eq!(power(&mods, ModKind::Protection), 4_500);
@@ -200,6 +206,7 @@ fn the_basic_attack_is_not_strengthened_by_passive_skills() {
         auras: &auras,
         cells: &cells,
         alive: 0b11,
+        monsters: MonsterAuraField::EMPTY,
     };
     assert_eq!(
         power(
@@ -245,6 +252,7 @@ fn a_passive_without_aura_works_on_its_bearer_only() {
         auras: &auras,
         cells: &cells,
         alive: 0b1111,
+        monsters: MonsterAuraField::EMPTY,
     };
     assert_eq!(
         power(
@@ -274,13 +282,20 @@ fn a_debuff_aura_works_on_the_enemies_around() {
         auras: &auras,
         cells: &cells,
         alive: 0b0100,
+        monsters: MonsterAuraField::EMPTY,
     };
     assert_eq!(
-        power(&field.monster_mods(&none(), c(6, 5)), ModKind::Slow),
+        power(
+            &field.monster_mods(&none(), 0, c(6, 5), 0, false),
+            ModKind::Slow
+        ),
         3_000
     );
     assert_eq!(
-        power(&field.monster_mods(&none(), c(7, 4)), ModKind::Slow),
+        power(
+            &field.monster_mods(&none(), 0, c(7, 4), 0, false),
+            ModKind::Slow
+        ),
         0
     );
     // Not on the bearer or its allies.

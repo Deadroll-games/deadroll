@@ -1,11 +1,11 @@
 // A unit's combat stats with its buffs and debuffs, as the battle screen shows them.
 // Pure functions. Player defense and armor come from balance.json (deadroll_rules defaults,
 // through ./items); a monster's defense, armor and resistances come from the combat module
-// (`monsterSheet`: crates/rules over the defenses the session copied from the registry), so
+// (`monsterSheet`: crates/rules over the bestiary record the session copied from the registry), so
 // nothing here repeats the bestiary. The modifier arithmetic mirrors crates/combat support.rs
 // (apply_to_defender, speed_ap); stats.test.ts pins it.
 import balance from "./balance.json";
-import type { CombatWasm, DefenseInput } from "./combatWasm";
+import type { Bytes, CombatWasm } from "./combatWasm";
 import { heroDefense } from "./items";
 import { MOD_NAMES } from "./support";
 import { Aspect, Class, ModKind, StateKind, type TimedMod } from "./types";
@@ -27,11 +27,11 @@ export function playerDefense(cls: Class, stats: readonly number[], equipment: A
   return { ...heroDefense(cls, stats, equipment), resist: NO_RESIST };
 }
 
-/** A monster at `level` with the defenses of its registry record (`MonsterState.defense`), from
- * the combat module; null for an unknown bestiary id. */
-export function monsterDefense(combat: CombatWasm, bestiaryId: number, level: number, defense: DefenseInput): DefenseProfile | null {
+/** A monster at `level` from its bestiary record (`MonsterState.records`), by the combat module;
+ * null for a record that does not decode. */
+export function monsterDefense(combat: CombatWasm, record: Bytes, level: number, flags = 0): DefenseProfile | null {
   try {
-    const m = combat.monsterSheet({ bestiaryId, level, defense });
+    const m = combat.monsterSheet({ record, level, flags });
     return { defense: m.evasion, armor: m.armor, resist: m.resistBp };
   } catch {
     return null;

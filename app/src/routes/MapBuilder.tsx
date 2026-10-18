@@ -12,6 +12,19 @@ import { buildMapIxs, mapStatus, mapsOf, type MapAcc } from "../chain/game";
 import { useTx } from "../chain/useTx";
 import { DATA_SOURCE, explorerUrl } from "../config";
 import { useAppWallet } from "../wallet/AppWallet";
+import { useCombat } from "../chain/combatWasm";
+import { SPAWN_ELITE, spawnView, useBuilderRegistry, type SpawnView } from "../chain/monsters";
+import { SKILL_ERRORS, SKILL_ERROR_MESSAGES } from "../chain/skillcheck";
+
+const CATEGORY_NAMES = ["active", "reactive", "passive"];
+
+/** The verdict on a spawn's skills as a message, null = valid (or not known yet). */
+export function spawnSkillError(view: SpawnView | null): string | null {
+  const code = view?.check?.error ?? 0;
+  if (!code) return null;
+  const err = SKILL_ERRORS[code - 1];
+  return err ? SKILL_ERROR_MESSAGES[err] : `skill error ${code}`;
+}
 
 const BESTIARY = Object.entries(BESTIARY_NAMES).map(([id, name]) => ({ id: Number(id), name }));
 const PRESETS = MAP_PRESETS.map((p) => ({ name: p.name, width: p.width, height: p.height }));
@@ -22,7 +35,7 @@ const WALKABLE = new Set<number>([Tile.Floor, Tile.Door, Tile.Entrance, Tile.Exi
  * The authority is crates/mapcheck inside map.finalize_map.
  * TODO(L9.6): run crates/mapcheck through WASM for the exact same verdict.
  */
-export function quickCheck(tiles: Uint8Array, width: number, height: number, spawns: Spawn[]): string[] {
+export function quickCheck(tiles: Uint8Array, width: number, height: number, spawns: Spawn[], skillError: (s: Spawn) => string | null = () => null): string[] {
   const errors: string[] = [];
   let entrances = 0;
   let exits = 0;
@@ -37,6 +50,8 @@ export function quickCheck(tiles: Uint8Array, width: number, height: number, spa
   if (spawns.length > SPAWNS_MAX) errors.push(`At most ${SPAWNS_MAX} spawns`);
   spawns.forEach((s, i) => {
     if (!WALKABLE.has(tiles[cellIndex(s.x, s.y)] ?? Tile.Wall)) errors.push(`Spawn ${i} (${bestiaryName(s.bestiaryId)}) is not on a walkable tile`);
+    const skills = skillError(s);
+    if (skills) errors.push(`Spawn ${i} (${bestiaryName(s.bestiaryId)}): ${skills}`);
   });
   return errors;
 }
@@ -53,6 +68,10 @@ export function MapBuilderPage() {
   const wallet = useAppWallet();
   const { send, busy } = useTx();
   const [built, setBuilt] = useState<Address | null>(null);
+  // The bestiary pools and monster skills (registry), checked by the combat module.
+  const combat = useCombat();
+  const registry = useBuilderRegistry();
+  const viewOf = useCallback((sp: Pick<Spawn, "bestiaryId" | "flags" | "skills">) => (combat && registry ? spawnView(combat, registry, sp) : null), [combat, registry]);
   const [myMaps, setMyMaps] = useState<{ address: Address; data: MapAcc }[]>([]);
   const refreshMaps = useCallback(async () => {
     if (DATA_SOURCE !== "chain" || !wallet.address) return setMyMaps([]);
@@ -93,7 +112,9 @@ export function MapBuilderPage() {
     } else if (tool.kind === "spawn") {
       if (layout.spawns.some((s) => s.x === x && s.y === y) || layout.spawns.length >= SPAWNS_MAX) return;
       const pack = Math.max(0, ...layout.spawns.map((s) => s.pack)) + 1;
-      edit({ ...layout, spawns: [...layout.spawns, { bestiaryId: tool.bestiaryId, x, y, level: 1, skills: 0, flags: 0, aspects: 0, pack }] });
+      // The default choice fills the slots (the first skills of each kind of the pool).
+      const skills = viewOf({ bestiaryId: tool.bestiaryId, flags: 0, skills: 0 })?.check?.defaultMask ?? 0;
+      edit({ ...layout, spawns: [...layout.spawns, { bestiaryId: tool.bestiaryId, x, y, level: 1, skills, flags: 0, aspects: 0, pack }] });
     } else {
       edit({ ...layout, spawns: layout.spawns.filter((s) => s.x !== x || s.y !== y) });
     }
@@ -133,9 +154,18 @@ export function MapBuilderPage() {
             }}
             spawns={layout.spawns}
             onRemoveSpawn={(i) => edit({ ...layout, spawns: layout.spawns.filter((_, j) => j !== i) })}
+            renderSpawn={(spawn, i) => (
+              <SpawnEditor
+                spawn={spawn}
+                view={viewOf(spawn)}
+                viewOf={viewOf}
+                locked={busy !== null}
+                onChange={(next) => edit({ ...layout, spawns: layout.spawns.map((x, j) => (j === i ? next : x)) })}
+              />
+            )}
             errors={errors}
             onValidate={() => {
-              const e = quickCheck(layout.tiles, size.width, size.height, layout.spawns);
+              const e = quickCheck(layout.tiles, size.width, size.height, layout.spawns, (sp) => spawnSkillError(viewOf(sp)));
               setErrors(e);
               setValidated(e.length === 0);
             }}
@@ -175,5 +205,63 @@ export function MapBuilderPage() {
         </div>
       </div>
     </section>
+  );
+}
+
+/** A spawn's level, elite flag and skills from its template's pool (docs/BESTIARY.md 12,
+ * MAP_DESCRIPTION.md 7.2). The tier's levels and the elite limit are finalize_map's to check. */
+function SpawnEditor(p: {
+  spawn: Spawn;
+  view: SpawnView | null;
+  viewOf: (s: Pick<Spawn, "bestiaryId" | "flags" | "skills">) => SpawnView | null;
+  locked: boolean;
+  onChange: (s: Spawn) => void;
+}) {
+  const { spawn, view } = p;
+  const elite = (spawn.flags & SPAWN_ELITE) !== 0;
+  const error = spawnSkillError(view);
+  const slots = view?.check?.slots;
+  return (
+    <div className="forms-spawn-editor">
+      <label>
+        Level{" "}
+        <input
+          type="number"
+          min={1}
+          max={255}
+          value={spawn.level}
+          disabled={p.locked}
+          onChange={(e) => p.onChange({ ...spawn, level: Math.max(1, Math.min(255, Number(e.target.value) || 1)) })}
+        />
+      </label>{" "}
+      <label title={view?.boss ? "A boss cannot be elite" : undefined}>
+        <input
+          type="checkbox"
+          checked={elite}
+          disabled={p.locked || !view || view.boss}
+          onChange={() => {
+            // Elite changes the slots: start from the new default choice.
+            const flags = spawn.flags ^ SPAWN_ELITE;
+            const skills = p.viewOf({ ...spawn, flags })?.check?.defaultMask ?? spawn.skills;
+            p.onChange({ ...spawn, flags, skills });
+          }}
+        />{" "}
+        Elite
+      </label>
+      {view && view.pool.length > 0 && (
+        <fieldset className="forms-spawn-skills" disabled={p.locked}>
+          <legend className="muted">
+            Skills{slots ? `: ${slots.map((n, c) => `${n} ${CATEGORY_NAMES[c]}`).join(", ")}` : ""}
+          </legend>
+          {view.pool.map((k) => (
+            <label key={k.bit}>
+              <input type="checkbox" checked={(spawn.skills & (1 << k.bit)) !== 0} onChange={() => p.onChange({ ...spawn, skills: spawn.skills ^ (1 << k.bit) })} /> {k.name}{" "}
+              <span className="muted">({CATEGORY_NAMES[k.category] ?? k.category})</span>
+            </label>
+          ))}
+        </fieldset>
+      )}
+      {error && <p className="error">{error}</p>}
+    </div>
   );
 }

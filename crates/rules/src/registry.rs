@@ -10,10 +10,15 @@ use deadroll_combat::tables::{
     TEMPLATE_OPS, TRAITS,
 };
 use deadroll_combat::{ModKind, ResonanceCondition};
-use deadroll_types::{Aspect, Family, StateKind};
-use serde::Deserialize;
+use deadroll_skillcheck::{
+    monster::{MonsterSkill, KIN_ONLY, RECORDS_MAX, RECORD_SIZE as SKILL_RECORD},
+    Category, Effect, Purpose, SkillBlocks, SkillExt, SkillTuning, Target, Trigger,
+    SKILL_ASPECTS_MAX,
+};
+use deadroll_types::{Aspect, Family, Form, RangeTag, Source, StateKind, TimeTag};
+use serde::{Deserialize, Serialize};
 
-use crate::monster::{record, MonsterDefense};
+use crate::monster::{record, MonsterDefense, MonsterTemplate, NO_KIN};
 
 /// Bestiary slots (registry `BESTIARY_MAX`).
 pub const BESTIARY_MAX: usize = 32;
@@ -24,15 +29,24 @@ pub struct Registry {
     pub tables: ResonanceTables,
     /// By bestiary id; `None` for an empty slot.
     pub defense: Vec<Option<MonsterDefense>>,
+    /// By bestiary id; `None` for an empty slot.
+    pub templates: Vec<Option<MonsterTemplate>>,
+    /// By `monster_skills` index; `None` for an empty slot.
+    pub skills: Vec<Option<MonsterSkill>>,
+    /// Names from the JSON (text is not on the chain): bestiary by id, skills by index.
+    pub monster_names: Vec<String>,
+    pub skill_names: Vec<String>,
     /// The table bodies as the chain stores them.
     pub aspects: Vec<u8>,
     pub traits: Vec<u8>,
     pub resonances: Vec<u8>,
     pub bestiary: Vec<u8>,
+    pub monster_skills: Vec<u8>,
 }
 
 impl Registry {
-    /// Loads `aspects.json`, `traits.json`, `resonances.json` and `bestiary.json` from `dir`.
+    /// Loads `aspects.json`, `traits.json`, `resonances.json`, `bestiary.json` and
+    /// `monster_skills.json` from `dir`.
     pub fn load(dir: &Path) -> Result<Registry, String> {
         let read = |name: &str| {
             let path = dir.join(name);
@@ -41,8 +55,14 @@ impl Registry {
         let aspects = encode_aspects(&read("aspects.json")?)?;
         let traits = encode_traits(&read("traits.json")?)?;
         let resonances = encode_resonances(&read("resonances.json")?)?;
-        let bestiary = encode_bestiary(&read("bestiary.json")?)?;
-        Registry::from_bytes(aspects, traits, resonances, bestiary)
+        let bestiary_json = read("bestiary.json")?;
+        let skills_json = read("monster_skills.json")?;
+        let bestiary = encode_bestiary(&bestiary_json)?;
+        let monster_skills = encode_monster_skills(&skills_json)?;
+        let mut r = Registry::from_bytes(aspects, traits, resonances, bestiary, monster_skills)?;
+        r.monster_names = names::<MonsterJson>(&bestiary_json, |m| m.name.clone())?;
+        r.skill_names = names::<MonsterSkillJson>(&skills_json, |m| m.name.clone())?;
+        Ok(r)
     }
 
     /// The default location: `assets/registry` of this repository.
@@ -55,21 +75,88 @@ impl Registry {
         traits: Vec<u8>,
         resonances: Vec<u8>,
         bestiary: Vec<u8>,
+        monster_skills: Vec<u8>,
     ) -> Result<Registry, String> {
         let tables = ResonanceTables::from_bytes(&aspects, &traits, &resonances)
             .map_err(|e| format!("resonance tables: {e:?}"))?;
-        let defense = bestiary
+        let templates: Vec<Option<MonsterTemplate>> = bestiary
             .chunks(record::SIZE)
-            .map(MonsterDefense::from_record)
+            .map(MonsterTemplate::from_record)
             .collect();
+        let defense = templates.iter().map(|t| t.map(|t| t.defense)).collect();
+        let skills = monster_skills
+            .chunks(SKILL_RECORD)
+            .enumerate()
+            .map(|(i, r)| {
+                MonsterSkill::decode_record(r, &SkillTuning::DEFAULT)
+                    .map_err(|e| format!("monster skill {i}: {e:?}"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(Registry {
             tables,
             defense,
+            templates,
+            skills,
+            monster_names: Vec::new(),
+            skill_names: Vec::new(),
             aspects,
             traits,
             resonances,
             bestiary,
+            monster_skills,
         })
+    }
+
+    /// The template of bestiary id `id`.
+    pub fn template(&self, id: u8) -> Option<MonsterTemplate> {
+        self.templates.get(id as usize).copied().flatten()
+    }
+
+    /// The bestiary record bytes of `id` (what `MonsterState.records` copies).
+    pub fn record(&self, id: u8) -> Option<[u8; record::SIZE]> {
+        self.template(id)?;
+        let at = id as usize * record::SIZE;
+        let mut out = [0u8; record::SIZE];
+        out.copy_from_slice(self.bestiary.get(at..at + record::SIZE)?);
+        Some(out)
+    }
+
+    /// The pool of `t` in pool order (`None` for a slot past the table or empty).
+    pub fn pool(&self, t: &MonsterTemplate) -> Vec<Option<MonsterSkill>> {
+        (0..t.pool_len as usize)
+            .map(|i| {
+                self.skills
+                    .get(t.pool_start as usize + i)
+                    .copied()
+                    .flatten()
+            })
+            .collect()
+    }
+
+    /// The builder rules of bestiary id `id` (`deadroll_mapcheck::check_map`).
+    pub fn spawn_rules(
+        &self,
+        id: u8,
+        s: &crate::config::MonsterScaling,
+    ) -> Option<deadroll_mapcheck::roster::SpawnRules> {
+        self.template(id)?.spawn_rules(
+            |i| {
+                self.skills
+                    .get(i)
+                    .copied()
+                    .flatten()
+                    .map(|k| k.blocks.category)
+            },
+            s,
+        )
+    }
+
+    /// The bestiary id named `name` in `bestiary.json`.
+    pub fn monster_id(&self, name: &str) -> Option<u8> {
+        self.monster_names
+            .iter()
+            .position(|n| n == name)
+            .map(|i| i as u8)
     }
 
     /// The defenses of bestiary id `id` (none for an unknown id).
@@ -178,35 +265,116 @@ struct PairJson {
     ops: Vec<OpJson>,
 }
 
+/// One record of `bestiary.json` (programs/registry README byte table), as the file writes it:
+/// the balance bench edits these and saves the file.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MonsterJson {
+    pub id: u8,
+    pub name: String,
+    pub role: String,
+    pub biome: String,
+    pub size: u8,
+    pub min_tier: u8,
+    pub speed: u8,
+    pub attack_aspect: String,
+    pub attack_source: String,
+    pub attack_form: String,
+    pub predisposition: Option<String>,
+    #[serde(default)]
+    pub resistance: Vec<String>,
+    #[serde(default)]
+    pub immunity: Vec<String>,
+    #[serde(default)]
+    pub state_immunity: Vec<String>,
+    #[serde(default)]
+    pub traits: Vec<String>,
+    pub armor: u16,
+    pub evasion: u16,
+    pub accuracy: u16,
+    pub initiative: u16,
+    pub hp: u32,
+    pub hp_per_level: u32,
+    pub damage_min: u16,
+    pub damage_max: u16,
+    pub xp: u32,
+    /// Patch 6: the skill pool in `monster_skills.json` (`[start, start + len)`) and the kin.
+    #[serde(default)]
+    pub pool_start: u8,
+    #[serde(default)]
+    pub pool_len: u8,
+    #[serde(default)]
+    pub kin: Option<String>,
+}
+
+/// The whole `bestiary.json`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BestiaryJson {
+    #[serde(default)]
+    pub note: String,
+    pub records: Vec<MonsterJson>,
+}
+
+/// `dir/bestiary.json`.
+pub fn read_bestiary_json(dir: &Path) -> Result<BestiaryJson, String> {
+    let path = dir.join("bestiary.json");
+    let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Writes `dir/bestiary.json` after the encoder accepts it (the bytes the seed script uploads).
+pub fn write_bestiary_json(dir: &Path, b: &BestiaryJson) -> Result<(), String> {
+    let text = serde_json::to_string_pretty(b).map_err(|e| e.to_string())? + "\n";
+    encode_bestiary(&text)?;
+    let path = dir.join("bestiary.json");
+    fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))
+}
+
 #[derive(Deserialize)]
-struct MonsterJson {
+#[serde(deny_unknown_fields)]
+struct MonsterSkillJson {
     id: u8,
-    role: String,
-    biome: String,
-    size: u8,
-    min_tier: u8,
-    speed: u8,
-    attack_aspect: String,
-    attack_source: String,
-    attack_form: String,
-    predisposition: Option<String>,
+    name: String,
+    category: String,
+    purpose: String,
+    source: String,
+    form: String,
+    #[serde(default = "default_target")]
+    target: String,
+    aspects: Vec<String>,
+    #[serde(default = "default_none")]
+    effect: String,
+    #[serde(default = "default_none")]
+    trigger: String,
     #[serde(default)]
-    resistance: Vec<String>,
+    aura_radius: u8,
+    range: String,
+    #[serde(default = "default_timing")]
+    timing: String,
     #[serde(default)]
-    immunity: Vec<String>,
+    hp_below_pct: u8,
     #[serde(default)]
-    state_immunity: Vec<String>,
-    #[serde(default)]
-    traits: Vec<String>,
-    armor: u16,
-    evasion: u16,
-    accuracy: u16,
-    initiative: u16,
-    hp: u32,
-    hp_per_level: u32,
-    damage_min: u16,
-    damage_max: u16,
-    xp: u32,
+    kin_only: bool,
+}
+
+fn default_target() -> String {
+    "Single".into()
+}
+
+fn default_none() -> String {
+    "None".into()
+}
+
+fn default_timing() -> String {
+    "Instant".into()
+}
+
+fn names<T: serde::de::DeserializeOwned>(
+    json: &str,
+    name: impl Fn(&T) -> String,
+) -> Result<Vec<String>, String> {
+    let list: Records<T> = serde_json::from_str(json).map_err(|e| e.to_string())?;
+    Ok(list.records.iter().map(name).collect())
 }
 
 fn records<'a, T: Deserialize<'a>>(json: &'a str, table: &str) -> Result<Vec<T>, String> {
@@ -355,6 +523,9 @@ pub fn encode_resonances(json: &str) -> Result<Vec<u8>, String> {
 
 const ROLES: [&str; 6] = ["Swarm", "Fast", "Tank", "Loner", "Boss", "Helper"];
 const BIOMES: [&str; 2] = ["Forest", "Caves and Ruins"];
+/// Kin names by kin id (`record::KIN`): the families kin-only skills look at (docs/BESTIARY.md
+/// 7-8). Append only.
+pub const KINS: [&str; 6] = ["Wolf", "Goblin", "Bear", "Treant", "Fairy", "Troll"];
 const MONSTER_TRAITS: [(&str, u16); 4] = [
     ("swarm", 1),
     ("regeneration", 2),
@@ -424,8 +595,63 @@ pub fn encode_bestiary(json: &str) -> Result<Vec<u8>, String> {
         r[32..34].copy_from_slice(&m.damage_max.to_le_bytes());
         r[34..38].copy_from_slice(&m.xp.to_le_bytes());
         r[record::IMMUNE_STATES] = mask(&m.state_immunity, StateKind::ALL, "state")?;
-        MonsterDefense::from_record(&r).ok_or_else(|| format!("bestiary {i}: invalid"))?;
+        r[record::POOL_START] = m.pool_start;
+        r[record::POOL_LEN] = m.pool_len;
+        r[record::KIN] = match m.kin.as_deref() {
+            None => NO_KIN,
+            Some(k) => index(&KINS, k, "kin")?,
+        };
+        MonsterTemplate::from_record(&r).ok_or_else(|| format!("bestiary {i}: invalid"))?;
         out.extend_from_slice(&r);
+    }
+    Ok(out)
+}
+
+/// `monster_skills.json` as the `monster_skills` table body (programs/registry README), each
+/// record checked by the monster builder (`MonsterSkill::decode_record`).
+pub fn encode_monster_skills(json: &str) -> Result<Vec<u8>, String> {
+    let list: Vec<MonsterSkillJson> = records(json, "monster skills")?;
+    if list.len() > RECORDS_MAX {
+        return Err(format!("monster skills: at most {RECORDS_MAX} records"));
+    }
+    let mut out = Vec::new();
+    for (i, m) in list.iter().enumerate() {
+        if m.id as usize != i {
+            return Err(format!("monster skill {i} must have id {i}"));
+        }
+        let label = format!("monster skill {i} ({})", m.name);
+        let count = m.aspects.len();
+        if count == 0 || count > SKILL_ASPECTS_MAX {
+            return Err(format!("{label}: 1..={SKILL_ASPECTS_MAX} aspects"));
+        }
+        let mut aspects = [Aspect::default(); SKILL_ASPECTS_MAX];
+        for (slot, a) in aspects.iter_mut().zip(&m.aspects) {
+            *slot = aspect(a)?;
+        }
+        let skill = MonsterSkill {
+            blocks: SkillBlocks {
+                category: parse(&m.category, Category::ALL, "category")?,
+                purpose: parse(&m.purpose, Purpose::ALL, "purpose")?,
+                source: parse(&m.source, Source::ALL, "source")?,
+                form: parse(&m.form, Form::ALL, "form")?,
+                target: parse(&m.target, Target::ALL, "target")?,
+                aspects,
+                aspect_count: count as u8,
+                effect: parse(&m.effect, Effect::ALL, "effect")?,
+                trigger: parse(&m.trigger, Trigger::ALL, "trigger")?,
+                aura_radius: m.aura_radius,
+            },
+            ext: SkillExt {
+                range: parse(&m.range, RangeTag::ALL, "range")?,
+                timing: parse(&m.timing, TimeTag::ALL, "timing")?,
+                hp_below_pct: m.hp_below_pct,
+            },
+            flags: if m.kin_only { KIN_ONLY } else { 0 },
+        };
+        let bytes = skill.encode_record();
+        MonsterSkill::decode_record(&bytes, &SkillTuning::DEFAULT)
+            .map_err(|e| format!("{label}: {e:?}"))?;
+        out.extend_from_slice(&bytes);
     }
     Ok(out)
 }

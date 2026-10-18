@@ -14,6 +14,8 @@ pub const TILESET: &[u8] = b"tileset";
 pub const PREFABS: &[u8] = b"prefabs";
 /// `["traits"]` in registry (patch 4).
 pub const TRAITS: &[u8] = b"traits";
+/// `["monster_skills"]` in registry (patch 6): the skills of the bestiary pools.
+pub const MONSTER_SKILLS: &[u8] = b"monster_skills";
 /// `["authority"]` in every program: the signer for CPI into other game programs.
 pub const AUTHORITY: &[u8] = b"authority";
 /// `["rasterizer", version: u16]` in render.

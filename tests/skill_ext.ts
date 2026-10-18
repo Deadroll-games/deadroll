@@ -24,18 +24,21 @@ export function newSkill<B>(name: string, blocks: B, text: (s: string, len: numb
 /**
  * The accounts every VRF callback gets after its fixed list (programs/session party.rs): each
  * living player but `main`, in slot order, its Participation (writable) and its Character.
- * `s` is a decoded `GameSession`.
+ * `s` is a decoded `GameSession`. `deaths` (patch 6, a monster can hit several players): the
+ * Character writable, then its SkillSet and Bag (`deaths(character)`), so any of them can die.
  */
 export function partyAccounts(
   s: { core: { playerCount: number; players: { equals(o: unknown): boolean }[] }; aliveMask: number; participations: { equals(o: unknown): boolean }[] },
   main: { equals(o: unknown): boolean },
+  deaths: ((character: any) => [any, any]) | null = null,
 ) {
   const out: { pubkey: any; isSigner: boolean; isWritable: boolean }[] = [];
   for (let slot = 0; slot < s.core.playerCount; slot++) {
     const participation = s.participations[slot];
     if ((s.aliveMask & (1 << slot)) === 0 || participation.equals(main)) continue;
     out.push({ pubkey: participation, isSigner: false, isWritable: true });
-    out.push({ pubkey: s.core.players[slot], isSigner: false, isWritable: false });
+    out.push({ pubkey: s.core.players[slot], isSigner: false, isWritable: deaths !== null });
+    if (deaths) for (const pubkey of deaths(s.core.players[slot])) out.push({ pubkey, isSigner: false, isWritable: true });
   }
   return out;
 }

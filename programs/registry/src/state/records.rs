@@ -4,6 +4,7 @@
 
 use anchor_lang::prelude::*;
 use deadroll_combat::tables::{self, decode_aspect, decode_pair, decode_trait};
+use deadroll_skillcheck::{monster, SkillTuning};
 use deadroll_types::{seeds, Aspect, Form, Source, StateKind, Tile};
 
 /// Which table an instruction works on. Discriminants are part of the format: append only.
@@ -17,6 +18,8 @@ pub enum TableKind {
     Prefabs,
     /// Tint traits (docs/DAMAGE_TYPES_AND_MIXES.md 3.2), patch 4.
     Traits,
+    /// Monster skills (docs/BESTIARY.md 3), patch 6: the records the bestiary pools point at.
+    MonsterSkills,
 }
 
 impl TableKind {
@@ -28,6 +31,7 @@ impl TableKind {
             3 => Self::Tileset,
             4 => Self::Prefabs,
             5 => Self::Traits,
+            6 => Self::MonsterSkills,
             _ => return None,
         })
     }
@@ -41,6 +45,7 @@ impl TableKind {
             Self::Tileset => seeds::TILESET,
             Self::Prefabs => seeds::PREFABS,
             Self::Traits => seeds::TRAITS,
+            Self::MonsterSkills => seeds::MONSTER_SKILLS,
         }
     }
 
@@ -53,6 +58,7 @@ impl TableKind {
             Self::Tileset => TILE_SIZE,
             Self::Prefabs => 1,
             Self::Traits => TRAIT_SIZE,
+            Self::MonsterSkills => MONSTER_SKILL_SIZE,
         }
     }
 
@@ -65,6 +71,7 @@ impl TableKind {
             Self::Tileset => Tile::COUNT * TILE_SIZE,
             Self::Prefabs => crate::state::TABLE_CAP,
             Self::Traits => tables::TRAITS_LEN,
+            Self::MonsterSkills => MONSTER_SKILLS_MAX * MONSTER_SKILL_SIZE,
         }
     }
 }
@@ -76,6 +83,9 @@ pub const MONSTER_SIZE: usize = 48;
 pub const TILE_SIZE: usize = 8;
 /// Bestiary ids are record indices. P0: 0 wolf, 1 goblin, 2 goblin chieftain, 3 goblin warrior, 4 goblin shaman.
 pub const BESTIARY_MAX: usize = 32;
+/// Monster skill records (`deadroll_skillcheck::monster`): 128 x 32 B.
+pub const MONSTER_SKILL_SIZE: usize = monster::RECORD_SIZE;
+pub const MONSTER_SKILLS_MAX: usize = monster::RECORDS_MAX;
 
 /// `Role` variants in `crates/mapcheck/src/roster.rs`: Swarm, Fast, Tank, Loner, Boss, Helper.
 const ROLES: u8 = 6;
@@ -107,6 +117,10 @@ pub fn validate_record(kind: TableKind, index: usize, r: &[u8]) -> bool {
         // [passable, move_cost, blocks_los, flags, reserved x4]
         TableKind::Tileset => r[0] <= 1 && r[2] <= 1 && (r[0] == 0 || r[1] >= 1),
         TableKind::Prefabs => true,
+        // The monster builder rules (docs/BESTIARY.md 3.1), the decoder every reader uses.
+        TableKind::MonsterSkills => {
+            monster::MonsterSkill::decode_record(r, &SkillTuning::DEFAULT).is_ok()
+        }
     }
 }
 
@@ -132,7 +146,10 @@ fn validate_monster(r: &[u8]) -> bool {
         && r[10] & !aspect_mask == 0
         && r[11] & !aspect_mask == 0
         && r[38] & !state_mask == 0
-        && r[39..].iter().all(|&b| b == 0)
+        // Patch 6: [39] pool start, [40] pool length (a run of the monster skills table), [41] kin.
+        && r[40] as usize <= monster::POOL_MAX
+        && r[39] as usize + r[40] as usize <= MONSTER_SKILLS_MAX
+        && r[42..].iter().all(|&b| b == 0)
         && u16_at(r, 30) <= u16_at(r, 32)
 }
 
@@ -201,12 +218,14 @@ mod tests {
             TableKind::Tileset,
             TableKind::Prefabs,
             TableKind::Traits,
+            TableKind::MonsterSkills,
         ] {
             assert!(k.max_len() <= crate::state::TABLE_CAP);
             assert_eq!(k.max_len() % k.record_size(), 0);
             assert_eq!(TableKind::from_u8(k as u8), Some(k));
         }
-        assert_eq!(TableKind::from_u8(6), None);
+        assert_eq!(TableKind::from_u8(7), None);
+        assert_eq!(TableKind::MonsterSkills.seed(), b"monster_skills");
         assert_eq!(TableKind::Traits.seed(), b"traits");
     }
 
@@ -343,8 +362,52 @@ mod tests {
             !mutate(|r| r[38] = 0b1000_0000),
             "state bit past the states"
         );
-        assert!(!mutate(|r| r[40] = 1), "reserved byte");
+        assert!(mutate(|r| r[40] = 16), "a full pool");
+        assert!(!mutate(|r| r[40] = 17), "pool past 16");
+        assert!(
+            !mutate(|r| {
+                r[39] = 120;
+                r[40] = 9
+            }),
+            "pool past the table"
+        );
+        assert!(mutate(|r| r[41] = 1), "kin");
+        assert!(!mutate(|r| r[42] = 1), "reserved byte");
         assert!(!mutate(|r| r[30] = 9), "damage min above max");
+    }
+
+    #[test]
+    fn monster_skill_records() {
+        use deadroll_skillcheck::{monster::MonsterSkill, presets, Effect};
+        let k = TableKind::MonsterSkills;
+        let p = presets::SUPPORT[0];
+        let mut skill = MonsterSkill {
+            blocks: p.blocks,
+            ext: p.ext,
+            flags: monster::KIN_ONLY,
+        };
+        assert!(validate_record(k, 0, &skill.encode_record()));
+        assert!(
+            validate_record(k, 3, &[0; MONSTER_SKILL_SIZE]),
+            "empty slot"
+        );
+        // A heal is a monster skill.
+        skill.blocks.effect = Effect::Heal;
+        assert!(validate_record(k, 0, &skill.encode_record()));
+        let bad = |at: usize, v: u8| {
+            let mut r = skill.encode_record();
+            r[at] = v;
+            !validate_record(k, 0, &r)
+        };
+        assert!(bad(0, 2), "present flag");
+        assert!(bad(1, 9), "unknown category");
+        assert!(bad(17, 2), "unknown flag");
+        assert!(bad(31, 1), "reserved byte");
+        assert!(bad(9, 3), "aspect count past the builder");
+        assert_eq!(
+            check_range(k, 0, MONSTER_SKILL_SIZE * 129),
+            Err(RangeError::OutOfBounds)
+        );
     }
 
     #[test]

@@ -9,7 +9,6 @@ publish.workspace = true
 
 [dependencies]
 deadroll-types.workspace = true
+# Monster skill slots and the pool choice (docs/BESTIARY.md 3.2).
+deadroll-skillcheck.workspace = true
 
-[dev-dependencies]
-# The demo preset test reads assets/registry/maps/*.json.
-serde_json = "1"

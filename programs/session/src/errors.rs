@@ -127,4 +127,17 @@ pub enum SessionError {
     LineBlocked,
     #[msg("A reactive skill triggers here: the VRF accounts and the payer are required")]
     ReactiveAccountsMissing,
+    // Patch 6: monster skills (docs/BESTIARY.md 3).
+    #[msg("Too many different monster skills for one party")]
+    TooManyMonsterSkills,
+    #[msg("This monster has no active skill in that slot")]
+    MonsterSkillMissing,
+    #[msg("A kin-only monster skill reaches allies of its own kin only")]
+    NotSameKin,
+    #[msg("Account is not the registry monster skills table, or a pool skill is missing")]
+    InvalidMonsterSkills,
+    #[msg("A death is waiting to be finalized: start_turn (or a claim) first")]
+    DeathsPending,
+    #[msg("The remaining accounts are not the character, skill set and bag of each pending death, in slot order")]
+    InvalidDeathAccounts,
 }

@@ -10,6 +10,7 @@ pub mod events;
 pub mod hit_event;
 pub mod instructions;
 pub mod line;
+pub mod monster_cb;
 pub mod movement;
 pub mod outcomes;
 pub mod party;
@@ -63,7 +64,7 @@ pub mod deadroll_session {
     /// Starts the current unit's turn, before anything else on it (permissionless): over-time
     /// damage (same death and victory path as hits), Freeze / Stun skip the turn, state
     /// durations and cooldowns count down. A skip or a death ends the turn on its own.
-    pub fn start_turn(ctx: Context<StartTurn>) -> Result<()> {
+    pub fn start_turn<'info>(ctx: Context<'info, StartTurn<'info>>) -> Result<()> {
         start_turn::handler(ctx)
     }
 
@@ -118,12 +119,12 @@ pub mod deadroll_session {
     }
 
     /// After the party ended: rewards and unlock for one character (its owner or their session key).
-    pub fn claim_rewards(ctx: Context<ClaimRewards>) -> Result<()> {
+    pub fn claim_rewards<'info>(ctx: Context<'info, ClaimRewards<'info>>) -> Result<()> {
         claim_rewards::handler(ctx)
     }
 
     /// After the party ended: the DM takes the escrow and the map goes `Finished`.
-    pub fn claim_escrow(ctx: Context<ClaimEscrow>) -> Result<()> {
+    pub fn claim_escrow<'info>(ctx: Context<'info, ClaimEscrow<'info>>) -> Result<()> {
         claim_escrow::handler(ctx)
     }
 }

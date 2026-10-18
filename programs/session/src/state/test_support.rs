@@ -93,10 +93,18 @@ pub fn monster(x: u8, y: u8) -> Monster {
     }
 }
 
-/// A `MonsterState` account for `session`, serialized exactly as Anchor would.
+/// A `MonsterState` account for `session`, serialized exactly as Anchor would; each monster's
+/// bestiary record is the shipped one of its `bestiary_id` (as `open_session` copies it).
 pub fn monsters_account(session: Pubkey, monsters: &[Monster]) -> TestAccount {
     let mut all = [Monster::default(); MONSTERS_MAX];
     all[..monsters.len()].copy_from_slice(monsters);
+    let reg = registry();
+    let mut records = [[0; super::MONSTER_RECORD_LEN]; MONSTERS_MAX];
+    for (r, m) in records.iter_mut().zip(monsters) {
+        if let Some(record) = reg.record(m.bestiary_id) {
+            *r = record;
+        }
+    }
     let state = MonsterState {
         core: MonsterStateData {
             version: 1,
@@ -112,6 +120,12 @@ pub fn monsters_account(session: Pubkey, monsters: &[Monster]) -> TestAccount {
         res_traits: [0; super::RES_TRAITS_LEN],
         res_pairs: [0; super::RES_PAIRS_LEN],
         burning_cells: [Default::default(); deadroll_rules::spread::BURNING_CELLS_MAX],
+        records,
+        skill_table: [[0; super::SKILL_COPY_LEN]; deadroll_types::SESSION_SKILLS_MAX],
+        skill_count: 0,
+        skills: [[deadroll_rules::monster::NO_SKILL; deadroll_types::MONSTER_SLOTS]; MONSTERS_MAX],
+        skill_cooldowns: [[0; deadroll_types::MONSTER_SLOTS]; MONSTERS_MAX],
+        auras: [Default::default(); MONSTERS_MAX],
     };
     let mut data = Vec::new();
     state.try_serialize(&mut data).unwrap();
@@ -166,6 +180,8 @@ pub fn session(players: &[Cell]) -> GameSession {
         reactives: Default::default(),
         auras: Default::default(),
         pending_reactive: Default::default(),
+        pending_monster_reactive: Default::default(),
+        pending_deaths: 0,
     }
 }
 
@@ -179,9 +195,25 @@ pub fn tables() -> deadroll_combat::ResonanceTables {
         .tables
 }
 
-/// The shipped registry defenses of bestiary id `id`.
-pub fn defense(id: u8) -> deadroll_rules::MonsterDefense {
-    deadroll_rules::registry::Registry::shipped()
-        .expect("assets/registry")
-        .defense_of(id)
+/// Test bestiary ids (the shipped `assets/registry/bestiary.json` order).
+#[allow(dead_code)]
+pub mod ids {
+    pub const WOLF: u8 = 0;
+    pub const GOBLIN: u8 = 1;
+    pub const GOBLIN_CHIEFTAIN: u8 = 2;
+    pub const GOBLIN_WARRIOR: u8 = 3;
+    pub const GOBLIN_SHAMAN: u8 = 4;
+}
+
+/// The shipped registry (assets/registry).
+pub fn registry() -> deadroll_rules::registry::Registry {
+    deadroll_rules::registry::Registry::shipped().expect("assets/registry")
+}
+
+/// The shipped template of bestiary id `id` at level 1, with its registry defenses.
+pub fn profile(id: u8) -> deadroll_rules::MonsterProfile {
+    registry()
+        .template(id)
+        .expect("a shipped bestiary id")
+        .profile(1, &crate::rules::BALANCE.monsters)
 }

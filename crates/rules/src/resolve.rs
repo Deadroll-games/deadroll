@@ -16,10 +16,11 @@ use crate::{
     config::BalanceConfig,
     input::{
         buff_extra_turns, effect_action, effect_chance, effect_range, heal, land_effect,
-        monster_attacker, monster_defender, player_attacker, player_defender, support_input,
-        take_damage, EffectAction, HeroStats, SkillStats,
+        monster_attacker, monster_defender, monster_effect_range, monster_support_input,
+        player_attacker, player_defender, support_input, take_damage, EffectAction, HeroStats,
+        SkillStats,
     },
-    monster::MonsterProfile,
+    monster::{MonsterProfile, MonsterSkillStats},
 };
 
 /// The effect of a damage skill after its hit.
@@ -29,10 +30,10 @@ pub struct RiderOutcome {
     pub applied: Applied,
 }
 
-/// What a player's attack on a monster did besides the `HitResult`.
+/// What an attack did besides the `HitResult` (a player's on a monster, a monster's on a player).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AttackOutcome {
-    /// The monster reached 0 HP (`alive` is cleared).
+    /// The target reached 0 HP (a monster's `alive` is cleared).
     pub died: bool,
     /// The skill's effect, rolled when the hit landed and the monster lives.
     pub rider: Option<RiderOutcome>,
@@ -200,7 +201,10 @@ pub fn start_aura(
     (roll, reactive_aura(cfg, skill, roll.amount))
 }
 
-/// A monster's natural attack on a player; returns whether the player died.
+/// A monster's natural attack (`skill = None`) or damage skill on a player, then that skill's
+/// effect when the hit landed and the player lives: the rider's own chance (certain on a crit),
+/// on the player's stored modifiers `hero_own`. `hero_view`: the modifiers the hit sees (its own
+/// plus the auras over it).
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
 pub fn monster_attack(
@@ -208,20 +212,146 @@ pub fn monster_attack(
     tables: &ResonanceTables,
     attacker: u8,
     profile: &MonsterProfile,
+    skill: Option<&SkillStats>,
     monster_mods: &TimedMods,
     hero: &HeroStats,
     hp: &mut u32,
     states: &mut States,
-    hero_mods: &TimedMods,
+    hero_own: &mut TimedMods,
+    hero_view: &TimedMods,
     input: &mut HitInput,
     result: &mut HitResult,
     src: &mut impl RollSource,
-) -> bool {
-    input.attacker = monster_attacker(cfg, attacker, profile, monster_mods);
-    input.defender = player_defender(cfg, hero, states, hero_mods);
+) -> AttackOutcome {
+    input.attacker = monster_attacker(cfg, attacker, profile, skill, monster_mods);
+    input.defender = player_defender(cfg, hero, states, hero_view);
     resolve_hit_into(input, &cfg.combat, tables, src, result);
     let (left, died) = take_damage(*hp, result.damage);
     *hp = left;
     *states = result.states;
-    died
+
+    let mut rider = None;
+    if let Some(skill) = skill {
+        if let Some(effect) = effect_action(skill.blocks.effect) {
+            if result.outcome == Outcome::Hit && *hp > 0 {
+                let (min, max) = monster_effect_range(cfg, profile, skill.power_bp, effect);
+                let roll = resolve_rider(
+                    cfg.support.rider_chance_pct,
+                    result.crit,
+                    min,
+                    max,
+                    &cfg.combat,
+                    src,
+                );
+                let applied = if roll.outcome == Outcome::Hit {
+                    land_effect(
+                        cfg,
+                        effect,
+                        roll.amount,
+                        skill.blocks.aspects[0],
+                        attacker,
+                        0,
+                        states,
+                        hero_own,
+                    )
+                } else {
+                    Applied::None
+                };
+                rider = Some(RiderOutcome { roll, applied });
+            }
+        }
+    }
+    AttackOutcome { died, rider }
+}
+
+/// A monster's debuff skill on a player: it rolls to land (d20 + the monster's accuracy against
+/// the player's defense with `hero_view`), then lands on its stored modifiers `hero_own`.
+#[allow(clippy::too_many_arguments)]
+pub fn monster_debuff_player(
+    cfg: &BalanceConfig,
+    caster: u8,
+    profile: &MonsterProfile,
+    skill: &SkillStats,
+    effect: EffectAction,
+    hero: &HeroStats,
+    hp: u32,
+    states: &mut States,
+    hero_own: &mut TimedMods,
+    hero_view: &TimedMods,
+    src: &mut impl RollSource,
+) -> RiderOutcome {
+    let defense = player_defender(cfg, hero, states, hero_view).defense;
+    let input = monster_support_input(cfg, profile, skill, effect, Some(defense));
+    let roll = resolve_support(&input, &cfg.combat, src);
+    let applied = if roll.outcome == Outcome::Hit && hp > 0 {
+        land_effect(
+            cfg,
+            effect,
+            roll.amount,
+            skill.blocks.aspects[0],
+            caster,
+            0,
+            states,
+            hero_own,
+        )
+    } else {
+        Applied::None
+    };
+    RiderOutcome { roll, applied }
+}
+
+/// A monster's heal or buff on itself or an allied monster: no roll to land, a crit roll and the
+/// d100 strength, like a player's (docs/BESTIARY.md 8.1: the Goblin Shaman). A dead target is
+/// never raised; monsters have no Endurance, so a buff on itself lasts its plain duration.
+#[allow(clippy::too_many_arguments)]
+pub fn monster_support(
+    cfg: &BalanceConfig,
+    caster: u8,
+    profile: &MonsterProfile,
+    skill: &SkillStats,
+    effect: EffectAction,
+    target: &mut Monster,
+    mods: &mut TimedMods,
+    src: &mut impl RollSource,
+) -> RiderOutcome {
+    let input = monster_support_input(cfg, profile, skill, effect, None);
+    let roll = resolve_support(&input, &cfg.combat, src);
+    let applied = if !target.alive || target.hp == 0 {
+        Applied::None
+    } else if effect == EffectAction::Heal {
+        target.hp = heal(target.hp, target.hp_max, roll.amount);
+        Applied::None
+    } else {
+        land_effect(
+            cfg,
+            effect,
+            roll.amount,
+            skill.blocks.aspects[0],
+            caster,
+            0,
+            &mut target.states,
+            mods,
+        )
+    };
+    RiderOutcome { roll, applied }
+}
+
+/// A monster's reactive aura (docs/SKILL_BUILDER.md 3.5): like [`start_aura`] with the
+/// monster's numbers.
+pub fn monster_start_aura(
+    cfg: &BalanceConfig,
+    profile: &MonsterProfile,
+    skill: &MonsterSkillStats,
+    src: &mut impl RollSource,
+) -> (EffectRoll, Option<Aura>) {
+    let Some(kind) = aura_kind(&skill.stats) else {
+        return (EffectRoll::default(), None);
+    };
+    let input = monster_support_input(cfg, profile, &skill.stats, EffectAction::Mod(kind), None);
+    let roll = resolve_support(&input, &cfg.combat, src);
+    let aura = reactive_aura(cfg, &skill.stats, roll.amount).map(|a| Aura {
+        kin_only: skill.kin_only,
+        ..a
+    });
+    (roll, aura)
 }

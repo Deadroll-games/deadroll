@@ -16,6 +16,15 @@ export const PAIR_OVERRIDE = 1;
 export const MONSTER_SIZE = 48;
 export const TILE_SIZE = 8;
 export const BESTIARY_MAX = 32;
+/** Patch 6: monster skill records (`deadroll_skillcheck::monster`): 128 x 32 B. */
+export const MONSTER_SKILL_SIZE = 32;
+export const MONSTER_SKILLS_MAX = 128;
+/** Most skills in one bestiary pool (`Spawn.skills` is a u16 mask). */
+export const POOL_MAX = 16;
+/** Monster skill flag: an ally-target skill reaches allies of its own kin only. */
+export const KIN_ONLY = 1;
+/** Bestiary byte "none" (predisposition, kin). */
+export const NO_KIN = 0xff;
 export const TABLE_CAP = 4096;
 export const NO_ASPECT = 0xff;
 
@@ -26,6 +35,7 @@ export const TableKind = {
   Tileset: 3,
   Prefabs: 4,
   Traits: 5,
+  MonsterSkills: 6,
 } as const;
 export type TableKind = (typeof TableKind)[keyof typeof TableKind];
 
@@ -164,6 +174,27 @@ export const TRAIT: Record<string, number> = {
   leader: 1 << 2,
   hunt: 1 << 3,
 };
+/** Kin names by kin id (crates/rules/src/registry.rs `KINS`). */
+export const KIN: Record<string, number> = { Wolf: 0, Goblin: 1, Bear: 2, Treant: 3, Fairy: 4, Troll: 5 };
+/** Skill block enums (crates/skillcheck/src/blocks.rs, append-only discriminants). */
+export const CATEGORY: Record<string, number> = { Active: 0, Reactive: 1, Passive: 2 };
+export const PURPOSE: Record<string, number> = { Damage: 0, Buff: 1, Debuff: 2 };
+export const TARGET: Record<string, number> = { Single: 0, Line: 1 };
+export const EFFECT: Record<string, number> = {
+  None: 0,
+  Weakening: 1,
+  Slow: 2,
+  Vulnerability: 3,
+  Stun: 4,
+  Freeze: 5,
+  Haste: 6,
+  Empowerment: 7,
+  Protection: 8,
+  Heal: 9,
+};
+export const TRIGGER: Record<string, number> = { None: 0, Hit: 1, CritHit: 2, HpBelow: 3, AllyHpBelow: 4, Controlled: 5, EnemyAdjacent: 6 };
+export const RANGE: Record<string, number> = { Melee: 0, Ranged: 1 };
+export const TIMING: Record<string, number> = { Instant: 0, DoT: 1 };
 
 export const TABLES = [
   { table: "aspects", kind: TableKind.Aspects, seed: "aspects", file: "aspects.json", recordSize: ASPECT_SIZE },
@@ -172,6 +203,7 @@ export const TABLES = [
   { table: "tileset", kind: TableKind.Tileset, seed: "tileset", file: "tileset.json", recordSize: TILE_SIZE },
   { table: "prefabs", kind: TableKind.Prefabs, seed: "prefabs", file: "prefabs.json", recordSize: 1 },
   { table: "traits", kind: TableKind.Traits, seed: "traits", file: "traits.json", recordSize: TRAIT_SIZE },
+  { table: "monster_skills", kind: TableKind.MonsterSkills, seed: "monster_skills", file: "monster_skills.json", recordSize: MONSTER_SKILL_SIZE },
 ] as const;
 
 export function registryAsset(name: string): string {
@@ -192,6 +224,8 @@ export function recordSize(kind: TableKind): number {
       return 1;
     case TableKind.Traits:
       return TRAIT_SIZE;
+    case TableKind.MonsterSkills:
+      return MONSTER_SKILL_SIZE;
   }
 }
 
@@ -209,6 +243,8 @@ export function maxLen(kind: TableKind): number {
       return TABLE_CAP;
     case TableKind.Traits:
       return Object.keys(TINT_TRAIT).length * TRAIT_SIZE;
+    case TableKind.MonsterSkills:
+      return MONSTER_SKILLS_MAX * MONSTER_SKILL_SIZE;
   }
 }
 
@@ -288,8 +324,41 @@ export function validate_monster(r: Uint8Array): boolean {
     (r[10] & ~aspectMask) === 0 &&
     (r[11] & ~aspectMask) === 0 &&
     (r[38] & ~((1 << Object.keys(STATE_KIND).length) - 1)) === 0 &&
-    r.subarray(39).every((b) => b === 0) &&
+    // Patch 6: [39] pool start, [40] pool length, [41] kin, then reserved.
+    r[40] <= POOL_MAX &&
+    r[39] + r[40] <= MONSTER_SKILLS_MAX &&
+    r.subarray(42).every((b) => b === 0) &&
     u16At(r, 30) <= u16At(r, 32)
+  );
+}
+
+/**
+ * A monster skill record's layout: present, every block a known variant, a known flag, reserved
+ * zero. The builder rules themselves (`deadroll_skillcheck::validate_monster_skill`) are the
+ * program's `write_table` check; the shared fixture pins that both encoders agree.
+ */
+export function validate_monster_skill(r: Uint8Array): boolean {
+  if (r.length !== MONSTER_SKILL_SIZE) return false;
+  if (r.every((b) => b === 0)) return true;
+  const n = (o: Record<string, number>) => Object.keys(o).length;
+  return (
+    r[0] === 1 &&
+    r[1] < n(CATEGORY) &&
+    r[2] < n(PURPOSE) &&
+    isSource(r[3]) &&
+    isForm(r[4]) &&
+    r[5] < n(TARGET) &&
+    isAspect(r[6]) &&
+    isAspect(r[7]) &&
+    isAspect(r[8]) &&
+    r[9] >= 1 &&
+    r[9] <= 3 &&
+    r[10] < n(EFFECT) &&
+    r[11] < n(TRIGGER) &&
+    r[13] < n(RANGE) &&
+    r[14] < n(TIMING) &&
+    (r[16] & ~KIN_ONLY) === 0 &&
+    r.subarray(17).every((b) => b === 0)
   );
 }
 
@@ -319,6 +388,8 @@ export function validate_record(kind: TableKind, index: number, r: Uint8Array): 
         r[14] === 0 &&
         r[15] === 0
       );
+    case TableKind.MonsterSkills:
+      return validate_monster_skill(r);
     case TableKind.Traits:
       // An all-zero record is an absent trait; else [1, 0, hit op, template op x2, 12 x 0].
       if (r.every((b) => b === 0)) return true;
@@ -546,6 +617,48 @@ export function encodeMonster(json: unknown): Uint8Array {
   putU16(out, 30, dmgMin);
   putU16(out, 32, dmgMax);
   putU32(out, 34, requireInt(rec.xp, "xp", 0, 0xffffffff));
+  // Patch 6: the skill pool (a run of monster_skills.json) and the kin.
+  out[39] = rec.pool_start === undefined ? 0 : requireInt(rec.pool_start, "pool_start", 0, MONSTER_SKILLS_MAX - 1);
+  out[40] = rec.pool_len === undefined ? 0 : requireInt(rec.pool_len, "pool_len", 0, POOL_MAX);
+  out[41] = rec.kin === undefined || rec.kin === null ? NO_KIN : lookup(KIN, rec.kin, "kin");
+  return out;
+}
+
+/** One `monster_skills.json` record as its 32-byte registry record. */
+export function encodeMonsterSkill(json: unknown): Uint8Array {
+  const rec = asObject(json, "monster skill");
+  const out = new Uint8Array(MONSTER_SKILL_SIZE);
+  out[0] = 1;
+  out[1] = lookup(CATEGORY, rec.category, "category");
+  out[2] = lookup(PURPOSE, rec.purpose, "purpose");
+  out[3] = lookup(SOURCE, rec.source, "source");
+  out[4] = lookup(FORM, rec.form, "form");
+  out[5] = lookup(TARGET, rec.target ?? "Single", "target");
+  const aspects = rec.aspects;
+  if (!Array.isArray(aspects) || aspects.length < 1 || aspects.length > 3) fail("monster skill needs 1..=3 aspects");
+  aspects.forEach((a: unknown, i: number) => (out[6 + i] = lookup(ASPECT, a, "aspect")));
+  out[9] = aspects.length;
+  out[10] = lookup(EFFECT, rec.effect ?? "None", "effect");
+  out[11] = lookup(TRIGGER, rec.trigger ?? "None", "trigger");
+  out[12] = rec.aura_radius === undefined ? 0 : requireInt(rec.aura_radius, "aura_radius", 0, 255);
+  out[13] = lookup(RANGE, rec.range, "range");
+  out[14] = lookup(TIMING, rec.timing ?? "Instant", "timing");
+  out[15] = rec.hp_below_pct === undefined ? 0 : requireInt(rec.hp_below_pct, "hp_below_pct", 0, 100);
+  if (rec.kin_only !== undefined && typeof rec.kin_only !== "boolean") fail("kin_only must be true or false");
+  out[16] = rec.kin_only ? KIN_ONLY : 0;
+  return out;
+}
+
+export function encodeMonsterSkills(json: unknown): Uint8Array {
+  const records = recordsOf(json, "monster skills");
+  if (records.length > MONSTER_SKILLS_MAX) fail(`at most ${MONSTER_SKILLS_MAX} monster skills`);
+  const out = new Uint8Array(records.length * MONSTER_SKILL_SIZE);
+  for (let i = 0; i < records.length; i++) {
+    const rec = asObject(records[i], "monster skill");
+    const id = requireInt(rec.id, "id", 0, MONSTER_SKILLS_MAX - 1);
+    if (id !== i) fail(`monster skill ${i} must have id ${i}`);
+    out.set(encodeMonsterSkill(rec), i * MONSTER_SKILL_SIZE);
+  }
   return out;
 }
 
@@ -608,6 +721,8 @@ export function encodeRegistryFile(table: string, json: unknown): Uint8Array {
       return encodePrefabs(json);
     case "traits":
       return encodeTraits(json);
+    case "monster_skills":
+      return encodeMonsterSkills(json);
     default:
       fail(`unknown table ${table}`);
   }

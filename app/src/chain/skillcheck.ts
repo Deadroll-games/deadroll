@@ -143,7 +143,11 @@ export type SkillError =
   | "MissingThreshold"
   | "UnexpectedThreshold"
   | "ThresholdRange"
-  | "PassiveDebuffNeedsAura";
+  | "PassiveDebuffNeedsAura"
+  // Patch 6: monster skills and spawns.
+  | "HealCategory"
+  | "MonsterSkillUnknown"
+  | "MonsterSkillCount";
 
 /** One plain message per rule, for the builder UI. */
 export const SKILL_ERROR_MESSAGES: Record<SkillError, string> = {
@@ -175,7 +179,12 @@ export const SKILL_ERROR_MESSAGES: Record<SkillError, string> = {
   UnexpectedThreshold: "Only the HP triggers take an HP threshold.",
   ThresholdRange: `The HP threshold is ${HP_BELOW_MIN_PCT} to ${HP_BELOW_MAX_PCT} percent.`,
   PassiveDebuffNeedsAura: "A passive debuff must be an aura: it works on the enemies around.",
+  HealCategory: "A heal must be an active or reactive skill, not an aura.",
+  MonsterSkillUnknown: "The skill is not in the monster's pool.",
+  MonsterSkillCount: "Choose as many skills of each kind as the monster has slots (all of a kind if it has fewer).",
 };
+/** `SkillError` by its code (the Rust enum's order). */
+export const SKILL_ERRORS = Object.keys(SKILL_ERROR_MESSAGES) as SkillError[];
 
 export const isDebuff = (e: Effect): boolean =>
   e === Effect.Weakening || e === Effect.Slow || e === Effect.Vulnerability || e === Effect.Stun || e === Effect.Freeze;

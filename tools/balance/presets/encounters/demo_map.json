@@ -12,17 +12,17 @@
       "count": 2
     },
     {
-      "monster": "goblin_chieftain",
+      "monster": "goblin chieftain",
       "level": 1,
       "count": 1
     },
     {
-      "monster": "goblin_warrior",
+      "monster": "goblin warrior",
       "level": 1,
       "count": 1
     },
     {
-      "monster": "goblin_shaman",
+      "monster": "goblin shaman",
       "level": 1,
       "count": 1
     }

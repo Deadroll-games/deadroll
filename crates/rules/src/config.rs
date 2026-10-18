@@ -204,8 +204,9 @@ impl Default for PlayerTuning {
     }
 }
 
-/// How a monster template grows with its level (docs/BESTIARY.md, sections 7-8). The template
-/// itself is content: [`crate::monster::MonsterBase`].
+/// How a monster template grows with its level, what an elite version gets and how many skills
+/// each rank takes (docs/BESTIARY.md, sections 3.2, 4, 5). The template itself is registry data:
+/// [`crate::monster::MonsterTemplate`].
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MonsterScaling {
@@ -221,6 +222,13 @@ pub struct MonsterScaling {
     /// The "resistance" level of a bestiary record (docs/DAMAGE_TYPES_AND_MIXES.md 9): the
     /// counterweight on each aspect the monster resists, bp.
     pub resist_bp: u32,
+    /// Patch 6. An elite's HP increase, bp (BESTIARY 5: "more HP").
+    pub elite_hp_bp: u32,
+    /// Skill slots by `monster::Rank` (regular, elite, boss), each by `Category` (active,
+    /// reactive, passive): BESTIARY 3.2.
+    pub slots: [[u8; deadroll_skillcheck::Category::COUNT]; crate::monster::Rank::COUNT],
+    /// Monster AI (the simulator and the website's auto mode): heal an ally below this percent.
+    pub ai_heal_below_pct: u8,
 }
 
 impl MonsterScaling {
@@ -231,6 +239,14 @@ impl MonsterScaling {
         ap_min: 1,
         ap_max: 12,
         resist_bp: 5_000,
+        elite_hp_bp: 5_000,
+        //      active reactive passive
+        slots: [
+            [3, 0, 1], // regular
+            [4, 0, 1], // elite
+            [5, 1, 1], // boss
+        ],
+        ai_heal_below_pct: 60,
     };
 }
 

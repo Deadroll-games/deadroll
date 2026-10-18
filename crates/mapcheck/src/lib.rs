@@ -9,10 +9,11 @@ pub mod path;
 pub mod roster;
 pub mod tiles;
 
-use deadroll_types::{Cell, MapLayoutData, Tile, SPAWNS_MAX};
+use deadroll_skillcheck::{check_monster_selection, monster::RECORDS_MAX, SkillError};
+use deadroll_types::{Cell, MapLayoutData, Tile, SESSION_SKILLS_MAX, SPAWNS_MAX, SPAWN_ELITE};
 
 use limits::{tier_limits, BOSSES, BOSS_HELPERS, PACK_RADIUS, SIDE_MAX, SIDE_MIN};
-use roster::Role;
+use roster::{Role, SpawnRules};
 use tiles::{cell_index, in_bounds, is_passable};
 
 /// The first broken builder rule. One variant per rule; `code()` is stable.
@@ -63,6 +64,18 @@ pub enum MapCheckError {
     ExitUnreachable,
     /// A spawn cannot be reached from the entrance.
     SpawnUnreachable,
+    /// Patch 6. The map tier is below the template's minimum tier (BESTIARY 4, MAP 7.2).
+    TierBelowTemplate,
+    /// A chosen skill bit past the template's pool.
+    MonsterSkillUnknown,
+    /// Not exactly min(slots, pool) chosen skills of a category (BESTIARY 3.2, MAP 7.2).
+    MonsterSkillCount,
+    /// A boss marked elite (BESTIARY 5: elite is a regular monster).
+    EliteBoss,
+    /// More elite spawns than the tier allows.
+    TooManyElites,
+    /// More distinct chosen skills than a session copies (`SESSION_SKILLS_MAX`).
+    TooManySessionSkills,
 }
 
 impl MapCheckError {
@@ -71,15 +84,16 @@ impl MapCheckError {
     }
 }
 
-/// Runs every builder rule on a map. `role_of` maps a bestiary id to its role
-/// (`roster::p0_role` until the registry `Bestiary` exists).
+/// Runs every builder rule on a map. `template_of` gives a bestiary id's rules from the registry
+/// (`None`: no such template).
 pub fn check_map(
     width: u8,
     height: u8,
     tier: u8,
     layout: &MapLayoutData,
-    role_of: impl Fn(u8) -> Option<Role>,
+    template_of: impl Fn(u8) -> Option<SpawnRules>,
 ) -> Result<(), MapCheckError> {
+    let role_of = |id: u8| template_of(id).map(|t| t.role);
     use MapCheckError as E;
 
     let side_ok = |side: u8| (SIDE_MIN..=SIDE_MAX).contains(&side);
@@ -98,6 +112,9 @@ pub fn check_map(
 
     let mut boss_pack = None;
     let mut bosses = 0u8;
+    let mut elites = 0u8;
+    // Distinct chosen skills, bit per `monster_skills` index.
+    let mut skills = [0u64; RECORDS_MAX / 64];
     for (i, spawn) in spawns.iter().enumerate() {
         let cell = Cell {
             x: spawn.x,
@@ -117,9 +134,32 @@ pub fn check_map(
         if taken {
             return Err(E::SpawnOverlap);
         }
-        let role = role_of(spawn.bestiary_id).ok_or(E::UnknownMonster)?;
+        let t = template_of(spawn.bestiary_id).ok_or(E::UnknownMonster)?;
+        let role = t.role;
         if !(limits.level_min..=limits.level_max).contains(&spawn.level) {
             return Err(E::LevelOutOfTier);
+        }
+        if tier < t.min_tier {
+            return Err(E::TierBelowTemplate);
+        }
+        let elite = spawn.flags & SPAWN_ELITE != 0;
+        if elite && role == Role::Boss {
+            return Err(E::EliteBoss);
+        }
+        elites += elite as u8;
+        check_monster_selection(t.pool(), spawn.skills, t.slots_for(elite)).map_err(
+            |e| match e {
+                SkillError::MonsterSkillUnknown => E::MonsterSkillUnknown,
+                _ => E::MonsterSkillCount,
+            },
+        )?;
+        for bit in 0..t.pool_len.min(16) {
+            if spawn.skills & (1 << bit) != 0 {
+                let at = t.pool_start as usize + bit as usize;
+                if at < RECORDS_MAX {
+                    skills[at / 64] |= 1 << (at % 64);
+                }
+            }
         }
         if role == Role::Boss {
             bosses += 1;
@@ -128,6 +168,12 @@ pub fn check_map(
     }
     if bosses != BOSSES {
         return Err(E::BossCount);
+    }
+    if elites > limits.elites {
+        return Err(E::TooManyElites);
+    }
+    if skills.iter().map(|w| w.count_ones()).sum::<u32>() > SESSION_SKILLS_MAX as u32 {
+        return Err(E::TooManySessionSkills);
     }
     let boss_pack = boss_pack.ok_or(E::BossCount)?;
 
@@ -231,8 +277,29 @@ fn check_tiles(width: u8, height: u8, layout: &MapLayoutData) -> Result<(), MapC
 #[cfg(test)]
 mod tests {
     use super::*;
+    use deadroll_skillcheck::Category;
     use deadroll_types::{Pubkey, Spawn, MAP_CELLS};
-    use roster::{ids, p0_role};
+
+    /// Test bestiary ids (the shipped registry order).
+    mod ids {
+        pub const WOLF: u8 = 0;
+        pub const GOBLIN: u8 = 1;
+        pub const GOBLIN_CHIEFTAIN: u8 = 2;
+        pub const GOBLIN_WARRIOR: u8 = 3;
+        pub const GOBLIN_SHAMAN: u8 = 4;
+    }
+
+    /// Roles of the test ids; no skill pools.
+    fn p0_role(id: u8) -> Option<SpawnRules> {
+        let role = match id {
+            ids::WOLF => Role::Fast,
+            ids::GOBLIN => Role::Swarm,
+            ids::GOBLIN_CHIEFTAIN => Role::Boss,
+            ids::GOBLIN_WARRIOR | ids::GOBLIN_SHAMAN => Role::Helper,
+            _ => return None,
+        };
+        Some(SpawnRules::plain(role))
+    }
 
     const ENTRANCE: Cell = Cell { x: 1, y: 1 };
     const EXIT: Cell = Cell { x: 14, y: 14 };
@@ -497,7 +564,7 @@ mod tests {
         let layout = demo();
         let wolves_are_loners = |id| {
             if id == ids::WOLF {
-                Some(Role::Loner)
+                Some(SpawnRules::plain(Role::Loner))
             } else {
                 p0_role(id)
             }
@@ -546,5 +613,111 @@ mod tests {
     fn codes_are_sequential() {
         assert_eq!(MapCheckError::SizeOutOfRange.code(), 0);
         assert_eq!(MapCheckError::SpawnUnreachable.code(), 22);
+        assert_eq!(MapCheckError::TooManySessionSkills.code(), 28);
+    }
+
+    /// Wolves with a pool of 4 actives and a passive at `start`.
+    fn with_pool(start: u8) -> impl Fn(u8) -> Option<SpawnRules> {
+        move |id| {
+            let mut t = p0_role(id)?;
+            if id == ids::WOLF {
+                t.pool_start = start;
+                t.pool_len = 5;
+                t.pool[4] = Category::Passive;
+            }
+            Some(t)
+        }
+    }
+
+    #[test]
+    fn spawn_skills_must_fill_their_slots() {
+        let mut layout = demo();
+        let roster = with_pool(0);
+        // No skills chosen while the pool has some.
+        assert_eq!(
+            check_map(16, 16, 1, &layout, &roster),
+            Err(MapCheckError::MonsterSkillCount)
+        );
+        layout.spawns[0].skills = 0b1_0111;
+        layout.spawns[1].skills = 0b1_1110;
+        assert_eq!(check_map(16, 16, 1, &layout, &roster), Ok(()));
+        layout.spawns[1].skills = 0b10_0111;
+        assert_eq!(
+            check_map(16, 16, 1, &layout, &roster),
+            Err(MapCheckError::MonsterSkillUnknown)
+        );
+        // An elite takes all four actives.
+        layout.spawns[1].skills = 0b1_1111;
+        assert_eq!(
+            check_map(16, 16, 1, &layout, &roster),
+            Err(MapCheckError::MonsterSkillCount)
+        );
+        layout.spawns[1].flags = SPAWN_ELITE;
+        assert_eq!(check_map(16, 16, 1, &layout, &roster), Ok(()));
+    }
+
+    #[test]
+    fn elites_are_limited_and_never_bosses() {
+        let mut layout = demo();
+        layout.spawns[0].flags = SPAWN_ELITE;
+        assert_eq!(check(&layout), Ok(()));
+        layout.spawns[1].flags = SPAWN_ELITE;
+        assert_eq!(check(&layout), Err(MapCheckError::TooManyElites));
+        assert_eq!(
+            check_map(16, 16, 2, &layout, p0_role),
+            Err(MapCheckError::LevelOutOfTier)
+        );
+        let mut layout = demo();
+        layout.spawns[4].flags = SPAWN_ELITE;
+        assert_eq!(check(&layout), Err(MapCheckError::EliteBoss));
+    }
+
+    #[test]
+    fn the_template_minimum_tier_holds() {
+        let layout = demo();
+        let high = |id| {
+            let mut t = p0_role(id)?;
+            t.min_tier = 2;
+            Some(t)
+        };
+        assert_eq!(
+            check_map(16, 16, 1, &layout, high),
+            Err(MapCheckError::TierBelowTemplate)
+        );
+    }
+
+    #[test]
+    fn a_session_copies_at_most_its_skill_table() {
+        let mut layout = demo();
+        // Each goblin and helper with a pool of 16 actives at its own place: 2 x 3 + ... skills.
+        let roster = |id: u8| {
+            let mut t = p0_role(id)?;
+            t.pool_len = 16;
+            t.pool_start = id * 16;
+            t.slots = [[16, 0, 0], [16, 0, 0], [16, 0, 0]];
+            Some(t)
+        };
+        for s in layout.spawns[..7].iter_mut() {
+            s.skills = u16::MAX;
+        }
+        // 5 templates x 16 distinct skills = 80 > 32.
+        assert_eq!(
+            check_map(16, 16, 1, &layout, roster),
+            Err(MapCheckError::TooManySessionSkills)
+        );
+        // The same two templates share their skills: 2 x 16 = 32 fit.
+        for s in layout.spawns[..7].iter_mut() {
+            if s.bestiary_id > ids::GOBLIN {
+                s.skills = 0;
+            }
+        }
+        let two = |id: u8| {
+            let mut t = roster(id)?;
+            if id > ids::GOBLIN {
+                t.pool_len = 0;
+            }
+            Some(t)
+        };
+        assert_eq!(check_map(16, 16, 1, &layout, two), Ok(()));
     }
 }

@@ -3,15 +3,14 @@ use deadroll_types::{seeds, SessionStatus};
 
 use crate::{
     combat_input::{effect_action, target_side, Side},
-    cpi_out::{character::DeathAccounts, SessionSigner},
     errors::SessionError,
     outcomes,
     party::Party,
     reactions::{is_debuff, Cb},
-    rules::{Unit, BASE_ATTACK},
+    rules::{Unit, BASE_ATTACK, NATURAL_ATTACK},
     state::{
         external::read_character, pending_kind, GameSession, Monsters, Participation,
-        PendingAction, PendingReactiveData,
+        PendingAction, PendingMonsterReactiveData, PendingReactiveData,
     },
     turns, vrf,
 };
@@ -39,19 +38,21 @@ pub struct ConsumeRandomness<'info> {
     /// The player side of the hit, the one recorded by `act` / `monster_act`.
     #[account(mut, address = session.pending.participation @ SessionError::InvalidPendingAccounts)]
     pub participation: Box<Account<'info, Participation>>,
-    /// CHECK: that player's `Character`, decoded with owner and discriminator checks; written by
-    /// `character::mark_dead`.
+    /// CHECK: that player's `Character`, decoded with owner and discriminator checks. Patch 6: no
+    /// longer written here (a death is finalized by `start_turn` or a claim); kept writable so the
+    /// account list stays the same.
     #[account(mut, address = participation.core.character @ SessionError::InvalidPendingAccounts)]
     pub character: UncheckedAccount<'info>,
     /// CHECK: the `SkillSet` of the participation's character (recorded by `act` / `monster_act`
-    /// from its seeds): skills read by `read_skill`; burned by `character::mark_dead`.
+    /// from its seeds): the caster's skills. Patch 6: not burned here any more (see `character`).
     #[account(mut)]
     pub skill_set: UncheckedAccount<'info>,
-    /// CHECK: the `Bag` of the participation's character (recorded from its seeds); burned by
-    /// `character::mark_dead`.
+    /// CHECK: the `Bag` of the participation's character (recorded from its seeds). Patch 6:
+    /// unused here, kept for the account list.
     #[account(mut)]
     pub bag: UncheckedAccount<'info>,
-    /// CHECK: session `["authority"]` PDA, address checked (signs `mark_dead`).
+    /// CHECK: session `["authority"]` PDA, address checked. Patch 6: no CPI from the callback
+    /// any more; kept for the account list (with `config` and `character_program`).
     #[account(address = vrf::SESSION_AUTHORITY)]
     pub session_authority: UncheckedAccount<'info>,
     /// CHECK: registry `GameConfig`, address checked; the character program checks its content.
@@ -117,6 +118,11 @@ pub fn handler<'info>(
         );
         cb.react_to_pending(session, main)?;
         session.pending_reactive = PendingReactiveData::default();
+    } else if session.pending_monster_reactive.kind != pending_kind::NONE {
+        // Patch 6, `move_unit` / `start_turn`: a roll only for the monster reactives it
+        // triggered; the participation is the one `request_monster_reactive_roll` named.
+        cb.react_monsters_to_pending(session, main)?;
+        session.pending_monster_reactive = PendingMonsterReactiveData::default();
     } else {
         match (
             Unit::from_id(pending.attacker),
@@ -146,6 +152,9 @@ pub fn handler<'info>(
                             effect,
                             index,
                         )?;
+                        // What the action did to the monsters, then their reactions.
+                        let monster_events = cb.take_monster_events();
+                        cb.react_monsters(session, main, &monster_events)?;
                     }
                     None => {
                         let moves = cb.strike(
@@ -156,7 +165,11 @@ pub fn handler<'info>(
                             pending.skill_slot,
                             index,
                         )?;
+                        // The players react first, then the monsters, to the action only.
+                        let monster_events = cb.take_monster_events();
                         cb.react_to_moves(session, main, &moves)?;
+                        cb.take_monster_events();
+                        cb.react_monsters(session, main, &monster_events)?;
                     }
                 }
             }
@@ -186,21 +199,19 @@ pub fn handler<'info>(
             }
             (Some(Unit::Monster(index)), Some(Unit::Player(slot))) => {
                 require!(main.core.slot == slot, SessionError::InvalidPendingAccounts);
-                cb.monster_hits_player(
-                    session,
-                    main,
-                    index,
-                    &SessionSigner {
-                        session_authority: &accounts.session_authority,
-                        config: &accounts.config,
-                        bump: vrf::SESSION_AUTHORITY_BUMP,
-                    },
-                    &DeathAccounts {
-                        character: &accounts.character,
-                        skill_set: &accounts.skill_set,
-                        bag: &accounts.bag,
-                    },
-                )?;
+                // `monster_act`: the natural attack, or the skill in slot `action - 1`.
+                let skill = pending.skill_slot.checked_sub(1);
+                debug_assert!(skill.is_some() || pending.skill_slot == NATURAL_ATTACK);
+                cb.monster_strikes(session, main, index, skill)?;
+            }
+            (Some(Unit::Monster(index)), Some(Unit::Monster(target))) => {
+                // Patch 6: a heal or buff on an allied monster; `participation` is any living
+                // player's (the callback's account list is fixed).
+                let slot = pending
+                    .skill_slot
+                    .checked_sub(1)
+                    .ok_or(SessionError::InvalidPendingAccounts)?;
+                cb.monster_support(session, index, slot, target)?;
             }
             _ => return err!(SessionError::InvalidPendingAccounts),
         }

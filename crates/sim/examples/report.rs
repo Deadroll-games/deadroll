@@ -23,15 +23,15 @@ fn main() {
     ];
     println!("{FIGHTS} fights per row, seed {SEED}.\n");
     println!(
-        "| party | encounter | win % | rounds p50 | hits to kill p50 | party dpt mean | crit share | dot share | control | states / fight | resonances / fight | reactives / fight | line extra / fight | aura reach / fight |"
+        "| party | encounter | win % | rounds p50 | hits to kill p50 | party dpt mean | crit share | dot share | control | states / fight | resonances / fight | reactives / fight | line extra / fight | aura reach / fight | monster skills / fight | monster heal / fight | monster reactives / fight |"
     );
-    println!("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
+    println!("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
     for party in parties {
         let ids: Vec<String> = party.iter().map(|s| s.to_string()).collect();
         let (team, issues) = resolve_party(&presets, &ids, &cfg);
         assert!(issues.errors.is_empty(), "{:?}", issues.errors);
         for enc in ENCOUNTERS {
-            let (fight, issues) = resolve_fight(&presets, enc);
+            let (fight, issues) = resolve_fight(&presets, enc, &cfg);
             assert!(issues.errors.is_empty(), "{:?}", issues.errors);
             let r = run_batch(
                 &cfg,
@@ -59,7 +59,7 @@ fn main() {
                 r.cell_burns_per_fight
             );
             println!(
-                "| {} | {enc} | {:.1} | {:.0} | {:.0} | {:.2} | {:.3} | {:.3} | {:.3} | {} | {res} | {:.2} | {:.2} | {:.2} |",
+                "| {} | {enc} | {:.1} | {:.0} | {:.0} | {:.2} | {:.3} | {:.3} | {:.3} | {} | {res} | {:.2} | {:.2} | {:.2} | {:.2} | {:.2} | {:.2} |",
                 party.join(" + "),
                 r.win_rate * 100.0,
                 r.rounds_to_win.p50,
@@ -72,6 +72,9 @@ fn main() {
                 r.reactions_per_fight,
                 r.line_extra_per_fight,
                 r.aura_reach_per_fight,
+                r.monster_skills_per_fight,
+                r.monster_healed_per_fight,
+                r.monster_reactions_per_fight,
             );
         }
     }

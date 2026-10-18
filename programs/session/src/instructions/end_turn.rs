@@ -45,6 +45,8 @@ pub fn handler(ctx: Context<EndTurn>) -> Result<()> {
         SessionError::NotActive
     );
     require!(!session.core.pending_vrf, SessionError::RollPending);
+    // Patch 6: a player down in the last callback is finalized first (`start_turn`).
+    require!(session.pending_deaths == 0, SessionError::DeathsPending);
     let current = session.current_unit().ok_or(SessionError::NotActive)?;
     let token = accounts.session_token.as_ref();
     match current {

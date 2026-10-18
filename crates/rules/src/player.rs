@@ -68,9 +68,20 @@ pub fn heal_range(
     power_bp: u32,
     t: &PlayerTuning,
 ) -> (u32, u32) {
+    heal_scale(weapon, power_bp, support_increase(class, class_tier, t), t)
+}
+
+/// HP range of a heal of `power_bp` from `weapon` with an `increase_bp` on its power: the
+/// player's (class trait) and the monster's (none, docs/BESTIARY.md 8.1) heal.
+pub fn heal_scale(
+    weapon: DamageRange,
+    power_bp: u32,
+    increase_bp: u32,
+    t: &PlayerTuning,
+) -> (u32, u32) {
     let scale = |v: u32| {
         let v = v as u64 * t.heal_weapon_bp as u64 / BP as u64 * power_bp as u64 / BP as u64;
-        more(v, support_increase(class, class_tier, t)).clamp(1, u32::MAX as u64) as u32
+        more(v, increase_bp).clamp(1, u32::MAX as u64) as u32
     };
     let min = scale(weapon.min);
     (min, scale(weapon.max).max(min))

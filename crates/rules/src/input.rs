@@ -21,7 +21,7 @@ use crate::{
     },
     monster::MonsterProfile,
     player::{
-        class_increase, class_source, effect_stat, heal_range, hp_max, player_accuracy,
+        class_increase, class_source, effect_stat, heal_range, heal_scale, hp_max, player_accuracy,
         player_defense, player_initiative, player_speed, predisposition_added, self_buff_turns,
         source_stat, speed_to_ap, stat_damage_increases, state_chance_bonus, support_increase,
     },
@@ -347,18 +347,33 @@ pub fn player_defender(
     defender
 }
 
-/// A monster attacking with its natural attack.
+/// A monster attacking with its natural attack (`skill = None`, like a basic attack) or a damage
+/// skill: the natural attack is its weapon base (docs/BESTIARY.md 2, SKILL_BUILDER.md 5.1-5.2).
+/// Monsters have no core stats, so no stat increases, and no tints (no predisposition yet).
 pub fn monster_attacker(
     cfg: &BalanceConfig,
     unit: u8,
     p: &MonsterProfile,
+    skill: Option<&SkillStats>,
     mods: &TimedMods,
 ) -> Attacker {
+    let skill = match skill {
+        Some(s) => Skill {
+            aspects: s.blocks.aspects,
+            aspect_count: s.blocks.aspect_count,
+            shares_bp: s.shares_bp,
+            power_bp: s.power_bp,
+            source: s.blocks.source,
+            form: s.blocks.form,
+            state_chance_pct: cfg.players.skill_state_chance_pct,
+        },
+        None => Skill::basic(p.source, p.form, cfg.players.basic_state_chance_pct),
+    };
     let mut attacker = Attacker {
         slot: unit,
         attack_bonus: p.attack_bonus,
         weapon: p.weapon,
-        skill: Skill::basic(p.source, p.form, cfg.players.basic_state_chance_pct),
+        skill,
         ..Attacker::default()
     };
     apply_to_attacker(&mut attacker, mods);
@@ -421,6 +436,41 @@ pub fn support_input(
         attack_bonus: hero::accuracy(cfg, c),
         defense: defense.unwrap_or(0),
         crit_chance_pct: hero::crit_pct(cfg, c),
+        min,
+        max,
+    }
+}
+
+/// Strength range of `action` cast by a monster with a skill of `power_bp`: a heal from its natural
+/// attack, a modifier with no increase (monsters have no class trait), none for hard control.
+pub fn monster_effect_range(
+    cfg: &BalanceConfig,
+    p: &MonsterProfile,
+    power_bp: u32,
+    action: EffectAction,
+) -> (u32, u32) {
+    match action {
+        EffectAction::Heal => heal_scale(p.weapon, power_bp, 0, &cfg.players),
+        EffectAction::Mod(kind) => mod_range(kind, power_bp, 0, &cfg.support),
+        EffectAction::Stun | EffectAction::Freeze => (0, 0),
+    }
+}
+
+/// The rolls of a monster's heal, buff or debuff: its accuracy, no crit chance besides a natural
+/// 20. `defense`: the target's for a debuff, `None` on an ally.
+pub fn monster_support_input(
+    cfg: &BalanceConfig,
+    p: &MonsterProfile,
+    skill: &SkillStats,
+    action: EffectAction,
+    defense: Option<u32>,
+) -> SupportInput {
+    let (min, max) = monster_effect_range(cfg, p, skill.power_bp, action);
+    SupportInput {
+        hostile: defense.is_some(),
+        attack_bonus: p.attack_bonus,
+        defense: defense.unwrap_or(0),
+        crit_chance_pct: 0,
         min,
         max,
     }

@@ -306,20 +306,20 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                     s.stats.cooldown
                 ));
             }
-            // Before the dice (docs/COMBAT_MATH.md, 13): against the monster selected in the
-            // Monsters tab, at the hero's level.
+            // Before the dice (docs/COMBAT_MATH.md, 13): against the registry monster selected in
+            // the Monsters tab (else the first), at the hero's level.
+            let reg = &app.presets.registry;
             let target = app.selected[2]
-                .as_ref()
-                .and_then(|id| app.presets.monsters.get(id))
-                .or_else(|| app.presets.monsters.values().next());
-            if let Some(m) = target {
+                .as_deref()
+                .and_then(|name| reg.monster_id(name))
+                .or(Some(0))
+                .and_then(|id| Some((reg.template(id)?, reg.monster_names.get(id as usize)?)));
+            if let Some((t, name)) = target {
                 let level = u8::try_from(h.level).unwrap_or(u8::MAX);
-                let profile =
-                    m.base()
-                        .profile(level, &cfg.monsters, &m.defense(&app.presets.registry));
+                let profile = t.profile(level, &cfg.monsters);
                 let tables = &app.presets.registry.tables;
                 ui.add_space(4.0);
-                ui.strong(format!("Preview against {} (level {level})", m.name));
+                ui.strong(format!("Preview against {name} (level {level})"));
                 egui::Grid::new("hero_preview")
                     .striped(true)
                     .show(ui, |ui| {

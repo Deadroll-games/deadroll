@@ -1,4 +1,4 @@
-//! The shared rules: the P0 table against the registry data, scaling, and the config driving
+//! The shared rules: the registry bestiary templates, scaling, and the config driving
 //! every number. The program's own tests (programs/session) pin the default values.
 use deadroll_combat::{AccuracyBuff, ModKind, SeededRoll, TimedMod, TimedMods};
 use deadroll_rules::{
@@ -6,11 +6,11 @@ use deadroll_rules::{
         effect_action, effect_range, land_effect, player_attacker, skill_use, target_side,
         EffectAction, HeroStats, Side, SkillStats, SkillUse,
     },
-    monster::{monster_ap, monster_hp, p0},
+    monster::{monster_ap, monster_hp, MonsterTemplate, Rank},
     player::{class_increase, hp_max, player_ap, stats_valid},
     start_of_turn,
     units::{in_range, roll_initiative},
-    BalanceConfig, MonsterDefense, Unit,
+    BalanceConfig, Unit,
 };
 use deadroll_skillcheck::{presets, Effect, Purpose};
 use deadroll_types::{ActiveState, Aspect, Cell, Class, Race, RangeTag, StateKind, STATES_MAX};
@@ -23,8 +23,10 @@ const NONE: TimedMods = [TimedMod {
     source: 0,
 }; deadroll_combat::MODS_MAX];
 
+#[cfg(feature = "serde")]
 #[test]
-fn p0_table_matches_the_registry_bestiary() {
+fn every_bestiary_template_decodes_with_one_boss() {
+    let reg = deadroll_rules::registry::Registry::shipped().unwrap();
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../assets/registry/bestiary.json"
@@ -33,66 +35,74 @@ fn p0_table_matches_the_registry_bestiary() {
         serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     let records = json["records"].as_array().unwrap();
     assert!(records.len() >= 5);
+    let mut bosses = 0;
     for r in records {
         let id = r["id"].as_u64().unwrap() as u8;
-        let Some(base) = p0::monster_base(id) else {
-            continue;
-        };
-        assert_eq!(base.speed as u64, r["speed"].as_u64().unwrap(), "{id}");
+        let t = reg.template(id).unwrap();
+        assert_eq!(t.speed as u64, r["speed"].as_u64().unwrap(), "{id}");
+        assert_eq!(t.accuracy as u64, r["accuracy"].as_u64().unwrap(), "{id}");
+        assert_eq!(t.evasion as u64, r["evasion"].as_u64().unwrap(), "{id}");
+        assert_eq!(t.armor as u64, r["armor"].as_u64().unwrap(), "{id}");
+        assert_eq!(t.xp as u64, r["xp"].as_u64().unwrap(), "{id}");
         assert_eq!(
-            base.initiative as u64,
-            r["initiative"].as_u64().unwrap(),
+            t.weapon.min as u64,
+            r["damage_min"].as_u64().unwrap(),
             "{id}"
         );
-        assert_eq!(base.hp as u64, r["hp"].as_u64().unwrap(), "{id}");
         assert_eq!(
-            base.hp_per_level as u64,
-            r["hp_per_level"].as_u64().unwrap(),
+            t.weapon.max as u64,
+            r["damage_max"].as_u64().unwrap(),
             "{id}"
         );
-        assert_eq!(base.boss, r["role"] == "Boss", "{id}");
+        assert_eq!(t.is_boss(), r["role"] == "Boss", "{id}");
+        bosses += t.is_boss() as u32;
+        // Every pool skill exists and passed the monster builder.
+        assert!(reg.pool(&t).iter().all(|s| s.is_some()), "{id}");
+        assert_eq!(reg.monster_names[id as usize], r["name"].as_str().unwrap());
     }
-    assert!(p0::monster_base(5).is_none());
+    assert_eq!(bosses, 1);
+    assert_eq!(reg.template(5), None);
+    assert_eq!(reg.skill_names.len(), reg.skills.len());
 }
 
+#[cfg(feature = "serde")]
 #[test]
 fn monsters_grow_with_level_and_scaling() {
     let s = BalanceConfig::DEFAULT.monsters;
-    let wolf = p0::monster_base(0).unwrap();
-    let l0 = wolf.profile(0, &s, &MonsterDefense::NONE);
-    let l3 = wolf.profile(3, &s, &MonsterDefense::NONE);
+    let reg = deadroll_rules::registry::Registry::shipped().unwrap();
+    let wolf: MonsterTemplate = reg.template(0).unwrap();
+    let l0 = wolf.profile(0, &s);
+    let l3 = wolf.profile(3, &s);
     // min + 3/2, max + 3, attack + 3.
     assert_eq!(
         (l3.weapon.min, l3.weapon.max),
         (l0.weapon.min + 1, l0.weapon.max + 3)
     );
     assert_eq!(l3.attack_bonus, l0.attack_bonus + 3);
-    assert_eq!((l0.xp, l3.xp), (10, 30));
-    assert_eq!(l3.resist_bp, [0; Aspect::COUNT]);
-    // Defenses come from the registry record: the wolf resists Cold at the scaling's level.
-    #[cfg(feature = "serde")]
-    {
-        let reg = deadroll_rules::registry::Registry::shipped().unwrap();
-        let d = reg.defense_of(0);
-        let p = wolf.profile(3, &s, &d);
-        assert_eq!(p.resist_bp[Aspect::Cold as usize], s.resist_bp);
-        assert_eq!(p.resist_bp.iter().filter(|r| **r > 0).count(), 1);
-        assert_eq!((p.immune_aspects, p.immune_states), (0, 0));
-    }
+    assert_eq!((l0.xp, l3.xp), (wolf.xp, wolf.xp * 3));
+    // Defenses come from the record: the wolf resists Cold at the scaling's level.
+    assert_eq!(l3.resist_bp[Aspect::Cold as usize], s.resist_bp);
+    assert_eq!(l3.resist_bp.iter().filter(|r| **r > 0).count(), 1);
+    assert_eq!((l3.immune_aspects, l3.immune_states), (0, 0));
     let flat = deadroll_rules::MonsterScaling {
         weapon_min_per_level_bp: 0,
         weapon_max_per_level_bp: 0,
         attack_per_level_bp: 0,
         ..s
     };
-    assert_eq!(
-        wolf.profile(9, &flat, &MonsterDefense::NONE).weapon,
-        l0.weapon
-    );
+    assert_eq!(wolf.profile(9, &flat).weapon, l0.weapon);
     assert_eq!(monster_hp(12, 3, 2), 18);
     assert_eq!(monster_hp(0, 0, 9), 1);
     assert_eq!(monster_ap(0, &s), 1);
     assert_eq!(monster_ap(200, &s), 12);
+    // An elite has more HP and an extra active slot; a boss is never elite.
+    let elite = deadroll_types::SPAWN_ELITE;
+    assert_eq!(wolf.hp_at(1, elite, &s), wolf.hp_at(1, 0, &s) * 3 / 2);
+    assert_eq!(wolf.slots(elite, &s)[0], wolf.slots(0, &s)[0] + 1);
+    let boss = reg.template(2).unwrap();
+    assert_eq!(boss.rank(elite), Rank::Boss);
+    assert_eq!(boss.hp_at(1, elite, &s), boss.hp_at(1, 0, &s));
+    assert_eq!(boss.slots(0, &s), [5, 1, 1]);
 }
 
 #[test]
