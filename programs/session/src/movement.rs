@@ -91,7 +91,7 @@ pub fn burn_on_path(
     Ok(())
 }
 
-fn step(at: Cell, dir: u8, width: u8, height: u8) -> Result<Cell> {
+pub(crate) fn step(at: Cell, dir: u8, width: u8, height: u8) -> Result<Cell> {
     let next = match dir {
         0 => at.y.checked_sub(1).map(|y| Cell { x: at.x, y }),
         1 => at.x.checked_add(1).map(|x| Cell { x, y: at.y }),

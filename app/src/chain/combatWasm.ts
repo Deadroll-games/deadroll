@@ -12,18 +12,24 @@
 import { useEffect, useState } from "react";
 import wasmUrl from "./wasm/combat.wasm?url";
 import { Reader, concat, u16le, u32le } from "./bytes";
-import { ASPECT_KEYS, CLASS_KEYS, RACE_KEYS, enumIndex, type ActiveStateAcc, type CharacterAcc, type Enum, type MonsterAcc, type SkillRecordAcc } from "./game";
+import { ASPECT_KEYS, CLASS_KEYS, MOD_KEYS, RACE_KEYS, enumIndex, type ActiveStateAcc, type AuraAcc, type CharacterAcc, type Enum, type MonsterAcc, type SkillRecordAcc } from "./game";
 import characterIdl from "./idl/deadroll_character.json";
-import type { ActiveState, TimedMod } from "./types";
+import type { ActiveState, Cell, TimedMod } from "./types";
 
 /** `ABI_VERSION` of the module this wrapper speaks. */
-export const COMBAT_ABI = 4;
+export const COMBAT_ABI = 5;
 /** Bytes of the resonance tables: the registry `aspects`, `traits` and `resonances` bodies. */
 export const COMBAT_TABLES_LEN = 48 + 192 + 576;
 export const COMBAT_STATS = 4;
 export const COMBAT_EQUIP_SLOTS = 11;
 export const COMBAT_STATES = 6;
 export const COMBAT_MODS = 6;
+export const COMBAT_PARTY = 4;
+/** Auras per player: the passive one, then the temporary one from a reactive skill. */
+export const COMBAT_AURAS = 2;
+export const COMBAT_LINE_MAX = 32;
+/** Bytes of the impassable-cell bitmap of a line request: a 32 x 32 map, bit `y * 32 + x`. */
+export const COMBAT_BLOCKED_LEN = 128;
 
 /** A character as the chain stores it; enums as discriminants. */
 export type HeroInput = {
@@ -72,14 +78,53 @@ export type MonsterSheet = {
   resistCapBp: number;
 };
 
+/** A map cell as the module takes it: `[x, y]`. */
+export type WasmCell = readonly [number, number];
+
+/** One aura of a player (`AuraData` with enums as discriminants). `turns` 0 = no aura. */
+export type AuraInput = {
+  kind: number;
+  aspect: number;
+  powerBp: number;
+  radius: number;
+  turns: number;
+  hostile: boolean;
+  passive: boolean;
+  selfOnly: boolean;
+};
+export const NO_AURA: AuraInput = { kind: 0, aspect: 0, powerBp: 0, radius: 0, turns: 0, hostile: false, passive: false, selfOnly: false };
+
+/** The auras of a party with their bearers' cells; `alive` is a bit per player slot. */
+export type PartyInput = { auras: readonly (readonly AuraInput[])[]; cells: readonly WasmCell[]; alive: number };
+export const NO_PARTY: PartyInput = { auras: [], cells: [], alive: 0 };
+
 export type AttackRequest = {
   hero: HeroInput;
+  /** The attacker's own buffs and debuffs; the auras come from `party`. */
   heroMods: readonly TimedMod[];
   /** null = the weapon's basic attack. */
   skill: SkillInput | null;
   target: TargetInput;
   accuracy: AccuracyInput;
+  party: PartyInput;
+  /** The attacker's player slot. */
+  slot: number;
+  targetAt: WasmCell;
 };
+
+/** A unit's own buffs and debuffs with the auras over it: a player slot, or a monster at `at`. */
+export type UnitModsRequest = {
+  party: PartyInput;
+  mods: readonly TimedMod[];
+  monster: boolean;
+  slot: number;
+  at: WasmCell;
+  /** The view of a player's basic attack, which no passive Empowerment strengthens. */
+  basicAttack: boolean;
+};
+
+/** A line target: from `from` through `through` up to `reach` cells; a wall ends it. */
+export type LineRequest = { from: WasmCell; through: WasmCell; reach: number; width: number; height: number; blocked: Uint8Array };
 
 export type HeroSheet = {
   accuracy: number;
@@ -184,7 +229,45 @@ export function encodeAttack(r: AttackRequest): Uint8Array {
     u8(r.accuracy.aspect),
     u8(r.accuracy.turns),
     u32le(r.accuracy.bonus),
+    encodeParty(r.party),
+    u8(r.slot),
+    encodeCell(r.targetAt),
   );
+}
+
+const encodeCell = (c: WasmCell | undefined) => concat(u8(c?.[0] ?? 0), u8(c?.[1] ?? 0));
+
+function encodeAura(a: AuraInput): Uint8Array {
+  return concat(u8(a.kind), u8(a.aspect), u32le(a.powerBp), u8(a.radius), u8(a.turns), u8(a.hostile ? 1 : 0), u8(a.passive ? 1 : 0), u8(a.selfOnly ? 1 : 0));
+}
+
+export function encodeParty(p: PartyInput): Uint8Array {
+  return concat(
+    ...Array.from({ length: COMBAT_PARTY }, (_, i) => concat(...Array.from({ length: COMBAT_AURAS }, (_, j) => encodeAura(p.auras[i]?.[j] ?? NO_AURA)))),
+    ...Array.from({ length: COMBAT_PARTY }, (_, i) => encodeCell(p.cells[i])),
+    u8(p.alive),
+  );
+}
+
+export function encodeUnitMods(r: UnitModsRequest): Uint8Array {
+  return concat(encodeParty(r.party), encodeMods(r.mods), u8(r.monster ? 1 : 0), u8(r.slot), encodeCell(r.at), u8(r.basicAttack ? 1 : 0));
+}
+
+export function encodeLine(r: LineRequest): Uint8Array {
+  if (r.blocked.length !== COMBAT_BLOCKED_LEN) throw new Error(`combat wasm: blocked is ${COMBAT_BLOCKED_LEN} bytes`);
+  return concat(encodeCell(r.from), encodeCell(r.through), u8(r.reach), u8(r.width), u8(r.height), r.blocked);
+}
+
+export function decodeMods(bytes: Uint8Array): TimedMod[] {
+  const r = new Reader(bytes);
+  return Array.from({ length: COMBAT_MODS }, () => ({ kind: r.u8(), aspect: r.u8(), turns: r.u8(), powerBp: r.u32(), source: r.u8() }) as TimedMod);
+}
+
+export function decodeLine(bytes: Uint8Array): WasmCell[] {
+  const r = new Reader(bytes);
+  const len = r.u8();
+  const cells: WasmCell[] = Array.from({ length: COMBAT_LINE_MAX }, () => [r.u8(), r.u8()] as const);
+  return cells.slice(0, len);
 }
 
 function encodeDefense(d: DefenseInput): Uint8Array {
@@ -274,6 +357,8 @@ type Exports = {
   preview_attack(len: number): number;
   set_tables(len: number): number;
   monster_sheet(len: number): number;
+  unit_mods(len: number): number;
+  line(len: number): number;
 };
 
 const ERRORS: Record<number, string> = {
@@ -320,6 +405,16 @@ export class CombatWasm {
 
   monsterSheet(m: MonsterInput): MonsterSheet {
     return decodeMonsterSheet(this.call(this.x.monster_sheet, encodeMonster(m)));
+  }
+
+  /** A unit's buffs and debuffs with the auras over it (the same merge the session runs). */
+  unitMods(r: UnitModsRequest): TimedMod[] {
+    return decodeMods(this.call(this.x.unit_mods, encodeUnitMods(r)));
+  }
+
+  /** The cells of a line target, nearest first. */
+  line(r: LineRequest): WasmCell[] {
+    return decodeLine(this.call(this.x.line, encodeLine(r)));
   }
 }
 
@@ -420,6 +515,36 @@ export function statesOf(states: readonly ActiveStateAcc[]): ActiveState[] {
   return states.map((s) => ({ kind: enumIndex(s.kind, STATE_KEYS), turns: s.turns, power: s.power, source: s.source }) as ActiveState);
 }
 
+/** The session's auras (`GameSession.auras`) with the players' cells, as the module's party. */
+export function partyInputOf(s: { auras: readonly (readonly AuraAcc[])[]; playerPos: readonly Cell[]; aliveMask: number }): PartyInput {
+  return {
+    auras: s.auras.map((p) =>
+      p.map((a) => ({
+        kind: enumIndex(a.kind, MOD_KEYS),
+        aspect: enumIndex(a.aspect, ASPECT_KEYS),
+        powerBp: a.powerBp,
+        radius: a.radius,
+        turns: a.turns,
+        hostile: a.hostile,
+        passive: a.passive,
+        selfOnly: a.selfOnly,
+      })),
+    ),
+    cells: s.playerPos.map((c) => [c.x, c.y] as const),
+    alive: s.aliveMask,
+  };
+}
+
+/**
+ * The impassable cells of a map as a line request's bitmap: `tiles` is `MapLayout.tiles` (stride
+ * 32), a tile whose cost in the session (`GameSession.tile_cost`, by tile) is 0 cannot be entered.
+ */
+export function blockedOf(tiles: ArrayLike<number>, tileCost: ArrayLike<number>): Uint8Array {
+  const out = new Uint8Array(COMBAT_BLOCKED_LEN);
+  for (let i = 0; i < COMBAT_BLOCKED_LEN * 8; i++) if ((tileCost[tiles[i] ?? 0] ?? 0) === 0) out[i >> 3]! |= 1 << (i & 7);
+  return out;
+}
+
 /** An attack of `hero` (with its buffs and debuffs and resonance accuracy) on a live monster with
  * its registry defenses, before the dice. The session's tables must be loaded (`setTables`). */
 export function previewOnMonster(
@@ -431,6 +556,8 @@ export function previewOnMonster(
   monsterMods: readonly TimedMod[],
   defense: DefenseInput,
   accuracy: AccuracyInput = NO_ACCURACY,
+  party: PartyInput = NO_PARTY,
+  slot = 0,
 ): HitPreview | null {
   try {
     return combat.previewAttack({
@@ -439,6 +566,9 @@ export function previewOnMonster(
       skill: skill ? skillInputOf(skill) : null,
       target: { bestiaryId: monster.bestiaryId, level: monster.level, states: statesOf(monster.states), mods: monsterMods, defense },
       accuracy,
+      party,
+      slot,
+      targetAt: [monster.x, monster.y],
     });
   } catch {
     // An unknown bestiary id: no preview rather than a wrong one.

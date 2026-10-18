@@ -6,11 +6,11 @@ use deadroll_character::state::{MAP_SKILLS, SKILLS_MAX};
 use deadroll_combat::MODS_MAX;
 use deadroll_types::{ActiveState, Cell, SessionStatus, StateKind, STATES_MAX, TURN_ORDER_MAX};
 
-use deadroll_skillcheck::Effect;
+use deadroll_skillcheck::{Effect, Trigger};
 
 use crate::{
     hit_event::{Applied, EffectRollData, HitItemsData, HitResultData},
-    state::{AccuracyBuffData, TimedModData},
+    state::{AccuracyBuffData, AuraData, TimedModData},
 };
 
 #[event]
@@ -302,4 +302,49 @@ pub struct CellBurned {
     pub applied: Applied,
     /// The unit's states after.
     pub states: [ActiveState; STATES_MAX],
+}
+
+/// What a triggered reactive skill did (`deadroll_rules::reactive::Reaction`).
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReactionKind {
+    /// A counterattack: its `HitResolved` follows (one per unit of a line).
+    Strike,
+    /// A debuff on the enemy: its `EffectResolved` follows.
+    Debuff,
+    /// A buff on the bearer or an ally: its `EffectResolved` follows.
+    Buff,
+    /// A temporary aura around the bearer: its `EffectResolved` (the strength roll) and
+    /// `AuraChanged` follow.
+    Aura,
+}
+
+/// A reactive skill triggered by itself (docs/SKILL_BUILDER.md, section 3.2), on the dice of
+/// the action that caused it (`action_counter`, after that action's own rolls).
+#[event]
+pub struct ReactiveTriggered {
+    pub session: Pubkey,
+    pub action_counter: u32,
+    /// Player slot of the bearer.
+    pub bearer: u8,
+    /// The reactive skill's `SkillSet` index.
+    pub skill_slot: u8,
+    pub trigger: Trigger,
+    pub reaction: ReactionKind,
+    /// Turn-order id the reaction goes to: the enemy, the buffed player, or the bearer for an
+    /// aura.
+    pub target: u8,
+    /// Own turn starts until it can trigger again.
+    pub cooldown_left: u8,
+}
+
+/// An aura started, or ended (`aura.turns == 0`): docs/SKILL_BUILDER.md, section 3.5. Passive
+/// auras start at `set_ready(true)` and end at `set_ready(false)` or the bearer's death.
+#[event]
+pub struct AuraChanged {
+    pub session: Pubkey,
+    /// Player slot of the bearer.
+    pub bearer: u8,
+    /// `0` the passive skill's aura, `1` the reactive skill's.
+    pub aura_slot: u8,
+    pub aura: AuraData,
 }

@@ -96,3 +96,10 @@ pub struct SkillsSelected {
     /// `SkillSet` indexes: 4 active, 1 reactive, 1 passive (`deadroll_skillcheck::NO_SKILL` = empty).
     pub selection: [u8; MAP_SKILLS],
 }
+
+#[event]
+pub struct SkillDescribed {
+    pub character: Pubkey,
+    /// `SkillSet` index whose description was written (`SkillExtras.extras[skill_index]`).
+    pub skill_index: u8,
+}

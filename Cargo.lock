@@ -1271,6 +1271,7 @@ name = "deadroll-character"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
+ "bytemuck",
  "deadroll-rules",
  "deadroll-skillcheck",
  "deadroll-types",

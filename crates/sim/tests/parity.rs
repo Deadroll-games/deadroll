@@ -17,7 +17,7 @@
 //! `equipment` (left out = the starter kit). Every hero fights in each [`Gear`].
 use deadroll_character::rules::CLASS_START_TIER;
 use deadroll_character::state::Gear as CharacterGear;
-use deadroll_character::state::SkillRecord;
+use deadroll_character::state::{SkillExtra, SkillRecord};
 use deadroll_combat::{
     resolve_hit, resolve_hit_into, AccuracyBuff, HitInput, HitResult, ModKind, OpKind,
     ResonanceTables, RollSource, TimedMod, TimedMods, VrfRoll,
@@ -170,17 +170,19 @@ fn demo() -> [(CharacterData, &'static [skill_presets::Preset]); 3] {
     ]
 }
 
-/// What `create_character` stores for a preset skill.
-fn record(p: &skill_presets::Preset) -> SkillRecord {
+/// What `create_character` stores for a preset skill (its `SkillSet` record and its
+/// `SkillExtras` part), as `set_ready` copies it onto the map.
+fn record(p: &skill_presets::Preset) -> input::SkillStats {
     let d = derive(&p.blocks);
-    SkillRecord {
+    let rec = SkillRecord {
         blocks: p.blocks,
         shares_bp: d.shares_bp,
         power_bp: d.power_bp,
         fusion: d.fusion,
         cooldown: d.cooldown,
         ..SkillRecord::default()
-    }
+    };
+    program::skill_stats(&rec, &SkillExtra::new(&p.ext, d.ap_cost)).unwrap()
 }
 
 /// The same character and skills as JSON presets, resolved by the simulator.
@@ -196,7 +198,7 @@ fn sim_fighter(
         let id = format!("s{i}");
         presets.skills.insert(
             id.clone(),
-            round_trip(&SkillPreset::from_blocks(p.name, &p.blocks)),
+            round_trip(&SkillPreset::from_blocks(p.name, &p.blocks, &p.ext)),
         );
         ids.push(id);
     }
@@ -396,14 +398,14 @@ fn heroes_and_skills_resolve_like_the_character_program() {
             f.hero,
             HeroStats::new(&c, CLASS_START_TIER).with_equipment(f.hero.equipment)
         );
-        let usable: Vec<SkillRecord> = set
+        let usable: Vec<input::SkillStats> = set
             .iter()
             .map(record)
             .filter(|r| program::skill_use(r) == program::SkillUse::Ok)
             .collect();
         assert_eq!(f.skills.len(), usable.len());
         for (sim, prog) in f.skills.iter().zip(&usable) {
-            assert_eq!(sim.stats, program::skill_stats(prog));
+            assert_eq!(sim.stats, *prog);
         }
     }
 }
@@ -421,12 +423,13 @@ fn every_demo_attack_deals_the_same_damage() {
     {
         let f = sim_fighter(&c, set, &cfg, gear);
         let ph = program_hero(&c, gear);
-        let records: Vec<SkillRecord> = set
+        let records: Vec<input::SkillStats> = set
             .iter()
             .map(record)
             .filter(|r| program::skill_use(r) == program::SkillUse::Ok)
             .collect();
-        let mut choices: Vec<(Option<SkillRecord>, Option<input::SkillStats>)> = vec![(None, None)];
+        let mut choices: Vec<(Option<input::SkillStats>, Option<input::SkillStats>)> =
+            vec![(None, None)];
         for (r, s) in records.iter().zip(&f.skills) {
             if r.blocks.purpose == Purpose::Damage {
                 choices.push((Some(*r), Some(s.stats)));
@@ -475,12 +478,13 @@ fn every_demo_attack_deals_the_same_damage() {
                         &pt,
                         0,
                         &ph,
-                        rec.as_ref().map(program::skill_stats).as_ref(),
+                        rec.as_ref(),
                         &NONE,
                         &mut p_acc,
                         &program_profile(id),
                         &mut pm,
                         &mut pmods,
+                        &NONE,
                         &mut pin,
                         &mut pres,
                         &mut SyscallRoll::new(seed(i)),
@@ -500,6 +504,7 @@ fn every_demo_attack_deals_the_same_damage() {
                         &profile,
                         &mut sm,
                         &mut smods,
+                        &NONE,
                         &mut sin,
                         &mut sres,
                         &mut VrfRoll::new(seed(i)),
@@ -566,7 +571,7 @@ fn every_support_effect_lands_the_same() {
     {
         let f = sim_fighter(&c, set, &cfg, gear);
         let ph = program_hero(&c, gear);
-        let records: Vec<SkillRecord> = set
+        let records: Vec<input::SkillStats> = set
             .iter()
             .map(record)
             .filter(|r| program::skill_use(r) == program::SkillUse::Ok)
@@ -588,7 +593,7 @@ fn every_support_effect_lands_the_same() {
                                 program_rules::BALANCE,
                                 0,
                                 &ph,
-                                &program::skill_stats(rec),
+                                rec,
                                 effect,
                                 &program_profile(id),
                                 &mut pm,
@@ -620,7 +625,7 @@ fn every_support_effect_lands_the_same() {
                             program_rules::BALANCE,
                             0,
                             &ph,
-                            &program::skill_stats(rec),
+                            rec,
                             effect,
                             on_self,
                             &mut ally.0,
@@ -757,7 +762,8 @@ fn pair_input(cfg: &BalanceConfig, base: Aspect, tint: Aspect, second: Option<As
         trigger: Trigger::None,
         aura_radius: 0,
     };
-    let skill = input::SkillStats::derive(blocks, &cfg.skills);
+    let skill =
+        input::SkillStats::derive(blocks, deadroll_skillcheck::SkillExt::MELEE, &cfg.skills);
     let mut a =
         input::player_attacker(cfg, 0, &hero, Some(&skill), &NONE, &AccuracyBuff::default());
     a.tints = Default::default();
@@ -897,5 +903,305 @@ fn the_program_reads_the_monster_defenses_of_the_registry() {
     assert_eq!(program_profile(1).resist_bp, [0; Aspect::COUNT]);
     for id in 0..5u8 {
         assert_eq!(program_defense(&registry, id), registry.defense_of(id));
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Patch 5: map skills, passive skills and auras, reactive skills, the line target.
+
+/// The demo set's skill of `category` (the first one), on both sides: the program's map skill
+/// snapshot and the simulator's fighter.
+fn both_sides(
+    set: &[skill_presets::Preset],
+    f: &Fighter,
+    category: deadroll_skillcheck::Category,
+) -> Option<(input::SkillStats, input::SkillStats)> {
+    use deadroll_skillcheck::Category;
+    let prog = set
+        .iter()
+        .find(|p| p.blocks.category == category)
+        .map(record)?;
+    let sim = match category {
+        Category::Reactive => f.reactive.as_ref(),
+        Category::Passive => f.passive.as_ref(),
+        Category::Active => None,
+    }?;
+    Some((prog, sim.stats))
+}
+
+#[test]
+fn map_skills_reactive_and_passive_snapshot_the_same() {
+    use deadroll_session::state::{AuraData, MapSkillData};
+    use deadroll_skillcheck::Category;
+    let cfg = sim_config();
+    for (c, set) in demo() {
+        let f = sim_fighter(&c, set, &cfg, Gear::Kit);
+        let ph = program_hero(&c, Gear::Kit);
+        // Active skills: their own AP cost both ways (PARTY_AND_TURNS 5.1).
+        let actives: Vec<input::SkillStats> = set
+            .iter()
+            .map(record)
+            .filter(|r| program::skill_use(r) == program::SkillUse::Ok)
+            .collect();
+        for (p, s) in actives.iter().zip(&f.skills) {
+            assert_eq!(p.ap_cost, s.stats.ap_cost);
+            assert_eq!(
+                program::action_ap(Some(p)),
+                input::action_ap(&cfg, Some(&s.stats))
+            );
+            // The participation stores the snapshot and gives the same skill back.
+            assert_eq!(input::SkillStats::from(&MapSkillData::from(p)), *p);
+        }
+        assert_eq!(program::action_ap(None), input::action_ap(&cfg, None));
+        let (pr, sr) = both_sides(set, &f, Category::Reactive).expect("a reactive skill");
+        assert_eq!(pr, sr);
+        let (pp, sp) = both_sides(set, &f, Category::Passive).expect("a passive skill");
+        assert_eq!(pp, sp);
+        // The passive skill as the session keeps it (`set_ready`) and as the simulator does.
+        let prog_aura = deadroll_rules::aura::passive_aura(program_rules::BALANCE, &ph, &pp)
+            .map(AuraData::from)
+            .map(deadroll_rules::aura::Aura::from);
+        let sim_aura = deadroll_rules::aura::passive_aura(&cfg, &f.hero, &sp);
+        assert!(sim_aura.is_some());
+        assert_eq!(prog_aura, sim_aura);
+    }
+}
+
+/// A `RollSource` over a closure (one body for both roll streams).
+struct FnRoll<'a>(&'a mut dyn FnMut() -> u64);
+
+impl RollSource for FnRoll<'_> {
+    fn next_u64(&mut self) -> u64 {
+        (self.0)()
+    }
+}
+
+/// A counterattack of `skill` by `hero` on a fresh monster `id`: outcome, hit, monster, mods.
+#[allow(clippy::too_many_arguments)]
+fn counterattack(
+    cfg: &BalanceConfig,
+    tables: &ResonanceTables,
+    hero: &HeroStats,
+    skill: &input::SkillStats,
+    profile: &MonsterProfile,
+    id: u8,
+    hp: u32,
+    next: &mut dyn FnMut() -> u64,
+) -> (resolve::AttackOutcome, HitResult, Monster, TimedMods) {
+    let (mut m, mut mods) = (monster(id, hp), NONE);
+    let (mut hin, mut hres) = (HitInput::default(), HitResult::default());
+    let mut acc = AccuracyBuff::default();
+    let out = resolve::attack_monster(
+        cfg,
+        tables,
+        0,
+        hero,
+        Some(skill),
+        &NONE,
+        &mut acc,
+        profile,
+        &mut m,
+        &mut mods,
+        &NONE,
+        &mut hin,
+        &mut hres,
+        &mut FnRoll(next),
+    );
+    (out, hres, m, mods)
+}
+
+#[test]
+fn reactive_skills_resolve_the_same() {
+    use deadroll_rules::{
+        aura::Aura,
+        reactive::{reaction, Event, Reaction},
+    };
+    use deadroll_session::state::AuraData;
+    use deadroll_skillcheck::{Category, Trigger};
+    let cfg = sim_config();
+    let monsters = sim_monsters(&cfg);
+    let registry = sim_registry();
+    let (st, pt) = (registry.tables, program_tables(&registry));
+    for (c, set) in demo() {
+        let f = sim_fighter(&c, set, &cfg, Gear::Kit);
+        let ph = program_hero(&c, Gear::Kit);
+        let (pr, sr) = both_sides(set, &f, Category::Reactive).unwrap();
+        let at = Cell { x: 4, y: 4 };
+        let next_to = Cell { x: 5, y: 4 };
+        // The event its trigger answers.
+        let event = match pr.blocks.trigger {
+            Trigger::Hit | Trigger::CritHit => Event::Hit { crit: true },
+            Trigger::HpBelow => Event::HpDrop {
+                before: c.hp_max,
+                after: 1,
+                hp_max: c.hp_max,
+            },
+            Trigger::EnemyAdjacent => Event::EnemyEntered,
+            other => panic!("no demo reactive on {other:?}"),
+        };
+        let source = Some((0, next_to));
+        let r = reaction(program_rules::BALANCE, &pr, 0, 0, at, &event, source, None);
+        assert_eq!(r, reaction(&cfg, &sr, 0, 0, at, &event, source, None));
+        for i in 0..SEEDS {
+            match r.expect("the demo reactive fires") {
+                Reaction::Strike { .. } => {
+                    for &(id, profile, hp) in &monsters {
+                        let mut p_src = SyscallRoll::new(seed(i));
+                        let mut s_src = VrfRoll::new(seed(i));
+                        let p = counterattack(
+                            program_rules::BALANCE,
+                            &pt,
+                            &ph,
+                            &pr,
+                            &program_profile(id),
+                            id,
+                            hp,
+                            &mut || p_src.next_u64(),
+                        );
+                        let s =
+                            counterattack(&cfg, &st, &f.hero, &sr, &profile, id, hp, &mut || {
+                                s_src.next_u64()
+                            });
+                        assert_eq!(s, p, "counterattack on {id}, seed {i}");
+                    }
+                }
+                Reaction::Debuff { .. } => {
+                    let effect = effect_action(pr.blocks.effect).unwrap();
+                    for &(id, profile, hp) in &monsters {
+                        let (mut pm, mut pmods) = (monster(id, hp), NONE);
+                        let p = resolve::debuff_monster(
+                            program_rules::BALANCE,
+                            0,
+                            &ph,
+                            &pr,
+                            effect,
+                            &program_profile(id),
+                            &mut pm,
+                            &mut pmods,
+                            &mut SyscallRoll::new(seed(i)),
+                        );
+                        let (mut sm, mut smods) = (monster(id, hp), NONE);
+                        let s = resolve::debuff_monster(
+                            &cfg,
+                            0,
+                            &f.hero,
+                            &sr,
+                            effect,
+                            &profile,
+                            &mut sm,
+                            &mut smods,
+                            &mut VrfRoll::new(seed(i)),
+                        );
+                        assert_eq!((s, sm, smods), (p, pm, pmods));
+                    }
+                }
+                Reaction::Aura => {
+                    let (proll, paura) = resolve::start_aura(
+                        program_rules::BALANCE,
+                        &ph,
+                        &pr,
+                        &mut SyscallRoll::new(seed(i)),
+                    );
+                    let (sroll, saura) =
+                        resolve::start_aura(&cfg, &f.hero, &sr, &mut VrfRoll::new(seed(i)));
+                    assert_eq!(sroll, proll);
+                    // Through the session's account data and back.
+                    assert_eq!(saura, paura.map(AuraData::from).map(Aura::from));
+                    assert!(saura.is_some_and(|a| !a.passive && a.radius > 0));
+                }
+                Reaction::Buff { .. } => panic!("no demo reactive buffs without an aura"),
+            }
+        }
+    }
+}
+
+#[test]
+fn a_line_hits_the_same_units_in_the_same_order_on_the_same_dice() {
+    use deadroll_rules::line::{line_cells, targets_on_line};
+    use deadroll_skillcheck::Target;
+    let cfg = sim_config();
+    let registry = sim_registry();
+    let (st, pt) = (registry.tables, program_tables(&registry));
+    let (c, set) = &demo()[1];
+    let f = sim_fighter(c, set, &cfg, Gear::Kit);
+    let ph = program_hero(c, Gear::Kit);
+    // Arc: the mage's lightning line.
+    let arc = set
+        .iter()
+        .position(|p| p.blocks.target == Target::Line)
+        .unwrap();
+    let pskill = record(&set[arc]);
+    let sskill = f
+        .skills
+        .iter()
+        .find(|s| s.stats.blocks.target == Target::Line)
+        .unwrap()
+        .stats;
+    assert_eq!(pskill, sskill);
+    let reach = deadroll_rules::units::reach(pskill.ext.range, &cfg.players);
+    assert_eq!(reach, program_rules::reach(pskill.ext.range));
+    let line = line_cells(ATTACKER, Cell { x: 5, y: 5 }, reach, |c| {
+        c.x < 12 && c.y < 12
+    });
+    let goblin = sim_monsters(&cfg)[1].1;
+    for i in 0..SEEDS {
+        let mut sides = Vec::new();
+        for program_side in [true, false] {
+            let mut ms = cluster([ActiveState::default(); STATES_MAX]);
+            let units: Vec<(u8, Cell)> = ms
+                .iter()
+                .enumerate()
+                .map(|(k, m)| (k as u8, Cell { x: m.x, y: m.y }))
+                .collect();
+            let (targets, n) = targets_on_line(&line, units.iter().copied());
+            // The target, the one right behind it, the one further on the line.
+            assert_eq!(&targets[..n], &[0, 1, 4]);
+            let mut src_p = SyscallRoll::new(seed(i));
+            let mut src_s = VrfRoll::new(seed(i));
+            let mut results = Vec::new();
+            for &k in &targets[..n] {
+                let mut mods = NONE;
+                let (mut hin, mut hres) = (HitInput::default(), HitResult::default());
+                let mut acc = AccuracyBuff::default();
+                let out = if program_side {
+                    resolve::attack_monster(
+                        program_rules::BALANCE,
+                        &pt,
+                        0,
+                        &ph,
+                        Some(&pskill),
+                        &NONE,
+                        &mut acc,
+                        &program_profile(1),
+                        &mut ms[k as usize],
+                        &mut mods,
+                        &NONE,
+                        &mut hin,
+                        &mut hres,
+                        &mut src_p,
+                    )
+                } else {
+                    resolve::attack_monster(
+                        &cfg,
+                        &st,
+                        0,
+                        &f.hero,
+                        Some(&sskill),
+                        &NONE,
+                        &mut acc,
+                        &goblin,
+                        &mut ms[k as usize],
+                        &mut mods,
+                        &NONE,
+                        &mut hin,
+                        &mut hres,
+                        &mut src_s,
+                    )
+                };
+                results.push((out, hres.damage, hres.rolls_used, mods));
+            }
+            sides.push((results, ms));
+        }
+        assert_eq!(sides[0], sides[1], "seed {i}");
     }
 }

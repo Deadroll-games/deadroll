@@ -30,6 +30,9 @@ pub const CHARACTER: &[u8] = b"character";
 pub const SKILLS: &[u8] = b"skills";
 /// `["bag", character]` in character.
 pub const BAG: &[u8] = b"bag";
+/// `["skill_extras", character]` in character (patch 5): range, timing, HP threshold, AP cost
+/// and description of every skill, by `SkillSet` index.
+pub const SKILL_EXTRAS: &[u8] = b"skill_extras";
 /// `["item", asset]` in items.
 pub const ITEM: &[u8] = b"item";
 /// `["loadout", character]` in items. Not used since patch 1 (gear lives in the character).

@@ -15,12 +15,15 @@ use std::path::PathBuf;
 
 use deadroll_combat::{AccuracyBuff, HitPreview, ModKind, TimedMod, TimedMods, MODS_MAX};
 use deadroll_combat_wasm::{
-    attack_input, hero_sheet, monster_sheet, AttackRequest, DefenseInput, HeroInput, HeroSheet,
-    MonsterInput, SkillInput, TargetInput,
+    attack_input, hero_sheet, line, monster_sheet, unit_mods, AttackRequest, AuraInput,
+    DefenseInput, HeroInput, HeroSheet, LineRequest, MonsterInput, PartyInput, SkillInput,
+    TargetInput, UnitModsRequest,
 };
 use deadroll_rules::{items::starter_loadout, registry::Registry, BalanceConfig};
 use deadroll_skillcheck::{derive, presets, Category, Purpose};
-use deadroll_types::{ActiveState, Aspect, Class, Race, StateKind, STATES_MAX};
+use deadroll_types::{
+    ActiveState, Aspect, Cell, Class, Race, StateKind, MAP_CELLS, MAP_MAX, STATES_MAX,
+};
 use serde_json::{json, Value};
 
 fn fixture_path() -> PathBuf {
@@ -156,6 +159,148 @@ fn preview_json(p: &HitPreview) -> Value {
     })
 }
 
+fn party_json(p: &PartyInput) -> Value {
+    let auras: Vec<Value> = p
+        .auras
+        .iter()
+        .map(|slots| {
+            slots
+                .iter()
+                .map(|a| {
+                    json!({
+                        "kind": a.kind as u8,
+                        "aspect": a.aspect as u8,
+                        "powerBp": a.power_bp,
+                        "radius": a.radius,
+                        "turns": a.turns,
+                        "hostile": a.hostile,
+                        "passive": a.passive,
+                        "selfOnly": a.self_only,
+                    })
+                })
+                .collect::<Value>()
+        })
+        .collect();
+    json!({
+        "auras": auras,
+        "cells": p.cells.iter().map(|c| json!([c.x, c.y])).collect::<Vec<Value>>(),
+        "alive": p.alive,
+    })
+}
+
+/// A party whose player `bearer` (at `at`) carries `aura` in its passive slot, everyone alive.
+fn party_of(bearer: usize, at: Cell, aura: AuraInput) -> PartyInput {
+    let mut p = PartyInput {
+        alive: 0b1111,
+        ..PartyInput::default()
+    };
+    for (i, c) in p.cells.iter_mut().enumerate() {
+        *c = Cell {
+            x: 1 + i as u8,
+            y: 1,
+        };
+    }
+    p.cells[bearer] = at;
+    p.auras[bearer][0] = aura;
+    p
+}
+
+fn aura_in(
+    kind: ModKind,
+    aspect: Aspect,
+    power_bp: u32,
+    hostile: bool,
+    passive: bool,
+) -> AuraInput {
+    AuraInput {
+        kind,
+        aspect,
+        power_bp,
+        radius: 2,
+        turns: if passive { u8::MAX } else { 3 },
+        hostile,
+        passive,
+        self_only: false,
+    }
+}
+
+/// `unit_mods` cases: a passive Protection aura, a debuff aura on monsters, a basic attack under
+/// a passive Empowerment, a self-only passive, a unit out of reach.
+fn unit_mods_cases() -> Vec<UnitModsRequest> {
+    let at = Cell { x: 4, y: 4 };
+    let mut own = NO_MODS;
+    own[0] = TimedMod {
+        kind: ModKind::Protection,
+        aspect: Aspect::Fire,
+        turns: 2,
+        power_bp: 1_000,
+        source: 1,
+    };
+    let protect = party_of(
+        0,
+        at,
+        aura_in(ModKind::Protection, Aspect::Cold, 2_500, false, true),
+    );
+    let slow = party_of(
+        2,
+        at,
+        aura_in(ModKind::Slow, Aspect::Cold, 3_000, true, true),
+    );
+    let empower = party_of(
+        1,
+        at,
+        aura_in(ModKind::Empowerment, Aspect::Blood, 2_000, false, true),
+    );
+    let mut self_only = protect;
+    self_only.auras[0][0].self_only = true;
+    let req = |party, mods, monster, slot, at, basic_attack| UnitModsRequest {
+        party,
+        mods,
+        monster,
+        slot,
+        at,
+        basic_attack,
+    };
+    vec![
+        req(protect, NO_MODS, false, 0, at, false),
+        req(protect, own, false, 1, Cell { x: 5, y: 5 }, false),
+        req(protect, NO_MODS, false, 1, Cell { x: 7, y: 4 }, false),
+        req(slow, NO_MODS, true, 0, Cell { x: 5, y: 3 }, false),
+        req(slow, NO_MODS, false, 1, Cell { x: 5, y: 3 }, false),
+        req(empower, NO_MODS, false, 0, Cell { x: 4, y: 5 }, false),
+        req(empower, NO_MODS, false, 0, Cell { x: 4, y: 5 }, true),
+        req(self_only, NO_MODS, false, 1, at, false),
+    ]
+}
+
+/// `line` cases: straight, diagonal, slanted, cut by a wall, cut by the map edge.
+fn line_cases() -> Vec<LineRequest> {
+    let base = LineRequest {
+        from: Cell { x: 2, y: 2 },
+        through: Cell { x: 4, y: 2 },
+        reach: 6,
+        width: 12,
+        height: 12,
+        blocked: [0; MAP_CELLS / 8],
+    };
+    let mut walled = base;
+    let wall = 2 * MAP_MAX + 6;
+    walled.blocked[wall / 8] |= 1 << (wall % 8);
+    vec![
+        base,
+        LineRequest {
+            through: Cell { x: 4, y: 4 },
+            ..base
+        },
+        LineRequest {
+            through: Cell { x: 5, y: 3 },
+            reach: 1 + 5,
+            ..base
+        },
+        walled,
+        LineRequest { width: 5, ..base },
+    ]
+}
 fn heroes() -> Vec<HeroInput> {
     let mut out = Vec::new();
     for (i, class) in Class::ALL.iter().enumerate() {
@@ -247,6 +392,28 @@ fn requests(heroes: &[HeroInput], registry: &Registry) -> Vec<AttackRequest> {
                     defense: defense_of(registry, id),
                 },
                 accuracy,
+                // Patch 5: auras over the attacker and the target.
+                party: match m % 6 {
+                    4 => party_of(
+                        1,
+                        Cell { x: 2, y: 3 },
+                        aura_in(ModKind::Vulnerability, Aspect::Piercing, 4_000, true, true),
+                    ),
+                    5 => party_of(
+                        0,
+                        Cell { x: 2, y: 2 },
+                        aura_in(
+                            ModKind::Empowerment,
+                            Aspect::Blood,
+                            3_000,
+                            false,
+                            m % 4 != 1,
+                        ),
+                    ),
+                    _ => PartyInput::default(),
+                },
+                slot: 0,
+                target_at: Cell { x: 3, y: 3 },
             });
         }
     }
@@ -297,6 +464,9 @@ fn build() -> Value {
                         "turns": r.accuracy.turns,
                         "bonus": r.accuracy.bonus,
                     },
+                    "party": party_json(&r.party),
+                    "slot": r.slot,
+                    "targetAt": [r.target_at.x, r.target_at.y],
                 },
                 "bytes": hex(&borsh::to_vec(r).unwrap()),
                 "preview": preview_json(&p),
@@ -332,12 +502,49 @@ fn build() -> Value {
             })
         })
         .collect();
+    let unit_views: Vec<Value> = unit_mods_cases()
+        .iter()
+        .map(|r| {
+            json!({
+                "input": {
+                    "party": party_json(&r.party),
+                    "mods": mods_json(&r.mods),
+                    "monster": r.monster,
+                    "slot": r.slot,
+                    "at": [r.at.x, r.at.y],
+                    "basicAttack": r.basic_attack,
+                },
+                "bytes": hex(&borsh::to_vec(r).unwrap()),
+                "mods": mods_json(&unit_mods(r)),
+            })
+        })
+        .collect();
+    let lines: Vec<Value> = line_cases()
+        .iter()
+        .map(|r| {
+            let out = line(r);
+            json!({
+                "input": {
+                    "from": [r.from.x, r.from.y],
+                    "through": [r.through.x, r.through.y],
+                    "reach": r.reach,
+                    "width": r.width,
+                    "height": r.height,
+                    "blocked": hex(&r.blocked),
+                },
+                "bytes": hex(&borsh::to_vec(r).unwrap()),
+                "cells": out.cells[..out.len as usize].iter().map(|c| json!([c.x, c.y])).collect::<Vec<Value>>(),
+            })
+        })
+        .collect();
     json!({
         "abiVersion": deadroll_combat_wasm::ABI_VERSION,
         "tables": hex(&tables),
         "sheets": sheets,
         "attacks": attacks,
         "monsters": monsters,
+        "unitMods": unit_views,
+        "lines": lines,
     })
 }
 

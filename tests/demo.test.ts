@@ -22,6 +22,7 @@ import {
   TransactionInstruction,
 } from "@solana/web3.js";
 import { MAP_STRIDE, Tile, layoutBytes, loadMapPreset } from "../tools/scripts/lib/demo-map.ts";
+import { newSkill, partyAccounts } from "./skill_ext.ts";
 
 const { AnchorProvider, BN, EventParser, Program } = anchor;
 type BN = InstanceType<typeof BN>;
@@ -301,7 +302,7 @@ class Demo {
       predisposition: e(warrior ? "piercing" : "cold"),
       stats: warrior ? [10, 7, 5, 8] : [5, 7, 13, 5],
       appearance: new Array(20).fill(layer),
-      skills: (warrior ? WARRIOR_SKILLS : MAGE_SKILLS).map(([name, b]) => ({ blocks: structuredClone(b), name: text(name, 24) })),
+      skills: (warrior ? WARRIOR_SKILLS : MAGE_SKILLS).map(([name, b]) => newSkill(name, b, text)),
     };
     const asset = Keypair.generate();
     const sig = await characterProgram.methods
@@ -316,6 +317,7 @@ class Demo {
         asset: asset.publicKey,
         mplCoreProgram: MPL_CORE,
         systemProgram: SystemProgram.programId,
+        skillExtras: pda([Buffer.from("skill_extras"), character.toBuffer()], CHARACTER),
       })
       .signers([owner, asset])
       .rpc({ commitment: "confirmed" })
@@ -405,6 +407,7 @@ class Demo {
         sessionToken: pl.token,
         ...vrfAccounts,
         targetParticipation: null,
+        layout: this.layout,
       })
       .signers([pl.actor])
       .rpc()
@@ -444,9 +447,25 @@ class Demo {
         // Burned if over-time damage kills the player.
         skillSet: pl ? pl.skillSet : null,
         bag: pl ? pl.bag : null,
+        payer: provider.wallet.publicKey,
+        ...vrfAccounts,
       })
       .rpc({ commitment: "confirmed" })
-      .then(track(`start_turn ${pl?.kind ?? "monster"}`));
+      .then(track(`start_turn ${pl?.kind ?? "monster"}`))
+      .then(async (sig: string) => {
+        await this.settle();
+        return sig;
+      });
+  }
+  /**
+   * Patch 5: the oracle answers a reactive-only roll (a monster stepping next to the mage's Cold
+   * Snap, over-time damage under a threshold) on the first bearer's accounts.
+   */
+  async settle(seed: Buffer = MISS) {
+    const s = await this.state();
+    if (!s.core.pendingVrf || s.pendingReactive.kind === 0) return null;
+    const bearer = [0, 1, 2, 3].find((i) => s.pendingReactive.bearers & (1 << i))!;
+    return this.consume(bearer, seed);
   }
   // --- DM moves through the DM's session key
   monsterMove(monster: number, steps: number[]) {
@@ -459,6 +478,7 @@ class Demo {
         monsters: this.acc.monsters,
         layout: this.layout,
         sessionToken: this.dmToken,
+        ...vrfAccounts,
       })
       .signers([this.dmActor])
       .rpc()
@@ -484,8 +504,9 @@ class Demo {
       .then(track("monster_act"));
   }
   /** The oracle's callback for the pending action of player `who` (attacker or target). */
-  consume(who: number, seed: Buffer) {
+  async consume(who: number, seed: Buffer) {
     const pl = this.players[who];
+    const remaining = partyAccounts(await this.state(), pl.participation);
     return session.methods
       .consumeRandomness([...seed])
       .accountsStrict({
@@ -502,13 +523,14 @@ class Demo {
         targetParticipation: null,
         layout: this.layout,
       })
+      .remainingAccounts(remaining)
       .signers([MOCK_VRF])
       .rpc({ commitment: "confirmed" })
       .then(track("consume_randomness"))
       .then(async (sig: string) => {
         // Read back at once: the shared validator keeps ~100 slots of transaction history.
         const names = (await eventsOf(sig)).map((x) => x.name);
-        publicRolls.push({ sig, ok: names.includes("hitResolved") || names.includes("initiativeRolled") });
+        publicRolls.push({ sig, ok: ["hitResolved", "initiativeRolled", "reactiveTriggered"].some((n) => names.includes(n)) });
         return sig;
       });
   }
@@ -600,9 +622,17 @@ class Demo {
       spent += st.cost;
     }
     if (take.length === 0) return 0;
-    if (who !== null) await this.move(who, take);
-    else await this.monsterMove(monster!, take);
-    return spent;
+    if (who !== null) {
+      await this.move(who, take);
+      return spent;
+    }
+    // A monster's walk stops on the first cell next to a Cold Snap bearer (patch 5): the AP
+    // actually spent, after the reactive roll.
+    const before = (await this.monsters())[monster!].actionPoints;
+    await this.monsterMove(monster!, take);
+    const after = (await this.monsters())[monster!].actionPoints;
+    await this.settle();
+    return before - after;
   }
 }
 
@@ -727,6 +757,7 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
           sessionAuthority,
           config,
           characterProgram: CHARACTER,
+          skillExtras: pda([Buffer.from("skill_extras"), pl.character.toBuffer()], CHARACTER),
         })
         .signers([pl.wallet])
         .rpc()
@@ -752,7 +783,8 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
     // The oracle answers the initiative request (action 0) with player slot 0's accounts.
     const units = await demo.initiativeUnits();
     assert.equal(units.length, 2 + preset.spawns.length);
-    const seed = randomBytes(32);
+    // A fixed VRF value: every run rolls the same order.
+    const seed = createHash("sha256").update("deadroll:demo:initiative").digest();
     const rolled = await demo.consume(0, seed);
     const ev = await eventOf(rolled, "initiativeRolled");
     const expected = initiativeOrder(seed, units);
@@ -988,6 +1020,6 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
     const rolls = signatures.filter((x) => x.what === "consume_randomness");
     assert.ok(rolls.length >= 3);
     assert.equal(publicRolls.length, rolls.length);
-    for (const { sig, ok } of publicRolls) assert.ok(ok, `${sig}: no InitiativeRolled / HitResolved in its logs`);
+    for (const { sig, ok } of publicRolls) assert.ok(ok, `${sig}: no InitiativeRolled / HitResolved / ReactiveTriggered in its logs`);
   });
 });

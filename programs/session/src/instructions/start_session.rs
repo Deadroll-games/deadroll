@@ -104,6 +104,9 @@ pub fn handler(ctx: Context<StartSession>) -> Result<()> {
             bag: character,
             target_participation: None,
             layout: session.layout,
+            // The initiative roll touches no player but the first.
+            party: Default::default(),
+            party_len: 0,
         },
     )?;
 

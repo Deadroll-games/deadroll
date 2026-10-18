@@ -19,22 +19,25 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use deadroll_combat::{
     preview_hit, preview_range, resolve_hit, AccuracyBuff, Attacker, DamageRange, Defender,
-    HitInput, ResonanceTables, TimedMods, VrfRoll,
+    HitInput, ModKind, ResonanceTables, TimedMods, VrfRoll,
 };
 use deadroll_rules::{
+    aura::{Aura, AuraField, PartyAuras, AURAS_PER_PLAYER},
     input::{hero, monster_defender, player_attacker, HeroStats, SkillStats},
     items::Equipment,
+    line::{line_cells, LINE_MAX},
     monster::p0,
     player::stat_damage_increases,
     BalanceConfig, MonsterDefense,
 };
-use deadroll_skillcheck::{SkillBlocks, SKILL_ASPECTS_MAX};
+use deadroll_skillcheck::{SkillBlocks, SkillExt, SKILL_ASPECTS_MAX};
 use deadroll_types::{
-    ActiveState, Aspect, Class, Race, Stat, EQUIP_SLOTS, STATES_MAX, STATS_COUNT,
+    ActiveState, Aspect, Cell, Class, Race, Stat, EQUIP_SLOTS, MAP_CELLS, MAP_MAX, PARTY_MAX,
+    STATES_MAX, STATS_COUNT,
 };
 
 /// Bumped on any change of the exports or the byte layouts.
-pub const ABI_VERSION: u32 = 4;
+pub const ABI_VERSION: u32 = 5;
 /// Size of the input and output buffers.
 pub const BUFFER_LEN: usize = 4096;
 
@@ -110,6 +113,20 @@ pub struct SkillInput {
     pub power_bp: u32,
 }
 
+impl SkillInput {
+    /// The rules' view for a hit: range, timing and AP do not change a hit.
+    pub fn stats(&self) -> SkillStats {
+        SkillStats {
+            blocks: self.blocks,
+            shares_bp: self.shares_bp,
+            power_bp: self.power_bp,
+            cooldown: 0,
+            ext: SkillExt::MELEE,
+            ap_cost: 0,
+        }
+    }
+}
+
 /// A monster's registry defenses, as `MonsterState.defense` stores them.
 #[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct DefenseInput {
@@ -177,16 +194,121 @@ pub fn monster_sheet(m: &MonsterInput) -> Result<MonsterSheet, Error> {
     })
 }
 
+/// One aura as `GameSession.auras` stores it (`deadroll_rules::aura::Aura`, the same fields).
+#[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AuraInput {
+    pub kind: ModKind,
+    pub aspect: Aspect,
+    pub power_bp: u32,
+    pub radius: u8,
+    pub turns: u8,
+    pub hostile: bool,
+    pub passive: bool,
+    pub self_only: bool,
+}
+
+impl From<AuraInput> for Aura {
+    fn from(a: AuraInput) -> Self {
+        Aura {
+            kind: a.kind,
+            aspect: a.aspect,
+            power_bp: a.power_bp,
+            radius: a.radius,
+            turns: a.turns,
+            hostile: a.hostile,
+            passive: a.passive,
+            self_only: a.self_only,
+        }
+    }
+}
+
+/// The party's auras as the session holds them (`GameSession.auras`, `player_pos`,
+/// `alive_mask`): what the auras over a unit add (docs/SKILL_BUILDER.md 3.3, 3.5).
+#[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PartyInput {
+    pub auras: [[AuraInput; AURAS_PER_PLAYER]; PARTY_MAX],
+    pub cells: [Cell; PARTY_MAX],
+    pub alive: u8,
+}
+
+impl PartyInput {
+    fn auras(&self) -> PartyAuras {
+        self.auras.map(|p| p.map(Aura::from))
+    }
+}
+
 /// A player's attack on a monster: the weapon's basic attack (`skill = None`) or a damage skill.
 #[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AttackRequest {
     pub hero: HeroInput,
-    /// The attacker's buffs and debuffs.
+    /// The attacker's buffs and debuffs (its own; the auras come from `party`).
     pub hero_mods: TimedMods,
     pub skill: Option<SkillInput>,
     pub target: TargetInput,
     /// The attacker's accuracy buff from a resonance (`Participation.accuracy`).
     pub accuracy: AccuracyBuff,
+    /// Patch 5 (ABI 5): the auras, the attacker's player slot and the target's cell.
+    pub party: PartyInput,
+    pub slot: u8,
+    pub target_at: Cell,
+}
+
+/// A unit's buffs and debuffs with the auras over it (`unit_mods`): a player slot, or a monster
+/// at `at` (`monster`). `basic_attack`: the view of a player's basic attack, which no passive
+/// Empowerment strengthens.
+#[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UnitModsRequest {
+    pub party: PartyInput,
+    pub mods: TimedMods,
+    pub monster: bool,
+    pub slot: u8,
+    pub at: Cell,
+    pub basic_attack: bool,
+}
+
+pub fn unit_mods(r: &UnitModsRequest) -> TimedMods {
+    let auras = r.party.auras();
+    let field = AuraField {
+        auras: &auras,
+        cells: &r.party.cells,
+        alive: r.party.alive,
+    };
+    if r.monster {
+        field.monster_mods(&r.mods, r.at)
+    } else {
+        field.hero_mods(&r.mods, r.slot, r.at, r.basic_attack)
+    }
+}
+
+/// The cells of a line target (`line`): from `from` through `through` up to `reach` cells, on a
+/// `width` x `height` map whose impassable cells are set in `blocked` (bit `y * MAP_MAX + x`).
+#[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LineRequest {
+    pub from: Cell,
+    pub through: Cell,
+    pub reach: u8,
+    pub width: u8,
+    pub height: u8,
+    pub blocked: [u8; MAP_CELLS / 8],
+}
+
+/// What `line` writes: the cells, nearest first.
+#[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LineOutput {
+    pub len: u8,
+    pub cells: [Cell; LINE_MAX],
+}
+
+pub fn line(r: &LineRequest) -> LineOutput {
+    let open = |c: Cell| {
+        let i = c.y as usize * MAP_MAX + c.x as usize;
+        c.x < r.width && c.y < r.height && r.blocked[i / 8] & (1 << (i % 8)) == 0
+    };
+    let l = line_cells(r.from, r.through, r.reach, open);
+    LineOutput {
+        len: l.len,
+        cells: l.cells,
+    }
 }
 
 /// A hero's derived stats with what it wears (docs/CHARACTER.md, section 3).
@@ -249,21 +371,30 @@ pub fn hero_sheet(h: &HeroStats) -> HeroSheet {
 pub fn attack_input(r: &AttackRequest) -> Result<HitInput, Error> {
     let base = p0::monster_base(r.target.bestiary_id).ok_or(Error::UnknownMonster)?;
     let profile = base.profile(r.target.level, &CFG.monsters, &r.target.defense.defense());
-    let skill = r.skill.map(|s| SkillStats {
-        blocks: s.blocks,
-        shares_bp: s.shares_bp,
-        power_bp: s.power_bp,
-        cooldown: 0,
-    });
+    let skill = r.skill.map(|s| s.stats());
+    let auras = r.party.auras();
+    let field = AuraField {
+        auras: &auras,
+        cells: &r.party.cells,
+        alive: r.party.alive,
+    };
+    let at = r
+        .party
+        .cells
+        .get(r.slot as usize)
+        .copied()
+        .unwrap_or_default();
+    let hero_mods = field.hero_mods(&r.hero_mods, r.slot, at, skill.is_none());
+    let target_mods = field.monster_mods(&r.target.mods, r.target_at);
     let attacker: Attacker = player_attacker(
         CFG,
         0,
         &r.hero.hero(),
         skill.as_ref(),
-        &r.hero_mods,
+        &hero_mods,
         &r.accuracy,
     );
-    let defender: Defender = monster_defender(&profile, &r.target.states, &r.target.mods);
+    let defender: Defender = monster_defender(&profile, &r.target.states, &target_mods);
     Ok(HitInput { attacker, defender })
 }
 
@@ -320,6 +451,18 @@ pub fn preview_attack_bytes(
         &preview_hit(&attack_input(&request)?, &CFG.combat, tables),
         out,
     )
+}
+
+/// Decodes a borsh `UnitModsRequest`, writes the borsh `TimedMods` view.
+pub fn unit_mods_bytes(input: &[u8], out: &mut [u8]) -> Result<usize, Error> {
+    let request = UnitModsRequest::try_from_slice(input).map_err(|_| Error::BadInput)?;
+    write(&unit_mods(&request), out)
+}
+
+/// Decodes a borsh `LineRequest`, writes a borsh `LineOutput`.
+pub fn line_bytes(input: &[u8], out: &mut [u8]) -> Result<usize, Error> {
+    let request = LineRequest::try_from_slice(input).map_err(|_| Error::BadInput)?;
+    write(&line(&request), out)
 }
 
 fn write(value: &impl BorshSerialize, out: &mut [u8]) -> Result<usize, Error> {
@@ -485,6 +628,18 @@ mod abi {
         })
     }
 
+    /// A unit's buffs and debuffs with the auras over it: `UnitModsRequest` in, `TimedMods` out.
+    #[no_mangle]
+    pub extern "C" fn unit_mods(input_len: u32) -> i32 {
+        with_input(input_len, |input, _, out| unit_mods_bytes(input, out))
+    }
+
+    /// The cells of a line target: `LineRequest` in, `LineOutput` out.
+    #[no_mangle]
+    pub extern "C" fn line(input_len: u32) -> i32 {
+        with_input(input_len, |input, _, out| line_bytes(input, out))
+    }
+
     /// Roll number `index` of the seed buffer (`VrfRoll::roll_at`), for replay checks.
     #[no_mangle]
     pub extern "C" fn roll_u64(index: u32) -> u64 {
@@ -568,6 +723,9 @@ mod tests {
                 defense: defense(id),
             },
             accuracy: AccuracyBuff::default(),
+            party: PartyInput::default(),
+            slot: 0,
+            target_at: Cell::default(),
         }
     }
 
@@ -689,12 +847,7 @@ mod tests {
                 &CFG.monsters,
                 &r.target.defense.defense(),
             );
-            let stats = r.skill.map(|s| SkillStats {
-                blocks: s.blocks,
-                shares_bp: s.shares_bp,
-                power_bp: s.power_bp,
-                cooldown: 0,
-            });
+            let stats = r.skill.map(|s| s.stats());
             let expected = HitInput {
                 attacker: player_attacker(
                     CFG,
@@ -801,5 +954,106 @@ mod tests {
         );
         assert_eq!(abi::abi_version(), ABI_VERSION);
         assert_eq!(abi::buffer_len(), BUFFER_LEN as u32);
+    }
+
+    fn party_with(aura: AuraInput, bearer: Cell) -> PartyInput {
+        let mut party = PartyInput {
+            alive: 0b1,
+            ..PartyInput::default()
+        };
+        party.auras[0][0] = aura;
+        party.cells[0] = bearer;
+        party
+    }
+
+    fn aura(kind: ModKind, power_bp: u32, radius: u8, hostile: bool) -> AuraInput {
+        AuraInput {
+            kind,
+            aspect: Aspect::Cold,
+            power_bp,
+            radius,
+            turns: u8::MAX,
+            hostile,
+            passive: true,
+            self_only: false,
+        }
+    }
+
+    #[test]
+    fn the_attack_preview_sees_the_auras() {
+        let tables = registry().tables;
+        let at = Cell { x: 2, y: 2 };
+        let target_at = Cell { x: 3, y: 2 };
+        let mut r = request(None, 1);
+        r.slot = 0;
+        r.target_at = target_at;
+        let plain = attack_input(&r).unwrap();
+        // A debuff aura over the target: Vulnerability to Piercing (the sword's aspect).
+        let mut vuln = aura(ModKind::Vulnerability, 5_000, 2, true);
+        vuln.aspect = Aspect::Piercing;
+        r.party = party_with(vuln, at);
+        let exposed = attack_input(&r).unwrap();
+        assert_eq!(exposed.defender.vuln_bp[Aspect::Piercing as usize], 5_000);
+        assert_eq!(plain.defender.vuln_bp[Aspect::Piercing as usize], 0);
+        let a = deadroll_combat::preview_hit(&plain, &CFG.combat, &tables);
+        let b = deadroll_combat::preview_hit(&exposed, &CFG.combat, &tables);
+        assert!(b.max > a.max);
+        // A passive Empowerment aura does not strengthen the basic attack (SKILL_BUILDER 3.1).
+        r.party = party_with(aura(ModKind::Empowerment, 5_000, 2, false), at);
+        assert_eq!(attack_input(&r).unwrap(), plain);
+    }
+
+    #[test]
+    fn unit_mods_merge_the_auras_over_a_unit() {
+        let at = Cell { x: 4, y: 4 };
+        let party = party_with(aura(ModKind::Protection, 3_000, 1, false), at);
+        let view = |slot: u8, cell: Cell, monster: bool| {
+            let r = UnitModsRequest {
+                party,
+                mods: NO_MODS,
+                monster,
+                slot,
+                at: cell,
+                basic_attack: false,
+            };
+            let mut out = [0u8; BUFFER_LEN];
+            let len = unit_mods_bytes(&borsh::to_vec(&r).unwrap(), &mut out).unwrap();
+            TimedMods::try_from_slice(&out[..len]).unwrap()
+        };
+        let power = |m: TimedMods| m.iter().find(|x| x.turns > 0).map_or(0, |x| x.power_bp);
+        assert_eq!(power(view(0, at, false)), 3_000);
+        assert_eq!(power(view(1, Cell { x: 5, y: 5 }, false)), 3_000);
+        assert_eq!(power(view(1, Cell { x: 6, y: 4 }, false)), 0);
+        assert_eq!(
+            power(view(0, Cell { x: 5, y: 4 }, true)),
+            0,
+            "not on monsters"
+        );
+    }
+
+    #[test]
+    fn line_runs_through_the_target_and_stops_at_a_wall() {
+        let mut r = LineRequest {
+            from: Cell { x: 1, y: 1 },
+            through: Cell { x: 3, y: 1 },
+            reach: 6,
+            width: 10,
+            height: 10,
+            blocked: [0; MAP_CELLS / 8],
+        };
+        let cells = |r: &LineRequest| {
+            let mut out = [0u8; BUFFER_LEN];
+            let len = line_bytes(&borsh::to_vec(r).unwrap(), &mut out).unwrap();
+            let l = LineOutput::try_from_slice(&out[..len]).unwrap();
+            l.cells[..l.len as usize].to_vec()
+        };
+        assert_eq!(cells(&r).len(), 6);
+        let wall = MAP_MAX + 5;
+        r.blocked[wall / 8] |= 1 << (wall % 8);
+        assert_eq!(
+            cells(&r),
+            (2..=4).map(|x| Cell { x, y: 1 }).collect::<Vec<_>>()
+        );
+        assert_eq!(cells(&LineRequest { width: 4, ..r }).len(), 2);
     }
 }

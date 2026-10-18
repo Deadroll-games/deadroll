@@ -10,5 +10,9 @@
   ],
   "effect": "Protection",
   "trigger": "None",
-  "aura_radius": 2
+  "aura_radius": 2,
+  "range": "Melee",
+  "timing": "Instant",
+  "hp_below_pct": 0,
+  "description": "A ring of still, cold air guards those nearby."
 }

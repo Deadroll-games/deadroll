@@ -107,6 +107,7 @@ pub fn handler(ctx: Context<JoinSession>, contribution: u64, actor: Pubkey) -> R
     }
 
     session.core.players[slot as usize] = character_key;
+    session.participations[slot as usize] = accounts.participation.key();
     session.core.player_count = slot + 1;
     session.player_pos[slot as usize] = session.entrance;
     session.alive_mask |= 1 << slot;

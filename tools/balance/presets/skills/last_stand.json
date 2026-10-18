@@ -10,5 +10,9 @@
   ],
   "effect": "Protection",
   "trigger": "HpBelow",
-  "aura_radius": 2
+  "aura_radius": 2,
+  "range": "Melee",
+  "timing": "Instant",
+  "hp_below_pct": 40,
+  "description": "When the blood runs low, everyone near stands behind the shield."
 }

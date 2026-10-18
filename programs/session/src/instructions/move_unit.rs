@@ -65,7 +65,8 @@ pub fn handler(ctx: Context<MoveUnit>, steps: [u8; MAX_PATH], len: u8) -> Result
         SessionError::UnitDead
     );
 
-    participation.refresh_ap(session.turn_seq);
+    let auras = session.party_auras();
+    participation.refresh_ap(session.turn_seq, &session.aura_field(&auras));
     let layout = MapLayoutView::load(&accounts.layout)?;
     let monsters = Monsters::load(accounts.monsters.as_ref(), &session.key())?;
     let start = Cell {

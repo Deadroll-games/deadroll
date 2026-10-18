@@ -10,5 +10,9 @@
   ],
   "effect": "Weakening",
   "trigger": "None",
-  "aura_radius": 0
+  "aura_radius": 0,
+  "range": "Ranged",
+  "timing": "Instant",
+  "hp_below_pct": 0,
+  "description": "Drains the strength out of a foe's arms."
 }

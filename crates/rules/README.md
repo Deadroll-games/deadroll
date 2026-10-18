@@ -13,6 +13,9 @@ Game rules shared by the session program and the balance bench. Pure Rust, `no_s
 | `input` | `Attacker` / `Defender` / `SupportInput` from a hero, a skill or a monster; effects of skills |
 | `turn` | `start_of_turn`: over-time damage, Freeze / Stun skip, durations, cooldowns |
 | `resolve` | one action from its dice: what `consume_randomness` does to the state |
+| `aura` | auras of passive and reactive skills (docs/SKILL_BUILDER.md 3.5): who they reach, the strongest per kind merged into a unit's mods |
+| `line` | the line target: from the caster through the target to the reach, a wall ends it |
+| `reactive` | reactive skills (docs/SKILL_BUILDER.md 3.2): which events trigger them and what they do |
 
 ```rust
 use deadroll_rules::{resolve, BalanceConfig};

@@ -15,10 +15,12 @@ use deadroll_rules::{
     MonsterDefense, PlayerTuning,
 };
 use deadroll_skillcheck::{
-    validate, validate_starting, Category, Effect, Purpose, SkillBlocks, SkillError, Target,
-    Trigger, SKILL_ASPECTS_MAX,
+    validate_skill, validate_starting, Category, Effect, Purpose, SkillBlocks, SkillError,
+    SkillExt, Target, Trigger, SKILL_ASPECTS_MAX,
 };
-use deadroll_types::{Aspect, Class, Form, Race, Source, StateKind, Tier, STATS_COUNT};
+use deadroll_types::{
+    Aspect, Class, Form, Race, RangeTag, Source, StateKind, Tier, TimeTag, STATS_COUNT,
+};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::named::{self, Named};
@@ -46,6 +48,17 @@ pub struct SkillPreset {
     pub trigger: Trigger,
     #[serde(default)]
     pub aura_radius: u8,
+    /// Patch 5 blocks (`SkillExt`): range and timing tags, the HP threshold of `HpBelow` /
+    /// `AllyHpBelow` in percent. Left out: melee, instant, none.
+    #[serde(with = "named::variant", default)]
+    pub range: RangeTag,
+    #[serde(with = "named::variant", default)]
+    pub timing: TimeTag,
+    #[serde(default)]
+    pub hp_below_pct: u8,
+    /// The player's text, up to 200 characters; mechanics never read it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
 }
 
 impl SkillPreset {
@@ -70,21 +83,30 @@ impl SkillPreset {
         })
     }
 
-    /// The builder rules (`skillcheck::validate`).
-    pub fn check(&self) -> Result<SkillBlocks, SkillError> {
+    /// The patch 5 blocks.
+    pub fn ext(&self) -> SkillExt {
+        SkillExt {
+            range: self.range,
+            timing: self.timing,
+            hp_below_pct: self.hp_below_pct,
+        }
+    }
+
+    /// The builder rules (`skillcheck::validate_skill`).
+    pub fn check(&self) -> Result<(SkillBlocks, SkillExt), SkillError> {
         let blocks = self.blocks()?;
-        validate(&blocks)?;
-        Ok(blocks)
+        validate_skill(&blocks, &self.ext())?;
+        Ok((blocks, self.ext()))
     }
 
     /// The builder rules plus the class limits on starting skills (`validate_starting`).
-    pub fn check_for(&self, class: Class) -> Result<SkillBlocks, SkillError> {
+    pub fn check_for(&self, class: Class) -> Result<(SkillBlocks, SkillExt), SkillError> {
         let blocks = self.blocks()?;
-        validate_starting(&blocks, class)?;
-        Ok(blocks)
+        validate_starting(&blocks, &self.ext(), class)?;
+        Ok((blocks, self.ext()))
     }
 
-    pub fn from_blocks(name: &str, b: &SkillBlocks) -> Self {
+    pub fn from_blocks(name: &str, b: &SkillBlocks, ext: &SkillExt) -> Self {
         SkillPreset {
             name: name.to_string(),
             category: b.category,
@@ -96,6 +118,10 @@ impl SkillPreset {
             effect: b.effect,
             trigger: b.trigger,
             aura_radius: b.aura_radius,
+            range: ext.range,
+            timing: ext.timing,
+            hp_below_pct: ext.hp_below_pct,
+            description: String::new(),
         }
     }
 

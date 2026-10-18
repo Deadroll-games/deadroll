@@ -5,7 +5,8 @@ use crate::{
     auth,
     errors::SessionError,
     events::ActionRequested,
-    rules::{in_range, monster_profile, Unit, ACT_AP, NATURAL_ATTACK},
+    party::party_keys,
+    rules::{in_range, monster_profile, monster_range, Unit, BASIC_ATTACK_AP, NATURAL_ATTACK},
     state::{GameSession, Monsters, Participation, PendingAction},
     vrf::{self, CallbackAccounts, RequestAccounts},
 };
@@ -114,11 +115,14 @@ pub fn handler(ctx: Context<MonsterAct>, monster: u8, action: u8, target: u8) ->
         x: participation.core.x,
         y: participation.core.y,
     };
-    require!(in_range(profile.form, from, to), SessionError::OutOfRange);
+    require!(
+        in_range(monster_range(profile.form), from, to),
+        SessionError::OutOfRange
+    );
 
     state.action_points = state
         .action_points
-        .checked_sub(ACT_AP)
+        .checked_sub(BASIC_ATTACK_AP)
         .ok_or(SessionError::NotEnoughActionPoints)?;
     monsters.set(monster, &state)?;
 
@@ -134,6 +138,7 @@ pub fn handler(ctx: Context<MonsterAct>, monster: u8, action: u8, target: u8) ->
     session.acted_seq = session.turn_seq;
 
     let session_key = session.key();
+    let (party, party_len) = party_keys(session, target);
     vrf::request(
         RequestAccounts {
             payer: &accounts.signer,
@@ -153,6 +158,8 @@ pub fn handler(ctx: Context<MonsterAct>, monster: u8, action: u8, target: u8) ->
             bag: accounts.bag.key(),
             target_participation: None,
             layout: session.layout,
+            party,
+            party_len,
         },
     )?;
 

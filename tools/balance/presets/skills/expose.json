@@ -10,5 +10,9 @@
   ],
   "effect": "Vulnerability",
   "trigger": "None",
-  "aura_radius": 0
+  "aura_radius": 0,
+  "range": "Ranged",
+  "timing": "Instant",
+  "hp_below_pct": 0,
+  "description": "Marks a foe with fire. Fire finds it easier now."
 }

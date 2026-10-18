@@ -119,4 +119,12 @@ pub enum SessionError {
     ReadyUnchanged,
     #[msg("A death needs the character's SkillSet and Bag")]
     DeathAccountsMissing,
+    #[msg(
+        "The callback needs every other living player's Participation and Character, in slot order"
+    )]
+    InvalidPartyAccounts,
+    #[msg("A wall cuts the line before the target")]
+    LineBlocked,
+    #[msg("A reactive skill triggers here: the VRF accounts and the payer are required")]
+    ReactiveAccountsMissing,
 }

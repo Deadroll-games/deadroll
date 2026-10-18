@@ -6,7 +6,25 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import fixtures from "./__fixtures__/combat-wasm.json";
-import { COMBAT_ABI, COMBAT_TABLES_LEN, CombatWasm, encodeAttack, encodeHero, encodeMonster, percent, type AttackRequest, type HeroInput, type MonsterInput } from "./combatWasm";
+import {
+  COMBAT_ABI,
+  COMBAT_TABLES_LEN,
+  CombatWasm,
+  blockedOf,
+  encodeAttack,
+  encodeHero,
+  encodeLine,
+  encodeMonster,
+  encodeUnitMods,
+  partyInputOf,
+  percent,
+  type AttackRequest,
+  type HeroInput,
+  type LineRequest,
+  type MonsterInput,
+  type UnitModsRequest,
+} from "./combatWasm";
+import { Tile } from "./types";
 
 const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
 
@@ -66,6 +84,45 @@ describe("combat wasm", () => {
     const input = { ...(fixtures.attacks[0]!.input as unknown as AttackRequest) };
     input.target = { ...input.target, bestiaryId: 200 };
     expect(() => combat.previewAttack(input)).toThrow("unknown monster");
+  });
+
+  it("patch 5: a unit's mods with the auras over it, as the session merges them", () => {
+    expect(fixtures.unitMods.length).toBeGreaterThan(0);
+    for (const f of fixtures.unitMods) {
+      const input = f.input as unknown as UnitModsRequest;
+      expect(hex(encodeUnitMods(input))).toBe(f.bytes);
+      expect(combat.unitMods(input)).toEqual(f.mods);
+    }
+  });
+
+  it("patch 5: the cells of a line, nearest first; a wall ends it", () => {
+    expect(fixtures.lines.length).toBeGreaterThan(0);
+    for (const f of fixtures.lines) {
+      const input = { ...(f.input as unknown as LineRequest), blocked: Uint8Array.from(Buffer.from(f.input.blocked as string, "hex")) };
+      expect(hex(encodeLine(input))).toBe(f.bytes);
+      expect(combat.line(input)).toEqual(f.cells);
+    }
+  });
+
+  it("patch 5: the session's auras and walls as module inputs", () => {
+    const aura = { kind: { protection: {} }, aspect: { cold: {} }, powerBp: 2_500, radius: 2, turns: 255, hostile: false, passive: true, selfOnly: false };
+    const none = { ...aura, kind: { haste: {} }, aspect: { fire: {} }, powerBp: 0, radius: 0, turns: 0, passive: false };
+    const party = partyInputOf({ auras: [[aura, none]], playerPos: [{ x: 3, y: 4 }], aliveMask: 1 });
+    expect(party).toEqual({
+      auras: [[{ kind: 4, aspect: 1, powerBp: 2_500, radius: 2, turns: 255, hostile: false, passive: true, selfOnly: false }, { kind: 0, aspect: 0, powerBp: 0, radius: 0, turns: 0, hostile: false, passive: false, selfOnly: false }]],
+      cells: [[3, 4]],
+      alive: 1,
+    });
+    // A wall (cost 0) at (2, 1) on an otherwise open map: bit 1 * 32 + 2.
+    const tiles = new Uint8Array(1024);
+    tiles[32 + 2] = Tile.Wall;
+    const costs = new Uint8Array(8).fill(1);
+    costs[Tile.Wall] = 0;
+    const blocked = blockedOf(tiles, costs);
+    expect(blocked[4]).toBe(1 << 2);
+    expect(blocked.reduce((n, b) => n + (b ? 1 : 0), 0)).toBe(1);
+    // From (0, 1) east through (1, 1): the wall ends the line before it.
+    expect(combat.line({ from: [0, 1], through: [1, 1], reach: 6, width: 16, height: 16, blocked })).toEqual([[1, 1]]);
   });
 
   it("formats percents", () => {

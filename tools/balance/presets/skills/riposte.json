@@ -10,5 +10,9 @@
   ],
   "effect": "None",
   "trigger": "Hit",
-  "aura_radius": 0
+  "aura_radius": 0,
+  "range": "Melee",
+  "timing": "Instant",
+  "hp_below_pct": 0,
+  "description": "Hit me once and the blade answers."
 }

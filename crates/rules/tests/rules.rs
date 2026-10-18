@@ -13,7 +13,7 @@ use deadroll_rules::{
     BalanceConfig, MonsterDefense, Unit,
 };
 use deadroll_skillcheck::{presets, Effect, Purpose};
-use deadroll_types::{ActiveState, Aspect, Cell, Class, Form, Race, StateKind, STATES_MAX};
+use deadroll_types::{ActiveState, Aspect, Cell, Class, Race, RangeTag, StateKind, STATES_MAX};
 
 const NONE: TimedMods = [TimedMod {
     kind: ModKind::Haste,
@@ -115,9 +115,9 @@ fn the_config_drives_the_rules() {
     // Each tier reads its own entry.
     assert_eq!(class_increase(Class::Support, 13, &cfg.players), None);
 
-    cfg.players.strike_range = 2;
+    cfg.players.melee_range = 2;
     assert!(in_range(
-        Form::Strike,
+        RangeTag::Melee,
         Cell { x: 0, y: 0 },
         Cell { x: 2, y: 1 },
         &cfg.players
@@ -146,7 +146,11 @@ fn the_config_drives_the_rules() {
         &BalanceConfig::DEFAULT,
         0,
         &hero,
-        Some(&SkillStats::derive(cleave, &cfg.skills)),
+        Some(&SkillStats::derive(
+            cleave,
+            presets::WARRIOR[3].ext,
+            &cfg.skills,
+        )),
         &NONE,
         &AccuracyBuff::default(),
     );
@@ -155,7 +159,11 @@ fn the_config_drives_the_rules() {
         &cfg,
         0,
         &hero,
-        Some(&SkillStats::derive(cleave, &cfg.skills)),
+        Some(&SkillStats::derive(
+            cleave,
+            presets::WARRIOR[3].ext,
+            &cfg.skills,
+        )),
         &NONE,
         &AccuracyBuff::default(),
     );
@@ -169,7 +177,7 @@ fn effects_map_to_actions_and_sides() {
         .chain(&presets::MAGE)
         .chain(&presets::SUPPORT)
     {
-        let s = SkillStats::derive(p.blocks, &BalanceConfig::DEFAULT.skills);
+        let s = SkillStats::derive(p.blocks, p.ext, &BalanceConfig::DEFAULT.skills);
         let side = target_side(Some(&s));
         assert_eq!(
             side == Side::Ally,

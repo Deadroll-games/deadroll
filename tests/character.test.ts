@@ -20,6 +20,7 @@ import {
   Transaction,
   TransactionInstruction,
 } from "@solana/web3.js";
+import { newSkill } from "./skill_ext.ts";
 
 const MPL_CORE = new PublicKey("CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d");
 const REGISTRY = new PublicKey("dZ1jraMfS3bAUTkRw2TA1ddg8UDGzgUdFQz5pmBxjoG");
@@ -100,9 +101,9 @@ const MAGE_SKILLS: [string, Blocks][] = [
   ["Cold Snap", blocks("reactive", "debuff", "magical", "strike", ["cold"], { effect: "slow", trigger: "enemyAdjacent" })],
   ["Cold Mind", blocks("passive", "buff", "magical", "projectile", ["cold"], { effect: "empowerment" })],
 ];
-// Deep copies: tests mutate blocks, the preset tables must stay intact.
-const skills = (set: [string, Blocks][]) =>
-  set.map(([name, b]) => ({ blocks: structuredClone(b), name: text(name, 24) }));
+// Deep copies: tests mutate blocks, the preset tables must stay intact. The patch 5 ext
+// (range, timing, HP threshold) matches the Rust presets (./skill_ext.ts).
+const skills = (set: [string, Blocks][]) => set.map(([name, b]) => newSkill(name, b, text));
 
 const layer = { spriteId: 1, materialRamp: 2, accentRamp: 3, elementRamp: 0 };
 
@@ -135,6 +136,7 @@ const characterOf = (owner: PublicKey, index: number) =>
   pda([Buffer.from("character"), owner.toBuffer(), Buffer.from([index])]);
 const skillsOf = (c: PublicKey) => pda([Buffer.from("skills"), c.toBuffer()]);
 const bagOf = (c: PublicKey) => pda([Buffer.from("bag"), c.toBuffer()]);
+const extrasOf = (c: PublicKey) => pda([Buffer.from("skill_extras"), c.toBuffer()]);
 
 async function funded(sol = 5): Promise<Keypair> {
   const kp = Keypair.generate();
@@ -196,6 +198,7 @@ function createIx(
       asset: asset ? asset.publicKey : null,
       mplCoreProgram: asset ? (opts.mpl ?? MPL_CORE) : null,
       systemProgram: SystemProgram.programId,
+      skillExtras: extrasOf(character),
     })
     .signers(asset ? [owner, asset] : [owner]);
   return { call, character, asset };
@@ -299,6 +302,18 @@ describe("create_character: argument checks (run before GameConfig is read)", ()
   rejects("a skill that breaks the builder", (a) => (a.skills[0].blocks.aspectCount = 0), "InvalidSkill");
   rejects("two reactive skills", (a) => (a.skills[0] = a.skills[4]), "InvalidSkill");
   rejects("an invalid skill name", (a) => (a.skills[2].name = new Array(24).fill(0)), "InvalidName");
+  // Patch 5: no Heal in the builder (CHARACTER 8.1), thresholds only on the HP triggers.
+  rejects("a heal", (a) => (a.skills[1].blocks.effect = e("heal")), "InvalidSkill");
+  rejects("an HP threshold on a hit trigger", (a) => (a.skills[4].ext.hpBelowPct = 40), "InvalidSkill");
+  rejects("an HP trigger without a threshold", (a) => (a.skills[4].blocks.trigger = e("hpBelow")), "InvalidSkill");
+  rejects("an HP threshold out of range", (a) => {
+    a.skills[4].blocks.trigger = e("hpBelow");
+    a.skills[4].ext.hpBelowPct = 95;
+  }, "InvalidSkill");
+  rejects("a passive debuff without an aura", (a) => {
+    a.skills[5].blocks.purpose = e("debuff");
+    a.skills[5].blocks.effect = e("slow");
+  }, "InvalidSkill");
 
   it("rejects a mage predisposition on an elf from the human list", async () => {
     const p = await newPlayer();
@@ -558,4 +573,107 @@ describe("session flow: lock, rewards, death, unlock, freeze", { skip: NEEDS_SES
   // victory -> grant_rewards, HP 0 -> mark_dead, end -> unlock), then freeze_tombstone by a
   // stranger and a failing Core transfer of the frozen tombstone. Covered by L8.2 until then.
   it("locks, levels up, dies, unlocks and freezes the tombstone NFT");
+});
+
+// ---------- patch 5: SkillExtras and set_skill_description ----------
+
+/** The raw `SkillExtras` records (zero-copy: 4 bytes and a 200-byte description each). */
+async function readExtras(character: PublicKey) {
+  const acc = await connection.getAccountInfo(extrasOf(character));
+  assert.ok(acc, "SkillExtras missing");
+  const d = acc.data;
+  const at = (i: number) => 8 + 2 + 32 + i * 204;
+  return {
+    version: d[8],
+    character: new PublicKey(d.subarray(10, 42)),
+    records: Array.from({ length: 16 }, (_, i) => {
+      const r = d.subarray(at(i), at(i) + 204);
+      const desc = r.subarray(4);
+      const end = desc.indexOf(0);
+      return {
+        range: r[0],
+        timing: r[1],
+        hpBelowPct: r[2],
+        apCost: r[3],
+        description: desc.subarray(0, end < 0 ? 200 : end).toString("ascii"),
+      };
+    }),
+  };
+}
+
+function describeIx(owner: Keypair, character: PublicKey, index: number, description: number[], extras = extrasOf(character)) {
+  return program.methods
+    .setSkillDescription(index, description)
+    .accountsStrict({ owner: owner.publicKey, character, skillSet: skillsOf(character), skillExtras: extras })
+    .signers([owner]);
+}
+
+describe("SkillExtras (patch 5)", { skip: NEEDS_CONFIG }, () => {
+  it("create_character stores each skill's range, timing, HP threshold and AP cost", async () => {
+    const p = await newPlayer();
+    const c = await create(p, warrior());
+    const x = await readExtras(c.character);
+    assert.equal(x.version, 1);
+    assert.ok(x.character.equals(c.character));
+    // Piercing Thrust 2 AP melee, Shield Bash 3 (Stun), Javelin 2 ranged, Bleeding Cleave 3 (line)
+    // ranged, Riposte and Iron Skin 0 (not actions).
+    assert.deepEqual(
+      x.records.slice(0, 6).map((r) => [r.range, r.apCost]),
+      [
+        [0, 2],
+        [0, 3],
+        [1, 2],
+        [1, 3],
+        [0, 0],
+        [0, 0],
+      ],
+    );
+    assert.ok(x.records.every((r) => r.timing === 0 && r.hpBelowPct === 0 && r.description === ""));
+  });
+
+  it("stores the HP threshold of an HP trigger", async () => {
+    const p = await newPlayer();
+    const args = warrior();
+    args.skills[4].blocks.trigger = e("hpBelow");
+    args.skills[4].ext.hpBelowPct = 35;
+    const c = await create(p, args);
+    assert.equal((await readExtras(c.character)).records[4].hpBelowPct, 35);
+  });
+});
+
+describe("set_skill_description", { skip: NEEDS_CONFIG }, () => {
+  it("writes a description once, then refuses a second one", async () => {
+    const p = await newPlayer();
+    const c = await create(p, warrior());
+    const sig = await describeIx(p, c.character, 2, text("Thrown hard and low.", 200)).rpc({ commitment: "confirmed" });
+    const tx = await connection.getTransaction(sig, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
+    const parser = new (await import("@anchor-lang/core")).EventParser(ID, program.coder);
+    const ev = [...parser.parseLogs(tx?.meta?.logMessages ?? [])].find((x) => x.name === "skillDescribed");
+    assert.ok(ev, "SkillDescribed");
+    assert.equal(ev.data.skillIndex, 2);
+    const x = await readExtras(c.character);
+    assert.equal(x.records[2].description, "Thrown hard and low.");
+    // The full 200 bytes fit.
+    await describeIx(p, c.character, 0, text("x".repeat(200), 200)).rpc();
+    assert.equal((await readExtras(c.character)).records[0].description.length, 200);
+    // Once: like the name, it never changes.
+    await fails(describeIx(p, c.character, 2, text("Another text.", 200)).rpc(), "DescriptionAlreadySet");
+  });
+
+  it("rejects a stranger, a missing skill, bad text and a foreign extras account", async () => {
+    const p = await newPlayer();
+    const c = await create(p, warrior());
+    const other = await create(await newPlayer(), warrior());
+    const stranger = await funded(1);
+    await fails(describeIx(stranger, c.character, 0, text("Mine now.", 200)).rpc(), "NotOwner");
+    await fails(describeIx(p, c.character, 6, text("No such skill.", 200)).rpc(), "NoSuchSkill");
+    await fails(describeIx(p, c.character, 0, new Array(200).fill(0)).rpc(), "InvalidDescription");
+    await fails(describeIx(p, c.character, 0, text(" Leading space.", 200)).rpc(), "InvalidDescription");
+    const nonAscii = text("Caf", 200);
+    nonAscii[3] = 0xc3;
+    await fails(describeIx(p, c.character, 0, nonAscii).rpc(), "InvalidDescription");
+    await fails(describeIx(p, c.character, 0, text("Wrong account.", 200), extrasOf(other.character)).rpc(), "ConstraintSeeds");
+    // Nothing was written.
+    assert.ok((await readExtras(c.character)).records.every((r) => r.description === ""));
+  });
 });

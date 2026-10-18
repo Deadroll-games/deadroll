@@ -12,6 +12,7 @@ use deadroll_combat::{
 use deadroll_types::Monster;
 
 use crate::{
+    aura::{aura_kind, reactive_aura, Aura},
     config::BalanceConfig,
     input::{
         buff_extra_turns, effect_action, effect_chance, effect_range, heal, land_effect,
@@ -39,8 +40,10 @@ pub struct AttackOutcome {
 
 /// A player's weapon (`skill = None`) or damage skill on a monster, then that skill's effect
 /// (if any) when the hit landed and the monster lives: its own chance (certain on a crit).
-/// The resonance's timed modifiers land on the monster here, its accuracy buff on
-/// `accuracy`; what it does to other monsters and cells is `crate::spread`.
+/// The resonance's timed modifiers land on the monster here (`monster_mods`, its own), its
+/// accuracy buff on `accuracy`; what it does to other monsters and cells is `crate::spread`.
+/// `hero_mods` and `monster_view` are the modifiers the hit sees: their own plus the auras
+/// over them (`crate::aura`).
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
 pub fn attack_monster(
@@ -54,12 +57,13 @@ pub fn attack_monster(
     profile: &MonsterProfile,
     monster: &mut Monster,
     monster_mods: &mut TimedMods,
+    monster_view: &TimedMods,
     input: &mut HitInput,
     result: &mut HitResult,
     src: &mut impl RollSource,
 ) -> AttackOutcome {
     input.attacker = player_attacker(cfg, attacker, hero, skill, hero_mods, accuracy);
-    input.defender = monster_defender(profile, &monster.states, monster_mods);
+    input.defender = monster_defender(profile, &monster.states, monster_view);
     resolve_hit_into(input, &cfg.combat, tables, src, result);
     for m in result.target_mods() {
         apply_mod(monster_mods, *m);
@@ -177,6 +181,23 @@ pub fn support_ally(
         )
     };
     RiderOutcome { roll, applied }
+}
+
+/// A reactive skill's temporary aura around its bearer (docs/SKILL_BUILDER.md 3.5): no roll to
+/// land, a crit roll and the d100 strength, like a buff. `None` with the roll when the skill is
+/// not an aura.
+pub fn start_aura(
+    cfg: &BalanceConfig,
+    hero: &HeroStats,
+    skill: &SkillStats,
+    src: &mut impl RollSource,
+) -> (EffectRoll, Option<Aura>) {
+    let Some(kind) = aura_kind(skill) else {
+        return (EffectRoll::default(), None);
+    };
+    let input = support_input(cfg, hero, skill, EffectAction::Mod(kind), None);
+    let roll = resolve_support(&input, &cfg.combat, src);
+    (roll, reactive_aura(cfg, skill, roll.amount))
 }
 
 /// A monster's natural attack on a player; returns whether the player died.

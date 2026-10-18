@@ -162,6 +162,10 @@ pub fn session(players: &[Cell]) -> GameSession {
         acted_seq: 0,
         started_seq: 0,
         pending_target: Pubkey::default(),
+        participations: [Pubkey::default(); PARTY_MAX],
+        reactives: Default::default(),
+        auras: Default::default(),
+        pending_reactive: Default::default(),
     }
 }
 

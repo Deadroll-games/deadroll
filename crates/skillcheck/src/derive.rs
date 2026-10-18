@@ -18,6 +18,16 @@ pub const THIRD_ASPECT_COUNTER_BP: u32 = 2_000;
 /// Cooldowns in the character's turns. BALANCE: placeholders.
 pub const ACTIVE_COOLDOWN: u8 = 1;
 pub const REACTIVE_COOLDOWN: u8 = 2;
+/// Action points of an active skill (docs/PARTY_AND_TURNS.md, section 5.1): a base plus what the
+/// blocks add. BALANCE: placeholders.
+pub const AP_BASE: u8 = 2;
+pub const AP_LINE: u8 = 1;
+pub const AP_THIRD_ASPECT: u8 = 1;
+pub const AP_EFFECT: u8 = 0;
+pub const AP_HARD_CONTROL: u8 = 1;
+/// Limits of the HP threshold of a reactive trigger, percent of the maximum. BALANCE: placeholders.
+pub const HP_BELOW_MIN_PCT: u8 = 10;
+pub const HP_BELOW_MAX_PCT: u8 = 90;
 
 /// Stored next to the blocks; `deadroll_combat::Skill` is built from these by `session`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -30,6 +40,8 @@ pub struct Derived {
     pub fusion: u8,
     /// Cooldown in the character's turns, `0` = none (passive).
     pub cooldown: u8,
+    /// Action points to use it, `0` for reactive and passive skills (they are not actions).
+    pub ap_cost: u8,
 }
 
 /// Fusion of an ordered aspect pair (section 7): `1 + first * 6 + second`, `0` = none.
@@ -56,6 +68,17 @@ pub struct SkillTuning {
     pub third_aspect_counter_bp: u32,
     pub active_cooldown: u8,
     pub reactive_cooldown: u8,
+    /// Action points of an active skill: `ap_base`, plus `ap_line` on a line, `ap_third_aspect`
+    /// with three aspects, `ap_effect` for a damage skill's effect, `ap_hard_control` for Stun or
+    /// Freeze.
+    pub ap_base: u8,
+    pub ap_line: u8,
+    pub ap_third_aspect: u8,
+    pub ap_effect: u8,
+    pub ap_hard_control: u8,
+    /// Limits of the HP threshold of `HpBelow` / `AllyHpBelow`, percent.
+    pub hp_below_min_pct: u8,
+    pub hp_below_max_pct: u8,
 }
 
 impl SkillTuning {
@@ -66,6 +89,13 @@ impl SkillTuning {
         third_aspect_counter_bp: THIRD_ASPECT_COUNTER_BP,
         active_cooldown: ACTIVE_COOLDOWN,
         reactive_cooldown: REACTIVE_COOLDOWN,
+        ap_base: AP_BASE,
+        ap_line: AP_LINE,
+        ap_third_aspect: AP_THIRD_ASPECT,
+        ap_effect: AP_EFFECT,
+        ap_hard_control: AP_HARD_CONTROL,
+        hp_below_min_pct: HP_BELOW_MIN_PCT,
+        hp_below_max_pct: HP_BELOW_MAX_PCT,
     };
 }
 
@@ -100,15 +130,27 @@ pub fn derive_with(s: &SkillBlocks, t: &SkillTuning) -> Derived {
         0
     };
 
+    let line = s.target == Target::Line;
+    let third = count == 3;
+    let hard = s.effect.hard_control_aspect().is_some();
     let cooldown = match s.category {
         Category::Passive => 0,
         Category::Reactive => t.reactive_cooldown,
-        Category::Active => {
-            t.active_cooldown
-                + (s.target == Target::Line) as u8
-                + (count == 3) as u8
-                + s.effect.hard_control_aspect().is_some() as u8
-        }
+        Category::Active => t.active_cooldown + line as u8 + third as u8 + hard as u8,
+    };
+
+    let add = |on: bool, ap: u8| if on { ap } else { 0 };
+    let ap_cost = match s.category {
+        Category::Reactive | Category::Passive => 0,
+        Category::Active => t
+            .ap_base
+            .saturating_add(add(line, t.ap_line))
+            .saturating_add(add(third, t.ap_third_aspect))
+            .saturating_add(add(
+                s.purpose == Purpose::Damage && s.effect != Effect::None,
+                t.ap_effect,
+            ))
+            .saturating_add(add(hard, t.ap_hard_control)),
     };
 
     Derived {
@@ -116,5 +158,6 @@ pub fn derive_with(s: &SkillBlocks, t: &SkillTuning) -> Derived {
         power_bp: power,
         fusion,
         cooldown,
+        ap_cost,
     }
 }

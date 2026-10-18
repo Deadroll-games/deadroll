@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Effect, PRESETS, SKILL_ERROR_MESSAGES, type NamedSkill } from "../../chain/skillcheck";
+import { Effect, PRESETS, RangeTag, SKILL_DESCRIPTION_LEN, SKILL_ERROR_MESSAGES, Trigger, type NamedSkill } from "../../chain/skillcheck";
 import { Aspect, Class, Race } from "../../chain/types";
 import { CharacterForm } from "./CharacterForm";
 import { blankSkill, checkSkills, SkillBuilder } from "./SkillBuilder";
@@ -82,7 +82,41 @@ describe("SkillBuilder", () => {
     render(<Builder cls={Class.Mage} initial={[PRESETS[Class.Mage][1]!]} />);
     // Frost Burn: Cold 65% / Fire 35%, fusion 1 + 1*6 + 0 = 7
     const card = screen.getByRole("listitem", { name: "Skill 1" });
-    expect(within(card).getByText(/power 100% · Cold 65% \/ Fire 35% · cooldown 1 · range 6 · fusion #7 · usable in combat/)).toBeTruthy();
+    expect(within(card).getByText(/power 100% · Cold 65% \/ Fire 35% · 2 AP · cooldown 1 · reach 6 · fusion #7 · usable in combat/)).toBeTruthy();
+  });
+
+  it("patch 5: range, AP and reach follow the picks; heal is not offered", () => {
+    render(<Builder cls={Class.Mage} initial={[PRESETS[Class.Mage][0]!]} />);
+    const card = screen.getByRole("listitem", { name: "Skill 1" });
+    // Frost Bolt is ranged; melee brings the reach to 1.
+    expect(within(card).getByText(/· 2 AP · cooldown \d+ · reach 6/)).toBeTruthy();
+    select("Skill 1 range", RangeTag.Melee);
+    expect(within(card).getByText(/reach 1/)).toBeTruthy();
+    const effects = Array.from((screen.getByLabelText("Skill 1 effect") as HTMLSelectElement).options).map((o) => o.textContent);
+    expect(effects).not.toContain("Heal");
+  });
+
+  it("patch 5: an HP trigger asks for a threshold in percent within the limits", () => {
+    const lastStand = PRESETS[Class.Support].find((k) => k.name === "Last Stand")!;
+    render(<Builder cls={Class.Support} initial={[lastStand]} />);
+    const input = screen.getByLabelText("Skill 1 HP threshold");
+    expect(input).toHaveProperty("value", "40");
+    fireEvent.change(input, { target: { value: "95" } });
+    expect(screen.getByText(SKILL_ERROR_MESSAGES.ThresholdRange)).toBeTruthy();
+    fireEvent.change(input, { target: { value: "30" } });
+    expect(screen.queryByText(SKILL_ERROR_MESSAGES.ThresholdRange)).toBeNull();
+    // Another trigger takes the threshold away.
+    select("Skill 1 trigger", Trigger.Hit);
+    expect(screen.queryByLabelText("Skill 1 HP threshold")).toBeNull();
+    expect(within(screen.getByRole("listitem", { name: "Skill 1" })).getByText(/no AP \(not an action\)/)).toBeTruthy();
+  });
+
+  it("patch 5: the description counts up to 200 characters", () => {
+    render(<Builder cls={Class.Mage} initial={[PRESETS[Class.Mage][0]!]} />);
+    const box = screen.getByLabelText("Skill 1 description");
+    expect(box).toHaveProperty("maxLength", SKILL_DESCRIPTION_LEN);
+    fireEvent.change(box, { target: { value: "Cold." } });
+    expect(screen.getByText(`Description (5/${SKILL_DESCRIPTION_LEN})`)).toBeTruthy();
   });
 });
 

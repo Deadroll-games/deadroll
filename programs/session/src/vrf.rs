@@ -102,6 +102,10 @@ pub struct CallbackAccounts {
     pub target_participation: Option<Pubkey>,
     /// The session's `MapLayout` (`GameSession.layout`), read-only (patch 4).
     pub layout: Pubkey,
+    /// Patch 5: every other living player's `(Participation, Character)`, in slot order
+    /// (`party::party_keys`), after the fixed list.
+    pub party: [(Pubkey, Pubkey); deadroll_types::PARTY_MAX],
+    pub party_len: usize,
 }
 
 pub fn callback_metas(a: &CallbackAccounts) -> Vec<SerializableAccountMeta> {
@@ -110,7 +114,7 @@ pub fn callback_metas(a: &CallbackAccounts) -> Vec<SerializableAccountMeta> {
         is_signer: false,
         is_writable,
     };
-    vec![
+    let mut metas = vec![
         meta(&a.session, true),
         meta(&a.monsters, true),
         meta(&a.participation, true),
@@ -126,7 +130,12 @@ pub fn callback_metas(a: &CallbackAccounts) -> Vec<SerializableAccountMeta> {
             None => meta(&crate::ID, false),
         },
         meta(&a.layout, false),
-    ]
+    ];
+    for (participation, character) in &a.party[..a.party_len] {
+        metas.push(meta(participation, true));
+        metas.push(meta(character, false));
+    }
+    metas
 }
 
 /// Accounts of the VRF request CPI.
@@ -242,6 +251,8 @@ mod tests {
                 bag: keys[5],
                 target_participation: ally,
                 layout: keys[7],
+                party: Default::default(),
+                party_len: 0,
             });
             let anchors = crate::accounts::ConsumeRandomness {
                 vrf_program_identity: VRF_IDENTITY,
@@ -272,5 +283,34 @@ mod tests {
             assert_eq!(ours.last().unwrap().pubkey.to_bytes(), keys[7].to_bytes());
             assert!(!ours.last().unwrap().is_writable);
         }
+    }
+
+    #[test]
+    fn party_accounts_follow_the_fixed_list() {
+        let k: Vec<Pubkey> = (0..12).map(|_| Pubkey::new_unique()).collect();
+        let mut party = [(Pubkey::default(), Pubkey::default()); deadroll_types::PARTY_MAX];
+        party[0] = (k[8], k[9]);
+        party[1] = (k[10], k[11]);
+        let metas = callback_metas(&CallbackAccounts {
+            session: k[0],
+            monsters: k[1],
+            participation: k[2],
+            character: k[3],
+            skill_set: k[4],
+            bag: k[5],
+            target_participation: None,
+            layout: k[7],
+            party,
+            party_len: 2,
+        });
+        assert_eq!(metas.len(), 11 + 4);
+        let tail: Vec<(Pubkey, bool)> = metas[11..]
+            .iter()
+            .map(|m| (Pubkey::new_from_array(m.pubkey.to_bytes()), m.is_writable))
+            .collect();
+        assert_eq!(
+            tail,
+            vec![(k[8], true), (k[9], false), (k[10], true), (k[11], false)]
+        );
     }
 }

@@ -2,15 +2,18 @@
 // a skill targets, the EffectResolved / ModsTicked events in app shape, and their log lines.
 // Pure functions over decoded accounts and events.
 import type { Address } from "@solana/kit";
-import { ASPECT_KEYS, MOD_KEYS, bytesText, enumIndex, type Enum, type SkillRecordAcc, type TimedModAcc } from "./game";
+import { ASPECT_KEYS, MOD_KEYS, bytesText, enumIndex, type Enum, type MapSkillAcc, type SkillRecordAcc, type TimedModAcc } from "./game";
 import { ASPECT_NAMES, effectAmount } from "./names";
-import { Effect, Form, Purpose, skillSide, usableInCombat, type Category, type Side, type SkillBlocks } from "./skillcheck";
+import { Effect, Form, Purpose, RangeTag, Target, derive, skillSide, usableInCombat, type Category, type Side, type SkillBlocks } from "./skillcheck";
 import { Applied, HitOutcome, type Aspect, type ModKind, type TimedMod } from "./types";
 
 const EFFECT_KEYS = ["none", "weakening", "slow", "vulnerability", "stun", "freeze", "haste", "empowerment", "protection", "heal"] as const;
 const PURPOSE_KEYS = ["damage", "buff", "debuff"] as const;
 const CATEGORY_KEYS = ["active", "reactive", "passive"] as const;
 const FORM_KEYS = ["strike", "projectile"] as const;
+const RANGE_KEYS = ["melee", "ranged"] as const;
+const TARGET_KEYS = ["single", "line"] as const;
+const TRIGGER_KEYS = ["none", "hit", "critHit", "hpBelow", "allyHpBelow", "controlled", "enemyAdjacent"] as const;
 const OUTCOMES = ["miss", "hit", "immune"];
 const APPLIED = ["none", "added", "refreshed", "froze"];
 export const MOD_NAMES = ["Haste", "Slow", "Empowerment", "Weakening", "Protection", "Vulnerability"] as const;
@@ -72,15 +75,47 @@ export function modsAt(events: readonly { name: string; data: any }[], index: nu
 // ---- skills in battle
 
 /** One SkillSet slot as the skill bar needs it. */
-export type CombatSkill = { slot: number; name: string; category: Category; usable: boolean; purpose: Purpose; side: Side; form: Form; effect: Effect };
+export type CombatSkill = {
+  slot: number;
+  name: string;
+  category: Category;
+  usable: boolean;
+  purpose: Purpose;
+  side: Side;
+  form: Form;
+  effect: Effect;
+  /** Patch 5: how far it reaches, what it costs, whether it hits a whole line. */
+  range: RangeTag;
+  apCost: number;
+  line: boolean;
+};
 
-export function combatSkill(slot: number, k: SkillRecordAcc): CombatSkill {
-  const purpose = enumIndex(k.blocks.purpose, PURPOSE_KEYS) as Purpose;
-  const effect = enumIndex(k.blocks.effect, EFFECT_KEYS) as Effect;
-  const form = enumIndex(k.blocks.form, FORM_KEYS) as Form;
-  const category = enumIndex(k.blocks.category, CATEGORY_KEYS) as Category;
-  const usable = usableInCombat({ category, purpose, effect } as SkillBlocks);
-  return { slot, name: bytesText(k.name), category, usable, purpose, side: skillSide(purpose), form, effect };
+/** The blocks of a stored skill, as the TS mirror of crates/skillcheck reads them. */
+export function recordBlocks(k: SkillRecordAcc): SkillBlocks {
+  const b = k.blocks;
+  return {
+    category: enumIndex(b.category, CATEGORY_KEYS) as Category,
+    purpose: enumIndex(b.purpose, PURPOSE_KEYS) as Purpose,
+    source: (Object.keys(b.source)[0] === "combat" ? 1 : 0) as SkillBlocks["source"],
+    form: enumIndex(b.form, FORM_KEYS) as Form,
+    target: enumIndex(b.target, TARGET_KEYS) as Target,
+    aspects: b.aspects.map((a) => enumIndex(a, ASPECT_KEYS)) as SkillBlocks["aspects"],
+    aspectCount: b.aspectCount,
+    effect: enumIndex(b.effect, EFFECT_KEYS) as Effect,
+    trigger: enumIndex(b.trigger, TRIGGER_KEYS) as SkillBlocks["trigger"],
+    auraRadius: b.auraRadius,
+  };
+}
+
+/** `map`: the participation's snapshot of the skill (set_ready), which carries its range and AP. */
+export function combatSkill(slot: number, k: SkillRecordAcc, map: MapSkillAcc | null = null): CombatSkill {
+  const blocks = recordBlocks(k);
+  const { purpose, effect, form, category } = blocks;
+  const usable = usableInCombat(blocks);
+  const range = map ? (enumIndex(map.ext.range, RANGE_KEYS) as RangeTag) : form === Form.Projectile ? RangeTag.Ranged : RangeTag.Melee;
+  const apCost = map ? map.apCost : derive(blocks).apCost;
+  const line = blocks.target === Target.Line;
+  return { slot, name: bytesText(k.name), category, usable, purpose, side: skillSide(purpose), form, effect, range, apCost, line };
 }
 
 // ---- EffectResolved

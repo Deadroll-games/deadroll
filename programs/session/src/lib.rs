@@ -9,8 +9,11 @@ pub mod errors;
 pub mod events;
 pub mod hit_event;
 pub mod instructions;
+pub mod line;
 pub mod movement;
 pub mod outcomes;
+pub mod party;
+pub mod reactions;
 pub mod rules;
 pub mod state;
 pub mod turns;
@@ -102,7 +105,10 @@ pub mod deadroll_session {
 
     /// VRF callback: resolves the pending attack through `deadroll_combat`, applies HP and
     /// states, death (`character.mark_dead`), boss victory and wipe.
-    pub fn consume_randomness(ctx: Context<ConsumeRandomness>, randomness: [u8; 32]) -> Result<()> {
+    pub fn consume_randomness<'info>(
+        ctx: Context<'info, ConsumeRandomness<'info>>,
+        randomness: [u8; 32],
+    ) -> Result<()> {
         consume_randomness::handler(ctx, randomness)
     }
 

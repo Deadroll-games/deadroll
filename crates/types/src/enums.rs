@@ -23,6 +23,11 @@ u8_enum!(Source { Magical, Combat });
 u8_enum!(Form { Strike, Projectile });
 u8_enum!(TimeTag { Instant, DoT });
 u8_enum!(
+    /// Range axis of a skill or a basic attack (docs/DAMAGE_TYPES_AND_MIXES.md, section 2).
+    /// Added in patch 5.
+    RangeTag { Melee, Ranged }
+);
+u8_enum!(
     /// Burning, Chill, Freeze, Bleeding, Shock, Stun, then Penetration (patch 3, append only).
     StateKind { Burning, Chill, Freeze, Bleeding, Shock, Stun, Penetration }
 );

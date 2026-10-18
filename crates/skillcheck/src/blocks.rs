@@ -1,6 +1,6 @@
 //! Skill blocks (docs/SKILL_BUILDER.md, section 2). Mechanics come only from these.
 
-use deadroll_types::{Aspect, Form, Source};
+use deadroll_types::{Aspect, Form, RangeTag, Source, TimeTag};
 
 u8_enum!(
     /// Section 3: active (4 slots), reactive (1), passive (1).
@@ -23,6 +23,13 @@ u8_enum!(
     /// Section 3.2, reactive skills only.
     Trigger { None, Hit, CritHit, HpBelow, AllyHpBelow, Controlled, EnemyAdjacent }
 );
+
+impl Trigger {
+    /// `HpBelow` and `AllyHpBelow` need an HP threshold ([`SkillExt::hp_below_pct`]).
+    pub const fn uses_threshold(self) -> bool {
+        matches!(self, Trigger::HpBelow | Trigger::AllyHpBelow)
+    }
+}
 
 impl Effect {
     /// Weakening, Slow, Vulnerability and hard control: allowed on damage and debuff skills.
@@ -78,6 +85,33 @@ shared! {
         /// Aura radius in cells, `0` = not an aura (section 3.5).
         pub aura_radius: u8,
     }
+}
+
+shared! {
+    /// Blocks added in patch 5, stored next to [`SkillBlocks`] (a `SkillSet` record cannot grow
+    /// in place): the range and timing tags (docs/DAMAGE_TYPES_AND_MIXES.md, section 2) and the
+    /// HP threshold of a reactive trigger (docs/SKILL_BUILDER.md, section 3.2).
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct SkillExt {
+        /// Melee or ranged: how far the skill reaches.
+        pub range: RangeTag,
+        /// Instant or over time. Only a tag for now (rules by tag come later).
+        pub timing: TimeTag,
+        /// `HpBelow` / `AllyHpBelow`: the trigger fires when HP drops below this percent of the
+        /// maximum. `0` for every other skill.
+        pub hp_below_pct: u8,
+    }
+}
+
+impl SkillExt {
+    /// Borsh size in bytes.
+    pub const SIZE: usize = 3;
+    /// Melee, instant, no threshold.
+    pub const MELEE: SkillExt = SkillExt {
+        range: RangeTag::Melee,
+        timing: TimeTag::Instant,
+        hp_below_pct: 0,
+    };
 }
 
 impl SkillBlocks {

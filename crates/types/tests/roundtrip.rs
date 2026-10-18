@@ -203,6 +203,7 @@ enum_tests! {
     source: Source, 2;
     form: Form, 2;
     time_tag: TimeTag, 2;
+    range_tag: RangeTag, 2;
     state_kind: StateKind, 7;
     tile: Tile, 7;
     session_status: SessionStatus, 6;
@@ -221,6 +222,7 @@ fn enum_discriminants_match_contract_order() {
     assert_eq!(SessionStatus::Abandoned as u8, 5);
     assert_eq!(MapStatus::Finished as u8, 3);
     assert_eq!(ProgramIdx::Session as usize, 5);
+    assert_eq!(RangeTag::Ranged as u8, 1);
 }
 
 #[test]

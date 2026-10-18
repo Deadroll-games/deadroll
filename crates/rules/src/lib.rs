@@ -9,16 +9,21 @@
 //! - Every balance number lives in [`BalanceConfig`]. Placeholders, tune in `tools/balance`.
 //! - Item numbers and class starter kits are [`config::ItemTuning`]; [`items`] holds the equipment
 //!   rules every program and the simulator share.
+//! - Skills beyond the one action (patch 5): passive skills and auras ([`aura`]), reactive skills
+//!   ([`reactive`]) and the line target ([`line`]).
 //! - Content (monster stats) is data: [`monster::MonsterBase`]. The program reads the P0 table
 //!   in [`monster::p0`], the simulator reads JSON presets.
 //! - Integers only, no allocation, `no_std` without features.
 #![cfg_attr(not(feature = "std"), no_std)]
 
+pub mod aura;
 pub mod config;
 pub mod input;
 pub mod items;
+pub mod line;
 pub mod monster;
 pub mod player;
+pub mod reactive;
 #[cfg(feature = "serde")]
 pub mod registry;
 pub mod resolve;

@@ -3,7 +3,10 @@
 
 use deadroll_types::{Aspect, Class, Source};
 
-use crate::{Category, Effect, Purpose, SkillBlocks, Target, Trigger, SKILL_ASPECTS_MAX};
+use crate::{
+    Category, Effect, Purpose, SkillBlocks, SkillExt, SkillTuning, Target, Trigger,
+    SKILL_ASPECTS_MAX,
+};
 
 /// Largest aura radius in cells. BALANCE: placeholder.
 pub const AURA_RADIUS_MAX: u8 = 3;
@@ -73,6 +76,16 @@ pub enum SkillError {
     SelectionCategory,
     /// Map selection: not exactly min(slots, owned) skills of a category (section 13).
     SelectionCount,
+    /// Heal is not in the builder yet: healing comes with its own class (CHARACTER.md, 8.1).
+    HealNotAvailable,
+    /// `HpBelow` / `AllyHpBelow` without an HP threshold (section 3.2).
+    MissingThreshold,
+    /// An HP threshold on a skill whose trigger has none.
+    UnexpectedThreshold,
+    /// HP threshold outside `SkillTuning::hp_below_min_pct..=hp_below_max_pct`.
+    ThresholdRange,
+    /// A passive debuff works only as an aura on the enemies around it.
+    PassiveDebuffNeedsAura,
 }
 
 impl SkillError {
@@ -104,6 +117,11 @@ impl SkillError {
             SkillError::SelectionCount => {
                 "take 4 active, 1 reactive and 1 passive (all of a kind if there are fewer)"
             }
+            SkillError::HealNotAvailable => "healing is not available yet",
+            SkillError::MissingThreshold => "this trigger needs an HP threshold",
+            SkillError::UnexpectedThreshold => "only an HP trigger has a threshold",
+            SkillError::ThresholdRange => "the HP threshold is out of range",
+            SkillError::PassiveDebuffNeedsAura => "a passive debuff must be an aura",
         }
     }
 }
@@ -122,6 +140,10 @@ pub fn validate(s: &SkillBlocks) -> Result<(), SkillError> {
     }
     if s.aspects[count..].iter().any(|a| *a != Aspect::default()) {
         return Err(SkillError::UnusedAspectSet);
+    }
+
+    if s.effect == Effect::Heal {
+        return Err(SkillError::HealNotAvailable);
     }
 
     match s.purpose {
@@ -171,12 +193,17 @@ pub fn validate(s: &SkillBlocks) -> Result<(), SkillError> {
     if s.category == Category::Passive && s.purpose == Purpose::Damage {
         return Err(SkillError::PassiveDamage);
     }
+    if s.category == Category::Passive && s.purpose == Purpose::Debuff && !s.is_aura() {
+        return Err(SkillError::PassiveDebuffNeedsAura);
+    }
 
     if s.is_aura() {
         if s.category == Category::Active {
             return Err(SkillError::AuraCategory);
         }
-        if s.purpose == Purpose::Damage {
+        // One aura = one effect: one stat, one resistance, one increase (section 3.5). Hard
+        // control is none of these.
+        if s.purpose == Purpose::Damage || s.effect.hard_control_aspect().is_some() {
             return Err(SkillError::AuraEffect);
         }
         if s.aura_radius > AURA_RADIUS_MAX {
@@ -186,9 +213,33 @@ pub fn validate(s: &SkillBlocks) -> Result<(), SkillError> {
     Ok(())
 }
 
-/// Builder rules plus the class limits on the first six skills (section 10.1).
-pub fn validate_starting(s: &SkillBlocks, class: Class) -> Result<(), SkillError> {
+/// [`validate`] plus the rules of the patch 5 blocks, with the default numbers.
+pub fn validate_skill(s: &SkillBlocks, e: &SkillExt) -> Result<(), SkillError> {
+    validate_skill_with(s, e, &SkillTuning::DEFAULT)
+}
+
+/// [`validate_skill`] with the limits of `t`: an HP threshold exactly on the HP triggers, within
+/// `t.hp_below_min_pct..=t.hp_below_max_pct`. The range and timing tags have no forbidden pairs
+/// (DAMAGE_TYPES_AND_MIXES.md, 2.1).
+pub fn validate_skill_with(
+    s: &SkillBlocks,
+    e: &SkillExt,
+    t: &SkillTuning,
+) -> Result<(), SkillError> {
     validate(s)?;
+    match (s.trigger.uses_threshold(), e.hp_below_pct) {
+        (true, 0) => Err(SkillError::MissingThreshold),
+        (true, pct) if pct < t.hp_below_min_pct || pct > t.hp_below_max_pct => {
+            Err(SkillError::ThresholdRange)
+        }
+        (false, pct) if pct != 0 => Err(SkillError::UnexpectedThreshold),
+        _ => Ok(()),
+    }
+}
+
+/// Builder rules plus the class limits on the first six skills (section 10.1).
+pub fn validate_starting(s: &SkillBlocks, e: &SkillExt, class: Class) -> Result<(), SkillError> {
+    validate_skill(s, e)?;
     match class {
         Class::Warrior if s.source != Source::Combat => Err(SkillError::ClassSource),
         Class::Mage if s.source != Source::Magical => Err(SkillError::ClassSource),

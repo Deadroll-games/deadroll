@@ -2,6 +2,8 @@
 // Checked against fixtures generated from the Rust crate (crates/skillcheck/tests/ts_fixtures.rs,
 // app/src/chain/__fixtures__/skillcheck.json). Change the Rust first, regenerate, then this file.
 // Enum values are the on-chain discriminants; the borsh coder accepts them as variant indexes.
+// The numbers come from balance.json (deadroll_rules::BalanceConfig::DEFAULT).
+import balance from "./balance.json";
 import { Aspect, Class } from "./types";
 
 export const Category = { Active: 0, Reactive: 1, Passive: 2 } as const;
@@ -14,6 +16,12 @@ export type Source = (typeof Source)[keyof typeof Source];
 /** crates/types Form. */
 export const Form = { Strike: 0, Projectile: 1 } as const;
 export type Form = (typeof Form)[keyof typeof Form];
+/** crates/types RangeTag (DAMAGE_TYPES_AND_MIXES 2, the range axis). */
+export const RangeTag = { Melee: 0, Ranged: 1 } as const;
+export type RangeTag = (typeof RangeTag)[keyof typeof RangeTag];
+/** crates/types TimeTag: only a tag for now. */
+export const TimeTag = { Instant: 0, OverTime: 1 } as const;
+export type TimeTag = (typeof TimeTag)[keyof typeof TimeTag];
 export const Target = { Single: 0, Line: 1 } as const;
 export type Target = (typeof Target)[keyof typeof Target];
 export const Effect = {
@@ -36,8 +44,22 @@ export const CATEGORY_NAMES = ["Active", "Reactive", "Passive"] as const;
 export const PURPOSE_NAMES = ["Damage", "Buff", "Debuff"] as const;
 export const SOURCE_NAMES = ["Magical", "Combat"] as const;
 export const FORM_NAMES = ["Strike", "Projectile"] as const;
+export const RANGE_NAMES = ["Melee", "Ranged"] as const;
+export const TIMING_NAMES = ["Instant", "Over time"] as const;
 export const TARGET_NAMES = ["Single", "Line"] as const;
 export const EFFECT_NAMES = ["None", "Weakening", "Slow", "Vulnerability", "Stun", "Freeze", "Haste", "Empowerment", "Protection", "Heal"] as const;
+/** The effects the builder offers: no Heal until the healing class (docs/CHARACTER.md 8.1). */
+export const BUILDER_EFFECTS: readonly Effect[] = [
+  Effect.None,
+  Effect.Weakening,
+  Effect.Slow,
+  Effect.Vulnerability,
+  Effect.Stun,
+  Effect.Freeze,
+  Effect.Haste,
+  Effect.Empowerment,
+  Effect.Protection,
+];
 export const TRIGGER_NAMES = ["None", "Hit", "Crit hit", "HP below", "Ally HP below", "Controlled", "Enemy adjacent"] as const;
 
 export const SKILL_ASPECTS_MAX = 3;
@@ -56,18 +78,24 @@ export const SELECTION_SLOTS: readonly (readonly [Category, number, number])[] =
 ];
 /** programs/character state/skill_set.rs SKILL_NAME_LEN. */
 export const SKILL_NAME_LEN = 24;
+/** programs/character state/skill_extras.rs SKILL_DESCRIPTION_LEN. */
+export const SKILL_DESCRIPTION_LEN = 200;
 
 const BP = 10_000;
-export const SHARES_BP = [
-  [BP, 0, 0],
-  [6_500, 3_500, 0],
-  [5_500, 3_000, 1_500],
-] as const;
-export const LINE_COUNTER_BP = 5_000;
-export const EFFECT_COUNTER_BP = 2_500;
-export const THIRD_ASPECT_COUNTER_BP = 2_000;
-export const ACTIVE_COOLDOWN = 1;
-export const REACTIVE_COOLDOWN = 2;
+const T = balance.skills;
+export const SHARES_BP = T.shares_bp as readonly (readonly number[])[];
+export const LINE_COUNTER_BP: number = T.line_counter_bp;
+export const EFFECT_COUNTER_BP: number = T.effect_counter_bp;
+export const THIRD_ASPECT_COUNTER_BP: number = T.third_aspect_counter_bp;
+export const ACTIVE_COOLDOWN: number = T.active_cooldown;
+export const REACTIVE_COOLDOWN: number = T.reactive_cooldown;
+export const HP_BELOW_MIN_PCT: number = T.hp_below_min_pct;
+export const HP_BELOW_MAX_PCT: number = T.hp_below_max_pct;
+/** Reach in cells (programs/session rules.rs MELEE_RANGE, RANGED_RANGE). */
+export const MELEE_RANGE: number = balance.players.melee_range;
+export const RANGED_RANGE: number = balance.players.ranged_range;
+/** Action points of the basic attack (an active skill costs its own, `derive().apCost`). */
+export const BASIC_ATTACK_AP: number = balance.players.basic_attack_ap;
 
 /** Field order is the borsh order (crates/skillcheck blocks.rs). */
 export type SkillBlocks = {
@@ -82,6 +110,10 @@ export type SkillBlocks = {
   trigger: Trigger;
   auraRadius: number;
 };
+
+/** Patch 5 blocks next to SkillBlocks (crates/skillcheck SkillExt), borsh order. */
+export type SkillExt = { range: RangeTag; timing: TimeTag; hpBelowPct: number };
+export const MELEE_EXT: SkillExt = { range: RangeTag.Melee, timing: TimeTag.Instant, hpBelowPct: 0 };
 
 export type SkillError =
   | "AspectCount"
@@ -106,7 +138,12 @@ export type SkillError =
   | "SelectionUnknownSkill"
   | "SelectionRepeated"
   | "SelectionCategory"
-  | "SelectionCount";
+  | "SelectionCount"
+  | "HealNotAvailable"
+  | "MissingThreshold"
+  | "UnexpectedThreshold"
+  | "ThresholdRange"
+  | "PassiveDebuffNeedsAura";
 
 /** One plain message per rule, for the builder UI. */
 export const SKILL_ERROR_MESSAGES: Record<SkillError, string> = {
@@ -115,14 +152,14 @@ export const SKILL_ERROR_MESSAGES: Record<SkillError, string> = {
   UnusedAspectSet: "An unused aspect slot must stay empty.",
   ThirdAspectTarget: "A third aspect needs a single target.",
   EffectNeedsOneAspect: "A damage skill with an effect takes exactly one aspect.",
-  EffectKind: "This effect does not fit the purpose: buffs take Haste, Empowerment, Protection or Heal; damage and debuffs take Weakening, Slow, Vulnerability, Stun or Freeze.",
+  EffectKind: "This effect does not fit the purpose: buffs take Haste, Empowerment or Protection; damage and debuffs take Weakening, Slow, Vulnerability, Stun or Freeze.",
   MissingEffect: "A buff or debuff needs an effect.",
   HardControlAspect: "Stun needs Blunt and Freeze needs Cold as the first aspect.",
   MissingTrigger: "A reactive skill needs a trigger.",
   UnexpectedTrigger: "Only reactive skills have a trigger.",
   PassiveDamage: "A passive skill cannot deal damage: make it a buff or a debuff.",
   AuraCategory: "An active skill cannot be an aura: auras are reactive or passive.",
-  AuraEffect: "An aura must be a buff or a debuff, not damage.",
+  AuraEffect: "An aura gives one stat, resistance or increase: a buff or a debuff, not damage, Stun or Freeze.",
   AuraRadius: `Aura radius is at most ${AURA_RADIUS_MAX}.`,
   ClassSource: "Class limit: warriors use combat skills, mages use magical skills.",
   ClassPurpose: "Class limit: support starting skills are buffs or debuffs, not damage.",
@@ -133,6 +170,11 @@ export const SKILL_ERROR_MESSAGES: Record<SkillError, string> = {
   SelectionRepeated: "The same skill is chosen twice.",
   SelectionCategory: "A skill is in a slot of another category.",
   SelectionCount: `Take ${ACTIVE_MAX} active, ${REACTIVE_MAX} reactive and ${PASSIVE_MAX} passive skills (all of a kind if you have fewer).`,
+  HealNotAvailable: "Healing is not available yet: it comes with its own class.",
+  MissingThreshold: "This trigger needs an HP threshold in percent.",
+  UnexpectedThreshold: "Only the HP triggers take an HP threshold.",
+  ThresholdRange: `The HP threshold is ${HP_BELOW_MIN_PCT} to ${HP_BELOW_MAX_PCT} percent.`,
+  PassiveDebuffNeedsAura: "A passive debuff must be an aura: it works on the enemies around.",
 };
 
 export const isDebuff = (e: Effect): boolean =>
@@ -144,14 +186,18 @@ export function hardControlAspect(e: Effect): Aspect | null {
   if (e === Effect.Freeze) return Aspect.Cold;
   return null;
 }
+/** `HpBelow` and `AllyHpBelow` take an HP threshold. */
+export const usesThreshold = (t: Trigger): boolean => t === Trigger.HpBelow || t === Trigger.AllyHpBelow;
 
-/** Builder rules for any skill, first failing rule wins (crates/skillcheck rules.rs validate). */
+/** Builder rules on the blocks, first failing rule wins (crates/skillcheck rules.rs validate). */
 export function validate(s: SkillBlocks): SkillError | null {
   const count = s.aspectCount;
   if (count === 0 || count > SKILL_ASPECTS_MAX) return "AspectCount";
   const used = s.aspects.slice(0, count);
   for (let i = 0; i < used.length; i++) if (used.indexOf(used[i]!) !== i) return "RepeatedAspect";
   if (s.aspects.slice(count).some((a) => a !== Aspect.Fire)) return "UnusedAspectSet";
+
+  if (s.effect === Effect.Heal) return "HealNotAvailable";
 
   if (s.purpose === Purpose.Damage) {
     if (count === 3 && s.target !== Target.Single) return "ThirdAspectTarget";
@@ -176,18 +222,32 @@ export function validate(s: SkillBlocks): SkillError | null {
   }
 
   if (s.category === Category.Passive && s.purpose === Purpose.Damage) return "PassiveDamage";
+  if (s.category === Category.Passive && s.purpose === Purpose.Debuff && s.auraRadius === 0) return "PassiveDebuffNeedsAura";
 
   if (s.auraRadius > 0) {
     if (s.category === Category.Active) return "AuraCategory";
-    if (s.purpose === Purpose.Damage) return "AuraEffect";
+    if (s.purpose === Purpose.Damage || hard !== null) return "AuraEffect";
     if (s.auraRadius > AURA_RADIUS_MAX) return "AuraRadius";
   }
   return null;
 }
 
-/** Builder rules plus the class limits on the first six skills. */
-export function validateStarting(s: SkillBlocks, cls: Class): SkillError | null {
+/** validate plus the patch 5 blocks (crates/skillcheck validate_skill): the HP threshold. */
+export function validateSkill(s: SkillBlocks, e: SkillExt): SkillError | null {
   const base = validate(s);
+  if (base) return base;
+  if (usesThreshold(s.trigger)) {
+    if (e.hpBelowPct === 0) return "MissingThreshold";
+    if (e.hpBelowPct < HP_BELOW_MIN_PCT || e.hpBelowPct > HP_BELOW_MAX_PCT) return "ThresholdRange";
+  } else if (e.hpBelowPct !== 0) {
+    return "UnexpectedThreshold";
+  }
+  return null;
+}
+
+/** Builder rules plus the class limits on the first six skills. */
+export function validateStarting(s: SkillBlocks, e: SkillExt, cls: Class): SkillError | null {
+  const base = validateSkill(s, e);
   if (base) return base;
   if (cls === Class.Warrior && s.source !== Source.Combat) return "ClassSource";
   if (cls === Class.Mage && s.source !== Source.Magical) return "ClassSource";
@@ -237,7 +297,7 @@ export function defaultMapSelection(owned: readonly Category[]): number[] {
   return out;
 }
 
-export type Derived = { sharesBp: [number, number, number]; powerBp: number; fusion: number; cooldown: number };
+export type Derived = { sharesBp: [number, number, number]; powerBp: number; fusion: number; cooldown: number; apCost: number };
 
 /** Ordered aspect pair fusion: 1 + first * 6 + second, 0 = none. */
 export const fusionId = (first: Aspect, second: Aspect): number => (first === second ? 0 : 1 + first * 6 + second);
@@ -253,12 +313,23 @@ export function derive(s: SkillBlocks): Derived {
   if (s.purpose === Purpose.Damage && s.effect !== Effect.None) power = counter(power, EFFECT_COUNTER_BP);
   if (count === 3) power = counter(power, THIRD_ASPECT_COUNTER_BP);
   const fusion = count === 2 ? fusionId(s.aspects[0], s.aspects[1]) : 0;
+  const line = s.target === Target.Line;
+  const third = count === 3;
+  const hard = hardControlAspect(s.effect) !== null;
   let cooldown = 0;
+  let apCost = 0;
   if (s.category === Category.Reactive) cooldown = REACTIVE_COOLDOWN;
-  else if (s.category === Category.Active)
-    cooldown = ACTIVE_COOLDOWN + (s.target === Target.Line ? 1 : 0) + (count === 3 ? 1 : 0) + (hardControlAspect(s.effect) !== null ? 1 : 0);
+  else if (s.category === Category.Active) {
+    cooldown = ACTIVE_COOLDOWN + (line ? 1 : 0) + (third ? 1 : 0) + (hard ? 1 : 0);
+    apCost =
+      T.ap_base +
+      (line ? T.ap_line : 0) +
+      (third ? T.ap_third_aspect : 0) +
+      (s.purpose === Purpose.Damage && s.effect !== Effect.None ? T.ap_effect : 0) +
+      (hard ? T.ap_hard_control : 0);
+  }
   const shares = SHARES_BP[count - 1]!;
-  return { sharesBp: [shares[0], shares[1], shares[2]], powerBp: power, fusion, cooldown };
+  return { sharesBp: [shares[0]!, shares[1]!, shares[2]!], powerBp: power, fusion, cooldown, apCost: Math.min(apCost, 255) };
 }
 
 /** Same rule as programs/character rules.rs name_valid on a 24-byte name: printable ASCII, no leading space. */
@@ -266,11 +337,16 @@ export function skillNameValid(name: string): boolean {
   return new RegExp(`^[!-~][ -~]{0,${SKILL_NAME_LEN - 1}}$`).test(name);
 }
 
+/** The same rule on a 200-byte description (set_skill_description). */
+export function skillDescriptionValid(text: string): boolean {
+  return new RegExp(`^[!-~][ -~]{0,${SKILL_DESCRIPTION_LEN - 1}}$`).test(text);
+}
+
 /** session `act` takes every Active skill; a buff or debuff without an effect is refused. */
 export const usableInCombat = (s: SkillBlocks): boolean =>
   s.category === Category.Active && (s.purpose === Purpose.Damage || s.effect !== Effect.None);
-/** Range by form (programs/session rules.rs): Strike 1, Projectile 6. */
-export const formRange = (f: Form): number => (f === Form.Strike ? 1 : 6);
+/** Reach of a range tag in cells (programs/session rules.rs `reach`). */
+export const rangeReach = (r: RangeTag): number => (r === RangeTag.Melee ? MELEE_RANGE : RANGED_RANGE);
 
 /** Who `act` targets with a skill: heals and buffs go to an ally (self included), the rest to a monster. */
 export type Side = "ally" | "enemy";
@@ -279,21 +355,25 @@ export const skillSide = (purpose: Purpose): Side => (purpose === Purpose.Buff ?
  * Reach of `act` at Chebyshev distance `dist` (rules.rs in_range / in_ally_range): allies may
  * share a cell (distance 0), an enemy needs at least 1.
  */
-export const inReach = (side: Side, form: Form, dist: number): boolean => (side === "ally" ? dist >= 0 : dist >= 1) && dist <= formRange(form);
+export const inReach = (side: Side, range: RangeTag, dist: number): boolean =>
+  (side === "ally" ? dist >= 0 : dist >= 1) && dist <= rangeReach(range);
 
-/** Every problem of one starting skill: its first failing rule and the name check. */
-export function skillProblems(s: { name: string; blocks: SkillBlocks }, cls: Class): string[] {
+/** A skill as the builder edits it: blocks, the patch 5 blocks, the player's text. */
+export type NamedSkill = { name: string; blocks: SkillBlocks; ext: SkillExt; description: string };
+
+/** Every problem of one starting skill: its first failing rule, the name and the description. */
+export function skillProblems(s: NamedSkill, cls: Class): string[] {
   const out: string[] = [];
   if (!skillNameValid(s.name)) out.push(`Name: 1 to ${SKILL_NAME_LEN} printable ASCII characters, not starting with a space.`);
-  const err = validateStarting(s.blocks, cls);
+  if (!skillDescriptionValid(s.description))
+    out.push(`Description: 1 to ${SKILL_DESCRIPTION_LEN} printable ASCII characters, not starting with a space.`);
+  const err = validateStarting(s.blocks, s.ext, cls);
   if (err) out.push(SKILL_ERROR_MESSAGES[err]);
   return out;
 }
 
 // ---------------------------------------------------------------------------------------------
 // presets (crates/skillcheck presets.rs)
-
-export type NamedSkill = { name: string; blocks: SkillBlocks };
 
 type BlockOpts = { line?: boolean; effect?: Effect; trigger?: Trigger; aura?: number };
 export function makeBlocks(category: Category, purpose: Purpose, source: Source, form: Form, aspects: Aspect[], o: BlockOpts = {}): SkillBlocks {
@@ -316,32 +396,52 @@ const { Active, Reactive, Passive } = Category;
 const { Damage, Buff, Debuff } = Purpose;
 const { Magical, Combat } = Source;
 const { Strike, Projectile } = Form;
+const ranged: SkillExt = { ...MELEE_EXT, range: RangeTag.Ranged };
+const named = (name: string, blocks: SkillBlocks, description: string, ext: SkillExt = MELEE_EXT): NamedSkill => ({ name, blocks, ext, description });
 
 /** The starting sets per class; also the builder's one-click options. */
 export const PRESETS: Record<Class, NamedSkill[]> = {
   [Class.Warrior]: [
-    { name: "Piercing Thrust", blocks: makeBlocks(Active, Damage, Combat, Strike, [Aspect.Piercing]) },
-    { name: "Shield Bash", blocks: makeBlocks(Active, Damage, Combat, Strike, [Aspect.Blunt], { effect: Effect.Stun }) },
-    { name: "Javelin", blocks: makeBlocks(Active, Damage, Combat, Projectile, [Aspect.Piercing]) },
-    { name: "Bleeding Cleave", blocks: makeBlocks(Active, Damage, Combat, Strike, [Aspect.Blood, Aspect.Piercing], { line: true }) },
-    { name: "Riposte", blocks: makeBlocks(Reactive, Damage, Combat, Strike, [Aspect.Piercing], { trigger: Trigger.Hit }) },
-    { name: "Iron Skin", blocks: makeBlocks(Passive, Buff, Combat, Strike, [Aspect.Blunt], { effect: Effect.Protection }) },
+    named("Piercing Thrust", makeBlocks(Active, Damage, Combat, Strike, [Aspect.Piercing]), "A straight thrust that finds the gap in the armor."),
+    named("Shield Bash", makeBlocks(Active, Damage, Combat, Strike, [Aspect.Blunt], { effect: Effect.Stun }), "The shield rim to the head. Sometimes they stay down."),
+    named("Javelin", makeBlocks(Active, Damage, Combat, Projectile, [Aspect.Piercing]), "Thrown hard and low, before they close in.", ranged),
+    named(
+      "Bleeding Cleave",
+      makeBlocks(Active, Damage, Combat, Strike, [Aspect.Blood, Aspect.Piercing], { line: true }),
+      "A wide arc of steel that opens everyone in a row.",
+      ranged,
+    ),
+    named("Riposte", makeBlocks(Reactive, Damage, Combat, Strike, [Aspect.Piercing], { trigger: Trigger.Hit }), "Hit me once and the blade answers."),
+    named("Iron Skin", makeBlocks(Passive, Buff, Combat, Strike, [Aspect.Blunt], { effect: Effect.Protection }), "Years of blows have left a hide like iron."),
   ],
   [Class.Mage]: [
-    { name: "Frost Bolt", blocks: makeBlocks(Active, Damage, Magical, Projectile, [Aspect.Cold]) },
-    { name: "Frost Burn", blocks: makeBlocks(Active, Damage, Magical, Projectile, [Aspect.Cold, Aspect.Fire]) },
-    { name: "Ice Prison", blocks: makeBlocks(Active, Damage, Magical, Projectile, [Aspect.Cold], { effect: Effect.Freeze }) },
-    { name: "Arc", blocks: makeBlocks(Active, Damage, Magical, Strike, [Aspect.Lightning], { line: true }) },
-    { name: "Cold Snap", blocks: makeBlocks(Reactive, Debuff, Magical, Strike, [Aspect.Cold], { effect: Effect.Slow, trigger: Trigger.EnemyAdjacent }) },
-    { name: "Cold Mind", blocks: makeBlocks(Passive, Buff, Magical, Projectile, [Aspect.Cold], { effect: Effect.Empowerment }) },
+    named("Frost Bolt", makeBlocks(Active, Damage, Magical, Projectile, [Aspect.Cold]), "A shard of ice, thrown from the palm.", ranged),
+    named("Frost Burn", makeBlocks(Active, Damage, Magical, Projectile, [Aspect.Cold, Aspect.Fire]), "Cold so deep it burns.", ranged),
+    named("Ice Prison", makeBlocks(Active, Damage, Magical, Projectile, [Aspect.Cold], { effect: Effect.Freeze }), "The air around the target turns to ice.", ranged),
+    named("Arc", makeBlocks(Active, Damage, Magical, Strike, [Aspect.Lightning], { line: true }), "Lightning runs down the line and spares no one on it.", ranged),
+    named(
+      "Cold Snap",
+      makeBlocks(Reactive, Debuff, Magical, Strike, [Aspect.Cold], { effect: Effect.Slow, trigger: Trigger.EnemyAdjacent }),
+      "Step too close and the frost takes your legs.",
+    ),
+    named("Cold Mind", makeBlocks(Passive, Buff, Magical, Projectile, [Aspect.Cold], { effect: Effect.Empowerment }), "A calm, cold focus behind every spell."),
   ],
   [Class.Support]: [
-    { name: "Quicken", blocks: makeBlocks(Active, Buff, Magical, Projectile, [Aspect.Lightning], { effect: Effect.Haste }) },
-    { name: "Sap", blocks: makeBlocks(Active, Debuff, Magical, Projectile, [Aspect.Blood], { effect: Effect.Weakening }) },
-    { name: "Expose", blocks: makeBlocks(Active, Debuff, Magical, Projectile, [Aspect.Fire], { effect: Effect.Vulnerability }) },
-    { name: "Shelter", blocks: makeBlocks(Active, Buff, Combat, Strike, [Aspect.Blunt], { effect: Effect.Protection }) },
-    { name: "Last Stand", blocks: makeBlocks(Reactive, Buff, Combat, Strike, [Aspect.Blunt], { effect: Effect.Protection, trigger: Trigger.HpBelow, aura: 2 }) },
-    { name: "Cold Ward", blocks: makeBlocks(Passive, Buff, Magical, Strike, [Aspect.Cold], { effect: Effect.Protection, aura: 2 }) },
+    named("Quicken", makeBlocks(Active, Buff, Magical, Projectile, [Aspect.Lightning], { effect: Effect.Haste }), "A spark in the blood: move, now.", ranged),
+    named("Sap", makeBlocks(Active, Debuff, Magical, Projectile, [Aspect.Blood], { effect: Effect.Weakening }), "Drains the strength out of a foe's arms.", ranged),
+    named("Expose", makeBlocks(Active, Debuff, Magical, Projectile, [Aspect.Fire], { effect: Effect.Vulnerability }), "Marks a foe with fire. Fire finds it easier now.", ranged),
+    named("Shelter", makeBlocks(Active, Buff, Combat, Strike, [Aspect.Blunt], { effect: Effect.Protection }), "A hand on the shoulder and a shield in front."),
+    named(
+      "Last Stand",
+      makeBlocks(Reactive, Buff, Combat, Strike, [Aspect.Blunt], { effect: Effect.Protection, trigger: Trigger.HpBelow, aura: 2 }),
+      "When the blood runs low, everyone near stands behind the shield.",
+      { ...MELEE_EXT, hpBelowPct: 40 },
+    ),
+    named(
+      "Cold Ward",
+      makeBlocks(Passive, Buff, Magical, Strike, [Aspect.Cold], { effect: Effect.Protection, aura: 2 }),
+      "A ring of still, cold air guards those nearby.",
+    ),
   ],
 };
 
@@ -363,3 +463,5 @@ export function blocksFromArray(v: readonly number[]): SkillBlocks {
     auraRadius: v[11]!,
   };
 }
+export const extToArray = (e: SkillExt): number[] => [e.range, e.timing, e.hpBelowPct];
+export const extFromArray = (v: readonly number[]): SkillExt => ({ range: v[0] as RangeTag, timing: v[1] as TimeTag, hpBelowPct: v[2]! });

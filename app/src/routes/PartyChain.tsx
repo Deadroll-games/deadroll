@@ -11,7 +11,7 @@ import type { HitItemSides, HitMods } from "../components/dice/types";
 import { StatsPanel } from "../components/stats/StatsPanel";
 import type { StatsUnit } from "../components/stats/types";
 import { Grid } from "../components/grid/Grid";
-import type { GridUnit } from "../components/grid/types";
+import type { GridAura, GridUnit } from "../components/grid/types";
 import { PartyLobby } from "../components/forms/PartyLobby";
 import type { LobbyPlayer } from "../components/forms/types";
 import { monsterRequest, renderRequest, tileRequest, TOMBSTONE } from "../chain/appearance";
@@ -40,7 +40,7 @@ import {
   myCharacters,
   openSessionIx,
   openSessions,
-  pendingTargetOf,
+  partyAccountsOf,
   pickSeed,
   playerAp,
   readParty,
@@ -50,6 +50,7 @@ import {
   startTurnIx,
   status,
   type Actor,
+  type AuraAcc,
   type CharacterAcc,
   type SkillRecordAcc,
   type SkillSetAcc,
@@ -60,7 +61,19 @@ import {
 } from "../chain/game";
 import { toHitResolved, toResonanceSpread } from "../chain/hit";
 import { aspectName, bestiaryName, carrierName, resonanceName, stateName } from "../chain/names";
-import { heroInputOf, previewOnMonster, previewText, statesOf, useCombat, type AccuracyInput, type CombatWasm, type HitPreview } from "../chain/combatWasm";
+import {
+  blockedOf,
+  heroInputOf,
+  partyInputOf,
+  percent,
+  previewOnMonster,
+  previewText,
+  statesOf,
+  useCombat,
+  type AccuracyInput,
+  type CombatWasm,
+  type HitPreview,
+} from "../chain/combatWasm";
 import { errorName } from "../chain/send";
 import { statusLabel, type SubStatus } from "../chain/subscribe";
 import { cooldownLabel, skillCooldowns, skillUsedText, skipText, startTurnFor, takenOntoMap, tickText, turnActed, turnStarted } from "../chain/turns";
@@ -68,7 +81,7 @@ import { skillSetPda } from "../chain/pda";
 import { affordable, cheb, reachable, route, type Step } from "../chain/route";
 import { useAutoFreezeTombstone } from "../chain/useAutoFreezeTombstone";
 import { useParty, type PartyEvent } from "../chain/useParty";
-import { Purpose, inReach } from "../chain/skillcheck";
+import { BASIC_ATTACK_AP, Purpose, inReach, rangeReach } from "../chain/skillcheck";
 import { monsterBaseAp, monsterDefense, playerDefense, unitStats } from "../chain/stats";
 import { activeMods, combatSkill, effectText, modsAt, modsTickText, toEffectResolved, type CombatSkill, type EffectResolved } from "../chain/support";
 import { useTx } from "../chain/useTx";
@@ -293,7 +306,19 @@ function PartyView({ address }: { address: Address }) {
       }),
     ).then((entries) => {
       setSkillRecords(Object.fromEntries(entries));
-      setSkillNames(Object.fromEntries(entries.map(([c, records]) => [c, records.map((k, slot) => combatSkill(slot, k))])));
+      // The participation's snapshot (set_ready) carries each map skill's range and AP cost.
+      setSkillNames(
+        Object.fromEntries(
+          entries.map(([c, records]) => {
+            const part = party.players.find((p) => p.character === c)?.part;
+            const map = (slot: number) => {
+              const i = part ? Array.from(part.skills).indexOf(slot) : -1;
+              return i >= 0 ? (part!.mapSkills[i] ?? null) : null;
+            };
+            return [c, records.map((k, slot) => combatSkill(slot, k, map(slot)))];
+          }),
+        ),
+      );
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [partyChars]);
@@ -346,7 +371,7 @@ function PartyView({ address }: { address: Address }) {
       const pl = p.players.find((x) => x.participation === pend);
       if (!pl) return;
       const seed = await pickSeed(kind);
-      const res = await send("VRF roll (localnet oracle)", sk.signer ?? wallet.signer, async () => [await consumeIx(address, pend, pl.character, seed, pendingTargetOf(p.session), p.session.layout)], {
+      const res = await send("VRF roll (localnet oracle)", sk.signer ?? wallet.signer, async () => [await consumeIx(address, pend, pl.character, seed, p.session.layout, partyAccountsOf(p.session, pend))], {
         quiet: true,
         silent: quietFail,
       });
@@ -394,7 +419,7 @@ function PartyView({ address }: { address: Address }) {
           if (!actor) break;
           const player = next.player ? { participation: next.player.participation, character: next.player.character } : null;
           let failed = false;
-          const res = await send(`start turn ${label(next.unit)}`, actor.signer, async () => [await startTurnIx(address, player)], {
+          const res = await send(`start turn ${label(next.unit)}`, actor.signer, async () => [await startTurnIx(address, player, actor.signer)], {
             quiet: true,
             onError: (m) => {
               // Another tab started it first: nothing to show.
@@ -539,7 +564,7 @@ function PartyView({ address }: { address: Address }) {
   const attack = (monster: number) => {
     if (!activePlayer || !canAttack || chosenSide !== "enemy") return;
     const actor = actorFor(activePlayer.part.core.actor);
-    void act(`attack ${label(MONSTER_BASE + monster)}`, actor?.signer ?? null, async () => [await actIx(actor!, address, activePlayer.character, chosenSkill, monster, null)], true);
+    void act(`attack ${label(MONSTER_BASE + monster)}`, actor?.signer ?? null, async () => [await actIx(actor!, address, activePlayer.character, chosenSkill, monster, null, s!.layout)], true);
   };
   /** A heal or buff on an ally: the target is its player slot, its Participation unless a self-cast. */
   const support = (slot: number) => {
@@ -547,7 +572,7 @@ function PartyView({ address }: { address: Address }) {
     if (!activePlayer || !canAttack || chosenSide !== "ally" || !ally || !chosen) return;
     const actor = actorFor(activePlayer.part.core.actor);
     const allyAccount = slot === activePlayer.slot ? null : ally.participation;
-    void act(`${chosen.name} on ${label(slot)}`, actor?.signer ?? null, async () => [await actIx(actor!, address, activePlayer.character, chosenSkill, slot, allyAccount)], true);
+    void act(`${chosen.name} on ${label(slot)}`, actor?.signer ?? null, async () => [await actIx(actor!, address, activePlayer.character, chosenSkill, slot, allyAccount, s!.layout)], true);
   };
   const endTurn = () => {
     if (!s) return;
@@ -756,7 +781,7 @@ function PartyView({ address }: { address: Address }) {
   const ended = st !== "active";
   const livingPlayers = party.players.filter((p) => s.aliveMask & (1 << p.slot));
   // A skill's targets within its reach (the weapon: every living monster, the program checks range).
-  const reachOk = (c: Cell) => !chosen || !moverPos || inReach(chosen.side, chosen.form, cheb(moverPos, c));
+  const reachOk = (c: Cell) => !chosen || !moverPos || inReach(chosen.side, chosen.range, cheb(moverPos, c));
   const monsterTargets: Cell[] = !canAttack
     ? []
     : myTurn && moverPos
@@ -766,8 +791,43 @@ function PartyView({ address }: { address: Address }) {
       : monsterTurn && isDm
         ? livingPlayers.map((p) => ({ x: p.part.core.x, y: p.part.core.y }))
         : [];
-  // Before the dice (docs/COMBAT_MATH.md 13): the weapon or a damage skill on the hovered monster,
-  // else on each monster in reach. The combat module builds the hit as the program does.
+  // A line skill under the pointer (docs/SKILL_BUILDER.md 4.3): from the caster through the
+  // hovered target to the skill's reach, a wall ends it (the module runs the program's line).
+  const lineCells: Cell[] =
+    combat && chosen?.line && moverPos && hover && monsterTargets.some((c) => c.x === hover.x && c.y === hover.y)
+      ? (() => {
+          try {
+            return combat
+              .line({
+                from: [moverPos.x, moverPos.y],
+                through: [hover.x, hover.y],
+                reach: rangeReach(chosen.range),
+                width: s.width,
+                height: s.height,
+                blocked: blockedOf(tiles, s.tileCost),
+              })
+              .map(([x, y]) => ({ x, y }));
+          } catch {
+            return [];
+          }
+        })()
+      : [];
+  const onLine = (c: Cell) => lineCells.some((l) => l.x === c.x && l.y === c.y);
+  const sessionParty = partyInputOf(s);
+  // Auras on the map (docs/SKILL_BUILDER.md 3.5): every living bearer's passive and temporary aura.
+  const gridAuras: GridAura[] = livingPlayers.flatMap((p) =>
+    (s.auras[p.slot] ?? [])
+      .filter((a) => a.turns > 0)
+      .map((a) => ({
+        center: { x: p.part.core.x, y: p.part.core.y },
+        radius: a.selfOnly ? 0 : a.radius,
+        hostile: a.hostile,
+        label: auraText(a, label(p.slot)),
+      })),
+  );
+  // Before the dice (docs/COMBAT_MATH.md 13): the weapon or a damage skill on the hovered monster
+  // (every monster on a hovered line), else on each monster in reach. The combat module builds the
+  // hit as the program does, auras included.
   const attackPreviews =
     combat && tablesReady && activePlayer && myTurn && canAttack && chosenSide === "enemy" && (!chosen || chosen.purpose === Purpose.Damage)
       ? (() => {
@@ -778,9 +838,13 @@ function PartyView({ address }: { address: Address }) {
           const inReach = party.monsters
             .map((m, i) => ({ m, i }))
             .filter(({ m }) => m.alive && reachOk({ x: m.x, y: m.y }));
-          const hovered = hover ? inReach.filter(({ m }) => m.x === hover.x && m.y === hover.y) : [];
+          const hovered = lineCells.length
+            ? party.monsters.map((m, i) => ({ m, i })).filter(({ m }) => m.alive && onLine(m))
+            : hover
+              ? inReach.filter(({ m }) => m.x === hover.x && m.y === hover.y)
+              : [];
           return (hovered.length ? hovered : inReach.slice(0, 4)).flatMap(({ m, i }) => {
-            const p = previewOnMonster(combat, hero, heroMods, record, m, activeMods(party.monsterMods[i]), defenseOf(party, i), accuracy);
+            const p = previewOnMonster(combat, hero, heroMods, record, m, activeMods(party.monsterMods[i]), defenseOf(party, i), accuracy, sessionParty, activePlayer.slot);
             return p ? [{ unit: MONSTER_BASE + i, text: `${previewText(p)}${tintPreviewText(p)}` }] : [];
           });
         })()
@@ -803,6 +867,8 @@ function PartyView({ address }: { address: Address }) {
             reachable={!ended && canMove ? reach : []}
             targets={!ended ? monsterTargets : []}
             path={preview}
+            auras={gridAuras}
+            line={!ended ? lineCells : []}
             burning={party.burningCells.filter((c) => c.untilRound >= s.core.round).map((c) => ({ x: c.x, y: c.y }))}
             cellPx={CELL_PX}
             unitSprite={unitSprite}
@@ -846,19 +912,20 @@ function PartyView({ address }: { address: Address }) {
                         <button
                           key={k.slot}
                           className={cd > 0 ? "btn cooldown" : "btn"}
-                          disabled={!canAttack || cd > 0}
+                          disabled={!canAttack || cd > 0 || moverAp < k.apCost}
                           aria-pressed={chosenSkill === k.slot}
                           title={cd > 0 ? `On cooldown: ${cooldownLabel(cd)}` : k.side === "ally" ? "Heal or buff: click an ally or yourself" : k.purpose === Purpose.Debuff ? "Debuff: click a monster" : undefined}
                           onClick={() => setSkill(k.slot)}
                         >
                           {k.name}
+                          <span className="muted ap"> · {k.apCost} AP{k.line ? " · line" : ""}</span>
                           {k.side === "ally" ? <span className="muted"> · ally</span> : k.purpose === Purpose.Debuff ? <span className="muted"> · debuff</span> : null}
                           {cd > 0 && <span className="cd"> · {cooldownLabel(cd)}</span>}
                         </button>
                       );
                     })}
-                    <button className="btn" disabled={!canAttack} aria-pressed={chosenSkill === BASE_ATTACK} onClick={() => setSkill(BASE_ATTACK)}>
-                      Weapon
+                    <button className="btn" disabled={!canAttack || moverAp < BASIC_ATTACK_AP} aria-pressed={chosenSkill === BASE_ATTACK} onClick={() => setSkill(BASE_ATTACK)}>
+                      Weapon<span className="muted ap"> · {BASIC_ATTACK_AP} AP</span>
                     </button>
                   </div>
                   {attackPreviews.length > 0 && (
@@ -1021,6 +1088,24 @@ export function Claims({
 
 type SkillName = (unit: number, slot: number) => string;
 
+const TRIGGER_TEXT: Record<string, string> = {
+  hit: "hit",
+  critHit: "critical hit",
+  hpBelow: "HP below its threshold",
+  allyHpBelow: "an ally's HP below its threshold",
+  controlled: "controlled",
+  enemyAdjacent: "an enemy next to it",
+};
+const triggerText = (t: Enum) => TRIGGER_TEXT[Object.keys(t)[0] ?? ""] ?? Object.keys(t)[0] ?? "?";
+
+/** "Mage: passive Protection aura 25%, radius 2" (a temporary one with its turns left). */
+function auraText(a: AuraAcc, bearer: string): string {
+  const kind = Object.keys(a.kind)[0] ?? "?";
+  const reach = a.selfOnly || a.radius === 0 ? "self" : `radius ${a.radius}`;
+  const time = a.passive ? "passive" : `temporary, ${a.turns} turns`;
+  return `${bearer}: ${a.hostile ? "hostile " : ""}${kind.charAt(0).toUpperCase()}${kind.slice(1)} aura ${percent(a.powerBp)}, ${reach} (${time})`;
+}
+
 /** One log line per event; null for an event with nothing to tell (a quiet turn start). */
 function describe(e: PartyEvent, label: (u: number) => string, skillName: SkillName): string | null {
   const d = e.data;
@@ -1077,6 +1162,10 @@ function describe(e: PartyEvent, label: (u: number) => string, skillName: SkillN
       return `escrow claimed by the DM: ${formatSol(BigInt(d.amount))}`;
     case "FleeVoted":
       return `slot ${d.slot} votes to flee`;
+    case "ReactiveTriggered":
+      return `${label(d.bearer)} reacts (${triggerText(d.trigger)}): ${skillName(d.bearer, d.skillSlot)}, ${Object.keys(d.reaction)[0]} on ${label(d.target)}, cooldown ${d.cooldownLeft}`;
+    case "AuraChanged":
+      return d.aura.turns === 0 ? `${label(d.bearer)}: aura ended` : auraText(d.aura, label(d.bearer));
     default:
       return e.name;
   }

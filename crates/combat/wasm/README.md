@@ -24,7 +24,7 @@ There are no imports. The module exports `memory` plus the functions below. Bala
 
 | Export | Signature | What it does |
 |---|---|---|
-| `abi_version` | `() -> u32` | `4`; bumped on any change of exports or layouts |
+| `abi_version` | `() -> u32` | `5`; bumped on any change of exports or layouts |
 | `buffer_len` | `() -> u32` | size of the input and output buffers (4096) |
 | `input_ptr` | `() -> *mut u8` | where to write the borsh input |
 | `seed_ptr` | `() -> *mut u8` | where to write the 32-byte VRF seed |
@@ -36,6 +36,8 @@ There are no imports. The module exports `memory` plus the functions below. Bala
 | `hero_sheet` | `(input_len: u32) -> i32` | `HeroInput` in: writes a borsh `HeroSheet` |
 | `preview_attack` | `(input_len: u32) -> i32` | `AttackRequest` in: builds the hit input as the session program does, writes a borsh `HitPreview` |
 | `monster_sheet` | `(input_len: u32) -> i32` | `MonsterInput` in: the template at a level with its registry defenses, writes a borsh `MonsterSheet` |
+| `unit_mods` | `(input_len: u32) -> i32` | `UnitModsRequest` in: a unit's own buffs and debuffs with the auras over it (`deadroll_rules::aura::AuraField`), writes `[TimedMod; 6]` |
+| `line` | `(input_len: u32) -> i32` | `LineRequest` in: the cells of a line target, nearest first (`deadroll_rules::line::line_cells`), writes a `LineOutput` |
 | `roll_u64` | `(index: u32) -> u64` (BigInt) | roll number `index` of the seed: first 8 bytes LE of `sha256(seed ‖ index u32 LE)` |
 
 Negative returns: `-1` input longer than the buffer, `-2` input is not valid borsh of the expected type (trailing bytes count as invalid), `-3` output does not fit, `-4` the target's bestiary id has no template, `-5` no resonance tables (call `set_tables`), or they do not decode.
@@ -139,7 +141,16 @@ AttackRequest {
   skill: Option<SkillInput>,                                    // None = the weapon's basic attack
   target: TargetInput,
   accuracy: AccuracyBuff,                                       // Participation.accuracy
+  party: PartyInput,                                            // ABI 5: the auras and the players' cells
+  slot: u8,                                                     // the attacker's player slot
+  target_at: Cell,                                              // the target's cell
 }
+Cell { x: u8, y: u8 }
+PartyInput { auras: [[AuraInput; 2]; 4], cells: [Cell; 4], alive: u8 }   // GameSession.auras, player_pos, alive_mask
+AuraInput { kind: ModKind, aspect: Aspect, power_bp: u32, radius: u8, turns: u8, hostile: bool, passive: bool, self_only: bool }  // turns == 0: none
+UnitModsRequest { party: PartyInput, mods: [TimedMod; 6], monster: bool, slot: u8, at: Cell, basic_attack: bool }
+LineRequest { from: Cell, through: Cell, reach: u8, width: u8, height: u8, blocked: [u8; 128] }  // bit y * 32 + x: impassable
+LineOutput { len: u8, cells: [Cell; 32] }
 AccuracyBuff { aspect: Aspect, turns: u8, bonus: u32 }          // turns == 0: none
 SkillInput { blocks: SkillBlocks, shares_bp: [u32; 3], power_bp: u32 }  // SkillRecord without the name
 TargetInput { bestiary_id: u8, level: u8, states: [ActiveState; 6], mods: [TimedMod; 6], defense: DefenseInput }

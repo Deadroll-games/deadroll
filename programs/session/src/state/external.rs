@@ -6,7 +6,9 @@
 //! after it never break the reader.
 use anchor_lang::prelude::*;
 use anchor_lang::{AccountDeserialize, Discriminator, Space};
-use deadroll_character::state::{Character, SkillRecord, SkillSet, SKILLS_MAX};
+use deadroll_character::state::{
+    Character, SkillExtra, SkillExtras, SkillRecord, SkillSet, SKILLS_MAX, SKILL_DESCRIPTION_LEN,
+};
 use deadroll_registry::state::{
     records::{BESTIARY_MAX, MONSTER_SIZE, TILE_SIZE},
     Table, TableKind, TABLE_CAP,
@@ -172,6 +174,38 @@ pub fn read_skill(info: &AccountInfo, character: &Pubkey, slot: u8) -> Result<Sk
     let start = skill_off::SKILLS + slot as usize * SkillRecord::INIT_SPACE;
     SkillRecord::deserialize(&mut &data[start..start + SkillRecord::INIT_SPACE])
         .map_err(|_| error!(SessionError::InvalidSkillSet))
+}
+
+/// Byte offsets inside a `deadroll_character` `SkillExtras` account (discriminator included).
+mod extras_off {
+    pub const CHARACTER: usize = 8 + 2;
+    pub const EXTRAS: usize = CHARACTER + 32;
+}
+
+/// The `SkillExtras` part of skill `slot` of `character` (patch 5), read in place (~3.3 KB).
+/// Owner, discriminator and the `character` field are checked, as for [`read_skill`].
+pub fn read_skill_extra(info: &AccountInfo, character: &Pubkey, slot: u8) -> Result<SkillExtra> {
+    require!(
+        check_header(info, &deadroll_character::ID, SkillExtras::DISCRIMINATOR),
+        SessionError::InvalidSkillSet
+    );
+    let data = info.try_borrow_data()?;
+    require!(
+        data.len() >= 8 + SkillExtras::SIZE
+            && data[extras_off::CHARACTER..extras_off::CHARACTER + 32] == character.to_bytes(),
+        SessionError::InvalidSkillSet
+    );
+    require!((slot as usize) < SKILLS_MAX, SessionError::InvalidSkill);
+    let r = &data[extras_off::EXTRAS + slot as usize * SkillExtra::SIZE..];
+    let mut description = [0u8; SKILL_DESCRIPTION_LEN];
+    description.copy_from_slice(&r[4..4 + SKILL_DESCRIPTION_LEN]);
+    Ok(SkillExtra {
+        range: r[0],
+        timing: r[1],
+        hp_below_pct: r[2],
+        ap_cost: r[3],
+        description,
+    })
 }
 
 /// Byte offsets inside a registry `Table` account (programs/registry/README.md).

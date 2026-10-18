@@ -11,17 +11,18 @@
 //! ```
 //!
 //! Blocks are encoded as discriminants in `SkillBlocks` field order:
-//! `[category, purpose, source, form, target, a0, a1, a2, aspect_count, effect, trigger, aura_radius]`.
+//! `[category, purpose, source, form, target, a0, a1, a2, aspect_count, effect, trigger, aura_radius]`,
+//! and the ext (`SkillExt`) as `[range, timing, hp_below_pct]`.
 
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use deadroll_skillcheck::{
-    check_loadout, check_map_selection, derive, presets, validate, validate_starting, Category,
-    Effect, MapSelection, Purpose, SkillBlocks, SkillError, Target, Trigger, NO_SKILL,
-    SELECTION_SLOTS, SKILL_ASPECTS_MAX, STARTING_MAX,
+    check_loadout, check_map_selection, derive, presets, validate, validate_skill,
+    validate_starting, Category, Effect, MapSelection, Purpose, SkillBlocks, SkillError, SkillExt,
+    Target, Trigger, NO_SKILL, SELECTION_SLOTS, SKILL_ASPECTS_MAX, STARTING_MAX,
 };
-use deadroll_types::{Aspect, Class, Form, Source};
+use deadroll_types::{Aspect, Class, Form, RangeTag, Source, TimeTag};
 
 const RANDOM_SKILLS: usize = 2_000;
 const RANDOM_LOADOUTS: usize = 200;
@@ -106,6 +107,24 @@ fn random_blocks(rng: &mut Rng) -> SkillBlocks {
     }
 }
 
+/// A random ext: mostly no threshold, some valid ones, some out of range.
+fn random_ext(rng: &mut Rng, s: &SkillBlocks) -> SkillExt {
+    let hp_below_pct = match (s.trigger.uses_threshold(), rng.below(10)) {
+        (_, 0) => rng.below(256) as u8,
+        (true, 1..=7) => 10 + rng.below(81) as u8,
+        _ => 0,
+    };
+    SkillExt {
+        range: RangeTag::ALL[rng.below(RangeTag::COUNT)],
+        timing: TimeTag::ALL[rng.below(TimeTag::COUNT)],
+        hp_below_pct,
+    }
+}
+
+fn encode_ext(e: &SkillExt) -> String {
+    format!("[{},{},{}]", e.range as u8, e.timing as u8, e.hp_below_pct)
+}
+
 fn encode(s: &SkillBlocks) -> String {
     let v = [
         s.category as u8,
@@ -131,16 +150,18 @@ fn result(r: Result<(), SkillError>) -> String {
     }
 }
 
-fn skill_line(s: &SkillBlocks) -> String {
+fn skill_line(s: &SkillBlocks, e: &SkillExt) -> String {
     let d = derive(s);
     let starting: Vec<String> = Class::ALL
         .iter()
-        .map(|c| result(validate_starting(s, *c)))
+        .map(|c| result(validate_starting(s, e, *c)))
         .collect();
     format!(
-        "{{\"blocks\":{},\"validate\":{},\"starting\":[{}],\"derive\":{{\"sharesBp\":[{},{},{}],\"powerBp\":{},\"fusion\":{},\"cooldown\":{}}}}}",
+        "{{\"blocks\":{},\"ext\":{},\"validate\":{},\"validateSkill\":{},\"starting\":[{}],\"derive\":{{\"sharesBp\":[{},{},{}],\"powerBp\":{},\"fusion\":{},\"cooldown\":{},\"apCost\":{}}}}}",
         encode(s),
+        encode_ext(e),
         result(validate(s)),
+        result(validate_skill(s, e)),
         starting.join(","),
         d.shares_bp[0],
         d.shares_bp[1],
@@ -148,6 +169,7 @@ fn skill_line(s: &SkillBlocks) -> String {
         d.power_bp,
         d.fusion,
         d.cooldown,
+        d.ap_cost,
     )
 }
 
@@ -173,7 +195,7 @@ fn build() -> (String, Vec<String>) {
                 "{{\"class\":{},\"name\":\"{}\",\"skill\":{}}}",
                 *class as u8,
                 p.name,
-                skill_line(&p.blocks)
+                skill_line(&p.blocks, &p.ext)
             ));
         }
     }
@@ -184,11 +206,13 @@ fn build() -> (String, Vec<String>) {
     let mut lines = Vec::with_capacity(RANDOM_SKILLS);
     for _ in 0..RANDOM_SKILLS {
         let s = random_blocks(&mut rng);
+        let e = random_ext(&mut rng, &s);
         note(validate(&s));
+        note(validate_skill(&s, &e));
         for c in Class::ALL {
-            note(validate_starting(&s, *c));
+            note(validate_starting(&s, &e, *c));
         }
-        lines.push(skill_line(&s));
+        lines.push(skill_line(&s, &e));
     }
     out += &lines.join(",\n");
 
@@ -288,6 +312,11 @@ fn ts_fixtures_are_current() {
         "SelectionRepeated",
         "SelectionCategory",
         "SelectionCount",
+        "HealNotAvailable",
+        "MissingThreshold",
+        "UnexpectedThreshold",
+        "ThresholdRange",
+        "PassiveDebuffNeedsAura",
     ];
     let missing: Vec<&str> = all
         .iter()

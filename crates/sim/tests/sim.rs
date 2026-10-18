@@ -9,7 +9,7 @@ use deadroll_sim::{
     Progress, RandomBuilds, Settings,
 };
 use deadroll_skillcheck::{Category, Effect, Purpose, Target, Trigger};
-use deadroll_types::{Aspect, Class, Form, Source};
+use deadroll_types::{Aspect, Class, Form, RangeTag, Source, TimeTag};
 
 fn shipped() -> Presets {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tools/balance/presets");
@@ -170,6 +170,10 @@ fn skill(source: Source, purpose: Purpose, effect: Effect, aspects: Vec<Aspect>)
         effect,
         trigger: Trigger::None,
         aura_radius: 0,
+        range: RangeTag::Ranged,
+        timing: TimeTag::Instant,
+        hp_below_pct: 0,
+        description: String::new(),
     }
 }
 
@@ -291,13 +295,12 @@ fn config_json_round_trips_and_fills_gaps_from_defaults() {
         cfg
     );
     // Missing groups, missing keys and short arrays keep the defaults.
-    let partial =
-        r#"{ "combat": { "armor_k": 50, "state_turns": [9] }, "players": { "act_ap": 3 } }"#;
+    let partial = r#"{ "combat": { "armor_k": 50, "state_turns": [9] }, "players": { "basic_attack_ap": 3 } }"#;
     let loaded = config_io::from_json(partial).unwrap();
     let mut expected = BalanceConfig::DEFAULT;
     expected.combat.armor_k = 50;
     expected.combat.state_turns[0] = 9;
-    expected.players.act_ap = 3;
+    expected.players.basic_attack_ap = 3;
     assert_eq!(loaded, expected);
     assert!(config_io::from_json("nope").is_err());
 }

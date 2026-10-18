@@ -1,6 +1,8 @@
 use anchor_lang::prelude::*;
+use deadroll_rules::aura::{AuraField, PartyAuras, AURAS_PER_PLAYER};
 use deadroll_types::{Cell, GameSessionData, Tile, MONSTERS_MAX, PARTY_MAX};
 
+use super::{auras_to_rules, AuraData, PendingReactiveData, ReactiveData};
 use crate::rules::{Unit, EMPTY_UNIT};
 
 /// The roll waiting for its VRF value (`core.pending_vrf`), resolved by `consume_randomness`:
@@ -91,6 +93,18 @@ pub struct GameSession {
     /// The ally `Participation` a pending heal or buff targets when it is not the caster: the
     /// callback's `target_participation`. `Pubkey::default()` = none.
     pub pending_target: Pubkey,
+    // Patch 5: skills beyond the one action (docs/SKILL_BUILDER.md, 3.2-3.5).
+    /// Each player slot's `Participation`, set at `join_session`: the party accounts every VRF
+    /// callback gets after its fixed list.
+    pub participations: [Pubkey; PARTY_MAX],
+    /// Each player's reactive skill on the map, set at `set_ready(true)`.
+    pub reactives: [ReactiveData; PARTY_MAX],
+    /// Each player's auras: its passive skill's (permanent, set at `set_ready(true)`) and its
+    /// reactive skill's (temporary).
+    pub auras: [[AuraData; AURAS_PER_PLAYER]; PARTY_MAX],
+    /// A pending roll that only resolves reactives (`monster_move`, `start_turn`); `kind == NONE`
+    /// for every other roll.
+    pub pending_reactive: PendingReactiveData,
 }
 
 impl GameSession {
@@ -123,6 +137,20 @@ impl GameSession {
     /// Bits for every joined slot.
     pub fn full_mask(&self) -> u8 {
         ((1u16 << self.core.player_count) - 1) as u8
+    }
+
+    /// The auras as the rules see them; borrow them with [`Self::aura_field`].
+    pub fn party_auras(&self) -> PartyAuras {
+        auras_to_rules(&self.auras)
+    }
+
+    /// The party's auras over the living players' cells.
+    pub fn aura_field<'a>(&'a self, auras: &'a PartyAuras) -> AuraField<'a> {
+        AuraField {
+            auras,
+            cells: &self.player_pos,
+            alive: self.alive_mask,
+        }
     }
 }
 

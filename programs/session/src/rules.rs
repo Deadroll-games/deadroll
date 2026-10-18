@@ -9,7 +9,7 @@ use deadroll_mapcheck::roster::{p0_role, Role};
 use deadroll_rules::{
     config::BalanceConfig, input::hero, items, monster, player, units, HeroStats, MonsterDefense,
 };
-use deadroll_types::{Aspect, Cell, Class, Form, Race, Source, Tile, STATS_COUNT};
+use deadroll_types::{Aspect, Cell, Class, Form, Race, RangeTag, Source, Tile, STATS_COUNT};
 
 pub use deadroll_rules::units::{
     cooldown_after_use, roll_initiative, tick_cooldowns, Initiative, Unit, EMPTY_UNIT,
@@ -101,26 +101,37 @@ pub fn item_bonus(h: &HeroStats) -> items::ItemBonus {
 pub const BASE_ATTACK: u8 = 0xFF;
 /// `monster_act` action: the monster's natural attack (the only P0 action).
 pub const NATURAL_ATTACK: u8 = 0;
-/// Action points one attack costs.
-pub const ACT_AP: u8 = BALANCE.players.act_ap;
-/// Strikes reach the 8 neighbouring cells.
-pub const STRIKE_RANGE: u8 = BALANCE.players.strike_range;
-/// Projectiles reach this far (Chebyshev distance). TODO(P1): line of sight.
-pub const PROJECTILE_RANGE: u8 = BALANCE.players.projectile_range;
+/// Action points of the basic attack and of a monster's natural attack; an active skill costs
+/// its own (`MapSkillData::ap_cost`).
+pub const BASIC_ATTACK_AP: u8 = BALANCE.players.basic_attack_ap;
+/// Melee reaches the 8 neighbouring cells.
+pub const MELEE_RANGE: u8 = BALANCE.players.melee_range;
+/// Ranged reaches this far (Chebyshev distance), no line of sight.
+pub const RANGED_RANGE: u8 = BALANCE.players.ranged_range;
 /// Native state chance of a skill / basic attack (crates/combat `Skill::state_chance_bp`).
 pub const SKILL_STATE_CHANCE_PCT: u32 = BALANCE.players.skill_state_chance_pct;
 pub const BASIC_STATE_CHANCE_PCT: u32 = BALANCE.players.basic_state_chance_pct;
 /// HP a heal restores per point of the weapon's range, bp.
 pub const HEAL_WEAPON_BP: u32 = BALANCE.players.heal_weapon_bp;
 
-/// Whether `form` reaches from `from` to `to` (Chebyshev distance, never the own cell).
-pub fn in_range(form: Form, from: Cell, to: Cell) -> bool {
-    units::in_range(form, from, to, &BALANCE.players)
+/// Whether `range` reaches from `from` to `to` (Chebyshev distance, never the own cell).
+pub fn in_range(range: RangeTag, from: Cell, to: Cell) -> bool {
+    units::in_range(range, from, to, &BALANCE.players)
 }
 
-/// Whether a heal or buff of `form` reaches an ally (allies may share a cell).
-pub fn in_ally_range(form: Form, from: Cell, to: Cell) -> bool {
-    units::in_ally_range(form, from, to, &BALANCE.players)
+/// Whether a buff of `range` reaches an ally (allies may share a cell).
+pub fn in_ally_range(range: RangeTag, from: Cell, to: Cell) -> bool {
+    units::in_ally_range(range, from, to, &BALANCE.players)
+}
+
+/// Reach of `range` in cells.
+pub fn reach(range: RangeTag) -> u8 {
+    units::reach(range, &BALANCE.players)
+}
+
+/// Range of a monster's natural attack, from its form (docs/BESTIARY.md 2).
+pub fn monster_range(form: Form) -> RangeTag {
+    units::form_range(form)
 }
 
 /// Power source of a class's own attacks (docs/CHARACTER.md, section 8.1).
@@ -325,22 +336,29 @@ mod tests {
     }
 
     #[test]
-    fn range_by_form() {
+    fn range_by_tag() {
         let at = Cell { x: 5, y: 5 };
         let c = |x, y| Cell { x, y };
-        assert!(!in_range(Form::Strike, at, at));
-        assert!(in_range(Form::Strike, at, c(6, 6)));
-        assert!(in_range(Form::Strike, at, c(4, 5)));
-        assert!(!in_range(Form::Strike, at, c(7, 5)));
-        assert!(in_range(Form::Projectile, at, c(11, 0)));
-        assert!(!in_range(Form::Projectile, at, c(12, 5)));
-        assert!(!in_range(Form::Projectile, at, at));
+        assert!(!in_range(RangeTag::Melee, at, at));
+        assert!(in_range(RangeTag::Melee, at, c(6, 6)));
+        assert!(in_range(RangeTag::Melee, at, c(4, 5)));
+        assert!(!in_range(RangeTag::Melee, at, c(7, 5)));
+        assert!(in_range(RangeTag::Ranged, at, c(11, 0)));
+        assert!(!in_range(RangeTag::Ranged, at, c(12, 5)));
+        assert!(!in_range(RangeTag::Ranged, at, at));
         // Allies: the own cell counts, the reach is the same.
-        assert!(in_ally_range(Form::Strike, at, at));
-        assert!(in_ally_range(Form::Strike, at, c(6, 4)));
-        assert!(!in_ally_range(Form::Strike, at, c(7, 5)));
-        assert!(in_ally_range(Form::Projectile, at, c(11, 0)));
-        assert!(!in_ally_range(Form::Projectile, at, c(5, 12)));
+        assert!(in_ally_range(RangeTag::Melee, at, at));
+        assert!(in_ally_range(RangeTag::Melee, at, c(6, 4)));
+        assert!(!in_ally_range(RangeTag::Melee, at, c(7, 5)));
+        assert!(in_ally_range(RangeTag::Ranged, at, c(11, 0)));
+        assert!(!in_ally_range(RangeTag::Ranged, at, c(5, 12)));
+        // A monster's natural attack: its form gives its range.
+        assert_eq!(monster_range(Form::Strike), RangeTag::Melee);
+        assert_eq!(monster_range(Form::Projectile), RangeTag::Ranged);
+        assert_eq!(
+            (reach(RangeTag::Melee), reach(RangeTag::Ranged)),
+            (MELEE_RANGE, RANGED_RANGE)
+        );
     }
 
     #[test]

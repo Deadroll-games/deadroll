@@ -1,8 +1,8 @@
 {
-  "abiVersion": 4,
+  "abiVersion": 5,
   "attacks": [
     {
-      "bytes": "000001000500070006000500030e0e00ffff03ffffffffffffff000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000020000000000000000",
+      "bytes": "000001000500070006000500030e0e00ffff03ffffffffffffff00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000303",
       "input": {
         "accuracy": {
           "aspect": 0,
@@ -80,7 +80,119 @@
             "turns": 0
           }
         ],
+        "party": {
+          "alive": 0,
+          "auras": [
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ]
+          ],
+          "cells": [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ]
+          ]
+        },
         "skill": null,
+        "slot": 0,
         "target": {
           "bestiaryId": 0,
           "defense": {
@@ -171,7 +283,11 @@
               "turns": 0
             }
           ]
-        }
+        },
+        "targetAt": [
+          3,
+          3
+        ]
       },
       "preview": {
         "critBp": 500,
@@ -199,7 +315,7 @@
       }
     },
     {
-      "bytes": "000001000500070006000500030e0e00ffff03ffffffffffffff020302b80b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000001000005000001000000102700000000000000000000102700000102000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000050203000000",
+      "bytes": "000001000500070006000500030e0e00ffff03ffffffffffffff020302b80b000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000100000500000100000010270000000000000000000010270000010200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005020300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000303",
       "input": {
         "accuracy": {
           "aspect": 5,
@@ -277,6 +393,117 @@
             "turns": 0
           }
         ],
+        "party": {
+          "alive": 0,
+          "auras": [
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ]
+          ],
+          "cells": [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ]
+          ]
+        },
         "skill": {
           "blocks": [
             0,
@@ -299,6 +526,7 @@
             0
           ]
         },
+        "slot": 0,
         "target": {
           "bestiaryId": 1,
           "defense": {
@@ -389,7 +617,11 @@
               "turns": 0
             }
           ]
-        }
+        },
+        "targetAt": [
+          3,
+          3
+        ]
       },
       "preview": {
         "critBp": 500,
@@ -430,7 +662,7 @@
       }
     },
     {
-      "bytes": "000001000500070006000500030e0e00ffff03ffffffffffffff00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000001000004000001040000102700000000000000000000401f00000203000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000200000000000000000",
+      "bytes": "000001000500070006000500030e0e00ffff03ffffffffffffff00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000001000004000001040000102700000000000000000000401f0000020300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000303",
       "input": {
         "accuracy": {
           "aspect": 0,
@@ -508,6 +740,117 @@
             "turns": 0
           }
         ],
+        "party": {
+          "alive": 0,
+          "auras": [
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ]
+          ],
+          "cells": [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ]
+          ]
+        },
         "skill": {
           "blocks": [
             0,
@@ -530,6 +873,7 @@
             0
           ]
         },
+        "slot": 0,
         "target": {
           "bestiaryId": 2,
           "defense": {
@@ -620,7 +964,11 @@
               "turns": 0
             }
           ]
-        }
+        },
+        "targetAt": [
+          3,
+          3
+        ]
       },
       "preview": {
         "critBp": 500,
@@ -661,7 +1009,7 @@
       }
     },
     {
-      "bytes": "000001000500070006000500030e0e00ffff03ffffffffffffff00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000001010005000001000000102700000000000000000000102700000301010288130000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "bytes": "000001000500070006000500030e0e00ffff03ffffffffffffff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000101000500000100000010270000000000000000000010270000030101028813000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000303",
       "input": {
         "accuracy": {
           "aspect": 0,
@@ -739,6 +1087,117 @@
             "turns": 0
           }
         ],
+        "party": {
+          "alive": 0,
+          "auras": [
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ]
+          ],
+          "cells": [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ]
+          ]
+        },
         "skill": {
           "blocks": [
             0,
@@ -761,6 +1220,7 @@
             0
           ]
         },
+        "slot": 0,
         "target": {
           "bestiaryId": 3,
           "defense": {
@@ -851,7 +1311,11 @@
               "turns": 0
             }
           ]
-        }
+        },
+        "targetAt": [
+          3,
+          3
+        ]
       },
       "preview": {
         "critBp": 500,
@@ -892,7 +1356,7 @@
       }
     },
     {
-      "bytes": "000001000500070006000500030e0e00ffff03ffffffffffffff020302b80b000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000100010305000200000064190000ac0d0000000000000a1a00000402000000000000000000000000000000000000000000000000000000000000000000000000000000000000040402c40900000500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "bytes": "000001000500070006000500030e0e00ffff03ffffffffffffff020302b80b000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000100010305000200000064190000ac0d0000000000000a1a00000402000000000000000000000000000000000000000000000000000000000000000000000000000000000000040402c40900000500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000505a00f000002ff0101000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001010203030104010f000303",
       "input": {
         "accuracy": {
           "aspect": 0,
@@ -970,6 +1434,117 @@
             "turns": 0
           }
         ],
+        "party": {
+          "alive": 15,
+          "auras": [
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 5,
+                "hostile": true,
+                "kind": 5,
+                "passive": true,
+                "powerBp": 4000,
+                "radius": 2,
+                "selfOnly": false,
+                "turns": 255
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ]
+          ],
+          "cells": [
+            [
+              1,
+              1
+            ],
+            [
+              2,
+              3
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              4,
+              1
+            ]
+          ]
+        },
         "skill": {
           "blocks": [
             0,
@@ -992,6 +1567,7 @@
             0
           ]
         },
+        "slot": 0,
         "target": {
           "bestiaryId": 4,
           "defense": {
@@ -1082,15 +1658,19 @@
               "turns": 0
             }
           ]
-        }
+        },
+        "targetAt": [
+          3,
+          3
+        ]
       },
       "preview": {
         "critBp": 500,
-        "critMax": 13,
-        "critMin": 6,
+        "critMax": 14,
+        "critMin": 7,
         "hitBp": 7000,
         "immune": false,
-        "max": 8,
+        "max": 9,
         "min": 4,
         "tints": [
           {
@@ -1100,7 +1680,7 @@
             "conditionMet": true,
             "generated": true,
             "id": 21,
-            "max": 8,
+            "max": 9,
             "min": 4,
             "pure": true,
             "tier": 14,
@@ -1113,7 +1693,7 @@
             "conditionMet": true,
             "generated": false,
             "id": 23,
-            "max": 8,
+            "max": 9,
             "min": 4,
             "pure": false,
             "tier": 14,
@@ -1126,7 +1706,7 @@
             "conditionMet": true,
             "generated": false,
             "id": 33,
-            "max": 8,
+            "max": 9,
             "min": 4,
             "pure": false,
             "tier": 14,
@@ -1139,7 +1719,7 @@
             "conditionMet": true,
             "generated": true,
             "id": 35,
-            "max": 8,
+            "max": 9,
             "min": 4,
             "pure": true,
             "tier": 14,
@@ -1149,7 +1729,7 @@
       }
     },
     {
-      "bytes": "01000200070008000900060001090a00ffff03ffffffffffffff020302b80b00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000102000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000203000000",
+      "bytes": "01000200070008000900060001090a00ffff03ffffffffffffff020302b80b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000020300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000303",
       "input": {
         "accuracy": {
           "aspect": 0,
@@ -1227,7 +1807,119 @@
             "turns": 0
           }
         ],
+        "party": {
+          "alive": 0,
+          "auras": [
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ]
+          ],
+          "cells": [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ]
+          ]
+        },
         "skill": null,
+        "slot": 0,
         "target": {
           "bestiaryId": 1,
           "defense": {
@@ -1318,7 +2010,11 @@
               "turns": 0
             }
           ]
-        }
+        },
+        "targetAt": [
+          3,
+          3
+        ]
       },
       "preview": {
         "critBp": 500,
@@ -1346,7 +2042,7 @@
       }
     },
     {
-      "bytes": "01000200070008000900060001090a00ffff03ffffffffffffff00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000001000005000001000000102700000000000000000000102700000203000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000200000000000000000",
+      "bytes": "01000200070008000900060001090a00ffff03ffffffffffffff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000100000500000100000010270000000000000000000010270000020300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000303",
       "input": {
         "accuracy": {
           "aspect": 0,
@@ -1424,6 +2120,117 @@
             "turns": 0
           }
         ],
+        "party": {
+          "alive": 0,
+          "auras": [
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ]
+          ],
+          "cells": [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ]
+          ]
+        },
         "skill": {
           "blocks": [
             0,
@@ -1446,6 +2253,7 @@
             0
           ]
         },
+        "slot": 0,
         "target": {
           "bestiaryId": 2,
           "defense": {
@@ -1536,7 +2344,11 @@
               "turns": 0
             }
           ]
-        }
+        },
+        "targetAt": [
+          3,
+          3
+        ]
       },
       "preview": {
         "critBp": 500,
@@ -1577,7 +2389,7 @@
       }
     },
     {
-      "bytes": "01000200070008000900060001090a00ffff03ffffffffffffff00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000001000004000001040000102700000000000000000000401f00000301010288130000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "bytes": "01000200070008000900060001090a00ffff03ffffffffffffff00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000001000004000001040000102700000000000000000000401f0000030101028813000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000303",
       "input": {
         "accuracy": {
           "aspect": 0,
@@ -1655,6 +2467,117 @@
             "turns": 0
           }
         ],
+        "party": {
+          "alive": 0,
+          "auras": [
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ]
+          ],
+          "cells": [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ]
+          ]
+        },
         "skill": {
           "blocks": [
             0,
@@ -1677,6 +2600,7 @@
             0
           ]
         },
+        "slot": 0,
         "target": {
           "bestiaryId": 3,
           "defense": {
@@ -1767,7 +2691,11 @@
               "turns": 0
             }
           ]
-        }
+        },
+        "targetAt": [
+          3,
+          3
+        ]
       },
       "preview": {
         "critBp": 500,
@@ -1808,7 +2736,7 @@
       }
     },
     {
-      "bytes": "01000200070008000900060001090a00ffff03ffffffffffffff020302b80b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000001010005000001000000102700000000000000000000102700000402000000000000000000000000000000000000000000000000000000000000000000000000000000000000040402c40900000500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "bytes": "01000200070008000900060001090a00ffff03ffffffffffffff020302b80b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000001010005000001000000102700000000000000000000102700000402000000000000000000000000000000000000000000000000000000000000000000000000000000000000040402c40900000500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000505a00f000002ff0101000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001010203030104010f000303",
       "input": {
         "accuracy": {
           "aspect": 0,
@@ -1886,6 +2814,117 @@
             "turns": 0
           }
         ],
+        "party": {
+          "alive": 15,
+          "auras": [
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 5,
+                "hostile": true,
+                "kind": 5,
+                "passive": true,
+                "powerBp": 4000,
+                "radius": 2,
+                "selfOnly": false,
+                "turns": 255
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ]
+          ],
+          "cells": [
+            [
+              1,
+              1
+            ],
+            [
+              2,
+              3
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              4,
+              1
+            ]
+          ]
+        },
         "skill": {
           "blocks": [
             0,
@@ -1908,6 +2947,7 @@
             0
           ]
         },
+        "slot": 0,
         "target": {
           "bestiaryId": 4,
           "defense": {
@@ -1998,16 +3038,20 @@
               "turns": 0
             }
           ]
-        }
+        },
+        "targetAt": [
+          3,
+          3
+        ]
       },
       "preview": {
         "critBp": 500,
-        "critMax": 24,
-        "critMin": 12,
+        "critMax": 30,
+        "critMin": 15,
         "hitBp": 7000,
         "immune": false,
-        "max": 16,
-        "min": 8,
+        "max": 20,
+        "min": 10,
         "tints": [
           {
             "base": 5,
@@ -2016,8 +3060,8 @@
             "conditionMet": true,
             "generated": false,
             "id": 31,
-            "max": 16,
-            "min": 8,
+            "max": 20,
+            "min": 10,
             "pure": false,
             "tier": 9,
             "tint": 1
@@ -2029,8 +3073,8 @@
             "conditionMet": true,
             "generated": true,
             "id": 35,
-            "max": 16,
-            "min": 8,
+            "max": 20,
+            "min": 10,
             "pure": true,
             "tier": 14,
             "tint": 5
@@ -2039,7 +3083,7 @@
       }
     },
     {
-      "bytes": "01000200070008000900060001090a00ffff03ffffffffffffff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000100010305000200000064190000ac0d0000000000000a1a00000003000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000020000030203000000",
+      "bytes": "01000200070008000900060001090a00ffff03ffffffffffffff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000100010305000200000064190000ac0d0000000000000a1a000000030000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000200000302030000000203b80b00000203000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002020201030104010f000303",
       "input": {
         "accuracy": {
           "aspect": 3,
@@ -2117,6 +3161,117 @@
             "turns": 0
           }
         ],
+        "party": {
+          "alive": 15,
+          "auras": [
+            [
+              {
+                "aspect": 3,
+                "hostile": false,
+                "kind": 2,
+                "passive": false,
+                "powerBp": 3000,
+                "radius": 2,
+                "selfOnly": false,
+                "turns": 3
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ]
+          ],
+          "cells": [
+            [
+              2,
+              2
+            ],
+            [
+              2,
+              1
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              4,
+              1
+            ]
+          ]
+        },
         "skill": {
           "blocks": [
             0,
@@ -2139,6 +3294,7 @@
             0
           ]
         },
+        "slot": 0,
         "target": {
           "bestiaryId": 0,
           "defense": {
@@ -2229,16 +3385,20 @@
               "turns": 0
             }
           ]
-        }
+        },
+        "targetAt": [
+          3,
+          3
+        ]
       },
       "preview": {
         "critBp": 500,
-        "critMax": 16,
-        "critMin": 8,
+        "critMax": 20,
+        "critMin": 10,
         "hitBp": 8500,
         "immune": false,
-        "max": 11,
-        "min": 5,
+        "max": 13,
+        "min": 6,
         "tints": [
           {
             "base": 3,
@@ -2247,8 +3407,8 @@
             "conditionMet": true,
             "generated": false,
             "id": 19,
-            "max": 11,
-            "min": 5,
+            "max": 13,
+            "min": 6,
             "pure": false,
             "tier": 9,
             "tint": 1
@@ -2260,8 +3420,8 @@
             "conditionMet": true,
             "generated": false,
             "id": 23,
-            "max": 11,
-            "min": 5,
+            "max": 13,
+            "min": 6,
             "pure": false,
             "tier": 14,
             "tint": 5
@@ -2273,8 +3433,8 @@
             "conditionMet": true,
             "generated": false,
             "id": 31,
-            "max": 11,
-            "min": 5,
+            "max": 13,
+            "min": 6,
             "pure": false,
             "tier": 9,
             "tint": 1
@@ -2286,8 +3446,8 @@
             "conditionMet": true,
             "generated": true,
             "id": 35,
-            "max": 11,
-            "min": 5,
+            "max": 13,
+            "min": 6,
             "pure": true,
             "tier": 14,
             "tint": 5
@@ -2296,7 +3456,7 @@
       }
     },
     {
-      "bytes": "00010300090009000c000700030406ffffffffffffffffffffff000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000203000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000200000000000000000",
+      "bytes": "00010300090009000c000700030406ffffffffffffffffffffff00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000020300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000303",
       "input": {
         "accuracy": {
           "aspect": 0,
@@ -2374,7 +3534,119 @@
             "turns": 0
           }
         ],
+        "party": {
+          "alive": 0,
+          "auras": [
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ]
+          ],
+          "cells": [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ]
+          ]
+        },
         "skill": null,
+        "slot": 0,
         "target": {
           "bestiaryId": 2,
           "defense": {
@@ -2465,7 +3737,11 @@
               "turns": 0
             }
           ]
-        }
+        },
+        "targetAt": [
+          3,
+          3
+        ]
       },
       "preview": {
         "critBp": 500,
@@ -2493,7 +3769,7 @@
       }
     },
     {
-      "bytes": "00010300090009000c000700030406ffffffffffffffffffffff00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000010001000001000000102700000000000000000000102700000301010288130000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "bytes": "00010300090009000c000700030406ffffffffffffffffffffff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000001000100000100000010270000000000000000000010270000030101028813000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000303",
       "input": {
         "accuracy": {
           "aspect": 0,
@@ -2571,6 +3847,117 @@
             "turns": 0
           }
         ],
+        "party": {
+          "alive": 0,
+          "auras": [
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ]
+          ],
+          "cells": [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ]
+          ]
+        },
         "skill": {
           "blocks": [
             0,
@@ -2593,6 +3980,7 @@
             0
           ]
         },
+        "slot": 0,
         "target": {
           "bestiaryId": 3,
           "defense": {
@@ -2683,7 +4071,11 @@
               "turns": 0
             }
           ]
-        }
+        },
+        "targetAt": [
+          3,
+          3
+        ]
       },
       "preview": {
         "critBp": 500,
@@ -2711,7 +4103,7 @@
       }
     },
     {
-      "bytes": "00010300090009000c000700030406ffffffffffffffffffffff020302b80b000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000001000100000200000064190000ac0d000000000000102700000402000000000000000000000000000000000000000000000000000000000000000000000000000000000000040402c40900000500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "bytes": "00010300090009000c000700030406ffffffffffffffffffffff020302b80b000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000001000100000200000064190000ac0d000000000000102700000402000000000000000000000000000000000000000000000000000000000000000000000000000000000000040402c40900000500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000505a00f000002ff0101000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001010203030104010f000303",
       "input": {
         "accuracy": {
           "aspect": 0,
@@ -2789,6 +4181,117 @@
             "turns": 0
           }
         ],
+        "party": {
+          "alive": 15,
+          "auras": [
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 5,
+                "hostile": true,
+                "kind": 5,
+                "passive": true,
+                "powerBp": 4000,
+                "radius": 2,
+                "selfOnly": false,
+                "turns": 255
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ]
+          ],
+          "cells": [
+            [
+              1,
+              1
+            ],
+            [
+              2,
+              3
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              4,
+              1
+            ]
+          ]
+        },
         "skill": {
           "blocks": [
             0,
@@ -2811,6 +4314,7 @@
             0
           ]
         },
+        "slot": 0,
         "target": {
           "bestiaryId": 4,
           "defense": {
@@ -2901,7 +4405,11 @@
               "turns": 0
             }
           ]
-        }
+        },
+        "targetAt": [
+          3,
+          3
+        ]
       },
       "preview": {
         "critBp": 500,
@@ -2942,7 +4450,7 @@
       }
     },
     {
-      "bytes": "00010300090009000c000700030406ffffffffffffffffffffff00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000010001000001050000102700000000000000000000401f00000003000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000020000010203000000",
+      "bytes": "00010300090009000c000700030406ffffffffffffffffffffff00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000010001000001050000102700000000000000000000401f000000030000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000200000102030000000203b80b00000203000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002020201030104010f000303",
       "input": {
         "accuracy": {
           "aspect": 1,
@@ -3020,6 +4528,117 @@
             "turns": 0
           }
         ],
+        "party": {
+          "alive": 15,
+          "auras": [
+            [
+              {
+                "aspect": 3,
+                "hostile": false,
+                "kind": 2,
+                "passive": false,
+                "powerBp": 3000,
+                "radius": 2,
+                "selfOnly": false,
+                "turns": 3
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ]
+          ],
+          "cells": [
+            [
+              2,
+              2
+            ],
+            [
+              2,
+              1
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              4,
+              1
+            ]
+          ]
+        },
         "skill": {
           "blocks": [
             0,
@@ -3042,6 +4661,7 @@
             0
           ]
         },
+        "slot": 0,
         "target": {
           "bestiaryId": 0,
           "defense": {
@@ -3132,16 +4752,20 @@
               "turns": 0
             }
           ]
-        }
+        },
+        "targetAt": [
+          3,
+          3
+        ]
       },
       "preview": {
         "critBp": 500,
-        "critMax": 16,
-        "critMin": 8,
+        "critMax": 19,
+        "critMin": 9,
         "hitBp": 8500,
         "immune": false,
-        "max": 11,
-        "min": 5,
+        "max": 13,
+        "min": 6,
         "tints": [
           {
             "base": 1,
@@ -3150,8 +4774,8 @@
             "conditionMet": true,
             "generated": false,
             "id": 9,
-            "max": 11,
-            "min": 5,
+            "max": 13,
+            "min": 6,
             "pure": false,
             "tier": 4,
             "tint": 3
@@ -3160,7 +4784,7 @@
       }
     },
     {
-      "bytes": "00010300090009000c000700030406ffffffffffffffffffffff000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000001020000010000001027000000000000000000000a1a00000101000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "bytes": "00010300090009000c000700030406ffffffffffffffffffffff000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000001020000010000001027000000000000000000000a1a0000010100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000303",
       "input": {
         "accuracy": {
           "aspect": 0,
@@ -3238,6 +4862,117 @@
             "turns": 0
           }
         ],
+        "party": {
+          "alive": 0,
+          "auras": [
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ]
+          ],
+          "cells": [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ]
+          ]
+        },
         "skill": {
           "blocks": [
             0,
@@ -3260,6 +4995,7 @@
             0
           ]
         },
+        "slot": 0,
         "target": {
           "bestiaryId": 1,
           "defense": {
@@ -3350,7 +5086,11 @@
               "turns": 0
             }
           ]
-        }
+        },
+        "targetAt": [
+          3,
+          3
+        ]
       },
       "preview": {
         "critBp": 500,
@@ -3378,7 +5118,7 @@
       }
     },
     {
-      "bytes": "010104000b000a0006000800010e0201ffff04ffffffffffffff000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000301010288130000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "bytes": "010104000b000a0006000800010e0201ffff04ffffffffffffff00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000030101028813000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000303",
       "input": {
         "accuracy": {
           "aspect": 0,
@@ -3456,7 +5196,119 @@
             "turns": 0
           }
         ],
+        "party": {
+          "alive": 0,
+          "auras": [
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ]
+          ],
+          "cells": [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ]
+          ]
+        },
         "skill": null,
+        "slot": 0,
         "target": {
           "bestiaryId": 3,
           "defense": {
@@ -3547,7 +5399,11 @@
               "turns": 0
             }
           ]
-        }
+        },
+        "targetAt": [
+          3,
+          3
+        ]
       },
       "preview": {
         "critBp": 500,
@@ -3575,7 +5431,7 @@
       }
     },
     {
-      "bytes": "010104000b000a0006000800010e0201ffff04ffffffffffffff020302b80b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000010001000001000000102700000000000000000000102700000402000000000000000000000000000000000000000000000000000000000000000000000000000000000000040402c40900000500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "bytes": "010104000b000a0006000800010e0201ffff04ffffffffffffff020302b80b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000010001000001000000102700000000000000000000102700000402000000000000000000000000000000000000000000000000000000000000000000000000000000000000040402c40900000500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000505a00f000002ff0101000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001010203030104010f000303",
       "input": {
         "accuracy": {
           "aspect": 0,
@@ -3653,6 +5509,117 @@
             "turns": 0
           }
         ],
+        "party": {
+          "alive": 15,
+          "auras": [
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 5,
+                "hostile": true,
+                "kind": 5,
+                "passive": true,
+                "powerBp": 4000,
+                "radius": 2,
+                "selfOnly": false,
+                "turns": 255
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ]
+          ],
+          "cells": [
+            [
+              1,
+              1
+            ],
+            [
+              2,
+              3
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              4,
+              1
+            ]
+          ]
+        },
         "skill": {
           "blocks": [
             0,
@@ -3675,6 +5642,7 @@
             0
           ]
         },
+        "slot": 0,
         "target": {
           "bestiaryId": 4,
           "defense": {
@@ -3765,7 +5733,11 @@
               "turns": 0
             }
           ]
-        }
+        },
+        "targetAt": [
+          3,
+          3
+        ]
       },
       "preview": {
         "critBp": 500,
@@ -3806,7 +5778,7 @@
       }
     },
     {
-      "bytes": "010104000b000a0006000800010e0201ffff04ffffffffffffff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000001000100000200000064190000ac0d000000000000102700000003000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000020000010203000000",
+      "bytes": "010104000b000a0006000800010e0201ffff04ffffffffffffff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000001000100000200000064190000ac0d0000000000001027000000030000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000200000102030000000203b80b00000203000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002020201030104010f000303",
       "input": {
         "accuracy": {
           "aspect": 1,
@@ -3884,6 +5856,117 @@
             "turns": 0
           }
         ],
+        "party": {
+          "alive": 15,
+          "auras": [
+            [
+              {
+                "aspect": 3,
+                "hostile": false,
+                "kind": 2,
+                "passive": false,
+                "powerBp": 3000,
+                "radius": 2,
+                "selfOnly": false,
+                "turns": 3
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ]
+          ],
+          "cells": [
+            [
+              2,
+              2
+            ],
+            [
+              2,
+              1
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              4,
+              1
+            ]
+          ]
+        },
         "skill": {
           "blocks": [
             0,
@@ -3906,6 +5989,7 @@
             0
           ]
         },
+        "slot": 0,
         "target": {
           "bestiaryId": 0,
           "defense": {
@@ -3996,16 +6080,20 @@
               "turns": 0
             }
           ]
-        }
+        },
+        "targetAt": [
+          3,
+          3
+        ]
       },
       "preview": {
         "critBp": 500,
-        "critMax": 14,
-        "critMin": 7,
+        "critMax": 17,
+        "critMin": 8,
         "hitBp": 9000,
         "immune": false,
-        "max": 9,
-        "min": 4,
+        "max": 11,
+        "min": 5,
         "tints": [
           {
             "base": 1,
@@ -4014,8 +6102,8 @@
             "conditionMet": true,
             "generated": true,
             "id": 7,
-            "max": 9,
-            "min": 4,
+            "max": 11,
+            "min": 5,
             "pure": true,
             "tier": 14,
             "tint": 1
@@ -4027,8 +6115,8 @@
             "conditionMet": false,
             "generated": false,
             "id": 10,
-            "max": 9,
-            "min": 4,
+            "max": 11,
+            "min": 5,
             "pure": false,
             "tier": 14,
             "tint": 4
@@ -4040,8 +6128,8 @@
             "conditionMet": true,
             "generated": false,
             "id": 1,
-            "max": 9,
-            "min": 4,
+            "max": 11,
+            "min": 5,
             "pure": false,
             "tier": 14,
             "tint": 1
@@ -4053,8 +6141,8 @@
             "conditionMet": true,
             "generated": false,
             "id": 4,
-            "max": 9,
-            "min": 4,
+            "max": 11,
+            "min": 5,
             "pure": false,
             "tier": 14,
             "tint": 4
@@ -4063,7 +6151,7 @@
       }
     },
     {
-      "bytes": "010104000b000a0006000800010e0201ffff04ffffffffffffff00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000010001000001050000102700000000000000000000401f00000101000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "bytes": "010104000b000a0006000800010e0201ffff04ffffffffffffff00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000010001000001050000102700000000000000000000401f0000010100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000303",
       "input": {
         "accuracy": {
           "aspect": 0,
@@ -4141,6 +6229,117 @@
             "turns": 0
           }
         ],
+        "party": {
+          "alive": 0,
+          "auras": [
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ]
+          ],
+          "cells": [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ]
+          ]
+        },
         "skill": {
           "blocks": [
             0,
@@ -4163,6 +6362,7 @@
             0
           ]
         },
+        "slot": 0,
         "target": {
           "bestiaryId": 1,
           "defense": {
@@ -4253,7 +6453,11 @@
               "turns": 0
             }
           ]
-        }
+        },
+        "targetAt": [
+          3,
+          3
+        ]
       },
       "preview": {
         "critBp": 500,
@@ -4294,7 +6498,7 @@
       }
     },
     {
-      "bytes": "010104000b000a0006000800010e0201ffff04ffffffffffffff020302b80b00000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000001020000010000001027000000000000000000000a1a00000202010288130000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000200000000000000000",
+      "bytes": "010104000b000a0006000800010e0201ffff04ffffffffffffff020302b80b00000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000001020000010000001027000000000000000000000a1a0000020201028813000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000303",
       "input": {
         "accuracy": {
           "aspect": 0,
@@ -4372,6 +6576,117 @@
             "turns": 0
           }
         ],
+        "party": {
+          "alive": 0,
+          "auras": [
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ]
+          ],
+          "cells": [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              0
+            ]
+          ]
+        },
         "skill": {
           "blocks": [
             0,
@@ -4394,6 +6709,7 @@
             0
           ]
         },
+        "slot": 0,
         "target": {
           "bestiaryId": 2,
           "defense": {
@@ -4484,7 +6800,11 @@
               "turns": 0
             }
           ]
-        }
+        },
+        "targetAt": [
+          3,
+          3
+        ]
       },
       "preview": {
         "critBp": 500,
@@ -4525,7 +6845,7 @@
       }
     },
     {
-      "bytes": "000201000d000b000900090003090e02ffff05ffffffffffffff020302b80b00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000402000000000000000000000000000000000000000000000000000000000000000000000000000000000000040402c40900000500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "bytes": "000201000d000b000900090003090e02ffff05ffffffffffffff020302b80b00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000402000000000000000000000000000000000000000000000000000000000000000000000000000000000000040402c40900000500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000505a00f000002ff0101000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001010203030104010f000303",
       "input": {
         "accuracy": {
           "aspect": 0,
@@ -4603,7 +6923,119 @@
             "turns": 0
           }
         ],
+        "party": {
+          "alive": 15,
+          "auras": [
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 5,
+                "hostile": true,
+                "kind": 5,
+                "passive": true,
+                "powerBp": 4000,
+                "radius": 2,
+                "selfOnly": false,
+                "turns": 255
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ]
+          ],
+          "cells": [
+            [
+              1,
+              1
+            ],
+            [
+              2,
+              3
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              4,
+              1
+            ]
+          ]
+        },
         "skill": null,
+        "slot": 0,
         "target": {
           "bestiaryId": 4,
           "defense": {
@@ -4694,7 +7126,11 @@
               "turns": 0
             }
           ]
-        }
+        },
+        "targetAt": [
+          3,
+          3
+        ]
       },
       "preview": {
         "critBp": 500,
@@ -4722,7 +7158,7 @@
       }
     },
     {
-      "bytes": "010202000f0007000c000a0001040affffffffffffffffffffff000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000020000000203000000",
+      "bytes": "010202000f0007000c000a0001040affffffffffffffffffffff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000030000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000200000002030000000203b80b00000203000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002020201030104010f000303",
       "input": {
         "accuracy": {
           "aspect": 0,
@@ -4800,7 +7236,119 @@
             "turns": 0
           }
         ],
+        "party": {
+          "alive": 15,
+          "auras": [
+            [
+              {
+                "aspect": 3,
+                "hostile": false,
+                "kind": 2,
+                "passive": false,
+                "powerBp": 3000,
+                "radius": 2,
+                "selfOnly": false,
+                "turns": 3
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ]
+          ],
+          "cells": [
+            [
+              2,
+              2
+            ],
+            [
+              2,
+              1
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              4,
+              1
+            ]
+          ]
+        },
         "skill": null,
+        "slot": 0,
         "target": {
           "bestiaryId": 0,
           "defense": {
@@ -4891,16 +7439,20 @@
               "turns": 0
             }
           ]
-        }
+        },
+        "targetAt": [
+          3,
+          3
+        ]
       },
       "preview": {
         "critBp": 500,
-        "critMax": 10,
-        "critMin": 5,
+        "critMax": 13,
+        "critMin": 6,
         "hitBp": 7000,
         "immune": false,
-        "max": 7,
-        "min": 3,
+        "max": 9,
+        "min": 4,
         "tints": [
           {
             "base": 4,
@@ -4909,13 +7461,202 @@
             "conditionMet": true,
             "generated": false,
             "id": 25,
-            "max": 7,
-            "min": 3,
+            "max": 9,
+            "min": 4,
             "pure": false,
             "tier": 4,
             "tint": 1
           }
         ]
+      }
+    }
+  ],
+  "lines": [
+    {
+      "bytes": "02020402060c0c0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "cells": [
+        [
+          3,
+          2
+        ],
+        [
+          4,
+          2
+        ],
+        [
+          5,
+          2
+        ],
+        [
+          6,
+          2
+        ],
+        [
+          7,
+          2
+        ],
+        [
+          8,
+          2
+        ]
+      ],
+      "input": {
+        "blocked": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "from": [
+          2,
+          2
+        ],
+        "height": 12,
+        "reach": 6,
+        "through": [
+          4,
+          2
+        ],
+        "width": 12
+      }
+    },
+    {
+      "bytes": "02020404060c0c0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "cells": [
+        [
+          3,
+          3
+        ],
+        [
+          4,
+          4
+        ],
+        [
+          5,
+          5
+        ],
+        [
+          6,
+          6
+        ],
+        [
+          7,
+          7
+        ],
+        [
+          8,
+          8
+        ]
+      ],
+      "input": {
+        "blocked": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "from": [
+          2,
+          2
+        ],
+        "height": 12,
+        "reach": 6,
+        "through": [
+          4,
+          4
+        ],
+        "width": 12
+      }
+    },
+    {
+      "bytes": "02020503060c0c0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "cells": [
+        [
+          3,
+          2
+        ],
+        [
+          4,
+          3
+        ],
+        [
+          5,
+          3
+        ],
+        [
+          6,
+          3
+        ],
+        [
+          7,
+          4
+        ],
+        [
+          8,
+          4
+        ]
+      ],
+      "input": {
+        "blocked": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "from": [
+          2,
+          2
+        ],
+        "height": 12,
+        "reach": 6,
+        "through": [
+          5,
+          3
+        ],
+        "width": 12
+      }
+    },
+    {
+      "bytes": "02020402060c0c0000000000000000400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "cells": [
+        [
+          3,
+          2
+        ],
+        [
+          4,
+          2
+        ],
+        [
+          5,
+          2
+        ]
+      ],
+      "input": {
+        "blocked": "0000000000000000400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "from": [
+          2,
+          2
+        ],
+        "height": 12,
+        "reach": 6,
+        "through": [
+          4,
+          2
+        ],
+        "width": 12
+      }
+    },
+    {
+      "bytes": "0202040206050c0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "cells": [
+        [
+          3,
+          2
+        ],
+        [
+          4,
+          2
+        ]
+      ],
+      "input": {
+        "blocked": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "from": [
+          2,
+          2
+        ],
+        "height": 12,
+        "reach": 6,
+        "through": [
+          4,
+          2
+        ],
+        "width": 5
       }
     }
   ],
@@ -5535,5 +8276,1695 @@
       }
     }
   ],
-  "tables": "0000000000010000010000010103000002000004020500000301000303060000040100050407000005010006050800000100120010270000040010270000000000000000000000000000000000000000010000000000000004011027000000000000000000000000000000000000000001000000000000000dff0000000000000000000000000000000000000000000001000000000000000403102700000000000000000000000000000000000000000100000000000000050510270000000000000000000000000000000000000000010013001027000002ff00000000000000000000000000000000000000000000000000000000000000000000000000000101070010270000140010270000000001010d0000000000000000000000000001010403102700000000000000000000010110000100000011001027000000000101020000000000040610270000000003010b001027000000000000000000000000000000000000000000000000000003010d0200000000000000000000000002010603102700000000000000000000040101ff102700000c020000000000000301810210270000020200000000000005010400102700000000000000000000050104011027000000000000000000000000000000000000000000000000000005010e030300000000000000000000000501050510270000000000000000000005010fff000000000000000000000000060104008813000000000000000000000601060110270000000000000000000006010900020000000000000000000000000000000000000000000000000000000601080010270000000000000000000006018700102700008800102700000000070104001027000000000000000000000701070010270000040110270000000007010d050000000000000000000000000701040310270000000000000000000000000000000000000000000000000000070104061027000000000000000000000801040010270000000000000000000008010401102700000000000000000000080105041027000000000000000000000601020300000000000000000000000008010a0010270000000000000000000000000000000000000000000000000000"
+  "tables": "0000000000010000010000010103000002000004020500000301000303060000040100050407000005010006050800000100120010270000040010270000000000000000000000000000000000000000010000000000000004011027000000000000000000000000000000000000000001000000000000000dff0000000000000000000000000000000000000000000001000000000000000403102700000000000000000000000000000000000000000100000000000000050510270000000000000000000000000000000000000000010013001027000002ff00000000000000000000000000000000000000000000000000000000000000000000000000000101070010270000140010270000000001010d0000000000000000000000000001010403102700000000000000000000010110000100000011001027000000000101020000000000040610270000000003010b001027000000000000000000000000000000000000000000000000000003010d0200000000000000000000000002010603102700000000000000000000040101ff102700000c020000000000000301810210270000020200000000000005010400102700000000000000000000050104011027000000000000000000000000000000000000000000000000000005010e030300000000000000000000000501050510270000000000000000000005010fff000000000000000000000000060104008813000000000000000000000601060110270000000000000000000006010900020000000000000000000000000000000000000000000000000000000601080010270000000000000000000006018700102700008800102700000000070104001027000000000000000000000701070010270000040110270000000007010d050000000000000000000000000701040310270000000000000000000000000000000000000000000000000000070104061027000000000000000000000801040010270000000000000000000008010401102700000000000000000000080105041027000000000000000000000601020300000000000000000000000008010a0010270000000000000000000000000000000000000000000000000000",
+  "unitMods": [
+    {
+      "bytes": "0401c409000002ff000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004040201030104010f0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000040400",
+      "input": {
+        "at": [
+          4,
+          4
+        ],
+        "basicAttack": false,
+        "mods": [
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          }
+        ],
+        "monster": false,
+        "party": {
+          "alive": 15,
+          "auras": [
+            [
+              {
+                "aspect": 1,
+                "hostile": false,
+                "kind": 4,
+                "passive": true,
+                "powerBp": 2500,
+                "radius": 2,
+                "selfOnly": false,
+                "turns": 255
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ]
+          ],
+          "cells": [
+            [
+              4,
+              4
+            ],
+            [
+              2,
+              1
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              4,
+              1
+            ]
+          ]
+        },
+        "slot": 0
+      },
+      "mods": [
+        {
+          "aspect": 1,
+          "kind": 4,
+          "powerBp": 2500,
+          "source": 0,
+          "turns": 1
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        }
+      ]
+    },
+    {
+      "bytes": "0401c409000002ff000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004040201030104010f040002e803000001000000000000000000000000000000000000000000000000000000000000000000000000000000000001050500",
+      "input": {
+        "at": [
+          5,
+          5
+        ],
+        "basicAttack": false,
+        "mods": [
+          {
+            "aspect": 0,
+            "kind": 4,
+            "powerBp": 1000,
+            "source": 1,
+            "turns": 2
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          }
+        ],
+        "monster": false,
+        "party": {
+          "alive": 15,
+          "auras": [
+            [
+              {
+                "aspect": 1,
+                "hostile": false,
+                "kind": 4,
+                "passive": true,
+                "powerBp": 2500,
+                "radius": 2,
+                "selfOnly": false,
+                "turns": 255
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ]
+          ],
+          "cells": [
+            [
+              4,
+              4
+            ],
+            [
+              2,
+              1
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              4,
+              1
+            ]
+          ]
+        },
+        "slot": 1
+      },
+      "mods": [
+        {
+          "aspect": 1,
+          "kind": 4,
+          "powerBp": 2500,
+          "source": 0,
+          "turns": 2
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        }
+      ]
+    },
+    {
+      "bytes": "0401c409000002ff000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004040201030104010f0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001070400",
+      "input": {
+        "at": [
+          7,
+          4
+        ],
+        "basicAttack": false,
+        "mods": [
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          }
+        ],
+        "monster": false,
+        "party": {
+          "alive": 15,
+          "auras": [
+            [
+              {
+                "aspect": 1,
+                "hostile": false,
+                "kind": 4,
+                "passive": true,
+                "powerBp": 2500,
+                "radius": 2,
+                "selfOnly": false,
+                "turns": 255
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ]
+          ],
+          "cells": [
+            [
+              4,
+              4
+            ],
+            [
+              2,
+              1
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              4,
+              1
+            ]
+          ]
+        },
+        "slot": 1
+      },
+      "mods": [
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        }
+      ]
+    },
+    {
+      "bytes": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000101b80b000002ff01010000000000000000000000000000000000000000000000000000000000000000000001010201040404010f0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100050300",
+      "input": {
+        "at": [
+          5,
+          3
+        ],
+        "basicAttack": false,
+        "mods": [
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          }
+        ],
+        "monster": true,
+        "party": {
+          "alive": 15,
+          "auras": [
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 1,
+                "hostile": true,
+                "kind": 1,
+                "passive": true,
+                "powerBp": 3000,
+                "radius": 2,
+                "selfOnly": false,
+                "turns": 255
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ]
+          ],
+          "cells": [
+            [
+              1,
+              1
+            ],
+            [
+              2,
+              1
+            ],
+            [
+              4,
+              4
+            ],
+            [
+              4,
+              1
+            ]
+          ]
+        },
+        "slot": 0
+      },
+      "mods": [
+        {
+          "aspect": 1,
+          "kind": 1,
+          "powerBp": 3000,
+          "source": 2,
+          "turns": 1
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        }
+      ]
+    },
+    {
+      "bytes": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000101b80b000002ff01010000000000000000000000000000000000000000000000000000000000000000000001010201040404010f0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001050300",
+      "input": {
+        "at": [
+          5,
+          3
+        ],
+        "basicAttack": false,
+        "mods": [
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          }
+        ],
+        "monster": false,
+        "party": {
+          "alive": 15,
+          "auras": [
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 1,
+                "hostile": true,
+                "kind": 1,
+                "passive": true,
+                "powerBp": 3000,
+                "radius": 2,
+                "selfOnly": false,
+                "turns": 255
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ]
+          ],
+          "cells": [
+            [
+              1,
+              1
+            ],
+            [
+              2,
+              1
+            ],
+            [
+              4,
+              4
+            ],
+            [
+              4,
+              1
+            ]
+          ]
+        },
+        "slot": 1
+      },
+      "mods": [
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        }
+      ]
+    },
+    {
+      "bytes": "000000000000000000000000000000000000000000000203d007000002ff0001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001010404030104010f0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000040500",
+      "input": {
+        "at": [
+          4,
+          5
+        ],
+        "basicAttack": false,
+        "mods": [
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          }
+        ],
+        "monster": false,
+        "party": {
+          "alive": 15,
+          "auras": [
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 3,
+                "hostile": false,
+                "kind": 2,
+                "passive": true,
+                "powerBp": 2000,
+                "radius": 2,
+                "selfOnly": false,
+                "turns": 255
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ]
+          ],
+          "cells": [
+            [
+              1,
+              1
+            ],
+            [
+              4,
+              4
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              4,
+              1
+            ]
+          ]
+        },
+        "slot": 0
+      },
+      "mods": [
+        {
+          "aspect": 3,
+          "kind": 2,
+          "powerBp": 2000,
+          "source": 1,
+          "turns": 1
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        }
+      ]
+    },
+    {
+      "bytes": "000000000000000000000000000000000000000000000203d007000002ff0001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001010404030104010f0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000040501",
+      "input": {
+        "at": [
+          4,
+          5
+        ],
+        "basicAttack": true,
+        "mods": [
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          }
+        ],
+        "monster": false,
+        "party": {
+          "alive": 15,
+          "auras": [
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 3,
+                "hostile": false,
+                "kind": 2,
+                "passive": true,
+                "powerBp": 2000,
+                "radius": 2,
+                "selfOnly": false,
+                "turns": 255
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ]
+          ],
+          "cells": [
+            [
+              1,
+              1
+            ],
+            [
+              4,
+              4
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              4,
+              1
+            ]
+          ]
+        },
+        "slot": 0
+      },
+      "mods": [
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        }
+      ]
+    },
+    {
+      "bytes": "0401c409000002ff000101000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004040201030104010f0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001040400",
+      "input": {
+        "at": [
+          4,
+          4
+        ],
+        "basicAttack": false,
+        "mods": [
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          },
+          {
+            "aspect": 0,
+            "kind": 0,
+            "powerBp": 0,
+            "source": 0,
+            "turns": 0
+          }
+        ],
+        "monster": false,
+        "party": {
+          "alive": 15,
+          "auras": [
+            [
+              {
+                "aspect": 1,
+                "hostile": false,
+                "kind": 4,
+                "passive": true,
+                "powerBp": 2500,
+                "radius": 2,
+                "selfOnly": true,
+                "turns": 255
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ],
+            [
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              },
+              {
+                "aspect": 0,
+                "hostile": false,
+                "kind": 0,
+                "passive": false,
+                "powerBp": 0,
+                "radius": 0,
+                "selfOnly": false,
+                "turns": 0
+              }
+            ]
+          ],
+          "cells": [
+            [
+              4,
+              4
+            ],
+            [
+              2,
+              1
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              4,
+              1
+            ]
+          ]
+        },
+        "slot": 1
+      },
+      "mods": [
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        },
+        {
+          "aspect": 0,
+          "kind": 0,
+          "powerBp": 0,
+          "source": 0,
+          "turns": 0
+        }
+      ]
+    }
+  ]
 }

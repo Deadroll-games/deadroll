@@ -314,3 +314,84 @@ and `CellBurned` (`move_unit` / `monster_move` into a burning cell). `TurnTicked
 
 Combat WASM ABI 4: `set_tables`, `monster_sheet`; `TargetInput.defense` and
 `AttackRequest.accuracy` appended; `HitPreview.tints` (`crates/combat/wasm/README.md`).
+
+## 12. Patch 5: skills (range, timing, AP, reactive, passive, auras, line)
+
+`crates/types`: `RangeTag { Melee, Ranged }` (discriminants 0, 1) and seed
+`SKILL_EXTRAS = b"skill_extras"` added. Nothing renamed or removed.
+
+`crates/skillcheck` (not frozen, listed for the IDL): `SkillExt { range: RangeTag, timing: TimeTag,
+hp_below_pct: u8 }` (3 B); `SkillError` gains, at the end, `HealNotAvailable`,
+`MissingThreshold`, `UnexpectedThreshold`, `ThresholdRange`, `PassiveDebuffNeedsAura`;
+`Derived.ap_cost`. `SkillBlocks` and `SkillRecord` are unchanged.
+
+Character program:
+
+```
+SkillExtras (new, zero-copy)  ["skill_extras", character], created by create_character
+  version: u8, bump: u8, character: Pubkey,
+  extras: [SkillExtra { range: u8, timing: u8, hp_below_pct: u8, ap_cost: u8,
+                        description: [u8; 200] }; 16]          by SkillSet index
+NewSkill (create_character arg)  { blocks, name, ext: SkillExt }   ext appended
+create_character accounts        ... skill_extras (init) appended at the end
+```
+
+`SkillSet` keeps its layout. `SkillExtras` is not burned at death (the description stays with
+the tombstone; the mechanics burn in `SkillSet`).
+
+Character instruction added: `set_skill_description(skill_index: u8, description: [u8; 200])`,
+`owner (signer), character, skill_set, skill_extras (w)`: the owner's main wallet, a living
+character outside a session, `skill_index < SkillSet.count`, printable ASCII zero-padded and not
+empty, written once (`DescriptionAlreadySet` otherwise). Event `SkillDescribed { character,
+skill_index }`. Errors appended to `CharacterError`: `NoSuchSkill`, `InvalidDescription`,
+`DescriptionAlreadySet`.
+
+Session program, accounts (fields appended at the end):
+
+```
+Participation:  ... accuracy, map_skills: [MapSkillData; 6]
+  MapSkillData { blocks, shares_bp: [u32; 3], power_bp, cooldown, ext: SkillExt, ap_cost }
+  snapshot of the map skills at set_ready(true) (by Participation.skills slot)
+GameSession:    ... pending_target, participations: [Pubkey; 4],
+                reactives: [ReactiveData { skill_slot, skill: MapSkillData, cooldown_left }; 4],
+                auras: [[AuraData; 2]; 4],
+                pending_reactive: PendingReactiveData { kind, bearers, source, victim,
+                                                        hp_before, hp_after, hp_max }
+  AuraData { kind: ModKindData, aspect, power_bp: u32, radius, turns (255 = permanent, 0 = none),
+             hostile, passive, self_only }
+  auras[slot][0] = the passive skill's (set at set_ready), [1] = a reactive skill's (temporary)
+  pending_reactive.kind: 0 none, 1 an enemy entered next to a bearer, 2 HP drop at start_turn
+  pending_target: unused since patch 5 (always the default key)
+```
+
+`Participation` and `GameSession` grow, so sessions opened before this upgrade no longer load.
+
+Instruction accounts:
+
+| Instruction | Change |
+|---|---|
+| `set_ready` | `skill_extras` (read) appended |
+| `join_session` | records `GameSession.participations[slot]` |
+| `act` | `layout` appended (walls end a line); AP cost from the skill, range by `RangeTag` |
+| `start_turn` | `payer` (signer, w) and the VRF accounts (`program_identity, oracle_queue, vrf_program, slot_hashes, system_program`) appended |
+| `monster_move` | `signer` writable, the VRF accounts appended; the walk stops on the first cell next to a bearer of an `EnemyAdjacent` reactive skill and requests a reactive roll |
+| `consume_randomness` | `target_participation` must be None; remaining accounts: `Participation (w), Character` of every other living player in slot order (`InvalidPartyAccounts` otherwise) |
+
+`vrf::callback_metas` appends the same party accounts to every request (`act`, `monster_act`,
+`monster_move`, `start_turn`); `start_session` passes none (the initiative roll returns before
+the party is read, extra accounts are ignored). A reactive-only roll puts the first bearer's
+Participation in `GameSession.pending`.
+
+Errors appended to `SessionError`: `InvalidPartyAccounts`, `LineBlocked`,
+`ReactiveAccountsMissing`. Events appended: `ReactiveTriggered { session, action_counter,
+bearer, skill_slot, trigger, reaction: ReactionKind, target, cooldown_left }`,
+`AuraChanged { session, bearer, aura_slot, aura: AuraData }`; `ReactionKind { Strike, Debuff,
+Buff, Aura }`.
+
+`BalanceConfig`: `PlayerTuning.act_ap` renamed `basic_attack_ap`, `strike_range` /
+`projectile_range` renamed `melee_range` / `ranged_range`, `nearby_ally_cells` added;
+`ItemBaseStats.basic_range`, `basic_form` added; `SupportBalance.passive_point_bp` added;
+`SkillTuning` AP and HP-threshold numbers added. Balance JSON presets regenerated.
+
+Combat WASM ABI 5: `AttackRequest.party`, `slot`, `target_at` appended; `unit_mods` and `line`
+exports (`crates/combat/wasm/README.md`).

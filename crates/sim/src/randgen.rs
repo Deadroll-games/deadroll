@@ -3,10 +3,10 @@
 use deadroll_combat::{RollSource, SeededRoll};
 use deadroll_rules::{player::predisposition_allowed, BalanceConfig};
 use deadroll_skillcheck::{
-    validate_starting, Category, Effect, Purpose, SkillBlocks, Target, Trigger, ACTIVE_MAX,
-    SKILL_ASPECTS_MAX,
+    validate_starting, Category, Effect, Purpose, SkillBlocks, SkillExt, Target, Trigger,
+    ACTIVE_MAX, SKILL_ASPECTS_MAX,
 };
-use deadroll_types::{Aspect, Class, Form, Race, Source, STATS_COUNT};
+use deadroll_types::{Aspect, Class, Form, Race, RangeTag, Source, STATS_COUNT};
 
 use crate::{
     named::Named,
@@ -18,7 +18,7 @@ fn pick<T: Copy>(rng: &mut SeededRoll, items: &[T]) -> T {
 }
 
 /// A random active skill the class may start with; `None` after many rejected tries.
-pub fn random_skill(rng: &mut SeededRoll, class: Class) -> Option<SkillBlocks> {
+pub fn random_skill(rng: &mut SeededRoll, class: Class) -> Option<(SkillBlocks, SkillExt)> {
     for _ in 0..1_000 {
         let count = 1 + (rng.next_u64() % SKILL_ASPECTS_MAX as u64) as usize;
         let mut aspects = [Aspect::default(); SKILL_ASPECTS_MAX];
@@ -39,8 +39,12 @@ pub fn random_skill(rng: &mut SeededRoll, class: Class) -> Option<SkillBlocks> {
             trigger: Trigger::None,
             aura_radius: 0,
         };
-        if validate_starting(&blocks, class).is_ok() {
-            return Some(blocks);
+        let ext = SkillExt {
+            range: pick(rng, RangeTag::all()),
+            ..SkillExt::MELEE
+        };
+        if validate_starting(&blocks, &ext, class).is_ok() {
+            return Some((blocks, ext));
         }
     }
     None
@@ -74,7 +78,8 @@ pub fn random_hero(rng: &mut SeededRoll, cfg: &BalanceConfig, class: Option<Clas
     }
     let inline_skills: Vec<SkillPreset> = (0..ACTIVE_MAX)
         .filter_map(|i| {
-            random_skill(rng, class).map(|b| SkillPreset::from_blocks(&format!("r{}", i + 1), &b))
+            random_skill(rng, class)
+                .map(|(b, e)| SkillPreset::from_blocks(&format!("r{}", i + 1), &b, &e))
         })
         .collect();
     HeroPreset {

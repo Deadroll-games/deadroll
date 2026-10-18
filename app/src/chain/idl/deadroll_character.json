@@ -124,6 +124,38 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "skill_extras",
+          "docs": [
+            "Patch 5: range, timing, HP threshold, AP cost and description of every skill."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  107,
+                  105,
+                  108,
+                  108,
+                  95,
+                  101,
+                  120,
+                  116,
+                  114,
+                  97,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "character"
+              }
+            ]
+          }
         }
       ],
       "args": [
@@ -502,6 +534,98 @@
       "args": []
     },
     {
+      "name": "set_skill_description",
+      "docs": [
+        "Owner's main wallet only: writes the description of skill `skill_index` (printable",
+        "ASCII, zero-padded), once. Not while the character is in a session."
+      ],
+      "discriminator": [
+        124,
+        211,
+        139,
+        16,
+        210,
+        36,
+        226,
+        176
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true
+        },
+        {
+          "name": "character"
+        },
+        {
+          "name": "skill_set",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  107,
+                  105,
+                  108,
+                  108,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "character"
+              }
+            ]
+          }
+        },
+        {
+          "name": "skill_extras",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  107,
+                  105,
+                  108,
+                  108,
+                  95,
+                  101,
+                  120,
+                  116,
+                  114,
+                  97,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "character"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "skill_index",
+          "type": "u8"
+        },
+        {
+          "name": "description",
+          "type": {
+            "array": [
+              "u8",
+              200
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "spend_stat_points",
       "docs": [
         "Owner's main wallet only: spends level-up stat points, `points` per `Stat`, all at once.",
@@ -658,6 +782,19 @@
       ]
     },
     {
+      "name": "SkillExtras",
+      "discriminator": [
+        192,
+        71,
+        255,
+        2,
+        155,
+        163,
+        110,
+        187
+      ]
+    },
+    {
       "name": "SkillSet",
       "discriminator": [
         151,
@@ -774,6 +911,19 @@
         29,
         160,
         92
+      ]
+    },
+    {
+      "name": "SkillDescribed",
+      "discriminator": [
+        142,
+        148,
+        33,
+        51,
+        80,
+        95,
+        71,
+        124
       ]
     },
     {
@@ -966,6 +1116,21 @@
       "code": 6029,
       "name": "NotEnoughStatPoints",
       "msg": "More stat points chosen than the character has unspent"
+    },
+    {
+      "code": 6030,
+      "name": "NoSuchSkill",
+      "msg": "The character has no skill at this index"
+    },
+    {
+      "code": 6031,
+      "name": "InvalidDescription",
+      "msg": "Description must be printable ASCII, not empty, zero-padded, at most 200 bytes"
+    },
+    {
+      "code": 6032,
+      "name": "DescriptionAlreadySet",
+      "msg": "This skill already has its description"
     }
   ],
   "types": [
@@ -1868,8 +2033,9 @@
     {
       "name": "NewSkill",
       "docs": [
-        "A starting skill: the blocks (usually a preset from `deadroll_skillcheck::presets`) and the",
-        "player's name for it."
+        "A starting skill: the blocks (usually a preset from `deadroll_skillcheck::presets`), the",
+        "player's name for it and the patch 5 blocks. The description comes with",
+        "`set_skill_description` (six of them do not fit one transaction with the rest)."
       ],
       "type": {
         "kind": "struct",
@@ -1889,6 +2055,14 @@
                 "u8",
                 24
               ]
+            }
+          },
+          {
+            "name": "ext",
+            "type": {
+              "defined": {
+                "name": "SkillExt"
+              }
             }
           }
         ]
@@ -1972,6 +2146,27 @@
           },
           {
             "name": "ForestElf"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RangeTag",
+      "docs": [
+        "Range axis of a skill or a basic attack (docs/DAMAGE_TYPES_AND_MIXES.md, section 2).",
+        "Added in patch 5."
+      ],
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Melee"
+          },
+          {
+            "name": "Ranged"
           }
         ]
       }
@@ -2106,6 +2301,160 @@
               "Aura radius in cells, `0` = not an aura (section 3.5)."
             ],
             "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SkillDescribed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "character",
+            "type": "pubkey"
+          },
+          {
+            "name": "skill_index",
+            "docs": [
+              "`SkillSet` index whose description was written (`SkillExtras.extras[skill_index]`)."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SkillExt",
+      "docs": [
+        "Blocks added in patch 5, stored next to [`SkillBlocks`] (a `SkillSet` record cannot grow",
+        "in place): the range and timing tags (docs/DAMAGE_TYPES_AND_MIXES.md, section 2) and the",
+        "HP threshold of a reactive trigger (docs/SKILL_BUILDER.md, section 3.2)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "range",
+            "docs": [
+              "Melee or ranged: how far the skill reaches."
+            ],
+            "type": {
+              "defined": {
+                "name": "RangeTag"
+              }
+            }
+          },
+          {
+            "name": "timing",
+            "docs": [
+              "Instant or over time. Only a tag for now (rules by tag come later)."
+            ],
+            "type": {
+              "defined": {
+                "name": "TimeTag"
+              }
+            }
+          },
+          {
+            "name": "hp_below_pct",
+            "docs": [
+              "`HpBelow` / `AllyHpBelow`: the trigger fires when HP drops below this percent of the",
+              "maximum. `0` for every other skill."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SkillExtra",
+      "docs": [
+        "The patch 5 part of the skill at the same `SkillSet` index. Raw bytes (zero-copy): `range`",
+        "is a `RangeTag`, `timing` a `TimeTag`."
+      ],
+      "serialization": "bytemuck",
+      "repr": {
+        "kind": "c"
+      },
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "range",
+            "type": "u8"
+          },
+          {
+            "name": "timing",
+            "type": "u8"
+          },
+          {
+            "name": "hp_below_pct",
+            "docs": [
+              "HP threshold of `HpBelow` / `AllyHpBelow`, percent; 0 for other skills."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "ap_cost",
+            "docs": [
+              "`deadroll_skillcheck::Derived::ap_cost`: action points to use it, 0 for reactive and",
+              "passive skills."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "description",
+            "docs": [
+              "Written once by `set_skill_description`; all zero until then."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                200
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "SkillExtras",
+      "docs": [
+        "`[\"skill_extras\", character]`: what patch 5 adds to every skill of a character, by `SkillSet`",
+        "index (a `SkillSet` record cannot grow in place). Zero-copy: over 3 KB."
+      ],
+      "serialization": "bytemuck",
+      "repr": {
+        "kind": "c"
+      },
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "character",
+            "type": "pubkey"
+          },
+          {
+            "name": "extras",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "SkillExtra"
+                  }
+                },
+                16
+              ]
+            }
           }
         ]
       }
@@ -2316,6 +2665,23 @@
           },
           {
             "name": "Line"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TimeTag",
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Instant"
+          },
+          {
+            "name": "DoT"
           }
         ]
       }

@@ -1,6 +1,6 @@
 //! Unit ids, the initiative roll, cooldowns and reach.
 use deadroll_combat::{d20, RollSource};
-use deadroll_types::{Cell, Form, PARTY_MAX, TURN_ORDER_MAX};
+use deadroll_types::{Cell, Form, RangeTag, PARTY_MAX, TURN_ORDER_MAX};
 
 use crate::config::PlayerTuning;
 
@@ -96,26 +96,35 @@ pub fn tick_cooldowns(cooldowns: &mut [u8]) {
     }
 }
 
-/// Whether `form` reaches from `from` to `to` (Chebyshev distance, never the own cell).
-pub fn in_range(form: Form, from: Cell, to: Cell, t: &PlayerTuning) -> bool {
+/// Whether `range` reaches from `from` to `to` (Chebyshev distance, never the own cell).
+pub fn in_range(range: RangeTag, from: Cell, to: Cell, t: &PlayerTuning) -> bool {
     let distance = chebyshev(from, to);
-    distance >= 1 && distance <= reach(form, t)
+    distance >= 1 && distance <= reach(range, t)
 }
 
-/// Whether a heal or buff of `form` reaches an ally: the same, but allies may share a cell (the
-/// whole party stands on the entrance when it joins).
-pub fn in_ally_range(form: Form, from: Cell, to: Cell, t: &PlayerTuning) -> bool {
-    chebyshev(from, to) <= reach(form, t)
+/// Whether a buff of `range` reaches an ally: the same, but allies may share a cell (the whole
+/// party stands on the entrance when it joins).
+pub fn in_ally_range(range: RangeTag, from: Cell, to: Cell, t: &PlayerTuning) -> bool {
+    chebyshev(from, to) <= reach(range, t)
 }
 
 pub fn chebyshev(from: Cell, to: Cell) -> u8 {
     from.x.abs_diff(to.x).max(from.y.abs_diff(to.y))
 }
 
-/// Reach of `form` in cells.
-pub fn reach(form: Form, t: &PlayerTuning) -> u8 {
+/// Reach of `range` in cells (docs/DAMAGE_TYPES_AND_MIXES.md, section 2: the range axis).
+pub fn reach(range: RangeTag, t: &PlayerTuning) -> u8 {
+    match range {
+        RangeTag::Melee => t.melee_range,
+        RangeTag::Ranged => t.ranged_range,
+    }
+}
+
+/// Range of a monster's natural attack. The bestiary gives it a form, not a range
+/// (docs/BESTIARY.md 2): a bite or a blade strikes in melee, an orb flies (a projectile).
+pub const fn form_range(form: Form) -> RangeTag {
     match form {
-        Form::Strike => t.strike_range,
-        Form::Projectile => t.projectile_range,
+        Form::Strike => RangeTag::Melee,
+        Form::Projectile => RangeTag::Ranged,
     }
 }

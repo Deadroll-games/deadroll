@@ -5,7 +5,7 @@ use deadroll_rules::{
     items::{check_equip, starter_loadout, EquipError, Equipment},
     BalanceConfig, HeroStats, MonsterBase, MonsterDefense,
 };
-use deadroll_skillcheck::{check_loadout, Category, SkillBlocks, ACTIVE_MAX};
+use deadroll_skillcheck::{check_loadout, Category, SkillBlocks, SkillExt, ACTIVE_MAX};
 use deadroll_types::{MONSTERS_MAX, PARTY_MAX};
 
 use crate::presets::{Arena, HeroPreset, Presets, SkillPreset};
@@ -37,6 +37,9 @@ pub struct Fighter {
     pub hp_max: u32,
     /// Usable actions: valid active skills, at most `ACTIVE_MAX`, in preset order.
     pub skills: Vec<Skill>,
+    /// The reactive and the passive skill taken onto the map (the first valid of each).
+    pub reactive: Option<Skill>,
+    pub passive: Option<Skill>,
 }
 
 /// A skill in a fighter's loadout.
@@ -87,7 +90,7 @@ pub fn fighter(
     for w in p.warnings(&cfg.players) {
         issues.warnings.push(format!("hero `{id}`: {w}"));
     }
-    let mut picked: Vec<(String, SkillBlocks)> = Vec::new();
+    let mut picked: Vec<(String, SkillBlocks, SkillExt)> = Vec::new();
     for (i, skill_id) in p.skills.iter().enumerate() {
         let preset: Option<&SkillPreset> = presets
             .skills
@@ -101,7 +104,7 @@ pub fn fighter(
             continue;
         };
         match skill.check_for(p.class) {
-            Ok(blocks) => picked.push((skill.name.clone(), blocks)),
+            Ok((blocks, ext)) => picked.push((skill.name.clone(), blocks, ext)),
             Err(e) => issues.errors.push(format!(
                 "hero `{id}`, skill `{skill_id}`: {} ({e:?}), not used",
                 e.message()
@@ -109,12 +112,12 @@ pub fn fighter(
         }
     }
     // Loadout limits: keep skills in order while they fit.
-    let mut kept: Vec<(String, SkillBlocks)> = Vec::new();
-    for (name, blocks) in picked {
-        let mut trial: Vec<SkillBlocks> = kept.iter().map(|(_, b)| *b).collect();
+    let mut kept: Vec<(String, SkillBlocks, SkillExt)> = Vec::new();
+    for (name, blocks, ext) in picked {
+        let mut trial: Vec<SkillBlocks> = kept.iter().map(|(_, b, _)| *b).collect();
         trial.push(blocks);
         match check_loadout(trial.iter()) {
-            Ok(()) => kept.push((name, blocks)),
+            Ok(()) => kept.push((name, blocks, ext)),
             Err(e) => issues.errors.push(format!(
                 "hero `{id}`, skill `{name}`: {} ({e:?}), not used",
                 e.message()
@@ -122,18 +125,18 @@ pub fn fighter(
         }
     }
     let mut skills = Vec::new();
-    for (name, blocks) in kept {
-        let stats = SkillStats::derive(blocks, &cfg.skills);
+    let (mut reactive, mut passive) = (None, None);
+    for (name, blocks, ext) in kept {
+        let stats = SkillStats::derive(blocks, ext, &cfg.skills);
         match skill_use(&stats) {
             SkillUse::Ok => skills.push(Skill { name, stats }),
-            SkillUse::NotActive => issues.warnings.push(format!(
-                "hero `{id}`, skill `{name}`: {} skills are not actions in the session yet",
-                match blocks.category {
-                    Category::Active => "active",
-                    Category::Reactive => "reactive",
-                    Category::Passive => "passive",
-                }
-            )),
+            // A reactive skill triggers by itself, a passive one works all the time
+            // (docs/SKILL_BUILDER.md 3.2, 3.3): one of each is taken onto the map.
+            SkillUse::NotActive => match blocks.category {
+                Category::Reactive => reactive = reactive.or(Some(Skill { name, stats })),
+                Category::Passive => passive = passive.or(Some(Skill { name, stats })),
+                Category::Active => {}
+            },
             SkillUse::NoEffect => issues
                 .errors
                 .push(format!("hero `{id}`, skill `{name}`: no effect, not used")),
@@ -156,6 +159,8 @@ pub fn fighter(
         hp_max: hero::hp_max(cfg, &hero),
         hero,
         skills,
+        reactive,
+        passive,
     }
 }
 
