@@ -18,6 +18,9 @@ export type GridUnit = {
   size?: 1 | 2;
 };
 
+/** An aura on the map: its bearer's cell, its reach, and a short label for the tooltip. */
+export type GridAura = { center: Cell; radius: number; hostile: boolean; label: string };
+
 export type GridProps = {
   /** Map size in cells, 1..=32 each. */
   width: number;
@@ -37,6 +40,13 @@ export type GridProps = {
   path?: Cell[];
   /** Cells on fire (a resonance's burning cells); tinted orange under the units. */
   burning?: Cell[];
+  /**
+   * Patch 5: auras around their bearers (docs/SKILL_BUILDER.md 3.5): a square of `radius` cells
+   * (Chebyshev, no line of sight) around `center`; `hostile` = a debuff aura on the enemies.
+   */
+  auras?: GridAura[];
+  /** Patch 5: the cells of a line target under the pointer, tinted. */
+  line?: Cell[];
   /** Pixel size of one cell on screen. Default 48. Sprites scale by integers, never smoothed. */
   cellPx?: number;
   /**

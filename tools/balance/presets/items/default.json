@@ -22,7 +22,9 @@
       "crit_pct": 0,
       "speed": 0,
       "speed_counter_bp": 0,
-      "initiative": 0
+      "initiative": 0,
+      "basic_range": "Melee",
+      "basic_form": "Strike"
     },
     "Staff": {
       "slot": "MainHand",
@@ -46,7 +48,9 @@
       "crit_pct": 0,
       "speed": 0,
       "speed_counter_bp": 0,
-      "initiative": 0
+      "initiative": 0,
+      "basic_range": "Ranged",
+      "basic_form": "Projectile"
     },
     "Wand": {
       "slot": "MainHand",
@@ -70,7 +74,9 @@
       "crit_pct": 0,
       "speed": 0,
       "speed_counter_bp": 0,
-      "initiative": 0
+      "initiative": 0,
+      "basic_range": "Ranged",
+      "basic_form": "Projectile"
     },
     "LeatherArmor": {
       "slot": "Body",
@@ -94,7 +100,9 @@
       "crit_pct": 0,
       "speed": 0,
       "speed_counter_bp": 0,
-      "initiative": 0
+      "initiative": 0,
+      "basic_range": "Melee",
+      "basic_form": "Strike"
     },
     "Robe": {
       "slot": "Body",
@@ -118,7 +126,9 @@
       "crit_pct": 0,
       "speed": 0,
       "speed_counter_bp": 0,
-      "initiative": 0
+      "initiative": 0,
+      "basic_range": "Melee",
+      "basic_form": "Strike"
     },
     "LightLeatherArmor": {
       "slot": "Body",
@@ -142,7 +152,9 @@
       "crit_pct": 0,
       "speed": 0,
       "speed_counter_bp": 0,
-      "initiative": 0
+      "initiative": 0,
+      "basic_range": "Melee",
+      "basic_form": "Strike"
     }
   },
   "starter_kits": {

@@ -10,5 +10,9 @@
   ],
   "effect": "Freeze",
   "trigger": "None",
-  "aura_radius": 0
+  "aura_radius": 0,
+  "range": "Ranged",
+  "timing": "Instant",
+  "hp_below_pct": 0,
+  "description": "The air around the target turns to ice."
 }

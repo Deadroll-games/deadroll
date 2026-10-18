@@ -6,7 +6,7 @@
 
 use deadroll_combat::{Balance, SupportBalance};
 use deadroll_skillcheck::SkillTuning;
-use deadroll_types::{Aspect, Class, EquipSlot, ItemBase, Race, STATS_COUNT};
+use deadroll_types::{Aspect, Class, EquipSlot, Form, ItemBase, Race, RangeTag, STATS_COUNT};
 
 use crate::items::KIT_MAX;
 
@@ -67,11 +67,14 @@ pub struct PlayerTuning {
     pub ap_max: u8,
     /// Initiative = Intelligence / this, plus items (CHARACTER 3).
     pub initiative_div: u16,
-    /// Action points one attack or active skill costs.
-    pub act_ap: u8,
-    /// Reach in cells (Chebyshev distance) of strikes and projectiles.
-    pub strike_range: u8,
-    pub projectile_range: u8,
+    /// Action points of the basic attack (players and the monsters' natural attack). An active
+    /// skill costs its own (`SkillTuning`, stored with the skill).
+    pub basic_attack_ap: u8,
+    /// Reach in cells (Chebyshev distance) of melee and ranged skills and attacks.
+    pub melee_range: u8,
+    pub ranged_range: u8,
+    /// "A nearby ally" of a reactive trigger (`AllyHpBelow`), in cells (Chebyshev distance).
+    pub nearby_ally_cells: u8,
     /// Native state chance of a skill and of the basic attack, percent.
     pub skill_state_chance_pct: u32,
     pub basic_state_chance_pct: u32,
@@ -142,9 +145,10 @@ impl PlayerTuning {
         ap_min: 1,
         ap_max: 12,
         initiative_div: 2,
-        act_ap: 2,
-        strike_range: 1,
-        projectile_range: 6,
+        basic_attack_ap: 2,
+        melee_range: 1,
+        ranged_range: 6,
+        nearby_ally_cells: 3,
         skill_state_chance_pct: 20,
         basic_state_chance_pct: 10,
         class_increase_by_tier_bp: [CLASS_TIERS, CLASS_TIERS, [0; TIERS]],
@@ -200,8 +204,9 @@ impl Default for PlayerTuning {
     }
 }
 
-/// How a monster template grows with its level (docs/BESTIARY.md, sections 7-8). The template
-/// itself is content: [`crate::monster::MonsterBase`].
+/// How a monster template grows with its level, what an elite version gets and how many skills
+/// each rank takes (docs/BESTIARY.md, sections 3.2, 4, 5). The template itself is registry data:
+/// [`crate::monster::MonsterTemplate`].
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MonsterScaling {
@@ -217,6 +222,13 @@ pub struct MonsterScaling {
     /// The "resistance" level of a bestiary record (docs/DAMAGE_TYPES_AND_MIXES.md 9): the
     /// counterweight on each aspect the monster resists, bp.
     pub resist_bp: u32,
+    /// Patch 6. An elite's HP increase, bp (BESTIARY 5: "more HP").
+    pub elite_hp_bp: u32,
+    /// Skill slots by `monster::Rank` (regular, elite, boss), each by `Category` (active,
+    /// reactive, passive): BESTIARY 3.2.
+    pub slots: [[u8; deadroll_skillcheck::Category::COUNT]; crate::monster::Rank::COUNT],
+    /// Monster AI (the simulator and the website's auto mode): heal an ally below this percent.
+    pub ai_heal_below_pct: u8,
 }
 
 impl MonsterScaling {
@@ -227,6 +239,14 @@ impl MonsterScaling {
         ap_min: 1,
         ap_max: 12,
         resist_bp: 5_000,
+        elite_hp_bp: 5_000,
+        //      active reactive passive
+        slots: [
+            [3, 0, 1], // regular
+            [4, 0, 1], // elite
+            [5, 1, 1], // boss
+        ],
+        ai_heal_below_pct: 60,
     };
 }
 
@@ -272,6 +292,12 @@ pub struct ItemBaseStats {
     pub speed_counter_bp: u32,
     /// Added to initiative.
     pub initiative: u16,
+    /// A weapon's basic attack (docs/SKILL_BUILDER.md 3.1: "a sword strike, a bow shot, a wand
+    /// shot"): its range and form. Ignored on items that are not weapons.
+    #[cfg_attr(feature = "serde", serde(default, with = "names::variant"))]
+    pub basic_range: RangeTag,
+    #[cfg_attr(feature = "serde", serde(default, with = "names::variant"))]
+    pub basic_form: Form,
 }
 
 /// Items (docs/ITEMS_AND_CRAFT.md): every base's numbers and the class starter kits.
@@ -293,11 +319,21 @@ pub struct ItemTuning {
 /// The tier of a starter weapon's aspect (CHARACTER 6.3: carriers start low).
 const STARTER_ASPECT_TIER: u8 = 14;
 
+/// A weapon whose basic attack is a melee strike.
 const fn weapon(aspect: Aspect, damage: [u32; 2]) -> ItemBaseStats {
     ItemBaseStats {
         aspect,
         aspect_tier: STARTER_ASPECT_TIER,
         ..base(EquipSlot::MainHand, damage, 0)
+    }
+}
+
+/// A weapon that shoots: a ranged projectile basic attack.
+const fn shooter(aspect: Aspect, damage: [u32; 2]) -> ItemBaseStats {
+    ItemBaseStats {
+        basic_range: RangeTag::Ranged,
+        basic_form: Form::Projectile,
+        ..weapon(aspect, damage)
     }
 }
 
@@ -318,6 +354,8 @@ const fn base(slot: EquipSlot, damage: [u32; 2], armor: u32) -> ItemBaseStats {
         speed: 0,
         speed_counter_bp: 0,
         initiative: 0,
+        basic_range: RangeTag::Melee,
+        basic_form: Form::Strike,
     }
 }
 
@@ -325,10 +363,11 @@ impl ItemTuning {
     //                                                   Sword  Staff  Wand  Leather  Robe  Light
     pub const DEFAULT: ItemTuning = ItemTuning {
         bases: [
-            // A Piercing sword, a Blunt staff, a Lightning wand (SKILL_BUILDER 5.1).
+            // A Piercing sword, a Blunt staff, a Lightning wand (SKILL_BUILDER 5.1). The sword
+            // strikes, the staff and the wand shoot (3.1).
             weapon(Aspect::Piercing, [4, 8]),
-            weapon(Aspect::Blunt, [3, 6]),
-            weapon(Aspect::Lightning, [2, 5]),
+            shooter(Aspect::Blunt, [3, 6]),
+            shooter(Aspect::Lightning, [2, 5]),
             base(EquipSlot::Body, [0, 0], 10),
             base(EquipSlot::Body, [0, 0], 2),
             base(EquipSlot::Body, [0, 0], 5),
@@ -368,7 +407,7 @@ impl Default for ItemTuning {
 pub mod names {
     use std::{collections::BTreeMap, fmt::Debug, format, string::String, vec::Vec};
 
-    use deadroll_types::{Aspect, Class, EquipSlot, ItemBase, Stat, STATS_COUNT};
+    use deadroll_types::{Aspect, Class, EquipSlot, Form, ItemBase, RangeTag, Stat, STATS_COUNT};
     use serde::{de::Error as _, ser::SerializeMap, Deserialize, Deserializer, Serializer};
 
     use super::{ItemBaseStats, KIT_MAX};
@@ -398,7 +437,7 @@ pub mod names {
             }
         )*};
     }
-    variant!(Aspect, Class, EquipSlot, ItemBase, Stat);
+    variant!(Aspect, Class, EquipSlot, Form, ItemBase, RangeTag, Stat);
 
     fn parse<'de, E: Variant, D: Deserializer<'de>>(text: &str) -> Result<E, D::Error> {
         E::parse(text).ok_or_else(|| {
@@ -566,6 +605,7 @@ mod remote {
         pub mod_max_bp: [u32; deadroll_combat::MODS_MAX],
         pub mod_duration: [u8; deadroll_combat::MODS_MAX],
         pub rider_chance_pct: u32,
+        pub passive_point_bp: u32,
     }
 
     #[derive(Serialize, Deserialize)]
@@ -577,5 +617,12 @@ mod remote {
         pub third_aspect_counter_bp: u32,
         pub active_cooldown: u8,
         pub reactive_cooldown: u8,
+        pub ap_base: u8,
+        pub ap_line: u8,
+        pub ap_third_aspect: u8,
+        pub ap_effect: u8,
+        pub ap_hard_control: u8,
+        pub hp_below_min_pct: u8,
+        pub hp_below_max_pct: u8,
     }
 }

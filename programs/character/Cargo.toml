@@ -38,6 +38,8 @@ deadroll-rules.workspace = true
 mpl-core = { workspace = true, optional = true }
 # `SessionTokenV2` layout for the session key check on `equip` / `unequip` (`auth.rs`).
 session-keys.workspace = true
+# `SkillExtras` is zero-copy (over 3 KB, never on the SBF stack).
+bytemuck = { version = "1", features = ["derive", "min_const_generics"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

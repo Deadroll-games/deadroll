@@ -58,7 +58,8 @@ const ENTRANCE = { x: 1, y: 1 };
 const EXIT = { x: 14, y: 14 };
 
 type Cell = { x: number; y: number };
-type Spawn = { id: number; x: number; y: number; pack: number; level?: number };
+/** `skills`: the chosen pool bits; `flags`: bit 0 elite (patch 6). */
+type Spawn = { id: number; x: number; y: number; pack: number; level?: number; skills: number; flags?: number };
 
 // ---------- encoding ----------
 
@@ -88,7 +89,7 @@ const u16 = (v: number) => [v & 0xff, (v >> 8) & 0xff];
 const u32 = (v: number) => [v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff, (v >>> 24) & 0xff];
 const vec = (bytes: Uint8Array | number[]) => concat(u32(bytes.length), bytes);
 const cell = (c: Cell) => [c.x, c.y];
-const spawnBytes = (s: Spawn) => [s.id, s.x, s.y, s.level ?? 1, ...u16(0), 0, 0, s.pack];
+const spawnBytes = (s: Spawn) => [s.id, s.x, s.y, s.level ?? 1, ...u16(s.skills), s.flags ?? 0, 0, s.pack];
 
 // ---------- addresses ----------
 
@@ -145,10 +146,12 @@ async function writeSpawnsIx(dm: Signer, map: string, entrance: Cell, exit: Cell
   };
 }
 
-async function finalizeIx(dm: Signer, map: string, root: number[]) {
+/** Patch 6: the registry bestiary and monster skills tables follow the layout; `tables` overrides them. */
+async function finalizeIx(dm: Signer, map: string, root: number[], tables: string[] | null = null) {
+  const [bestiary, skills] = tables ?? [await pda(["bestiary"], REGISTRY_PROGRAM), await pda(["monster_skills"], REGISTRY_PROGRAM)];
   return {
     programAddress: MAP_PROGRAM,
-    accounts: [signerMeta(dm), meta(map, true), meta(await layoutAddress(map))],
+    accounts: [signerMeta(dm), meta(map, true), meta(await layoutAddress(map)), meta(bestiary), meta(skills)],
     data: concat(disc("finalize_map"), root),
   };
 }
@@ -267,14 +270,15 @@ function demoTiles(): number[] {
   return tiles;
 }
 
+/** The skill choices of assets/registry/maps/demo_16x16.json: exactly the slots of each kind. */
 const demoSpawns = (): Spawn[] => [
-  { id: WOLF, x: 6, y: 2, pack: 1 },
-  { id: WOLF, x: 7, y: 3, pack: 1 },
-  { id: GOBLIN, x: 2, y: 10, pack: 2 },
-  { id: GOBLIN, x: 3, y: 11, pack: 2 },
-  { id: CHIEFTAIN, x: 12, y: 12, pack: 3 },
-  { id: WARRIOR, x: 11, y: 12, pack: 3 },
-  { id: SHAMAN, x: 12, y: 11, pack: 3 },
+  { id: WOLF, x: 6, y: 2, pack: 1, skills: 0b0111 },
+  { id: WOLF, x: 7, y: 3, pack: 1, skills: 0b1110 },
+  { id: GOBLIN, x: 2, y: 10, pack: 2, skills: 0b11 },
+  { id: GOBLIN, x: 3, y: 11, pack: 2, skills: 0b11 },
+  { id: CHIEFTAIN, x: 12, y: 12, pack: 3, skills: 0b11111 },
+  { id: WARRIOR, x: 11, y: 12, pack: 3, skills: 0b11 },
+  { id: SHAMAN, x: 12, y: 11, pack: 3, skills: 0b111 },
 ];
 
 async function create(dm: Signer, index = 0, width = 16, height = 16, tier = 1) {
@@ -408,7 +412,7 @@ describe("map: write_spawns", () => {
     const dm = await funded();
     const { map, layout } = await create(dm);
     await send(dm, [await writeSpawnsIx(dm, map, ENTRANCE, EXIT, demoSpawns())]);
-    const one = [{ id: WOLF, x: 5, y: 5, pack: 1 }];
+    const one = [{ id: WOLF, x: 5, y: 5, pack: 1, skills: 0b0111 }];
     await send(dm, [await writeSpawnsIx(dm, map, { x: 2, y: 2 }, EXIT, one)]);
     const l = await readLayout(layout);
     assert.deepEqual(l.entrance, { x: 2, y: 2 });
@@ -420,7 +424,7 @@ describe("map: write_spawns", () => {
   it("rejects more than SPAWNS_MAX spawns", async () => {
     const dm = await funded();
     const { map } = await create(dm);
-    const tooMany = Array.from({ length: SPAWNS_MAX + 1 }, () => ({ id: WOLF, x: 5, y: 5, pack: 1 }));
+    const tooMany = Array.from({ length: SPAWNS_MAX + 1 }, () => ({ id: WOLF, x: 5, y: 5, pack: 1, skills: 0b0111 }));
     await expectErr(send(dm, [await writeSpawnsIx(dm, map, ENTRANCE, EXIT, tooMany)]), err("TooManySpawns"));
   });
 
@@ -482,6 +486,46 @@ describe("map: finalize_map", () => {
     const { map } = await demoDraft(dm);
     await send(dm, [await writeSpawnsIx(dm, map, ENTRANCE, EXIT, demoSpawns().slice(0, 4))]);
     await expectErr(send(dm, [await finalizeIx(dm, map, new Array(32).fill(0))]), err("BossCount"));
+  });
+
+  it("patch 6: the spawns' skills, elite flags and the registry tables", async () => {
+    const dm = await funded();
+    const { map } = await demoDraft(dm);
+    const finalizeWith = async (edit: (s: Spawn[]) => void) => {
+      const spawns = demoSpawns();
+      edit(spawns);
+      await send(dm, [await writeSpawnsIx(dm, map, ENTRANCE, EXIT, spawns)]);
+      return send(dm, [await finalizeIx(dm, map, new Array(32).fill(0))]);
+    };
+    // The wolf's pool has 4 skills: bit 4 is past it.
+    await expectErr(finalizeWith((s) => (s[0].skills = 0b10111)), err("MonsterSkillUnknown"));
+    // 3 active slots: one chosen is too few, all 4 too many.
+    await expectErr(finalizeWith((s) => (s[0].skills = 0b1)), err("MonsterSkillCount"));
+    await expectErr(finalizeWith((s) => (s[0].skills = 0b1111)), err("MonsterSkillCount"));
+    // Elite: one more active slot; never a boss; one per tier-1 map.
+    await expectErr(finalizeWith((s) => (s[0].flags = 1)), err("MonsterSkillCount"));
+    await expectErr(finalizeWith((s) => (s[4].flags = 1)), err("EliteBoss"));
+    await expectErr(
+      finalizeWith((s) => {
+        s[0].flags = 1;
+        s[0].skills = 0b1111;
+        s[1].flags = 1;
+        s[1].skills = 0b1111;
+      }),
+      err("TooManyElites"),
+    );
+    // Other accounts in place of the registry tables.
+    await send(dm, [await writeSpawnsIx(dm, map, ENTRANCE, EXIT, demoSpawns())]);
+    const tileset = await pda(["tileset"], REGISTRY_PROGRAM);
+    const skills = await pda(["monster_skills"], REGISTRY_PROGRAM);
+    await expectErr(send(dm, [await finalizeIx(dm, map, new Array(32).fill(0), [tileset, skills])]), err("InvalidRegistryTable"));
+    // An elite wolf with all 4 skills finalizes.
+    const cu = await finalizeWith((s) => {
+      s[0].flags = 1;
+      s[0].skills = 0b1111;
+    });
+    console.log(`finalize 16x16 with an elite: ${cu} CU`);
+    assert.equal((await readMap(map)).status, STATUS.Finalized);
   });
 
   it("rejects an empty draft", async () => {

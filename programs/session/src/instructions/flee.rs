@@ -53,6 +53,8 @@ pub fn handler(ctx: Context<Flee>) -> Result<()> {
         SessionError::NotActive
     );
     require!(!session.core.pending_vrf, SessionError::RollPending);
+    // Patch 6: a player down in the last callback is finalized first (`start_turn`).
+    require!(session.pending_deaths == 0, SessionError::DeathsPending);
     let slot = participation.core.slot;
     require!(
         session.current_unit() == Some(Unit::Player(slot)),

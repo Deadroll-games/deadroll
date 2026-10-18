@@ -15,7 +15,7 @@ use deadroll_rules::{
     },
     BalanceConfig,
 };
-use deadroll_skillcheck::{Category, Effect, Purpose, SkillBlocks};
+use deadroll_skillcheck::{Category, Effect, Purpose, SkillBlocks, SkillExt};
 use deadroll_types::{
     ActiveState, Aspect, Class, Form, ItemBase, Race, Source, Stat, BP, STATES_MAX,
 };
@@ -59,7 +59,7 @@ fn skill(
         effect,
         ..SkillBlocks::default()
     };
-    SkillStats::derive(blocks, &CFG.skills)
+    SkillStats::derive(blocks, SkillExt::MELEE, &CFG.skills)
 }
 
 fn damage(source: Source, form: Form, aspect: Aspect) -> SkillStats {

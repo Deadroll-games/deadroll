@@ -22,11 +22,15 @@ export type AccountInput = Address | TransactionSigner | null;
 
 const isSigner = (v: AccountInput): v is TransactionSigner => typeof v === "object" && v !== null && "address" in v;
 
+/** An account after the IDL's list (`ctx.remaining_accounts`). */
+export type RemainingAccount = { address: Address; writable: boolean };
+
 export function buildInstruction(
   program: ProgramName,
   name: string,
   args: Record<string, unknown>,
   accounts: Record<string, AccountInput>,
+  remaining: readonly RemainingAccount[] = [],
 ): Instruction {
   const coder = coders[program];
   const programAddress = PROGRAMS[program];
@@ -48,6 +52,7 @@ export function buildInstruction(
   for (const key of Object.keys(accounts)) {
     if (!coder.instructionAccounts(name).some((a) => camel(a.name) === key)) throw new Error(`${program}.${name}: unknown account ${key}`);
   }
+  for (const r of remaining) metas.push({ address: r.address, role: r.writable ? AccountRole.WRITABLE : AccountRole.READONLY });
   return { programAddress, accounts: metas, data: coder.instructionData(name, args) };
 }
 

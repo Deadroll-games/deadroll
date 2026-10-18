@@ -3,7 +3,8 @@
 //! the session program and the simulator all read them through this module.
 use deadroll_combat::{Carrier, DamageRange, Tint};
 use deadroll_types::{
-    Aspect, Class, EquipSlot, ItemBase, EMPTY_ITEM, EQUIP_SLOTS, SOULBOUND_MAX, STATS_COUNT,
+    Aspect, Class, EquipSlot, Form, ItemBase, RangeTag, EMPTY_ITEM, EQUIP_SLOTS, SOULBOUND_MAX,
+    STATS_COUNT,
 };
 
 use crate::config::{ItemBaseStats, ItemTuning};
@@ -189,6 +190,18 @@ pub fn weapon_range(eq: &Equipment, t: &ItemTuning) -> DamageRange {
             DamageRange::new(b.aspect, b.damage[0], b.damage[1].max(b.damage[0]))
         }
         None => DamageRange::new(Aspect::Blunt, t.unarmed[0], t.unarmed[1].max(t.unarmed[0])),
+    }
+}
+
+/// Range and form of the basic attack: the main-hand weapon's, or an unarmed punch (a melee
+/// strike, docs/SKILL_BUILDER.md 3.1).
+pub fn basic_attack(eq: &Equipment, t: &ItemTuning) -> (RangeTag, Form) {
+    match item_bonus(eq, t).weapon {
+        Some(base) => {
+            let b = t.base(base);
+            (b.basic_range, b.basic_form)
+        }
+        None => (RangeTag::Melee, Form::Strike),
     }
 }
 

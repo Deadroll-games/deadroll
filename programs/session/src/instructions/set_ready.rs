@@ -1,16 +1,28 @@
 use anchor_lang::prelude::*;
 use deadroll_character::state::MAP_SKILLS;
-use deadroll_rules::HeroStats;
-use deadroll_skillcheck::NO_SKILL;
+use deadroll_rules::{
+    aura::{passive_aura, PASSIVE_AURA},
+    input::SkillStats,
+    HeroStats,
+};
+use deadroll_skillcheck::{ACTIVE_MAX, NO_SKILL, REACTIVE_MAX};
 use deadroll_types::{seeds, SessionStatus};
 
 use crate::{
+    combat_input::skill_stats,
     cpi_out::{self, SessionSigner},
     errors::SessionError,
-    events::PlayerReady,
-    rules::{hero_ap, hero_initiative, party_hp_max},
-    state::{external::read_character_gear, GameSession, Participation},
+    events::{AuraChanged, PlayerReady},
+    rules::{hero_ap, hero_initiative, party_hp_max, BALANCE},
+    state::{
+        external::{read_character_gear, read_skill, read_skill_extra},
+        GameSession, MapSkillData, Participation, ReactiveData,
+    },
 };
+
+/// Slots of a map selection (`deadroll_skillcheck::MapSelection`): the reactive, the passive.
+const REACTIVE_SLOT: usize = ACTIVE_MAX;
+const PASSIVE_SLOT: usize = ACTIVE_MAX + REACTIVE_MAX;
 
 #[derive(Accounts)]
 pub struct SetReady<'info> {
@@ -46,6 +58,14 @@ pub struct SetReady<'info> {
     /// CHECK: the character program.
     #[account(address = deadroll_character::ID)]
     pub character_program: UncheckedAccount<'info>,
+    /// CHECK: the character's `SkillExtras` (patch 5), read in place by `read_skill_extra`
+    /// (owner, discriminator and character checked); address from the seeds.
+    #[account(
+        seeds = [seeds::SKILL_EXTRAS, participation.core.character.as_ref()],
+        bump,
+        seeds::program = deadroll_character::ID,
+    )]
+    pub skill_extras: UncheckedAccount<'info>,
 }
 
 /// "Ready" in the lobby (docs/PARTY_AND_TURNS.md, 2.1), one main wallet transaction:
@@ -101,9 +121,47 @@ pub fn handler(ctx: Context<SetReady>, ready: bool, selection: [u8; MAP_SKILLS])
         participation.skills = selection;
         session.player_initiative[slot as usize] = hero_initiative(&hero);
         session.ready_mask |= 1 << slot;
+
+        // The map skills as the rules see them: the SkillSet record with its SkillExtras part.
+        // The character program just checked the selection, and the character stays locked.
+        let character_key = participation.core.character;
+        let mut skills = [MapSkillData::default(); MAP_SKILLS];
+        for (i, &index) in selection.iter().enumerate() {
+            if index == NO_SKILL {
+                continue;
+            }
+            let record = read_skill(&accounts.skill_set, &character_key, index)?;
+            let extra = read_skill_extra(&accounts.skill_extras, &character_key, index)?;
+            skills[i] = MapSkillData::from(&skill_stats(&record, &extra)?);
+        }
+        participation.map_skills = skills;
+        // The reactive skill lives in the session, so a trigger is checked without the
+        // player's accounts; the passive one becomes a permanent aura (SKILL_BUILDER 3.3, 3.5).
+        let reactive = selection[REACTIVE_SLOT];
+        session.reactives[slot as usize] = ReactiveData {
+            skill_slot: reactive,
+            skill: skills[REACTIVE_SLOT],
+            cooldown_left: 0,
+        };
+        let passive = (selection[PASSIVE_SLOT] != NO_SKILL)
+            .then(|| passive_aura(BALANCE, &hero, &SkillStats::from(&skills[PASSIVE_SLOT])))
+            .flatten();
+        session.auras[slot as usize] = Default::default();
+        if let Some(aura) = passive {
+            session.auras[slot as usize][PASSIVE_AURA] = aura.into();
+            emit!(AuraChanged {
+                session: session_key,
+                bearer: slot,
+                aura_slot: PASSIVE_AURA as u8,
+                aura: aura.into(),
+            });
+        }
     } else {
         cpi_out::character::unlock(&signer, &accounts.character)?;
         participation.skills = [NO_SKILL; MAP_SKILLS];
+        participation.map_skills = Default::default();
+        session.reactives[slot as usize] = ReactiveData::default();
+        session.auras[slot as usize] = Default::default();
         session.ready_mask &= !(1 << slot);
     }
     participation.core.ready = ready;

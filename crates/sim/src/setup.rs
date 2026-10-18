@@ -3,10 +3,11 @@
 use deadroll_rules::{
     input::{hero, skill_use, SkillStats, SkillUse},
     items::{check_equip, starter_loadout, EquipError, Equipment},
-    BalanceConfig, HeroStats, MonsterBase, MonsterDefense,
+    monster::{select_skills, NO_SKILL},
+    BalanceConfig, HeroStats, MonsterSkillStats, MonsterTemplate,
 };
-use deadroll_skillcheck::{check_loadout, Category, SkillBlocks, ACTIVE_MAX};
-use deadroll_types::{MONSTERS_MAX, PARTY_MAX};
+use deadroll_skillcheck::{check_loadout, Category, SkillBlocks, SkillExt, ACTIVE_MAX};
+use deadroll_types::{MONSTERS_MAX, MONSTER_SLOTS, PARTY_MAX, SPAWN_ELITE};
 
 use crate::presets::{Arena, HeroPreset, Presets, SkillPreset};
 
@@ -37,6 +38,9 @@ pub struct Fighter {
     pub hp_max: u32,
     /// Usable actions: valid active skills, at most `ACTIVE_MAX`, in preset order.
     pub skills: Vec<Skill>,
+    /// The reactive and the passive skill taken onto the map (the first valid of each).
+    pub reactive: Option<Skill>,
+    pub passive: Option<Skill>,
 }
 
 /// A skill in a fighter's loadout.
@@ -46,14 +50,82 @@ pub struct Skill {
     pub stats: SkillStats,
 }
 
-/// A monster ready to spawn.
+/// A monster ready to spawn: its registry template and the skills it takes in, as the program
+/// copies them at `open_session`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Spawn {
     pub name: String,
-    pub base: MonsterBase,
-    /// From the registry bestiary record (or the preset's own lists).
-    pub defense: MonsterDefense,
+    pub bestiary_id: u8,
+    pub template: MonsterTemplate,
     pub level: u8,
+    /// `Spawn.flags` (`SPAWN_ELITE`).
+    pub flags: u8,
+    /// By slot (`deadroll_rules::monster::ACTIVE_SLOT..`).
+    pub skills: [Option<MonsterSkillStats>; MONSTER_SLOTS],
+    pub skill_names: [String; MONSTER_SLOTS],
+}
+
+/// The pool bits that fill a spawn's slots with the first skills of each category.
+pub fn default_skills(pool: &[Category], slots: [u8; Category::COUNT]) -> u16 {
+    select_skills(pool, u16::MAX, slots)
+        .iter()
+        .filter(|&&i| i != NO_SKILL)
+        .fold(0u16, |m, &i| m | 1 << i)
+}
+
+/// A registry monster at `level` with the pool bits `mask` (`None` = [`default_skills`]): the
+/// skills are chosen like `open_session` does (mask and pool, at most the rank's slots).
+pub fn spawn(
+    reg: &deadroll_rules::registry::Registry,
+    bestiary_id: u8,
+    level: u8,
+    elite: bool,
+    mask: Option<u16>,
+    cfg: &BalanceConfig,
+) -> Result<Spawn, String> {
+    let template = reg
+        .template(bestiary_id)
+        .ok_or_else(|| format!("no bestiary record {bestiary_id}"))?;
+    let pool = reg.pool(&template);
+    let mut categories = Vec::new();
+    for (i, k) in pool.iter().enumerate() {
+        categories.push(
+            k.ok_or_else(|| format!("pool skill {i} of {bestiary_id} is missing"))?
+                .blocks
+                .category,
+        );
+    }
+    let flags = if elite { SPAWN_ELITE } else { 0 };
+    let slots = template.slots(flags, &cfg.monsters);
+    // A chosen mask passes the map builder's rule (`finalize_map`).
+    if let Some(m) = mask {
+        deadroll_skillcheck::check_monster_selection(&categories, m, slots)
+            .map_err(|e| format!("skills {m:#b}: {}", e.message()))?;
+    }
+    let mask = mask.unwrap_or_else(|| default_skills(&categories, slots));
+    let chosen = select_skills(&categories, mask, slots);
+    let mut skills = [None; MONSTER_SLOTS];
+    let mut skill_names: [String; MONSTER_SLOTS] = Default::default();
+    for (slot, &i) in chosen.iter().enumerate() {
+        if let Some(k) = (i != NO_SKILL).then(|| pool[i as usize]).flatten() {
+            skills[slot] = Some(MonsterSkillStats::new(&k, &cfg.skills));
+            let at = template.pool_start as usize + i as usize;
+            skill_names[slot] = reg.skill_names.get(at).cloned().unwrap_or_default();
+        }
+    }
+    Ok(Spawn {
+        name: reg
+            .monster_names
+            .get(bestiary_id as usize)
+            .cloned()
+            .unwrap_or_else(|| format!("monster {bestiary_id}")),
+        bestiary_id,
+        template,
+        level,
+        flags,
+        skills,
+        skill_names,
+    })
 }
 
 /// An encounter ready to fight.
@@ -87,7 +159,7 @@ pub fn fighter(
     for w in p.warnings(&cfg.players) {
         issues.warnings.push(format!("hero `{id}`: {w}"));
     }
-    let mut picked: Vec<(String, SkillBlocks)> = Vec::new();
+    let mut picked: Vec<(String, SkillBlocks, SkillExt)> = Vec::new();
     for (i, skill_id) in p.skills.iter().enumerate() {
         let preset: Option<&SkillPreset> = presets
             .skills
@@ -101,7 +173,7 @@ pub fn fighter(
             continue;
         };
         match skill.check_for(p.class) {
-            Ok(blocks) => picked.push((skill.name.clone(), blocks)),
+            Ok((blocks, ext)) => picked.push((skill.name.clone(), blocks, ext)),
             Err(e) => issues.errors.push(format!(
                 "hero `{id}`, skill `{skill_id}`: {} ({e:?}), not used",
                 e.message()
@@ -109,12 +181,12 @@ pub fn fighter(
         }
     }
     // Loadout limits: keep skills in order while they fit.
-    let mut kept: Vec<(String, SkillBlocks)> = Vec::new();
-    for (name, blocks) in picked {
-        let mut trial: Vec<SkillBlocks> = kept.iter().map(|(_, b)| *b).collect();
+    let mut kept: Vec<(String, SkillBlocks, SkillExt)> = Vec::new();
+    for (name, blocks, ext) in picked {
+        let mut trial: Vec<SkillBlocks> = kept.iter().map(|(_, b, _)| *b).collect();
         trial.push(blocks);
         match check_loadout(trial.iter()) {
-            Ok(()) => kept.push((name, blocks)),
+            Ok(()) => kept.push((name, blocks, ext)),
             Err(e) => issues.errors.push(format!(
                 "hero `{id}`, skill `{name}`: {} ({e:?}), not used",
                 e.message()
@@ -122,18 +194,18 @@ pub fn fighter(
         }
     }
     let mut skills = Vec::new();
-    for (name, blocks) in kept {
-        let stats = SkillStats::derive(blocks, &cfg.skills);
+    let (mut reactive, mut passive) = (None, None);
+    for (name, blocks, ext) in kept {
+        let stats = SkillStats::derive(blocks, ext, &cfg.skills);
         match skill_use(&stats) {
             SkillUse::Ok => skills.push(Skill { name, stats }),
-            SkillUse::NotActive => issues.warnings.push(format!(
-                "hero `{id}`, skill `{name}`: {} skills are not actions in the session yet",
-                match blocks.category {
-                    Category::Active => "active",
-                    Category::Reactive => "reactive",
-                    Category::Passive => "passive",
-                }
-            )),
+            // A reactive skill triggers by itself, a passive one works all the time
+            // (docs/SKILL_BUILDER.md 3.2, 3.3): one of each is taken onto the map.
+            SkillUse::NotActive => match blocks.category {
+                Category::Reactive => reactive = reactive.or(Some(Skill { name, stats })),
+                Category::Passive => passive = passive.or(Some(Skill { name, stats })),
+                Category::Active => {}
+            },
             SkillUse::NoEffect => issues
                 .errors
                 .push(format!("hero `{id}`, skill `{name}`: no effect, not used")),
@@ -156,6 +228,8 @@ pub fn fighter(
         hp_max: hero::hp_max(cfg, &hero),
         hero,
         skills,
+        reactive,
+        passive,
     }
 }
 
@@ -213,7 +287,7 @@ pub fn resolve_party(
 }
 
 /// An encounter from its id (at most `MONSTERS_MAX` monsters).
-pub fn resolve_fight(presets: &Presets, id: &str) -> (Option<Fight>, Issues) {
+pub fn resolve_fight(presets: &Presets, id: &str, cfg: &BalanceConfig) -> (Option<Fight>, Issues) {
     let mut issues = Issues::default();
     let Some(e) = presets.encounters.get(id) else {
         issues
@@ -222,26 +296,21 @@ pub fn resolve_fight(presets: &Presets, id: &str) -> (Option<Fight>, Issues) {
         return (None, issues);
     };
     let mut spawns = Vec::new();
+    let reg = &presets.registry;
     for slot in &e.monsters {
-        let Some(m) = presets.monsters.get(&slot.monster) else {
+        let Some(bestiary_id) = reg.monster_id(&slot.monster) else {
             issues.errors.push(format!(
-                "encounter `{id}`: no monster `{}`, left out",
+                "encounter `{id}`: no monster `{}` in bestiary.json, left out",
                 slot.monster
             ));
             continue;
         };
-        for w in m.warnings() {
-            issues
-                .warnings
-                .push(format!("monster `{}`: {w}", slot.monster));
-        }
-        for _ in 0..slot.count {
-            spawns.push(Spawn {
-                name: m.name.clone(),
-                base: m.base(),
-                defense: m.defense(&presets.registry),
-                level: slot.level,
-            });
+        match spawn(reg, bestiary_id, slot.level, slot.elite, slot.skills, cfg) {
+            Ok(s) => spawns.extend(std::iter::repeat_n(s, slot.count as usize)),
+            Err(err) => issues.errors.push(format!(
+                "encounter `{id}`, monster `{}`: {err}",
+                slot.monster
+            )),
         }
     }
     if spawns.len() > MONSTERS_MAX {

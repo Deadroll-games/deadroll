@@ -1,6 +1,6 @@
 // Mock data for VITE_DATA=mock and the /dev pages. Shapes match chain/types.ts exactly.
 import demoMap from "../../../assets/registry/maps/demo_16x16.json";
-import bestiaryJson from "../../../assets/registry/bestiary.json";
+import registryTables from "../../../tools/scripts/lib/__fixtures__/registry-tables.json";
 import {
   Applied,
   Aspect,
@@ -116,18 +116,17 @@ const NO_RESONANCE = {
   landed: 0,
 } satisfies Partial<HitResult>;
 
-/** Mock monster defenses: the registry bestiary records (assets/registry/bestiary.json), as
- * `MonsterState.defense` holds them. */
-export function mockDefense(bestiaryId: number): { resist: number; immuneAspects: number; immuneStates: number } {
-  const r = bestiaryJson.records.find((m) => m.id === bestiaryId);
-  const ASPECTS = ["Fire", "Cold", "Lightning", "Blood", "Blunt", "Piercing"];
-  const STATES = ["Burning", "Chill", "Freeze", "Bleeding", "Shock", "Stun", "Penetration"];
-  const bits = (list: readonly string[] | undefined, names: string[]) => (list ?? []).reduce((m, n) => m | (1 << names.indexOf(n)), 0);
-  return {
-    resist: bits(r?.resistance, ASPECTS),
-    immuneAspects: bits(r?.immunity, ASPECTS),
-    immuneStates: bits(r?.state_immunity, STATES),
-  };
+/** Mock monster records: the registry bestiary bytes (assets/registry/bestiary.json as
+ * deadroll-rules encodes it, the shared fixture of tools/scripts), as `MonsterState.records` holds them. */
+export function mockRecord(bestiaryId: number): Uint8Array {
+  const hex = registryTables.bestiary.slice(bestiaryId * 96, bestiaryId * 96 + 96);
+  return Uint8Array.from((hex.match(/../g) ?? []).map((h) => parseInt(h, 16)));
+}
+
+/** A mock registry table body (the shared fixture of tools/scripts): the map builder's bestiary
+ * pools and monster skills without a chain. */
+export function mockTable(table: "bestiary" | "monster_skills"): Uint8Array {
+  return Uint8Array.from((registryTables[table].match(/../g) ?? []).map((h) => parseInt(h, 16)));
 }
 
 /** Elf mage cold bolt on a wolf: hit, cold resonance with a fire tint, chill applied. */

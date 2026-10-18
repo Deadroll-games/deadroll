@@ -11,7 +11,7 @@ import type { HitItemSides, HitMods } from "../components/dice/types";
 import { StatsPanel } from "../components/stats/StatsPanel";
 import type { StatsUnit } from "../components/stats/types";
 import { Grid } from "../components/grid/Grid";
-import type { GridUnit } from "../components/grid/types";
+import type { GridAura, GridUnit } from "../components/grid/types";
 import { PartyLobby } from "../components/forms/PartyLobby";
 import type { LobbyPlayer } from "../components/forms/types";
 import { monsterRequest, renderRequest, tileRequest, TOMBSTONE } from "../chain/appearance";
@@ -24,6 +24,8 @@ import {
   bytesText,
   claimEscrowIx,
   claimRewardsIx,
+  deathAccountsOf,
+  withDeaths,
   consumeIx,
   currentUnit,
   endTurnIx,
@@ -40,7 +42,7 @@ import {
   myCharacters,
   openSessionIx,
   openSessions,
-  pendingTargetOf,
+  partyAccountsOf,
   pickSeed,
   playerAp,
   readParty,
@@ -50,6 +52,7 @@ import {
   startTurnIx,
   status,
   type Actor,
+  type AuraAcc,
   type CharacterAcc,
   type SkillRecordAcc,
   type SkillSetAcc,
@@ -60,7 +63,21 @@ import {
 } from "../chain/game";
 import { toHitResolved, toResonanceSpread } from "../chain/hit";
 import { aspectName, bestiaryName, carrierName, resonanceName, stateName } from "../chain/names";
-import { heroInputOf, previewOnMonster, previewText, statesOf, useCombat, type AccuracyInput, type CombatWasm, type HitPreview } from "../chain/combatWasm";
+import {
+  blockedOf,
+  heroInputOf,
+  partyInputOf,
+  percent,
+  previewOnMonster,
+  previewText,
+  statesOf,
+  useCombat,
+  type AccuracyInput,
+  type AiUnitInput,
+  type CombatWasm,
+  type HitPreview,
+} from "../chain/combatWasm";
+import { ACTIVE_SLOTS, REACTIVE_SLOT, kinOf, monsterBearersOf, monsterSkillName, monsterSkillsOf, skillAction, useMonsterSkillTable, type MonsterSkill } from "../chain/monsters";
 import { errorName } from "../chain/send";
 import { statusLabel, type SubStatus } from "../chain/subscribe";
 import { cooldownLabel, skillCooldowns, skillUsedText, skipText, startTurnFor, takenOntoMap, tickText, turnActed, turnStarted } from "../chain/turns";
@@ -68,7 +85,7 @@ import { skillSetPda } from "../chain/pda";
 import { affordable, cheb, reachable, route, type Step } from "../chain/route";
 import { useAutoFreezeTombstone } from "../chain/useAutoFreezeTombstone";
 import { useParty, type PartyEvent } from "../chain/useParty";
-import { Purpose, inReach } from "../chain/skillcheck";
+import { BASIC_ATTACK_AP, Purpose, inReach, rangeReach, type RangeTag } from "../chain/skillcheck";
 import { monsterBaseAp, monsterDefense, playerDefense, unitStats } from "../chain/stats";
 import { activeMods, combatSkill, effectText, modsAt, modsTickText, toEffectResolved, type CombatSkill, type EffectResolved } from "../chain/support";
 import { useTx } from "../chain/useTx";
@@ -226,6 +243,9 @@ function PartyView({ address }: { address: Address }) {
   const [skill, setSkill] = useState<number>(0);
   const [hover, setHover] = useState<Cell | null>(null);
   const [autoMonsters, setAutoMonsters] = useState(false);
+  /** The DM's chosen monster action: a skill slot, null = the natural attack. */
+  const [monsterSlot, setMonsterSlot] = useState<number | null>(null);
+  const skillTable = useMonsterSkillTable();
   const [roll, setRoll] = useState<Roll | null>(null);
   const [myChars, setMyChars] = useState<{ address: Address; data: CharacterAcc }[]>([]);
   const [skillNames, setSkillNames] = useState<Record<string, CombatSkill[]>>({});
@@ -267,10 +287,15 @@ function PartyView({ address }: { address: Address }) {
 
   const skillName = useCallback(
     (u: number, slot: number): string => {
+      // A monster's skill by its slot: the registry name of its session copy.
+      if (u >= MONSTER_BASE) {
+        const copy = party?.monsterSkills[u - MONSTER_BASE]?.[slot];
+        return copy ? monsterSkillName(copy, skillTable) : `skill ${slot}`;
+      }
       const pl = party?.players.find((p) => p.slot === u);
       return (pl && skillNames[pl.character]?.find((k) => k.slot === slot)?.name) || `skill ${slot}`;
     },
-    [party, skillNames],
+    [party, skillNames, skillTable],
   );
 
   // My characters (lobby join list) and skill names of party characters (attack buttons).
@@ -293,7 +318,19 @@ function PartyView({ address }: { address: Address }) {
       }),
     ).then((entries) => {
       setSkillRecords(Object.fromEntries(entries));
-      setSkillNames(Object.fromEntries(entries.map(([c, records]) => [c, records.map((k, slot) => combatSkill(slot, k))])));
+      // The participation's snapshot (set_ready) carries each map skill's range and AP cost.
+      setSkillNames(
+        Object.fromEntries(
+          entries.map(([c, records]) => {
+            const part = party.players.find((p) => p.character === c)?.part;
+            const map = (slot: number) => {
+              const i = part ? Array.from(part.skills).indexOf(slot) : -1;
+              return i >= 0 ? (part!.mapSkills[i] ?? null) : null;
+            };
+            return [c, records.map((k, slot) => combatSkill(slot, k, map(slot)))];
+          }),
+        ),
+      );
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [partyChars]);
@@ -322,12 +359,28 @@ function PartyView({ address }: { address: Address }) {
     // Mods are not in HitResolved: take each side's from the events before the hit, else the accounts.
     const modsNow = (u: number) =>
       !party ? [] : u < MONSTER_BASE ? activeMods(party.players.find((p) => p.slot === u)?.part.mods) : activeMods(party.monsterMods[u - MONSTER_BASE]);
+    /** The action of a hit: the requested one (ActionRequested of its action counter), or the
+     * reaction of its attacker on that counter. */
+    const actionOf = (counter: number, attacker: number): string | null => {
+      const req = events.find((e) => e.name === "ActionRequested" && e.data.action === counter);
+      if (req && req.data.attacker === attacker) {
+        const slot = req.data.skillSlot as number;
+        if (attacker < MONSTER_BASE) return slot === BASE_ATTACK ? "weapon" : skillName(attacker, slot);
+        return slot === 0 ? "natural attack" : skillName(attacker, slot - 1);
+      }
+      const monster = events.find((e) => e.name === "MonsterReactiveTriggered" && e.data.actionCounter === counter && MONSTER_BASE + e.data.bearer === attacker);
+      if (monster) return `reaction: ${skillName(attacker, REACTIVE_SLOT)}`;
+      const player = events.find((e) => e.name === "ReactiveTriggered" && e.data.actionCounter === counter && e.data.bearer === attacker);
+      return player ? `reaction: ${skillName(attacker, player.data.skillSlot)}` : null;
+    };
     const hitView = (data: unknown, at: number): Hit => {
       const h = toHitResolved(data);
       const mods = { attacker: modsAt(events, at, h.attacker, modsNow(h.attacker)), target: modsAt(events, at, h.target, modsNow(h.target)) };
       // Items only for player sides: a monster wears nothing.
       const items = { attacker: h.attacker < MONSTER_BASE ? h.items.attacker : null, target: h.target < MONSTER_BASE ? h.items.defender : null };
-      return { result: h.result, attacker: label(h.attacker), target: label(h.target), critChanceBp: critOf(h.attacker), mods, items };
+      const action = actionOf(h.actionCounter, h.attacker);
+      const attacker = action ? `${label(h.attacker)} (${action})` : label(h.attacker);
+      return { result: h.result, attacker, target: label(h.target), critChanceBp: critOf(h.attacker), mods, items };
     };
     if (ev.name === "HitResolved") return setRoll({ key, hit: hitView(ev.data, i), effect: null });
     const e = toEffectResolved(ev.data);
@@ -346,7 +399,7 @@ function PartyView({ address }: { address: Address }) {
       const pl = p.players.find((x) => x.participation === pend);
       if (!pl) return;
       const seed = await pickSeed(kind);
-      const res = await send("VRF roll (localnet oracle)", sk.signer ?? wallet.signer, async () => [await consumeIx(address, pend, pl.character, seed, pendingTargetOf(p.session), p.session.layout)], {
+      const res = await send("VRF roll (localnet oracle)", sk.signer ?? wallet.signer, async () => [await consumeIx(address, pend, pl.character, seed, p.session.layout, partyAccountsOf(p.session, pend))], {
         quiet: true,
         silent: quietFail,
       });
@@ -390,11 +443,15 @@ function PartyView({ address }: { address: Address }) {
           if (!next) break;
           // A failed start (no SOL, RPC down) is retried after 3 s, by the poll or the next action.
           if (startFailed.current?.seq === next.turnSeq && Date.now() - startFailed.current.at < 3_000) break;
-          const actor = actorFor(next.player ? next.player.part.core.actor : p.session.dmActor);
+          // Finalizing deaths (patch 6): any tab of the party pays, with its own session key.
+          const own = next.finalize ? (sk.signer ?? wallet.signer) : null;
+          const actor = next.finalize ? (own ? { signer: own, token: null } : null) : actorFor(next.player ? next.player.part.core.actor : p.session.dmActor);
           if (!actor) break;
           const player = next.player ? { participation: next.player.participation, character: next.player.character } : null;
+          const deaths = await deathAccountsOf(p.session);
           let failed = false;
-          const res = await send(`start turn ${label(next.unit)}`, actor.signer, async () => [await startTurnIx(address, player)], {
+          const what = next.finalize ? "finalize deaths" : `start turn ${label(next.unit)}`;
+          const res = await send(what, actor.signer, async () => withDeaths(deaths, await startTurnIx(address, player, actor.signer, deaths)), {
             quiet: true,
             onError: (m) => {
               // Another tab started it first: nothing to show.
@@ -483,7 +540,8 @@ function PartyView({ address }: { address: Address }) {
         hpMax: m.hpMax,
         alive: m.alive,
         label: `${bestiaryName(m.bestiaryId)} ${i}`,
-        size: (m.bestiaryId === 2 ? 2 : 1) as 1 | 2,
+        // Cells per side: the bestiary record (`record::CELLS`).
+        size: ((party.monsterRecords[i]?.[3] ?? 1) === 2 ? 2 : 1) as 1 | 2,
       })),
     ];
   }, [party]);
@@ -514,6 +572,23 @@ function PartyView({ address }: { address: Address }) {
   // Heals and buffs go to an ally (self included), everything else to a monster.
   const chosenSide = chosen?.side ?? "enemy";
 
+  // The current monster's active skills (DM), the chosen one, its side; a buff or heal goes to an
+  // allied monster (of its kin for a kin-only skill), everything else to a player.
+  const mIndex = monsterTurn && unit !== null ? unit - MONSTER_BASE : -1;
+  const mSkills: MonsterSkill[] = combat && party && mIndex >= 0 ? monsterSkillsOf(party, mIndex, combat, skillTable).filter((k) => k.slot < ACTIVE_SLOTS) : [];
+  const mCooldowns = party?.monsterCooldowns[mIndex] ?? new Uint8Array(0);
+  const mChosen = mSkills.find((k) => k.slot === monsterSlot && !(mCooldowns[k.slot] ?? 0)) ?? null;
+  const mSide = mChosen && mChosen.sheet.blocks[1] === Purpose.Buff ? "ally" : "enemy";
+  const mSheet = combat && party && mIndex >= 0 && party.monsterRecords[mIndex] ? (() => {
+    try {
+      return combat.monsterSheet({ record: party.monsterRecords[mIndex]!, level: party.monsters[mIndex]!.level, flags: party.monsters[mIndex]!.flags });
+    } catch {
+      return null;
+    }
+  })() : null;
+  const mRange = (mChosen ? mChosen.sheet.ext[0]! : (mSheet?.range ?? 0)) as RangeTag;
+  const mAp = mChosen ? mChosen.sheet.apCost : BASIC_ATTACK_AP;
+
   const pathTo = useCallback(
     (to: Cell): Step[] | null => {
       if (!party?.tiles || !s || !moverPos || unit === null) return null;
@@ -539,7 +614,7 @@ function PartyView({ address }: { address: Address }) {
   const attack = (monster: number) => {
     if (!activePlayer || !canAttack || chosenSide !== "enemy") return;
     const actor = actorFor(activePlayer.part.core.actor);
-    void act(`attack ${label(MONSTER_BASE + monster)}`, actor?.signer ?? null, async () => [await actIx(actor!, address, activePlayer.character, chosenSkill, monster, null)], true);
+    void act(`attack ${label(MONSTER_BASE + monster)}`, actor?.signer ?? null, async () => [await actIx(actor!, address, activePlayer.character, chosenSkill, monster, null, s!.layout)], true);
   };
   /** A heal or buff on an ally: the target is its player slot, its Participation unless a self-cast. */
   const support = (slot: number) => {
@@ -547,7 +622,7 @@ function PartyView({ address }: { address: Address }) {
     if (!activePlayer || !canAttack || chosenSide !== "ally" || !ally || !chosen) return;
     const actor = actorFor(activePlayer.part.core.actor);
     const allyAccount = slot === activePlayer.slot ? null : ally.participation;
-    void act(`${chosen.name} on ${label(slot)}`, actor?.signer ?? null, async () => [await actIx(actor!, address, activePlayer.character, chosenSkill, slot, allyAccount)], true);
+    void act(`${chosen.name} on ${label(slot)}`, actor?.signer ?? null, async () => [await actIx(actor!, address, activePlayer.character, chosenSkill, slot, allyAccount, s!.layout)], true);
   };
   const endTurn = () => {
     if (!s) return;
@@ -568,9 +643,19 @@ function PartyView({ address }: { address: Address }) {
   };
   const monsterAttack = (slot: number) => {
     const target = party?.players.find((p) => p.slot === slot);
-    if (!s || unit === null || !target || !canAttack) return;
+    if (!s || unit === null || !target || !canAttack || mSide !== "enemy") return;
     const actor = actorFor(s.dmActor);
-    void act(`${label(unit)} attacks ${label(slot)}`, actor?.signer ?? null, async () => [await monsterActIx(actor!, address, unit - MONSTER_BASE, slot, target.character)], true);
+    const action = mChosen ? skillAction(mChosen.slot) : 0;
+    const what = mChosen ? `${label(unit)}: ${mChosen.name} on ${label(slot)}` : `${label(unit)} attacks ${label(slot)}`;
+    void act(what, actor?.signer ?? null, async () => [await monsterActIx(actor!, address, unit - MONSTER_BASE, action, slot, target.character, s.layout)], true);
+  };
+  /** A monster's heal or buff on an allied monster: the callback's participation is the lowest
+   * living player's. */
+  const monsterSupport = (index: number) => {
+    const first = party?.players.filter((p) => s && s.aliveMask & (1 << p.slot)).sort((a, b) => a.slot - b.slot)[0];
+    if (!s || unit === null || !first || !canAttack || mSide !== "ally" || !mChosen) return;
+    const actor = actorFor(s.dmActor);
+    void act(`${label(unit)}: ${mChosen.name} on ${label(MONSTER_BASE + index)}`, actor?.signer ?? null, async () => [await monsterActIx(actor!, address, unit - MONSTER_BASE, skillAction(mChosen.slot), index, first.character, s.layout)], true);
   };
 
   /** The DM's monster: walk toward the nearest living player, bite if adjacent, end the turn (as demo.test.ts). */
@@ -589,13 +674,48 @@ function PartyView({ address }: { address: Address }) {
       const actor = actorFor(p.session.dmActor);
       if (!actor) return;
       const living = p.players.filter((pl) => p!.session.aliveMask & (1 << pl.slot));
-      if (m?.alive && living.length) {
-        const target = living.reduce((a, b) => (cheb(m, { x: b.part.core.x, y: b.part.core.y }) < cheb(m, { x: a.part.core.x, y: a.part.core.y }) ? b : a));
-        const tpos = { x: target.part.core.x, y: target.part.core.y };
+      if (m?.alive && living.length && combat) {
+        // The plan: what the simulator's monsters do (deadroll_rules::monster_ai), the target and
+        // the reach. Walk into reach with the AP the action leaves, then act.
+        const unitOf = (cell: Cell, hp: number, hpMax: number, alive: boolean, states: AiUnitInput["states"], mods: AiUnitInput["mods"], kin: number): AiUnitInput => ({ cell: [cell.x, cell.y], hp, hpMax, alive, states, mods, kin });
+        const heroes = Array.from({ length: p.session.core.playerCount }, (_, slot) => {
+          const pl = p!.players.find((x) => x.slot === slot);
+          return pl
+            ? unitOf({ x: pl.part.core.x, y: pl.part.core.y }, pl.part.core.hp, pl.part.hpMax || pl.char.core.hpMax, (p!.session.aliveMask & (1 << slot)) !== 0, statesOf(pl.part.core.states), activeMods(pl.part.mods), 0xff)
+            : unitOf({ x: 0, y: 0 }, 0, 0, false, [], [], 0xff);
+        });
+        const monsters = p.monsters.map((x, j) => unitOf({ x: x.x, y: x.y }, x.hp, x.hpMax, x.alive, statesOf(x.states), activeMods(p!.monsterMods[j]), kinOf(p!, j)));
+        let plan = null as ReturnType<CombatWasm["monsterPlan"]> | null;
+        try {
+          plan = combat.monsterPlan({
+            record: p.monsterRecords[mi]!,
+            level: m.level,
+            index: mi,
+            ap: m.actionPoints,
+            skills: p.monsterSkills[mi] ?? [],
+            cooldowns: Array.from(p.monsterCooldowns[mi] ?? []),
+            heroes,
+            monsters,
+          });
+        } catch (err) {
+          console.warn(err);
+        }
+        const nearest = living.reduce((a, b) => (cheb(m, { x: b.part.core.x, y: b.part.core.y }) < cheb(m, { x: a.part.core.x, y: a.part.core.y }) ? b : a));
+        const targetCell: Cell = plan?.found
+          ? plan.ally
+            ? { x: p.monsters[plan.target]!.x, y: p.monsters[plan.target]!.y }
+            : { x: heroes[plan.target]!.cell[0], y: heroes[plan.target]!.cell[1] }
+          : { x: nearest.part.core.x, y: nearest.part.core.y };
+        const reachCells = plan?.found ? rangeReach(plan.range as RangeTag) : 1;
+        const inRange = (c: Cell) => {
+          const d = cheb(c, targetCell);
+          return d <= reachCells && (plan?.ally ? true : d >= 1);
+        };
         let ap = m.actionPoints;
-        if (cheb(m, tpos) > 1) {
-          const steps = route({ from: m, goal: (x, y) => cheb({ x, y }, tpos) === 1, tiles: p.tiles, width: p.session.width, height: p.session.height, tileCost: Array.from(p.session.tileCost), taken: taken(p, u) });
-          const take = steps ? affordable(steps, ap, 2) : [];
+        const keep = plan?.found ? plan.ap : BASIC_ATTACK_AP;
+        if (!inRange(m)) {
+          const steps = route({ from: m, goal: (x, y) => inRange({ x, y }), tiles: p.tiles, width: p.session.width, height: p.session.height, tileCost: Array.from(p.session.tileCost), taken: taken(p, u) });
+          const take = steps ? affordable(steps, ap, keep) : [];
           if (take.length) {
             const r = await send(`move ${label(u)}`, actor.signer, async () => [await monsterMoveIx(actor, address, p!.session.layout, mi, take)], { quiet: true });
             if (r) ingest(r.signature, r.events);
@@ -604,8 +724,12 @@ function PartyView({ address }: { address: Address }) {
         }
         p = (await readParty(address, p.tiles))!;
         const mm = p.monsters[mi]!;
-        if (ap >= 2 && mm.alive && cheb(mm, tpos) === 1 && !turnActed(p.session)) {
-          const r = await send(`${label(u)} attacks ${label(target.slot)}`, actor.signer, async () => [await monsterActIx(actor, address, mi, target.slot, target.character)], { quiet: true });
+        if (plan?.found && ap >= plan.ap && mm.alive && inRange(mm) && !turnActed(p.session) && !p.session.core.pendingVrf) {
+          const action = plan.slot === null ? 0 : skillAction(plan.slot);
+          const first = p.players.filter((pl) => p!.session.aliveMask & (1 << pl.slot)).sort((a, b) => a.slot - b.slot)[0]!;
+          const character = plan.ally ? first.character : p.players.find((pl) => pl.slot === plan!.target)!.character;
+          const what = `${label(u)}: ${plan.slot === null ? "natural attack" : skillName(u, plan.slot)} on ${label(plan.ally ? MONSTER_BASE + plan.target : plan.target)}`;
+          const r = await send(what, actor.signer, async () => [await monsterActIx(actor, address, mi, action, plan!.target, character, p!.session.layout)], { quiet: true });
           if (r) {
             ingest(r.signature, r.events);
             if (MOCK_VRF) {
@@ -625,7 +749,7 @@ function PartyView({ address }: { address: Address }) {
     } finally {
       lock.current = false;
     }
-  }, [address, ensureStarted, actorFor, send, ingest, consume, refresh, taken, label]);
+  }, [address, ensureStarted, actorFor, send, ingest, consume, refresh, taken, label, combat, skillName]);
 
   // Auto-play monster turns from the DM window (toggle).
   useEffect(() => {
@@ -756,18 +880,75 @@ function PartyView({ address }: { address: Address }) {
   const ended = st !== "active";
   const livingPlayers = party.players.filter((p) => s.aliveMask & (1 << p.slot));
   // A skill's targets within its reach (the weapon: every living monster, the program checks range).
-  const reachOk = (c: Cell) => !chosen || !moverPos || inReach(chosen.side, chosen.form, cheb(moverPos, c));
+  const reachOk = (c: Cell) => !chosen || !moverPos || inReach(chosen.side, chosen.range, cheb(moverPos, c));
   const monsterTargets: Cell[] = !canAttack
     ? []
     : myTurn && moverPos
       ? chosenSide === "ally"
         ? livingPlayers.map((p) => ({ x: p.part.core.x, y: p.part.core.y })).filter(reachOk)
         : party.monsters.filter((m) => m.alive).map((m) => ({ x: m.x, y: m.y })).filter(reachOk)
-      : monsterTurn && isDm
-        ? livingPlayers.map((p) => ({ x: p.part.core.x, y: p.part.core.y }))
+      : monsterTurn && isDm && moverPos
+        ? mSide === "ally"
+          ? party.monsters
+              .map((m, i) => ({ m, i }))
+              .filter(({ m, i }) => m.alive && (!mChosen?.sheet.kinOnly || i === mIndex || kinOf(party, i) === kinOf(party, mIndex)))
+              .map(({ m }) => ({ x: m.x, y: m.y }))
+              .filter((c) => inReach("ally", mRange, cheb(moverPos, c)))
+          : livingPlayers.map((p) => ({ x: p.part.core.x, y: p.part.core.y })).filter((c) => inReach("enemy", mRange, cheb(moverPos, c)))
         : [];
-  // Before the dice (docs/COMBAT_MATH.md 13): the weapon or a damage skill on the hovered monster,
-  // else on each monster in reach. The combat module builds the hit as the program does.
+  // A line skill under the pointer (docs/SKILL_BUILDER.md 4.3): from the caster through the
+  // hovered target to the skill's reach, a wall ends it (the module runs the program's line).
+  const lineCells: Cell[] =
+    combat && chosen?.line && moverPos && hover && monsterTargets.some((c) => c.x === hover.x && c.y === hover.y)
+      ? (() => {
+          try {
+            return combat
+              .line({
+                from: [moverPos.x, moverPos.y],
+                through: [hover.x, hover.y],
+                reach: rangeReach(chosen.range),
+                width: s.width,
+                height: s.height,
+                blocked: blockedOf(tiles, s.tileCost),
+              })
+              .map(([x, y]) => ({ x, y }));
+          } catch {
+            return [];
+          }
+        })()
+      : [];
+  const onLine = (c: Cell) => lineCells.some((l) => l.x === c.x && l.y === c.y);
+  // The party's auras and the monsters' (patch 6) over every unit.
+  const sessionParty = partyInputOf(s, monsterBearersOf(party));
+  // Auras on the map (docs/SKILL_BUILDER.md 3.5): every living bearer's passive and temporary aura.
+  const gridAuras: GridAura[] = [
+    ...livingPlayers.flatMap((p) =>
+      (s.auras[p.slot] ?? [])
+        .filter((a) => a.turns > 0)
+        .map((a) => ({
+          center: { x: p.part.core.x, y: p.part.core.y },
+          radius: a.selfOnly ? 0 : a.radius,
+          hostile: a.hostile,
+          label: auraText(a, label(p.slot)),
+        })),
+    ),
+    // A monster's aura: friendly to its allies (its kin for a kin-only one), hostile to the players.
+    ...party.monsters.flatMap((m, i) =>
+      !m.alive
+        ? []
+        : (party.monsterAuras[i] ?? [])
+            .filter((a) => a.aura.turns > 0)
+            .map((a) => ({
+              center: { x: m.x, y: m.y },
+              radius: a.aura.selfOnly ? 0 : a.aura.radius,
+              hostile: !a.aura.hostile,
+              label: `${auraText(a.aura, label(MONSTER_BASE + i))}${a.kinOnly ? " (its kin)" : ""}`,
+            })),
+    ),
+  ];
+  // Before the dice (docs/COMBAT_MATH.md 13): the weapon or a damage skill on the hovered monster
+  // (every monster on a hovered line), else on each monster in reach. The combat module builds the
+  // hit as the program does, auras included.
   const attackPreviews =
     combat && tablesReady && activePlayer && myTurn && canAttack && chosenSide === "enemy" && (!chosen || chosen.purpose === Purpose.Damage)
       ? (() => {
@@ -778,12 +959,43 @@ function PartyView({ address }: { address: Address }) {
           const inReach = party.monsters
             .map((m, i) => ({ m, i }))
             .filter(({ m }) => m.alive && reachOk({ x: m.x, y: m.y }));
-          const hovered = hover ? inReach.filter(({ m }) => m.x === hover.x && m.y === hover.y) : [];
+          const hovered = lineCells.length
+            ? party.monsters.map((m, i) => ({ m, i })).filter(({ m }) => m.alive && onLine(m))
+            : hover
+              ? inReach.filter(({ m }) => m.x === hover.x && m.y === hover.y)
+              : [];
           return (hovered.length ? hovered : inReach.slice(0, 4)).flatMap(({ m, i }) => {
-            const p = previewOnMonster(combat, hero, heroMods, record, m, activeMods(party.monsterMods[i]), defenseOf(party, i), accuracy);
+            const p = previewOnMonster(combat, hero, heroMods, record, m, activeMods(party.monsterMods[i]), party.monsterRecords[i] ?? new Uint8Array(48), i, accuracy, sessionParty, activePlayer.slot);
             return p ? [{ unit: MONSTER_BASE + i, text: `${previewText(p)}${tintPreviewText(p)}` }] : [];
           });
         })()
+      : [];
+
+  // Before the dice, the DM's side: the monster's natural attack or damage skill on each player in
+  // reach (the combat module builds the program's hit, auras included).
+  const monsterPreviews =
+    combat && tablesReady && monsterTurn && isDm && canAttack && mIndex >= 0 && mSide === "enemy" && (!mChosen || mChosen.sheet.blocks[1] === Purpose.Damage)
+      ? livingPlayers
+          .filter((pl) => moverPos && inReach("enemy", mRange, cheb(moverPos, { x: pl.part.core.x, y: pl.part.core.y })))
+          .flatMap((pl) => {
+            const m = party.monsters[mIndex]!;
+            try {
+              const pv = combat.previewMonsterAttack({
+                monster: { record: party.monsterRecords[mIndex]!, level: m.level, states: statesOf(m.states), mods: activeMods(party.monsterMods[mIndex]) },
+                index: mIndex,
+                at: [m.x, m.y],
+                skill: mChosen?.copy ?? null,
+                hero: heroInputOf(pl.char, pl.part.equipment, pl.char.core.stats, pl.part.classTier),
+                heroStates: statesOf(pl.part.core.states),
+                heroMods: activeMods(pl.part.mods),
+                slot: pl.slot,
+                party: sessionParty,
+              });
+              return [{ unit: pl.slot, text: previewText(pv) }];
+            } catch {
+              return [];
+            }
+          })
       : [];
 
   return (
@@ -803,6 +1015,8 @@ function PartyView({ address }: { address: Address }) {
             reachable={!ended && canMove ? reach : []}
             targets={!ended ? monsterTargets : []}
             path={preview}
+            auras={gridAuras}
+            line={!ended ? lineCells : []}
             burning={party.burningCells.filter((c) => c.untilRound >= s.core.round).map((c) => ({ x: c.x, y: c.y }))}
             cellPx={CELL_PX}
             unitSprite={unitSprite}
@@ -813,7 +1027,8 @@ function PartyView({ address }: { address: Address }) {
               if (!canAttack) return;
               if (myTurn && chosenSide === "enemy" && u.kind === "monster" && u.alive) attack(u.id - MONSTER_BASE);
               else if (myTurn && chosenSide === "ally" && u.kind === "player" && u.alive) support(u.id);
-              else if (monsterTurn && isDm && u.kind === "player" && u.alive) monsterAttack(u.id);
+              else if (monsterTurn && isDm && mSide === "enemy" && u.kind === "player" && u.alive) monsterAttack(u.id);
+              else if (monsterTurn && isDm && mSide === "ally" && u.kind === "monster" && u.alive) monsterSupport(u.id - MONSTER_BASE);
             }}
           />
           <p className="muted" style={{ maxWidth: CELL_PX * s.width }}>
@@ -824,7 +1039,9 @@ function PartyView({ address }: { address: Address }) {
                   ? `Your turn: click an ally or yourself to cast ${chosen?.name ?? "the skill"} (one attack or skill per turn).`
                   : "Your turn: click a cell to move, a monster to attack with the selected skill (one attack per turn)."
                 : monsterTurn && isDm
-                  ? "Monster turn: click a cell to move it, a hero to attack (once), or Auto."
+                  ? mSide === "ally"
+                    ? `Monster turn: click an allied monster (or itself) for ${mChosen?.name ?? "the skill"}, a cell to move it, or Auto.`
+                    : "Monster turn: click a cell to move it, a hero to attack with the selected action (once), or Auto."
                   : ""}
           </p>
         </div>
@@ -846,19 +1063,20 @@ function PartyView({ address }: { address: Address }) {
                         <button
                           key={k.slot}
                           className={cd > 0 ? "btn cooldown" : "btn"}
-                          disabled={!canAttack || cd > 0}
+                          disabled={!canAttack || cd > 0 || moverAp < k.apCost}
                           aria-pressed={chosenSkill === k.slot}
                           title={cd > 0 ? `On cooldown: ${cooldownLabel(cd)}` : k.side === "ally" ? "Heal or buff: click an ally or yourself" : k.purpose === Purpose.Debuff ? "Debuff: click a monster" : undefined}
                           onClick={() => setSkill(k.slot)}
                         >
                           {k.name}
+                          <span className="muted ap"> · {k.apCost} AP{k.line ? " · line" : ""}</span>
                           {k.side === "ally" ? <span className="muted"> · ally</span> : k.purpose === Purpose.Debuff ? <span className="muted"> · debuff</span> : null}
                           {cd > 0 && <span className="cd"> · {cooldownLabel(cd)}</span>}
                         </button>
                       );
                     })}
-                    <button className="btn" disabled={!canAttack} aria-pressed={chosenSkill === BASE_ATTACK} onClick={() => setSkill(BASE_ATTACK)}>
-                      Weapon
+                    <button className="btn" disabled={!canAttack || moverAp < BASIC_ATTACK_AP} aria-pressed={chosenSkill === BASE_ATTACK} onClick={() => setSkill(BASE_ATTACK)}>
+                      Weapon<span className="muted ap"> · {BASIC_ATTACK_AP} AP</span>
                     </button>
                   </div>
                   {attackPreviews.length > 0 && (
@@ -871,6 +1089,44 @@ function PartyView({ address }: { address: Address }) {
                     </ul>
                   )}
                   <p className="muted">Session key: {sk.signer && activePlayer && sk.signer.address === activePlayer.part.core.actor ? "signing moves, no popups" : "not bound to this party; the wallet signs"}</p>
+                </>
+              )}
+              {monsterTurn && isDm && (
+                <>
+                  <div className="skills" aria-label="Monster actions">
+                    <button className="btn" disabled={!canAttack || moverAp < BASIC_ATTACK_AP} aria-pressed={monsterSlot === null} onClick={() => setMonsterSlot(null)}>
+                      Natural attack<span className="muted ap"> · {BASIC_ATTACK_AP} AP</span>
+                    </button>
+                    {mSkills.map((k) => {
+                      const cd = mCooldowns[k.slot] ?? 0;
+                      const ally = k.sheet.blocks[1] === Purpose.Buff;
+                      return (
+                        <button
+                          key={k.slot}
+                          className={cd > 0 ? "btn cooldown" : "btn"}
+                          disabled={!canAttack || cd > 0 || moverAp < k.sheet.apCost}
+                          aria-pressed={monsterSlot === k.slot}
+                          title={cd > 0 ? `On cooldown: ${cooldownLabel(cd)}` : ally ? "Heal or buff: click an allied monster" : undefined}
+                          onClick={() => setMonsterSlot(k.slot)}
+                        >
+                          {k.name}
+                          <span className="muted ap"> · {k.sheet.apCost} AP{k.sheet.blocks[4] === 1 ? " · line" : ""}</span>
+                          {ally ? <span className="muted"> · ally{k.sheet.kinOnly ? " (kin)" : ""}</span> : k.sheet.blocks[1] === Purpose.Debuff ? <span className="muted"> · debuff</span> : null}
+                          {cd > 0 && <span className="cd"> · {cooldownLabel(cd)}</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {mAp > moverAp && <p className="muted">Not enough AP for this action.</p>}
+                  {monsterPreviews.length > 0 && (
+                    <ul className="attack-preview" aria-label="Monster attack preview">
+                      {monsterPreviews.map((p) => (
+                        <li key={p.unit}>
+                          <b>{label(p.unit)}</b>: {p.text}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </>
               )}
               <div className="row">
@@ -995,7 +1251,11 @@ export function Claims({
                   disabled={busy !== null}
                   onClick={() => {
                     const actor = actorFor(p.part.core.actor);
-                    void send(`claim_rewards ${bytesText(p.char.name)}`, actor?.signer ?? null, async () => [await claimRewardsIx(actor!, party.address, p.character)]).then((r) => r && ingest(r.signature, r.events as never[]));
+                    void send(`claim_rewards ${bytesText(p.char.name)}`, actor?.signer ?? null, async () => {
+                      // Pending deaths of the party are finalized first (patch 6).
+                      const deaths = await deathAccountsOf(s);
+                      return withDeaths(deaths, await claimRewardsIx(actor!, party.address, p.character, deaths));
+                    }).then((r) => r && ingest(r.signature, r.events as never[]));
                   }}
                 >
                   Claim rewards
@@ -1009,7 +1269,10 @@ export function Claims({
         <button
           className="btn primary"
           disabled={busy !== null}
-          onClick={() => void send(`claim_escrow ${formatSol(party.escrow!.collected)}`, payer, async () => [await claimEscrowIx(payer!, party.address, s.core.map)]).then((r) => r && ingest(r.signature, r.events as never[]))}
+          onClick={() => void send(`claim_escrow ${formatSol(party.escrow!.collected)}`, payer, async () => {
+                const deaths = await deathAccountsOf(s);
+                return withDeaths(deaths, await claimEscrowIx(payer!, party.address, s.core.map, deaths));
+              }).then((r) => r && ingest(r.signature, r.events as never[]))}
         >
           Claim escrow ({formatSol(party.escrow.collected)})
         </button>
@@ -1020,6 +1283,24 @@ export function Claims({
 }
 
 type SkillName = (unit: number, slot: number) => string;
+
+const TRIGGER_TEXT: Record<string, string> = {
+  hit: "hit",
+  critHit: "critical hit",
+  hpBelow: "HP below its threshold",
+  allyHpBelow: "an ally's HP below its threshold",
+  controlled: "controlled",
+  enemyAdjacent: "an enemy next to it",
+};
+const triggerText = (t: Enum) => TRIGGER_TEXT[Object.keys(t)[0] ?? ""] ?? Object.keys(t)[0] ?? "?";
+
+/** "Mage: passive Protection aura 25%, radius 2" (a temporary one with its turns left). */
+function auraText(a: AuraAcc, bearer: string): string {
+  const kind = Object.keys(a.kind)[0] ?? "?";
+  const reach = a.selfOnly || a.radius === 0 ? "self" : `radius ${a.radius}`;
+  const time = a.passive ? "passive" : `temporary, ${a.turns} turns`;
+  return `${bearer}: ${a.hostile ? "hostile " : ""}${kind.charAt(0).toUpperCase()}${kind.slice(1)} aura ${percent(a.powerBp)}, ${reach} (${time})`;
+}
 
 /** One log line per event; null for an event with nothing to tell (a quiet turn start). */
 function describe(e: PartyEvent, label: (u: number) => string, skillName: SkillName): string | null {
@@ -1066,7 +1347,9 @@ function describe(e: PartyEvent, label: (u: number) => string, skillName: SkillN
     case "MonsterKilled":
       return `${label(MONSTER_BASE + d.monster)} killed${d.boss ? " (boss)" : ""}, +${d.xp} xp`;
     case "PlayerDied":
-      return `${label(d.slot)} died`;
+      return `${label(d.slot)} died (death pending: the next start_turn finalizes it)`;
+    case "DeathFinalized":
+      return `${label(d.slot)}: death finalized`;
     case "CharacterDied":
       return `character ${shortAddress(d.character)} is a tombstone`;
     case "SessionEnded":
@@ -1077,6 +1360,14 @@ function describe(e: PartyEvent, label: (u: number) => string, skillName: SkillN
       return `escrow claimed by the DM: ${formatSol(BigInt(d.amount))}`;
     case "FleeVoted":
       return `slot ${d.slot} votes to flee`;
+    case "ReactiveTriggered":
+      return `${label(d.bearer)} reacts (${triggerText(d.trigger)}): ${skillName(d.bearer, d.skillSlot)}, ${Object.keys(d.reaction)[0]} on ${label(d.target)}, cooldown ${d.cooldownLeft}`;
+    case "AuraChanged":
+      return d.aura.turns === 0 ? `${label(d.bearer)}: aura ended` : auraText(d.aura, label(d.bearer));
+    case "MonsterReactiveTriggered":
+      return `${label(MONSTER_BASE + d.bearer)} reacts (${triggerText(d.trigger)}): ${skillName(MONSTER_BASE + d.bearer, d.skillSlot)}, ${Object.keys(d.reaction)[0]} on ${label(d.target)}, cooldown ${d.cooldownLeft}`;
+    case "MonsterAuraChanged":
+      return d.aura.turns === 0 ? `${label(MONSTER_BASE + d.bearer)}: aura ended` : `${auraText(d.aura, label(MONSTER_BASE + d.bearer))}${d.kinOnly ? " (its kin)" : ""}`;
     default:
       return e.name;
   }
@@ -1106,8 +1397,9 @@ function statsUnits(party: Party, label: (u: number) => string, combat: CombatWa
       return { unit: p.slot, label: label(p.slot), kind: "player", current: current === p.slot, stats };
     });
   const monsters = party.monsters.flatMap((m, i): StatsUnit[] => {
-    // Defense, armor and resistances: the combat module over the registry defenses the session copied.
-    const profile = combat ? monsterDefense(combat, m.bestiaryId, m.level, defenseOf(party, i)) : null;
+    // Defense, armor and resistances: the combat module over the bestiary record the session copied.
+    const record = party.monsterRecords[i];
+    const profile = combat && record ? monsterDefense(combat, record, m.level, m.flags) : null;
     if (!m.alive || !profile) return [];
     const u = MONSTER_BASE + i;
     const stats = unitStats({
@@ -1156,11 +1448,6 @@ function LiveBadge({ status }: { status: SubStatus }) {
       {statusLabel(status)}
     </span>
   );
-}
-
-/** A monster's registry defenses (`MonsterState.defense`); none for a session from before them. */
-function defenseOf(party: Party, i: number) {
-  return party.monsterDefense[i] ?? { resist: 0, immuneAspects: 0, immuneStates: 0 };
 }
 
 /** The player's resonance accuracy buff (`Participation.accuracy`). */

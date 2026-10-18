@@ -45,8 +45,11 @@ const PROGRAMS = [
 ];
 const RENDER_PROGRAM = address(PROGRAMS[1]);
 
-const TABLE = { Aspects: 0, Resonances: 1, Bestiary: 2, Tileset: 3, Prefabs: 4 };
-const TABLE_SEED = ["aspects", "resonances", "bestiary", "tileset", "prefabs"];
+const TABLE = { Aspects: 0, Resonances: 1, Bestiary: 2, Tileset: 3, Prefabs: 4, Traits: 5, MonsterSkills: 6 };
+const TABLE_SEED = ["aspects", "resonances", "bestiary", "tileset", "prefabs", "traits", "monster_skills"];
+/** Patch 6: monster skill records (deadroll_skillcheck::monster). */
+const MONSTER_SKILL_SIZE = 32;
+const MONSTER_SKILLS_MAX = 128;
 const MONSTER_SIZE = 48;
 const BESTIARY_MAX = 32;
 /** Body starts after the discriminator and the 8-byte table header. */
@@ -419,6 +422,35 @@ describe("registry", () => {
         send(authority, [await writeTableIx(authority, TABLE.Aspects, 0, [1, 0, 0, 0, 0, 0, 0, 0])]),
         err("InvalidRecord"),
       );
+      // Patch 6: a skill pool longer than a spawn's 16-bit mask.
+      await expectErr(
+        send(authority, [await writeTableIx(authority, TABLE.Bestiary, slot * MONSTER_SIZE, monster({ 40: 17 }))]),
+        err("InvalidRecord"),
+      );
+    });
+
+    it("patch 6: monster skills pass the monster builder rules (Heal only as an action or a reaction)", async (t) => {
+      if (!owned) return t.skip(ownerSkip);
+      const shared = JSON.parse(readFileSync(new URL("../tools/scripts/lib/__fixtures__/registry-tables.json", import.meta.url), "utf8"));
+      const record = (i: number) => Uint8Array.from(Buffer.from(shared.monster_skills.slice(i * 64, i * 64 + 64), "hex"));
+      // The last slot is past the shipped skills; clear it afterwards.
+      const at = (MONSTER_SKILLS_MAX - 1) * MONSTER_SKILL_SIZE;
+      const lunge = record(0);
+      await send(authority, [await writeTableIx(authority, TABLE.MonsterSkills, at, lunge)]);
+      const d = await data(await tableAddress(TABLE.MonsterSkills));
+      assert.deepEqual(Array.from(d.slice(TABLE_BODY + at, TABLE_BODY + at + MONSTER_SKILL_SIZE)), Array.from(lunge));
+      await send(authority, [await writeTableIx(authority, TABLE.MonsterSkills, at, new Uint8Array(MONSTER_SKILL_SIZE))]);
+      // Mending (index 12) as a passive skill: a heal is never an aura or a passive.
+      const passiveHeal = record(12);
+      passiveHeal[1] = 2;
+      await expectErr(send(authority, [await writeTableIx(authority, TABLE.MonsterSkills, at, passiveHeal)]), err("InvalidRecord"));
+      // An unknown flag bit, a reserved byte.
+      const flag = record(0);
+      flag[16] = 2;
+      await expectErr(send(authority, [await writeTableIx(authority, TABLE.MonsterSkills, at, flag)]), err("InvalidRecord"));
+      const reserved = record(0);
+      reserved[31] = 1;
+      await expectErr(send(authority, [await writeTableIx(authority, TABLE.MonsterSkills, at, reserved)]), err("InvalidRecord"));
     });
   });
 });

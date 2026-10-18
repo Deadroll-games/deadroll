@@ -155,7 +155,11 @@ fn the_weapon_tints_skills_but_not_its_own_basic_attack() {
     let basic = player_attacker(&cfg, 0, &h, None, &NONE, &AccuracyBuff::default());
     assert_eq!(basic.tints[ITEM_TINT], Tint::default());
     assert_eq!(basic.tints[RACE_TINT].carrier, Carrier::Race);
-    let skill = SkillStats::derive(deadroll_skillcheck::presets::MAGE[0].blocks, &cfg.skills);
+    let skill = SkillStats::derive(
+        deadroll_skillcheck::presets::MAGE[0].blocks,
+        deadroll_skillcheck::presets::MAGE[0].ext,
+        &cfg.skills,
+    );
     let cast = player_attacker(&cfg, 0, &h, Some(&skill), &NONE, &AccuracyBuff::default());
     assert_eq!(
         cast.tints[ITEM_TINT],
@@ -181,7 +185,11 @@ fn an_accuracy_buff_helps_only_attacks_of_its_aspect() {
     use deadroll_rules::input::SkillStats;
     let cfg = BalanceConfig::DEFAULT;
     let h = hero_of(Class::Mage, kit(Class::Mage));
-    let skill = SkillStats::derive(deadroll_skillcheck::presets::MAGE[0].blocks, &cfg.skills);
+    let skill = SkillStats::derive(
+        deadroll_skillcheck::presets::MAGE[0].blocks,
+        deadroll_skillcheck::presets::MAGE[0].ext,
+        &cfg.skills,
+    );
     let plain = player_attacker(&cfg, 0, &h, Some(&skill), &NONE, &AccuracyBuff::default());
     let buff = |aspect| AccuracyBuff {
         aspect,

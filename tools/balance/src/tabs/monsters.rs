@@ -1,220 +1,211 @@
-//! Monsters: a template at level 0 and what it becomes at a few levels with the current scaling.
-use deadroll_sim::{
-    named::Named,
-    presets::{AttackPreset, MonsterPreset},
-};
-use deadroll_types::{Aspect, Form, Source, StateKind};
+//! Monsters: the registry bestiary (`assets/registry/bestiary.json`), the data the program copies
+//! at `open_session`. Numbers are edited here and saved to that file; the skill pools are listed
+//! from `monster_skills.json` (edited in the file). What a template becomes at a few levels uses
+//! the current scaling.
+use deadroll_rules::registry::{read_bestiary_json, write_bestiary_json, Registry, KINS};
+use deadroll_sim::presets::{registry_dir, SkillPreset};
 use eframe::egui::{self, Ui};
 
 use crate::{app::BalanceApp, widgets};
 
-fn fresh() -> MonsterPreset {
-    MonsterPreset {
-        name: "New monster".into(),
-        bestiary_id: None,
-        boss: false,
-        attack: AttackPreset {
-            aspect: Aspect::Piercing,
-            source: Source::Combat,
-            form: Form::Strike,
-            min: 1,
-            max: 3,
-        },
-        attack_bonus: 1,
-        defense: 10,
-        armor: 0,
-        resistance: Vec::new(),
-        immunity: Vec::new(),
-        state_immunity: Vec::new(),
-        xp_per_level: 5,
-        hp: 10,
-        hp_per_level: 2,
-        speed: 4,
-        initiative: 5,
-    }
-}
-
 pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
+    let dir = registry_dir(&app.root);
+    if app.bestiary.is_none() {
+        match read_bestiary_json(&dir) {
+            Ok(b) => app.bestiary = Some(b),
+            Err(e) => {
+                ui.colored_label(egui::Color32::RED, e);
+                return;
+            }
+        }
+    }
+    let Some(bestiary) = app.bestiary.as_mut() else {
+        return;
+    };
     egui::Panel::left("monster_list")
         .resizable(true)
-        .default_size(280.0)
+        .default_size(260.0)
         .show(ui, |ui| {
-            let action =
-                widgets::preset_list(ui, &app.presets.monsters, |m| &m.name, &mut app.selected[2]);
-            widgets::apply_list_action(
-                action,
-                &mut app.presets.monsters,
-                &mut app.selected[2],
-                fresh,
-                |m| &mut m.name,
-            );
+            ui.strong("bestiary.json");
+            for r in &bestiary.records {
+                let picked = app.selected[2].as_deref() == Some(r.name.as_str());
+                if ui.selectable_label(picked, &r.name).clicked() {
+                    app.selected[2] = Some(r.name.clone());
+                }
+            }
         });
-    let Some(id) = app.selected[2]
-        .clone()
-        .filter(|id| app.presets.monsters.contains_key(id))
-    else {
-        ui.label("Pick a monster on the left or press New.");
+    let Some(name) = app.selected[2].clone() else {
+        ui.label("Pick a monster on the left.");
+        return;
+    };
+    let Some(index) = bestiary.records.iter().position(|r| r.name == name) else {
+        ui.label("Pick a monster on the left.");
         return;
     };
     let scaling = app.cfg.monsters;
-    let registry = app.presets.registry.clone();
+    let skills_cfg = app.cfg.skills;
+    let mut save = false;
+    let mut reload = false;
     egui::ScrollArea::vertical()
         .id_salt("monster_edit")
         .show(ui, |ui| {
-            ui.heading(format!("Monster `{id}`"));
-            let Some(m) = app.presets.monsters.get_mut(&id) else {
-                return;
-            };
+            let m = &mut bestiary.records[index];
+            ui.heading(format!("Monster `{}` (bestiary id {})", m.name, m.id));
+            ui.label(format!(
+                "{} · {} · size {} · min tier {} · kin {}",
+                m.role,
+                m.biome,
+                m.size,
+                m.min_tier,
+                m.kin.as_deref().unwrap_or("none")
+            ));
             egui::Grid::new("monster_grid")
                 .num_columns(2)
                 .striped(true)
                 .show(ui, |ui| {
-                    ui.label("Name");
-                    ui.text_edit_singleline(&mut m.name);
+                    ui.label("Natural attack");
+                    ui.label(format!(
+                        "{} {} {}",
+                        m.attack_source, m.attack_form, m.attack_aspect
+                    ));
                     ui.end_row();
-                    ui.label("Registry bestiary id");
+                    ui.label("Damage min / max (level 0)");
                     ui.horizontal(|ui| {
-                        let mut has = m.bestiary_id.is_some();
-                        ui.checkbox(&mut has, "");
-                        match (has, &mut m.bestiary_id) {
-                            (true, Some(v)) => {
-                                widgets::int(ui, v, 0..=255);
-                            }
-                            (true, None) => m.bestiary_id = Some(0),
-                            (false, _) => m.bestiary_id = None,
-                        }
+                        widgets::int(ui, &mut m.damage_min, 0..=10_000);
+                        widgets::int(ui, &mut m.damage_max, 0..=10_000);
                     });
                     ui.end_row();
-                    ui.label("Boss (its death wins)");
-                    ui.checkbox(&mut m.boss, "");
-                    ui.end_row();
-                    ui.label("Attack aspect / source / form");
+                    ui.label("Accuracy (d20 bonus, level 0) / evasion (hit threshold)");
                     ui.horizontal(|ui| {
-                        widgets::pick(ui, "attack_aspect", &mut m.attack.aspect);
-                        widgets::pick(ui, "attack_source", &mut m.attack.source);
-                        widgets::pick(ui, "attack_form", &mut m.attack.form);
+                        widgets::int(ui, &mut m.accuracy, 0..=100);
+                        widgets::int(ui, &mut m.evasion, 0..=100);
                     });
-                    ui.end_row();
-                    ui.label("Attack damage min / max (level 0)");
-                    ui.horizontal(|ui| {
-                        widgets::int(ui, &mut m.attack.min, 0..=10_000);
-                        widgets::int(ui, &mut m.attack.max, 0..=10_000);
-                    });
-                    ui.end_row();
-                    ui.label("Attack bonus (level 0)");
-                    widgets::int(ui, &mut m.attack_bonus, 0..=100);
-                    ui.end_row();
-                    ui.label("Defense");
-                    widgets::int(ui, &mut m.defense, 0..=100);
                     ui.end_row();
                     ui.label("Armor");
                     widgets::int(ui, &mut m.armor, 0..=10_000);
                     ui.end_row();
-                    if m.bestiary_id.is_some() {
-                        // The program reads these from the registry record: shown, not edited.
-                        let d = m.defense(&registry);
-                        let names = |mask: u8, all: &[String]| {
-                            let list: Vec<&str> = all
-                                .iter()
-                                .enumerate()
-                                .filter(|(i, _)| mask & (1 << i) != 0)
-                                .map(|(_, n)| n.as_str())
-                                .collect();
-                            if list.is_empty() {
-                                "none".to_string()
-                            } else {
-                                list.join(", ")
-                            }
-                        };
-                        let aspects: Vec<String> = Aspect::all().iter().map(|a| a.name()).collect();
-                        let states: Vec<String> =
-                            StateKind::all().iter().map(|k| k.name()).collect();
-                        ui.label("Resists (registry bestiary.json)");
-                        ui.label(names(d.resist, &aspects));
-                        ui.end_row();
-                        ui.label("Immune to aspects / states");
-                        ui.label(format!(
-                            "{} / {}",
-                            names(d.immune_aspects, &aspects),
-                            names(d.immune_states, &states)
-                        ));
-                        ui.end_row();
-                    } else {
-                        let toggle = |ui: &mut Ui, list: &mut Vec<Aspect>, a: Aspect| {
-                            let mut on = list.contains(&a);
-                            if ui.checkbox(&mut on, a.name()).changed() {
-                                list.retain(|x| *x != a);
-                                if on {
-                                    list.push(a);
-                                }
-                            }
-                        };
-                        ui.label("Resists (at the scaling's resistance)");
-                        ui.horizontal_wrapped(|ui| {
-                            for &a in Aspect::all() {
-                                toggle(ui, &mut m.resistance, a);
-                            }
-                        });
-                        ui.end_row();
-                        ui.label("Immune to aspects");
-                        ui.horizontal_wrapped(|ui| {
-                            for &a in Aspect::all() {
-                                toggle(ui, &mut m.immunity, a);
-                            }
-                        });
-                        ui.end_row();
-                        ui.label("Immune to states");
-                        ui.horizontal_wrapped(|ui| {
-                            for &k in StateKind::all() {
-                                let mut on = m.state_immunity.contains(&k);
-                                if ui.checkbox(&mut on, k.name()).changed() {
-                                    m.state_immunity.retain(|x| *x != k);
-                                    if on {
-                                        m.state_immunity.push(k);
-                                    }
-                                }
-                            }
-                        });
-                        ui.end_row();
-                    }
                     ui.label("HP (level 0) / per level");
                     ui.horizontal(|ui| {
                         widgets::int(ui, &mut m.hp, 0..=1_000_000);
                         widgets::int(ui, &mut m.hp_per_level, 0..=100_000);
                     });
                     ui.end_row();
-                    ui.label("Speed (action points)");
-                    widgets::int(ui, &mut m.speed, 0..=255);
-                    ui.end_row();
-                    ui.label("Initiative");
-                    widgets::int(ui, &mut m.initiative, 0..=1_000);
+                    ui.label("Speed (action points) / initiative");
+                    ui.horizontal(|ui| {
+                        widgets::int(ui, &mut m.speed, 1..=255);
+                        widgets::int(ui, &mut m.initiative, 0..=1_000);
+                    });
                     ui.end_row();
                     ui.label("XP per level");
-                    widgets::int(ui, &mut m.xp_per_level, 0..=100_000);
+                    widgets::int(ui, &mut m.xp, 0..=100_000);
+                    ui.end_row();
+                    ui.label("Resists / immune / state immune");
+                    ui.label(format!(
+                        "{:?} / {:?} / {:?}",
+                        m.resistance, m.immunity, m.state_immunity
+                    ));
+                    ui.end_row();
+                    ui.label("Skill pool (monster_skills.json)");
+                    ui.horizontal(|ui| {
+                        ui.label("start");
+                        widgets::int(ui, &mut m.pool_start, 0..=127);
+                        ui.label("length");
+                        widgets::int(ui, &mut m.pool_len, 0..=16);
+                    });
+                    ui.end_row();
+                    ui.label("Kin");
+                    egui::ComboBox::from_id_salt("monster_kin")
+                        .selected_text(m.kin.clone().unwrap_or_else(|| "none".into()))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut m.kin, None, "none");
+                            for k in KINS {
+                                ui.selectable_value(&mut m.kin, Some(k.to_string()), k);
+                            }
+                        });
                     ui.end_row();
                 });
+            ui.horizontal(|ui| {
+                save = ui.button("Save bestiary.json").clicked();
+                reload = ui.button("Reload from disk").clicked();
+            });
             ui.add_space(8.0);
-            ui.strong("By level (current scaling)");
-            let base = m.base();
-            let defense = m.defense(&registry);
-            egui::Grid::new("monster_levels")
-                .striped(true)
-                .show(ui, |ui| {
-                    for h in ["level", "HP", "damage", "attack bonus", "XP"] {
-                        ui.strong(h);
+            // The saved registry: the pool and the numbers by level as the fights see them.
+            let reg: &Registry = &app.presets.registry;
+            let id = m.id;
+            if let Some(t) = reg.template(id) {
+                ui.strong("Skill pool (as saved)");
+                for (i, k) in reg.pool(&t).iter().enumerate() {
+                    let at = t.pool_start as usize + i;
+                    let label = match k {
+                        Some(k) => {
+                            let p = SkillPreset::from_blocks("", &k.blocks, &k.ext);
+                            let d = deadroll_skillcheck::derive_with(&k.blocks, &skills_cfg);
+                            format!(
+                                "{}: {}{} · power {:.0}% · AP {} · cooldown {}",
+                                reg.skill_names.get(at).map_or("?", |n| n.as_str()),
+                                p.summary(),
+                                if k.kin_only() { " · kin only" } else { "" },
+                                d.power_bp as f64 / 100.0,
+                                d.ap_cost,
+                                d.cooldown
+                            )
+                        }
+                        None => format!("{at}: missing"),
+                    };
+                    ui.label(format!("  • {label}"));
+                }
+                for (rank, flags) in [("regular", 0), ("elite", deadroll_types::SPAWN_ELITE)] {
+                    if t.is_boss() && flags != 0 {
+                        continue;
                     }
-                    ui.end_row();
-                    for level in [1u8, 2, 3, 5] {
-                        let p = base.profile(level, &scaling, &defense);
-                        ui.label(level.to_string());
-                        ui.label(base.hp_at(level).to_string());
-                        ui.label(format!("{}..{}", p.weapon.min, p.weapon.max));
-                        ui.label(p.attack_bonus.to_string());
-                        ui.label(p.xp.to_string());
+                    let [a, r, p] = t.slots(flags, &scaling);
+                    ui.label(format!(
+                        "Slots ({rank}): {a} active, {r} reactive, {p} passive"
+                    ));
+                }
+                ui.add_space(8.0);
+                ui.strong("By level (current scaling)");
+                egui::Grid::new("monster_levels")
+                    .striped(true)
+                    .show(ui, |ui| {
+                        for h in ["level", "HP", "elite HP", "damage", "accuracy", "XP"] {
+                            ui.strong(h);
+                        }
                         ui.end_row();
-                    }
-                });
-            let warnings = m.warnings();
-            widgets::issues(ui, &[], &warnings);
+                        for level in [1u8, 2, 3, 5] {
+                            let p = t.profile(level, &scaling);
+                            ui.label(level.to_string());
+                            ui.label(t.hp_at(level, 0, &scaling).to_string());
+                            ui.label(
+                                t.hp_at(level, deadroll_types::SPAWN_ELITE, &scaling)
+                                    .to_string(),
+                            );
+                            ui.label(format!("{}..{}", p.weapon.min, p.weapon.max));
+                            ui.label(p.attack_bonus.to_string());
+                            ui.label(p.xp.to_string());
+                            ui.end_row();
+                        }
+                    });
+            }
         });
+    if save {
+        let result = app
+            .bestiary
+            .as_ref()
+            .map(|b| write_bestiary_json(&dir, b))
+            .unwrap_or(Ok(()));
+        app.status = match result.and_then(|()| Registry::load(&dir)) {
+            Ok(reg) => {
+                app.presets.registry = reg;
+                format!("saved {}", dir.join("bestiary.json").display())
+            }
+            Err(e) => format!("not saved: {e}"),
+        };
+    }
+    if reload {
+        app.bestiary = None;
+        if let Ok(reg) = Registry::load(&dir) {
+            app.presets.registry = reg;
+        }
+    }
 }

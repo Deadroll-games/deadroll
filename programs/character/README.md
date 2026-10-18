@@ -12,6 +12,7 @@ Player profiles, characters with their gear, starting skills, bag and the charac
 | `Character` | `["character", owner, index: u8]` | `core: CharacterData` (frozen, CONTRACTS.md 4; `version` 3), then `name: [u8; 32], unspent_points: u8, nft_frozen: bool, gear: Gear, class_tier: u8` |
 | `SkillSet` | `["skills", character]` | `version, character, count: u8, skills: [SkillRecord; 16], bump` |
 | `Bag` | `["bag", character]` | `version, character, resources: [u32; 8], items: [Pubkey; 20], item_count: u8, bump` |
+| `SkillExtras` (zero-copy) | `["skill_extras", character]` | `version, bump, character, extras: [SkillExtra; 16]`; `SkillExtra` = `range, timing, hp_below_pct, ap_cost: u8, description: [u8; 200]` by `SkillSet` index |
 
 `SkillRecord` = `blocks: SkillBlocks` (12 bytes, `crates/skillcheck`), `shares_bp: [u32; 3]`,
 `power_bp: u32`, `fusion: u8`, `cooldown: u8`, `name: [u8; 24]`. Slots `i < count` are used.
@@ -28,7 +29,8 @@ logic is pure (`src/state/gear.rs`) and runs in the program-vs-simulator parity 
 | Instruction | Who | Accounts (in order) |
 |---|---|---|
 | `create_profile()` | player | `owner (s, w), profile (w), system_program` |
-| `create_character(args)` | player | `owner (s, w), profile (w), character (w), skill_set (w), bag (w), config, asset (s, w, optional), mpl_core_program (optional), system_program` |
+| `create_character(args)` | player | `owner (s, w), profile (w), character (w), skill_set (w), bag (w), config, asset (s, w, optional), mpl_core_program (optional), system_program, skill_extras (w)` |
+| `set_skill_description(skill_index: u8, description: [u8; 200])` | owner main wallet | `owner (s), character, skill_set, skill_extras (w)` |
 | `equip(item_index: u8, slot: EquipSlot)` | owner or session key | `signer (s), character (w), session_token (optional)` |
 | `unequip(slot: EquipSlot)` | owner or session key | `signer (s), character (w), session_token (optional)` |
 | `spend_stat_points(points: [u16; 4])` | owner main wallet | `owner (s), character (w)` |
@@ -66,6 +68,11 @@ logic is pure (`src/state/gear.rs`) and runs in the program-vs-simulator parity 
   session, and recomputes `hp_max`. Event `StatPointsSpent`.
 - **Trait tiers** (docs/CHARACTER.md 6.3): the race trait tier is `core.predisposition_tier`, the
   class trait tier `class_tier`; both start at the worst tier and grow only deterministically.
+- **Skill extras** (patch 5, docs/SKILL_BUILDER.md): `create_character` checks each skill's
+  `SkillExt` (range, timing, HP threshold) with its blocks (`deadroll_skillcheck::validate_starting`)
+  and stores it with the derived AP cost in `SkillExtras`. The description (up to 200 printable
+  ASCII bytes) is written once by `set_skill_description`, outside a session, for a living
+  character; it does not fit the creation transaction. `SkillExtras` is not burned at death.
 - Balance numbers are placeholders: creation, HP, level XP, stat points and item numbers come from
   `deadroll_rules::BalanceConfig::DEFAULT` (`crates/rules`, tuned in `tools/balance`).
 

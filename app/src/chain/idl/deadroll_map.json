@@ -166,6 +166,17 @@
               }
             ]
           }
+        },
+        {
+          "name": "bestiary",
+          "docs": [
+            "spawns, read in place by `deadroll_registry::state::view`."
+          ],
+          "address": "3uJyWiz7NeVekP4w1iZkKxKnJ5pMbxC6ciz7kxN3MZtM"
+        },
+        {
+          "name": "monster_skills",
+          "address": "NQNEuKDUZhACnTJ9sD3dW49BoiPtJPatp6bpY61r81p"
         }
       ],
       "args": [
@@ -715,6 +726,41 @@
       "code": 6028,
       "name": "SpawnUnreachable",
       "msg": "A spawn cannot be reached from the entrance"
+    },
+    {
+      "code": 6029,
+      "name": "TierBelowTemplate",
+      "msg": "Map tier is below the monster's minimum tier"
+    },
+    {
+      "code": 6030,
+      "name": "MonsterSkillUnknown",
+      "msg": "A chosen skill is not in the monster's pool"
+    },
+    {
+      "code": 6031,
+      "name": "MonsterSkillCount",
+      "msg": "Choose as many skills of each kind as the monster has slots (all if fewer)"
+    },
+    {
+      "code": 6032,
+      "name": "EliteBoss",
+      "msg": "A boss cannot be elite"
+    },
+    {
+      "code": 6033,
+      "name": "TooManyElites",
+      "msg": "Too many elite monsters for the map tier"
+    },
+    {
+      "code": 6034,
+      "name": "TooManySessionSkills",
+      "msg": "Too many different monster skills for one party"
+    },
+    {
+      "code": 6035,
+      "name": "InvalidRegistryTable",
+      "msg": "Account is not the registry bestiary or monster skills table"
     }
   ],
   "types": [

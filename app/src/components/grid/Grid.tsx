@@ -15,6 +15,11 @@ const TRAP = "#6b2f2f";
 const GRID_LINE = "rgba(0,0,0,.25)";
 const REACHABLE = "rgba(79,143,217,.28)";
 const BURNING = "rgba(230,120,40,.45)";
+const AURA = "rgba(120,200,255,.9)";
+const AURA_FILL = "rgba(120,200,255,.10)";
+const AURA_HOSTILE = "rgba(200,120,255,.9)";
+const AURA_HOSTILE_FILL = "rgba(200,120,255,.10)";
+const LINE = "rgba(214,90,74,.22)";
 const TARGET = "#d65a4a";
 const PLAYER = "#4f8fd9";
 const MONSTER = "#c4473a";
@@ -283,6 +288,28 @@ function drawGrid(ctx: CanvasRenderingContext2D, props: GridProps, cell: number)
 
   ctx.fillStyle = BURNING;
   for (const spot of props.burning ?? []) {
+    if (!inMap(spot, width, height)) continue;
+    ctx.fillRect(spot.x * cell, spot.y * cell, cell, cell);
+  }
+
+  // Auras: a dashed square of `radius` cells around the bearer (Chebyshev reach).
+  for (const a of props.auras ?? []) {
+    const x0 = Math.max(0, a.center.x - a.radius);
+    const y0 = Math.max(0, a.center.y - a.radius);
+    const x1 = Math.min(width - 1, a.center.x + a.radius);
+    const y1 = Math.min(height - 1, a.center.y + a.radius);
+    ctx.fillStyle = a.hostile ? AURA_HOSTILE_FILL : AURA_FILL;
+    ctx.fillRect(x0 * cell, y0 * cell, (x1 - x0 + 1) * cell, (y1 - y0 + 1) * cell);
+    ctx.save();
+    ctx.strokeStyle = a.hostile ? AURA_HOSTILE : AURA;
+    ctx.lineWidth = Math.max(1, Math.floor(cell / 24));
+    ctx.setLineDash([Math.max(2, Math.floor(cell / 8)), Math.max(2, Math.floor(cell / 8))]);
+    ctx.strokeRect(x0 * cell + 1, y0 * cell + 1, (x1 - x0 + 1) * cell - 2, (y1 - y0 + 1) * cell - 2);
+    ctx.restore();
+  }
+
+  ctx.fillStyle = LINE;
+  for (const spot of props.line ?? []) {
     if (!inMap(spot, width, height)) continue;
     ctx.fillRect(spot.x * cell, spot.y * cell, cell, cell);
   }

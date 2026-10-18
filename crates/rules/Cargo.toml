@@ -17,7 +17,7 @@ serde = ["dep:serde", "dep:serde_json", "std"]
 deadroll-types.workspace = true
 deadroll-combat.workspace = true
 deadroll-skillcheck.workspace = true
-# P0 bestiary ids and roles.
+# Monster roles and the builder rules of a template (`SpawnRules`).
 deadroll-mapcheck.workspace = true
 serde = { version = "1", default-features = false, features = ["derive", "std"], optional = true }
 # Reads assets/registry (`registry`, tools only).

@@ -1,12 +1,13 @@
 use anchor_lang::prelude::*;
 use deadroll_character::state::{MAP_SKILLS, SKILLS_MAX};
 use deadroll_combat::{chill_slow_bp, speed_ap, AccuracyBuff, TimedMods, MODS_MAX};
-use deadroll_rules::{items::Equipment, HeroStats};
+use deadroll_rules::{aura::AuraField, input::SkillStats, items::Equipment, HeroStats};
 use deadroll_skillcheck::{ACTIVE_MAX, NO_SKILL};
 use deadroll_types::Aspect;
-use deadroll_types::{CharacterData, ParticipationData, EQUIP_SLOTS};
+use deadroll_types::{Cell, CharacterData, ParticipationData, EQUIP_SLOTS};
 
 use super::mods::{self, TimedModData};
+use super::MapSkillData;
 
 /// A character with its class trait tier and an equipment snapshot (`Participation.class_tier`,
 /// `Participation.equipment`), as the rules see it.
@@ -49,6 +50,9 @@ pub struct Participation {
     pub class_tier: u8,
     /// Patch 4: a resonance's accuracy buff on this player (Pale Flame), `turns == 0` = none.
     pub accuracy: AccuracyBuffData,
+    /// Patch 5: the skills of `skills`, slot by slot, as the rules see them (the character's
+    /// `SkillSet` record with its `SkillExtras` part), copied at `set_ready(true)`.
+    pub map_skills: [MapSkillData; MAP_SKILLS],
 }
 
 /// `deadroll_combat::AccuracyBuff`.
@@ -86,13 +90,33 @@ impl From<AccuracyBuff> for AccuracyBuffData {
 
 impl Participation {
     /// Refills action points if this is the first action of a new own turn: speed, with Haste
-    /// and Slow as an opposing pair.
-    pub fn refresh_ap(&mut self, turn_seq: u32) {
+    /// and Slow as an opposing pair, auras over the player included.
+    pub fn refresh_ap(&mut self, turn_seq: u32, auras: &AuraField) {
         if self.ap_seq != turn_seq {
             self.ap_seq = turn_seq;
             let chill = chill_slow_bp(&self.core.states, &crate::rules::BALANCE.combat);
-            self.core.action_points = speed_ap(self.max_ap, &self.combat_mods(), chill);
+            let mods = self.mods_with_auras(auras, false);
+            self.core.action_points = speed_ap(self.max_ap, &mods, chill);
         }
+    }
+
+    /// This player's buffs and debuffs with the auras over its cell (a view for one calculation).
+    /// `basic_attack`: for the attacker of a basic attack (no passive Empowerment).
+    pub fn mods_with_auras(&self, auras: &AuraField, basic_attack: bool) -> TimedMods {
+        let at = Cell {
+            x: self.core.x,
+            y: self.core.y,
+        };
+        auras.hero_mods(&self.combat_mods(), self.core.slot, at, basic_attack)
+    }
+
+    /// The map skill in `SkillSet` slot `skill`, if it is one of the skills taken onto the map.
+    pub fn map_skill(&self, skill: u8) -> Option<SkillStats> {
+        if skill == NO_SKILL {
+            return None;
+        }
+        let i = self.skills.iter().position(|s| *s == skill)?;
+        Some(SkillStats::from(&self.map_skills[i]))
     }
 
     /// The rules' view of this participant: the character with what it wears.
@@ -147,6 +171,7 @@ mod tests {
             skills: [2, 0, NO_SKILL, 5, 1, 3],
             class_tier: 14,
             accuracy: Default::default(),
+            map_skills: Default::default(),
         };
         for s in [0, 2, 5] {
             assert!(p.active_selected(s), "{s}");

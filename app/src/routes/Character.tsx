@@ -11,6 +11,8 @@ import {
   RACE_PREDISPOSITIONS,
   bytesText,
   createCharacterIxs,
+  skillDescriptionIxs,
+  SKILL_PRESETS,
   enumIndex,
   myCharacters,
   type CharacterAcc,
@@ -75,6 +77,12 @@ export function CharacterPage() {
     // The class starter items come with the character (create_character), worn.
     const res = await send(`create_character ${d.name} (Core NFT + starter items)`, owner, [c.ix]);
     if (res) {
+      // The skill descriptions follow in their own transactions (six of 200 bytes do not fit
+      // the creation one); each is written once.
+      const batches = await skillDescriptionIxs(owner, c.character, d.skills ?? SKILL_PRESETS[d.class]);
+      for (const [i, ixs] of batches.entries()) {
+        if (!(await send(`skill descriptions ${i + 1}/${batches.length}`, owner, ixs))) break;
+      }
       setDraft((x) => ({ ...x, name: "" }));
       await refresh();
       void wallet.refreshBalance();

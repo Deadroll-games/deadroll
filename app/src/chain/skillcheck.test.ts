@@ -11,8 +11,12 @@ import {
   checkMapSelection,
   defaultMapSelection,
   derive,
+  extFromArray,
+  extToArray,
+  skillDescriptionValid,
   skillNameValid,
   validate,
+  validateSkill,
   validateStarting,
   type Category,
   type SkillError,
@@ -21,9 +25,11 @@ import { Class } from "./types";
 
 type FixtureSkill = {
   blocks: number[];
+  ext: number[];
   validate: string;
+  validateSkill: string;
   starting: string[];
-  derive: { sharesBp: number[]; powerBp: number; fusion: number; cooldown: number };
+  derive: { sharesBp: number[]; powerBp: number; fusion: number; cooldown: number; apCost: number };
 };
 
 const CLASSES = [Class.Warrior, Class.Mage, Class.Support] as const;
@@ -31,9 +37,12 @@ const ok = (e: SkillError | null) => e ?? "Ok";
 
 function check(s: FixtureSkill, label: string) {
   const b = blocksFromArray(s.blocks);
+  const e = extFromArray(s.ext);
   expect(blocksToArray(b), label).toEqual(s.blocks);
+  expect(extToArray(e), label).toEqual(s.ext);
   expect(ok(validate(b)), `${label} validate`).toBe(s.validate);
-  expect(CLASSES.map((c) => ok(validateStarting(b, c))), `${label} starting`).toEqual(s.starting);
+  expect(ok(validateSkill(b, e)), `${label} validate_skill`).toBe(s.validateSkill);
+  expect(CLASSES.map((c) => ok(validateStarting(b, e, c))), `${label} starting`).toEqual(s.starting);
   expect(derive(b), `${label} derive`).toEqual(s.derive);
 }
 
@@ -48,6 +57,8 @@ describe("skillcheck mirror vs Rust fixtures", () => {
       const ours = PRESETS[p.class as Class].find((x) => x.name === p.name);
       expect(ours, p.name).toBeDefined();
       expect(blocksToArray(ours!.blocks), p.name).toEqual(p.skill.blocks);
+      expect(extToArray(ours!.ext), p.name).toEqual(p.skill.ext);
+      expect(skillDescriptionValid(ours!.description), p.name).toBe(true);
       check(p.skill, p.name);
     }
     expect(CLASSES.map((c) => PRESETS[c].length)).toEqual([6, 6, 6]);
@@ -79,12 +90,12 @@ describe("skillcheck mirror vs Rust fixtures", () => {
 
   it("every rule the fixture hits has a message", () => {
     const errors = new Set<string>([
-      ...fixture.skills.flatMap((s) => [s.validate, ...s.starting]),
+      ...fixture.skills.flatMap((s) => [s.validate, s.validateSkill, ...s.starting]),
       ...fixture.loadouts.map((l) => l.result),
       ...fixture.selections.map((s) => s.result),
     ]);
     errors.delete("Ok");
-    expect(errors.size).toBe(23);
+    expect(errors.size).toBe(28);
     for (const e of errors) expect(SKILL_ERROR_MESSAGES[e as SkillError], e).toBeTruthy();
   });
 });
@@ -97,5 +108,15 @@ describe("skillNameValid", () => {
     expect(skillNameValid("é")).toBe(false);
     expect(skillNameValid("x".repeat(24))).toBe(true);
     expect(skillNameValid("x".repeat(25))).toBe(false);
+  });
+});
+
+describe("skillDescriptionValid", () => {
+  it("mirrors name_valid for 200-byte descriptions", () => {
+    expect(skillDescriptionValid("A shard of ice, thrown from the palm.")).toBe(true);
+    expect(skillDescriptionValid("")).toBe(false);
+    expect(skillDescriptionValid(" Lead")).toBe(false);
+    expect(skillDescriptionValid("x".repeat(200))).toBe(true);
+    expect(skillDescriptionValid("x".repeat(201))).toBe(false);
   });
 });

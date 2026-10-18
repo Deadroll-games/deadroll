@@ -9,17 +9,20 @@ import { concat, toHex } from "./bytes";
 import { camel, type IdlType } from "./coder";
 import { decodeEvents } from "./events";
 import {
-  DEFAULT_KEY,
   SKILL_PRESETS,
   actIx,
   consumeIx,
-  pendingTargetOf,
   endTurnIx,
   joinSessionIx,
   setReadyIx,
   mockVrfSigner,
   moveIx,
+  partyAccountsOf,
   startTurnIx,
+  computeLimitIx,
+  deathAccountsOf,
+  withDeaths,
+  FINALIZE_CU,
   textBytes,
   type Actor,
 } from "./game";
@@ -27,7 +30,7 @@ import { toHitResolved } from "./hit";
 import { toEffectResolved } from "./support";
 import { Effect } from "./skillcheck";
 import { coders } from "./programs";
-import { bagPda, gameConfigPda, monstersPda, participationPda, programIdentityPda, sessionAuthorityPda, sessionTokenPda, skillSetPda } from "./pda";
+import { bagPda, gameConfigPda, monstersPda, participationPda, programIdentityPda, sessionAuthorityPda, sessionTokenPda, skillExtrasPda, skillSetPda } from "./pda";
 import { affordable, pathArgs, reachable, route } from "./route";
 import { explainFailure } from "./send";
 import { Applied, Aspect, Class, HitOutcome, MAP_MAX, ModKind, OpKind, Tile } from "./types";
@@ -78,18 +81,24 @@ describe("session builders", () => {
     const want = concat(ixDisc("move_unit"), Uint8Array.from([1, 1, 2, ...new Array(13).fill(0)]), Uint8Array.of(3));
     expect(toHex(ix.data as Uint8Array)).toBe(toHex(want));
     expect(ix.accounts!.map((a) => [a.address, a.role])).toEqual([
-      [signer.address, AccountRole.READONLY_SIGNER],
+      [signer.address, AccountRole.WRITABLE_SIGNER],
       [session, AccountRole.WRITABLE],
       [await participationPda(session, character), AccountRole.WRITABLE],
       [await monstersPda(session), AccountRole.READONLY],
       [addrOf(10), AccountRole.READONLY],
       [addrOf(9), AccountRole.READONLY],
+      // Patch 6: a monster's EnemyAdjacent reaction is a VRF roll the mover pays for.
+      [await programIdentityPda(), AccountRole.READONLY],
+      [VRF.oracleQueue, AccountRole.WRITABLE],
+      [VRF.program, AccountRole.READONLY],
+      [VRF.slotHashes, AccountRole.READONLY],
+      ['11111111111111111111111111111111', AccountRole.READONLY],
     ]);
   });
 
-  it("act: skill slot and target, VRF accounts after the session token", async () => {
+  it("act: skill slot and target, VRF accounts after the session token, the map layout last", async () => {
     const signer = await generateKeyPairSigner();
-    const ix = await actIx({ signer, token: null }, session, character, 1, 3, null);
+    const ix = await actIx({ signer, token: null }, session, character, 1, 3, null, addrOf(13));
     expect(toHex(ix.data as Uint8Array)).toBe(toHex(concat(ixDisc("act"), Uint8Array.of(1, 3))));
     const addrs = ix.accounts!.map((a) => a.address);
     expect(addrs[4]).toBe(await skillSetPda(character));
@@ -99,15 +108,17 @@ describe("session builders", () => {
     expect(addrs[7]).toBe(PROGRAMS.session);
     expect(addrs.slice(8, 13)).toEqual([await programIdentityPda(), VRF.oracleQueue, VRF.program, VRF.slotHashes, "11111111111111111111111111111111"]);
     expect(ix.accounts![9]!.role).toBe(AccountRole.WRITABLE);
-    // An enemy target (or a self-cast): no ally account, the trailing optional is None.
-    expect(ix.accounts).toHaveLength(14);
+    // An enemy target (or a self-cast): no ally account, the optional is None.
+    expect(ix.accounts).toHaveLength(15);
     expect(ix.accounts![13]).toEqual({ address: PROGRAMS.session, role: AccountRole.READONLY });
+    // Patch 5: the layout, for the walls that end a line.
+    expect(ix.accounts![14]).toEqual({ address: addrOf(13), role: AccountRole.READONLY });
   });
 
   it("act: a buff on another ally targets its player slot and passes its participation last", async () => {
     const signer = await generateKeyPairSigner();
     const ally = addrOf(14);
-    const ix = await actIx({ signer, token: null }, session, character, 2, 1, ally);
+    const ix = await actIx({ signer, token: null }, session, character, 2, 1, ally, addrOf(13));
     expect(toHex(ix.data as Uint8Array)).toBe(toHex(concat(ixDisc("act"), Uint8Array.of(2, 1))));
     expect(ix.accounts![13]).toEqual({ address: ally, role: AccountRole.READONLY });
   });
@@ -119,9 +130,32 @@ describe("session builders", () => {
     expect(toHex(ix.data as Uint8Array)).toBe(toHex(ixDisc("end_turn")));
   });
 
-  it("start_turn: no args, no signer, the participation and character of a player turn, its SkillSet and Bag last", async () => {
+  it("patch 6: start_turn finalizes the pending deaths: a writable Character, SkillSet and Bag per queued slot, a compute limit in front", async () => {
+    const chars = [addrOf(30), addrOf(31), addrOf(32)];
+    const s = { core: { playerCount: 3, players: chars }, pendingDeaths: 0b101 } as never;
+    const deaths = await deathAccountsOf(s);
+    expect(deaths).toEqual([
+      { address: chars[0], writable: true },
+      { address: await skillSetPda(chars[0]!), writable: true },
+      { address: await bagPda(chars[0]!), writable: true },
+      { address: chars[2], writable: true },
+      { address: await skillSetPda(chars[2]!), writable: true },
+      { address: await bagPda(chars[2]!), writable: true },
+    ]);
+    const payer = await generateKeyPairSigner();
+    const ix = await startTurnIx(session, null, payer, deaths);
+    expect(ix.accounts!.slice(-6).map((a) => [a.address, a.role])).toEqual(deaths.map((d) => [d.address, AccountRole.WRITABLE]));
+    const [limit, same] = withDeaths(deaths, ix);
+    expect(same).toBe(ix);
+    expect(Array.from(limit!.data as Uint8Array)).toEqual(Array.from(computeLimitIx(FINALIZE_CU).data as Uint8Array));
+    expect((limit!.data as Uint8Array)[0]).toBe(2);
+    expect(withDeaths([], ix)).toEqual([ix]);
+  });
+
+  it("start_turn: no args, the participation and character of a player turn, its SkillSet and Bag, then the payer and the VRF accounts", async () => {
     const participation = addrOf(13);
-    const ix = await startTurnIx(session, { participation, character });
+    const payer = await generateKeyPairSigner();
+    const ix = await startTurnIx(session, { participation, character }, payer);
     expect(toHex(ix.data as Uint8Array)).toBe(toHex(ixDisc("start_turn")));
     expect(ix.accounts!.map((a) => [a.address, a.role])).toEqual([
       [session, AccountRole.WRITABLE],
@@ -134,11 +168,18 @@ describe("session builders", () => {
       // Burned if over-time damage kills.
       [await skillSetPda(character), AccountRole.WRITABLE],
       [await bagPda(character), AccountRole.WRITABLE],
+      // Patch 5: pays the VRF fee when over-time damage triggers a reactive skill.
+      [payer.address, AccountRole.WRITABLE_SIGNER],
+      [await programIdentityPda(), AccountRole.READONLY],
+      [VRF.oracleQueue, AccountRole.WRITABLE],
+      [VRF.program, AccountRole.READONLY],
+      [VRF.slotHashes, AccountRole.READONLY],
+      ["11111111111111111111111111111111", AccountRole.READONLY],
     ]);
   });
 
   it("start_turn for a monster passes None for the participation, the character, SkillSet and Bag", async () => {
-    const ix = await startTurnIx(session, null);
+    const ix = await startTurnIx(session, null, await generateKeyPairSigner());
     expect(ix.accounts![2]).toEqual({ address: PROGRAMS.session, role: AccountRole.READONLY });
     expect(ix.accounts![3]).toEqual({ address: PROGRAMS.session, role: AccountRole.READONLY });
     expect(ix.accounts![7]).toEqual({ address: PROGRAMS.session, role: AccountRole.READONLY });
@@ -156,7 +197,7 @@ describe("session builders", () => {
     expect(ix.accounts![0]!.role).toBe(AccountRole.WRITABLE_SIGNER);
   });
 
-  it("set_ready: the flag and the 6-slot selection; the character (w) and its SkillSet for the lock CPI", async () => {
+  it("set_ready: the flag and the 6-slot selection; the character (w) and its SkillSet for the lock CPI, its SkillExtras last", async () => {
     const player = await generateKeyPairSigner();
     const ix = await setReadyIx(player, session, character, true, [0, 1, 2, 3, 4, 5]);
     expect(toHex(ix.data as Uint8Array)).toBe(toHex(concat(ixDisc("set_ready"), Uint8Array.of(1, 0, 1, 2, 3, 4, 5))));
@@ -169,6 +210,7 @@ describe("session builders", () => {
       [await sessionAuthorityPda(), AccountRole.READONLY],
       [await gameConfigPda(), AccountRole.READONLY],
       [PROGRAMS.character, AccountRole.READONLY],
+      [await skillExtrasPda(character), AccountRole.READONLY],
     ]);
     const off = await setReadyIx(player, session, character, false, [0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
     expect(toHex(off.data as Uint8Array)).toBe(toHex(concat(ixDisc("set_ready"), Uint8Array.of(0, 255, 255, 255, 255, 255, 255))));
@@ -176,7 +218,7 @@ describe("session builders", () => {
 
   it("consume_randomness is signed by the mock-vrf identity of programs/session/src/vrf.rs", async () => {
     expect((await mockVrfSigner()).address).toBe("5RotSMue7vx9xBPp3L8iQEKbKSc3ezbY4GqiJxDEe6sN");
-    const ix = await consumeIx(session, addrOf(12), character, A(0x5a), null, addrOf(13));
+    const ix = await consumeIx(session, addrOf(12), character, A(0x5a), addrOf(13), []);
     expect(toHex(ix.data as Uint8Array)).toBe(toHex(concat(ixDisc("consume_randomness"), A(0x5a))));
     expect(ix.accounts![0]!.role).toBe(AccountRole.READONLY_SIGNER);
     expect(ix.accounts![3]!.address).toBe(addrOf(12));
@@ -188,12 +230,27 @@ describe("session builders", () => {
     expect(ix.accounts![11]).toEqual({ address: addrOf(13), role: AccountRole.READONLY });
   });
 
-  it("consume_randomness passes GameSession.pendingTarget, writable, for a heal or buff on an ally", async () => {
-    const ally = addrOf(15);
-    expect(pendingTargetOf({ pendingTarget: DEFAULT_KEY } as never)).toBeNull();
-    expect(pendingTargetOf({ pendingTarget: ally } as never)).toBe(ally);
-    const ix = await consumeIx(session, addrOf(12), character, A(1), ally, addrOf(13));
-    expect(ix.accounts![10]).toEqual({ address: ally, role: AccountRole.WRITABLE });
+  it("consume_randomness: the other living players' Participation (w) and Character after the layout, by slot", async () => {
+    const parts = [addrOf(20), addrOf(21), addrOf(22), addrOf(23)];
+    const chars = [addrOf(30), addrOf(31), addrOf(32), addrOf(33)];
+    // Slot 1 is the pending player (its accounts are named), slot 2 is dead.
+    const s = { core: { playerCount: 4, players: chars }, aliveMask: 0b1011, participations: parts } as never;
+    const party = await partyAccountsOf(s, parts[1]!);
+    expect(party.map((a) => [a.address, a.writable])).toEqual([
+      [parts[0], true],
+      [chars[0], false],
+      [parts[3], true],
+      [chars[3], false],
+    ]);
+    const ix = await consumeIx(session, parts[1]!, chars[1]!, A(1), addrOf(13), party);
+    // Since patch 5 an ally comes with the party accounts: the optional is None.
+    expect(ix.accounts![10]).toEqual({ address: PROGRAMS.session, role: AccountRole.READONLY });
+    expect(ix.accounts!.slice(12).map((a) => [a.address, a.role])).toEqual([
+      [parts[0], AccountRole.WRITABLE],
+      [chars[0], AccountRole.READONLY],
+      [parts[3], AccountRole.WRITABLE],
+      [chars[3], AccountRole.READONLY],
+    ]);
   });
 });
 
@@ -207,19 +264,20 @@ describe("create_character", () => {
         predisposition: "cold",
         stats: [5, 7, 13, 5],
         appearance: new Array(20).fill({ spriteId: 0x0102, materialRamp: 3, accentRamp: 4, elementRamp: 5 }),
-        skills: SKILL_PRESETS[Class.Mage].map((s) => ({ blocks: s.blocks, name: textBytes(s.name, 24) })),
+        skills: SKILL_PRESETS[Class.Mage].map((s) => ({ blocks: s.blocks, name: textBytes(s.name, 24), ext: s.ext })),
       },
     });
-    // 8 disc + 32 name + race, class, predisposition + 4 x u16 + 20 x LayerRef(5) + vec(6 x (12 blocks + 24 name))
-    expect(data.length).toBe(8 + 32 + 3 + 8 + 100 + 4 + 6 * 36);
+    // 8 disc + 32 name + race, class, predisposition + 4 x u16 + 20 x LayerRef(5) + vec(6 x (12 blocks + 24 name + 3 ext))
+    expect(data.length).toBe(8 + 32 + 3 + 8 + 100 + 4 + 6 * 39);
     expect(Array.from(data.subarray(40, 43))).toEqual([1, 1, Aspect.Cold]);
     expect(Array.from(data.subarray(43, 51))).toEqual([5, 0, 7, 0, 13, 0, 5, 0]);
     expect(Array.from(data.subarray(51, 56))).toEqual([2, 1, 3, 4, 5]);
     const vec = 151;
     expect(Array.from(data.subarray(vec, vec + 4))).toEqual([6, 0, 0, 0]);
-    // Frost Burn (second skill): aspects [cold, fire, fire], count 2.
-    const frostBurn = vec + 4 + 36;
+    // Frost Burn (second skill): aspects [cold, fire, fire], count 2; ranged, instant, no threshold.
+    const frostBurn = vec + 4 + 39;
     expect(Array.from(data.subarray(frostBurn + 5, frostBurn + 9))).toEqual([Aspect.Cold, Aspect.Fire, Aspect.Fire, 2]);
+    expect(Array.from(data.subarray(frostBurn + 36, frostBurn + 39))).toEqual([1, 0, 0]);
   });
 });
 
@@ -251,17 +309,35 @@ describe("decoders", () => {
       const bytes = concat(...out);
       return { bytes, back: c.decodeAccount<any>(name, bytes) };
     };
+    const sizeOf = (t: IdlType) => {
+      const out: Uint8Array[] = [];
+      c.encode(t, zero(c, t), out);
+      return concat(...out).length;
+    };
     const ally = addrOf(16);
     const s = roundTrip("GameSession", (v) => {
       v.turnSeq = 9;
       v.actedSeq = 9;
       v.startedSeq = 8;
       v.pendingTarget = ally;
+      v.participations[2] = ally;
+      v.auras[1][1].turns = 3;
+      v.pendingReactive.kind = 2;
+      v.pendingDeaths = 0b101;
     });
-    // acted_seq and started_seq, then pending_target (32) are the last 40 bytes.
-    expect(Array.from(s.bytes.subarray(-40, -32))).toEqual([9, 0, 0, 0, 8, 0, 0, 0]);
-    expect(Array.from(s.bytes.subarray(-32))).toEqual(Array.from(pk(ally)));
+    expect(s.bytes[s.bytes.length - 1]).toBe(0b101);
+    expect(s.back.pendingDeaths).toBe(0b101);
+    // Patch 5 appends participations (4 x 32), reactives (4), auras (4 x 2) and pending_reactive;
+    // patch 6 pending_monster_reactive.
+    // ... and pending_deaths (u8).
+    const p6 = sizeOf({ defined: { name: "PendingMonsterReactiveData" } }) + 1;
+    const p5 = 4 * 32 + 4 * sizeOf({ defined: { name: "ReactiveData" } }) + 8 * sizeOf({ defined: { name: "AuraData" } }) + sizeOf({ defined: { name: "PendingReactiveData" } }) + p6;
+    // Before them: acted_seq and started_seq, then pending_target (32).
+    expect(Array.from(s.bytes.subarray(-p5 - 40, -p5 - 32))).toEqual([9, 0, 0, 0, 8, 0, 0, 0]);
+    expect(Array.from(s.bytes.subarray(-p5 - 32, -p5))).toEqual(Array.from(pk(ally)));
+    expect(Array.from(s.bytes.subarray(-p5 + 64, -p5 + 96))).toEqual(Array.from(pk(ally)));
     expect([s.back.turnSeq, s.back.actedSeq, s.back.startedSeq, s.back.pendingTarget]).toEqual([9, 9, 8, ally]);
+    expect([s.back.participations[2], s.back.auras[1][1].turns, s.back.pendingReactive.kind]).toEqual([ally, 3, 2]);
     const mod = { kind: "weakening", aspect: "blood", turns: 3, powerBp: 1_800, source: 2 };
     const p = roundTrip("Participation", (v) => {
       v.cooldowns[1] = 2;
@@ -271,7 +347,13 @@ describe("decoders", () => {
       v.skills = Uint8Array.of(2, 0, 0xff, 5, 1, 3);
       v.classTier = 9;
       v.accuracy = { aspect: "fire", turns: 3, bonus: 4 };
+      v.mapSkills[5].apCost = 3;
     });
+    // Patch 5 appends map_skills (6 x MapSkillData); the offsets below count from before them.
+    const mapSkill = sizeOf({ defined: { name: "MapSkillData" } });
+    expect(p.back.mapSkills).toHaveLength(6);
+    expect(p.back.mapSkills[5].apCost).toBe(3);
+    p.bytes = p.bytes.subarray(0, -6 * mapSkill);
     expect(p.back.cooldowns).toHaveLength(16);
     // cooldowns (16), hp_max (4), mods (6 x 8 bytes), equipment (11), skills (6), class_tier (1),
     // then accuracy (aspect, turns, bonus u32 = 6, patch 4).
@@ -294,7 +376,23 @@ describe("decoders", () => {
       v.mods[2][ModKind.Slow] = { kind: "slow", aspect: "cold", turns: 2, powerBp: 2_500, source: 1 };
       v.defense[1] = { resist: 2, immuneAspects: 0, immuneStates: 4 };
       v.burningCells[0] = { x: 3, y: 4, untilRound: 7, power: 5, source: 1 };
+      v.records[1] = Uint8Array.from({ length: 48 }, (_, i) => i);
+      v.skillTable[0] = Uint8Array.from({ length: 16 }, (_, i) => 100 + i);
+      v.skillCount = 1;
+      v.skills[1] = Uint8Array.of(0, 0xff, 0xff, 0xff, 0xff, 0xff, 0);
+      v.skillCooldowns[1] = Uint8Array.of(2, 0, 0, 0, 0, 0, 0);
+      v.auras[1][0].aura.turns = 255;
+      v.auras[1][0].kinOnly = true;
     });
+    // Patch 6 appends records (24 x 48), skill_table (32 x 16), skill_count, skills and
+    // skill_cooldowns (24 x 7 each), auras (24 x 2).
+    const p6m = 24 * 48 + 32 * 16 + 1 + 2 * 24 * 7 + 48 * sizeOf({ defined: { name: "MonsterAuraData" } });
+    expect(Array.from(m.bytes.subarray(-p6m + 48, -p6m + 52))).toEqual([0, 1, 2, 3]);
+    expect(m.bytes[m.bytes.length - p6m + 24 * 48]).toBe(100);
+    expect(m.bytes[m.bytes.length - p6m + 24 * 48 + 32 * 16]).toBe(1);
+    expect([m.back.skillCount, Array.from(m.back.skills[1]), Array.from(m.back.skillCooldowns[1]).slice(0, 1)]).toEqual([1, [0, 0xff, 0xff, 0xff, 0xff, 0xff, 0], [2]]);
+    expect([m.back.auras[1][0].aura.turns, m.back.auras[1][0].kinOnly]).toEqual([255, true]);
+    m.bytes = m.bytes.subarray(0, -p6m);
     expect(m.back.cooldowns).toHaveLength(24);
     expect(Array.from(m.back.cooldowns[2])).toEqual([1, 0, 3, 0]);
     // After the mods (24 x 6 x 8): defense (24 x 3), the tables (48 + 192 + 576), burning cells (16 x 9).
@@ -306,7 +404,7 @@ describe("decoders", () => {
     expect(m.back.burningCells[0]).toEqual({ x: 3, y: 4, untilRound: 7, power: 5, source: 1 });
     expect(m.back.mods[2][ModKind.Slow].turns).toBe(2);
     // A pre-upgrade account (no trailing fields) no longer decodes.
-    expect(() => c.decodeAccount("Participation", p.bytes.subarray(0, -6))).toThrow(/read past end/);
+    expect(() => c.decodeAccount("Participation", p.bytes)).toThrow(/read past end/);
   });
 
   it("decodes TurnTicked, TurnSkipped and SkillUsed", () => {

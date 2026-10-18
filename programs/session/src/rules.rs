@@ -1,15 +1,14 @@
 //! Session-local game rules: step costs, instruction constants, rewards, and the shared rules of
 //! `deadroll-rules` with the program's numbers ([`BALANCE`]).
 //!
-//! Monster HP, speed, initiative and tile costs come from the registry tables (copied at
-//! `open_session`). Every combat number lives in `deadroll_rules::BalanceConfig` (placeholders
+//! Monster templates (every monster number), monster skills and tile costs come from the registry
+//! tables (copied at `open_session` into `MonsterState` / `GameSession`). Every combat number lives in `deadroll_rules::BalanceConfig` (placeholders
 //! until balancing, tuned in `tools/balance`); the wrappers below keep one call per rule.
 use deadroll_combat::{DamageRange, RollSource};
-use deadroll_mapcheck::roster::{p0_role, Role};
 use deadroll_rules::{
-    config::BalanceConfig, input::hero, items, monster, player, units, HeroStats, MonsterDefense,
+    config::BalanceConfig, input::hero, items, monster, player, units, HeroStats,
 };
-use deadroll_types::{Aspect, Cell, Class, Form, Race, Source, Tile, STATS_COUNT};
+use deadroll_types::{Aspect, Cell, Class, Form, Race, RangeTag, Source, Tile, STATS_COUNT};
 
 pub use deadroll_rules::units::{
     cooldown_after_use, roll_initiative, tick_cooldowns, Initiative, Unit, EMPTY_UNIT,
@@ -17,7 +16,7 @@ pub use deadroll_rules::units::{
 };
 pub use deadroll_rules::MonsterProfile;
 
-use crate::state::{external::BestiaryRecord, STASH_RESOURCES};
+use crate::state::STASH_RESOURCES;
 
 /// The numbers the program plays with.
 pub const BALANCE: &BalanceConfig = &BalanceConfig::DEFAULT;
@@ -38,11 +37,6 @@ pub fn player_ap(race: Race, class: Class, dexterity: u16) -> u8 {
 /// Action points per turn for a monster: its registry bestiary speed (copied at open).
 pub fn monster_ap(speed: u8) -> u8 {
     monster::monster_ap(speed, &BALANCE.monsters)
-}
-
-/// Monster HP at spawn from its registry bestiary record (at least 1).
-pub fn monster_hp(record: &BestiaryRecord, level: u8) -> u32 {
-    monster::monster_hp(record.hp, record.hp_per_level, level)
 }
 
 /// Action points to step onto a tile, `None` if it cannot be entered. `costs` is the registry
@@ -99,28 +93,40 @@ pub fn item_bonus(h: &HeroStats) -> items::ItemBonus {
 
 /// `act` skill slot for the weapon's basic attack.
 pub const BASE_ATTACK: u8 = 0xFF;
-/// `monster_act` action: the monster's natural attack (the only P0 action).
+/// `monster_act` action: the monster's natural attack; `1 + slot` is the skill in that slot
+/// (`deadroll_rules::monster::ACTIVE_SLOT..`, patch 6).
 pub const NATURAL_ATTACK: u8 = 0;
-/// Action points one attack costs.
-pub const ACT_AP: u8 = BALANCE.players.act_ap;
-/// Strikes reach the 8 neighbouring cells.
-pub const STRIKE_RANGE: u8 = BALANCE.players.strike_range;
-/// Projectiles reach this far (Chebyshev distance). TODO(P1): line of sight.
-pub const PROJECTILE_RANGE: u8 = BALANCE.players.projectile_range;
+/// Action points of the basic attack and of a monster's natural attack; an active skill costs
+/// its own (`MapSkillData::ap_cost`).
+pub const BASIC_ATTACK_AP: u8 = BALANCE.players.basic_attack_ap;
+/// Melee reaches the 8 neighbouring cells.
+pub const MELEE_RANGE: u8 = BALANCE.players.melee_range;
+/// Ranged reaches this far (Chebyshev distance), no line of sight.
+pub const RANGED_RANGE: u8 = BALANCE.players.ranged_range;
 /// Native state chance of a skill / basic attack (crates/combat `Skill::state_chance_bp`).
 pub const SKILL_STATE_CHANCE_PCT: u32 = BALANCE.players.skill_state_chance_pct;
 pub const BASIC_STATE_CHANCE_PCT: u32 = BALANCE.players.basic_state_chance_pct;
 /// HP a heal restores per point of the weapon's range, bp.
 pub const HEAL_WEAPON_BP: u32 = BALANCE.players.heal_weapon_bp;
 
-/// Whether `form` reaches from `from` to `to` (Chebyshev distance, never the own cell).
-pub fn in_range(form: Form, from: Cell, to: Cell) -> bool {
-    units::in_range(form, from, to, &BALANCE.players)
+/// Whether `range` reaches from `from` to `to` (Chebyshev distance, never the own cell).
+pub fn in_range(range: RangeTag, from: Cell, to: Cell) -> bool {
+    units::in_range(range, from, to, &BALANCE.players)
 }
 
-/// Whether a heal or buff of `form` reaches an ally (allies may share a cell).
-pub fn in_ally_range(form: Form, from: Cell, to: Cell) -> bool {
-    units::in_ally_range(form, from, to, &BALANCE.players)
+/// Whether a buff of `range` reaches an ally (allies may share a cell).
+pub fn in_ally_range(range: RangeTag, from: Cell, to: Cell) -> bool {
+    units::in_ally_range(range, from, to, &BALANCE.players)
+}
+
+/// Reach of `range` in cells.
+pub fn reach(range: RangeTag) -> u8 {
+    units::reach(range, &BALANCE.players)
+}
+
+/// Range of a monster's natural attack, from its form (docs/BESTIARY.md 2).
+pub fn monster_range(form: Form) -> RangeTag {
+    units::form_range(form)
 }
 
 /// Power source of a class's own attacks (docs/CHARACTER.md, section 8.1).
@@ -162,21 +168,6 @@ pub fn player_defense(class: Class, stats: &[u16; STATS_COUNT]) -> (u32, u32) {
     player::player_defense(class, stats, &BALANCE.players)
 }
 
-/// One P0 bestiary template at a level (`deadroll_rules::monster::p0`) with the defenses of its
-/// registry record (`MonsterState.defense`, copied at `open_session`).
-pub fn monster_profile(
-    bestiary_id: u8,
-    level: u8,
-    defense: &MonsterDefense,
-) -> Option<MonsterProfile> {
-    monster::p0::monster_base(bestiary_id).map(|b| b.profile(level, &BALANCE.monsters, defense))
-}
-
-/// Killing this monster wins the party (docs/PARTY_AND_TURNS.md, section 7.1).
-pub fn is_boss(bestiary_id: u8) -> bool {
-    p0_role(bestiary_id) == Some(Role::Boss)
-}
-
 // ---------------------------------------------------------------------------------------------
 // Rewards (L7.5). TODO(post-demo): reward tables and levels from the map (PARTY_AND_TURNS 9).
 
@@ -205,7 +196,6 @@ pub fn boss_rewards(src: &mut impl RollSource) -> [u32; STASH_RESOURCES] {
 mod tests {
     use super::*;
     use deadroll_combat::SeededRoll;
-    use deadroll_mapcheck::roster::ids;
     use deadroll_types::BP;
 
     #[test]
@@ -226,30 +216,6 @@ mod tests {
         assert_eq!(monster_ap(0), 1);
         assert_eq!(monster_ap(6), 6);
         assert_eq!(monster_ap(200), 12);
-    }
-
-    #[test]
-    fn monster_hp_from_the_bestiary() {
-        let wolf = BestiaryRecord {
-            speed: 6,
-            initiative: 6,
-            hp: 12,
-            hp_per_level: 3,
-            defense: deadroll_rules::MonsterDefense::NONE,
-        };
-        assert_eq!(monster_hp(&wolf, 0), 12);
-        assert_eq!(monster_hp(&wolf, 2), 18);
-        let zero = BestiaryRecord {
-            hp: 0,
-            hp_per_level: 0,
-            ..wolf
-        };
-        assert_eq!(monster_hp(&zero, 5), 1);
-        let huge = BestiaryRecord {
-            hp: u32::MAX,
-            ..wolf
-        };
-        assert_eq!(monster_hp(&huge, 255), u32::MAX);
     }
 
     #[test]
@@ -325,54 +291,28 @@ mod tests {
     }
 
     #[test]
-    fn range_by_form() {
+    fn range_by_tag() {
         let at = Cell { x: 5, y: 5 };
         let c = |x, y| Cell { x, y };
-        assert!(!in_range(Form::Strike, at, at));
-        assert!(in_range(Form::Strike, at, c(6, 6)));
-        assert!(in_range(Form::Strike, at, c(4, 5)));
-        assert!(!in_range(Form::Strike, at, c(7, 5)));
-        assert!(in_range(Form::Projectile, at, c(11, 0)));
-        assert!(!in_range(Form::Projectile, at, c(12, 5)));
-        assert!(!in_range(Form::Projectile, at, at));
+        assert!(!in_range(RangeTag::Melee, at, at));
+        assert!(in_range(RangeTag::Melee, at, c(6, 6)));
+        assert!(in_range(RangeTag::Melee, at, c(4, 5)));
+        assert!(!in_range(RangeTag::Melee, at, c(7, 5)));
+        assert!(in_range(RangeTag::Ranged, at, c(11, 0)));
+        assert!(!in_range(RangeTag::Ranged, at, c(12, 5)));
+        assert!(!in_range(RangeTag::Ranged, at, at));
         // Allies: the own cell counts, the reach is the same.
-        assert!(in_ally_range(Form::Strike, at, at));
-        assert!(in_ally_range(Form::Strike, at, c(6, 4)));
-        assert!(!in_ally_range(Form::Strike, at, c(7, 5)));
-        assert!(in_ally_range(Form::Projectile, at, c(11, 0)));
-        assert!(!in_ally_range(Form::Projectile, at, c(5, 12)));
-    }
-
-    #[test]
-    fn every_p0_monster_has_a_profile_and_one_boss() {
-        for id in 0..=4u8 {
-            let p = monster_profile(id, 1, &crate::state::test_support::defense(id)).unwrap();
-            assert!(p.weapon.min >= 1 && p.weapon.max >= p.weapon.min);
-            assert!(p.xp > 0);
-        }
+        assert!(in_ally_range(RangeTag::Melee, at, at));
+        assert!(in_ally_range(RangeTag::Melee, at, c(6, 4)));
+        assert!(!in_ally_range(RangeTag::Melee, at, c(7, 5)));
+        assert!(in_ally_range(RangeTag::Ranged, at, c(11, 0)));
+        assert!(!in_ally_range(RangeTag::Ranged, at, c(5, 12)));
+        // A monster's natural attack: its form gives its range.
+        assert_eq!(monster_range(Form::Strike), RangeTag::Melee);
+        assert_eq!(monster_range(Form::Projectile), RangeTag::Ranged);
         assert_eq!(
-            monster_profile(5, 1, &crate::state::test_support::defense(5)),
-            None
-        );
-        assert!(is_boss(ids::GOBLIN_CHIEFTAIN));
-        for id in [
-            ids::WOLF,
-            ids::GOBLIN,
-            ids::GOBLIN_WARRIOR,
-            ids::GOBLIN_SHAMAN,
-            9,
-        ] {
-            assert!(!is_boss(id));
-        }
-        assert_eq!(
-            monster_profile(
-                ids::GOBLIN_SHAMAN,
-                1,
-                &crate::state::test_support::defense(ids::GOBLIN_SHAMAN)
-            )
-            .unwrap()
-            .form,
-            Form::Projectile
+            (reach(RangeTag::Melee), reach(RangeTag::Ranged)),
+            (MELEE_RANGE, RANGED_RANGE)
         );
     }
 

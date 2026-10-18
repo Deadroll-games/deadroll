@@ -1,7 +1,8 @@
-//! Monster roles for pack rules (docs/BESTIARY.md, section 2.1) and the P0 roster.
-//!
-//! TODO(post-demo): read roles from the registry `Bestiary`; `check_map` takes the lookup as a
-//! function so the table can be swapped without touching the checks.
+//! What the builder rules need of a bestiary template (docs/BESTIARY.md, sections 2.1, 3.2, 4, 5;
+//! MAP_DESCRIPTION.md 7.2). The caller builds it from the registry `Bestiary` record and its pool
+//! in the `monster_skills` table (`deadroll_rules::monster`), so `check_map` holds no copy of
+//! the bestiary.
+use deadroll_skillcheck::{monster::POOL_MAX, Category};
 
 /// How a monster template enters a pack.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -17,37 +18,45 @@ pub enum Role {
     Helper,
 }
 
-/// P0 bestiary ids. Shared with the registry `Bestiary` and the session program.
-pub mod ids {
-    pub const WOLF: u8 = 0;
-    pub const GOBLIN: u8 = 1;
-    pub const GOBLIN_CHIEFTAIN: u8 = 2;
-    pub const GOBLIN_WARRIOR: u8 = 3;
-    pub const GOBLIN_SHAMAN: u8 = 4;
+/// One template as the builder rules see it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SpawnRules {
+    pub role: Role,
+    /// The lowest map tier it may stand on (BESTIARY 4).
+    pub min_tier: u8,
+    /// Its pool: `pool_len` skills from `pool_start` of the `monster_skills` table, each one's
+    /// category (BESTIARY 3.2).
+    pub pool_start: u8,
+    pub pool_len: u8,
+    pub pool: [Category; POOL_MAX],
+    /// Skill slots by `Category` for a regular spawn, an elite one and a boss
+    /// (`MonsterScaling::slots`).
+    pub slots: [[u8; Category::COUNT]; 3],
 }
 
-/// Role of a P0 bestiary id, `None` for unknown ids.
-pub const fn p0_role(bestiary_id: u8) -> Option<Role> {
-    match bestiary_id {
-        ids::WOLF => Some(Role::Fast),
-        ids::GOBLIN => Some(Role::Swarm),
-        ids::GOBLIN_CHIEFTAIN => Some(Role::Boss),
-        ids::GOBLIN_WARRIOR | ids::GOBLIN_SHAMAN => Some(Role::Helper),
-        _ => None,
+impl SpawnRules {
+    /// A template with no skills.
+    pub const fn plain(role: Role) -> Self {
+        SpawnRules {
+            role,
+            min_tier: 1,
+            pool_start: 0,
+            pool_len: 0,
+            pool: [Category::Active; POOL_MAX],
+            slots: [[3, 0, 1], [4, 0, 1], [5, 1, 1]],
+        }
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+    pub fn pool(&self) -> &[Category] {
+        &self.pool[..(self.pool_len as usize).min(POOL_MAX)]
+    }
 
-    #[test]
-    fn p0_roster() {
-        assert_eq!(p0_role(ids::WOLF), Some(Role::Fast));
-        assert_eq!(p0_role(ids::GOBLIN), Some(Role::Swarm));
-        assert_eq!(p0_role(ids::GOBLIN_CHIEFTAIN), Some(Role::Boss));
-        assert_eq!(p0_role(ids::GOBLIN_WARRIOR), Some(Role::Helper));
-        assert_eq!(p0_role(ids::GOBLIN_SHAMAN), Some(Role::Helper));
-        assert_eq!(p0_role(5), None);
+    /// The slots of a spawn: a boss is always a boss, any other template may be elite.
+    pub fn slots_for(&self, elite: bool) -> [u8; Category::COUNT] {
+        match (self.role, elite) {
+            (Role::Boss, _) => self.slots[2],
+            (_, true) => self.slots[1],
+            (_, false) => self.slots[0],
+        }
     }
 }

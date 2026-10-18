@@ -274,6 +274,10 @@ pub struct SupportBalance {
     pub mod_duration: [u8; MODS_MAX],
     /// Native chance of a damage skill's effect on a hit (a crit makes it certain), percent.
     pub rider_chance_pct: u32,
+    /// A passive skill works all the time and rolls nothing (docs/SKILL_BUILDER.md 3.3,
+    /// COMBAT_MATH.md 5: strength is not rolled): its strength is this point of the range, bp
+    /// (`0` = the minimum, `BP` = the maximum).
+    pub passive_point_bp: u32,
 }
 
 impl SupportBalance {
@@ -283,10 +287,19 @@ impl SupportBalance {
         mod_max_bp: [5_000, 5_000, 4_000, 5_000, 4_000, 4_000],
         mod_duration: [2, 2, 2, 2, 2, 2],
         rider_chance_pct: 30,
+        passive_point_bp: 5_000,
     };
 
     pub const fn duration(&self, kind: ModKind) -> u8 {
         self.mod_duration[kind as usize]
+    }
+
+    /// The fixed strength of a passive skill in `min..=max` (see `passive_point_bp`).
+    pub const fn passive_point(&self, min: u32, max: u32) -> u32 {
+        let max = if max < min { min } else { max };
+        let point = self.passive_point_bp as u64;
+        let point = if point > BP as u64 { BP as u64 } else { point };
+        (min as u64 + (max - min) as u64 * point / BP as u64) as u32
     }
 }
 

@@ -15,6 +15,7 @@ import { existsSync, readFileSync } from "node:fs";
 // Node loads the CJS build; its getter exports are invisible to ESM named imports.
 import anchor from "@anchor-lang/core";
 import type { DeadrollSession } from "../target/types/deadroll_session.ts";
+import { newSkill, partyAccounts } from "./skill_ext.ts";
 import {
   Connection,
   Keypair,
@@ -22,10 +23,18 @@ import {
   PublicKey,
   SystemProgram,
   Transaction,
+  ComputeBudgetProgram,
   TransactionInstruction,
 } from "@solana/web3.js";
 
 const { AnchorProvider, BN, EventParser, Program } = anchor;
+
+/** Fixed VRF values: the n-th value any test draws is sha256("deadroll:session-test:n"), so
+ * every run plays the same dice (no random seeds). */
+let seedCounter = 0;
+function nextSeed(): Buffer {
+  return createHash("sha256").update(`deadroll:session-test:${seedCounter++}`).digest();
+}
 type BN = InstanceType<typeof BN>;
 
 const idl = JSON.parse(
@@ -82,6 +91,8 @@ const tileset = pda([Buffer.from("tileset")], REGISTRY);
 const aspects = pda([Buffer.from("aspects")], REGISTRY);
 const traits = pda([Buffer.from("traits")], REGISTRY);
 const resonances = pda([Buffer.from("resonances")], REGISTRY);
+// Patch 6: the skills of the bestiary pools (finalize_map checks the choice, open_session copies it).
+const monsterSkills = pda([Buffer.from("monster_skills")], REGISTRY);
 const programIdentity = pda([Buffer.from("identity")], SESSION);
 /** `MOCK_VRF_IDENTITY` of programs/session/src/vrf.rs: a public test key, mock-vrf builds only. */
 const MOCK_VRF = Keypair.fromSeed(sha256("deadroll:mock-vrf"));
@@ -287,6 +298,7 @@ function openSession(dm: Keypair, map: PublicKey, layout: PublicKey, price: BN, 
       aspects,
       traits,
       resonances,
+      monsterSkills,
     })
     .signers([dm]);
 }
@@ -302,12 +314,14 @@ function consume(
     skillSet: PublicKey;
     /** The character's `Bag`, burned by `mark_dead` if the roll kills it. */
     bag: PublicKey;
-    /** The ally of a heal or buff on another player (`GameSession.pendingTarget`). */
+    /** Unused since patch 5 (allies come with the party accounts); null. */
     targetParticipation?: PublicKey | null;
-    /** The session's `MapLayout` (patch 4: knockback and burning cells). */
+    /** The session's `MapLayout` (patch 4: knockback and burning cells; patch 5: line walls). */
     layout: PublicKey;
   },
   seed: Buffer,
+  /** Patch 5: every other living player's Participation and Character (`partyAccounts`). */
+  party: { pubkey: PublicKey; isSigner: boolean; isWritable: boolean }[] = [],
 ) {
   return program.methods
     .consumeRandomness([...seed])
@@ -319,6 +333,7 @@ function consume(
       config,
       characterProgram: CHARACTER,
     })
+    .remainingAccounts(party)
     .signers([identity]);
 }
 
@@ -407,6 +422,7 @@ describe("deadroll_session: deployed program", () => {
         sessionToken: null,
         ...vrfAccounts,
         targetParticipation: null,
+        layout: Keypair.generate().publicKey,
       }),
     );
     await run(
@@ -420,6 +436,7 @@ describe("deadroll_session: deployed program", () => {
         bag,
         sessionToken: null,
         ...vrfAccounts,
+        layout: Keypair.generate().publicKey,
       }),
     );
     await run(
@@ -436,6 +453,7 @@ describe("deadroll_session: deployed program", () => {
         sessionAuthority,
         config,
         mapProgram: MAP,
+        characterProgram: CHARACTER,
       }),
     );
     await rejects(
@@ -467,7 +485,7 @@ describe("deadroll_session: deployed program", () => {
     const act = (over: Record<string, PublicKey>) =>
       program.methods
         .act(BASE_ATTACK, 0)
-        .accountsStrict({ signer: signer.publicKey, session, participation, character, skillSet, bag, monsters, sessionToken: null, targetParticipation: null, ...vrfAccounts, ...over })
+        .accountsStrict({ signer: signer.publicKey, session, participation, character, skillSet, bag, monsters, sessionToken: null, targetParticipation: null, layout: Keypair.generate().publicKey, ...vrfAccounts, ...over })
         .signers([signer])
         .rpc();
     // Session is checked first; these only prove the IDL carries the checked accounts.
@@ -570,14 +588,17 @@ const EXIT = { x: 14, y: 14 };
 const [WOLF, GOBLIN, CHIEFTAIN, GOBLIN_WARRIOR, SHAMAN] = [0, 1, 2, 3, 4];
 /** Monster index of the chieftain in `DEMO_SPAWNS`. */
 const CHIEFTAIN_INDEX = 4;
-const DEMO_SPAWNS = [
-  { id: WOLF, x: 6, y: 2, pack: 1 },
-  { id: WOLF, x: 7, y: 3, pack: 1 },
-  { id: GOBLIN, x: 2, y: 10, pack: 2 },
-  { id: GOBLIN, x: 3, y: 11, pack: 2 },
-  { id: CHIEFTAIN, x: 12, y: 12, pack: 3 },
-  { id: GOBLIN_WARRIOR, x: 11, y: 12, pack: 3 },
-  { id: SHAMAN, x: 12, y: 11, pack: 3 },
+/** `skills`: the chosen pool bits (assets/registry/maps/demo_16x16.json): exactly the slots of each
+ * kind the template has (patch 6, finalize_map checks it). */
+type SpawnDef = { id: number; x: number; y: number; pack: number; skills: number; flags?: number };
+const DEMO_SPAWNS: SpawnDef[] = [
+  { id: WOLF, x: 6, y: 2, pack: 1, skills: 0b0111 },
+  { id: WOLF, x: 7, y: 3, pack: 1, skills: 0b1110 },
+  { id: GOBLIN, x: 2, y: 10, pack: 2, skills: 0b11 },
+  { id: GOBLIN, x: 3, y: 11, pack: 2, skills: 0b11 },
+  { id: CHIEFTAIN, x: 12, y: 12, pack: 3, skills: 0b11111 },
+  { id: GOBLIN_WARRIOR, x: 11, y: 12, pack: 3, skills: 0b11 },
+  { id: SHAMAN, x: 12, y: 11, pack: 3, skills: 0b111 },
 ];
 
 interface MapFixture {
@@ -585,8 +606,9 @@ interface MapFixture {
   layout: PublicKey;
 }
 
-/** `bossLevel`: the goblin chieftain's spawn level (its XP grows with it); the rest are level 1. */
-async function createFinalizedMap(dm: Keypair, bossLevel = 1): Promise<MapFixture> {
+/** `bossLevel`: the goblin chieftain's spawn level (its XP grows with it); the rest are level 1.
+ * `spawns`: another roster on the same room (patch 6 tests place packs near the entrance). */
+async function createFinalizedMap(dm: Keypair, bossLevel = 1, roster: SpawnDef[] = DEMO_SPAWNS): Promise<MapFixture> {
   const index = randomBytes(4).readUInt32LE(0);
   const idx = Buffer.alloc(4);
   idx.writeUInt32LE(index);
@@ -603,18 +625,23 @@ async function createFinalizedMap(dm: Keypair, bossLevel = 1): Promise<MapFixtur
   tiles[ENTRANCE.y * 32 + ENTRANCE.x] = TILE.Entrance;
   tiles[EXIT.y * 32 + EXIT.x] = TILE.Exit;
   await mapProgram.methods.writeLayout(0, Buffer.from(tiles)).accountsStrict(edit).signers([dm]).rpc();
-  const spawns = DEMO_SPAWNS.map((s) => ({
+  const spawns = roster.map((s) => ({
     bestiaryId: s.id,
     x: s.x,
     y: s.y,
     level: s.id === CHIEFTAIN ? bossLevel : 1,
-    skills: 0,
-    flags: 0,
+    skills: s.skills,
+    flags: s.flags ?? 0,
     aspects: 0,
     pack: s.pack,
   }));
   await mapProgram.methods.writeSpawns(ENTRANCE, EXIT, spawns).accountsStrict(edit).signers([dm]).rpc();
-  await mapProgram.methods.finalizeMap(new Array(32).fill(7)).accountsStrict(edit).signers([dm]).rpc();
+  // Patch 6: the builder rules read the registry bestiary and monster skills.
+  await mapProgram.methods
+    .finalizeMap(new Array(32).fill(7))
+    .accountsStrict({ ...edit, bestiary, monsterSkills })
+    .signers([dm])
+    .rpc();
   return { map, layout };
 }
 
@@ -658,12 +685,13 @@ const MAGE_SKILLS: [string, any][] = [
 const SUPPORT_SKILLS: [string, any][] = [
   ["Quicken", blocks("active", "buff", "magical", "projectile", ["lightning"], { effect: "haste" })],
   ["Sap", blocks("active", "debuff", "magical", "projectile", ["blood"], { effect: "weakening" })],
-  ["Mend", blocks("active", "buff", "magical", "projectile", ["blood"], { effect: "heal" })],
+  ["Expose", blocks("active", "debuff", "magical", "projectile", ["fire"], { effect: "vulnerability" })],
   ["Shelter", blocks("active", "buff", "combat", "strike", ["blunt"], { effect: "protection" })],
   ["Last Stand", { ...blocks("reactive", "buff", "combat", "strike", ["blunt"], { effect: "protection", trigger: "hpBelow" }), auraRadius: 2 }],
   ["Cold Ward", { ...blocks("passive", "buff", "magical", "strike", ["cold"], { effect: "protection" }), auraRadius: 2 }],
 ];
-const [QUICKEN, SAP, MEND, SHELTER] = [0, 1, 2, 3];
+// Patch 5: no Heal in the builder (CHARACTER 8.1); Expose takes the slot Mend had.
+const [QUICKEN, SAP, EXPOSE, SHELTER] = [0, 1, 2, 3];
 /** Projectile skill slot per class: Javelin, Frost Bolt, Sap (a debuff, it rolls like an attack). */
 const RANGED_SLOT = { warrior: 2, mage: 0, support: SAP, stormMage: 0 };
 const REACTIVE_SLOT = 4;
@@ -698,7 +726,7 @@ async function createCharacter(owner: Keypair, kind: Kind): Promise<PublicKey> {
     predisposition: e(p.predisposition),
     stats: p.stats,
     appearance: new Array(20).fill(layer),
-    skills: p.skills.map(([name, b]) => ({ blocks: structuredClone(b), name: text(name, 24) })),
+    skills: p.skills.map(([name, b]) => newSkill(name, b, text)),
   };
   const asset = Keypair.generate();
   await characterProgram.methods
@@ -713,6 +741,7 @@ async function createCharacter(owner: Keypair, kind: Kind): Promise<PublicKey> {
       asset: asset.publicKey,
       mplCoreProgram: MPL_CORE,
       systemProgram: SystemProgram.programId,
+      skillExtras: pda([Buffer.from("skill_extras"), character.toBuffer()], CHARACTER),
     })
     .signers([owner, asset])
     .rpc();
@@ -751,6 +780,23 @@ function targetInRange(s: any, m: any): number | undefined {
   return undefined;
 }
 
+/** Patch 6: the accounts that finalize the deaths a callback queued (`GameSession.pending_deaths`):
+ * each queued slot's Character, SkillSet and Bag, writable, in slot order. */
+function deathAccounts(st: any) {
+  const out: { pubkey: PublicKey; isSigner: boolean; isWritable: boolean }[] = [];
+  for (let slot = 0; slot < st.core.playerCount; slot++) {
+    if (!(st.pendingDeaths & (1 << slot))) continue;
+    const c: PublicKey = st.core.players[slot];
+    const skillSet = pda([Buffer.from("skills"), c.toBuffer()], CHARACTER);
+    const bag = pda([Buffer.from("bag"), c.toBuffer()], CHARACTER);
+    for (const pubkey of [c, skillSet, bag]) out.push({ pubkey, isSigner: false, isWritable: true });
+  }
+  return out;
+}
+/** Compute limit of an instruction that may finalize deaths (`character.mark_dead` each). */
+const FINALIZE_CU = 600_000;
+const finalizeBudget = (deaths: unknown[]) => (deaths.length ? [ComputeBudgetProgram.setComputeUnitLimit({ units: FINALIZE_CU })] : []);
+
 /** One party on a fresh demo map, with helpers for every session instruction. */
 class Party {
   dm!: Keypair;
@@ -759,10 +805,10 @@ class Party {
   acc!: ReturnType<typeof sessionAccounts>;
   players: Player[] = [];
 
-  static async create(kinds: Kind[], opts: { bossLevel?: number } = {}): Promise<Party> {
+  static async create(kinds: Kind[], opts: { bossLevel?: number; roster?: SpawnDef[] } = {}): Promise<Party> {
     const p = new Party();
     [p.dm, p.dmActor] = await Promise.all([funded(), funded(1)]);
-    p.fixture = await createFinalizedMap(p.dm, opts.bossLevel);
+    p.fixture = await createFinalizedMap(p.dm, opts.bossLevel, opts.roster);
     p.acc = sessionAccounts(p.fixture.map);
     for (const kind of kinds) {
       const [wallet, actor] = await Promise.all([funded(), funded(1)]);
@@ -805,6 +851,7 @@ class Party {
         sessionAuthority,
         config,
         characterProgram: CHARACTER,
+        skillExtras: pda([Buffer.from("skill_extras"), pl.character.toBuffer()], CHARACTER),
         ...over,
       })
       .signers([signer])
@@ -843,8 +890,10 @@ class Party {
   }
   /** `start_turn` with player `who`'s accounts (`null`: a monster's turn); sent by the provider
    * wallet, which is not in the party (anyone may start a turn). */
-  startTurn(who: number | null, over: Record<string, PublicKey | null> = {}) {
+  async startTurn(who: number | null, over: Record<string, PublicKey | null> = {}, deaths: { pubkey: PublicKey; isSigner: boolean; isWritable: boolean }[] | null = null) {
     const pl = who === null ? null : this.players[who];
+    // Patch 6: the deaths the last callback queued are finalized first.
+    const queue = deaths ?? deathAccounts(await this.state());
     return program.methods
       .startTurn()
       .accountsStrict({
@@ -858,19 +907,55 @@ class Party {
         // Burned if over-time damage kills the player.
         skillSet: pl?.skillSet ?? null,
         bag: pl?.bag ?? null,
+        // Pays the VRF fee when over-time damage triggers a reactive skill (patch 5).
+        payer: provider.wallet.publicKey,
+        ...vrfAccounts,
         ...over,
       })
+      .remainingAccounts(queue)
+      .preInstructions(finalizeBudget(queue))
       .rpc({ commitment: "confirmed" });
   }
-  /** `start_turn` for whoever's turn it is. */
+  /** Patch 6: `start_turn` that finalizes the queued deaths (with the current player's accounts,
+   * the turn may not have started yet); `null` when nothing waits. */
+  async finalize() {
+    const s = await this.state();
+    if (!s.pendingDeaths || s.core.pendingVrf || !s.core.status.active) return null;
+    const unit = s.core.turnOrder[s.core.turnIndex];
+    return this.startTurn(unit < MONSTER_BASE ? unit : null);
+  }
+  /** `start_turn` for whoever's turn it is; a reactive roll it asks for is answered (`settle`). */
   async begin(): Promise<string> {
     const s = await this.state();
     const unit = s.core.turnOrder[s.core.turnIndex];
-    return this.startTurn(unit < MONSTER_BASE ? unit : null);
+    const sig = await this.startTurn(unit < MONSTER_BASE ? unit : null);
+    await this.settle();
+    return sig;
+  }
+  /**
+   * Patch 5: answers a pending reactive-only roll (a monster stepping next to a Cold Snap bearer,
+   * over-time damage below a threshold) with `seed`, on the first bearer's accounts; nothing
+   * when no such roll waits.
+   */
+  async settle(seed: Buffer = MISS) {
+    const s = await this.state();
+    if (!s.core.pendingVrf) return this.finalize();
+    // Patch 6: a monster's reactive-only roll rides on the player the request named.
+    if (s.pendingMonsterReactive.kind !== 0) return this.consume(this.pendingWho(s), seed);
+    if (s.pendingReactive.kind === 0) return null;
+    const bearer = [0, 1, 2, 3].find((i) => s.pendingReactive.bearers & (1 << i))!;
+    return this.consume(bearer, seed);
+  }
+  /** The player whose accounts the pending callback takes (`GameSession.pending.participation`). */
+  pendingWho(s: any): number {
+    const who = this.players.findIndex((pl) => pl.participation.equals(s.pending.participation));
+    assert.ok(who >= 0, "the pending participation is a party player's");
+    return who;
   }
   /** Starts every turn and ends every unit's turn but `unit`'s, until `unit`'s turn has started. */
   async skipTo(unit: number, max = 40) {
     for (let i = 0; i < max; i++) {
+      await this.settle();
       const s = await this.state();
       const cur = s.core.turnOrder[s.core.turnIndex];
       if (s.startedSeq !== s.turnSeq) await this.begin();
@@ -905,8 +990,8 @@ class Party {
     const { blockhash } = await connection.getLatestBlockhash();
     let best: { seed: Buffer; score: number } | null = null;
     for (let i = 0; i < tries; i++) {
-      const seed = randomBytes(32);
-      const tx = await consume(MOCK_VRF, a, seed).transaction();
+      const seed = nextSeed();
+      const tx = await consume(MOCK_VRF, a, seed, await this.partyOf(who)).transaction();
       tx.feePayer = provider.wallet.publicKey;
       tx.recentBlockhash = blockhash;
       tx.partialSign(MOCK_VRF);
@@ -925,6 +1010,7 @@ class Party {
   /** Starts and ends turns until `unit`'s turn is next to start (it is not started). */
   async untilStartOf(unit: number, max = 40) {
     for (let i = 0; i < max; i++) {
+      await this.settle();
       const s = await this.state();
       const cur = s.core.turnOrder[s.core.turnIndex];
       if (s.startedSeq !== s.turnSeq) {
@@ -946,6 +1032,8 @@ class Party {
         monsters: this.acc.monsters,
         layout: this.fixture.layout,
         sessionToken: token,
+        // Patch 6: stepping next to a monster can trigger its reactive skill (a VRF roll).
+        ...vrfAccounts,
       })
       .signers([signer])
       .rpc();
@@ -960,6 +1048,7 @@ class Party {
         monsters: this.acc.monsters,
         layout: this.fixture.layout,
         sessionToken: token,
+        ...vrfAccounts,
       })
       .signers([signer])
       .rpc();
@@ -993,12 +1082,18 @@ class Party {
         sessionToken: token,
         ...vrfAccounts,
         targetParticipation: ally,
+        layout: this.fixture.layout,
       })
       .signers([signer])
       .rpc();
   }
-  monsterAct(signer: Keypair, monster: number, target: number, token: PublicKey | null = null, action = 0) {
-    const pl = this.players[target];
+  /**
+   * `action`: 0 = the natural attack, `1 + slot` = the monster's skill in that slot (patch 6).
+   * `target`: a player slot, or for a heal or buff (`accounts` = the lowest living player) a
+   * monster index; `accounts`: whose participation the callback takes.
+   */
+  monsterAct(signer: Keypair, monster: number, target: number, token: PublicKey | null = null, action = 0, accounts = target) {
+    const pl = this.players[accounts];
     return program.methods
       .monsterAct(monster, action, target)
       .accountsStrict({
@@ -1011,16 +1106,28 @@ class Party {
         bag: pl.bag,
         sessionToken: token,
         ...vrfAccounts,
+        layout: this.fixture.layout,
       })
       .signers([signer])
       .rpc();
   }
   /** The callback for the pending action of player `who` (attacker or target); `ally`: the
    * other player of a heal or buff. */
-  consume(who: number, seed: Buffer, identity = MOCK_VRF, ally: PublicKey | null = null) {
-    return this.consumeTx(who, seed, identity, ally).rpc({ commitment: "confirmed" });
+  async consume(who: number, seed: Buffer, identity = MOCK_VRF, ally: PublicKey | null = null) {
+    return (await this.consumeTx(who, seed, identity, ally)).rpc({ commitment: "confirmed" });
   }
-  consumeTx(who: number, seed: Buffer, identity = MOCK_VRF, ally: PublicKey | null = null) {
+  /** The other living players' accounts the callback of player `who`'s pending roll gets. */
+  async partyOf(who: number) {
+    return partyAccounts(await this.state(), this.players[who].participation);
+  }
+  /** `party`: override the party accounts (`null`: what the session expects). */
+  async consumeTx(
+    who: number,
+    seed: Buffer,
+    identity = MOCK_VRF,
+    ally: PublicKey | null = null,
+    party: { pubkey: PublicKey; isSigner: boolean; isWritable: boolean }[] | null = null,
+  ) {
     const pl = this.players[who];
     return consume(
       identity,
@@ -1035,11 +1142,12 @@ class Party {
         layout: this.fixture.layout,
       },
       seed,
+      party ?? (await this.partyOf(who)),
     );
   }
   /** The events the callback would emit with `seed` (simulated, nothing sent); `null` on an error. */
   async simulateConsume(who: number, seed: Buffer, ally: PublicKey | null = null) {
-    const tx = await this.consumeTx(who, seed, MOCK_VRF, ally).transaction();
+    const tx = await (await this.consumeTx(who, seed, MOCK_VRF, ally)).transaction();
     tx.feePayer = provider.wallet.publicKey;
     tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
     tx.partialSign(MOCK_VRF);
@@ -1054,7 +1162,7 @@ class Party {
     tries = 400,
   ) {
     for (let i = 0; i < tries; i++) {
-      const seed = randomBytes(32);
+      const seed = nextSeed();
       const events = await this.simulateConsume(who, seed, ally);
       if (events && pred(events)) {
         const sig = await this.consume(who, seed, MOCK_VRF, ally);
@@ -1077,7 +1185,7 @@ class Party {
       .rpc();
   }
   /** Signed by the owner's main wallet unless another signer (and session token) is given. */
-  claimRewards(who: number, signer: Keypair = this.players[who].wallet, sessionToken: PublicKey | null = null) {
+  async claimRewards(who: number, signer: Keypair = this.players[who].wallet, sessionToken: PublicKey | null = null) {
     const pl = this.players[who];
     return program.methods
       .claimRewards()
@@ -1093,10 +1201,13 @@ class Party {
         characterProgram: CHARACTER,
         sessionToken,
       })
+      .remainingAccounts(deathAccounts(await this.state()))
+      .preInstructions(finalizeBudget(deathAccounts(await this.state())))
       .signers([signer])
       .rpc({ commitment: "confirmed" });
   }
-  claimEscrow(signer: Keypair) {
+  async claimEscrow(signer: Keypair) {
+    const queue = deathAccounts(await this.state());
     return program.methods
       .claimEscrow()
       .accountsStrict({
@@ -1107,7 +1218,10 @@ class Party {
         sessionAuthority,
         config,
         mapProgram: MAP,
+        characterProgram: CHARACTER,
       })
+      .remainingAccounts(queue)
+      .preInstructions(finalizeBudget(queue))
       .signers([signer])
       .rpc();
   }
@@ -1147,6 +1261,7 @@ class Party {
       [W, -1, 0],
     ];
     for (let step = 0; step < (opts.steps ?? 400); step++) {
+      await this.settle();
       const s = await this.state();
       if (s.core.status.active && s.startedSeq !== s.turnSeq) {
         await this.begin();
@@ -1209,6 +1324,7 @@ class Party {
       try {
         if (who === null) await this.monsterMove(this.dm, monster!, [o.d]);
         else await this.move(who, this.players[who].wallet, [o.d]);
+        await this.settle();
         return true;
       } catch {
         // blocked or occupied: try the next direction
@@ -1510,7 +1626,9 @@ describe("deadroll_session: combat, death, victory and payouts", { skip: SKIP_PA
     const ev = await eventOf(await party.startTurn(null), "turnTicked");
     assert.deepEqual([ev.unit, ev.skipped], [MONSTER_BASE + wolfTurn, false]);
     await rejects(party.monsterAct(p0.wallet, wolfTurn, 0), "Unauthorized");
-    await rejects(party.monsterAct(party.dm, wolfTurn, 0, null, 7), "InvalidAction");
+    // Patch 6: action 1 + slot; 8 is past the 7 slots, 7 is the passive slot (not an action).
+    await rejects(party.monsterAct(party.dm, wolfTurn, 0, null, 8), "InvalidAction");
+    await rejects(party.monsterAct(party.dm, wolfTurn, 0, null, 7), "MonsterSkillMissing");
     await rejects(party.monsterAct(party.dm, wolfTurn, 0), "OutOfRange");
   });
 
@@ -1897,11 +2015,33 @@ describe("deadroll_session: turn start, cooldowns and over-time damage", { skip:
   });
 
   it("over-time damage kills a player like a hit: PlayerDied, tombstone, the turn moves on", async () => {
+    /**
+     * The wolf's Ragged Bite on the mage (patch 6: a monster skill; Blood bleeds), scored for a
+     * death by over-time damage: a hit whose Burning
+     * or Bleeding ticks (power each own turn start, `turns` times) cover the HP it leaves is the
+     * one wanted; else a DoT hit that keeps more HP than the ticks take (never 1 HP without a DoT:
+     * every later hit would kill outright); else a miss over a plain hit.
+     */
+    const dotOverTime = (states: any[]) =>
+      states
+        .filter((x) => x.turns > 0 && (x.kind.burning !== undefined || x.kind.bleeding !== undefined))
+        .reduce((sum, x) => sum + x.power * x.turns, 0);
+    const playerDotScore = (hp: number) => (r: any) => {
+      const left = hp - r.damage;
+      if (left <= 0) return -Infinity;
+      const total = dotOverTime(r.states);
+      if (total >= left) return LETHAL_DOT;
+      if (total > 0 && left - total >= 2) return 1e6 - left;
+      return -r.damage;
+    };
     const party = await Party.create(["warrior", "mage"]);
     await party.startAll();
-    const SHAMAN_INDEX = DEMO_SPAWNS.findIndex((x) => x.id === SHAMAN);
-    const shamanUnit = MONSTER_BASE + SHAMAN_INDEX;
+    // Wolf 0 chose Lunge, Hamstring, Ragged Bite (slots 0, 1, 2).
+    const BITER = 0;
+    const RAGGED_BITE = 2;
+    const biterUnit = MONSTER_BASE + BITER;
     for (let step = 0; step < 800; step++) {
+      await party.settle();
       const s = await party.state();
       assert.ok(s.core.status.active);
       const cur = s.core.turnOrder[s.core.turnIndex];
@@ -1913,7 +2053,7 @@ describe("deadroll_session: turn start, cooldowns and over-time damage", { skip:
         assert.deepEqual([tick.unit, tick.hp, tick.skipped], [MAGE, 0, false]);
         assert.ok(tick.dotDamage >= hp);
         const [died] = eventsNamed(evs, "playerDied");
-        assert.deepEqual([died.slot, died.by], [MAGE, shamanUnit]);
+        assert.deepEqual([died.slot, died.by], [MAGE, biterUnit]);
         assert.ok(died.character.equals(party.players[MAGE].character));
         const after = await party.state();
         assert.equal(after.aliveMask & (1 << MAGE), 0);
@@ -1926,23 +2066,26 @@ describe("deadroll_session: turn start, cooldowns and over-time damage", { skip:
         await party.endTurn(party.players[cur].wallet, cur);
         continue;
       }
-      if (cur !== shamanUnit || s.actedSeq === s.turnSeq) {
+      // While the mage bleeds the wolf holds its bite: the ticks finish the job.
+      const bleeding = dotOverTime((await party.part(MAGE)).core.states) > 0;
+      const m = await party.monsters();
+      if (cur !== biterUnit || s.actedSeq === s.turnSeq || bleeding) {
         await party.endTurn(party.dm, null);
         continue;
       }
-      const shaman = (await party.monsters()).core.monsters[SHAMAN_INDEX];
+      const wolf = m.core.monsters[BITER];
       const pos = s.playerPos[MAGE];
-      if (cheb(shaman, pos) > 6 || shaman.actionPoints < 2) {
+      if (cheb(wolf, pos) > 1 || wolf.actionPoints < 2 || m.skillCooldowns[BITER][RAGGED_BITE] > 0) {
         const moved =
-          cheb(shaman, pos) > 6 &&
-          shaman.actionPoints >= 1 &&
-          (await party.stepToward(null, shaman, pos, DIRS, cheb, SHAMAN_INDEX));
+          cheb(wolf, pos) > 1 &&
+          wolf.actionPoints >= 1 &&
+          (await party.stepToward(null, wolf, pos, DIRS, cheb, BITER));
         if (!moved) await party.endTurn(party.dm, null);
         continue;
       }
-      await party.monsterAct(party.dm, SHAMAN_INDEX, MAGE);
+      await party.monsterAct(party.dm, BITER, MAGE, null, skillAction(RAGGED_BITE));
       const hp = (await party.part(MAGE)).core.hp;
-      assert.ok(await party.consumeBest(MAGE, dotKillScore(hp), 400, LETHAL_DOT), "every VRF value kills the mage");
+      assert.ok(await party.consumeBest(MAGE, playerDotScore(hp), 400, LETHAL_DOT), "every VRF value kills the mage");
     }
     assert.fail("the mage never died of over-time damage");
   });
@@ -2003,7 +2146,7 @@ describe("deadroll_session: support and control skills", { skip: SKIP_PARTY }, (
     const before = await party.part(SUPPORT);
     await party.act(SUPPORT, party.players[SUPPORT].wallet, QUICKEN, SUPPORT);
     assert.ok((await party.state()).pendingTarget.equals(PublicKey.default), "a self-cast has no ally account");
-    const sig = await party.consume(SUPPORT, randomBytes(32));
+    const sig = await party.consume(SUPPORT, nextSeed());
     const fx = await eventOf(sig, "effectResolved");
     assert.deepEqual([fx.caster, fx.target, fx.rider], [SUPPORT, SUPPORT, false]);
     assert.ok(fx.effect.haste !== undefined);
@@ -2036,29 +2179,24 @@ describe("deadroll_session: support and control skills", { skip: SKIP_PARTY }, (
     }
   });
 
-  it("Mend heals an ally on the same cell, never past its maximum", async () => {
-    // Let the monsters wound the warrior (the players only end their turns).
-    const { hpMax } = await party.part(WARRIOR);
-    for (let i = 0; i < 300 && (await party.part(WARRIOR)).core.hp === hpMax; i++) {
-      await party.play({ playerSeed: MISS, monsterSeed: () => CRIT, huntSlot: WARRIOR, passive: true, steps: 1 });
-    }
-    const hp = (await party.part(WARRIOR)).core.hp;
-    assert.ok(hp < hpMax && hp > 0, `warrior ${hp}/${hpMax}`);
+  it("Shelter protects an ally on the same cell; the ally comes with the party accounts", async () => {
     await party.skipTo(SUPPORT);
-
     const ally = party.players[WARRIOR].participation;
-    await party.act(SUPPORT, party.players[SUPPORT].wallet, MEND, WARRIOR, null, ally);
-    assert.ok((await party.state()).pendingTarget.equals(ally));
-    // The ally account is part of the callback.
-    await rejects(party.consume(SUPPORT, randomBytes(32)), "InvalidPendingAccounts");
-    const missing = hpMax - hp;
-    const { events } = await party.consumeEventsWhere(SUPPORT, (ev) => effectOf(ev)?.roll.amount > missing, ally);
-    const fx = effectOf(events);
+    await party.act(SUPPORT, party.players[SUPPORT].wallet, SHELTER, WARRIOR, null, ally);
+    // Patch 5: no `pending_target`, the ally is one of the party accounts after the fixed list.
+    assert.ok((await party.state()).pendingTarget.equals(PublicKey.default));
+    const seed = nextSeed();
+    await rejects((await party.consumeTx(SUPPORT, seed, MOCK_VRF, null, [])).rpc(), "InvalidPartyAccounts");
+    const party3 = await party.partyOf(SUPPORT);
+    // In the wrong order, or read-only: refused too.
+    await rejects((await party.consumeTx(SUPPORT, seed, MOCK_VRF, null, [...party3.slice(2), ...party3.slice(0, 2)])).rpc(), "InvalidPartyAccounts");
+    const readOnly = party3.map((a) => ({ ...a, isWritable: false }));
+    await rejects((await party.consumeTx(SUPPORT, seed, MOCK_VRF, null, readOnly)).rpc(), "InvalidPartyAccounts");
+    const fx = await eventOf(await party.consume(SUPPORT, seed), "effectResolved");
     assert.deepEqual([fx.caster, fx.target], [SUPPORT, WARRIOR]);
-    assert.ok(fx.effect.heal !== undefined && fx.applied.none !== undefined);
-    assert.equal(fx.hp, hpMax, "the heal stops at the maximum");
-    assert.equal((await party.part(WARRIOR)).core.hp, hpMax);
-    assert.ok((await party.state()).pendingTarget.equals(PublicKey.default), "cleared when the roll settles");
+    assert.ok(fx.effect.protection !== undefined && fx.applied.added !== undefined);
+    const shelter = modOf((await party.part(WARRIOR)).mods, "protection");
+    assert.deepEqual([shelter.powerBp, shelter.source], [fx.roll.amount, SUPPORT]);
     await party.endTurn(party.players[SUPPORT].wallet, SUPPORT);
   });
 
@@ -2137,7 +2275,7 @@ describe("deadroll_session: support and control skills", { skip: SKIP_PARTY }, (
     assert.equal(s.aliveMask & (1 << MAGE), 0, "the mage died");
     await party.skipTo(SUPPORT);
     const cooldowns = (await party.part(SUPPORT)).cooldowns;
-    const buff = [MEND, QUICKEN, SHELTER].find((slot) => cooldowns[slot] === 0);
+    const buff = [QUICKEN, SHELTER].find((slot) => cooldowns[slot] === 0);
     assert.ok(buff !== undefined);
     const dead = party.players[MAGE].participation;
     await rejects(party.act(SUPPORT, party.players[SUPPORT].wallet, buff, MAGE, null, dead), "InvalidAllyTarget");
@@ -2257,5 +2395,540 @@ describe("deadroll_session: resonances on the map", { skip: SKIP_PARTY }, () => 
     const other = (await party.monsters()).core.monsters[WOLF1];
     assert.ok(other.states.some((x: any) => x.turns > 0 && Object.keys(x.kind)[0] === Object.keys(hit.kind)[0]));
     console.log(`CU consume_randomness, a jump (${Object.keys(hit.kind)[0]} to wolf ${hit.monster}): ${await unitsOf(done.sig)}`);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Patch 5: reactive and passive skills, auras, the line target, AP costs (docs/SKILL_BUILDER.md)
+
+describe("deadroll_session: reactive and passive skills, auras", { skip: SKIP_PARTY }, () => {
+  // A full party: three party accounts come with every callback.
+  const [WARRIOR, MAGE, SUPPORT, STORM] = [0, 1, 2, 3];
+  const WOLF0 = 0;
+  let party: Party;
+
+  before(async () => {
+    party = await Party.create(["warrior", "mage", "support", "stormMage"]);
+    await party.startAll();
+  });
+
+  it("set_ready takes the passive skills as auras and the reactive skills into the session", async () => {
+    const s = await party.state();
+    const [iron, mind, ward] = [WARRIOR, MAGE, SUPPORT].map((slot) => s.auras[slot][0]);
+    // Iron Skin and Cold Mind work on their bearer only; Cold Ward is a Protection aura, radius 2.
+    assert.ok(iron.kind.protection !== undefined && iron.selfOnly && iron.passive && iron.turns === 255);
+    assert.ok(mind.kind.empowerment !== undefined && mind.selfOnly);
+    assert.ok(ward.kind.protection !== undefined && !ward.selfOnly && !ward.hostile && ward.radius === 2);
+    assert.ok(iron.powerBp > 0 && ward.powerBp > 0, "a fixed point of the effect's range");
+    // Nothing temporary yet.
+    assert.ok(s.auras.every((a: any[]) => a[1].turns === 0));
+    // Riposte (hit), Cold Snap (an enemy next to it), Last Stand (HP below 40%).
+    assert.equal(s.reactives[WARRIOR].skillSlot, 4);
+    assert.ok(s.reactives[WARRIOR].skill.blocks.trigger.hit !== undefined);
+    assert.ok(s.reactives[MAGE].skill.blocks.trigger.enemyAdjacent !== undefined);
+    assert.equal(s.reactives[SUPPORT].skill.ext.hpBelowPct, 40);
+    assert.ok(s.reactives.slice(0, 3).every((r: any) => r.cooldownLeft === 0));
+    // The participation keeps the map skills with their range and AP cost.
+    const p = await party.part(WARRIOR);
+    assert.deepEqual(
+      p.mapSkills.slice(0, 4).map((m: any) => [Object.keys(m.ext.range)[0], m.apCost]),
+      [
+        ["melee", 2],
+        ["melee", 3],
+        ["ranged", 2],
+        ["ranged", 3],
+      ],
+    );
+    assert.equal(p.mapSkills[4].apCost, 0, "a reactive skill is not an action");
+  });
+
+  it("Cold Snap: a wolf stepping next to the mage stops there and the mage's reactive rolls", async () => {
+    await party.untilStartOf(MONSTER_BASE + WOLF0);
+    await party.begin();
+    const before = (await party.monsters()).core.monsters[WOLF0];
+    // From (6, 2) west: (2, 2) is the first cell next to the party on the entrance (1, 1).
+    const sig = await party.monsterMove(party.dm, WOLF0, [W, W, W, W, W]);
+    const moved = (await party.monsters()).core.monsters[WOLF0];
+    assert.deepEqual([moved.x, moved.y], [2, 2], "the walk stops on the cell next to the mage");
+    assert.equal(moved.actionPoints, before.actionPoints - 4, "the steps not taken cost nothing");
+    const s = await party.state();
+    assert.ok(s.core.pendingVrf);
+    assert.equal(s.pendingReactive.kind, 1, "an enemy entered");
+    // Both mages carry Cold Snap; the others' reactives answer something else.
+    assert.equal(s.pendingReactive.bearers, (1 << MAGE) | (1 << STORM));
+    assert.equal(s.pendingReactive.source, MONSTER_BASE + WOLF0);
+    assert.ok((await eventsOf(sig)).some((x) => x.name.toLowerCase() === "actionrequested"));
+    await rejects(party.monsterAct(party.dm, WOLF0, WARRIOR), "RollPending");
+
+    // The callback for a reactive-only roll takes the first bearer's accounts.
+    await rejects(party.consume(WARRIOR, CRIT), "InvalidPendingAccounts");
+    const done = await party.consume(MAGE, CRIT);
+    console.log(`CU consume_randomness, a reactive-only roll (Cold Snap on an entering wolf): ${await unitsOf(done)}`);
+    const events = await eventsOf(done);
+    const reactions = eventsNamed(events, "reactiveTriggered");
+    assert.deepEqual(reactions.map((x) => x.bearer), [MAGE, STORM], "in slot order");
+    const r = reactions[0];
+    assert.deepEqual([r.bearer, r.skillSlot, r.target], [MAGE, 4, MONSTER_BASE + WOLF0]);
+    assert.ok(r.trigger.enemyAdjacent !== undefined && r.reaction.debuff !== undefined);
+    const fx = eventsNamed(events, "effectResolved")[0];
+    assert.deepEqual([fx.caster, fx.target], [MAGE, MONSTER_BASE + WOLF0]);
+    assert.ok(fx.effect.slow !== undefined && fx.roll.d20 === 20 && fx.applied.added !== undefined);
+    const after = await party.state();
+    assert.ok(!after.core.pendingVrf && after.pendingReactive.kind === 0);
+    assert.equal(after.reactives[MAGE].cooldownLeft, 3, "cooldown 2: its next 2 own turns");
+    assert.ok((await party.monsters()).mods[WOLF0].some((m: any) => m.turns > 0 && m.kind.slow !== undefined));
+  });
+
+  it("Riposte: the wolf's hit on the warrior triggers a counterattack on the same dice", async () => {
+    // The wolf still has its turn and the AP for its bite.
+    await party.monsterAct(party.dm, WOLF0, WARRIOR);
+    const wolfHp = (await party.monsters()).core.monsters[WOLF0].hp;
+    // A bite that lands and a counterattack that leaves the wolf alive (the next test needs it).
+    const { sig: done } = await party.consumeEventsWhere(WARRIOR, (ev) => {
+      const h = eventsNamed(ev, "hitResolved");
+      return h.length === 2 && h[1].result.damage < wolfHp;
+    });
+    console.log(`CU consume_randomness, a hit + Riposte, 4 players (3 party accounts), Cold Ward aura: ${await unitsOf(done)}`);
+    const events = await eventsOf(done);
+    const hits = eventsNamed(events, "hitResolved");
+    assert.equal(hits.length, 2, "the bite and the counterattack");
+    assert.deepEqual([hits[0].attacker, hits[0].target], [MONSTER_BASE + WOLF0, WARRIOR]);
+    assert.deepEqual([hits[1].attacker, hits[1].target], [WARRIOR, MONSTER_BASE + WOLF0]);
+    assert.equal(hits[0].actionCounter, hits[1].actionCounter, "one action, one VRF value");
+    // The bite sees the auras: Iron Skin and Cold Ward are both Protection, the stronger acts.
+    const ward = (await party.state()).auras;
+    const protection = Math.max(ward[WARRIOR][0].powerBp, ward[SUPPORT][0].powerBp);
+    assert.ok(protection > 0 && hits[0].result.packets[0].resistBp > 0, "Protection is a resistance on every aspect");
+    const r = eventsNamed(events, "reactiveTriggered")[0];
+    assert.ok(r.trigger.hit !== undefined && r.reaction.strike !== undefined && r.bearer === WARRIOR);
+    assert.equal((await party.state()).reactives[WARRIOR].cooldownLeft, 3);
+  });
+
+  it("Last Stand: the support's HP below 40% starts a temporary Protection aura", async () => {
+    for (let i = 0; i < 40; i++) {
+      const s = await party.state();
+      const supp = await party.part(SUPPORT);
+      if (s.auras[SUPPORT][1].turns > 0) break;
+      assert.ok(supp.core.hp > 0, "the support died before its threshold");
+      await party.untilStartOf(MONSTER_BASE + WOLF0);
+      await party.begin();
+      const m = (await party.monsters()).core.monsters[WOLF0];
+      if (!m.alive) assert.fail("the wolf died first");
+      const st = await party.state();
+      if (cheb(m, st.playerPos[SUPPORT]) > 1) {
+        await party.endTurn(party.dm, null);
+        continue;
+      }
+      await party.monsterAct(party.dm, WOLF0, SUPPORT);
+      const sig = await party.consume(SUPPORT, CRIT);
+      const events = await eventsOf(sig);
+      const r = eventsNamed(events, "reactiveTriggered").find((x) => x.bearer === SUPPORT);
+      if (!r) continue;
+      console.log(`CU consume_randomness, a hit + Last Stand aura: ${await unitsOf(sig)}`);
+      assert.ok(r.trigger.hpBelow !== undefined && r.reaction.aura !== undefined && r.target === SUPPORT);
+      const changed = eventsNamed(events, "auraChanged")[0];
+      assert.deepEqual([changed.bearer, changed.auraSlot], [SUPPORT, 1]);
+      assert.ok(changed.aura.kind.protection !== undefined && !changed.aura.passive && changed.aura.radius === 2);
+      const hpMax = (await party.part(SUPPORT)).hpMax;
+      assert.ok((await party.part(SUPPORT)).core.hp * 100 < 40 * hpMax);
+      const aura = (await party.state()).auras[SUPPORT][1];
+      assert.equal(aura.turns, 3, "Protection lasts 2 of its own turns");
+      // It ends with its bearer's turns.
+      for (const left of [2, 1, 0]) {
+        await party.untilStartOf(SUPPORT);
+        await party.begin();
+        assert.equal((await party.state()).auras[SUPPORT][1].turns, left);
+        await party.endTurn(party.players[SUPPORT].wallet, SUPPORT);
+      }
+      return;
+    }
+    assert.fail("Last Stand never triggered");
+  });
+});
+
+describe("deadroll_session: the line target and AP costs", { skip: SKIP_PARTY }, () => {
+  const [WARRIOR, MAGE] = [0, 1];
+  const [FROST_BOLT, ICE_PRISON, ARC] = [0, 2, 3];
+  const [WOLF0, WOLF1] = [0, 1];
+  let party: Party;
+
+  before(async () => {
+    party = await Party.create(["warrior", "mage"]);
+    await party.startAll();
+    await party.skipTo(MAGE);
+  });
+
+  it("a skill costs its own AP: Ice Prison 3, Frost Bolt 2", async () => {
+    const mage = party.players[MAGE];
+    // Two steps east: the elf mage has 4 AP, 2 left.
+    await party.move(MAGE, mage.wallet, [E, E]);
+    assert.equal((await party.part(MAGE)).core.actionPoints, 2);
+    await rejects(party.act(MAGE, mage.wallet, ICE_PRISON, WOLF0), "NotEnoughActionPoints");
+    // Two more steps: (5, 1), diagonal to both wolves; nothing left for this turn.
+    await party.move(MAGE, mage.wallet, [E, E]);
+    await rejects(party.act(MAGE, mage.wallet, FROST_BOLT, WOLF0), "NotEnoughActionPoints");
+    await party.endTurn(mage.wallet, MAGE);
+  });
+
+  it("Arc hits every wolf on the line through its target, in line order", async () => {
+    await party.untilStartOf(MAGE);
+    await party.begin();
+    const mage = party.players[MAGE];
+    const s = await party.state();
+    assert.deepEqual([s.playerPos[MAGE].x, s.playerPos[MAGE].y], [5, 1]);
+    const ms = (await party.monsters()).core.monsters;
+    // (5, 1) -> (6, 2) -> (7, 3): both wolves on the diagonal.
+    assert.deepEqual([ms[WOLF0].x, ms[WOLF0].y, ms[WOLF1].x, ms[WOLF1].y], [6, 2, 7, 3]);
+    await party.act(MAGE, mage.wallet, ARC, WOLF0);
+    assert.equal((await party.part(MAGE)).core.actionPoints, 1, "Arc costs 3 AP (a line)");
+    const done = await party.consume(MAGE, CRIT);
+    console.log(`CU consume_randomness, Arc on a line of 2 wolves: ${await unitsOf(done)}`);
+    const hits = eventsNamed(await eventsOf(done), "hitResolved");
+    assert.deepEqual(
+      hits.map((h) => h.target),
+      [MONSTER_BASE + WOLF0, MONSTER_BASE + WOLF1],
+    );
+    assert.ok(hits.every((h) => h.attacker === MAGE));
+    // Each unit on the line rolls its own hit on the same VRF value: the second starts where the
+    // first stopped.
+    assert.ok(hits[1].result.rollsUsed > 0);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Patch 6: monster skills from the registry (docs/BESTIARY.md 3, 5, 8.1, 12)
+
+/** The registry table body (8-byte discriminator, 8-byte header, then the records). */
+async function tableBody(address: PublicKey): Promise<Buffer> {
+  const info = await connection.getAccountInfo(address);
+  assert.ok(info, "the registry table is seeded");
+  return info.data.subarray(16);
+}
+
+/** The demo roster with the boss pack next to the entrance (1, 1), on its diagonal: a line from
+ * the party through the chieftain runs through the goblin warrior and the shaman. One goblin is
+ * elite. Monster indices: wolves 0, 1; goblins 2 (elite), 3; chieftain 4; warrior 5; shaman 6. */
+const CAMP: SpawnDef[] = [
+  { id: WOLF, x: 10, y: 3, pack: 1, skills: 0b0111 },
+  { id: WOLF, x: 11, y: 3, pack: 1, skills: 0b1110 },
+  { id: GOBLIN, x: 8, y: 8, pack: 2, skills: 0b11, flags: 1 },
+  { id: GOBLIN, x: 9, y: 8, pack: 2, skills: 0b11 },
+  { id: CHIEFTAIN, x: 2, y: 2, pack: 3, skills: 0b11111 },
+  { id: GOBLIN_WARRIOR, x: 3, y: 3, pack: 3, skills: 0b11 },
+  { id: SHAMAN, x: 4, y: 4, pack: 3, skills: 0b111 },
+];
+const [C_WOLF0, C_ELITE, C_GOBLIN, C_CHIEF, C_WARRIOR, C_SHAMAN] = [0, 2, 3, 4, 5, 6];
+/** `monster_act` action of a monster skill slot (0 = the natural attack). */
+const skillAction = (slot: number) => 1 + slot;
+/** Monster slots (`deadroll_rules::monster`): 0..5 active, 5 reactive, 6 passive. */
+const [M_REACTIVE, M_PASSIVE] = [5, 6];
+/** Registry monster_skills indices (assets/registry/monster_skills.json). */
+const MS = { netThrow: 6, spinStrike: 7, daggerThrow: 8, leader: 9, battleCry: 10, spark: 11, mending: 12, quicken: 13 };
+
+describe("deadroll_session: monster skills, the shaman and the chieftain (patch 6)", { skip: SKIP_PARTY }, () => {
+  const [WARRIOR, MAGE] = [0, 1];
+  const [FROST_BOLT, BLEEDING_CLEAVE] = [0, 3];
+  let party: Party;
+
+  before(async () => {
+    party = await Party.create(["warrior", "mage"], { roster: CAMP });
+    await party.startAll();
+  });
+
+  it("open_session copies the records and the chosen skills; Leader is an aura from the start; elite has more HP", async () => {
+    const m = await party.monsters();
+    const bestiaryBody = await tableBody(bestiary);
+    CAMP.forEach((sp, i) => assert.deepEqual([...m.records[i]], [...bestiaryBody.subarray(sp.id * 48, sp.id * 48 + 48)], `record of monster ${i}`));
+    // Wolves 0..4, goblins 4..6 (the warrior shares their pool), chieftain 6..11, shaman 11..14.
+    assert.equal(m.skillCount, 14, "each chosen registry skill once");
+    const skills = await tableBody(monsterSkills);
+    const copyOf = (i: number) => [...skills.subarray(i * 32 + 1, i * 32 + 17)];
+    const slots = m.skills[C_CHIEF];
+    assert.deepEqual(
+      [0, 1, 2, M_REACTIVE, M_PASSIVE].map((k) => [...m.skillTable[slots[k]]]),
+      [MS.netThrow, MS.spinStrike, MS.daggerThrow, MS.battleCry, MS.leader].map(copyOf),
+    );
+    assert.deepEqual([slots[3], slots[4]], [NO_SKILL, NO_SKILL], "a regular boss slot count: 3 active of 5");
+    const leader = m.auras[C_CHIEF][0];
+    assert.ok(leader.kinOnly && leader.aura.kind.empowerment !== undefined && leader.aura.passive && leader.aura.turns === 255 && leader.aura.radius === 2);
+    assert.equal(m.auras[C_CHIEF][1].aura.turns, 0, "Battle Cry waits for its trigger");
+    // Elite: +50% HP (BalanceConfig elite_hp_bp), one more active slot (the goblin pool has 2).
+    const [elite, plain] = [m.core.monsters[C_ELITE], m.core.monsters[C_GOBLIN]];
+    assert.equal(elite.flags & 1, 1);
+    assert.equal(elite.hpMax, plain.hpMax + plain.hpMax / 2);
+  });
+
+  it("Leader: the goblin warrior's Thrown Stone carries the chieftain's Empowerment", async () => {
+    await party.skipTo(MONSTER_BASE + C_WARRIOR);
+    const [DIRTY_STRIKE, THROWN_STONE] = [0, 1];
+    // Dirty Strike is melee; the party stands 2 cells away.
+    await rejects(party.monsterAct(party.dm, C_WARRIOR, WARRIOR, null, skillAction(DIRTY_STRIKE)), "OutOfRange");
+    // The passive slot is not an action.
+    await rejects(party.monsterAct(party.dm, C_WARRIOR, WARRIOR, null, skillAction(M_PASSIVE)), "MonsterSkillMissing");
+    const sig = await party.monsterAct(party.dm, C_WARRIOR, WARRIOR, null, skillAction(THROWN_STONE));
+    const used = await eventOf(sig, "skillUsed");
+    assert.deepEqual([used.unit, used.skillSlot], [MONSTER_BASE + C_WARRIOR, THROWN_STONE]);
+    const req = await eventOf(sig, "actionRequested");
+    assert.equal(req.skillSlot, skillAction(THROWN_STONE));
+    const done = await party.consumeWhere(WARRIOR, (r) => r.outcome.hit !== undefined || r.outcome.crit !== undefined);
+    assert.ok(done, "no VRF value lands the stone");
+    console.log(`CU consume_randomness, a monster skill hit (Thrown Stone, Leader aura): ${await unitsOf(done.sig)}`);
+    const hit = await eventOf(done.sig, "hitResolved");
+    assert.deepEqual([hit.attacker, hit.target], [MONSTER_BASE + C_WARRIOR, WARRIOR]);
+    assert.ok(done.result.packets[0].increasedBp > 0, "Empowerment from the chieftain 1 cell away");
+    assert.ok((await party.monsters()).skillCooldowns[C_WARRIOR][THROWN_STONE] > 0, "the skill is on cooldown");
+    await party.endTurn(party.dm, null);
+  });
+
+  it("Battle Cry: a player line through three goblins takes the chieftain below 50%; a Protection aura for its kin", async () => {
+    const monster = async (i: number) => (await party.monsters()).core.monsters[i];
+    // Frost Bolts (Cold: the chieftain resists only Piercing) bring it close to its threshold
+    // without crossing it, then the warrior's Bleeding Cleave crosses it.
+    for (let i = 0; i < 30; i++) {
+      const chief = await monster(C_CHIEF);
+      if (chief.hp * 100 < 75 * chief.hpMax) break;
+      await party.skipTo(MAGE);
+      const pl = await party.part(MAGE);
+      if (pl.cooldowns[FROST_BOLT] > 0) {
+        await party.endTurn(party.players[MAGE].wallet, MAGE);
+        continue;
+      }
+      await party.act(MAGE, party.players[MAGE].wallet, FROST_BOLT, C_CHIEF);
+      const done = await party.consumeWhere(MAGE, (r) => r.damage > 0 && (chief.hp - r.damage) * 100 >= 55 * chief.hpMax);
+      if (!done) await party.consume(MAGE, MISS);
+      await party.endTurn(party.players[MAGE].wallet, MAGE);
+    }
+    for (let i = 0; i < 30; i++) {
+      await party.skipTo(WARRIOR);
+      const pl = await party.part(WARRIOR);
+      if (pl.cooldowns[BLEEDING_CLEAVE] > 0) {
+        await party.endTurn(party.players[WARRIOR].wallet, WARRIOR);
+        continue;
+      }
+      await party.act(WARRIOR, party.players[WARRIOR].wallet, BLEEDING_CLEAVE, C_CHIEF);
+      const warriorHp = (await monster(C_WARRIOR)).hp;
+      const found = await party
+        .consumeEventsWhere(WARRIOR, (ev) => {
+          const hits = eventsNamed(ev, "hitResolved");
+          return (
+            eventsNamed(ev, "monsterReactiveTriggered").length > 0 &&
+            hits.length === 3 &&
+            hits[1].result.damage > 0 &&
+            hits[1].result.damage < warriorHp &&
+            eventsNamed(ev, "monsterKilled").length === 0
+          );
+        })
+        .catch(() => null);
+      if (!found) {
+        await party.consume(WARRIOR, MISS);
+        await party.endTurn(party.players[WARRIOR].wallet, WARRIOR);
+        continue;
+      }
+      console.log(`CU consume_randomness, a player line on 3 goblins + Battle Cry + Leader: ${await unitsOf(found.sig)}`);
+      const hits = eventsNamed(found.events, "hitResolved");
+      assert.deepEqual(
+        hits.map((h) => h.target),
+        [C_CHIEF, C_WARRIOR, C_SHAMAN].map((x) => MONSTER_BASE + x),
+        "in line order",
+      );
+      const r = eventsNamed(found.events, "monsterReactiveTriggered")[0];
+      assert.deepEqual([r.bearer, r.skillSlot, r.target], [C_CHIEF, M_REACTIVE, MONSTER_BASE + C_CHIEF]);
+      assert.ok(r.trigger.hpBelow !== undefined && r.reaction.aura !== undefined);
+      const changed = eventsNamed(found.events, "monsterAuraChanged")[0];
+      assert.deepEqual([changed.bearer, changed.auraSlot, changed.kinOnly], [C_CHIEF, 1, true]);
+      assert.ok(changed.aura.kind.protection !== undefined && !changed.aura.passive && changed.aura.radius === 2);
+      const m = await party.monsters();
+      assert.ok(m.auras[C_CHIEF][1].aura.turns > 0 && m.auras[C_CHIEF][0].aura.turns === 255);
+      const chief = m.core.monsters[C_CHIEF];
+      assert.ok(chief.hp * 100 < 50 * chief.hpMax);
+      return;
+    }
+    assert.fail("Battle Cry never triggered");
+  });
+
+  it("the shaman heals and hastes a goblin; a wolf (another kin) and a player cannot take them", async () => {
+    const [SPARK, MENDING, QUICKEN] = [0, 1, 2];
+    await party.skipTo(MONSTER_BASE + C_SHAMAN);
+    const before = (await party.monsters()).core.monsters[C_WARRIOR];
+    assert.ok(before.hp < before.hpMax, "the cleave wounded the goblin warrior");
+    // Same kin only: a wolf is another kin.
+    await rejects(party.monsterAct(party.dm, C_SHAMAN, C_WOLF0, null, skillAction(MENDING), WARRIOR), "NotSameKin");
+    // The callback of a heal on a monster takes the lowest living player's accounts.
+    await rejects(party.monsterAct(party.dm, C_SHAMAN, C_WARRIOR, null, skillAction(MENDING), MAGE), "InvalidPendingAccounts");
+    // A damage skill takes a player: monster index 5 is no player slot.
+    await rejects(party.monsterAct(party.dm, C_SHAMAN, C_WARRIOR, null, skillAction(SPARK), WARRIOR), "InvalidTarget");
+    await rejects(party.monsterAct(party.dm, C_SHAMAN, 9, null, skillAction(MENDING), WARRIOR), "InvalidAllyTarget");
+    await party.monsterAct(party.dm, C_SHAMAN, C_WARRIOR, null, skillAction(MENDING), WARRIOR);
+    const sig = await party.consume(WARRIOR, CRIT);
+    console.log(`CU consume_randomness, the shaman's Mending on a goblin: ${await unitsOf(sig)}`);
+    const fx = await eventOf(sig, "effectResolved");
+    assert.deepEqual([fx.caster, fx.target, fx.skillSlot], [MONSTER_BASE + C_SHAMAN, MONSTER_BASE + C_WARRIOR, MENDING]);
+    assert.ok(fx.effect.heal !== undefined);
+    const after = (await party.monsters()).core.monsters[C_WARRIOR];
+    assert.ok(after.hp > before.hp && after.hp <= after.hpMax && fx.hp === after.hp, "healed, up to its maximum");
+    await party.endTurn(party.dm, null);
+
+    // Next own turn: Quicken on the warrior (Mending may still be on cooldown).
+    await party.skipTo(MONSTER_BASE + C_SHAMAN);
+    const cd = (await party.monsters()).skillCooldowns[C_SHAMAN];
+    if (cd[MENDING] > 0) await rejects(party.monsterAct(party.dm, C_SHAMAN, C_WARRIOR, null, skillAction(MENDING), WARRIOR), "SkillOnCooldown");
+    await party.monsterAct(party.dm, C_SHAMAN, C_WARRIOR, null, skillAction(QUICKEN), WARRIOR);
+    const hasted = await party.consume(WARRIOR, CRIT);
+    const fx2 = await eventOf(hasted, "effectResolved");
+    assert.ok(fx2.effect.haste !== undefined && fx2.applied.added !== undefined);
+    const mods = (await party.monsters()).mods[C_WARRIOR];
+    assert.ok(mods.some((x: any) => x.turns > 0 && x.kind.haste !== undefined), "Haste on the goblin warrior");
+    await party.endTurn(party.dm, null);
+  });
+});
+
+describe("deadroll_session: a monster line puts several players down; start_turn finalizes them (patch 6)", { skip: SKIP_PARTY }, () => {
+  // Mages on the entrance cell: the chieftain's Spin Strike (a melee line, 1 cell) from the cell
+  // next to them hits them all.
+  const SPIN_STRIKE = 1;
+
+  /**
+   * Chieftain turns until one Spin Strike puts exactly `want` players down (natural attacks and
+   * strikes that put nobody down in between wear them down). Returns the callback's signature.
+   */
+  async function lineDown(party: Party, want: number) {
+    for (let i = 0; i < 120; i++) {
+      await party.skipTo(MONSTER_BASE + C_CHIEF, 60);
+      const s = await party.state();
+      const cd = (await party.monsters()).skillCooldowns[C_CHIEF];
+      const target = party.players.findIndex((_, x) => s.aliveMask & (1 << x));
+      const action = cd[SPIN_STRIKE] === 0 ? skillAction(SPIN_STRIKE) : 0;
+      await party.monsterAct(party.dm, C_CHIEF, target, null, action);
+      let pick: Buffer | null = null;
+      let none: Buffer | null = null;
+      for (let k = 0; k < (action ? 160 : 30) && !pick; k++) {
+        const seed = nextSeed();
+        const ev = await party.simulateConsume(target, seed);
+        if (!ev) continue;
+        const down = eventsNamed(ev, "playerDied").length;
+        if (action && down === want) pick = seed;
+        else if (down === 0 && !none) none = seed;
+      }
+      if (!pick) {
+        await party.consume(target, none ?? MISS);
+        await party.endTurn(party.dm, null);
+        continue;
+      }
+      return party.consume(target, pick);
+    }
+    return assert.fail(`no Spin Strike put ${want} players down`);
+  }
+
+  /** After the callback: down at once, alive on the character account, nothing else goes. */
+  async function assertPending(party: Party, sig: string, want: number) {
+    const events = await eventsOf(sig);
+    const hits = eventsNamed(events, "hitResolved");
+    assert.ok(hits.length >= want && hits.every((h) => h.attacker === MONSTER_BASE + C_CHIEF));
+    const down = eventsNamed(events, "playerDied").map((d) => d.slot);
+    assert.equal(down.length, want);
+    assert.equal(eventsNamed(events, "characterDied").length, 0, "no mark_dead in the callback");
+    const s = await party.state();
+    for (const slot of down) {
+      assert.equal(s.aliveMask & (1 << slot), 0, "out of the battle at once");
+      assert.ok(s.pendingDeaths & (1 << slot), "queued");
+      assert.ok((await party.character(slot)).core.alive, "not finalized yet");
+    }
+    return down;
+  }
+
+  it("3 players, 2 down: nothing but start_turn goes until the deaths are final", async () => {
+    const party = await Party.create(["mage", "mage", "mage"], { roster: CAMP });
+    await party.startAll();
+    const sig = await lineDown(party, 2);
+    console.log(`CU consume_randomness, a monster line on 3 players, 2 down: ${await unitsOf(sig)}`);
+    const down = await assertPending(party, sig, 2);
+    const living = [0, 1, 2].find((x) => !down.includes(x))!;
+    const pl = party.players[living];
+    // Every action waits for the queue.
+    await rejects(party.monsterAct(party.dm, C_CHIEF, living), "DeathsPending");
+    await rejects(party.monsterMove(party.dm, C_CHIEF, [S]), "DeathsPending");
+    await rejects(party.endTurn(party.dm, null), "DeathsPending");
+    await rejects(party.act(living, pl.wallet, 0, C_CHIEF), "DeathsPending");
+    await rejects(party.move(living, pl.wallet, [E]), "DeathsPending");
+    await rejects(party.flee(living, pl.wallet), "DeathsPending");
+    // Missing, swapped or foreign accounts are refused; the queue stays.
+    const queue = deathAccounts(await party.state());
+    await rejects(party.startTurn(null, {}, queue.slice(0, 3)), "InvalidDeathAccounts");
+    const swapped = [...queue.slice(3), ...queue.slice(0, 3)];
+    await rejects(party.startTurn(null, {}, swapped), "InvalidDeathAccounts");
+    const foreign = [...queue];
+    foreign[2] = { ...foreign[2], pubkey: pda([Buffer.from("bag"), pl.character.toBuffer()], CHARACTER) };
+    await rejects(party.startTurn(null, {}, foreign), "InvalidDeathAccounts");
+    // Anyone sends start_turn: the turn already started (the chieftain acted), so it only
+    // finalizes; the chieftain's turn goes on.
+    const fin = await party.startTurn(null);
+    console.log(`CU start_turn finalizing 2 deaths: ${await unitsOf(fin)}`);
+    const events = await eventsOf(fin);
+    assert.deepEqual(eventsNamed(events, "deathFinalized").map((d) => d.slot), down);
+    assert.equal(eventsNamed(events, "turnTicked").length, 0, "no new turn");
+    const s = await party.state();
+    assert.equal(s.pendingDeaths, 0);
+    for (const slot of down) assert.ok(!(await party.character(slot)).core.alive, "tombstone through character.mark_dead");
+    assert.equal(s.core.turnOrder[s.core.turnIndex], MONSTER_BASE + C_CHIEF);
+    // Now the turn ends as usual; the down players get no turn and can't be targeted.
+    await party.endTurn(party.dm, null);
+    let targeted = false;
+    const order = (await party.state()).core.turnOrder;
+    for (let i = 0; i < 60 && !targeted; i++) {
+      const st = await party.state();
+      const unit = st.core.turnOrder[st.core.turnIndex];
+      assert.ok(!down.includes(unit), "a down player has no turn");
+      if (st.startedSeq !== st.turnSeq) await party.begin();
+      else if (unit < MONSTER_BASE) await party.endTurn(party.players[unit].wallet, unit);
+      else {
+        if (unit === MONSTER_BASE + C_CHIEF && !targeted) {
+          await rejects(party.monsterAct(party.dm, C_CHIEF, down[0]), "InvalidTarget");
+          targeted = true;
+        }
+        await party.endTurn(party.dm, null);
+      }
+    }
+    assert.ok(order.length > 0 && targeted);
+  });
+
+  it("4 players, 3 down at once; start_turn finalizes all three; a wipe is finalized by claim_rewards", async () => {
+    const party = await Party.create(["mage", "mage", "mage", "mage"], { roster: CAMP });
+    await party.startAll();
+    const sig = await lineDown(party, 3);
+    console.log(`CU consume_randomness, a monster line on 4 players, 3 down: ${await unitsOf(sig)}`);
+    const down = await assertPending(party, sig, 3);
+    const fin = await party.startTurn(null);
+    console.log(`CU start_turn finalizing 3 deaths: ${await unitsOf(fin)}`);
+    assert.equal(eventsNamed(await eventsOf(fin), "deathFinalized").length, 3);
+    for (const slot of down) assert.ok(!(await party.character(slot)).core.alive);
+    assert.equal((await party.state()).pendingDeaths, 0);
+    await party.endTurn(party.dm, null);
+    // The last one: down in a callback, the party wiped; the claims finalize it first.
+    const last = [0, 1, 2, 3].find((x) => !down.includes(x))!;
+    for (let i = 0; i < 60; i++) {
+      await party.skipTo(MONSTER_BASE + C_CHIEF, 60);
+      await party.monsterAct(party.dm, C_CHIEF, last);
+      // Any landing hit; once its HP is low enough, one kills it.
+      const hurt = (ev: any[]) => eventsNamed(ev, "hitResolved").some((h) => h.result.damage > 0);
+      const { events: got } = await party.consumeEventsWhere(last, (ev) => hurt(ev));
+      if (eventsNamed(got, "playerDied").length === 0) {
+        await party.endTurn(party.dm, null);
+        continue;
+      }
+      const s = await party.state();
+      assert.ok(s.core.status.wiped !== undefined && s.pendingDeaths === 1 << last);
+      assert.ok((await party.character(last)).core.alive, "not finalized yet");
+      await rejects(party.startTurn(null), "NotActive");
+      const claim = await party.claimRewards(last);
+      console.log(`CU claim_rewards finalizing 1 death: ${await unitsOf(claim)}`);
+      assert.equal(eventsNamed(await eventsOf(claim), "deathFinalized")[0].slot, last);
+      assert.ok(!(await party.character(last)).core.alive);
+      assert.equal((await party.state()).pendingDeaths, 0);
+      // Nothing left for claim_escrow to finalize.
+      const escrow = await party.claimEscrow(party.dm);
+      assert.equal(eventsNamed(await eventsOf(escrow), "deathFinalized").length, 0);
+      return;
+    }
+    assert.fail("the last mage never went down");
   });
 });

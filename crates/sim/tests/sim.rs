@@ -9,7 +9,7 @@ use deadroll_sim::{
     Progress, RandomBuilds, Settings,
 };
 use deadroll_skillcheck::{Category, Effect, Purpose, Target, Trigger};
-use deadroll_types::{Aspect, Class, Form, Source};
+use deadroll_types::{Aspect, Class, Form, RangeTag, Source, TimeTag};
 
 fn shipped() -> Presets {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tools/balance/presets");
@@ -32,7 +32,7 @@ fn shipped_presets_load_and_resolve() {
         assert!(!f[0].skills.is_empty(), "{id}");
     }
     for id in p.ids(Kind::Encounters) {
-        let (f, issues) = resolve_fight(&p, &id);
+        let (f, issues) = resolve_fight(&p, &id, &BalanceConfig::DEFAULT);
         assert!(issues.errors.is_empty(), "{id}: {:?}", issues.errors);
         assert!(f.is_some());
     }
@@ -44,7 +44,7 @@ fn a_fight_is_deterministic_and_ends() {
     let cfg = BalanceConfig::DEFAULT;
     let (team, _) = resolve_party(&p, &party(), &cfg);
     for enc in ["wolves", "goblins", "chieftain", "demo_map"] {
-        let (f, _) = resolve_fight(&p, enc);
+        let (f, _) = resolve_fight(&p, enc, &BalanceConfig::DEFAULT);
         let f = f.unwrap();
         let settings = Settings::default();
         for seed in 0..40 {
@@ -58,7 +58,7 @@ fn a_fight_is_deterministic_and_ends() {
         }
     }
     // A round cap of 1 against the boss pack cannot be won in time.
-    let (f, _) = resolve_fight(&p, "wolves");
+    let (f, _) = resolve_fight(&p, "wolves", &BalanceConfig::DEFAULT);
     let short = Settings {
         max_rounds: 1,
         ..Settings::default()
@@ -72,7 +72,7 @@ fn batches_do_not_depend_on_threads_and_follow_the_config() {
     let p = shipped();
     let cfg = BalanceConfig::DEFAULT;
     let (team, _) = resolve_party(&p, &party(), &cfg);
-    let (f, _) = resolve_fight(&p, "wolves");
+    let (f, _) = resolve_fight(&p, "wolves", &BalanceConfig::DEFAULT);
     let f = f.unwrap();
     let settings = Settings::default();
     let run = |cfg: &BalanceConfig| {
@@ -105,7 +105,7 @@ fn cancel_stops_a_batch() {
     let p = shipped();
     let cfg = BalanceConfig::DEFAULT;
     let (team, _) = resolve_party(&p, &party(), &cfg);
-    let (f, _) = resolve_fight(&p, "wolves");
+    let (f, _) = resolve_fight(&p, "wolves", &BalanceConfig::DEFAULT);
     let progress = Progress::default();
     progress
         .cancel
@@ -127,7 +127,7 @@ fn random_builds_are_valid_and_ranked() {
     let p = shipped();
     let cfg = BalanceConfig::DEFAULT;
     let (team, _) = resolve_party(&p, &party(), &cfg);
-    let (f, _) = resolve_fight(&p, "goblins");
+    let (f, _) = resolve_fight(&p, "goblins", &BalanceConfig::DEFAULT);
     let rb = RandomBuilds {
         count: 60,
         fights_each: 6,
@@ -170,6 +170,10 @@ fn skill(source: Source, purpose: Purpose, effect: Effect, aspects: Vec<Aspect>)
         effect,
         trigger: Trigger::None,
         aura_radius: 0,
+        range: RangeTag::Ranged,
+        timing: TimeTag::Instant,
+        hp_below_pct: 0,
+        description: String::new(),
     }
 }
 
@@ -246,6 +250,8 @@ fn presets_save_and_load_by_file() {
                 monster: "wolf".into(),
                 level: 3,
                 count: 5,
+                elite: true,
+                skills: Some(0b1110),
             }],
             arena: Arena::default(),
         },
@@ -291,13 +297,12 @@ fn config_json_round_trips_and_fills_gaps_from_defaults() {
         cfg
     );
     // Missing groups, missing keys and short arrays keep the defaults.
-    let partial =
-        r#"{ "combat": { "armor_k": 50, "state_turns": [9] }, "players": { "act_ap": 3 } }"#;
+    let partial = r#"{ "combat": { "armor_k": 50, "state_turns": [9] }, "players": { "basic_attack_ap": 3 } }"#;
     let loaded = config_io::from_json(partial).unwrap();
     let mut expected = BalanceConfig::DEFAULT;
     expected.combat.armor_k = 50;
     expected.combat.state_turns[0] = 9;
-    expected.players.act_ap = 3;
+    expected.players.basic_attack_ap = 3;
     assert_eq!(loaded, expected);
     assert!(config_io::from_json("nope").is_err());
 }
@@ -378,7 +383,7 @@ fn hero_equipment_is_json_by_name_and_checked() {
 fn armor_changes_the_fights() {
     let p = shipped();
     let cfg = BalanceConfig::DEFAULT;
-    let (f, _) = resolve_fight(&p, "chieftain");
+    let (f, _) = resolve_fight(&p, "chieftain", &BalanceConfig::DEFAULT);
     let f = f.unwrap();
     let run = |hero: &str| {
         let (team, issues) = resolve_party(&p, &[hero.to_string()], &cfg);

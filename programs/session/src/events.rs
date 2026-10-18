@@ -6,11 +6,11 @@ use deadroll_character::state::{MAP_SKILLS, SKILLS_MAX};
 use deadroll_combat::MODS_MAX;
 use deadroll_types::{ActiveState, Cell, SessionStatus, StateKind, STATES_MAX, TURN_ORDER_MAX};
 
-use deadroll_skillcheck::Effect;
+use deadroll_skillcheck::{Effect, Trigger};
 
 use crate::{
     hit_event::{Applied, EffectRollData, HitItemsData, HitResultData},
-    state::{AccuracyBuffData, TimedModData},
+    state::{AccuracyBuffData, AuraData, TimedModData},
 };
 
 #[event]
@@ -73,7 +73,7 @@ pub struct TurnTicked {
     /// The unit's states after the tick.
     pub states: [ActiveState; STATES_MAX],
     /// Cooldowns after the tick, own turn starts until usable: a player's by `SkillSet` slot,
-    /// a monster's in the first `MONSTER_SKILLS_MAX` entries.
+    /// a monster's by skill slot in the first `MONSTER_SLOTS` entries (patch 6).
     pub cooldowns: [u8; SKILLS_MAX],
     /// Patch 4: the part of `dot_damage` from a Freeze that thawed (Burning Frost).
     pub thaw_damage: u32,
@@ -214,7 +214,9 @@ pub struct MonsterKilled {
     pub boss: bool,
 }
 
-/// A player's character reached 0 HP; `character.mark_dead` ran in the same callback.
+/// A player reached 0 HP: out of the battle at once (no turn, no target). Since patch 6 the
+/// tombstone (`character.mark_dead`) follows in `start_turn` or a claim, `DeathFinalized`; a death
+/// from over-time damage in `start_turn` is final in the same instruction.
 #[event]
 pub struct PlayerDied {
     pub session: Pubkey,
@@ -302,4 +304,90 @@ pub struct CellBurned {
     pub applied: Applied,
     /// The unit's states after.
     pub states: [ActiveState; STATES_MAX],
+}
+
+/// What a triggered reactive skill did (`deadroll_rules::reactive::Reaction`).
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReactionKind {
+    /// A counterattack: its `HitResolved` follows (one per unit of a line).
+    Strike,
+    /// A debuff on the enemy: its `EffectResolved` follows.
+    Debuff,
+    /// A buff on the bearer or an ally: its `EffectResolved` follows.
+    Buff,
+    /// A temporary aura around the bearer: its `EffectResolved` (the strength roll) and
+    /// `AuraChanged` follow.
+    Aura,
+}
+
+/// A reactive skill triggered by itself (docs/SKILL_BUILDER.md, section 3.2), on the dice of
+/// the action that caused it (`action_counter`, after that action's own rolls).
+#[event]
+pub struct ReactiveTriggered {
+    pub session: Pubkey,
+    pub action_counter: u32,
+    /// Player slot of the bearer.
+    pub bearer: u8,
+    /// The reactive skill's `SkillSet` index.
+    pub skill_slot: u8,
+    pub trigger: Trigger,
+    pub reaction: ReactionKind,
+    /// Turn-order id the reaction goes to: the enemy, the buffed player, or the bearer for an
+    /// aura.
+    pub target: u8,
+    /// Own turn starts until it can trigger again.
+    pub cooldown_left: u8,
+}
+
+/// An aura started, or ended (`aura.turns == 0`): docs/SKILL_BUILDER.md, section 3.5. Passive
+/// auras start at `set_ready(true)` and end at `set_ready(false)` or the bearer's death.
+#[event]
+pub struct AuraChanged {
+    pub session: Pubkey,
+    /// Player slot of the bearer.
+    pub bearer: u8,
+    /// `0` the passive skill's aura, `1` the reactive skill's.
+    pub aura_slot: u8,
+    pub aura: AuraData,
+}
+
+/// Patch 6: a monster's reactive skill triggered by itself (docs/SKILL_BUILDER.md 3.2,
+/// docs/BESTIARY.md 3.2), on the dice of the action that caused it, after the players' reactions.
+#[event]
+pub struct MonsterReactiveTriggered {
+    pub session: Pubkey,
+    pub action_counter: u32,
+    /// Monster index of the bearer.
+    pub bearer: u8,
+    /// The reactive skill's monster slot (`deadroll_rules::monster::REACTIVE_SLOT`).
+    pub skill_slot: u8,
+    pub trigger: Trigger,
+    pub reaction: ReactionKind,
+    /// Turn-order id the reaction goes to: the player, the buffed monster, or the bearer for an
+    /// aura.
+    pub target: u8,
+    pub cooldown_left: u8,
+}
+
+/// Patch 6: a monster's aura started, or ended (`aura.turns == 0`). A passive one starts at
+/// `open_session` and ends with the bearer's death.
+#[event]
+pub struct MonsterAuraChanged {
+    pub session: Pubkey,
+    /// Monster index of the bearer.
+    pub bearer: u8,
+    /// `0` the passive skill's aura, `1` the reactive skill's.
+    pub aura_slot: u8,
+    pub aura: AuraData,
+    /// On allies of the bearer's kin only.
+    pub kin_only: bool,
+}
+
+/// Patch 6: the death of a player who went down in a VRF callback is final: `character.mark_dead`
+/// ran (the tombstone; skills, bag and soulbound items burn). `PlayerDied` came at the fall.
+#[event]
+pub struct DeathFinalized {
+    pub session: Pubkey,
+    pub character: Pubkey,
+    pub slot: u8,
 }

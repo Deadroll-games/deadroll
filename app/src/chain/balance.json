@@ -238,7 +238,8 @@
       2,
       2
     ],
-    "rider_chance_pct": 30
+    "rider_chance_pct": 30,
+    "passive_point_bp": 5000
   },
   "skills": {
     "shares_bp": [
@@ -262,7 +263,14 @@
     "effect_counter_bp": 2500,
     "third_aspect_counter_bp": 2000,
     "active_cooldown": 1,
-    "reactive_cooldown": 2
+    "reactive_cooldown": 2,
+    "ap_base": 2,
+    "ap_line": 1,
+    "ap_third_aspect": 1,
+    "ap_effect": 0,
+    "ap_hard_control": 1,
+    "hp_below_min_pct": 10,
+    "hp_below_max_pct": 90
   },
   "players": {
     "ap_base": [
@@ -281,9 +289,10 @@
     "ap_min": 1,
     "ap_max": 12,
     "initiative_div": 2,
-    "act_ap": 2,
-    "strike_range": 1,
-    "projectile_range": 6,
+    "basic_attack_ap": 2,
+    "melee_range": 1,
+    "ranged_range": 6,
+    "nearby_ally_cells": 3,
     "skill_state_chance_pct": 20,
     "basic_state_chance_pct": 10,
     "class_increase_by_tier_bp": [
@@ -492,7 +501,26 @@
     "attack_per_level_bp": 10000,
     "ap_min": 1,
     "ap_max": 12,
-    "resist_bp": 5000
+    "resist_bp": 5000,
+    "elite_hp_bp": 5000,
+    "slots": [
+      [
+        3,
+        0,
+        1
+      ],
+      [
+        4,
+        0,
+        1
+      ],
+      [
+        5,
+        1,
+        1
+      ]
+    ],
+    "ai_heal_below_pct": 60
   },
   "items": {
     "bases": {
@@ -518,7 +546,9 @@
         "crit_pct": 0,
         "speed": 0,
         "speed_counter_bp": 0,
-        "initiative": 0
+        "initiative": 0,
+        "basic_range": "Melee",
+        "basic_form": "Strike"
       },
       "Staff": {
         "slot": "MainHand",
@@ -542,7 +572,9 @@
         "crit_pct": 0,
         "speed": 0,
         "speed_counter_bp": 0,
-        "initiative": 0
+        "initiative": 0,
+        "basic_range": "Ranged",
+        "basic_form": "Projectile"
       },
       "Wand": {
         "slot": "MainHand",
@@ -566,7 +598,9 @@
         "crit_pct": 0,
         "speed": 0,
         "speed_counter_bp": 0,
-        "initiative": 0
+        "initiative": 0,
+        "basic_range": "Ranged",
+        "basic_form": "Projectile"
       },
       "LeatherArmor": {
         "slot": "Body",
@@ -590,7 +624,9 @@
         "crit_pct": 0,
         "speed": 0,
         "speed_counter_bp": 0,
-        "initiative": 0
+        "initiative": 0,
+        "basic_range": "Melee",
+        "basic_form": "Strike"
       },
       "Robe": {
         "slot": "Body",
@@ -614,7 +650,9 @@
         "crit_pct": 0,
         "speed": 0,
         "speed_counter_bp": 0,
-        "initiative": 0
+        "initiative": 0,
+        "basic_range": "Melee",
+        "basic_form": "Strike"
       },
       "LightLeatherArmor": {
         "slot": "Body",
@@ -638,7 +676,9 @@
         "crit_pct": 0,
         "speed": 0,
         "speed_counter_bp": 0,
-        "initiative": 0
+        "initiative": 0,
+        "basic_range": "Melee",
+        "basic_form": "Strike"
       }
     },
     "starter_kits": {

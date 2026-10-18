@@ -5,6 +5,7 @@ use crate::{
     cpi_out::{self, SessionSigner},
     errors::SessionError,
     events::EscrowClaimed,
+    outcomes,
     state::{Escrow, GameSession},
 };
 
@@ -13,7 +14,7 @@ pub struct ClaimEscrow<'info> {
     /// DM main wallet only: this moves lamports (docs/GAME_COMMISSIONS.md, section 4).
     #[account(mut)]
     pub dm: Signer<'info>,
-    #[account(seeds = [seeds::SESSION, session.core.map.as_ref()], bump = session.core.bump)]
+    #[account(mut, seeds = [seeds::SESSION, session.core.map.as_ref()], bump = session.core.bump)]
     pub session: Box<Account<'info, GameSession>>,
     #[account(
         mut,
@@ -33,6 +34,9 @@ pub struct ClaimEscrow<'info> {
     /// CHECK: the map program.
     #[account(address = deadroll_map::ID)]
     pub map_program: UncheckedAccount<'info>,
+    /// CHECK: the character program (patch 6): the pending deaths are finalized first.
+    #[account(address = deadroll_character::ID)]
+    pub character_program: UncheckedAccount<'info>,
 }
 
 /// The DM takes the party price once the party ended, whatever the outcome (the DM ran the
@@ -40,9 +44,9 @@ pub struct ClaimEscrow<'info> {
 ///
 /// TODO(P1, L6.5): only after the final audit (every declared secret revealed).
 /// TODO(post-demo): `Abandoned` and unfilled parties refund the players instead.
-pub fn handler(ctx: Context<ClaimEscrow>) -> Result<()> {
+pub fn handler<'info>(ctx: Context<'info, ClaimEscrow<'info>>) -> Result<()> {
     let accounts = ctx.accounts;
-    let session = &accounts.session;
+    let session = &mut accounts.session;
     require_keys_eq!(session.core.dm, accounts.dm.key(), SessionError::NotDm);
     require!(
         matches!(
@@ -54,15 +58,16 @@ pub fn handler(ctx: Context<ClaimEscrow>) -> Result<()> {
     let escrow = &mut accounts.escrow;
     require!(!escrow.claimed, SessionError::AlreadyClaimed);
     escrow.claimed = true;
-    cpi_out::map::set_status(
-        &SessionSigner {
-            session_authority: &accounts.session_authority,
-            config: &accounts.config,
-            bump: ctx.bumps.session_authority,
-        },
-        &accounts.map,
-        MapStatus::Finished,
-    )?;
+    let signer = SessionSigner {
+        session_authority: &accounts.session_authority,
+        config: &accounts.config,
+        bump: ctx.bumps.session_authority,
+    };
+    // Patch 6: a party that ended in a callback may still have deaths to finalize; they come
+    // first (`remaining_accounts`: a character, skill set and bag per queued slot).
+    let key = session.key();
+    outcomes::finalize_deaths(session, key, &signer, ctx.remaining_accounts)?;
+    cpi_out::map::set_status(&signer, &accounts.map, MapStatus::Finished)?;
     // Lamports move last, after the CPI: escrow is owned by this program, the DM is a signer.
     let amount = escrow.collected;
     escrow.sub_lamports(amount)?;

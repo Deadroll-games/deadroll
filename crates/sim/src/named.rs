@@ -5,7 +5,9 @@ use std::fmt::Debug;
 use deadroll_combat::ModKind;
 use deadroll_rules::items::Equipment;
 use deadroll_skillcheck::{Category, Effect, Purpose, Target, Trigger};
-use deadroll_types::{Aspect, Class, EquipSlot, Form, ItemBase, Race, Source, Stat, StateKind};
+use deadroll_types::{
+    Aspect, Class, EquipSlot, Form, ItemBase, Race, RangeTag, Source, Stat, StateKind, TimeTag,
+};
 use serde::{de::Error as _, Deserialize, Deserializer, Serializer};
 
 /// An enum with every variant listed in `ALL`; the name is the `Debug` text.
@@ -37,7 +39,7 @@ macro_rules! named {
 
 named!(
     Race, Class, Aspect, Source, Form, Stat, StateKind, Category, Purpose, Target, Effect, Trigger,
-    EquipSlot, ItemBase
+    EquipSlot, ItemBase, RangeTag, TimeTag
 );
 
 impl Named for ModKind {

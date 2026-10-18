@@ -10,7 +10,7 @@ import type { GridUnit } from "../components/grid/types";
 import { PartyLobby } from "../components/forms/PartyLobby";
 import type { LobbyPlayer } from "../components/forms/types";
 import { freezeTombstoneInstruction } from "../chain/character";
-import { DEMO_MAP, MOCK_CHARACTERS, MOCK_HITS, mockDefense } from "../chain/mock";
+import { DEMO_MAP, MOCK_CHARACTERS, MOCK_HITS, mockRecord } from "../chain/mock";
 import { useCombat, type CombatWasm } from "../chain/combatWasm";
 import { bestiaryName } from "../chain/names";
 import { useAutoFreezeTombstone } from "../chain/useAutoFreezeTombstone";
@@ -58,7 +58,7 @@ function mockStats(units: GridUnit[], active: number, combat: CombatWasm | null)
           ? playerDefense(MOCK_CHARACTERS[u.id]?.class ?? Class.Warrior, [10, 7, 5, 8])
           : (() => {
               const spawn = DEMO_MAP.spawns[u.id - 4];
-              return spawn && combat ? monsterDefense(combat, spawn.bestiaryId, spawn.level, mockDefense(spawn.bestiaryId)) : null;
+              return spawn && combat ? monsterDefense(combat, mockRecord(spawn.bestiaryId), spawn.level, spawn.flags) : null;
             })();
       if (!profile) return [];
       const apBase = u.kind === "player" ? 4 : 6;

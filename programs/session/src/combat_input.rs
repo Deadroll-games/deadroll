@@ -2,58 +2,76 @@
 //! A player is a `HeroStats`: the character with what it wears (`Participation::hero`).
 //!
 //! The rules live in `deadroll_rules::input` (shared with `tools/balance`); these wrappers feed
-//! them the character program's `SkillRecord` and the program's numbers (`rules::BALANCE`).
-use deadroll_character::state::SkillRecord;
+//! them a skill as the rules see it (`SkillStats`, the participation's map skill snapshot) and
+//! the program's numbers (`rules::BALANCE`).
+use deadroll_character::state::{SkillExtra, SkillRecord};
 use deadroll_combat::{AccuracyBuff, Applied, Attacker, Defender, States, SupportInput, TimedMods};
-use deadroll_rules::{input, HeroStats, MonsterDefense};
-use deadroll_types::{ActiveState, Aspect, Form, Monster, STATES_MAX};
+use deadroll_rules::{input, items, HeroStats, MonsterProfile};
+use deadroll_types::{ActiveState, Aspect, Form, Monster, RangeTag, EQUIP_SLOTS, STATES_MAX};
 
-pub use deadroll_rules::input::{effect_action, heal, take_damage, EffectAction, Side, SkillUse};
+pub use deadroll_rules::input::{
+    effect_action, heal, take_damage, EffectAction, Side, SkillStats, SkillUse,
+};
 
-use crate::rules::{monster_profile, BALANCE};
+use crate::errors::SessionError;
+use crate::rules::BALANCE;
 
-/// The rules' view of a stored skill.
-pub fn skill_stats(skill: &SkillRecord) -> input::SkillStats {
-    input::SkillStats {
+/// The rules' view of a stored skill: its `SkillSet` record and its `SkillExtras` part.
+pub fn skill_stats(skill: &SkillRecord, extra: &SkillExtra) -> Result<SkillStats, SessionError> {
+    Ok(SkillStats {
         blocks: skill.blocks,
         shares_bp: skill.shares_bp,
         power_bp: skill.power_bp,
         cooldown: skill.cooldown,
-    }
+        ext: extra.ext().ok_or(SessionError::InvalidSkill)?,
+        ap_cost: extra.ap_cost,
+    })
 }
 
-pub fn skill_use(skill: &SkillRecord) -> SkillUse {
-    input::skill_use(&skill_stats(skill))
+pub fn skill_use(skill: &SkillStats) -> SkillUse {
+    input::skill_use(skill)
 }
 
 /// The side of `skill` (`None` = the weapon's basic attack).
-pub fn target_side(skill: Option<&SkillRecord>) -> Side {
-    input::target_side(skill.map(skill_stats).as_ref())
+pub fn target_side(skill: Option<&SkillStats>) -> Side {
+    input::target_side(skill)
 }
 
-/// Form of a player attack: the skill's, or a strike for the weapon's basic attack.
-pub fn player_form(skill: Option<&SkillRecord>) -> Form {
-    input::player_form(skill.map(skill_stats).as_ref())
+/// Form of a player attack: the skill's, or the weapon's basic attack's.
+pub fn player_form(h: &HeroStats, skill: Option<&SkillStats>) -> Form {
+    input::player_form(BALANCE, h, skill)
+}
+
+/// Range of a player action: the skill's, or the weapon's basic attack's.
+pub fn player_range(h: &HeroStats, skill: Option<&SkillStats>) -> RangeTag {
+    input::player_range(BALANCE, h, skill)
+}
+
+/// Action points of a player action: the skill's own, or the basic attack's.
+pub fn action_ap(skill: Option<&SkillStats>) -> u8 {
+    input::action_ap(BALANCE, skill)
+}
+
+/// Range of a player action from the participation's equipment snapshot (no character needed):
+/// the skill's range tag, or the weapon's basic attack.
+pub fn action_range(equipment: &[u8; EQUIP_SLOTS], skill: Option<&SkillStats>) -> RangeTag {
+    match skill {
+        Some(s) => s.ext.range,
+        None => items::basic_attack(&items::Equipment(*equipment), &BALANCE.items).0,
+    }
 }
 
 /// A player attacking with `skill` (`None` = the weapon's basic attack). `unit` is the
 /// turn-order id, written as the source of applied states. `mods`: the player's buffs and
-/// debuffs; `accuracy`: its resonance accuracy buff.
+/// debuffs (auras included); `accuracy`: its resonance accuracy buff.
 pub fn player_attacker(
     unit: u8,
     h: &HeroStats,
-    skill: Option<&SkillRecord>,
+    skill: Option<&SkillStats>,
     mods: &TimedMods,
     accuracy: &AccuracyBuff,
 ) -> Attacker {
-    input::player_attacker(
-        BALANCE,
-        unit,
-        h,
-        skill.map(skill_stats).as_ref(),
-        mods,
-        accuracy,
-    )
+    input::player_attacker(BALANCE, unit, h, skill, mods, accuracy)
 }
 
 /// A player as the target.
@@ -65,25 +83,20 @@ pub fn player_defender(
     input::player_defender(BALANCE, h, states, mods)
 }
 
-/// A monster attacking with its natural attack. `None` for an unknown bestiary id.
+/// A monster (its copied template at its level, `Monsters::profile`) attacking with its natural
+/// attack (`skill = None`) or a damage skill.
 pub fn monster_attacker(
     unit: u8,
-    m: &Monster,
-    defense: &MonsterDefense,
+    p: &MonsterProfile,
+    skill: Option<&SkillStats>,
     mods: &TimedMods,
-) -> Option<Attacker> {
-    let p = monster_profile(m.bestiary_id, m.level, defense)?;
-    Some(input::monster_attacker(BALANCE, unit, &p, mods))
+) -> Attacker {
+    input::monster_attacker(BALANCE, unit, p, skill, mods)
 }
 
-/// A monster as the target, with its registry defenses. `None` for an unknown bestiary id.
-pub fn monster_defender(
-    m: &Monster,
-    defense: &MonsterDefense,
-    mods: &TimedMods,
-) -> Option<Defender> {
-    let p = monster_profile(m.bestiary_id, m.level, defense)?;
-    Some(input::monster_defender(&p, &m.states, mods))
+/// A monster as the target, with its registry defenses.
+pub fn monster_defender(m: &Monster, p: &MonsterProfile, mods: &TimedMods) -> Defender {
+    input::monster_defender(p, &m.states, mods)
 }
 
 /// Strength range of `action` cast by `h` with a skill of `power_bp`: HP for a heal (from the
@@ -96,11 +109,11 @@ pub fn effect_range(h: &HeroStats, power_bp: u32, action: EffectAction) -> (u32,
 /// debuff (it rolls to land); `None` for a heal or buff on an ally.
 pub fn support_input(
     h: &HeroStats,
-    skill: &SkillRecord,
+    skill: &SkillStats,
     action: EffectAction,
     defense: Option<u32>,
 ) -> SupportInput {
-    input::support_input(BALANCE, h, &skill_stats(skill), action, defense)
+    input::support_input(BALANCE, h, skill, action, defense)
 }
 
 /// Lands `action` (not a heal) of strength `amount` on a unit: a modifier for its duration plus
@@ -131,12 +144,12 @@ pub fn land_effect(
 pub(crate) mod tests {
     use super::*;
     use crate::rules::{heal_range, hero_weapon, player_accuracy, starter_equipment};
+    use crate::state::test_support::ids;
     use deadroll_combat::{
         mod_turns, preview_range, resolve_hit, Balance, HitInput, Mod, ModFilter, ModKind, Outcome,
         SeededRoll, SupportBalance,
     };
-    use deadroll_mapcheck::roster::ids;
-    use deadroll_skillcheck::{derive, presets, SkillBlocks};
+    use deadroll_skillcheck::{derive, presets, SkillBlocks, SkillExt};
     use deadroll_skillcheck::{Category, Effect, Purpose};
     use deadroll_types::CharacterData;
     use deadroll_types::StateKind;
@@ -177,13 +190,15 @@ pub(crate) mod tests {
         HeroStats::new(c, 14).with_equipment(starter_equipment(c.class))
     }
 
-    fn record(blocks: SkillBlocks) -> SkillRecord {
+    /// A skill as the participation holds it (`set_ready` copies it from the character).
+    fn record(blocks: SkillBlocks) -> SkillStats {
         let d = derive(&blocks);
-        SkillRecord {
+        SkillStats {
             blocks,
             shares_bp: d.shares_bp,
             power_bp: d.power_bp,
-            ..SkillRecord::default()
+            ext: SkillExt::MELEE,
+            ..SkillStats::default()
         }
     }
 
@@ -224,10 +239,9 @@ pub(crate) mod tests {
                         ),
                         defender: monster_defender(
                             &monster(id),
-                            &crate::state::test_support::defense(id),
+                            &crate::state::test_support::profile(id),
                             &NONE,
-                        )
-                        .unwrap(),
+                        ),
                     });
                 }
             }
@@ -237,11 +251,10 @@ pub(crate) mod tests {
             out.push(HitInput {
                 attacker: monster_attacker(
                     4,
-                    &monster(id),
-                    &crate::state::test_support::defense(id),
+                    &crate::state::test_support::profile(id),
+                    None,
                     &NONE,
-                )
-                .unwrap(),
+                ),
                 defender: target,
             });
         }
@@ -275,10 +288,9 @@ pub(crate) mod tests {
                         attacker,
                         defender: monster_defender(
                             &monster(id),
-                            &crate::state::test_support::defense(id),
+                            &crate::state::test_support::profile(id),
                             &NONE,
-                        )
-                        .unwrap(),
+                        ),
                     };
                     let (lo, hi) = preview_range(&input, &Balance::DEFAULT);
                     assert!(lo >= 1 && hi >= lo, "{class:?} vs {id}: {lo}..{hi}");
@@ -318,7 +330,16 @@ pub(crate) mod tests {
             a.increased[0],
             Mod::new(ModFilter::Source(Source::Combat), 2_000)
         );
-        assert_eq!(player_form(None), Form::Strike);
+        assert_eq!(player_form(&kit(&c), None), Form::Strike);
+        // A sword strikes in melee; a staff and a wand shoot (docs/SKILL_BUILDER.md 3.1).
+        assert_eq!(player_range(&kit(&c), None), RangeTag::Melee);
+        let mage = character(Race::Human, Class::Mage, Aspect::Blunt);
+        assert_eq!(player_form(&kit(&mage), None), Form::Projectile);
+        assert_eq!(player_range(&kit(&mage), None), RangeTag::Ranged);
+        assert_eq!(
+            action_range(&starter_equipment(Class::Support).0, None),
+            RangeTag::Ranged
+        );
     }
 
     #[test]
@@ -334,13 +355,7 @@ pub(crate) mod tests {
         );
         assert_eq!(bare.armor, 20);
         for id in 0..=4 {
-            let a = monster_attacker(
-                4,
-                &monster(id),
-                &crate::state::test_support::defense(id),
-                &NONE,
-            )
-            .unwrap();
+            let a = monster_attacker(4, &crate::state::test_support::profile(id), None, &NONE);
             let (lo, hi) = preview_range(
                 &HitInput {
                     attacker: a,
@@ -351,22 +366,11 @@ pub(crate) mod tests {
             // The preview has no minimum-damage floor (resolve_hit does): only the top is >= 1.
             assert!(hi >= 1 && hi >= lo, "{id}: {lo}..{hi}");
         }
-        assert!(monster_attacker(
-            4,
-            &monster(9),
-            &crate::state::test_support::defense(9),
-            &NONE
-        )
-        .is_none());
-        assert!(
-            monster_defender(&monster(9), &crate::state::test_support::defense(9), &NONE).is_none()
-        );
         let wolf = monster_defender(
             &monster(ids::WOLF),
-            &crate::state::test_support::defense(ids::WOLF),
+            &crate::state::test_support::profile(ids::WOLF),
             &NONE,
-        )
-        .unwrap();
+        );
         assert_eq!(wolf.resist_bp[Aspect::Cold as usize], 5_000);
     }
 
@@ -382,10 +386,9 @@ pub(crate) mod tests {
         assert_eq!(
             monster_defender(
                 &m,
-                &crate::state::test_support::defense(m.bestiary_id),
+                &crate::state::test_support::profile(m.bestiary_id),
                 &NONE
             )
-            .unwrap()
             .states,
             m.states
         );
@@ -424,20 +427,18 @@ pub(crate) mod tests {
         let wolf = monster(ids::WOLF);
         let m = monster_defender(
             &wolf,
-            &crate::state::test_support::defense(wolf.bestiary_id),
+            &crate::state::test_support::profile(wolf.bestiary_id),
             &mods,
-        )
-        .unwrap();
+        );
         // Protection adds to the bestiary resistance.
         assert_eq!(m.resist_bp[Aspect::Cold as usize], 9_000);
         assert_eq!(m.resist_bp[Aspect::Fire as usize], 4_000);
         let bite = monster_attacker(
             4,
-            &wolf,
-            &crate::state::test_support::defense(wolf.bestiary_id),
+            &crate::state::test_support::profile(wolf.bestiary_id),
+            None,
             &mods,
-        )
-        .unwrap();
+        );
         assert_eq!(bite.increased[0], Mod::new(ModFilter::Any, 3_000));
         assert_eq!(bite.weaken_bp, 2_000);
     }

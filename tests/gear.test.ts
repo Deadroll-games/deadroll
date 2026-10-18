@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import anchor from "@anchor-lang/core";
+import { extOf } from "./skill_ext.ts";
 import {
   Connection,
   Keypair,
@@ -145,7 +146,7 @@ async function newCharacter(kind: Kind): Promise<{ owner: Keypair; character: Pu
       predisposition: e(p.predisposition),
       stats: p.stats,
       appearance: new Array(20).fill({ spriteId: 0, materialRamp: 0, accentRamp: 0, elementRamp: 0 }),
-      skills: [{ blocks: p.skill, name: text("Strike", 24) }],
+      skills: [{ blocks: p.skill, name: text("Strike", 24), ext: extOf("Strike") }],
     })
     .accountsStrict({
       owner: owner.publicKey,
@@ -157,6 +158,7 @@ async function newCharacter(kind: Kind): Promise<{ owner: Keypair; character: Pu
       asset: asset.publicKey,
       mplCoreProgram: MPL_CORE,
       systemProgram: SystemProgram.programId,
+      skillExtras: pda([Buffer.from("skill_extras"), c.toBuffer()], CHARACTER),
     })
     .signers([owner, asset])
     .rpc();

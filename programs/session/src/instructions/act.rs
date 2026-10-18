@@ -1,14 +1,17 @@
 use anchor_lang::prelude::*;
+use deadroll_skillcheck::Target;
 use deadroll_types::{seeds, Cell, SessionStatus};
 
 use crate::{
     auth,
-    combat_input::{player_form, skill_use, target_side, Side, SkillUse},
+    combat_input::{action_ap, action_range, skill_use, target_side, Side, SkillUse},
     errors::SessionError,
     events::{ActionRequested, SkillUsed},
-    rules::{cooldown_after_use, in_ally_range, in_range, Unit, ACT_AP, BASE_ATTACK},
+    line::skill_line,
+    party::party_keys,
+    rules::{cooldown_after_use, in_ally_range, in_range, Unit, BASE_ATTACK},
     state::{
-        external::read_skill, GameSession, MonsterState, Monsters, Participation, PendingAction,
+        external::MapLayoutView, GameSession, MonsterState, Monsters, Participation, PendingAction,
     },
     vrf::{self, CallbackAccounts, RequestAccounts},
 };
@@ -81,6 +84,10 @@ pub struct Act<'info> {
         bump = target_participation.core.bump,
     )]
     pub target_participation: Option<Box<Account<'info, Participation>>>,
+    /// CHECK: the session's `MapLayout` (patch 5): a wall cuts a line target. Address pinned at
+    /// `open_session`, read by `MapLayoutView`.
+    #[account(address = session.layout @ SessionError::InvalidLayout)]
+    pub layout: UncheckedAccount<'info>,
 }
 
 /// `skill_slot`: a slot of the character's `SkillSet`, or `BASE_ATTACK` for the weapon.
@@ -101,6 +108,8 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
         SessionError::NotActive
     );
     require!(!session.core.pending_vrf, SessionError::RollPending);
+    // Patch 6: a player down in the last callback is finalized first (`start_turn`).
+    require!(session.pending_deaths == 0, SessionError::DeathsPending);
     let slot = participation.core.slot;
     require!(
         session.current_unit() == Some(Unit::Player(slot)),
@@ -117,16 +126,15 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
     let skill = if skill_slot == BASE_ATTACK {
         None
     } else {
-        // Only the active skills taken onto this map (docs/SKILL_BUILDER.md, 3.4).
+        // Only the active skills taken onto this map (docs/SKILL_BUILDER.md, 3.4), as copied
+        // at `set_ready(true)`.
         require!(
             participation.active_selected(skill_slot),
             SessionError::SkillNotSelected
         );
-        let skill = read_skill(
-            &accounts.skill_set,
-            &participation.core.character,
-            skill_slot,
-        )?;
+        let skill = participation
+            .map_skill(skill_slot)
+            .ok_or(SessionError::SkillNotSelected)?;
         require!(
             skill_use(&skill) == SkillUse::Ok,
             SessionError::InvalidSkill
@@ -148,7 +156,7 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
 
     // The target must be on the skill's side: an enemy for the weapon, damage and debuffs, an
     // ally (or the caster) for heals and buffs (docs/SKILL_BUILDER.md, section 2).
-    let (target_unit, to, pending_target) = match target_side(skill.as_ref()) {
+    let (target_unit, to) = match target_side(skill.as_ref()) {
         Side::Enemy => {
             require!(
                 accounts.target_participation.is_none(),
@@ -161,7 +169,7 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
                 x: monster.x,
                 y: monster.y,
             };
-            (Unit::Monster(target), Some((to, false)), Pubkey::default())
+            (Unit::Monster(target), Some((to, false)))
         }
         Side::Ally if target == slot => {
             // A self-cast resolves on the caster's own participation: no second account.
@@ -169,7 +177,7 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
                 accounts.target_participation.is_none(),
                 SessionError::UnexpectedAllyAccount
             );
-            (Unit::Player(slot), None, Pubkey::default())
+            (Unit::Player(slot), None)
         }
         Side::Ally => {
             require!(
@@ -188,24 +196,34 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
                 x: ally.core.x,
                 y: ally.core.y,
             };
-            (Unit::Player(target), Some((to, true)), ally.key())
+            (Unit::Player(target), Some((to, true)))
         }
     };
+    // The range tag of the skill, or the weapon's for the basic attack (patch 5).
+    let range = action_range(&participation.equipment, skill.as_ref());
     if let Some((to, ally)) = to {
-        let form = player_form(skill.as_ref());
         let reaches = if ally {
-            in_ally_range(form, from, to)
+            in_ally_range(range, from, to)
         } else {
-            in_range(form, from, to)
+            in_range(range, from, to)
         };
         require!(reaches, SessionError::OutOfRange);
+        // A line runs from the caster through the target (docs/SKILL_BUILDER.md, 2 and 5.3);
+        // a wall before the target cuts it.
+        if skill.is_some_and(|s| s.blocks.target == Target::Line) {
+            let layout = MapLayoutView::load(&accounts.layout)?;
+            let line = skill_line(session, &layout, from, to, range);
+            require!(line.index_of(to).is_some(), SessionError::LineBlocked);
+        }
     }
 
-    participation.refresh_ap(session.turn_seq);
+    // Patch 6: a monster's debuff aura over the player counts too.
+    let field = crate::monster_cb::Field::load(session, &monsters)?;
+    participation.refresh_ap(session.turn_seq, &field.view());
     participation.core.action_points = participation
         .core
         .action_points
-        .checked_sub(ACT_AP)
+        .checked_sub(action_ap(skill.as_ref()))
         .ok_or(SessionError::NotEnoughActionPoints)?;
     // Any action resets every escape intent (docs/PARTY_AND_TURNS.md, 7.3).
     session.flee_mask = 0;
@@ -218,7 +236,8 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
         skill_slot,
         participation: participation.key(),
     };
-    session.pending_target = pending_target;
+    // Patch 5: an ally of a buff comes with the party accounts, not as `target_participation`.
+    session.pending_target = Pubkey::default();
     session.core.pending_vrf = true;
     session.acted_seq = session.turn_seq;
     if let Some(skill) = &skill {
@@ -226,6 +245,7 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
     }
 
     let session_key = session.key();
+    let (party, party_len) = party_keys(session, slot);
     vrf::request(
         RequestAccounts {
             payer: &accounts.signer,
@@ -243,8 +263,10 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
             character: accounts.character.key(),
             skill_set: accounts.skill_set.key(),
             bag: accounts.bag.key(),
-            target_participation: (pending_target != Pubkey::default()).then_some(pending_target),
+            target_participation: None,
             layout: session.layout,
+            party,
+            party_len,
         },
     )?;
 

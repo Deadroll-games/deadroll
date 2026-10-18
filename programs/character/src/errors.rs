@@ -62,4 +62,10 @@ pub enum CharacterError {
     NoPointsSpent,
     #[msg("More stat points chosen than the character has unspent")]
     NotEnoughStatPoints,
+    #[msg("The character has no skill at this index")]
+    NoSuchSkill,
+    #[msg("Description must be printable ASCII, not empty, zero-padded, at most 200 bytes")]
+    InvalidDescription,
+    #[msg("This skill already has its description")]
+    DescriptionAlreadySet,
 }

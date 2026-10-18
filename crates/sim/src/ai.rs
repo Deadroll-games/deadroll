@@ -2,20 +2,24 @@
 //! - heroes: heal the weakest ally below `heal_below_pct` if a heal skill reaches it; else the
 //!   action with the best expected value that is reachable this turn (damage, a debuff the target
 //!   lacks, a buff the ally lacks); else walk toward the nearest monster;
-//! - monsters: walk to the nearest hero and use the natural attack.
+//! - monsters: `deadroll_rules::monster_ai` picks the action and its target (the website's auto
+//!   mode asks the same function), then they walk into its reach; else toward the nearest hero.
 //!
 //! Scores are integers in "expected damage x 400" (two d20 factors of 20). Every effect kind has
 //! an explicit value below: a new `EffectAction` or `ModKind` does not compile until it has one.
 use deadroll_combat::{preview_range, support::find_mod, HitInput, ModKind};
 use deadroll_rules::{
     input::{
-        effect_action, effect_range, monster_attacker, monster_defender, player_attacker,
-        player_defender, support_input, target_side, EffectAction, Side,
+        action_ap, effect_action, effect_range, monster_attacker, monster_defender,
+        player_attacker, player_defender, player_range, support_input, target_side, EffectAction,
+        Side,
     },
+    monster::NO_KIN,
+    monster_ai::{plan as monster_plan, AiMonster, AiTarget, AiUnit},
     units::{in_ally_range, in_range},
 };
-use deadroll_skillcheck::Purpose;
-use deadroll_types::{Cell, Form, StateKind, BP};
+use deadroll_skillcheck::{Purpose, Target};
+use deadroll_types::{Cell, StateKind, BP};
 
 use crate::battle::{Action, Battle};
 
@@ -134,13 +138,10 @@ impl Battle<'_> {
     pub(crate) fn hero_turn(&mut self, s: usize, ap: u8) {
         let from = self.heroes[s].cell;
         let dist = self.distances(from);
-        let act = self.cfg.players.act_ap;
-        if ap >= act {
-            if let Some((cell, action)) = self.plan(s, &dist, ap - act) {
-                self.move_hero(s, cell);
-                self.hero_act(s, action);
-                return;
-            }
+        if let Some((cell, action)) = self.plan(s, &dist, ap) {
+            self.move_hero(s, cell);
+            self.hero_act(s, action);
+            return;
         }
         let targets: Vec<Cell> = (0..self.foes.len())
             .filter(|&i| self.foes[i].m.alive)
@@ -150,10 +151,13 @@ impl Battle<'_> {
         self.move_hero(s, to);
     }
 
-    /// The best action reachable with `budget` steps, and the cell to act from.
-    pub(crate) fn plan(&self, s: usize, dist: &[u16], budget: u8) -> Option<(Cell, Action)> {
+    /// The best action affordable with `ap` (its own cost, docs/PARTY_AND_TURNS.md 5.1; the
+    /// rest buys steps), and the cell to act from. A line is worth the sum over the units on it.
+    pub(crate) fn plan(&self, s: usize, dist: &[u16], ap: u8) -> Option<(Cell, Action)> {
         let fighter = &self.party[self.heroes[s].fighter];
         let ready = |k: usize| self.heroes[s].cooldowns[k] == 0;
+        let budget_for =
+            |stats: Option<&deadroll_rules::SkillStats>| ap.checked_sub(action_ap(self.cfg, stats));
 
         // 1. A heal on the weakest ally below the threshold.
         let pct = self.settings.heal_below_pct as u64;
@@ -172,9 +176,12 @@ impl Battle<'_> {
             if !ready(k) || effect_action(skill.blocks.effect) != Some(EffectAction::Heal) {
                 continue;
             }
+            let Some(budget) = budget_for(Some(skill)) else {
+                continue;
+            };
             for &a in &wounded {
                 let to = self.heroes[a].cell;
-                let reach = |c| in_ally_range(skill.blocks.form, c, to, &self.cfg.players);
+                let reach = |c| in_ally_range(skill.ext.range, c, to, &self.cfg.players);
                 if let Some((cell, _)) = self.best_cell(dist, budget, reach) {
                     return Some((cell, Action::Support { skill: k, ally: a }));
                 }
@@ -196,20 +203,29 @@ impl Battle<'_> {
             std::iter::once(None).chain((0..fighter.skills.len()).filter(|&k| ready(k)).map(Some));
         for skill in choices {
             let stats = skill.map(|k| fighter.skills[k].stats);
-            let form = stats.map_or(Form::Strike, |s| s.blocks.form);
+            let Some(budget) = budget_for(stats.as_ref()) else {
+                continue;
+            };
+            let range = player_range(self.cfg, &fighter.hero, stats.as_ref());
+            let line = stats.filter(|st| st.blocks.target == Target::Line);
             match target_side(stats.as_ref()) {
                 Side::Enemy => {
                     for i in (0..self.foes.len()).filter(|&i| self.foes[i].m.alive) {
                         let to = self.foe_cell(i);
-                        let reach = |c| in_range(form, c, to, &self.cfg.players);
+                        let reach = |c| in_range(range, c, to, &self.cfg.players);
                         let Some((cell, cost)) = self.best_cell(dist, budget, reach) else {
                             continue;
+                        };
+                        let targets = match &line {
+                            Some(st) => self.line_foes(cell, i, st),
+                            None => vec![i],
                         };
                         let debuff = stats.filter(|s| s.blocks.purpose == Purpose::Debuff);
                         match (skill, debuff) {
                             (Some(k), Some(_)) => {
+                                let score = targets.iter().map(|&t| self.debuff_score(s, k, t));
                                 consider(
-                                    self.debuff_score(s, k, i),
+                                    score.sum(),
                                     cell,
                                     cost,
                                     Action::Debuff {
@@ -218,12 +234,15 @@ impl Battle<'_> {
                                     },
                                 );
                             }
-                            _ => consider(
-                                self.attack_score(s, skill, i),
-                                cell,
-                                cost,
-                                Action::Attack { skill, target: i },
-                            ),
+                            _ => {
+                                let score = targets.iter().map(|&t| self.attack_score(s, skill, t));
+                                consider(
+                                    score.sum(),
+                                    cell,
+                                    cost,
+                                    Action::Attack { skill, target: i },
+                                )
+                            }
                         }
                     }
                 }
@@ -231,16 +250,19 @@ impl Battle<'_> {
                     let Some(k) = skill else { continue };
                     for a in (0..self.heroes.len()).filter(|&a| self.heroes[a].alive) {
                         let to = self.heroes[a].cell;
-                        let reach = |c| in_ally_range(form, c, to, &self.cfg.players);
+                        let reach = |c| in_ally_range(range, c, to, &self.cfg.players);
                         let Some((cell, cost)) = self.best_cell(dist, budget, reach) else {
                             continue;
                         };
-                        consider(
-                            self.buff_score(s, k, a),
-                            cell,
-                            cost,
-                            Action::Support { skill: k, ally: a },
-                        );
+                        let score: u64 = match &line {
+                            Some(st) => self
+                                .line_heroes(s, a, st)
+                                .iter()
+                                .map(|&t| self.buff_score(s, k, t))
+                                .sum(),
+                            None => self.buff_score(s, k, a),
+                        };
+                        consider(score, cell, cost, Action::Support { skill: k, ally: a });
                     }
                 }
             }
@@ -261,10 +283,10 @@ impl Battle<'_> {
                 0,
                 &fighter.hero,
                 stats.as_ref(),
-                &h.mods,
+                &self.hero_mods(s, stats.is_none()),
                 &h.accuracy,
             ),
-            defender: monster_defender(&foe.profile, &foe.m.states, &foe.mods),
+            defender: monster_defender(&foe.profile, &foe.m.states, &self.foe_mods(i, false)),
         };
         let f = faces(input.attacker.attack_bonus, input.defender.defense);
         let mut score = mid(preview_range(&input, &self.cfg.combat)) * f * 20;
@@ -387,10 +409,14 @@ impl Battle<'_> {
                         0,
                         &fighter.hero,
                         stats.as_ref(),
-                        &self.heroes[a].mods,
+                        &self.hero_mods(a, k.is_none()),
                         &self.heroes[a].accuracy,
                     ),
-                    defender: monster_defender(&foe.profile, &foe.m.states, &foe.mods),
+                    defender: monster_defender(
+                        &foe.profile,
+                        &foe.m.states,
+                        &self.foe_mods(i, false),
+                    ),
                 };
                 mid(preview_range(&input, &self.cfg.combat))
                     * faces(input.attacker.attack_bonus, input.defender.defense)
@@ -431,8 +457,13 @@ impl Battle<'_> {
         let foe = &self.foes[i];
         let h = &self.heroes[a];
         let input = HitInput {
-            attacker: monster_attacker(self.cfg, 0, &foe.profile, &foe.mods),
-            defender: player_defender(self.cfg, &self.party[h.fighter].hero, &h.states, &h.mods),
+            attacker: monster_attacker(self.cfg, 0, &foe.profile, None, &self.foe_mods(i, true)),
+            defender: player_defender(
+                self.cfg,
+                &self.party[h.fighter].hero,
+                &h.states,
+                &self.hero_mods(a, false),
+            ),
         };
         mid(preview_range(&input, &self.cfg.combat))
             * faces(input.attacker.attack_bonus, input.defender.defense)
@@ -445,30 +476,67 @@ impl Battle<'_> {
     pub(crate) fn foe_turn(&mut self, i: usize, ap: u8) {
         let from = self.foe_cell(i);
         let dist = self.distances(from);
-        let act = self.cfg.players.act_ap;
-        let form = self.foes[i].profile.form;
-        let mut targets: Vec<usize> = (0..self.heroes.len())
-            .filter(|&a| self.heroes[a].alive)
+        let unit = |cell, hp, hp_max, alive, states, mods, kin| AiUnit {
+            cell,
+            hp,
+            hp_max,
+            alive,
+            states,
+            mods,
+            kin,
+        };
+        let heroes: Vec<AiUnit> = self
+            .heroes
+            .iter()
+            .map(|h| unit(h.cell, h.hp, h.hp_max, h.alive, h.states, h.mods, NO_KIN))
             .collect();
-        targets.sort_by_key(|&a| {
-            (
-                deadroll_rules::units::chebyshev(from, self.heroes[a].cell),
-                self.heroes[a].hp,
-                a,
-            )
-        });
-        if ap >= act {
-            for &a in &targets {
-                let to = self.heroes[a].cell;
-                let reach = |c| in_range(form, c, to, &self.cfg.players);
-                if let Some((cell, _)) = self.best_cell(&dist, ap - act, reach) {
-                    self.move_foe(i, cell);
-                    self.foe_attack(i, a);
-                    return;
+        let monsters: Vec<AiUnit> = (0..self.foes.len())
+            .map(|j| {
+                let f = &self.foes[j];
+                unit(
+                    self.foe_cell(j),
+                    f.m.hp,
+                    f.m.hp_max,
+                    f.m.alive,
+                    f.m.states,
+                    f.mods,
+                    f.profile.kin,
+                )
+            })
+            .collect();
+        let foe = &self.foes[i];
+        let me = AiMonster {
+            index: i as u8,
+            ap,
+            profile: &foe.profile,
+            skills: &foe.skills,
+            cooldowns: &foe.cooldowns,
+        };
+        if let Some(choice) = monster_plan(self.cfg, &me, &heroes, &monsters) {
+            let (to, ally) = match choice.target {
+                AiTarget::Player(s) => (self.heroes[s as usize].cell, false),
+                AiTarget::Monster(j) => (self.foe_cell(j as usize), true),
+            };
+            let players = &self.cfg.players;
+            let reach = |c: Cell| {
+                if ally {
+                    in_ally_range(choice.range, c, to, players)
+                } else {
+                    in_range(choice.range, c, to, players)
                 }
+            };
+            if let Some((cell, _)) = self.best_cell(&dist, ap - choice.ap, reach) {
+                self.move_foe(i, cell);
+                if self.foes[i].m.alive && self.ended().is_none() {
+                    self.foe_act(i, choice);
+                }
+                return;
             }
         }
-        let cells: Vec<Cell> = targets.iter().map(|&a| self.heroes[a].cell).collect();
+        let cells: Vec<Cell> = (0..self.heroes.len())
+            .filter(|&a| self.heroes[a].alive)
+            .map(|a| self.heroes[a].cell)
+            .collect();
         let to = self.approach(from, &dist, ap, &cells);
         self.move_foe(i, to);
     }

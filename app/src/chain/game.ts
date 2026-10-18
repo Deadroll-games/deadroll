@@ -15,7 +15,7 @@ import { MPL_CORE_PROGRAM, PROGRAMS, SYSTEM_PROGRAM, VRF } from "../config";
 import { client } from "../wallet/client";
 import { characterAppearance } from "./appearance";
 import { concat, fromBase64, sha256 } from "./bytes";
-import { buildInstruction, coders } from "./programs";
+import { buildInstruction, coders, type RemainingAccount } from "./programs";
 import {
   bagPda,
   bestiaryPda,
@@ -30,15 +30,17 @@ import {
   programIdentityPda,
   sessionAuthorityPda,
   sessionPda,
+  skillExtrasPda,
   skillSetPda,
   stashPda,
   tilesetPda,
   aspectsPda,
   traitsPda,
   resonancesPda,
+  monsterSkillsPda,
 } from "./pda";
 import { pathArgs, type Step } from "./route";
-import { PRESETS, SKILL_NAME_LEN, type NamedSkill } from "./skillcheck";
+import { PRESETS, SKILL_DESCRIPTION_LEN, SKILL_NAME_LEN, type NamedSkill } from "./skillcheck";
 import { Aspect, Class, MAP_CELLS, MAP_MAX, Race, Tile, type Cell, type Spawn } from "./types";
 
 // ---------------------------------------------------------------------------------------------
@@ -63,6 +65,8 @@ export type MonsterAcc = {
 };
 /** `MonsterState.defense`: bits by aspect / state. */
 export type MonsterDefenseAcc = { resist: number; immuneAspects: number; immuneStates: number };
+/** `MonsterState.auras` (patch 6): a monster's aura and its kin-only flag. */
+export type MonsterAuraAcc = { aura: AuraAcc; kinOnly: boolean };
 /** `MonsterState.burning_cells`: Burning of `power` on whoever steps in, through `untilRound`. */
 export type BurningCellAcc = { x: number; y: number; untilRound: number; power: number; source: number };
 export type GameSessionAcc = {
@@ -106,8 +110,18 @@ export type GameSessionAcc = {
   actedSeq: number;
   /** `turnSeq` whose `start_turn` ran; every other turn instruction waits for it. */
   startedSeq: number;
-  /** The ally Participation of a pending heal or buff on another player; the default key = none. */
+  /** Unused since patch 5 (allies come with the party accounts); the default key. */
   pendingTarget: Address;
+  /** Patch 5: each slot's Participation (set at join), reactive skill, auras (passive, reactive). */
+  participations: Address[];
+  reactives: ReactiveAcc[];
+  auras: AuraAcc[][];
+  pendingReactive: { kind: number; bearers: number; source: number; victim: number; hpBefore: number; hpAfter: number; hpMax: number };
+  /** Patch 6: a roll for monster reactives only (`kind` 0 = none). */
+  pendingMonsterReactive: { kind: number; bearers: number; source: number; victim: number; hpBefore: number; hpAfter: number; hpMax: number };
+  /** Patch 6: players down in a callback whose death is not finalized yet, one bit per slot. While
+   * not 0 no turn starts and no action is taken: `start_turn` (anyone) or a claim finalizes them. */
+  pendingDeaths: number;
 };
 export type ParticipationAcc = {
   core: {
@@ -140,7 +154,33 @@ export type ParticipationAcc = {
   classTier: number;
   /** A resonance's accuracy buff (Pale Flame): +bonus to the d20 of `aspect` attacks, `turns` 0 = none. */
   accuracy: { aspect: Enum; turns: number; bonus: number };
+  /** Patch 5: the map skills of `skills`, slot by slot, as the rules see them (copied at set_ready). */
+  mapSkills: MapSkillAcc[];
 };
+/** session MapSkillData: a skill taken onto the map (blocks, derived values, the patch 5 ext). */
+export type MapSkillAcc = {
+  blocks: SkillRecordAcc["blocks"];
+  sharesBp: number[];
+  powerBp: number;
+  cooldown: number;
+  ext: { range: Enum; timing: Enum; hpBelowPct: number };
+  apCost: number;
+};
+/** session AuraData (docs/SKILL_BUILDER.md 3.5): `turns` 255 = permanent (a passive), 0 = none. */
+export type AuraAcc = {
+  kind: Enum;
+  aspect: Enum;
+  powerBp: number;
+  radius: number;
+  turns: number;
+  hostile: boolean;
+  passive: boolean;
+  selfOnly: boolean;
+};
+/** session ReactiveData: a player's reactive skill on the map, `skillSlot` 0xFF = none. */
+export type ReactiveAcc = { skillSlot: number; skill: MapSkillAcc; cooldownLeft: number };
+/** programs/character SkillExtras: the patch 5 part of every skill, by SkillSet index (zero-copy, raw bytes). */
+export type SkillExtraAcc = { range: number; timing: number; hpBelowPct: number; apCost: number; description: string };
 /** programs/character `Gear`: soulbound starter items and what is worn, by `EquipSlot`. */
 export type GearAcc = {
   items: { base: Enum; level: number }[];
@@ -244,6 +284,29 @@ export async function getAccount<T>(program: keyof typeof coders, name: string, 
   return raw ? coders[program].decodeAccount<T>(name, raw) : null;
 }
 
+/** Bytes of one SkillExtra record (programs/character skill_extras.rs). */
+const SKILL_EXTRA_SIZE = 4 + SKILL_DESCRIPTION_LEN;
+/** Offset of the first record: discriminator, version, bump, character. */
+const SKILL_EXTRAS_START = 8 + 2 + 32;
+
+/** The zero-copy `SkillExtras` account: one record per SkillSet index, raw bytes. */
+export function decodeSkillExtras(raw: Uint8Array, count: number): SkillExtraAcc[] {
+  const text = new TextDecoder();
+  return Array.from({ length: count }, (_, i) => {
+    const at = SKILL_EXTRAS_START + i * SKILL_EXTRA_SIZE;
+    const r = raw.subarray(at, at + SKILL_EXTRA_SIZE);
+    const d = r.subarray(4);
+    const len = d.indexOf(0) === -1 ? d.length : d.indexOf(0);
+    return { range: r[0]!, timing: r[1]!, hpBelowPct: r[2]!, apCost: r[3]!, description: text.decode(d.subarray(0, len)) };
+  });
+}
+
+/** A character's `SkillExtras` (the first `count` skills), or null before it exists. */
+export async function skillExtrasOf(character: Address, count: number): Promise<SkillExtraAcc[] | null> {
+  const [raw] = await getAccounts([await skillExtrasPda(character)]);
+  return raw ? decodeSkillExtras(raw, count) : null;
+}
+
 const addressEncoder = getAddressEncoder();
 /** Accounts of `program` whose data matches the discriminator of `name` and the given memcmp. */
 export async function findAccounts<T>(
@@ -317,7 +380,7 @@ export async function createCharacterIxs(
       predisposition: ASPECT_KEYS[c.predisposition],
       stats: c.stats,
       appearance: characterAppearance(c.race, c.class, c.predisposition),
-      skills: (c.skills ?? SKILL_PRESETS[c.class]).map((s) => ({ blocks: s.blocks, name: textBytes(s.name, SKILL_NAME_LEN) })),
+      skills: (c.skills ?? SKILL_PRESETS[c.class]).map((s) => ({ blocks: s.blocks, name: textBytes(s.name, SKILL_NAME_LEN), ext: s.ext })),
     },
   };
   const ix = buildInstruction("character", "create_character", args, {
@@ -330,8 +393,29 @@ export async function createCharacterIxs(
     asset,
     mplCoreProgram: MPL_CORE_PROGRAM,
     systemProgram: SYSTEM_PROGRAM,
+    skillExtras: await skillExtrasPda(character),
   });
   return { profileIx: prof ? null : createProfileIx(owner, profile), ix, character, asset };
+}
+
+/**
+ * The descriptions of a new character's skills (set_skill_description, once each): sent after
+ * create_character, `perTx` instructions to a transaction (six of 200 bytes do not fit one).
+ */
+export async function skillDescriptionIxs(owner: TransactionSigner, character: Address, skills: readonly NamedSkill[], perTx = 3): Promise<Instruction[][]> {
+  const accounts = {
+    owner,
+    character,
+    skillSet: await skillSetPda(character),
+    skillExtras: await skillExtrasPda(character),
+  };
+  const ixs = skills
+    .map((s, i) => [s.description, i] as const)
+    .filter(([d]) => d.length > 0)
+    .map(([d, i]) => buildInstruction("character", "set_skill_description", { skillIndex: i, description: textBytes(d, SKILL_DESCRIPTION_LEN) }, accounts));
+  const out: Instruction[][] = [];
+  for (let i = 0; i < ixs.length; i += perTx) out.push(ixs.slice(i, i + perTx));
+  return out;
 }
 
 /** All characters of `owner`, by profile count (indices 0..count). */
@@ -381,7 +465,8 @@ export async function buildMapIxs(dm: TransactionSigner, d: MapDraft): Promise<{
     buildInstruction("map", "create_map", { index, width: d.width, height: d.height, tier: d.tier }, { ...edit, systemProgram: SYSTEM_PROGRAM }),
     buildInstruction("map", "write_layout", { offset: 0, tiles: tiles.slice(0, (d.height - 1) * MAP_MAX + d.width) }, edit),
     buildInstruction("map", "write_spawns", { entrance, exit, spawns: d.spawns }, edit),
-    buildInstruction("map", "finalize_map", { secretsRoot: new Uint8Array(32) }, edit),
+    // The builder rules read the registry bestiary and monster skills (roles, pools, slots).
+    buildInstruction("map", "finalize_map", { secretsRoot: new Uint8Array(32) }, { ...edit, bestiary: await bestiaryPda(), monsterSkills: await monsterSkillsPda() }),
   ];
   return { map, layout, index, ixs };
 }
@@ -440,6 +525,7 @@ export async function openSessionIx(dm: TransactionSigner, map: Address, priceLa
       aspects: await aspectsPda(),
       traits: await traitsPda(),
       resonances: await resonancesPda(),
+      monsterSkills: await monsterSkillsPda(),
     },
   );
 }
@@ -482,6 +568,7 @@ export async function setReadyIx(
     sessionAuthority: await sessionAuthorityPda(),
     config: await gameConfigPda(),
     characterProgram: PROGRAMS.character,
+    skillExtras: await skillExtrasPda(character),
   });
 }
 
@@ -505,6 +592,8 @@ export async function moveIx(actor: Actor, session: Address, character: Address,
     monsters: await monstersPda(session),
     layout,
     sessionToken: actor.token,
+    // Patch 6: stepping next to a monster can trigger its reactive skill (a VRF roll).
+    ...(await vrfAccounts()),
   });
 }
 
@@ -520,6 +609,7 @@ export async function actIx(
   skillSlot: number,
   target: number,
   targetParticipation: Address | null,
+  layout: Address,
 ): Promise<Instruction> {
   return buildInstruction(
     "session",
@@ -536,6 +626,7 @@ export async function actIx(
       sessionToken: actor.token,
       ...(await vrfAccounts()),
       targetParticipation,
+      layout,
     },
   );
 }
@@ -552,10 +643,45 @@ export async function endTurnIx(actor: Actor, session: Address, character: Addre
 }
 
 /**
+ * The accounts that finalize the pending deaths (`GameSession.pending_deaths`): each queued slot's
+ * Character, SkillSet and Bag, writable, in slot order. The programs check them and refuse
+ * everything else while the queue is not empty; the app only supplies them.
+ */
+export async function deathAccountsOf(s: GameSessionAcc): Promise<RemainingAccount[]> {
+  const out: RemainingAccount[] = [];
+  for (let slot = 0; slot < s.core.playerCount; slot++) {
+    if (!(s.pendingDeaths & (1 << slot))) continue;
+    const character = s.core.players[slot]!;
+    out.push({ address: character, writable: true }, { address: await skillSetPda(character), writable: true }, { address: await bagPda(character), writable: true });
+  }
+  return out;
+}
+
+/** ComputeBudget program: `SetComputeUnitLimit(units)`. */
+const COMPUTE_BUDGET = "ComputeBudget111111111111111111111111111111" as Address;
+/** Compute limit of a transaction that may finalize deaths (`character.mark_dead` each, about
+ * 45k CU; four players at most). */
+export const FINALIZE_CU = 600_000;
+export function computeLimitIx(units: number): Instruction {
+  const data = new Uint8Array(5);
+  data[0] = 2;
+  new DataView(data.buffer).setUint32(1, units, true);
+  return { programAddress: COMPUTE_BUDGET, data };
+}
+/** `ix` with the compute limit in front when it finalizes deaths. */
+export const withDeaths = (deaths: readonly RemainingAccount[], ix: Instruction): Instruction[] => (deaths.length ? [computeLimitIx(FINALIZE_CU), ix] : [ix]);
+
+/**
  * start_turn for the current unit (demo.test.ts `begin`): permissionless, the sender only pays the
  * fee. `player` null: a monster turn. Sent alone: a Freeze / Stun skip ends the turn inside it.
+ * `deaths` (patch 6, `deathAccountsOf`): it finalizes them first, also when the turn already started.
  */
-export async function startTurnIx(session: Address, player: { participation: Address; character: Address } | null): Promise<Instruction> {
+export async function startTurnIx(
+  session: Address,
+  player: { participation: Address; character: Address } | null,
+  payer: TransactionSigner,
+  deaths: readonly RemainingAccount[] = [],
+): Promise<Instruction> {
   return buildInstruction("session", "start_turn", {}, {
     session,
     monsters: await monstersPda(session),
@@ -567,7 +693,10 @@ export async function startTurnIx(session: Address, player: { participation: Add
     // Burned if over-time damage kills the player.
     skillSet: player ? await skillSetPda(player.character) : null,
     bag: player ? await bagPda(player.character) : null,
-  });
+    // Pays the VRF fee when over-time damage triggers a reactive skill (patch 5).
+    payer,
+    ...(await vrfAccounts()),
+  }, deaths);
 }
 
 export async function monsterMoveIx(dmActor: Actor, session: Address, layout: Address, monster: number, steps: Step[]): Promise<Instruction> {
@@ -577,30 +706,48 @@ export async function monsterMoveIx(dmActor: Actor, session: Address, layout: Ad
     monsters: await monstersPda(session),
     layout,
     sessionToken: dmActor.token,
+    // A monster stepping next to a player can trigger its reactive skill (a VRF roll).
+    ...(await vrfAccounts()),
   });
 }
 
-export async function monsterActIx(dmActor: Actor, session: Address, monster: number, targetSlot: number, targetCharacter: Address): Promise<Instruction> {
+/**
+ * A monster's action: `action` 0 = its natural attack, `1 + slot` = the active skill in that monster
+ * slot. `target`: a player slot (natural attack, damage, debuff), or a monster index (heal, buff).
+ * `character`: the target player's character, or for a heal or buff on a monster the lowest living
+ * slot's (the callback's participation).
+ */
+export async function monsterActIx(
+  dmActor: Actor,
+  session: Address,
+  monster: number,
+  action: number,
+  target: number,
+  character: Address,
+  layout: Address,
+): Promise<Instruction> {
   return buildInstruction(
     "session",
     "monster_act",
-    { monster, action: 0, target: targetSlot },
+    { monster, action, target },
     {
       signer: dmActor.signer,
       session,
       monsters: await monstersPda(session),
-      participation: await participationPda(session, targetCharacter),
-      character: targetCharacter,
-      skillSet: await skillSetPda(targetCharacter),
-      bag: await bagPda(targetCharacter),
+      participation: await participationPda(session, character),
+      character,
+      skillSet: await skillSetPda(character),
+      bag: await bagPda(character),
       sessionToken: dmActor.token,
       ...(await vrfAccounts()),
+      layout,
     },
   );
 }
 
-/** claim_rewards: only the character's owner, from its main wallet or its session key (+ token). */
-export async function claimRewardsIx(actor: Actor, session: Address, character: Address): Promise<Instruction> {
+/** claim_rewards: only the character's owner, from its main wallet or its session key (+ token).
+ * `deaths`: the pending deaths it finalizes first (patch 6). */
+export async function claimRewardsIx(actor: Actor, session: Address, character: Address, deaths: readonly RemainingAccount[] = []): Promise<Instruction> {
   return buildInstruction("session", "claim_rewards", {}, {
     signer: actor.signer,
     session,
@@ -612,10 +759,11 @@ export async function claimRewardsIx(actor: Actor, session: Address, character: 
     config: await gameConfigPda(),
     characterProgram: PROGRAMS.character,
     sessionToken: actor.token,
-  });
+  }, deaths);
 }
 
-export async function claimEscrowIx(dm: TransactionSigner, session: Address, map: Address): Promise<Instruction> {
+/** claim_escrow: the DM's main wallet. `deaths`: the pending deaths it finalizes first (patch 6). */
+export async function claimEscrowIx(dm: TransactionSigner, session: Address, map: Address, deaths: readonly RemainingAccount[] = []): Promise<Instruction> {
   return buildInstruction("session", "claim_escrow", {}, {
     dm,
     session,
@@ -624,7 +772,8 @@ export async function claimEscrowIx(dm: TransactionSigner, session: Address, map
     sessionAuthority: await sessionAuthorityPda(),
     config: await gameConfigPda(),
     mapProgram: PROGRAMS.map,
-  });
+    characterProgram: PROGRAMS.character,
+  }, deaths);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -637,21 +786,48 @@ export function mockVrfSigner(): Promise<KeyPairSigner> {
   return mockVrf;
 }
 
-/** The ally account a pending heal or buff needs in the callback (`GameSession.pendingTarget`), or null. */
-export const pendingTargetOf = (s: GameSessionAcc): Address | null => (s.pendingTarget === DEFAULT_KEY ? null : s.pendingTarget);
+/**
+ * The party accounts every callback gets after its fixed list (programs/session party.rs): each
+ * living player but the pending participation's, in slot order, its Participation (writable) and
+ * its Character. A death in the callback only queues (patch 6), so no death accounts ride along.
+ */
+export function partyAccountsOf(s: GameSessionAcc, pendingParticipation: Address): RemainingAccount[] {
+  const out: RemainingAccount[] = [];
+  for (let slot = 0; slot < s.core.playerCount; slot++) {
+    const alive = (s.aliveMask & (1 << slot)) !== 0;
+    const participation = s.participations[slot]!;
+    if (!alive || participation === pendingParticipation) continue;
+    out.push({ address: participation, writable: true }, { address: s.core.players[slot]!, writable: false });
+  }
+  return out;
+}
+
+/** The body of a registry table (as far as it is written), or null. */
+async function registryTable(pdaOf: () => Promise<Address>): Promise<Uint8Array | null> {
+  const [raw] = await getAccounts([await pdaOf()]);
+  if (!raw || raw.length < 16) return null;
+  const len = new DataView(raw.buffer, raw.byteOffset).getUint32(12, true);
+  return raw.slice(16, 16 + len);
+}
+
+/** Patch 6: the registry `bestiary` (48-byte records by id) and `monster_skills` (32-byte records)
+ * bodies, read straight from the chain: the map builder's pools and the skill names' indices. */
+export const registryBestiary = () => registryTable(bestiaryPda);
+export const registryMonsterSkills = () => registryTable(monsterSkillsPda);
 
 /**
  * consume_randomness for the pending action: the callback gets the pending participation's player,
- * `targetParticipation` = `pendingTargetOf(session)` for a heal or buff on another ally, and the
- * session's map layout (`GameSession.layout`: a resonance's knockback and burning cells).
+ * the session's map layout (`GameSession.layout`: a resonance's knockback and burning cells, a
+ * line's walls) and the other living players (`partyAccountsOf`: reactive skills, lines, buffs on
+ * an ally).
  */
 export async function consumeIx(
   session: Address,
   pendingParticipation: Address,
   character: Address,
   seed: Uint8Array,
-  targetParticipation: Address | null,
   layout: Address,
+  party: readonly RemainingAccount[],
 ): Promise<Instruction> {
   return buildInstruction("session", "consume_randomness", { randomness: seed }, {
     vrfProgramIdentity: await mockVrfSigner(),
@@ -664,9 +840,10 @@ export async function consumeIx(
     sessionAuthority: await sessionAuthorityPda(),
     config: await gameConfigPda(),
     characterProgram: PROGRAMS.character,
-    targetParticipation,
+    // Since patch 5 an ally comes with the party accounts.
+    targetParticipation: null,
     layout,
-  });
+  }, party);
 }
 
 /** Roll `index` of a VRF value, exactly `deadroll_combat::VrfRoll`: sha256(seed ‖ index u32 LE). */
@@ -714,8 +891,15 @@ export type Party = {
   session: GameSessionAcc;
   monsters: MonsterAcc[];
   players: PartyPlayer[];
-  /** Per monster (same index as `monsters`), per skill: own turn starts until usable. */
+  /** Per monster (same index as `monsters`), per skill slot (`0..5` active, `5` reactive, `6`
+   * passive): own turn starts until usable (`MonsterState.skill_cooldowns`, patch 6). */
   monsterCooldowns: Uint8Array[];
+  /** Per monster: its bestiary record (`MonsterState.records`, copied at open_session). */
+  monsterRecords: Uint8Array[];
+  /** Per monster, per skill slot: the skill's 16-byte session copy (`skill_table`), null = empty. */
+  monsterSkills: (Uint8Array | null)[][];
+  /** Per monster: its passive skill's aura, then its reactive skill's. */
+  monsterAuras: MonsterAuraAcc[][];
   /** Per monster (same index as `monsters`): buffs and debuffs, like `Participation.mods`. */
   monsterMods: TimedModAcc[][];
   /** Per monster: its registry defenses (`MonsterState.defense`, copied at open_session). */
@@ -747,6 +931,12 @@ export async function readParty(address: Address, tiles: Uint8Array | null = nul
     ? coders.session.decodeAccount<{
         core: { monsters: MonsterAcc[]; count: number };
         cooldowns?: Uint8Array[];
+        records?: Uint8Array[];
+        skillTable?: Uint8Array[];
+        skillCount?: number;
+        skills?: Uint8Array[];
+        skillCooldowns?: Uint8Array[];
+        auras?: MonsterAuraAcc[][];
         mods?: TimedModAcc[][];
         defense?: MonsterDefenseAcc[];
         resAspects?: Uint8Array;
@@ -781,7 +971,13 @@ export async function readParty(address: Address, tiles: Uint8Array | null = nul
     const rawLayout = extra[chars.length * 2 + 1];
     tiles = rawLayout ? coders.map.decodeAccount<{ core: { tiles: Uint8Array } }>("MapLayout", rawLayout).core.tiles : null;
   }
-  const monsterCooldowns = (monsterState?.cooldowns ?? []).slice(0, monsters.count);
+  const monsterCooldowns = (monsterState?.skillCooldowns ?? []).slice(0, monsters.count).map((c) => Uint8Array.from(c));
+  const monsterRecords = (monsterState?.records ?? []).slice(0, monsters.count).map((r) => Uint8Array.from(r));
+  const table = (monsterState?.skillTable ?? []).slice(0, monsterState?.skillCount ?? 0);
+  const monsterSkills = (monsterState?.skills ?? [])
+    .slice(0, monsters.count)
+    .map((slots) => Array.from(slots).map((t) => (t === 0xff || !table[t] ? null : Uint8Array.from(table[t]!))));
+  const monsterAuras = (monsterState?.auras ?? []).slice(0, monsters.count);
   const monsterMods = (monsterState?.mods ?? []).slice(0, monsters.count);
   const monsterDefense = (monsterState?.defense ?? []).slice(0, monsters.count);
   const resonanceTables =
@@ -795,6 +991,9 @@ export async function readParty(address: Address, tiles: Uint8Array | null = nul
     monsters: monsters.monsters.slice(0, monsters.count),
     players,
     monsterCooldowns,
+    monsterRecords,
+    monsterSkills,
+    monsterAuras,
     monsterMods,
     monsterDefense,
     resonanceTables,

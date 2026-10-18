@@ -323,6 +323,12 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                                 d.support.rider_chance_pct,
                                 0..=100,
                             );
+                            bp_row(
+                                ui,
+                                "Passive skill strength (point of the range)",
+                                &mut c.support.passive_point_bp,
+                                d.support.passive_point_bp,
+                            );
                         });
                     egui::Grid::new("mods").striped(true).show(ui, |ui| {
                         for h in ["", "strength min", "strength max", "own turns"] {
@@ -381,6 +387,55 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                                 &mut c.skills.reactive_cooldown,
                                 d.skills.reactive_cooldown,
                                 0..=20,
+                            );
+                            int_row(
+                                ui,
+                                "AP of an active skill (base)",
+                                &mut c.skills.ap_base,
+                                d.skills.ap_base,
+                                0..=30,
+                            );
+                            int_row(
+                                ui,
+                                "AP + line",
+                                &mut c.skills.ap_line,
+                                d.skills.ap_line,
+                                0..=30,
+                            );
+                            int_row(
+                                ui,
+                                "AP + third aspect",
+                                &mut c.skills.ap_third_aspect,
+                                d.skills.ap_third_aspect,
+                                0..=30,
+                            );
+                            int_row(
+                                ui,
+                                "AP + effect on damage",
+                                &mut c.skills.ap_effect,
+                                d.skills.ap_effect,
+                                0..=30,
+                            );
+                            int_row(
+                                ui,
+                                "AP + hard control",
+                                &mut c.skills.ap_hard_control,
+                                d.skills.ap_hard_control,
+                                0..=30,
+                            );
+                            int_row(
+                                ui,
+                                "HP threshold min, percent",
+                                &mut c.skills.hp_below_min_pct,
+                                d.skills.hp_below_min_pct,
+                                1..=99,
+                            );
+                            int_row(
+                                ui,
+                                "HP threshold max, percent",
+                                &mut c.skills.hp_below_max_pct,
+                                d.skills.hp_below_max_pct,
+                                1..=99,
                             );
                         });
                     ui.label("Aspect shares by aspect count (each row should sum to 100%)");
@@ -441,7 +496,13 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                             );
                             int_row(ui, "AP min", &mut p.ap_min, dp.ap_min, 0..=30);
                             int_row(ui, "AP max", &mut p.ap_max, dp.ap_max, 1..=60);
-                            int_row(ui, "AP per action", &mut p.act_ap, dp.act_ap, 0..=30);
+                            int_row(
+                                ui,
+                                "AP of the basic attack",
+                                &mut p.basic_attack_ap,
+                                dp.basic_attack_ap,
+                                0..=30,
+                            );
                             int_row(
                                 ui,
                                 "Initiative = Intelligence /",
@@ -451,17 +512,24 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                             );
                             int_row(
                                 ui,
-                                "Strike reach",
-                                &mut p.strike_range,
-                                dp.strike_range,
+                                "Melee reach",
+                                &mut p.melee_range,
+                                dp.melee_range,
                                 1..=10,
                             );
                             int_row(
                                 ui,
-                                "Projectile reach",
-                                &mut p.projectile_range,
-                                dp.projectile_range,
+                                "Ranged reach",
+                                &mut p.ranged_range,
+                                dp.ranged_range,
                                 1..=30,
+                            );
+                            int_row(
+                                ui,
+                                "Nearby ally (AllyHpBelow), cells",
+                                &mut p.nearby_ally_cells,
+                                dp.nearby_ally_cells,
+                                0..=30,
                             );
                             int_row(
                                 ui,
@@ -707,6 +775,27 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                                 "Resistance level (bestiary resists)",
                                 &mut m.resist_bp,
                                 dm.resist_bp,
+                            );
+                            bp_row(ui, "Elite HP increase", &mut m.elite_hp_bp, dm.elite_hp_bp);
+                            for (rank, name) in ["regular", "elite", "boss"].iter().enumerate() {
+                                for (k, kind) in
+                                    ["active", "reactive", "passive"].iter().enumerate()
+                                {
+                                    int_row(
+                                        ui,
+                                        &format!("Skill slots, {name}, {kind}"),
+                                        &mut m.slots[rank][k],
+                                        dm.slots[rank][k],
+                                        0..=5,
+                                    );
+                                }
+                            }
+                            int_row(
+                                ui,
+                                "Monster AI: heal an ally below, %",
+                                &mut m.ai_heal_below_pct,
+                                dm.ai_heal_below_pct,
+                                0..=100,
                             );
                         });
                 });

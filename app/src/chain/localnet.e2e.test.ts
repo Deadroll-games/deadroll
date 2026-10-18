@@ -1,7 +1,7 @@
 // @vitest-environment node
 // The demo script through the app's own builders (game.ts) against the shared local validator,
 // the same flow as tests/demo.test.ts, with the turn rules (start_turn, one attack per turn), and
-// the support skills of PR #25 (heals and buffs on allies, debuffs on monsters).
+// the support skills of PR #25 (buffs on allies, debuffs on monsters).
 // Skipped unless DEADROLL_LOCALNET=1 (needs deploy-local).
 //   DEADROLL_LOCALNET=1 pnpm --filter @deadroll/app exec vitest run src/chain/localnet.e2e.test.ts
 import { describe, expect, it } from "vitest";
@@ -20,6 +20,8 @@ import {
   buildMapIxs,
   claimEscrowIx,
   claimRewardsIx,
+  deathAccountsOf,
+  withDeaths,
   consumeIx,
   createCharacterIxs,
   currentUnit,
@@ -30,7 +32,7 @@ import {
   monsterMoveIx,
   moveIx,
   openSessionIx,
-  pendingTargetOf,
+  partyAccountsOf,
   pickSeed,
   playerAp,
   readParty,
@@ -53,7 +55,7 @@ import { skillSetPda } from "./pda";
 import { affordable, cheb, route } from "./route";
 import { sendTx } from "./send";
 import { toHitResolved } from "./hit";
-import { Category, Effect, Form, Purpose, Source, defaultMapSelection, makeBlocks, type NamedSkill } from "./skillcheck";
+import { Category, Effect, defaultMapSelection, type NamedSkill } from "./skillcheck";
 import { activeMods, toEffectResolved } from "./support";
 import { turnStarted } from "./turns";
 import { Applied, Aspect, Class, HitOutcome, MAP_MAX, ModKind, Race } from "./types";
@@ -149,16 +151,26 @@ async function openParty(specs: Spec[]) {
     // set_ready copied what each character wears.
     for (const pl of party.players) expect(Array.from(pl.part.equipment)).toEqual(equipmentOf(await gearOf(pl.character)));
     expect(party.session.core.pendingVrf).toBe(true);
-    // The localnet oracle: the ally of a pending heal or buff rides along (GameSession.pendingTarget).
+    // The localnet oracle: the other living players ride along (patch 5: reactive skills, lines,
+    // a buff on an ally). A death in the callback only queues (patch 6).
     const oracle = async (seed: Uint8Array): Promise<ChainEvent[]> => {
       const p = (await readParty(acc.session, party.tiles))!;
       const pendingPart = p.session.pending.participation;
       const pl = p.players.find((x) => x.participation === pendingPart)!;
-      return send(dmKey, [await consumeIx(acc.session, pendingPart, pl.character, seed, pendingTargetOf(p.session), p.session.layout)]);
+      return send(dmKey, [await consumeIx(acc.session, pendingPart, pl.character, seed, p.session.layout, partyAccountsOf(p.session, pendingPart))]);
+    };
+    /** Patch 6: anyone sends start_turn to finalize the deaths a callback queued (with the
+     * current player's accounts when the turn has not started). */
+    const finalize = async (payer: KeyPairSigner): Promise<ChainEvent[]> => {
+      const p = (await readParty(acc.session, party.tiles))!;
+      const unit = currentUnit(p.session)!;
+      const pl = unit < MONSTER_BASE ? p.players.find((x) => x.slot === unit)! : null;
+      const deaths = await deathAccountsOf(p.session);
+      return send(payer, withDeaths(deaths, await startTurnIx(acc.session, pl ? { participation: pl.participation, character: pl.character } : null, payer, deaths)));
     };
     const init = await oracle(await pickSeed("random"));
     expect(init.some((e) => e.name === "InitiativeRolled")).toBe(true);
-    return { preset, dm, dmKey, dmActor, players, built, acc, oracle, party };
+    return { preset, dm, dmKey, dmActor, players, built, acc, oracle, finalize, party };
   }
 }
 
@@ -169,10 +181,19 @@ const taken = (p: Party, moverUnit: number) => {
   return t;
 };
 const tileCost = (p: Party) => Array.from(p.session.tileCost);
+/**
+ * Patch 5: a monster's walk stops on the first cell next to a Cold Snap bearer and asks for a
+ * reactive roll; the oracle answers it. Returns the AP the monster has left.
+ */
+const afterMonsterMove = async (session: Address, tiles: Uint8Array, mi: number, oracle: (seed: Uint8Array) => Promise<ChainEvent[]>) => {
+  const p = (await readParty(session, tiles))!;
+  if (p.session.core.pendingVrf) await oracle(await pickSeed("miss"));
+  return (await readParty(session, tiles))!.monsters[mi]!.actionPoints;
+};
 
 describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
   it("plays create -> map -> party -> fight -> death -> victory -> claims", { timeout: 15 * 60_000 }, async () => {
-    const { preset, dm, dmKey, dmActor, players, built, acc, oracle, party: first } = await openParty([
+    const { preset, dm, dmKey, dmActor, players, built, acc, oracle, finalize, party: first } = await openParty([
       { cls: Class.Warrior, race: Race.Human, pred: Aspect.Piercing, stats: [10, 7, 5, 8], name: "Bran" },
       { cls: Class.Mage, race: Race.ForestElf, pred: Aspect.Cold, stats: [5, 7, 13, 5], name: "Ilyra" },
     ]);
@@ -193,6 +214,16 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
       party = (await readParty(acc.session, tiles))!;
       const s = party.session;
       if (status(s) !== "active") break;
+      // Patch 5: a reactive-only roll (a wolf stepping next to the mage's Cold Snap, over-time
+      // damage under a threshold) waits for the oracle first.
+      if (s.core.pendingVrf) {
+        await oracle(await pickSeed("miss"));
+        continue;
+      }
+      if (s.pendingDeaths) {
+        await finalize(dmKey);
+        continue;
+      }
       const unit = currentUnit(s)!;
       // Every turn begins with start_turn, sent alone by whoever plays the unit (the app's rule).
       if (!turnStarted(s)) {
@@ -202,7 +233,7 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
           await expect(send(payer, [await endTurnIx(players[unit]!.actor, acc.session, pl.character)])).rejects.toThrow(/TurnNotStarted/);
           checkedNotStarted = true;
         }
-        const evs = await send(payer, [await startTurnIx(acc.session, pl ? { participation: pl.participation, character: pl.character } : null)]);
+        const evs = await send(payer, [await startTurnIx(acc.session, pl ? { participation: pl.participation, character: pl.character } : null, payer)]);
         const tick = evs.find((e) => e.name === "TurnTicked")!.data;
         expect([tick.unit, tick.turnSeq]).toEqual([unit, s.turnSeq]);
         ticks++;
@@ -217,7 +248,7 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
         let ap = playerAp(me.part, s);
         const pos = { x: me.part.core.x, y: me.part.core.y };
         if (unit === MAGE && !resonance && livingWolves.length && cheb(pos, party.monsters[livingWolves[0]!]!) <= 6) {
-          const used = (await send(pl.key, [await actIx(pl.actor, acc.session, pl.character, 1, livingWolves[0]!, null)])).find((e) => e.name === "SkillUsed")!.data;
+          const used = (await send(pl.key, [await actIx(pl.actor, acc.session, pl.character, 1, livingWolves[0]!, null, s.layout)])).find((e) => e.name === "SkillUsed")!.data;
           expect(used.skillSlot).toBe(1);
           const after = (await readParty(acc.session, tiles))!;
           expect(Array.from(used.cooldowns as Uint8Array)).toEqual(Array.from(after.players[MAGE]!.part.cooldowns));
@@ -244,12 +275,12 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
           // One attack per turn: Piercing Thrust off cooldown, else the weapon (no cooldown).
           if (ap >= 2 && cheb(now, party.monsters[target]!) === 1 && party.monsters[target]!.alive) {
             const skill = party.players[unit]!.part.cooldowns[0] === 0 ? 0 : BASE_ATTACK;
-            await send(pl.key, [await actIx(pl.actor, acc.session, pl.character, skill, target, null)]);
+            await send(pl.key, [await actIx(pl.actor, acc.session, pl.character, skill, target, null, s.layout)]);
             const evs = await oracle(await pickSeed("crit"));
             hits++;
             if (evs.some((e) => e.name === "SessionEnded")) victory = true;
             if (!victory && !checkedActed) {
-              await expect(send(pl.key, [await actIx(pl.actor, acc.session, pl.character, BASE_ATTACK, target, null)])).rejects.toThrow(/AlreadyActed/);
+              await expect(send(pl.key, [await actIx(pl.actor, acc.session, pl.character, BASE_ATTACK, target, null, s.layout)])).rejects.toThrow(/AlreadyActed/);
               checkedActed = true;
             }
           }
@@ -267,17 +298,22 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
             const take = steps ? affordable(steps, ap, 2) : [];
             if (take.length) {
               await send(dmKey, [await monsterMoveIx(dmActor, acc.session, s.layout, mi, take)]);
-              ap -= take.reduce((n, st) => n + st.cost, 0);
+              ap = await afterMonsterMove(acc.session, tiles, mi, oracle);
             }
           }
           party = (await readParty(acc.session, tiles))!;
           if (ap >= 2 && cheb(party.monsters[mi]!, target) === 1) {
-            await send(dmKey, [await monsterActIx(dmActor, acc.session, mi, MAGE, mage.character)]);
+            await send(dmKey, [await monsterActIx(dmActor, acc.session, mi, 0, MAGE, mage.character, s.layout)]);
             const evs = await oracle(await pickSeed("crit"));
             hits++;
             if (evs.some((e) => e.name === "PlayerDied")) {
               mageDied = true;
-              expect(evs.some((e) => e.name === "CharacterDied")).toBe(true);
+              // Patch 6: down at once, the tombstone comes with the next start_turn; nothing
+              // else goes before it.
+              expect(evs.some((e) => e.name === "CharacterDied")).toBe(false);
+              await expect(send(dmKey, [await endTurnIx(dmActor, acc.session, null)])).rejects.toThrow(/DeathsPending/);
+              const fin = await finalize(dmKey);
+              expect(fin.some((e) => e.name === "DeathFinalized") && fin.some((e) => e.name === "CharacterDied")).toBe(true);
               // The skills burn (names stay as a memorial), the soulbound items vanish.
               const burned = (await getAccount<SkillSetAcc>("character", "SkillSet", await skillSetPda(mage.character)))!;
               expect(burned.skills.slice(0, burned.count).every((k) => k.powerBp === 0 && k.name[0] !== 0)).toBe(true);
@@ -310,12 +346,10 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
     expect(status(party.session)).toBe("victory");
   });
 
-  it("support skills: Quicken on self, Mend on an ally, Sap on a wolf", { timeout: 15 * 60_000 }, async () => {
-    // The Support starting set with Mend (a heal, as in tests/session.test.ts) in place of Expose.
-    const MEND: NamedSkill = { name: "Mend", blocks: makeBlocks(Category.Active, Purpose.Buff, Source.Magical, Form.Projectile, [Aspect.Blood], { effect: Effect.Heal }) };
-    const supportSkills = SKILL_PRESETS[Class.Support].map((k) => (k.name === "Expose" ? MEND : k));
-    const [QUICKEN, SAP, MEND_SLOT] = ["Quicken", "Sap", "Mend"].map((n) => supportSkills.findIndex((k) => k.name === n)) as [number, number, number];
-    const { dmKey, dmActor, players, acc, oracle, party: first } = await openParty([
+  it("support skills: Quicken on self, Shelter on an ally, Sap on a wolf", { timeout: 15 * 60_000 }, async () => {
+    const supportSkills = SKILL_PRESETS[Class.Support];
+    const [QUICKEN, SAP, SHELTER] = ["Quicken", "Sap", "Shelter"].map((n) => supportSkills.findIndex((k) => k.name === n)) as [number, number, number];
+    const { dmKey, dmActor, players, acc, oracle, finalize, party: first } = await openParty([
       { cls: Class.Warrior, race: Race.Human, pred: Aspect.Piercing, stats: [10, 7, 5, 8], name: "Bran" },
       { cls: Class.Support, race: Race.Human, pred: Aspect.Blood, stats: [5, 7, 13, 5], name: "Mira", skills: supportSkills },
     ]);
@@ -325,19 +359,28 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
     const mira = players[SUPPORT]!;
     const bran = first.players[WARRIOR]!;
     const effectOf = (evs: ChainEvent[]) => toEffectResolved(evs.find((e) => e.name === "EffectResolved")!.data);
-    const act = async (skill: number, target: number, ally: Address | null) => send(mira.key, [await actIx(mira.actor, acc.session, mira.character, skill, target, ally)]);
+    const act = async (skill: number, target: number, ally: Address | null) => send(mira.key, [await actIx(mira.actor, acc.session, mira.character, skill, target, ally, first.session.layout)]);
 
-    let phase: "quicken" | "mend" | "sap" | "done" = "quicken";
+    let phase: "quicken" | "shelter" | "sap" | "done" = "quicken";
     let hasted = 0;
     let checkedHaste = false;
     for (let guard = 0; guard < 400 && phase !== "done"; guard++) {
       const party = (await readParty(acc.session, tiles))!;
       const s = party.session;
       expect(status(s)).toBe("active");
+      if (s.core.pendingVrf) {
+        await oracle(await pickSeed("miss"));
+        continue;
+      }
+      if (s.pendingDeaths) {
+        await finalize(dmKey);
+        continue;
+      }
       const unit = currentUnit(s)!;
       if (!turnStarted(s)) {
         const pl = unit < MONSTER_BASE ? party.players[unit]! : null;
-        const evs = await send(pl ? players[unit]!.key : dmKey, [await startTurnIx(acc.session, pl ? { participation: pl.participation, character: pl.character } : null)]);
+        const starter = pl ? players[unit]!.key : dmKey;
+        const evs = await send(starter, [await startTurnIx(acc.session, pl ? { participation: pl.participation, character: pl.character } : null, starter)]);
         // The first own turn after Quicken: ModsTicked follows TurnTicked with the hasted AP.
         if (unit === SUPPORT && hasted && !checkedHaste) {
           const names = evs.map((e) => e.name);
@@ -368,18 +411,17 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
           expect([haste.turns, haste.powerBp, haste.source]).toEqual([4, fx.roll.amount, SUPPORT]);
           hasted = Math.min(255, Math.max(1, Math.floor((me.part.maxAp * (10_000 + fx.roll.amount)) / 10_000)));
           expect(hasted).toBeGreaterThan(me.part.maxAp);
-          phase = "mend";
-        } else if (phase === "mend") {
-          await act(MEND_SLOT, WARRIOR, bran.participation);
-          expect((await readParty(acc.session, tiles))!.session.pendingTarget).toBe(bran.participation);
+          phase = "shelter";
+        } else if (phase === "shelter") {
+          // Both still stand on the entrance: Shelter (a strike) reaches the warrior there.
+          await act(SHELTER, WARRIOR, bran.participation);
+          // Patch 5: the ally comes with the party accounts, not `pending_target`.
+          expect((await readParty(acc.session, tiles))!.session.pendingTarget).toBe(DEFAULT_KEY);
           const fx = effectOf(await oracle(await pickSeed("random")));
-          expect([fx.caster, fx.target, fx.effect, fx.applied, fx.roll.outcome]).toEqual([SUPPORT, WARRIOR, Effect.Heal, Applied.None, HitOutcome.Hit]);
+          expect([fx.caster, fx.target, fx.effect, fx.applied, fx.roll.outcome]).toEqual([SUPPORT, WARRIOR, Effect.Protection, Applied.Added, HitOutcome.Hit]);
           const after = (await readParty(acc.session, tiles))!;
-          const warrior = after.players[WARRIOR]!.part;
-          expect(warrior.hpMax).toBeGreaterThan(0);
-          expect(fx.hp).toBe(Math.min(warrior.hpMax, party.players[WARRIOR]!.part.core.hp + fx.roll.amount));
-          expect(warrior.core.hp).toBe(fx.hp);
-          expect(after.session.pendingTarget).toBe(DEFAULT_KEY);
+          const shelter = activeMods(after.players[WARRIOR]!.part.mods).find((m) => m.kind === ModKind.Protection)!;
+          expect([shelter.powerBp, shelter.source]).toEqual([fx.roll.amount, SUPPORT]);
           phase = "sap";
         } else {
           const pos = { x: me.part.core.x, y: me.part.core.y };
@@ -398,7 +440,7 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
       } else if (unit < MONSTER_BASE) {
         await send(players[unit]!.key, [await endTurnIx(players[unit]!.actor, acc.session, party.players[unit]!.character)]);
       } else {
-        // Wolves walk up to the warrior on the entrance and bite (wounds for Mend, a target for Sap).
+        // Wolves walk up to the warrior on the entrance and bite (a target for Sap).
         const mi = unit - MONSTER_BASE;
         const m = party.monsters[mi]!;
         const target = { x: bran.part.core.x, y: bran.part.core.y };
@@ -409,12 +451,12 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
             const take = steps ? affordable(steps, ap, 2) : [];
             if (take.length) {
               await send(dmKey, [await monsterMoveIx(dmActor, acc.session, s.layout, mi, take)]);
-              ap -= take.reduce((n, st) => n + st.cost, 0);
+              ap = await afterMonsterMove(acc.session, tiles, mi, oracle);
             }
           }
           const now = (await readParty(acc.session, tiles))!;
           if (ap >= 2 && cheb(now.monsters[mi]!, target) === 1) {
-            await send(dmKey, [await monsterActIx(dmActor, acc.session, mi, WARRIOR, bran.character)]);
+            await send(dmKey, [await monsterActIx(dmActor, acc.session, mi, 0, WARRIOR, bran.character, s.layout)]);
             await oracle(await pickSeed("random"));
           }
         }
@@ -430,7 +472,7 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
     const EXPOSE = supportSkills.findIndex((k) => k.name === "Expose");
     expect(EXPOSE).toBeGreaterThanOrEqual(0);
     // A Fire predisposition (forest elf) gives the warrior's basic hit a Fire packet next to the Piercing sword.
-    const { dmKey, dmActor, players, acc, oracle, party: first } = await openParty([
+    const { dmKey, dmActor, players, acc, oracle, finalize, party: first } = await openParty([
       { cls: Class.Warrior, race: Race.ForestElf, pred: Aspect.Fire, stats: [10, 7, 5, 8], name: "Bran" },
       { cls: Class.Support, race: Race.Human, pred: Aspect.Blood, stats: [5, 7, 13, 5], name: "Mira", skills: supportSkills },
     ]);
@@ -448,10 +490,19 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
       const party = (await readParty(acc.session, tiles))!;
       const s = party.session;
       expect(status(s)).toBe("active");
+      if (s.core.pendingVrf) {
+        await oracle(await pickSeed("miss"));
+        continue;
+      }
+      if (s.pendingDeaths) {
+        await finalize(dmKey);
+        continue;
+      }
       const unit = currentUnit(s)!;
       if (!turnStarted(s)) {
         const pl = unit < MONSTER_BASE ? party.players[unit]! : null;
-        await send(pl ? players[unit]!.key : dmKey, [await startTurnIx(acc.session, pl ? { participation: pl.participation, character: pl.character } : null)]);
+        const starter = pl ? players[unit]!.key : dmKey;
+        await send(starter, [await startTurnIx(acc.session, pl ? { participation: pl.participation, character: pl.character } : null, starter)]);
         continue;
       }
       const target = branAt(party);
@@ -460,7 +511,7 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
         // A wolf already next to the warrior, in Mira's reach.
         const wolf = wolves.find((i) => party.monsters[i]!.alive && cheb(party.monsters[i]!, target) === 1 && cheb(me, party.monsters[i]!) >= 1 && cheb(me, party.monsters[i]!) <= 6);
         if (phase === "expose" && wolf !== undefined) {
-          await send(mira.key, [await actIx(mira.actor, acc.session, mira.character, EXPOSE, wolf, null)]);
+          await send(mira.key, [await actIx(mira.actor, acc.session, mira.character, EXPOSE, wolf, null, s.layout)]);
           const fx = toEffectResolved((await oracle(await pickSeed("crit"))).find((e) => e.name === "EffectResolved")!.data);
           expect([fx.target, fx.effect, fx.roll.d20, fx.applied]).toEqual([MONSTER_BASE + wolf, Effect.Vulnerability, 20, Applied.Added]);
           const v = vulnOf((await readParty(acc.session, tiles))!, wolf)!;
@@ -475,7 +526,7 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
         if (phase === "strike" && !v) phase = "expose"; // wore off before the warrior's turn
         if (phase === "strike" && v && wolf?.alive && cheb(wolf, target) === 1) {
           const hpBefore = wolf.hp;
-          await send(bran.key, [await actIx(bran.actor, acc.session, bran.character, BASE_ATTACK, exposed, null)]);
+          await send(bran.key, [await actIx(bran.actor, acc.session, bran.character, BASE_ATTACK, exposed, null, s.layout)]);
           // A plain roll (no crit), so the hit rarely kills and the HP drop is the whole damage.
           const hit = toHitResolved((await oracle(await pickSeed("random"))).find((e) => e.name === "HitResolved")!.data).result;
           const hpAfter = (await readParty(acc.session, tiles))!.monsters[exposed]!.hp;
@@ -517,12 +568,12 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
             const take = steps ? affordable(steps, ap, 2) : [];
             if (take.length) {
               await send(dmKey, [await monsterMoveIx(dmActor, acc.session, s.layout, mi, take)]);
-              ap -= take.reduce((n, st) => n + st.cost, 0);
+              ap = await afterMonsterMove(acc.session, tiles, mi, oracle);
             }
           }
           const now = (await readParty(acc.session, tiles))!;
           if (ap >= 2 && cheb(now.monsters[mi]!, target) === 1) {
-            await send(dmKey, [await monsterActIx(dmActor, acc.session, mi, WARRIOR, first.players[WARRIOR]!.character)]);
+            await send(dmKey, [await monsterActIx(dmActor, acc.session, mi, 0, WARRIOR, first.players[WARRIOR]!.character, s.layout)]);
             await oracle(await pickSeed("random"));
           }
         }

@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { textBytes, type SkillRecordAcc, type TimedModAcc } from "./game";
-import { Category, Effect, Form, Purpose, Source, inReach, makeBlocks, skillSide, usableInCombat } from "./skillcheck";
+import { textBytes, type MapSkillAcc, type SkillRecordAcc, type TimedModAcc } from "./game";
+import { Category, Effect, Form, Purpose, RangeTag, Source, inReach, makeBlocks, skillSide, usableInCombat } from "./skillcheck";
 import { activeMods, combatSkill, effectText, modLabel, modTurnsLeft, modsAt, modsTickText, type EffectResolved } from "./support";
 import { Applied, Aspect, HitOutcome, ModKind } from "./types";
 
@@ -14,9 +14,9 @@ describe("skill side and reach", () => {
     expect([Purpose.Buff, Purpose.Damage, Purpose.Debuff].map(skillSide)).toEqual(["ally", "enemy", "enemy"]);
   });
 
-  it("allies may share the cell, enemies need distance 1; strike 1, projectile 6", () => {
-    expect([0, 1, 2].map((d) => inReach("ally", Form.Strike, d))).toEqual([true, true, false]);
-    expect([0, 1, 6, 7].map((d) => inReach("enemy", Form.Projectile, d))).toEqual([false, true, true, false]);
+  it("allies may share the cell, enemies need distance 1; melee 1, ranged 6", () => {
+    expect([0, 1, 2].map((d) => inReach("ally", RangeTag.Melee, d))).toEqual([true, true, false]);
+    expect([0, 1, 6, 7].map((d) => inReach("enemy", RangeTag.Ranged, d))).toEqual([false, true, true, false]);
   });
 
   it("every active skill with its effect is usable; reactive ones are not", () => {
@@ -37,7 +37,7 @@ describe("skill side and reach", () => {
         target: e("single"),
         aspects: [e("blood"), e("fire"), e("fire")],
         aspectCount: 1,
-        effect: e("heal"),
+        effect: e("protection"),
         trigger: e("none"),
         auraRadius: 0,
       },
@@ -45,9 +45,14 @@ describe("skill side and reach", () => {
       powerBp: 10_000,
       fusion: 0,
       cooldown: 1,
-      name: textBytes("Mend", 24),
+      name: textBytes("Ward", 24),
     } as unknown as SkillRecordAcc;
-    expect(combatSkill(3, rec)).toEqual({ slot: 3, name: "Mend", category: Category.Active, usable: true, purpose: Purpose.Buff, side: "ally", form: Form.Projectile, effect: Effect.Heal });
+    const ward = { slot: 3, name: "Ward", category: Category.Active, usable: true, purpose: Purpose.Buff, side: "ally", form: Form.Projectile, effect: Effect.Protection };
+    // Without the session snapshot: the form's range and the derived AP cost.
+    expect(combatSkill(3, rec)).toEqual({ ...ward, range: RangeTag.Ranged, apCost: 2, line: false });
+    // With it (Participation.map_skills): the stored range tag and AP cost.
+    const map = { ext: { range: e("melee"), timing: e("instant"), hpBelowPct: 0 }, apCost: 3 } as unknown as MapSkillAcc;
+    expect(combatSkill(3, rec, map)).toEqual({ ...ward, range: RangeTag.Melee, apCost: 3, line: false });
   });
 });
 

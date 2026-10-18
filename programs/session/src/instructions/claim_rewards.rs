@@ -6,6 +6,7 @@ use crate::{
     cpi_out::{self, SessionSigner},
     errors::SessionError,
     events::RewardsClaimed,
+    outcomes,
     rules::{boss_rewards, REWARD_ROLL_BASE, REWARD_ROLL_STRIDE},
     state::{GameSession, Participation, TempStash, STASH_RESOURCES},
     vrf::SyscallRoll,
@@ -58,8 +59,10 @@ pub struct ClaimRewards<'info> {
 /// - fled, alive: the cache is abandoned, `unlock` only;
 /// - dead: the cache burns; the tombstone stays locked to this session (`character::mark_dead`).
 ///
+/// Patch 6: every pending death of the session is finalized first.
+///
 /// TODO(P1, L6.5): only after the DM's final audit.
-pub fn handler(ctx: Context<ClaimRewards>) -> Result<()> {
+pub fn handler<'info>(ctx: Context<'info, ClaimRewards<'info>>) -> Result<()> {
     let accounts = ctx.accounts;
     let participation = &accounts.participation;
     let caller = accounts.signer.key();
@@ -98,6 +101,10 @@ pub fn handler(ctx: Context<ClaimRewards>) -> Result<()> {
         config: &accounts.config,
         bump: ctx.bumps.session_authority,
     };
+    // Patch 6: a party that ended in a callback may still have deaths to finalize; they come
+    // first (`remaining_accounts`: a character, skill set and bag per queued slot).
+    let key = session.key();
+    outcomes::finalize_deaths(session, key, &signer, ctx.remaining_accounts)?;
     let (mut xp, mut resources) = (0, [0u32; STASH_RESOURCES]);
     if alive && status == SessionStatus::Victory {
         stash.xp = stash.xp.saturating_add(session.xp_pool);

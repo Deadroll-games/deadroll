@@ -1,5 +1,7 @@
 use anchor_lang::prelude::*;
-use deadroll_skillcheck::{check_loadout, derive, validate_starting, SkillBlocks, STARTING_MAX};
+use deadroll_skillcheck::{
+    check_loadout, derive, validate_starting, SkillBlocks, SkillExt, STARTING_MAX,
+};
 use deadroll_types::{
     seeds, Aspect, CharacterData, Class, LayerRef, Race, BAG_SLOTS, LAYERS_MAX, STATS_COUNT,
 };
@@ -12,18 +14,20 @@ use crate::{
     events::CharacterCreated,
     rules::{self, ACCOUNT_VERSION, CHARACTER_VERSION, CLASS_START_TIER, START_TIER},
     state::{
-        Bag, Character, Gear, PlayerProfile, SkillRecord, SkillSet, NAME_LEN, RESOURCE_KINDS,
-        SKILLS_MAX, SKILL_NAME_LEN,
+        Bag, Character, Gear, PlayerProfile, SkillExtra, SkillExtras, SkillRecord, SkillSet,
+        NAME_LEN, RESOURCE_KINDS, SKILLS_MAX, SKILL_NAME_LEN,
     },
     trust,
 };
 
-/// A starting skill: the blocks (usually a preset from `deadroll_skillcheck::presets`) and the
-/// player's name for it.
+/// A starting skill: the blocks (usually a preset from `deadroll_skillcheck::presets`), the
+/// player's name for it and the patch 5 blocks. The description comes with
+/// `set_skill_description` (six of them do not fit one transaction with the rest).
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug)]
 pub struct NewSkill {
     pub blocks: SkillBlocks,
     pub name: [u8; SKILL_NAME_LEN],
+    pub ext: SkillExt,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
@@ -84,6 +88,15 @@ pub struct CreateCharacter<'info> {
     #[account(address = MPL_CORE_ID)]
     pub mpl_core_program: Option<UncheckedAccount<'info>>,
     pub system_program: Program<'info, System>,
+    /// Patch 5: range, timing, HP threshold, AP cost and description of every skill.
+    #[account(
+        init,
+        payer = owner,
+        space = 8 + SkillExtras::SIZE,
+        seeds = [seeds::SKILL_EXTRAS, character.key().as_ref()],
+        bump,
+    )]
+    pub skill_extras: AccountLoader<'info, SkillExtras>,
 }
 
 pub fn handler(ctx: Context<CreateCharacter>, args: CreateCharacterArgs) -> Result<()> {
@@ -102,21 +115,28 @@ pub fn handler(ctx: Context<CreateCharacter>, args: CreateCharacterArgs) -> Resu
     );
 
     let mut skills = [SkillRecord::default(); SKILLS_MAX];
-    for (i, s) in args.skills.iter().enumerate() {
-        if let Err(e) = validate_starting(&s.blocks, args.class) {
-            msg!("skill {}: {:?}", i, e);
-            return err!(CharacterError::InvalidSkill);
+    {
+        let mut extras = ctx.accounts.skill_extras.load_init()?;
+        extras.version = ACCOUNT_VERSION;
+        extras.bump = ctx.bumps.skill_extras;
+        extras.character = ctx.accounts.character.key();
+        for (i, s) in args.skills.iter().enumerate() {
+            if let Err(e) = validate_starting(&s.blocks, &s.ext, args.class) {
+                msg!("skill {}: {:?}", i, e);
+                return err!(CharacterError::InvalidSkill);
+            }
+            require!(rules::name_valid(&s.name), CharacterError::InvalidName);
+            let d = derive(&s.blocks);
+            skills[i] = SkillRecord {
+                blocks: s.blocks,
+                shares_bp: d.shares_bp,
+                power_bp: d.power_bp,
+                fusion: d.fusion,
+                cooldown: d.cooldown,
+                name: s.name,
+            };
+            extras.extras[i] = SkillExtra::new(&s.ext, d.ap_cost);
         }
-        require!(rules::name_valid(&s.name), CharacterError::InvalidName);
-        let d = derive(&s.blocks);
-        skills[i] = SkillRecord {
-            blocks: s.blocks,
-            shares_bp: d.shares_bp,
-            power_bp: d.power_bp,
-            fusion: d.fusion,
-            cooldown: d.cooldown,
-            name: s.name,
-        };
     }
     if let Err(e) = check_loadout(args.skills.iter().map(|s| &s.blocks)) {
         msg!("loadout: {:?}", e);

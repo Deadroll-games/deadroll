@@ -122,6 +122,15 @@ pub struct Report {
     pub knockbacks_per_fight: f64,
     pub cells_per_fight: f64,
     pub cell_burns_per_fight: f64,
+    /// Per fight (patch 5): reactive skills that triggered, the units a line hit beyond its
+    /// chosen target, and the bearer turns an aura covered an ally or an enemy.
+    pub reactions_per_fight: f64,
+    pub line_extra_per_fight: f64,
+    pub aura_reach_per_fight: f64,
+    /// Patch 6: monster active skills used, HP monsters healed, monster reactives that fired.
+    pub monster_skills_per_fight: f64,
+    pub monster_healed_per_fight: f64,
+    pub monster_reactions_per_fight: f64,
 }
 
 fn ratio(a: u64, b: u64) -> f64 {
@@ -234,6 +243,12 @@ impl Report {
             knockbacks_per_fight: per_fight(|f| f.knockbacks),
             cells_per_fight: per_fight(|f| f.cells_ignited),
             cell_burns_per_fight: per_fight(|f| f.burned_by_cells),
+            reactions_per_fight: per_fight(|f| f.reactions),
+            line_extra_per_fight: per_fight(|f| f.line_extra_hits),
+            aura_reach_per_fight: per_fight(|f| f.aura_reach),
+            monster_skills_per_fight: per_fight(|f| f.monster_skills),
+            monster_healed_per_fight: per_fight(|f| f.monster_healed.min(u32::MAX as u64) as u32),
+            monster_reactions_per_fight: per_fight(|f| f.monster_reactions),
         }
     }
 }

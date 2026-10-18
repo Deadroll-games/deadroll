@@ -1,10 +1,11 @@
-//! One rejection of `validate`, `validate_starting` or `check_loadout` per test.
+//! One rejection of `validate`, `validate_skill`, `validate_starting` or `check_loadout` per test.
 //! Each case starts from a valid preset and changes only what the rule looks at.
 //! Happy paths live in `tests/presets.rs`.
 
 use deadroll_skillcheck::{
-    check_loadout, presets, validate, validate_starting, Category, Effect, Purpose, SkillBlocks,
-    SkillError, Target, Trigger, AURA_RADIUS_MAX,
+    check_loadout, presets, validate, validate_skill, validate_skill_with, validate_starting,
+    Category, Effect, Purpose, SkillBlocks, SkillError, SkillExt, SkillTuning, Target, Trigger,
+    AURA_RADIUS_MAX,
 };
 use deadroll_types::{Aspect, Class, Form, Source};
 
@@ -127,17 +128,123 @@ fn debuff_with_buff_effect() {
 }
 
 #[test]
-fn damage_with_heal_effect() {
-    let mut s = presets::WARRIOR[0].blocks;
-    s.effect = Effect::Heal;
-    assert_eq!(validate(&s), Err(SkillError::EffectKind));
+fn heal_is_not_in_the_builder() {
+    // A buff, a damage skill and a debuff with Heal: healing comes with its own class
+    // (docs/CHARACTER.md, 8.1), whatever the purpose.
+    for p in [
+        &presets::SUPPORT[0],
+        &presets::WARRIOR[0],
+        &presets::SUPPORT[1],
+    ] {
+        let mut s = p.blocks;
+        s.effect = Effect::Heal;
+        assert_eq!(
+            validate(&s),
+            Err(SkillError::HealNotAvailable),
+            "{}",
+            p.name
+        );
+        assert_eq!(
+            validate_skill(&s, &p.ext),
+            Err(SkillError::HealNotAvailable)
+        );
+    }
 }
 
 #[test]
-fn debuff_with_heal_effect() {
-    let mut s = presets::SUPPORT[1].blocks;
-    s.effect = Effect::Heal;
-    assert_eq!(validate(&s), Err(SkillError::EffectKind));
+fn hp_trigger_without_threshold() {
+    // Last Stand is HpBelow at 40%.
+    let p = &presets::SUPPORT[4];
+    let ext = SkillExt {
+        hp_below_pct: 0,
+        ..p.ext
+    };
+    assert_eq!(
+        validate_skill(&p.blocks, &ext),
+        Err(SkillError::MissingThreshold)
+    );
+    let mut ally = p.blocks;
+    ally.trigger = Trigger::AllyHpBelow;
+    assert_eq!(
+        validate_skill(&ally, &ext),
+        Err(SkillError::MissingThreshold)
+    );
+}
+
+#[test]
+fn threshold_on_another_trigger() {
+    // Riposte triggers on a hit: no threshold.
+    let p = &presets::WARRIOR[4];
+    let ext = SkillExt {
+        hp_below_pct: 50,
+        ..p.ext
+    };
+    assert_eq!(
+        validate_skill(&p.blocks, &ext),
+        Err(SkillError::UnexpectedThreshold)
+    );
+    // An active skill has no trigger and so no threshold either.
+    let p = &presets::WARRIOR[0];
+    let ext = SkillExt {
+        hp_below_pct: 50,
+        ..p.ext
+    };
+    assert_eq!(
+        validate_skill(&p.blocks, &ext),
+        Err(SkillError::UnexpectedThreshold)
+    );
+}
+
+#[test]
+fn threshold_out_of_range() {
+    let p = &presets::SUPPORT[4];
+    let t = SkillTuning::DEFAULT;
+    for pct in [t.hp_below_min_pct - 1, t.hp_below_max_pct + 1, 100, u8::MAX] {
+        let ext = SkillExt {
+            hp_below_pct: pct,
+            ..p.ext
+        };
+        assert_eq!(
+            validate_skill(&p.blocks, &ext),
+            Err(SkillError::ThresholdRange),
+            "{pct}"
+        );
+    }
+    // The limits come from the tuning.
+    let wide = SkillTuning {
+        hp_below_min_pct: 1,
+        hp_below_max_pct: 99,
+        ..t
+    };
+    let ext = SkillExt {
+        hp_below_pct: 99,
+        ..p.ext
+    };
+    assert_eq!(validate_skill_with(&p.blocks, &ext, &wide), Ok(()));
+}
+
+#[test]
+fn passive_debuff_without_aura() {
+    // Cold Ward is a passive buff aura. As a debuff it must stay an aura (on the enemies around).
+    let mut s = presets::SUPPORT[5].blocks;
+    s.purpose = Purpose::Debuff;
+    s.effect = Effect::Slow;
+    assert_eq!(validate(&s), Ok(()));
+    s.aura_radius = 0;
+    assert_eq!(validate(&s), Err(SkillError::PassiveDebuffNeedsAura));
+}
+
+#[test]
+fn starting_skill_checks_the_ext_too() {
+    let p = &presets::SUPPORT[4];
+    let ext = SkillExt {
+        hp_below_pct: 0,
+        ..p.ext
+    };
+    assert_eq!(
+        validate_starting(&p.blocks, &ext, Class::Support),
+        Err(SkillError::MissingThreshold)
+    );
 }
 
 #[test]
@@ -238,6 +345,18 @@ fn aura_on_reactive_damage() {
 }
 
 #[test]
+fn aura_with_hard_control() {
+    // Cold Ward as a debuff aura: Slow is fine, Freeze is not "one stat, one resistance, one
+    // increase" (section 3.5).
+    let mut s = presets::SUPPORT[5].blocks;
+    s.purpose = Purpose::Debuff;
+    s.effect = Effect::Slow;
+    assert_eq!(validate(&s), Ok(()));
+    s.effect = Effect::Freeze;
+    assert_eq!(validate(&s), Err(SkillError::AuraEffect));
+}
+
+#[test]
 fn aura_radius_max_boundary() {
     // Last Stand is a reactive buff aura.
     let mut s = presets::SUPPORT[4].blocks;
@@ -254,7 +373,7 @@ fn warrior_magical_source() {
     let mut s = presets::WARRIOR[0].blocks;
     s.source = Source::Magical;
     assert_eq!(
-        validate_starting(&s, Class::Warrior),
+        validate_starting(&s, &SkillExt::MELEE, Class::Warrior),
         Err(SkillError::ClassSource)
     );
 }
@@ -264,7 +383,7 @@ fn mage_combat_source() {
     let mut s = presets::MAGE[0].blocks;
     s.source = Source::Combat;
     assert_eq!(
-        validate_starting(&s, Class::Mage),
+        validate_starting(&s, &SkillExt::MELEE, Class::Mage),
         Err(SkillError::ClassSource)
     );
 }
@@ -273,7 +392,7 @@ fn mage_combat_source() {
 fn support_damage_purpose() {
     // Frost Bolt is a legal damage skill. Support starting skills cannot deal damage.
     assert_eq!(
-        validate_starting(&presets::MAGE[0].blocks, Class::Support),
+        validate_starting(&presets::MAGE[0].blocks, &SkillExt::MELEE, Class::Support),
         Err(SkillError::ClassPurpose)
     );
 }
@@ -282,7 +401,11 @@ fn support_damage_purpose() {
 fn support_combat_buff_is_ok() {
     // Shelter is a Combat-source buff. Support may use either power source.
     assert_eq!(
-        validate_starting(&presets::SUPPORT[3].blocks, Class::Support),
+        validate_starting(
+            &presets::SUPPORT[3].blocks,
+            &SkillExt::MELEE,
+            Class::Support
+        ),
         Ok(())
     );
 }
@@ -374,13 +497,13 @@ fn builder_error_before_class_error() {
     s.source = Source::Magical;
     s.aspect_count = 0;
     assert_eq!(
-        validate_starting(&s, Class::Warrior),
+        validate_starting(&s, &SkillExt::MELEE, Class::Warrior),
         Err(SkillError::AspectCount)
     );
     // Once the builder rule holds, the class rule is what remains.
     s.aspect_count = 1;
     assert_eq!(
-        validate_starting(&s, Class::Warrior),
+        validate_starting(&s, &SkillExt::MELEE, Class::Warrior),
         Err(SkillError::ClassSource)
     );
 }
@@ -471,6 +594,26 @@ fn every_skill_error_variant_is_covered() {
     let two_reactive = [presets::WARRIOR[4].blocks; 2];
     let two_passive = [presets::WARRIOR[5].blocks; 2];
 
+    let mut heal = presets::SUPPORT[0].blocks;
+    heal.effect = Effect::Heal;
+    let last_stand = presets::SUPPORT[4];
+    let no_threshold = SkillExt {
+        hp_below_pct: 0,
+        ..last_stand.ext
+    };
+    let low_threshold = SkillExt {
+        hp_below_pct: 1,
+        ..last_stand.ext
+    };
+    let riposte_threshold = SkillExt {
+        hp_below_pct: 50,
+        ..presets::WARRIOR[4].ext
+    };
+    let mut passive_debuff = presets::SUPPORT[5].blocks;
+    passive_debuff.purpose = Purpose::Debuff;
+    passive_debuff.effect = Effect::Slow;
+    passive_debuff.aura_radius = 0;
+
     let produced = [
         validate(&zero).unwrap_err(),
         validate(&repeated).unwrap_err(),
@@ -486,11 +629,16 @@ fn every_skill_error_variant_is_covered() {
         validate(&active_aura).unwrap_err(),
         validate(&damage_aura).unwrap_err(),
         validate(&wide_aura).unwrap_err(),
-        validate_starting(&magical, Class::Warrior).unwrap_err(),
-        validate_starting(&presets::MAGE[0].blocks, Class::Support).unwrap_err(),
+        validate_starting(&magical, &SkillExt::MELEE, Class::Warrior).unwrap_err(),
+        validate_starting(&presets::MAGE[0].blocks, &SkillExt::MELEE, Class::Support).unwrap_err(),
         check_loadout(five_active.iter()).unwrap_err(),
         check_loadout(two_reactive.iter()).unwrap_err(),
         check_loadout(two_passive.iter()).unwrap_err(),
+        validate(&heal).unwrap_err(),
+        validate_skill(&last_stand.blocks, &no_threshold).unwrap_err(),
+        validate_skill(&presets::WARRIOR[4].blocks, &riposte_threshold).unwrap_err(),
+        validate_skill(&last_stand.blocks, &low_threshold).unwrap_err(),
+        validate(&passive_debuff).unwrap_err(),
     ];
     let all = [
         SkillError::AspectCount,
@@ -512,9 +660,15 @@ fn every_skill_error_variant_is_covered() {
         SkillError::TooManyActive,
         SkillError::TooManyReactive,
         SkillError::TooManyPassive,
+        SkillError::HealNotAvailable,
+        SkillError::MissingThreshold,
+        SkillError::UnexpectedThreshold,
+        SkillError::ThresholdRange,
+        SkillError::PassiveDebuffNeedsAura,
     ];
-    assert_eq!(produced.len(), 19);
-    assert_eq!(all.len(), 19);
+    // The selection errors have their own file (`tests/map_selection.rs`).
+    assert_eq!(produced.len(), 24);
+    assert_eq!(all.len(), 24);
     for variant in all {
         assert!(produced.contains(&variant), "missing {variant:?}");
     }

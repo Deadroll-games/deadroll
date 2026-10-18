@@ -13,7 +13,7 @@ pub mod trust;
 
 use deadroll_types::{EquipSlot, STATS_COUNT};
 use instructions::*;
-use state::{MAP_SKILLS, RESOURCE_KINDS};
+use state::{MAP_SKILLS, RESOURCE_KINDS, SKILL_DESCRIPTION_LEN};
 
 declare_id!("9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL");
 
@@ -85,6 +85,16 @@ pub mod deadroll_character {
     /// the party).
     pub fn unlock(ctx: Context<Unlock>) -> Result<()> {
         unlock::handler(ctx)
+    }
+
+    /// Owner's main wallet only: writes the description of skill `skill_index` (printable
+    /// ASCII, zero-padded), once. Not while the character is in a session.
+    pub fn set_skill_description(
+        ctx: Context<SetSkillDescription>,
+        skill_index: u8,
+        description: [u8; SKILL_DESCRIPTION_LEN],
+    ) -> Result<()> {
+        set_skill_description::handler(ctx, skill_index, description)
     }
 
     /// Permissionless: freezes the Core NFT of a dead character.

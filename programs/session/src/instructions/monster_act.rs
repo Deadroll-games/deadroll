@@ -1,12 +1,20 @@
 use anchor_lang::prelude::*;
-use deadroll_types::{seeds, Cell, SessionStatus};
+use deadroll_rules::{
+    input::{skill_use, target_side, Side, SkillUse},
+    monster::{kin_reaches, record},
+    MonsterSkillStats,
+};
+use deadroll_skillcheck::Target;
+use deadroll_types::{seeds, Cell, SessionStatus, MONSTER_SLOTS};
 
 use crate::{
     auth,
     errors::SessionError,
-    events::ActionRequested,
-    rules::{in_range, monster_profile, Unit, ACT_AP, NATURAL_ATTACK},
-    state::{GameSession, Monsters, Participation, PendingAction},
+    events::{ActionRequested, SkillUsed},
+    line::skill_line,
+    party::party_keys,
+    rules::{cooldown_after_use, in_ally_range, in_range, monster_range, Unit, BASIC_ATTACK_AP},
+    state::{external::MapLayoutView, GameSession, Monsters, Participation, PendingAction},
     vrf::{self, CallbackAccounts, RequestAccounts},
 };
 
@@ -24,7 +32,8 @@ pub struct MonsterAct<'info> {
     /// CHECK: `MonsterState` of this session, checked by `Monsters::load` (written in place).
     #[account(mut)]
     pub monsters: UncheckedAccount<'info>,
-    /// The target player's participation.
+    /// The target player's participation; for a heal or buff on a monster (patch 6), the
+    /// participation of the lowest living player slot (the callback's account list is fixed).
     #[account(
         seeds = [
             seeds::PARTICIPATION,
@@ -66,10 +75,16 @@ pub struct MonsterAct<'info> {
     #[account(address = vrf::slot_hashes())]
     pub slot_hashes: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
+    /// CHECK: the session's `MapLayout` (patch 6): a wall cuts a line target. Address pinned at
+    /// `open_session`, read by `MapLayoutView`.
+    #[account(address = session.layout @ SessionError::InvalidLayout)]
+    pub layout: UncheckedAccount<'info>,
 }
 
-/// Monster `monster` attacks the player in `target` (a slot) with `action`
-/// (`NATURAL_ATTACK` is the only P0 action; TODO(post-demo): skills from the spawn's pool).
+/// Monster `monster` acts with `action`: `NATURAL_ATTACK`, or `1 + slot` for the active skill in
+/// that monster slot (docs/BESTIARY.md 3.2; patch 6). `target`, by the skill's side: a player slot
+/// for the natural attack, damage and debuff skills; a monster index (itself included) for heal
+/// and buff skills, of its own kin for a kin-only skill.
 pub fn handler(ctx: Context<MonsterAct>, monster: u8, action: u8, target: u8) -> Result<()> {
     let accounts = ctx.accounts;
     let session = &mut accounts.session;
@@ -84,7 +99,12 @@ pub fn handler(ctx: Context<MonsterAct>, monster: u8, action: u8, target: u8) ->
         SessionError::NotActive
     );
     require!(!session.core.pending_vrf, SessionError::RollPending);
-    require!(action == NATURAL_ATTACK, SessionError::InvalidAction);
+    // Patch 6: a player down in the last callback is finalized first (`start_turn`).
+    require!(session.pending_deaths == 0, SessionError::DeathsPending);
+    require!(
+        action as usize <= MONSTER_SLOTS,
+        SessionError::InvalidAction
+    );
     let monsters = Monsters::load(&accounts.monsters, &session.key())?;
     require!(monster < monsters.count()?, SessionError::InvalidMonster);
     require!(
@@ -97,33 +117,96 @@ pub fn handler(ctx: Context<MonsterAct>, monster: u8, action: u8, target: u8) ->
     // One attack per turn, like players (PARTY_AND_TURNS 5.1).
     require!(!session.acted(), SessionError::AlreadyActed);
 
-    let participation = &accounts.participation;
-    require!(
-        participation.core.slot == target
-            && session.player_alive(target)
-            && participation.core.hp > 0,
-        SessionError::InvalidTarget
-    );
-    let profile = monster_profile(state.bestiary_id, state.level, &monsters.defense(monster)?)
-        .ok_or(SessionError::InvalidMonster)?;
+    // The skill: an active one in that slot, off cooldown (the natural attack has none).
+    let slot = action.checked_sub(1);
+    let skill: Option<MonsterSkillStats> = match slot {
+        None => None,
+        Some(k) => {
+            let skill = monsters
+                .skill(monster, k)?
+                .ok_or(SessionError::MonsterSkillMissing)?;
+            require!(
+                skill_use(&skill.stats) == SkillUse::Ok,
+                SessionError::MonsterSkillMissing
+            );
+            require!(
+                monsters.skill_cooldowns(monster)?[k as usize] == 0,
+                SessionError::SkillOnCooldown
+            );
+            Some(skill)
+        }
+    };
+    let profile = monsters.profile(monster, state.level)?;
     let from = Cell {
         x: state.x,
         y: state.y,
     };
-    let to = Cell {
-        x: participation.core.x,
-        y: participation.core.y,
+    let range = skill.map_or(monster_range(profile.form), |k| k.stats.ext.range);
+    let participation = &accounts.participation;
+    let target_unit = match target_side(skill.as_ref().map(|k| &k.stats)) {
+        Side::Enemy => {
+            require!(
+                participation.core.slot == target
+                    && session.player_alive(target)
+                    && participation.core.hp > 0,
+                SessionError::InvalidTarget
+            );
+            let to = Cell {
+                x: participation.core.x,
+                y: participation.core.y,
+            };
+            require!(in_range(range, from, to), SessionError::OutOfRange);
+            check_line(session, &accounts.layout, skill.as_ref(), from, to)?;
+            Unit::Player(target)
+        }
+        Side::Ally => {
+            // The callback's participation: the lowest living slot.
+            let first = (0..session.core.player_count)
+                .find(|&s| session.player_alive(s))
+                .ok_or(SessionError::NotActive)?;
+            require!(
+                participation.core.slot == first,
+                SessionError::InvalidPendingAccounts
+            );
+            require!(target < monsters.count()?, SessionError::InvalidAllyTarget);
+            let ally = monsters.get(target)?;
+            require!(ally.alive, SessionError::InvalidAllyTarget);
+            let skill = skill.as_ref().ok_or(SessionError::MonsterSkillMissing)?;
+            require!(
+                kin_reaches(
+                    skill.kin_only,
+                    profile.kin,
+                    monsters.record(target)?[record::KIN],
+                    target == monster
+                ),
+                SessionError::NotSameKin
+            );
+            let to = Cell {
+                x: ally.x,
+                y: ally.y,
+            };
+            require!(in_ally_range(range, from, to), SessionError::OutOfRange);
+            if target != monster {
+                check_line(session, &accounts.layout, Some(skill), from, to)?;
+            }
+            Unit::Monster(target)
+        }
     };
-    require!(in_range(profile.form, from, to), SessionError::OutOfRange);
 
+    let ap = skill.map_or(BASIC_ATTACK_AP, |k| k.stats.ap_cost);
     state.action_points = state
         .action_points
-        .checked_sub(ACT_AP)
+        .checked_sub(ap)
         .ok_or(SessionError::NotEnoughActionPoints)?;
     monsters.set(monster, &state)?;
+    let mut cooldowns = monsters.skill_cooldowns(monster)?;
+    if let (Some(k), Some(skill)) = (slot, skill.as_ref()) {
+        cooldowns[k as usize] = cooldown_after_use(skill.stats.cooldown);
+        monsters.set_skill_cooldowns(monster, &cooldowns)?;
+    }
 
     let attacker = Unit::Monster(monster).id();
-    let target_unit = Unit::Player(target).id();
+    let target_unit = target_unit.id();
     session.pending = PendingAction {
         attacker,
         target: target_unit,
@@ -134,6 +217,8 @@ pub fn handler(ctx: Context<MonsterAct>, monster: u8, action: u8, target: u8) ->
     session.acted_seq = session.turn_seq;
 
     let session_key = session.key();
+    let main = participation.core.slot;
+    let (party, party_len) = party_keys(session, main);
     vrf::request(
         RequestAccounts {
             payer: &accounts.signer,
@@ -153,9 +238,22 @@ pub fn handler(ctx: Context<MonsterAct>, monster: u8, action: u8, target: u8) ->
             bag: accounts.bag.key(),
             target_participation: None,
             layout: session.layout,
+            party,
+            party_len,
         },
     )?;
 
+    if let (Some(k), Some(skill)) = (slot, skill.as_ref()) {
+        let mut all = [0u8; deadroll_character::state::SKILLS_MAX];
+        all[..MONSTER_SLOTS].copy_from_slice(&cooldowns);
+        emit!(SkillUsed {
+            session: session_key,
+            unit: attacker,
+            skill_slot: k,
+            cooldown: skill.stats.cooldown,
+            cooldowns: all,
+        });
+    }
     emit!(ActionRequested {
         session: session_key,
         action: session.core.action_counter,
@@ -164,5 +262,22 @@ pub fn handler(ctx: Context<MonsterAct>, monster: u8, action: u8, target: u8) ->
         skill_slot: action,
         action_points: state.action_points,
     });
+    Ok(())
+}
+
+/// A line runs from the monster through its target (docs/SKILL_BUILDER.md 2, 5.3): a wall before
+/// the target cuts it.
+fn check_line(
+    session: &GameSession,
+    layout: &AccountInfo,
+    skill: Option<&MonsterSkillStats>,
+    from: Cell,
+    to: Cell,
+) -> Result<()> {
+    if let Some(k) = skill.filter(|k| k.stats.blocks.target == Target::Line) {
+        let layout = MapLayoutView::load(layout)?;
+        let line = skill_line(session, &layout, from, to, k.stats.ext.range);
+        require!(line.index_of(to).is_some(), SessionError::LineBlocked);
+    }
     Ok(())
 }

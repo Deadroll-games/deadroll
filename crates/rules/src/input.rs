@@ -7,18 +7,21 @@ use deadroll_combat::{
     Skill, States, SupportInput, TimedMod, TimedMods, Tint,
 };
 use deadroll_skillcheck::{
-    derive_with, Category, Effect, Purpose, SkillBlocks, SkillTuning, SKILL_ASPECTS_MAX,
+    derive_with, Category, Effect, Purpose, SkillBlocks, SkillExt, SkillTuning, SKILL_ASPECTS_MAX,
 };
 use deadroll_types::{
-    ActiveState, Aspect, CharacterData, Class, Form, Race, Stat, StateKind, STATES_MAX, STATS_COUNT,
+    ActiveState, Aspect, CharacterData, Class, Form, Race, RangeTag, Stat, StateKind, STATES_MAX,
+    STATS_COUNT,
 };
 
 use crate::{
     config::BalanceConfig,
-    items::{effective_stats, item_bonus, item_tints, weapon_range, Equipment, ITEM_TINTS},
+    items::{
+        basic_attack, effective_stats, item_bonus, item_tints, weapon_range, Equipment, ITEM_TINTS,
+    },
     monster::MonsterProfile,
     player::{
-        class_increase, class_source, effect_stat, heal_range, hp_max, player_accuracy,
+        class_increase, class_source, effect_stat, heal_range, heal_scale, hp_max, player_accuracy,
         player_defense, player_initiative, player_speed, predisposition_added, self_buff_turns,
         source_stat, speed_to_ap, stat_damage_increases, state_chance_bonus, support_increase,
     },
@@ -139,7 +142,8 @@ pub mod hero {
     }
 }
 
-/// A skill as stored with the character (`SkillRecord` without the name).
+/// A skill as stored with the character (`SkillRecord` and its patch 5 `SkillExtRecord`, without
+/// the text).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SkillStats {
     pub blocks: SkillBlocks,
@@ -147,19 +151,31 @@ pub struct SkillStats {
     pub power_bp: u32,
     /// In the character's turns, `0` = none.
     pub cooldown: u8,
+    /// Range, timing, the HP threshold of a reactive trigger.
+    pub ext: SkillExt,
+    /// Action points to use it (`0` for reactive and passive skills).
+    pub ap_cost: u8,
 }
 
 impl SkillStats {
     /// The stored values of `blocks`, derived with `t` (what `create_character` stores).
-    pub fn derive(blocks: SkillBlocks, t: &SkillTuning) -> Self {
+    pub fn derive(blocks: SkillBlocks, ext: SkillExt, t: &SkillTuning) -> Self {
         let d = derive_with(&blocks, t);
         SkillStats {
             blocks,
             shares_bp: d.shares_bp,
             power_bp: d.power_bp,
             cooldown: d.cooldown,
+            ext,
+            ap_cost: d.ap_cost,
         }
     }
+}
+
+/// Action points of an action: the skill's own cost, or the basic attack's
+/// (docs/PARTY_AND_TURNS.md, section 5.1).
+pub fn action_ap(cfg: &BalanceConfig, skill: Option<&SkillStats>) -> u8 {
+    skill.map_or(cfg.players.basic_attack_ap, |s| s.ap_cost)
 }
 
 /// Why a skill cannot be used as an action.
@@ -233,9 +249,18 @@ pub fn effect_action(effect: Effect) -> Option<EffectAction> {
     })
 }
 
-/// Form of a player attack: the skill's, or a strike for the weapon's basic attack.
-pub fn player_form(skill: Option<&SkillStats>) -> Form {
-    skill.map_or(Form::Strike, |s| s.blocks.form)
+/// Form of a player attack: the skill's, or the weapon's basic attack's.
+pub fn player_form(cfg: &BalanceConfig, c: &HeroStats, skill: Option<&SkillStats>) -> Form {
+    skill.map_or_else(
+        || basic_attack(&c.equipment, &cfg.items).1,
+        |s| s.blocks.form,
+    )
+}
+
+/// Range of a player action: the skill's, or the weapon's basic attack's (a sword strikes in
+/// melee, a wand shoots, docs/SKILL_BUILDER.md 3.1).
+pub fn player_range(cfg: &BalanceConfig, c: &HeroStats, skill: Option<&SkillStats>) -> RangeTag {
+    skill.map_or_else(|| basic_attack(&c.equipment, &cfg.items).0, |s| s.ext.range)
 }
 
 /// Tint slots of a player: race, class, then items.
@@ -266,7 +291,7 @@ pub fn player_attacker(
             form: s.blocks.form,
             state_chance_pct: t.skill_state_chance_pct,
         },
-        None => Skill::basic(source, Form::Strike, t.basic_state_chance_pct),
+        None => Skill::basic(source, player_form(cfg, c, None), t.basic_state_chance_pct),
     };
     let mut attacker = Attacker {
         slot: unit,
@@ -322,18 +347,33 @@ pub fn player_defender(
     defender
 }
 
-/// A monster attacking with its natural attack.
+/// A monster attacking with its natural attack (`skill = None`, like a basic attack) or a damage
+/// skill: the natural attack is its weapon base (docs/BESTIARY.md 2, SKILL_BUILDER.md 5.1-5.2).
+/// Monsters have no core stats, so no stat increases, and no tints (no predisposition yet).
 pub fn monster_attacker(
     cfg: &BalanceConfig,
     unit: u8,
     p: &MonsterProfile,
+    skill: Option<&SkillStats>,
     mods: &TimedMods,
 ) -> Attacker {
+    let skill = match skill {
+        Some(s) => Skill {
+            aspects: s.blocks.aspects,
+            aspect_count: s.blocks.aspect_count,
+            shares_bp: s.shares_bp,
+            power_bp: s.power_bp,
+            source: s.blocks.source,
+            form: s.blocks.form,
+            state_chance_pct: cfg.players.skill_state_chance_pct,
+        },
+        None => Skill::basic(p.source, p.form, cfg.players.basic_state_chance_pct),
+    };
     let mut attacker = Attacker {
         slot: unit,
         attack_bonus: p.attack_bonus,
         weapon: p.weapon,
-        skill: Skill::basic(p.source, p.form, cfg.players.basic_state_chance_pct),
+        skill,
         ..Attacker::default()
     };
     apply_to_attacker(&mut attacker, mods);
@@ -396,6 +436,41 @@ pub fn support_input(
         attack_bonus: hero::accuracy(cfg, c),
         defense: defense.unwrap_or(0),
         crit_chance_pct: hero::crit_pct(cfg, c),
+        min,
+        max,
+    }
+}
+
+/// Strength range of `action` cast by a monster with a skill of `power_bp`: a heal from its natural
+/// attack, a modifier with no increase (monsters have no class trait), none for hard control.
+pub fn monster_effect_range(
+    cfg: &BalanceConfig,
+    p: &MonsterProfile,
+    power_bp: u32,
+    action: EffectAction,
+) -> (u32, u32) {
+    match action {
+        EffectAction::Heal => heal_scale(p.weapon, power_bp, 0, &cfg.players),
+        EffectAction::Mod(kind) => mod_range(kind, power_bp, 0, &cfg.support),
+        EffectAction::Stun | EffectAction::Freeze => (0, 0),
+    }
+}
+
+/// The rolls of a monster's heal, buff or debuff: its accuracy, no crit chance besides a natural
+/// 20. `defense`: the target's for a debuff, `None` on an ally.
+pub fn monster_support_input(
+    cfg: &BalanceConfig,
+    p: &MonsterProfile,
+    skill: &SkillStats,
+    action: EffectAction,
+    defense: Option<u32>,
+) -> SupportInput {
+    let (min, max) = monster_effect_range(cfg, p, skill.power_bp, action);
+    SupportInput {
+        hostile: defense.is_some(),
+        attack_bonus: p.attack_bonus,
+        defense: defense.unwrap_or(0),
+        crit_chance_pct: 0,
         min,
         max,
     }

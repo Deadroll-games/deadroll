@@ -1,4 +1,6 @@
-//! Map presets in `assets/registry/maps/*.json` must pass every builder rule.
+//! Map presets in `assets/registry/maps/*.json` must pass every builder rule with the shipped
+//! registry (roles, minimum tiers and skill pools of `assets/registry/bestiary.json`).
+#![cfg(feature = "serde")]
 //!
 //! Preset format:
 //! ```json
@@ -12,7 +14,8 @@
 
 use std::path::PathBuf;
 
-use deadroll_mapcheck::{check_map, roster::p0_role, tiles::cell_index};
+use deadroll_mapcheck::{check_map, tiles::cell_index};
+use deadroll_rules::{registry::Registry, BalanceConfig};
 use deadroll_types::{Cell, MapLayoutData, Pubkey, Spawn, Tile, MAP_CELLS, SPAWNS_MAX};
 use serde_json::Value;
 
@@ -104,13 +107,16 @@ fn load(path: &PathBuf) -> (u8, u8, u8, MapLayoutData) {
 #[test]
 fn every_preset_passes_the_builder_rules() {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/registry/maps");
+    let reg = Registry::shipped().unwrap();
+    let cfg = BalanceConfig::DEFAULT;
     let mut checked = 0;
     for entry in std::fs::read_dir(&dir).expect("assets/registry/maps") {
         let path = entry.unwrap().path();
         if path.extension().is_some_and(|e| e == "json") {
             let (width, height, tier, layout) = load(&path);
             assert_eq!(
-                check_map(width, height, tier, &layout, p0_role),
+                check_map(width, height, tier, &layout, |id| reg
+                    .spawn_rules(id, &cfg.monsters)),
                 Ok(()),
                 "{}",
                 path.display()

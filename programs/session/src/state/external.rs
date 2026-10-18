@@ -6,12 +6,15 @@
 //! after it never break the reader.
 use anchor_lang::prelude::*;
 use anchor_lang::{AccountDeserialize, Discriminator, Space};
-use deadroll_character::state::{Character, SkillRecord, SkillSet, SKILLS_MAX};
+use deadroll_character::state::{
+    Character, SkillExtra, SkillExtras, SkillRecord, SkillSet, SKILLS_MAX, SKILL_DESCRIPTION_LEN,
+};
 use deadroll_registry::state::{
-    records::{BESTIARY_MAX, MONSTER_SIZE, TILE_SIZE},
+    records::{BESTIARY_MAX, MONSTER_SIZE, MONSTER_SKILLS_MAX, MONSTER_SKILL_SIZE, TILE_SIZE},
     Table, TableKind, TABLE_CAP,
 };
-use deadroll_rules::{items::Equipment, MonsterDefense};
+use deadroll_rules::{items::Equipment, MonsterTemplate};
+use deadroll_skillcheck::monster::MonsterSkill;
 use deadroll_types::{Cell, CharacterData, MapData, Spawn, Tile, MAP_CELLS, MAP_MAX, SPAWNS_MAX};
 
 use crate::errors::SessionError;
@@ -24,6 +27,8 @@ pub const TILESET_TABLE: Pubkey = pubkey!("GqzUadKRKmJNT2RQAhrTz31qdoMfTGmya3Cfz
 pub const ASPECTS_TABLE: Pubkey = pubkey!("9MkMBjPca7x6iZV1rKaCT7mn3BmezhXF4DAvFeTpa7aJ");
 pub const TRAITS_TABLE: Pubkey = pubkey!("3yqgW5wFnwbqWAoGvvA1cAmw9gQxqz8TKA4vHX62GxoC");
 pub const RESONANCES_TABLE: Pubkey = pubkey!("5wvxCqYJgp3gckLyZeNz3md4g8qmRxd7nenhkqtBNXjG");
+/// Registry `["monster_skills"]` table (patch 6).
+pub const MONSTER_SKILLS_TABLE: Pubkey = pubkey!("NQNEuKDUZhACnTJ9sD3dW49BoiPtJPatp6bpY61r81p");
 
 /// `sha256("account:Character")[..8]`.
 pub const CHARACTER_DISCRIMINATOR: [u8; 8] = [0x8c, 0x73, 0xa5, 0x24, 0xf1, 0x99, 0x66, 0x54];
@@ -174,6 +179,38 @@ pub fn read_skill(info: &AccountInfo, character: &Pubkey, slot: u8) -> Result<Sk
         .map_err(|_| error!(SessionError::InvalidSkillSet))
 }
 
+/// Byte offsets inside a `deadroll_character` `SkillExtras` account (discriminator included).
+mod extras_off {
+    pub const CHARACTER: usize = 8 + 2;
+    pub const EXTRAS: usize = CHARACTER + 32;
+}
+
+/// The `SkillExtras` part of skill `slot` of `character` (patch 5), read in place (~3.3 KB).
+/// Owner, discriminator and the `character` field are checked, as for [`read_skill`].
+pub fn read_skill_extra(info: &AccountInfo, character: &Pubkey, slot: u8) -> Result<SkillExtra> {
+    require!(
+        check_header(info, &deadroll_character::ID, SkillExtras::DISCRIMINATOR),
+        SessionError::InvalidSkillSet
+    );
+    let data = info.try_borrow_data()?;
+    require!(
+        data.len() >= 8 + SkillExtras::SIZE
+            && data[extras_off::CHARACTER..extras_off::CHARACTER + 32] == character.to_bytes(),
+        SessionError::InvalidSkillSet
+    );
+    require!((slot as usize) < SKILLS_MAX, SessionError::InvalidSkill);
+    let r = &data[extras_off::EXTRAS + slot as usize * SkillExtra::SIZE..];
+    let mut description = [0u8; SKILL_DESCRIPTION_LEN];
+    description.copy_from_slice(&r[4..4 + SKILL_DESCRIPTION_LEN]);
+    Ok(SkillExtra {
+        range: r[0],
+        timing: r[1],
+        hp_below_pct: r[2],
+        ap_cost: r[3],
+        description,
+    })
+}
+
 /// Byte offsets inside a registry `Table` account (programs/registry/README.md).
 mod table_off {
     pub const KIND: usize = 8 + 1;
@@ -220,21 +257,13 @@ pub fn read_table_body<const N: usize>(
     table_record::<N>(info, address, kind, 0)?.ok_or(error!(SessionError::InvalidRegistryTable))
 }
 
-/// The bestiary fields the session uses (record layout: programs/registry/README.md).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct BestiaryRecord {
-    /// Action points per turn.
-    pub speed: u8,
-    pub initiative: u16,
-    /// HP at level 0, and per level.
-    pub hp: u32,
-    pub hp_per_level: u32,
-    /// Resistances and immunities (docs/BESTIARY.md 10).
-    pub defense: MonsterDefense,
-}
-
-/// Bestiary entry `bestiary_id`; `UnknownMonster` if the slot is empty or not written yet.
-pub fn read_bestiary(info: &AccountInfo, bestiary_id: u8) -> Result<BestiaryRecord> {
+/// Bestiary entry `bestiary_id` (record layout: programs/registry/README.md) and its template,
+/// decoded by the shared `deadroll_rules::MonsterTemplate`; `UnknownMonster` if the slot is empty
+/// or not written yet.
+pub fn read_bestiary(
+    info: &AccountInfo,
+    bestiary_id: u8,
+) -> Result<([u8; MONSTER_SIZE], MonsterTemplate)> {
     require!(
         (bestiary_id as usize) < BESTIARY_MAX,
         SessionError::UnknownMonster
@@ -246,16 +275,22 @@ pub fn read_bestiary(info: &AccountInfo, bestiary_id: u8) -> Result<BestiaryReco
         bestiary_id as usize,
     )?
     .ok_or(SessionError::UnknownMonster)?;
-    require!(r[0] == 1, SessionError::UnknownMonster);
-    let u16_at = |at: usize| u16::from_le_bytes([r[at], r[at + 1]]);
-    let u32_at = |at: usize| u32::from_le_bytes([r[at], r[at + 1], r[at + 2], r[at + 3]]);
-    Ok(BestiaryRecord {
-        speed: r[5],
-        initiative: u16_at(20),
-        hp: u32_at(22),
-        hp_per_level: u32_at(26),
-        defense: MonsterDefense::from_record(&r).ok_or(SessionError::UnknownMonster)?,
-    })
+    let t = MonsterTemplate::from_record(&r).ok_or(SessionError::UnknownMonster)?;
+    Ok((r, t))
+}
+
+/// Monster skill `index` of the registry `monster_skills` table (validated by `write_table`);
+/// `InvalidMonsterSkills` if it is empty or not written.
+pub fn read_monster_skill(info: &AccountInfo, index: usize) -> Result<MonsterSkill> {
+    require!(
+        index < MONSTER_SKILLS_MAX,
+        SessionError::InvalidMonsterSkills
+    );
+    let r: [u8; MONSTER_SKILL_SIZE] =
+        table_record(info, &MONSTER_SKILLS_TABLE, TableKind::MonsterSkills, index)?
+            .ok_or(SessionError::InvalidMonsterSkills)?;
+    require!(r[0] == 1, SessionError::InvalidMonsterSkills);
+    MonsterSkill::decode_session(&r[1..]).ok_or(error!(SessionError::InvalidMonsterSkills))
 }
 
 /// Step cost in action points of every tile, in `Tile` order; 0 = cannot be entered. Every
@@ -295,7 +330,10 @@ mod tests {
     fn monster_record(speed: u8, initiative: u16, hp: u32, per_level: u32) -> [u8; MONSTER_SIZE] {
         let mut r = [0u8; MONSTER_SIZE];
         r[0] = 1;
+        r[3] = 1;
+        r[4] = 1;
         r[5] = speed;
+        r[9] = 0xFF;
         r[20..22].copy_from_slice(&initiative.to_le_bytes());
         r[22..26].copy_from_slice(&hp.to_le_bytes());
         r[26..30].copy_from_slice(&per_level.to_le_bytes());
@@ -310,6 +348,7 @@ mod tests {
         assert_eq!(pda(seeds::ASPECTS), ASPECTS_TABLE);
         assert_eq!(pda(seeds::TRAITS), TRAITS_TABLE);
         assert_eq!(pda(seeds::RESONANCES), RESONANCES_TABLE);
+        assert_eq!(pda(seeds::MONSTER_SKILLS), MONSTER_SKILLS_TABLE);
     }
 
     #[test]
@@ -320,22 +359,55 @@ mod tests {
         body.extend_from_slice(&monster_record(3, 2, 60, 15));
         let mut account = table(BESTIARY_TABLE, TableKind::Bestiary, &body);
         let info = account.info();
+        let (r, t) = read_bestiary(&info, 0).unwrap();
+        assert_eq!(r, monster_record(6, 7, 12, 3));
         assert_eq!(
-            read_bestiary(&info, 0).unwrap(),
-            BestiaryRecord {
-                speed: 6,
-                initiative: 7,
-                hp: 12,
-                hp_per_level: 3,
-                defense: deadroll_rules::MonsterDefense::NONE,
-            }
+            (t.speed, t.initiative, t.hp, t.hp_per_level, t.defense),
+            (6, 7, 12, 3, deadroll_rules::MonsterDefense::NONE)
         );
-        assert_eq!(read_bestiary(&info, 2).unwrap().hp, 60);
+        assert_eq!(read_bestiary(&info, 2).unwrap().1.hp, 60);
         let unknown = u32::from(SessionError::UnknownMonster);
         // Empty slot, past the written length, past the table.
         for id in [1, 3, 200] {
             assert_eq!(code(read_bestiary(&info, id).unwrap_err()), unknown, "{id}");
         }
+        // A record the shared decoder refuses is unknown too.
+        let mut bad = monster_record(6, 7, 12, 3);
+        bad[3] = 3;
+        let mut account = table(BESTIARY_TABLE, TableKind::Bestiary, &bad);
+        assert_eq!(
+            code(read_bestiary(&account.info(), 0).unwrap_err()),
+            unknown
+        );
+    }
+
+    #[test]
+    fn reads_monster_skills() {
+        use deadroll_skillcheck::presets;
+        let p = presets::SUPPORT[0];
+        let skill = MonsterSkill {
+            blocks: p.blocks,
+            ext: p.ext,
+            flags: 1,
+        };
+        let mut body = skill.encode_record().to_vec();
+        body.extend_from_slice(&[0u8; MONSTER_SKILL_SIZE]);
+        let mut account = table(MONSTER_SKILLS_TABLE, TableKind::MonsterSkills, &body);
+        let info = account.info();
+        assert_eq!(read_monster_skill(&info, 0).unwrap(), skill);
+        let missing = u32::from(SessionError::InvalidMonsterSkills);
+        for i in [1, 2, MONSTER_SKILLS_MAX] {
+            assert_eq!(
+                code(read_monster_skill(&info, i).unwrap_err()),
+                missing,
+                "{i}"
+            );
+        }
+        let mut moved = table(Pubkey::new_unique(), TableKind::MonsterSkills, &body);
+        assert_eq!(
+            code(read_monster_skill(&moved.info(), 0).unwrap_err()),
+            u32::from(SessionError::InvalidRegistryTable)
+        );
     }
 
     #[test]

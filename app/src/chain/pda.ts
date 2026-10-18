@@ -23,6 +23,8 @@ export const characterPda = (owner: Address, index: number) =>
 export const profilePda = (owner: Address) => pda(PROGRAMS.character, ["profile", enc.encode(owner) as Uint8Array]);
 export const skillSetPda = (character: Address) => pda(PROGRAMS.character, ["skills", enc.encode(character) as Uint8Array]);
 export const bagPda = (character: Address) => pda(PROGRAMS.character, ["bag", enc.encode(character) as Uint8Array]);
+/** Patch 5: range, timing, HP threshold, AP cost and description of every skill. */
+export const skillExtrasPda = (character: Address) => pda(PROGRAMS.character, ["skill_extras", enc.encode(character) as Uint8Array]);
 
 export const bestiaryPda = () => pda(PROGRAMS.registry, ["bestiary"]);
 export const tilesetPda = () => pda(PROGRAMS.registry, ["tileset"]);
@@ -30,6 +32,8 @@ export const tilesetPda = () => pda(PROGRAMS.registry, ["tileset"]);
 export const aspectsPda = () => pda(PROGRAMS.registry, ["aspects"]);
 export const traitsPda = () => pda(PROGRAMS.registry, ["traits"]);
 export const resonancesPda = () => pda(PROGRAMS.registry, ["resonances"]);
+/** Patch 6: the skills of the bestiary pools. */
+export const monsterSkillsPda = () => pda(PROGRAMS.registry, ["monster_skills"]);
 
 export const mapPda = (dm: Address, index: number) => pda(PROGRAMS.map, ["map", enc.encode(dm) as Uint8Array, u32le(index)]);
 export const layoutPda = (map: Address) => pda(PROGRAMS.map, ["layout", enc.encode(map) as Uint8Array]);
