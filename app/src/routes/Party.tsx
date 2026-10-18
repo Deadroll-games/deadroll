@@ -10,11 +10,12 @@ import type { GridUnit } from "../components/grid/types";
 import { PartyLobby } from "../components/forms/PartyLobby";
 import type { LobbyPlayer } from "../components/forms/types";
 import { freezeTombstoneInstruction } from "../chain/character";
-import { DEMO_MAP, MOCK_CHARACTERS, MOCK_HITS } from "../chain/mock";
+import { DEMO_MAP, MOCK_CHARACTERS, MOCK_HITS, mockDefense } from "../chain/mock";
+import { useCombat, type CombatWasm } from "../chain/combatWasm";
 import { bestiaryName } from "../chain/names";
 import { useAutoFreezeTombstone } from "../chain/useAutoFreezeTombstone";
 import type { TombstoneLog } from "../chain/tombstone";
-import { MONSTER_DEFENSE, playerDefense, unitStats } from "../chain/stats";
+import { monsterDefense, playerDefense, unitStats } from "../chain/stats";
 import { Aspect, Class, ModKind, PARTY_MAX, type HitResult, type TimedMod } from "../chain/types";
 import { DATA_SOURCE } from "../config";
 import { useSessionKey } from "../session-key/SessionKeyProvider";
@@ -48,12 +49,17 @@ const MOCK_MODS: Record<number, TimedMod[]> = {
   4: [{ kind: ModKind.Vulnerability, aspect: Aspect.Fire, turns: 2, powerBp: 2_500, source: 1 }],
 };
 
-function mockStats(units: GridUnit[], active: number): StatsUnit[] {
+function mockStats(units: GridUnit[], active: number, combat: CombatWasm | null): StatsUnit[] {
   return units
     .filter((u) => u.alive)
     .flatMap((u): StatsUnit[] => {
       const profile =
-        u.kind === "player" ? playerDefense(MOCK_CHARACTERS[u.id]?.class ?? Class.Warrior, [10, 7, 5, 8]) : MONSTER_DEFENSE[DEMO_MAP.spawns[u.id - 4]?.bestiaryId ?? -1];
+        u.kind === "player"
+          ? playerDefense(MOCK_CHARACTERS[u.id]?.class ?? Class.Warrior, [10, 7, 5, 8])
+          : (() => {
+              const spawn = DEMO_MAP.spawns[u.id - 4];
+              return spawn && combat ? monsterDefense(combat, spawn.bestiaryId, spawn.level, mockDefense(spawn.bestiaryId)) : null;
+            })();
       if (!profile) return [];
       const apBase = u.kind === "player" ? 4 : 6;
       const stats = unitStats({ hp: u.hp, hpMax: u.hpMax, apBase, apNow: u.id === active ? apBase : null, profile, mods: MOCK_MODS[u.id] ?? [] });
@@ -72,6 +78,7 @@ function MockParty() {
   const payer = sessionKey.signer ?? connected?.signer ?? null;
   const chainLog = useAutoFreezeTombstone(payer, (connected?.account.address as Address | undefined) ?? null);
   const [mockLog, setMockLog] = useState<TombstoneLog[]>([]);
+  const combat = useCombat();
 
   const [role, setRole] = useState<"dm" | "player" | "guest">("guest");
   const [players, setPlayers] = useState<LobbyPlayer[]>([]);
@@ -199,7 +206,7 @@ function MockParty() {
                 <HitBreakdown hit={hit.result} defaultOpen={false} mods={{ attacker: MOCK_MODS[hit.attackerId] ?? [], target: MOCK_MODS[hit.targetId] ?? [] }} />
               </>
             )}
-            <StatsPanel units={mockStats(units, active)} />
+            <StatsPanel units={mockStats(units, active, combat)} />
             {log.length > 0 && (
               <div className="panel">
                 <h3>Tombstones</h3>

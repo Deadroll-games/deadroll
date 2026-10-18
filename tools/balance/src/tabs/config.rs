@@ -189,10 +189,31 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                             );
                             int_row(
                                 ui,
-                                "Extra state chance, percent",
+                                "Resonance state chance, percent",
                                 &mut c.combat.extra_state_chance_pct,
                                 d.combat.extra_state_chance_pct,
                                 0..=100,
+                            );
+                            int_row(
+                                ui,
+                                "Resonance modifier, own turns",
+                                &mut c.combat.res_mod_turns,
+                                d.combat.res_mod_turns,
+                                0..=20,
+                            );
+                            int_row(
+                                ui,
+                                "Accuracy buff, own turns",
+                                &mut c.combat.res_accuracy_turns,
+                                d.combat.res_accuracy_turns,
+                                0..=20,
+                            );
+                            int_row(
+                                ui,
+                                "Burning cells, rounds",
+                                &mut c.combat.burning_cell_rounds,
+                                d.combat.burning_cell_rounds,
+                                0..=20,
                             );
                         });
                     by_variant::<StateKind, u8>(
@@ -221,7 +242,7 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                             widgets::int(ui, v, 0..=100);
                         }
                         ui.end_row();
-                        let rows: [(&str, &mut [u32; 14], &[u32; 14]); 3] = [
+                        let rows: [(&str, &mut [u32; 14], &[u32; 14]); 5] = [
                             (
                                 "Resonance more",
                                 &mut c.combat.resonance_more_bp,
@@ -237,6 +258,16 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                                 &mut c.combat.keenness_pen_bp,
                                 &d.combat.keenness_pen_bp,
                             ),
+                            (
+                                "Resonance state power",
+                                &mut c.combat.res_power_bp,
+                                &d.combat.res_power_bp,
+                            ),
+                            (
+                                "Resonance modifier",
+                                &mut c.combat.res_mod_bp,
+                                &d.combat.res_mod_bp,
+                            ),
                         ];
                         for (name, values, defaults) in rows {
                             widgets::label(ui, name, values != defaults);
@@ -245,6 +276,36 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                             }
                             ui.end_row();
                         }
+                        widgets::label(
+                            ui,
+                            "Resonance extra turns",
+                            c.combat.res_turns != d.combat.res_turns,
+                        );
+                        for v in c.combat.res_turns.iter_mut() {
+                            widgets::int(ui, v, 0..=10);
+                        }
+                        ui.end_row();
+                        widgets::label(
+                            ui,
+                            "Accuracy buff, d20",
+                            c.combat.res_accuracy != d.combat.res_accuracy,
+                        );
+                        for v in c.combat.res_accuracy.iter_mut() {
+                            widgets::int(ui, v, 0..=20);
+                        }
+                        ui.end_row();
+                        widgets::label(
+                            ui,
+                            "Tint added damage min / max",
+                            c.combat.tint_added != d.combat.tint_added,
+                        );
+                        for [lo, hi] in c.combat.tint_added.iter_mut() {
+                            ui.vertical(|ui| {
+                                widgets::int(ui, lo, 0..=1_000);
+                                widgets::int(ui, hi, 0..=1_000);
+                            });
+                        }
+                        ui.end_row();
                     });
                 });
 
@@ -641,6 +702,12 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                             );
                             int_row(ui, "AP min", &mut m.ap_min, dm.ap_min, 0..=30);
                             int_row(ui, "AP max", &mut m.ap_max, dm.ap_max, 1..=60);
+                            bp_row(
+                                ui,
+                                "Resistance level (bestiary resists)",
+                                &mut m.resist_bp,
+                                dm.resist_bp,
+                            );
                         });
                 });
         });

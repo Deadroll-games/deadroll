@@ -54,5 +54,9 @@ ephemeral-vrf-sdk.workspace = true
 # Dice: the SHA-256 syscall gives the same rolls as `deadroll_combat::VrfRoll` for far fewer CU.
 solana-sha256-hasher = { version = "3.1", features = ["sha2"] }
 
+[dev-dependencies]
+# Tests read the shipped registry (assets/registry) through the simulator's loader.
+deadroll-rules = { workspace = true, features = ["serde"] }
+
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

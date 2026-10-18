@@ -6,8 +6,8 @@
 //! `VrfRoll` / `SyscallRoll` started there. `HitInput` and `HitResult` come from the caller so the
 //! program can keep them off the 4 KB SBF stack frame.
 use deadroll_combat::{
-    resolve_hit_into, resolve_rider, resolve_support, Applied, EffectRoll, HitInput, HitResult,
-    Outcome, RollSource, States, TimedMods,
+    apply_mod, resolve_hit_into, resolve_rider, resolve_support, AccuracyBuff, Applied, EffectRoll,
+    HitInput, HitResult, Outcome, ResonanceTables, RollSource, States, TimedMods,
 };
 use deadroll_types::Monster;
 
@@ -39,14 +39,18 @@ pub struct AttackOutcome {
 
 /// A player's weapon (`skill = None`) or damage skill on a monster, then that skill's effect
 /// (if any) when the hit landed and the monster lives: its own chance (certain on a crit).
+/// The resonance's timed modifiers land on the monster here, its accuracy buff on
+/// `accuracy`; what it does to other monsters and cells is `crate::spread`.
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
 pub fn attack_monster(
     cfg: &BalanceConfig,
+    tables: &ResonanceTables,
     attacker: u8,
     hero: &HeroStats,
     skill: Option<&SkillStats>,
     hero_mods: &TimedMods,
+    accuracy: &mut AccuracyBuff,
     profile: &MonsterProfile,
     monster: &mut Monster,
     monster_mods: &mut TimedMods,
@@ -54,9 +58,13 @@ pub fn attack_monster(
     result: &mut HitResult,
     src: &mut impl RollSource,
 ) -> AttackOutcome {
-    input.attacker = player_attacker(cfg, attacker, hero, skill, hero_mods);
+    input.attacker = player_attacker(cfg, attacker, hero, skill, hero_mods, accuracy);
     input.defender = monster_defender(profile, &monster.states, monster_mods);
-    resolve_hit_into(input, &cfg.combat, src, result);
+    resolve_hit_into(input, &cfg.combat, tables, src, result);
+    for m in result.target_mods() {
+        apply_mod(monster_mods, *m);
+    }
+    accuracy.apply(result.accuracy_buff);
 
     let (hp, died) = take_damage(monster.hp, result.damage);
     monster.hp = hp;
@@ -176,6 +184,7 @@ pub fn support_ally(
 #[allow(clippy::too_many_arguments)]
 pub fn monster_attack(
     cfg: &BalanceConfig,
+    tables: &ResonanceTables,
     attacker: u8,
     profile: &MonsterProfile,
     monster_mods: &TimedMods,
@@ -189,7 +198,7 @@ pub fn monster_attack(
 ) -> bool {
     input.attacker = monster_attacker(cfg, attacker, profile, monster_mods);
     input.defender = player_defender(cfg, hero, states, hero_mods);
-    resolve_hit_into(input, &cfg.combat, src, result);
+    resolve_hit_into(input, &cfg.combat, tables, src, result);
     let (left, died) = take_damage(*hp, result.damage);
     *hp = left;
     *states = result.states;

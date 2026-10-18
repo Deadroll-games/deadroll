@@ -1,8 +1,9 @@
 use anchor_lang::prelude::*;
 use deadroll_character::state::{MAP_SKILLS, SKILLS_MAX};
-use deadroll_combat::{chill_slow_bp, speed_ap, TimedMods, MODS_MAX};
+use deadroll_combat::{chill_slow_bp, speed_ap, AccuracyBuff, TimedMods, MODS_MAX};
 use deadroll_rules::{items::Equipment, HeroStats};
 use deadroll_skillcheck::{ACTIVE_MAX, NO_SKILL};
+use deadroll_types::Aspect;
 use deadroll_types::{CharacterData, ParticipationData, EQUIP_SLOTS};
 
 use super::mods::{self, TimedModData};
@@ -46,6 +47,41 @@ pub struct Participation {
     /// The character's class trait tier (`Character.class_tier`), copied at `set_ready(true)`
     /// with the gear; the locked character cannot change it during the party.
     pub class_tier: u8,
+    /// Patch 4: a resonance's accuracy buff on this player (Pale Flame), `turns == 0` = none.
+    pub accuracy: AccuracyBuffData,
+}
+
+/// `deadroll_combat::AccuracyBuff`.
+#[derive(
+    AnchorSerialize, AnchorDeserialize, InitSpace, Clone, Copy, Debug, Default, PartialEq, Eq,
+)]
+pub struct AccuracyBuffData {
+    /// Attacks with a packet of this aspect get the bonus.
+    pub aspect: Aspect,
+    /// Own turn starts until it ends.
+    pub turns: u8,
+    /// Added to the d20.
+    pub bonus: u32,
+}
+
+impl From<AccuracyBuffData> for AccuracyBuff {
+    fn from(b: AccuracyBuffData) -> Self {
+        AccuracyBuff {
+            aspect: b.aspect,
+            turns: b.turns,
+            bonus: b.bonus,
+        }
+    }
+}
+
+impl From<AccuracyBuff> for AccuracyBuffData {
+    fn from(b: AccuracyBuff) -> Self {
+        AccuracyBuffData {
+            aspect: b.aspect,
+            turns: b.turns,
+            bonus: b.bonus,
+        }
+    }
 }
 
 impl Participation {
@@ -110,6 +146,7 @@ mod tests {
             // Actives 2, 0, 5 and an empty slot; reactive 1, passive 3.
             skills: [2, 0, NO_SKILL, 5, 1, 3],
             class_tier: 14,
+            accuracy: Default::default(),
         };
         for s in [0, 2, 5] {
             assert!(p.active_selected(s), "{s}");

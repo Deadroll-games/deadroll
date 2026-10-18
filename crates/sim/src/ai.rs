@@ -137,7 +137,7 @@ impl Battle<'_> {
         let act = self.cfg.players.act_ap;
         if ap >= act {
             if let Some((cell, action)) = self.plan(s, &dist, ap - act) {
-                self.heroes[s].cell = cell;
+                self.move_hero(s, cell);
                 self.hero_act(s, action);
                 return;
             }
@@ -146,7 +146,8 @@ impl Battle<'_> {
             .filter(|&i| self.foes[i].m.alive)
             .map(|i| self.foe_cell(i))
             .collect();
-        self.heroes[s].cell = self.approach(from, &dist, ap, &targets);
+        let to = self.approach(from, &dist, ap, &targets);
+        self.move_hero(s, to);
     }
 
     /// The best action reachable with `budget` steps, and the cell to act from.
@@ -255,7 +256,14 @@ impl Battle<'_> {
         let stats = skill.map(|k| fighter.skills[k].stats);
         let foe = &self.foes[i];
         let input = HitInput {
-            attacker: player_attacker(self.cfg, 0, &fighter.hero, stats.as_ref(), &h.mods),
+            attacker: player_attacker(
+                self.cfg,
+                0,
+                &fighter.hero,
+                stats.as_ref(),
+                &h.mods,
+                &h.accuracy,
+            ),
             defender: monster_defender(&foe.profile, &foe.m.states, &foe.mods),
         };
         let f = faces(input.attacker.attack_bonus, input.defender.defense);
@@ -380,6 +388,7 @@ impl Battle<'_> {
                         &fighter.hero,
                         stats.as_ref(),
                         &self.heroes[a].mods,
+                        &self.heroes[a].accuracy,
                     ),
                     defender: monster_defender(&foe.profile, &foe.m.states, &foe.mods),
                 };
@@ -453,8 +462,7 @@ impl Battle<'_> {
                 let to = self.heroes[a].cell;
                 let reach = |c| in_range(form, c, to, &self.cfg.players);
                 if let Some((cell, _)) = self.best_cell(&dist, ap - act, reach) {
-                    self.foes[i].m.x = cell.x;
-                    self.foes[i].m.y = cell.y;
+                    self.move_foe(i, cell);
                     self.foe_attack(i, a);
                     return;
                 }
@@ -462,7 +470,6 @@ impl Battle<'_> {
         }
         let cells: Vec<Cell> = targets.iter().map(|&a| self.heroes[a].cell).collect();
         let to = self.approach(from, &dist, ap, &cells);
-        self.foes[i].m.x = to.x;
-        self.foes[i].m.y = to.y;
+        self.move_foe(i, to);
     }
 }

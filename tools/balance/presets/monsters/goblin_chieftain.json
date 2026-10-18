@@ -12,9 +12,6 @@
   "attack_bonus": 4,
   "defense": 13,
   "armor": 40,
-  "resist": {
-    "Piercing": 5000
-  },
   "xp_per_level": 50,
   "hp": 28,
   "hp_per_level": 6,

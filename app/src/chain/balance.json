@@ -86,7 +86,132 @@
       1200,
       1000
     ],
-    "extra_state_chance_pct": 30
+    "extra_state_chance_pct": 30,
+    "res_turns": [
+      2,
+      2,
+      2,
+      2,
+      2,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+    ],
+    "res_power_bp": [
+      5900,
+      5600,
+      5300,
+      5000,
+      4700,
+      4400,
+      4100,
+      3800,
+      3500,
+      3200,
+      2900,
+      2600,
+      2300,
+      2000
+    ],
+    "res_mod_bp": [
+      5000,
+      4750,
+      4500,
+      4250,
+      4000,
+      3750,
+      3500,
+      3250,
+      3000,
+      2750,
+      2500,
+      2250,
+      2000,
+      1750
+    ],
+    "res_mod_turns": 2,
+    "tint_added": [
+      [
+        4,
+        8
+      ],
+      [
+        4,
+        7
+      ],
+      [
+        4,
+        7
+      ],
+      [
+        3,
+        6
+      ],
+      [
+        3,
+        6
+      ],
+      [
+        3,
+        5
+      ],
+      [
+        3,
+        5
+      ],
+      [
+        2,
+        4
+      ],
+      [
+        2,
+        4
+      ],
+      [
+        2,
+        3
+      ],
+      [
+        2,
+        3
+      ],
+      [
+        1,
+        3
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        1,
+        2
+      ]
+    ],
+    "res_accuracy": [
+      4,
+      4,
+      3,
+      3,
+      3,
+      3,
+      2,
+      2,
+      2,
+      2,
+      1,
+      1,
+      1,
+      1
+    ],
+    "res_accuracy_turns": 2,
+    "burning_cell_rounds": 2
   },
   "support": {
     "mod_min_bp": [
@@ -366,14 +491,16 @@
     "weapon_max_per_level_bp": 10000,
     "attack_per_level_bp": 10000,
     "ap_min": 1,
-    "ap_max": 12
+    "ap_max": 12,
+    "resist_bp": 5000
   },
   "items": {
     "bases": {
       "Sword": {
         "slot": "MainHand",
         "level": 1,
-        "aspect": "Blunt",
+        "aspect": "Piercing",
+        "aspect_tier": 14,
         "damage": [
           4,
           8
@@ -397,6 +524,7 @@
         "slot": "MainHand",
         "level": 1,
         "aspect": "Blunt",
+        "aspect_tier": 14,
         "damage": [
           3,
           6
@@ -419,7 +547,8 @@
       "Wand": {
         "slot": "MainHand",
         "level": 1,
-        "aspect": "Blunt",
+        "aspect": "Lightning",
+        "aspect_tier": 14,
         "damage": [
           2,
           5
@@ -443,6 +572,7 @@
         "slot": "Body",
         "level": 1,
         "aspect": "Blunt",
+        "aspect_tier": 0,
         "damage": [
           0,
           0
@@ -466,6 +596,7 @@
         "slot": "Body",
         "level": 1,
         "aspect": "Blunt",
+        "aspect_tier": 0,
         "damage": [
           0,
           0
@@ -489,6 +620,7 @@
         "slot": "Body",
         "level": 1,
         "aspect": "Blunt",
+        "aspect_tier": 0,
         "damage": [
           0,
           0

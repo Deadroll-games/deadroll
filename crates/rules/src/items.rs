@@ -1,7 +1,7 @@
 //! Equipment rules (docs/ITEMS_AND_CRAFT.md): what a worn item adds to a hero, where an item may
 //! be worn, and the class starter kit. Item numbers live in [`ItemTuning`]; the items program,
 //! the session program and the simulator all read them through this module.
-use deadroll_combat::DamageRange;
+use deadroll_combat::{Carrier, DamageRange, Tint};
 use deadroll_types::{
     Aspect, Class, EquipSlot, ItemBase, EMPTY_ITEM, EQUIP_SLOTS, SOULBOUND_MAX, STATS_COUNT,
 };
@@ -190,6 +190,26 @@ pub fn weapon_range(eq: &Equipment, t: &ItemTuning) -> DamageRange {
         }
         None => DamageRange::new(Aspect::Blunt, t.unarmed[0], t.unarmed[1].max(t.unarmed[0])),
     }
+}
+
+/// Item tint slots of an attacker (the race and class take the others).
+pub const ITEM_TINTS: usize = 2;
+
+/// Worn items that carry an aspect, as resonance tints (DAMAGE_TYPES_AND_MIXES.md 4 and 6.1,
+/// SKILL_BUILDER.md 5.2): the main hand first, then the other slots in `EquipSlot` order.
+/// `basic`: the attack is the weapon's basic attack, so the main-hand aspect is the base
+/// itself and tints nothing.
+pub fn item_tints(eq: &Equipment, t: &ItemTuning, basic: bool) -> [Tint; ITEM_TINTS] {
+    let mut out = [Tint::default(); ITEM_TINTS];
+    let carriers = eq
+        .worn()
+        .filter(|(slot, _)| !(basic && *slot == EquipSlot::MainHand))
+        .map(|(_, base)| t.base(base))
+        .filter(|b| b.aspect_tier > 0);
+    for (slot, b) in out.iter_mut().zip(carriers) {
+        *slot = Tint::new(b.aspect, b.aspect_tier, Carrier::Item);
+    }
+    out
 }
 
 /// Core stats with the worn items' stat bonuses.

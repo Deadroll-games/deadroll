@@ -1,6 +1,6 @@
 //! The shared rules: the P0 table against the registry data, scaling, and the config driving
 //! every number. The program's own tests (programs/session) pin the default values.
-use deadroll_combat::{ModKind, SeededRoll, TimedMod, TimedMods};
+use deadroll_combat::{AccuracyBuff, ModKind, SeededRoll, TimedMod, TimedMods};
 use deadroll_rules::{
     input::{
         effect_action, effect_range, land_effect, player_attacker, skill_use, target_side,
@@ -10,7 +10,7 @@ use deadroll_rules::{
     player::{class_increase, hp_max, player_ap, stats_valid},
     start_of_turn,
     units::{in_range, roll_initiative},
-    BalanceConfig, Unit,
+    BalanceConfig, MonsterDefense, Unit,
 };
 use deadroll_skillcheck::{presets, Effect, Purpose};
 use deadroll_types::{ActiveState, Aspect, Cell, Class, Form, Race, StateKind, STATES_MAX};
@@ -59,8 +59,8 @@ fn p0_table_matches_the_registry_bestiary() {
 fn monsters_grow_with_level_and_scaling() {
     let s = BalanceConfig::DEFAULT.monsters;
     let wolf = p0::monster_base(0).unwrap();
-    let l0 = wolf.profile(0, &s);
-    let l3 = wolf.profile(3, &s);
+    let l0 = wolf.profile(0, &s, &MonsterDefense::NONE);
+    let l3 = wolf.profile(3, &s, &MonsterDefense::NONE);
     // min + 3/2, max + 3, attack + 3.
     assert_eq!(
         (l3.weapon.min, l3.weapon.max),
@@ -68,14 +68,27 @@ fn monsters_grow_with_level_and_scaling() {
     );
     assert_eq!(l3.attack_bonus, l0.attack_bonus + 3);
     assert_eq!((l0.xp, l3.xp), (10, 30));
-    assert_eq!(l3.resist_bp[Aspect::Cold as usize], 5_000);
+    assert_eq!(l3.resist_bp, [0; Aspect::COUNT]);
+    // Defenses come from the registry record: the wolf resists Cold at the scaling's level.
+    #[cfg(feature = "serde")]
+    {
+        let reg = deadroll_rules::registry::Registry::shipped().unwrap();
+        let d = reg.defense_of(0);
+        let p = wolf.profile(3, &s, &d);
+        assert_eq!(p.resist_bp[Aspect::Cold as usize], s.resist_bp);
+        assert_eq!(p.resist_bp.iter().filter(|r| **r > 0).count(), 1);
+        assert_eq!((p.immune_aspects, p.immune_states), (0, 0));
+    }
     let flat = deadroll_rules::MonsterScaling {
         weapon_min_per_level_bp: 0,
         weapon_max_per_level_bp: 0,
         attack_per_level_bp: 0,
         ..s
     };
-    assert_eq!(wolf.profile(9, &flat).weapon, l0.weapon);
+    assert_eq!(
+        wolf.profile(9, &flat, &MonsterDefense::NONE).weapon,
+        l0.weapon
+    );
     assert_eq!(monster_hp(12, 3, 2), 18);
     assert_eq!(monster_hp(0, 0, 9), 1);
     assert_eq!(monster_ap(0, &s), 1);
@@ -135,6 +148,7 @@ fn the_config_drives_the_rules() {
         &hero,
         Some(&SkillStats::derive(cleave, &cfg.skills)),
         &NONE,
+        &AccuracyBuff::default(),
     );
     cfg.skills.line_counter_bp = 0;
     let b = player_attacker(
@@ -143,6 +157,7 @@ fn the_config_drives_the_rules() {
         &hero,
         Some(&SkillStats::derive(cleave, &cfg.skills)),
         &NONE,
+        &AccuracyBuff::default(),
     );
     assert!(b.skill.power_bp > a.skill.power_bp);
 }

@@ -101,8 +101,68 @@ export type Resonance = {
   /** base * 6 + tint; see resonanceName(). */
   id: number;
   active: boolean;
+  /** The second tint of a triple (docs/DAMAGE_TYPES_AND_MIXES.md 6.5), its tier and carrier. */
   secondTint: Aspect | null;
+  secondTier: number;
+  secondCarrier: Carrier;
+  /** The pair has no record of its own: its mechanics are the tint's trait. */
+  generated: boolean;
 };
+
+/** `deadroll_combat::tables::OpKind`: what one op of a resonance does. */
+export const OpKind = {
+  None: 0,
+  Multiplier: 1,
+  StateOnCrit: 2,
+  ExtraStateChance: 3,
+  Linked: 4,
+  LinkedChance: 5,
+  LinkedMod: 6,
+  NativeTurns: 7,
+  NativePower: 8,
+  NativeFaster: 9,
+  NativePowerArmor: 10,
+  ThawDamage: 11,
+  RemoveState: 12,
+  Jump: 13,
+  JumpChain: 14,
+  JumpLine: 15,
+  Knockback: 16,
+  IgniteCells: 17,
+  AddPacket: 18,
+  Penetrate: 19,
+  AccuracyBuff: 20,
+} as const;
+export type OpKind = (typeof OpKind)[keyof typeof OpKind];
+
+/** Where an op comes from: the pair, the second tint's trait (a triple), a trait's hit part. */
+export const OpOrigin = { Pair: 0, Template: 1, Trait: 2 } as const;
+export type OpOrigin = (typeof OpOrigin)[keyof typeof OpOrigin];
+
+/** Op `arg` 255: the base's native state (any state, for a multiplier). */
+export const OP_NATIVE = 255;
+
+/** What one op of a resonance did (`deadroll_combat::OpResult`). */
+export type OpResult = {
+  kind: OpKind;
+  critOnly: boolean;
+  /** A state, a modifier kind or an aspect, by kind (see opText). */
+  arg: number;
+  origin: OpOrigin;
+  tint: Aspect;
+  carrier: Carrier;
+  tier: number;
+  acted: boolean;
+  /** The state it applied, with its roll (`kind` 0 and nothing rolled when none). */
+  state: StateRoll;
+  amount: number;
+  amountMax: number;
+};
+
+/** A state passed on to other monsters (`deadroll_combat::Jump`). */
+export const JumpMode = { Adjacent: 0, Chain: 1, Line: 2 } as const;
+export type JumpMode = (typeof JumpMode)[keyof typeof JumpMode];
+export type Jump = { mode: JumpMode; state: ActiveState; filter: StateKind; limit: number; base: Aspect };
 
 export type StateRoll = {
   kind: StateKind;
@@ -159,6 +219,39 @@ export type HitResult = {
   /** Final rounded damage. */
   damage: number;
   rollsUsed: number;
+  /** Per skill base slot (same index as `resonances`): the ops of its resonance. */
+  resOps: OpResult[][];
+  jumps: Jump[];
+  /** Cells the target is pushed away from the attacker. */
+  knockback: number;
+  /** Burning of this power on the cells around the target, 0 = none. */
+  ignitePower: number;
+  /** Timed modifiers the resonance put on the target. */
+  targetMods: TimedMod[];
+  /** The attacker's accuracy buff from this hit (turns 0 = none). */
+  accuracyBuff: AccuracyBuff;
+  /** `1 << StateKind` of every state that landed on the target. */
+  landed: number;
+};
+
+/** A resonance's accuracy buff on a player (Pale Flame): +bonus to the d20 of `aspect` attacks. */
+export type AccuracyBuff = { aspect: Aspect; turns: number; bonus: number };
+
+/** One monster a state jumped to (`ResonanceSpread`). */
+export type SpreadHit = { monster: number; kind: StateKind; applied: Applied; states: ActiveState[] };
+
+/** What a player's hit did beyond its target (session `ResonanceSpread`, after its HitResolved). */
+export type ResonanceSpread = {
+  session: string;
+  actionCounter: number;
+  attacker: number;
+  target: number;
+  hits: SpreadHit[];
+  moved: { from: Cell; to: Cell } | null;
+  ignited: Cell[];
+  ignitePower: number;
+  untilRound: number;
+  accuracy: AccuracyBuff;
 };
 
 /**

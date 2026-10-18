@@ -44,8 +44,27 @@ pub struct Balance {
     pub penetration_power_bp: u32,
     /// Keenness: armor penetration added when a Piercing tint's resonance triggers, by tier, bp.
     pub keenness_pen_bp: [u32; 14],
-    /// Chance of a resonance's extra state roll (Icy Point's Chill), percent.
+    /// Chance of a resonance's own state roll ("a chance of Stun"), percent, before the op's
+    /// scale and the stat increase.
     pub extra_state_chance_pct: u32,
+    /// Resonance ops (docs/DAMAGE_TYPES_AND_MIXES.md, section 6.4), by the tint's tier, index
+    /// `tier - 1`. Each op scales its curve by the table value (`crate::tables`).
+    /// Extra turns of the native state ("Burning lasts longer").
+    pub res_turns: [u8; 14],
+    /// Increase on the power of states a resonance makes or strengthens.
+    pub res_power_bp: [u32; 14],
+    /// Strength of a timed modifier a resonance applies (Weakening, Slow), bp.
+    pub res_mod_bp: [u32; 14],
+    /// Duration of that modifier in the bearer's own turns.
+    pub res_mod_turns: u8,
+    /// Addition from a tint trait (Fury): flat `[min, max]` of the trait's aspect.
+    pub tint_added: [[u32; 2]; 14],
+    /// Accuracy (the d20 bonus) of an accuracy buff (Pale Flame).
+    pub res_accuracy: [u32; 14],
+    /// Duration of the accuracy buff in the attacker's own turns.
+    pub res_accuracy_turns: u8,
+    /// Rounds a cell set on fire by a resonance keeps burning.
+    pub burning_cell_rounds: u8,
 }
 
 impl Balance {
@@ -82,6 +101,36 @@ impl Balance {
             1_200, 1_000,
         ],
         extra_state_chance_pct: 30,
+        res_turns: [2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        res_power_bp: [
+            5_900, 5_600, 5_300, 5_000, 4_700, 4_400, 4_100, 3_800, 3_500, 3_200, 2_900, 2_600,
+            2_300, 2_000,
+        ],
+        res_mod_bp: [
+            5_000, 4_750, 4_500, 4_250, 4_000, 3_750, 3_500, 3_250, 3_000, 2_750, 2_500, 2_250,
+            2_000, 1_750,
+        ],
+        res_mod_turns: 2,
+        // Same shape as the race trait's added damage until the bench tunes it.
+        tint_added: [
+            [4, 8],
+            [4, 7],
+            [4, 7],
+            [3, 6],
+            [3, 6],
+            [3, 5],
+            [3, 5],
+            [2, 4],
+            [2, 4],
+            [2, 3],
+            [2, 3],
+            [1, 3],
+            [1, 2],
+            [1, 2],
+        ],
+        res_accuracy: [4, 4, 3, 3, 3, 3, 2, 2, 2, 2, 1, 1, 1, 1],
+        res_accuracy_turns: 2,
+        burning_cell_rounds: 2,
     };
 
     pub const fn tint_chance(&self, tier: Tier) -> u32 {
@@ -94,6 +143,26 @@ impl Balance {
 
     pub const fn resonance_more(&self, tier: Tier) -> u32 {
         self.resonance_more_bp[tier.get() as usize - 1]
+    }
+
+    pub const fn res_turns(&self, tier: Tier) -> u8 {
+        self.res_turns[tier.get() as usize - 1]
+    }
+
+    pub const fn res_power(&self, tier: Tier) -> u32 {
+        self.res_power_bp[tier.get() as usize - 1]
+    }
+
+    pub const fn res_mod(&self, tier: Tier) -> u32 {
+        self.res_mod_bp[tier.get() as usize - 1]
+    }
+
+    pub const fn tint_added(&self, tier: Tier) -> [u32; 2] {
+        self.tint_added[tier.get() as usize - 1]
+    }
+
+    pub const fn res_accuracy(&self, tier: Tier) -> u32 {
+        self.res_accuracy[tier.get() as usize - 1]
     }
 
     pub const fn pure_pair(&self, tier: Tier) -> u32 {
@@ -142,6 +211,11 @@ mod tests {
             assert!(b.resonance_more_bp[i] > b.resonance_more_bp[i + 1]);
             assert!(b.pure_pair_bp[i] > b.pure_pair_bp[i + 1]);
             assert!(b.keenness_pen_bp[i] > b.keenness_pen_bp[i + 1]);
+            assert!(b.res_power_bp[i] > b.res_power_bp[i + 1]);
+            assert!(b.res_mod_bp[i] > b.res_mod_bp[i + 1]);
+            assert!(b.res_turns[i] >= b.res_turns[i + 1]);
+            assert!(b.res_accuracy[i] >= b.res_accuracy[i + 1]);
+            assert!(b.tint_added[i][1] >= b.tint_added[i + 1][1]);
         }
         assert_eq!(b.tint_chance(Tier::BEST), 40);
         assert_eq!(b.tint_chance(Tier::WORST), 7);

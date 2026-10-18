@@ -8,7 +8,9 @@
 //!
 //! The attack preview and the hero sheet take a hero, a skill and a monster as the chain stores
 //! them and build the hit input with `deadroll-rules`, the same code the session program runs,
-//! so the website repeats no formula.
+//! so the website repeats no formula. Resonances and monster defenses are registry data: the page
+//! passes the tables the session copied at `open_session` (`set_tables`) and each monster's
+//! defenses from the same account, so nothing here is a copy of the registry.
 //!
 //! Built with `std`: `deadroll-types` pulls `solana-pubkey`, whose `atomic` feature links `std`
 //! (`parking_lot`) on non-SBF targets, so `no_std` is not possible here. std on wasm32 aborts on
@@ -16,14 +18,15 @@
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use deadroll_combat::{
-    preview_hit, preview_range, resolve_hit, Attacker, Defender, HitInput, TimedMods, VrfRoll,
+    preview_hit, preview_range, resolve_hit, AccuracyBuff, Attacker, DamageRange, Defender,
+    HitInput, ResonanceTables, TimedMods, VrfRoll,
 };
 use deadroll_rules::{
     input::{hero, monster_defender, player_attacker, HeroStats, SkillStats},
     items::Equipment,
     monster::p0,
     player::stat_damage_increases,
-    BalanceConfig,
+    BalanceConfig, MonsterDefense,
 };
 use deadroll_skillcheck::{SkillBlocks, SKILL_ASPECTS_MAX};
 use deadroll_types::{
@@ -31,7 +34,7 @@ use deadroll_types::{
 };
 
 /// Bumped on any change of the exports or the byte layouts.
-pub const ABI_VERSION: u32 = 3;
+pub const ABI_VERSION: u32 = 4;
 /// Size of the input and output buffers.
 pub const BUFFER_LEN: usize = 4096;
 
@@ -49,6 +52,25 @@ pub enum Error {
     OutputTooSmall = -3,
     /// The target's bestiary id has no template.
     UnknownMonster = -4,
+    /// No resonance tables yet (`set_tables` not called), or they do not decode.
+    NoTables = -5,
+}
+
+/// The registry resonance tables as `MonsterState` holds them: the `aspects`, `traits` and
+/// `resonances` bodies, back to back.
+pub const TABLES_LEN: usize = deadroll_combat::tables::ASPECTS_LEN
+    + deadroll_combat::tables::TRAITS_LEN
+    + deadroll_combat::tables::PAIRS_LEN;
+
+/// Decodes the three table bodies (`TABLES_LEN` bytes).
+pub fn decode_tables(bytes: &[u8]) -> Result<ResonanceTables, Error> {
+    use deadroll_combat::tables::{ASPECTS_LEN, TRAITS_LEN};
+    if bytes.len() != TABLES_LEN {
+        return Err(Error::NoTables);
+    }
+    let (a, rest) = bytes.split_at(ASPECTS_LEN);
+    let (t, p) = rest.split_at(TRAITS_LEN);
+    ResonanceTables::from_bytes(a, t, p).map_err(|_| Error::NoTables)
 }
 
 /// A character as the chain stores it: `CharacterData` fields, `Character.class_tier` and what it
@@ -88,13 +110,71 @@ pub struct SkillInput {
     pub power_bp: u32,
 }
 
-/// A live monster: its bestiary template at a level, with its states and modifiers.
+/// A monster's registry defenses, as `MonsterState.defense` stores them.
+#[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DefenseInput {
+    pub resist: u8,
+    pub immune_aspects: u8,
+    pub immune_states: u8,
+}
+
+impl DefenseInput {
+    pub fn defense(&self) -> MonsterDefense {
+        MonsterDefense {
+            resist: self.resist,
+            immune_aspects: self.immune_aspects,
+            immune_states: self.immune_states,
+        }
+    }
+}
+
+/// A live monster: its bestiary template at a level, with its states, modifiers and defenses.
 #[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TargetInput {
     pub bestiary_id: u8,
     pub level: u8,
     pub states: [ActiveState; STATES_MAX],
     pub mods: TimedMods,
+    pub defense: DefenseInput,
+}
+
+/// A monster as the battle screen shows it: its template at a level with its registry defenses.
+#[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MonsterInput {
+    pub bestiary_id: u8,
+    pub level: u8,
+    pub defense: DefenseInput,
+}
+
+/// What the rules make of a monster (`deadroll_rules::MonsterProfile`).
+#[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MonsterSheet {
+    pub weapon: DamageRange,
+    pub attack_bonus: u32,
+    /// The hit threshold.
+    pub evasion: u32,
+    pub armor: u32,
+    /// Resistance per aspect, bp (counterweight), before the cap.
+    pub resist_bp: [u32; Aspect::COUNT],
+    pub immune_aspects: u8,
+    pub immune_states: u8,
+    /// `Balance::resist_cap_bp`: a hit never uses more resistance.
+    pub resist_cap_bp: u32,
+}
+
+pub fn monster_sheet(m: &MonsterInput) -> Result<MonsterSheet, Error> {
+    let base = p0::monster_base(m.bestiary_id).ok_or(Error::UnknownMonster)?;
+    let p = base.profile(m.level, &CFG.monsters, &m.defense.defense());
+    Ok(MonsterSheet {
+        weapon: p.weapon,
+        attack_bonus: p.attack_bonus,
+        evasion: p.defense,
+        armor: p.armor,
+        resist_bp: p.resist_bp,
+        immune_aspects: p.immune_aspects,
+        immune_states: p.immune_states,
+        resist_cap_bp: CFG.combat.resist_cap_bp,
+    })
 }
 
 /// A player's attack on a monster: the weapon's basic attack (`skill = None`) or a damage skill.
@@ -105,6 +185,8 @@ pub struct AttackRequest {
     pub hero_mods: TimedMods,
     pub skill: Option<SkillInput>,
     pub target: TargetInput,
+    /// The attacker's accuracy buff from a resonance (`Participation.accuracy`).
+    pub accuracy: AccuracyBuff,
 }
 
 /// A hero's derived stats with what it wears (docs/CHARACTER.md, section 3).
@@ -166,23 +248,35 @@ pub fn hero_sheet(h: &HeroStats) -> HeroSheet {
 /// The hit input of a player's attack on a monster, as the session program builds it.
 pub fn attack_input(r: &AttackRequest) -> Result<HitInput, Error> {
     let base = p0::monster_base(r.target.bestiary_id).ok_or(Error::UnknownMonster)?;
-    let profile = base.profile(r.target.level, &CFG.monsters);
+    let profile = base.profile(r.target.level, &CFG.monsters, &r.target.defense.defense());
     let skill = r.skill.map(|s| SkillStats {
         blocks: s.blocks,
         shares_bp: s.shares_bp,
         power_bp: s.power_bp,
         cooldown: 0,
     });
-    let attacker: Attacker = player_attacker(CFG, 0, &r.hero.hero(), skill.as_ref(), &r.hero_mods);
+    let attacker: Attacker = player_attacker(
+        CFG,
+        0,
+        &r.hero.hero(),
+        skill.as_ref(),
+        &r.hero_mods,
+        &r.accuracy,
+    );
     let defender: Defender = monster_defender(&profile, &r.target.states, &r.target.mods);
     Ok(HitInput { attacker, defender })
 }
 
-/// Decodes a borsh `HitInput`, resolves it with `seed`, writes a borsh `HitResult` to `out`.
-/// Returns the number of bytes written.
-pub fn resolve_bytes(input: &[u8], seed: &[u8; 32], out: &mut [u8]) -> Result<usize, Error> {
+/// Decodes a borsh `HitInput`, resolves it with `seed` and `tables`, writes a borsh `HitResult`
+/// to `out`. Returns the number of bytes written.
+pub fn resolve_bytes(
+    input: &[u8],
+    seed: &[u8; 32],
+    tables: &ResonanceTables,
+    out: &mut [u8],
+) -> Result<usize, Error> {
     let input = HitInput::try_from_slice(input).map_err(|_| Error::BadInput)?;
-    let result = resolve_hit(&input, &CFG.combat, &mut VrfRoll::new(*seed));
+    let result = resolve_hit(&input, &CFG.combat, tables, &mut VrfRoll::new(*seed));
     write(&result, out)
 }
 
@@ -194,9 +288,19 @@ pub fn preview_bytes(input: &[u8], out: &mut [u8]) -> Result<usize, Error> {
 }
 
 /// Decodes a borsh `HitInput`, writes a borsh `HitPreview`.
-pub fn preview_hit_bytes(input: &[u8], out: &mut [u8]) -> Result<usize, Error> {
+pub fn preview_hit_bytes(
+    input: &[u8],
+    tables: &ResonanceTables,
+    out: &mut [u8],
+) -> Result<usize, Error> {
     let input = HitInput::try_from_slice(input).map_err(|_| Error::BadInput)?;
-    write(&preview_hit(&input, &CFG.combat), out)
+    write(&preview_hit(&input, &CFG.combat, tables), out)
+}
+
+/// Decodes a borsh `MonsterInput`, writes a borsh `MonsterSheet`.
+pub fn monster_sheet_bytes(input: &[u8], out: &mut [u8]) -> Result<usize, Error> {
+    let input = MonsterInput::try_from_slice(input).map_err(|_| Error::BadInput)?;
+    write(&monster_sheet(&input)?, out)
 }
 
 /// Decodes a borsh `HeroInput`, writes a borsh `HeroSheet`.
@@ -206,9 +310,16 @@ pub fn hero_sheet_bytes(input: &[u8], out: &mut [u8]) -> Result<usize, Error> {
 }
 
 /// Decodes a borsh `AttackRequest`, writes a borsh `HitPreview`.
-pub fn preview_attack_bytes(input: &[u8], out: &mut [u8]) -> Result<usize, Error> {
+pub fn preview_attack_bytes(
+    input: &[u8],
+    tables: &ResonanceTables,
+    out: &mut [u8],
+) -> Result<usize, Error> {
     let request = AttackRequest::try_from_slice(input).map_err(|_| Error::BadInput)?;
-    write(&preview_hit(&attack_input(&request)?, &CFG.combat), out)
+    write(
+        &preview_hit(&attack_input(&request)?, &CFG.combat, tables),
+        out,
+    )
 }
 
 fn write(value: &impl BorshSerialize, out: &mut [u8]) -> Result<usize, Error> {
@@ -236,6 +347,8 @@ mod abi {
         input: [u8; BUFFER_LEN],
         output: [u8; BUFFER_LEN],
         seed: [u8; 32],
+        /// From `set_tables`; `None` until then.
+        tables: Option<ResonanceTables>,
     }
 
     /// wasm32 runs one thread: the exports never overlap.
@@ -246,10 +359,27 @@ mod abi {
         input: [0; BUFFER_LEN],
         output: [0; BUFFER_LEN],
         seed: [0; 32],
+        tables: None,
     }));
 
     fn buffers() -> *mut Buffers {
         BUFFERS.0.get()
+    }
+
+    /// Runs `f` over `input[..input_len]`, the loaded tables and the output buffer.
+    fn with_tables(
+        input_len: u32,
+        f: impl FnOnce(&[u8], &[u8; 32], &ResonanceTables, &mut [u8]) -> Result<usize, Error>,
+    ) -> i32 {
+        // SAFETY: single-threaded, no other borrow of the buffers is alive during the call.
+        let b = unsafe { &mut *buffers() };
+        let Some(tables) = b.tables.as_ref() else {
+            return Error::NoTables as i32;
+        };
+        let Some(input) = b.input.get(..input_len as usize) else {
+            return Error::InputTooLong as i32;
+        };
+        code(f(input, &b.seed, tables, &mut b.output))
     }
 
     /// Runs `f` over `input[..input_len]` and the output buffer.
@@ -297,7 +427,34 @@ mod abi {
     /// [`Error`] code.
     #[no_mangle]
     pub extern "C" fn resolve(input_len: u32) -> i32 {
-        with_input(input_len, resolve_bytes)
+        with_tables(input_len, resolve_bytes)
+    }
+
+    /// Loads the resonance tables (`TABLES_LEN` bytes in the input buffer) for `resolve`,
+    /// `preview_hit` and `preview_attack`. Returns 0, or `NoTables` (they stay unloaded).
+    #[no_mangle]
+    pub extern "C" fn set_tables(input_len: u32) -> i32 {
+        // SAFETY: as in `with_input`.
+        let b = unsafe { &mut *buffers() };
+        let Some(input) = b.input.get(..input_len as usize) else {
+            return Error::InputTooLong as i32;
+        };
+        match decode_tables(input) {
+            Ok(t) => {
+                b.tables = Some(t);
+                0
+            }
+            Err(e) => {
+                b.tables = None;
+                e as i32
+            }
+        }
+    }
+
+    /// A monster's numbers: `MonsterInput` in, `MonsterSheet` out.
+    #[no_mangle]
+    pub extern "C" fn monster_sheet(input_len: u32) -> i32 {
+        with_input(input_len, |input, _, out| monster_sheet_bytes(input, out))
     }
 
     /// Damage range without dice: writes `min, max` as two `u32` LE. Returns 8 or an error.
@@ -309,7 +466,9 @@ mod abi {
     /// Hit chance, crit chance and damage of a `HitInput` without dice: a borsh `HitPreview`.
     #[no_mangle]
     pub extern "C" fn preview_hit(input_len: u32) -> i32 {
-        with_input(input_len, |input, _, out| preview_hit_bytes(input, out))
+        with_tables(input_len, |input, _, t, out| {
+            preview_hit_bytes(input, t, out)
+        })
     }
 
     /// A hero's derived stats: `HeroInput` in, `HeroSheet` out.
@@ -321,7 +480,9 @@ mod abi {
     /// A player's attack on a monster before the dice: `AttackRequest` in, `HitPreview` out.
     #[no_mangle]
     pub extern "C" fn preview_attack(input_len: u32) -> i32 {
-        with_input(input_len, |input, _, out| preview_attack_bytes(input, out))
+        with_tables(input_len, |input, _, t, out| {
+            preview_attack_bytes(input, t, out)
+        })
     }
 
     /// Roll number `index` of the seed buffer (`VrfRoll::roll_at`), for replay checks.
@@ -339,9 +500,20 @@ mod tests {
     use deadroll_combat::{
         Carrier, DamageRange, HitPreview, HitResult, ModKind, Skill, TimedMod, Tint,
     };
-    use deadroll_rules::{input::monster_defender as rules_defender, items::starter_loadout};
+    use deadroll_rules::{
+        input::monster_defender as rules_defender, items::starter_loadout, registry::Registry,
+    };
     use deadroll_skillcheck::presets;
     use deadroll_types::{Form, Source};
+
+    fn registry() -> Registry {
+        Registry::shipped().unwrap()
+    }
+
+    fn table_bytes() -> Vec<u8> {
+        let r = registry();
+        [r.aspects, r.traits, r.resonances].concat()
+    }
 
     fn input() -> HitInput {
         let mut input = HitInput::default();
@@ -374,31 +546,54 @@ mod tests {
         }
     }
 
-    fn request(skill: Option<SkillInput>) -> AttackRequest {
+    fn defense(id: u8) -> DefenseInput {
+        let d = registry().defense_of(id);
+        DefenseInput {
+            resist: d.resist,
+            immune_aspects: d.immune_aspects,
+            immune_states: d.immune_states,
+        }
+    }
+
+    fn request(skill: Option<SkillInput>, id: u8) -> AttackRequest {
         AttackRequest {
             hero: warrior(),
             hero_mods: NO_MODS,
             skill,
             target: TargetInput {
-                bestiary_id: 1,
+                bestiary_id: id,
                 level: 1,
                 states: [ActiveState::default(); STATES_MAX],
                 mods: NO_MODS,
+                defense: defense(id),
             },
+            accuracy: AccuracyBuff::default(),
         }
     }
 
     #[test]
+    fn tables_decode_from_the_session_bytes() {
+        let bytes = table_bytes();
+        assert_eq!(bytes.len(), TABLES_LEN);
+        assert_eq!(decode_tables(&bytes), Ok(registry().tables));
+        assert_eq!(decode_tables(&bytes[1..]), Err(Error::NoTables));
+        let mut bad = bytes.clone();
+        bad[0] = 3;
+        assert_eq!(decode_tables(&bad), Err(Error::NoTables));
+    }
+
+    #[test]
     fn resolve_round_trip_matches_direct_call() {
+        let tables = registry().tables;
         let input = input();
         let bytes = borsh::to_vec(&input).unwrap();
         assert!(bytes.len() < BUFFER_LEN);
         let mut out = [0u8; BUFFER_LEN];
         for s in 0u8..32 {
             let seed = [s; 32];
-            let len = resolve_bytes(&bytes, &seed, &mut out).unwrap();
+            let len = resolve_bytes(&bytes, &seed, &tables, &mut out).unwrap();
             let decoded = HitResult::try_from_slice(&out[..len]).unwrap();
-            let direct = resolve_hit(&input, &CFG.combat, &mut VrfRoll::new(seed));
+            let direct = resolve_hit(&input, &CFG.combat, &tables, &mut VrfRoll::new(seed));
             assert_eq!(decoded, direct);
         }
     }
@@ -415,13 +610,18 @@ mod tests {
 
     #[test]
     fn preview_hit_round_trip() {
+        let tables = registry().tables;
         let bytes = borsh::to_vec(&input()).unwrap();
         let mut out = [0u8; BUFFER_LEN];
-        let len = preview_hit_bytes(&bytes, &mut out).unwrap();
+        let len = preview_hit_bytes(&bytes, &tables, &mut out).unwrap();
         let decoded = HitPreview::try_from_slice(&out[..len]).unwrap();
-        assert_eq!(decoded, deadroll_combat::preview_hit(&input(), &CFG.combat));
-        // immune: bool, then six u32.
-        assert_eq!(len, 1 + 6 * 4);
+        assert_eq!(
+            decoded,
+            deadroll_combat::preview_hit(&input(), &CFG.combat, &tables)
+        );
+        // The Cold tint on the Piercing basic attack: Icy Point.
+        assert_eq!(decoded.tint_count, 1);
+        assert_eq!(decoded.tints[0].id, 31);
     }
 
     #[test]
@@ -442,7 +642,36 @@ mod tests {
     }
 
     #[test]
+    fn monster_sheet_reads_the_given_defenses() {
+        let wolf = MonsterInput {
+            bestiary_id: 0,
+            level: 1,
+            defense: defense(0),
+        };
+        let bytes = borsh::to_vec(&wolf).unwrap();
+        let mut out = [0u8; BUFFER_LEN];
+        let len = monster_sheet_bytes(&bytes, &mut out).unwrap();
+        let sheet = MonsterSheet::try_from_slice(&out[..len]).unwrap();
+        assert_eq!(
+            sheet.resist_bp[Aspect::Cold as usize],
+            CFG.monsters.resist_bp
+        );
+        assert_eq!(sheet.resist_cap_bp, CFG.combat.resist_cap_bp);
+        let bare = MonsterInput {
+            defense: DefenseInput::default(),
+            ..wolf
+        };
+        assert_eq!(monster_sheet(&bare).unwrap().resist_bp, [0; Aspect::COUNT]);
+        let unknown = MonsterInput {
+            bestiary_id: 200,
+            ..wolf
+        };
+        assert_eq!(monster_sheet(&unknown), Err(Error::UnknownMonster));
+    }
+
+    #[test]
     fn preview_attack_builds_the_program_input() {
+        let tables = registry().tables;
         let thrust = presets::WARRIOR[0].blocks;
         let d = deadroll_skillcheck::derive(&thrust);
         let skill = SkillInput {
@@ -450,12 +679,16 @@ mod tests {
             shares_bp: d.shares_bp,
             power_bp: d.power_bp,
         };
-        for r in [request(None), request(Some(skill))] {
+        for r in [request(None, 0), request(Some(skill), 1)] {
             let bytes = borsh::to_vec(&r).unwrap();
             let mut out = [0u8; BUFFER_LEN];
-            let len = preview_attack_bytes(&bytes, &mut out).unwrap();
+            let len = preview_attack_bytes(&bytes, &tables, &mut out).unwrap();
             let p = HitPreview::try_from_slice(&out[..len]).unwrap();
-            let profile = p0::monster_base(1).unwrap().profile(1, &CFG.monsters);
+            let profile = p0::monster_base(r.target.bestiary_id).unwrap().profile(
+                1,
+                &CFG.monsters,
+                &r.target.defense.defense(),
+            );
             let stats = r.skill.map(|s| SkillStats {
                 blocks: s.blocks,
                 shares_bp: s.shares_bp,
@@ -463,52 +696,89 @@ mod tests {
                 cooldown: 0,
             });
             let expected = HitInput {
-                attacker: player_attacker(CFG, 0, &r.hero.hero(), stats.as_ref(), &NO_MODS),
+                attacker: player_attacker(
+                    CFG,
+                    0,
+                    &r.hero.hero(),
+                    stats.as_ref(),
+                    &NO_MODS,
+                    &AccuracyBuff::default(),
+                ),
                 defender: rules_defender(&profile, &r.target.states, &NO_MODS),
             };
-            assert_eq!(p, deadroll_combat::preview_hit(&expected, &CFG.combat));
+            assert_eq!(
+                p,
+                deadroll_combat::preview_hit(&expected, &CFG.combat, &tables)
+            );
             assert!(p.hit_bp > 0 && p.max >= p.min);
         }
-        let mut unknown = request(None);
+        let mut unknown = request(None, 1);
         unknown.target.bestiary_id = 200;
         let bytes = borsh::to_vec(&unknown).unwrap();
         let mut out = [0u8; BUFFER_LEN];
         assert_eq!(
-            preview_attack_bytes(&bytes, &mut out),
+            preview_attack_bytes(&bytes, &tables, &mut out),
             Err(Error::UnknownMonster)
         );
     }
 
     #[test]
     fn errors() {
+        let tables = registry().tables;
         let bytes = borsh::to_vec(&input()).unwrap();
         let mut out = [0u8; BUFFER_LEN];
         assert_eq!(
-            resolve_bytes(&bytes[..10], &[0; 32], &mut out),
+            resolve_bytes(&bytes[..10], &[0; 32], &tables, &mut out),
             Err(Error::BadInput)
         );
         let mut trailing = bytes.clone();
         trailing.push(0);
         assert_eq!(
-            resolve_bytes(&trailing, &[0; 32], &mut out),
+            resolve_bytes(&trailing, &[0; 32], &tables, &mut out),
             Err(Error::BadInput)
         );
         assert_eq!(
-            resolve_bytes(&bytes, &[0; 32], &mut out[..16]),
+            resolve_bytes(&bytes, &[0; 32], &tables, &mut out[..16]),
             Err(Error::OutputTooSmall)
         );
         assert_eq!(hero_sheet_bytes(&[1, 2], &mut out), Err(Error::BadInput));
         assert_eq!(code(Err(Error::InputTooLong)), -1);
         assert_eq!(code(Err(Error::UnknownMonster)), -4);
+        assert_eq!(code(Err(Error::NoTables)), -5);
     }
 
     #[test]
     fn exports_on_host() {
+        let tables = registry().tables;
         let bytes = borsh::to_vec(&input()).unwrap();
+        let table_bytes = table_bytes();
         // SAFETY: test-only access to the export buffers; this is the only test using them.
         unsafe {
             core::ptr::copy_nonoverlapping(bytes.as_ptr(), abi::input_ptr(), bytes.len());
             core::ptr::write_bytes(abi::seed_ptr(), 7, 32);
+        }
+        // No tables yet.
+        assert_eq!(abi::resolve(bytes.len() as u32), Error::NoTables as i32);
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                table_bytes.as_ptr(),
+                abi::input_ptr(),
+                table_bytes.len(),
+            );
+        }
+        assert_eq!(abi::set_tables(table_bytes.len() as u32), 0);
+        assert_eq!(abi::set_tables(3), Error::NoTables as i32);
+        assert_eq!(abi::resolve(bytes.len() as u32), Error::NoTables as i32);
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                table_bytes.as_ptr(),
+                abi::input_ptr(),
+                table_bytes.len(),
+            );
+        }
+        assert_eq!(abi::set_tables(table_bytes.len() as u32), 0);
+        unsafe {
+            core::ptr::copy_nonoverlapping(bytes.as_ptr(), abi::input_ptr(), bytes.len());
         }
         let len = abi::resolve(bytes.len() as u32);
         assert!(len > 0);
@@ -516,13 +786,13 @@ mod tests {
         let decoded = HitResult::try_from_slice(out).unwrap();
         assert_eq!(
             decoded,
-            resolve_hit(&input(), &CFG.combat, &mut VrfRoll::new([7; 32]))
+            resolve_hit(&input(), &CFG.combat, &tables, &mut VrfRoll::new([7; 32]))
         );
         let len = abi::preview_hit(bytes.len() as u32);
         let out = unsafe { core::slice::from_raw_parts(abi::output_ptr(), len as usize) };
         assert_eq!(
             HitPreview::try_from_slice(out).unwrap(),
-            deadroll_combat::preview_hit(&input(), &CFG.combat)
+            deadroll_combat::preview_hit(&input(), &CFG.combat, &tables)
         );
         assert_eq!(abi::roll_u64(0), VrfRoll::roll_at(&[7; 32], 0));
         assert_eq!(

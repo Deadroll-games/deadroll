@@ -14,6 +14,7 @@ const EXIT = "#8a6a1f";
 const TRAP = "#6b2f2f";
 const GRID_LINE = "rgba(0,0,0,.25)";
 const REACHABLE = "rgba(79,143,217,.28)";
+const BURNING = "rgba(230,120,40,.45)";
 const TARGET = "#d65a4a";
 const PLAYER = "#4f8fd9";
 const MONSTER = "#c4473a";
@@ -278,6 +279,12 @@ function drawGrid(ctx: CanvasRenderingContext2D, props: GridProps, cell: number)
   for (let y = 0; y <= height; y++) {
     const py = y === height ? pixelH - 1 : y * cell;
     ctx.fillRect(0, py, pixelW, 1);
+  }
+
+  ctx.fillStyle = BURNING;
+  for (const spot of props.burning ?? []) {
+    if (!inMap(spot, width, height)) continue;
+    ctx.fillRect(spot.x * cell, spot.y * cell, cell, cell);
   }
 
   ctx.fillStyle = REACHABLE;

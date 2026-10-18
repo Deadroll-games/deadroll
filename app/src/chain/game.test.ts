@@ -30,7 +30,7 @@ import { coders } from "./programs";
 import { bagPda, gameConfigPda, monstersPda, participationPda, programIdentityPda, sessionAuthorityPda, sessionTokenPda, skillSetPda } from "./pda";
 import { affordable, pathArgs, reachable, route } from "./route";
 import { explainFailure } from "./send";
-import { Applied, Aspect, Class, HitOutcome, MAP_MAX, ModKind, Tile } from "./types";
+import { Applied, Aspect, Class, HitOutcome, MAP_MAX, ModKind, OpKind, Tile } from "./types";
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex").slice(0, 16);
 const A = (n: number) => new Uint8Array(32).fill(n);
@@ -176,21 +176,23 @@ describe("session builders", () => {
 
   it("consume_randomness is signed by the mock-vrf identity of programs/session/src/vrf.rs", async () => {
     expect((await mockVrfSigner()).address).toBe("5RotSMue7vx9xBPp3L8iQEKbKSc3ezbY4GqiJxDEe6sN");
-    const ix = await consumeIx(session, addrOf(12), character, A(0x5a), null);
+    const ix = await consumeIx(session, addrOf(12), character, A(0x5a), null, addrOf(13));
     expect(toHex(ix.data as Uint8Array)).toBe(toHex(concat(ixDisc("consume_randomness"), A(0x5a))));
     expect(ix.accounts![0]!.role).toBe(AccountRole.READONLY_SIGNER);
     expect(ix.accounts![3]!.address).toBe(addrOf(12));
     // skill_set and bag of that character: burned by mark_dead if the roll kills it.
     expect(ix.accounts!.slice(5, 7).map((a) => a.role)).toEqual([AccountRole.WRITABLE, AccountRole.WRITABLE]);
-    expect(ix.accounts).toHaveLength(11);
+    expect(ix.accounts).toHaveLength(12);
     expect(ix.accounts![10]).toEqual({ address: PROGRAMS.session, role: AccountRole.READONLY });
+    // The map layout, read-only, last (patch 4).
+    expect(ix.accounts![11]).toEqual({ address: addrOf(13), role: AccountRole.READONLY });
   });
 
   it("consume_randomness passes GameSession.pendingTarget, writable, for a heal or buff on an ally", async () => {
     const ally = addrOf(15);
     expect(pendingTargetOf({ pendingTarget: DEFAULT_KEY } as never)).toBeNull();
     expect(pendingTargetOf({ pendingTarget: ally } as never)).toBe(ally);
-    const ix = await consumeIx(session, addrOf(12), character, A(1), ally);
+    const ix = await consumeIx(session, addrOf(12), character, A(1), ally, addrOf(13));
     expect(ix.accounts![10]).toEqual({ address: ally, role: AccountRole.WRITABLE });
   });
 });
@@ -268,16 +270,20 @@ describe("decoders", () => {
       v.equipment = Uint8Array.of(0, 0xff, 0xff, 3, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff);
       v.skills = Uint8Array.of(2, 0, 0xff, 5, 1, 3);
       v.classTier = 9;
+      v.accuracy = { aspect: "fire", turns: 3, bonus: 4 };
     });
     expect(p.back.cooldowns).toHaveLength(16);
-    // cooldowns (16), hp_max (4), mods (6 x 8 bytes), equipment (11), skills (6), class_tier (1).
-    expect(Array.from(p.bytes.subarray(-86, -84))).toEqual([0, 2]);
-    expect(Array.from(p.bytes.subarray(-70, -66))).toEqual([30, 0, 0, 0]);
+    // cooldowns (16), hp_max (4), mods (6 x 8 bytes), equipment (11), skills (6), class_tier (1),
+    // then accuracy (aspect, turns, bonus u32 = 6, patch 4).
+    expect(Array.from(p.bytes.subarray(-92, -90))).toEqual([0, 2]);
+    expect(Array.from(p.bytes.subarray(-76, -72))).toEqual([30, 0, 0, 0]);
     // TimedModData: kind, aspect, turns, power_bp u32, source = 8 bytes.
-    expect(Array.from(p.bytes.subarray(-66 + 8 * 3, -66 + 8 * 4))).toEqual([ModKind.Weakening, Aspect.Blood, 3, 0x08, 0x07, 0, 0, 2]);
-    expect(Array.from(p.bytes.subarray(-18, -7))).toEqual([0, 0xff, 0xff, 3, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
-    expect(Array.from(p.bytes.subarray(-7, -1))).toEqual([2, 0, 0xff, 5, 1, 3]);
-    expect(Array.from(p.bytes.subarray(-1))).toEqual([9]);
+    expect(Array.from(p.bytes.subarray(-72 + 8 * 3, -72 + 8 * 4))).toEqual([ModKind.Weakening, Aspect.Blood, 3, 0x08, 0x07, 0, 0, 2]);
+    expect(Array.from(p.bytes.subarray(-24, -13))).toEqual([0, 0xff, 0xff, 3, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
+    expect(Array.from(p.bytes.subarray(-13, -7))).toEqual([2, 0, 0xff, 5, 1, 3]);
+    expect(Array.from(p.bytes.subarray(-7, -6))).toEqual([9]);
+    expect(Array.from(p.bytes.subarray(-6))).toEqual([Aspect.Fire, 3, 4, 0, 0, 0]);
+    expect(p.back.accuracy).toEqual({ aspect: { fire: {} }, turns: 3, bonus: 4 });
     expect(p.back.classTier).toBe(9);
     expect(Array.from(p.back.skills)).toEqual([2, 0, 0xff, 5, 1, 3]);
     expect(p.back.hpMax).toBe(30);
@@ -286,15 +292,21 @@ describe("decoders", () => {
     const m = roundTrip("MonsterState", (v) => {
       v.cooldowns[2] = Uint8Array.of(1, 0, 3, 0);
       v.mods[2][ModKind.Slow] = { kind: "slow", aspect: "cold", turns: 2, powerBp: 2_500, source: 1 };
+      v.defense[1] = { resist: 2, immuneAspects: 0, immuneStates: 4 };
+      v.burningCells[0] = { x: 3, y: 4, untilRound: 7, power: 5, source: 1 };
     });
     expect(m.back.cooldowns).toHaveLength(24);
     expect(Array.from(m.back.cooldowns[2])).toEqual([1, 0, 3, 0]);
-    // mods: 24 monsters x 6 slots x 8 bytes after the cooldowns.
+    // After the mods (24 x 6 x 8): defense (24 x 3), the tables (48 + 192 + 576), burning cells (16 x 9).
+    const tail = 24 * 3 + 48 + 192 + 576 + 16 * 9;
     expect(m.back.mods).toHaveLength(24);
-    expect(Array.from(m.bytes.subarray(-1152 + 2 * 48 + 8, -1152 + 2 * 48 + 11))).toEqual([ModKind.Slow, Aspect.Cold, 2]);
+    expect(Array.from(m.bytes.subarray(-tail - 1152 + 2 * 48 + 8, -tail - 1152 + 2 * 48 + 11))).toEqual([ModKind.Slow, Aspect.Cold, 2]);
+    expect(Array.from(m.bytes.subarray(-tail + 3, -tail + 6))).toEqual([2, 0, 4]);
+    expect(Array.from(m.bytes.subarray(-16 * 9, -16 * 9 + 9))).toEqual([3, 4, 7, 0, 5, 0, 0, 0, 1]);
+    expect(m.back.burningCells[0]).toEqual({ x: 3, y: 4, untilRound: 7, power: 5, source: 1 });
     expect(m.back.mods[2][ModKind.Slow].turns).toBe(2);
     // A pre-upgrade account (no trailing fields) no longer decodes.
-    expect(() => c.decodeAccount("Participation", p.bytes.subarray(0, -11))).toThrow(/read past end/);
+    expect(() => c.decodeAccount("Participation", p.bytes.subarray(0, -6))).toThrow(/read past end/);
   });
 
   it("decodes TurnTicked, TurnSkipped and SkillUsed", () => {
@@ -373,7 +385,25 @@ describe("decoders", () => {
     r.crit = true;
     r.tintRollCount = 1;
     r.tintRolls[0] = { base: "fire", tint: "cold", carrier: "race", tier: 14, chanceBp: 700, roll: 39, success: true };
-    r.resonances[0] = { base: "fire", tint: "cold", tier: 14, carrier: "race", id: 1, active: true, secondTint: null };
+    r.resonances[0] = {
+      base: "fire",
+      tint: "cold",
+      tier: 14,
+      carrier: "race",
+      id: 1,
+      active: true,
+      secondTint: "blood",
+      secondTier: 12,
+      secondCarrier: "item",
+      generated: false,
+    };
+    // Pale Flame: Burning longer, and the accuracy buff.
+    r.resOps[0][0] = { ...r.resOps[0][0], kind: "nativeTurns", acted: true, amount: 1, tint: "cold", carrier: "race", tier: 14 };
+    r.resOps[0][1] = { ...r.resOps[0][1], kind: "accuracyBuff", arg: 0, acted: true, amount: 1, origin: "pair" };
+    r.jumpCount = 1;
+    r.jumps[0] = { mode: "line", state: { kind: "shock", turns: 2, power: 2000, source: 1 }, filter: "shock", limit: 1, base: "lightning" };
+    r.knockback = 1;
+    r.accuracyBuff = { aspect: "fire", turns: 3, bonus: 1 };
     r.packetCount = 2;
     r.packets[1].aspect = "fire";
     r.packets[1].rolled = 30_000n;
@@ -389,7 +419,14 @@ describe("decoders", () => {
     expect([h.attacker, h.target, h.actionCounter]).toEqual([1, 4, 2]);
     expect(h.result.outcome).toBe(HitOutcome.Hit);
     expect(h.result.tintRolls).toHaveLength(1);
-    expect(h.result.resonances[0]).toMatchObject({ base: Aspect.Fire, tint: Aspect.Cold, active: true, secondTint: null });
+    expect(h.result.resonances[0]).toMatchObject({ base: Aspect.Fire, tint: Aspect.Cold, active: true, secondTint: Aspect.Blood, secondTier: 12, secondCarrier: 2 });
+    expect(h.result.resOps[0]!.map((o) => [o.kind, o.acted, o.amount])).toEqual([
+      [OpKind.NativeTurns, true, 1],
+      [OpKind.AccuracyBuff, true, 1],
+    ]);
+    expect(h.result.resOps[1]).toEqual([]);
+    expect(h.result.jumps).toEqual([{ mode: 2, state: { kind: 4, turns: 2, power: 2000, source: 1 }, filter: 4, limit: 1, base: Aspect.Lightning }]);
+    expect([h.result.knockback, h.result.accuracyBuff]).toEqual([1, { aspect: Aspect.Fire, turns: 3, bonus: 1 }]);
     expect(h.result.resonances[1]).toBeNull();
     expect(h.result.packets).toHaveLength(2);
     expect(h.result.packets[1]).toMatchObject({ aspect: Aspect.Fire, rolled: 30_000n });

@@ -7,7 +7,7 @@
 use deadroll_combat::{DamageRange, RollSource};
 use deadroll_mapcheck::roster::{p0_role, Role};
 use deadroll_rules::{
-    config::BalanceConfig, input::hero, items, monster, player, units, HeroStats,
+    config::BalanceConfig, input::hero, items, monster, player, units, HeroStats, MonsterDefense,
 };
 use deadroll_types::{Aspect, Cell, Class, Form, Race, Source, Tile, STATS_COUNT};
 
@@ -162,9 +162,14 @@ pub fn player_defense(class: Class, stats: &[u16; STATS_COUNT]) -> (u32, u32) {
     player::player_defense(class, stats, &BALANCE.players)
 }
 
-/// One P0 bestiary template at a level (`deadroll_rules::monster::p0`).
-pub fn monster_profile(bestiary_id: u8, level: u8) -> Option<MonsterProfile> {
-    monster::p0::monster_base(bestiary_id).map(|b| b.profile(level, &BALANCE.monsters))
+/// One P0 bestiary template at a level (`deadroll_rules::monster::p0`) with the defenses of its
+/// registry record (`MonsterState.defense`, copied at `open_session`).
+pub fn monster_profile(
+    bestiary_id: u8,
+    level: u8,
+    defense: &MonsterDefense,
+) -> Option<MonsterProfile> {
+    monster::p0::monster_base(bestiary_id).map(|b| b.profile(level, &BALANCE.monsters, defense))
 }
 
 /// Killing this monster wins the party (docs/PARTY_AND_TURNS.md, section 7.1).
@@ -230,6 +235,7 @@ mod tests {
             initiative: 6,
             hp: 12,
             hp_per_level: 3,
+            defense: deadroll_rules::MonsterDefense::NONE,
         };
         assert_eq!(monster_hp(&wolf, 0), 12);
         assert_eq!(monster_hp(&wolf, 2), 18);
@@ -340,11 +346,14 @@ mod tests {
     #[test]
     fn every_p0_monster_has_a_profile_and_one_boss() {
         for id in 0..=4u8 {
-            let p = monster_profile(id, 1).unwrap();
+            let p = monster_profile(id, 1, &crate::state::test_support::defense(id)).unwrap();
             assert!(p.weapon.min >= 1 && p.weapon.max >= p.weapon.min);
             assert!(p.xp > 0);
         }
-        assert_eq!(monster_profile(5, 1), None);
+        assert_eq!(
+            monster_profile(5, 1, &crate::state::test_support::defense(5)),
+            None
+        );
         assert!(is_boss(ids::GOBLIN_CHIEFTAIN));
         for id in [
             ids::WOLF,
@@ -356,7 +365,13 @@ mod tests {
             assert!(!is_boss(id));
         }
         assert_eq!(
-            monster_profile(ids::GOBLIN_SHAMAN, 1).unwrap().form,
+            monster_profile(
+                ids::GOBLIN_SHAMAN,
+                1,
+                &crate::state::test_support::defense(ids::GOBLIN_SHAMAN)
+            )
+            .unwrap()
+            .form,
             Form::Projectile
         );
     }

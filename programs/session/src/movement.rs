@@ -1,10 +1,12 @@
 //! Path validation shared by `move_unit` and `monster_move`.
 use anchor_lang::prelude::*;
-use deadroll_types::Cell;
+use deadroll_rules::spread::{step_into, BurningCell, BURNING_CELLS_MAX};
+use deadroll_types::{ActiveState, Cell, STATES_MAX};
 
 use crate::{
     errors::SessionError,
-    rules::{step_cost, Unit, DIRECTIONS, MAX_PATH},
+    events::CellBurned,
+    rules::{step_cost, Unit, BALANCE, DIRECTIONS, MAX_PATH},
     state::{external::MapLayoutView, GameSession, Monsters},
 };
 
@@ -46,6 +48,47 @@ pub fn walk_path(
             .ok_or(SessionError::NotEnoughActionPoints)?;
     }
     Ok((at, action_points))
+}
+
+/// Every cell a walked `path` enters from `start` sets the mover on fire if it burns
+/// (docs/DAMAGE_TYPES_AND_MIXES.md 6.4, Blasting Flame; 7.7: burning cells set on fire those who
+/// step on them). `walk_path` already checked the path. Writes `CellBurned` per cell.
+#[allow(clippy::too_many_arguments)]
+pub fn burn_on_path(
+    session: &GameSession,
+    session_key: Pubkey,
+    cells: &[BurningCell; BURNING_CELLS_MAX],
+    mover: Unit,
+    start: Cell,
+    path: &Path,
+    states: &mut [ActiveState; STATES_MAX],
+    immune_states: u8,
+) -> Result<()> {
+    if cells.iter().all(|c| !c.burns(session.core.round)) {
+        return Ok(());
+    }
+    let mut at = start;
+    for &dir in &path.steps[..path.len as usize] {
+        at = step(at, dir, session.width, session.height)?;
+        if let Some((_, applied)) = step_into(
+            cells,
+            at,
+            session.core.round,
+            states,
+            immune_states,
+            BALANCE,
+        ) {
+            emit!(CellBurned {
+                session: session_key,
+                unit: mover.id(),
+                x: at.x,
+                y: at.y,
+                applied: applied.into(),
+                states: *states,
+            });
+        }
+    }
+    Ok(())
 }
 
 fn step(at: Cell, dir: u8, width: u8, height: u8) -> Result<Cell> {

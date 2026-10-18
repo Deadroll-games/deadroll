@@ -410,7 +410,7 @@ async function estimateCost(conn: Rpc, opts: DeployOptions, programIds: Record<s
     }
   }
   if (!(await fetchData(conn.rpc, GAME_CONFIG))) add("GameConfig", await rentFor(conn.rpc, 8 + 420));
-  for (const seed of ["aspects", "resonances", "bestiary", "tileset", "prefabs"]) {
+  for (const seed of ["aspects", "resonances", "bestiary", "tileset", "prefabs", "traits"]) {
     const [table] = await getProgramDerivedAddress({ programAddress: address(programIds.registry), seeds: [enc.encode(seed)] });
     if (!(await fetchData(conn.rpc, table))) add(`registry table ${seed}`, await rentFor(conn.rpc, 16 + 4096));
   }
@@ -506,8 +506,9 @@ function paletteVersion(): number {
 async function uploadRender(conn: Rpc, opts: DeployOptions, wallet: KeyPairSigner, programIds: Record<string, string>) {
   step("registry tables");
   script("seed-registry.ts", [], opts);
-  // open_session reads monster HP, speed, initiative and tile costs from these two.
-  for (const seed of ["bestiary", "tileset"]) {
+  // open_session reads monster HP, speed, initiative, defenses and tile costs, and copies the
+  // resonance tables (aspects, traits, resonances) into the session.
+  for (const seed of ["bestiary", "tileset", "aspects", "traits", "resonances"]) {
     const [table] = await getProgramDerivedAddress({ programAddress: address(programIds.registry), seeds: [enc.encode(seed)] });
     const data = await fetchData(conn.rpc, table);
     if (!data || data.subarray(16).every((b) => b === 0)) throw new Error(`registry ${seed} table ${table} is not seeded`);

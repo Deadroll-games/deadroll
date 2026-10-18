@@ -101,6 +101,9 @@ pub fn handler(ctx: Context<StartTurn>) -> Result<()> {
             );
             participation.core.hp = start.hp;
             participation.set_combat_mods(&mods);
+            let mut accuracy = deadroll_combat::AccuracyBuff::from(participation.accuracy);
+            accuracy.tick();
+            participation.accuracy = accuracy.into();
             // After the tick: this turn's AP see the buffs and debuffs that still cover it.
             participation.refresh_ap(turn_seq);
             if start.died {
@@ -181,6 +184,7 @@ pub fn handler(ctx: Context<StartTurn>) -> Result<()> {
         expired: start.expired,
         states,
         cooldowns,
+        thaw_damage: start.thaw_damage,
     });
     emit!(ModsTicked {
         session: session_key,

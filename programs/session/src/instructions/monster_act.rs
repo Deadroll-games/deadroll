@@ -104,8 +104,8 @@ pub fn handler(ctx: Context<MonsterAct>, monster: u8, action: u8, target: u8) ->
             && participation.core.hp > 0,
         SessionError::InvalidTarget
     );
-    let profile =
-        monster_profile(state.bestiary_id, state.level).ok_or(SessionError::InvalidMonster)?;
+    let profile = monster_profile(state.bestiary_id, state.level, &monsters.defense(monster)?)
+        .ok_or(SessionError::InvalidMonster)?;
     let from = Cell {
         x: state.x,
         y: state.y,
@@ -152,6 +152,7 @@ pub fn handler(ctx: Context<MonsterAct>, monster: u8, action: u8, target: u8) ->
             skill_set: accounts.skill_set.key(),
             bag: accounts.bag.key(),
             target_participation: None,
+            layout: session.layout,
         },
     )?;
 

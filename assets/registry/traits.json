@@ -1,0 +1,88 @@
+{
+  "note": "docs/DAMAGE_TYPES_AND_MIXES.md 3.2 and 6.5. hit: what the trait does to the hit whenever its tint triggers. template: the trait on the base's native state (generated pairs, the second tint of a triple). epithet: off-chain text for triple names.",
+  "records": [
+    {
+      "trait": "Fury",
+      "aspect": "Fire",
+      "epithet": "of Ash",
+      "hit": {
+        "kind": "AddPacket",
+        "arg": "Fire",
+        "value": 10000
+      },
+      "template": [
+        {
+          "kind": "Linked",
+          "arg": "Burning",
+          "value": 10000
+        }
+      ]
+    },
+    {
+      "trait": "Composure",
+      "aspect": "Cold",
+      "epithet": "of Frost",
+      "hit": null,
+      "template": [
+        {
+          "kind": "Linked",
+          "arg": "Chill",
+          "value": 10000
+        }
+      ]
+    },
+    {
+      "trait": "Swiftness",
+      "aspect": "Lightning",
+      "epithet": "of the Storm",
+      "hit": null,
+      "template": [
+        {
+          "kind": "Jump",
+          "arg": "Native"
+        }
+      ]
+    },
+    {
+      "trait": "Wasting",
+      "aspect": "Blood",
+      "epithet": "of Blood",
+      "hit": null,
+      "template": [
+        {
+          "kind": "Linked",
+          "arg": "Bleeding",
+          "value": 10000
+        }
+      ]
+    },
+    {
+      "trait": "Crushing",
+      "aspect": "Blunt",
+      "epithet": "of Ruin",
+      "hit": null,
+      "template": [
+        {
+          "kind": "LinkedChance",
+          "arg": "Stun",
+          "value": 10000
+        }
+      ]
+    },
+    {
+      "trait": "Keenness",
+      "aspect": "Piercing",
+      "epithet": "of the Point",
+      "hit": {
+        "kind": "Penetrate",
+        "value": 10000
+      },
+      "template": [
+        {
+          "kind": "StateOnCrit",
+          "arg": "Native"
+        }
+      ]
+    }
+  ]
+}

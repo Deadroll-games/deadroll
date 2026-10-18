@@ -5,6 +5,14 @@ import { fileURLToPath } from "node:url";
 
 export const ASPECT_SIZE = 8;
 export const RESONANCE_SIZE = 16;
+export const TRAIT_SIZE = 32;
+export const OP_SIZE = 6;
+/** Op `arg`: the base's native state (or, for a Multiplier, no state required). */
+export const NATIVE = 0xff;
+export const ANY_STATE = 0xff;
+export const NO_STATE = 0xff;
+export const CRIT_ONLY = 0x80;
+export const PAIR_OVERRIDE = 1;
 export const MONSTER_SIZE = 48;
 export const TILE_SIZE = 8;
 export const BESTIARY_MAX = 32;
@@ -17,6 +25,7 @@ export const TableKind = {
   Bestiary: 2,
   Tileset: 3,
   Prefabs: 4,
+  Traits: 5,
 } as const;
 export type TableKind = (typeof TableKind)[keyof typeof TableKind];
 
@@ -82,11 +91,72 @@ export const CONDITION: Record<string, number> = {
   CanBeStunned: 7,
   HasArmor: 8,
 };
-export const EFFECT_KIND: Record<string, number> = {
+/** `deadroll_combat::tables::OpKind`, in discriminant order. */
+export const OP_KIND: Record<string, number> = {
   None: 0,
   Multiplier: 1,
   StateOnCrit: 2,
   ExtraStateChance: 3,
+  Linked: 4,
+  LinkedChance: 5,
+  LinkedMod: 6,
+  NativeTurns: 7,
+  NativePower: 8,
+  NativeFaster: 9,
+  NativePowerArmor: 10,
+  ThawDamage: 11,
+  RemoveState: 12,
+  Jump: 13,
+  JumpChain: 14,
+  JumpLine: 15,
+  Knockback: 16,
+  IgniteCells: 17,
+  AddPacket: 18,
+  Penetrate: 19,
+  AccuracyBuff: 20,
+};
+const OP_KINDS = Object.keys(OP_KIND).length;
+/** What an op's `arg` names (`deadroll_combat::tables::ArgKind`). */
+type ArgKind = "Zero" | "State" | "StateOnly" | "StateOrAny" | "Mod" | "Aspect";
+export function opArg(kind: number): ArgKind {
+  switch (kind) {
+    case OP_KIND.Multiplier:
+      return "StateOrAny";
+    case OP_KIND.StateOnCrit:
+    case OP_KIND.ExtraStateChance:
+    case OP_KIND.Linked:
+    case OP_KIND.LinkedChance:
+    case OP_KIND.RemoveState:
+    case OP_KIND.Jump:
+    case OP_KIND.JumpLine:
+      return "State";
+    case OP_KIND.JumpChain:
+      return "StateOnly";
+    case OP_KIND.LinkedMod:
+      return "Mod";
+    case OP_KIND.AddPacket:
+    case OP_KIND.AccuracyBuff:
+      return "Aspect";
+    default:
+      return "Zero";
+  }
+}
+export const MOD_KIND: Record<string, number> = {
+  Haste: 0,
+  Slow: 1,
+  Empowerment: 2,
+  Weakening: 3,
+  Protection: 4,
+  Vulnerability: 5,
+};
+/** Tint traits, by trait id (docs/DAMAGE_TYPES_AND_MIXES.md 3.2). */
+export const TINT_TRAIT: Record<string, number> = {
+  Fury: 0,
+  Composure: 1,
+  Swiftness: 2,
+  Wasting: 3,
+  Crushing: 4,
+  Keenness: 5,
 };
 export const TRAIT: Record<string, number> = {
   swarm: 1 << 0,
@@ -101,6 +171,7 @@ export const TABLES = [
   { table: "bestiary", kind: TableKind.Bestiary, seed: "bestiary", file: "bestiary.json", recordSize: MONSTER_SIZE },
   { table: "tileset", kind: TableKind.Tileset, seed: "tileset", file: "tileset.json", recordSize: TILE_SIZE },
   { table: "prefabs", kind: TableKind.Prefabs, seed: "prefabs", file: "prefabs.json", recordSize: 1 },
+  { table: "traits", kind: TableKind.Traits, seed: "traits", file: "traits.json", recordSize: TRAIT_SIZE },
 ] as const;
 
 export function registryAsset(name: string): string {
@@ -119,6 +190,8 @@ export function recordSize(kind: TableKind): number {
       return TILE_SIZE;
     case TableKind.Prefabs:
       return 1;
+    case TableKind.Traits:
+      return TRAIT_SIZE;
   }
 }
 
@@ -134,6 +207,8 @@ export function maxLen(kind: TableKind): number {
       return Object.keys(TILE).length * TILE_SIZE;
     case TableKind.Prefabs:
       return TABLE_CAP;
+    case TableKind.Traits:
+      return Object.keys(TINT_TRAIT).length * TRAIT_SIZE;
   }
 }
 
@@ -150,25 +225,33 @@ function isForm(v: number): boolean {
   return v === 0 || v === 1;
 }
 function isStateKind(v: number): boolean {
-  return Number.isInteger(v) && v >= 0 && v < 6;
+  return Number.isInteger(v) && v >= 0 && v < Object.keys(STATE_KIND).length;
 }
 
 function u16At(r: Uint8Array, at: number): number {
   return r[at] | (r[at + 1] << 8);
 }
 
-/** Effect: [kind, state, value u32 LE]. Kinds 0 None, 1 Multiplier, 2 StateOnCrit, 3 ExtraStateChance. */
-export function validate_effect(e: Uint8Array): boolean {
-  if (e.length < 6) return false;
-  switch (e[0]) {
-    case 0:
-    case 1:
-      return true;
-    case 2:
-    case 3:
-      return isStateKind(e[1]);
-    default:
-      return false;
+/** Op: [kind | CRIT_ONLY, arg, value u32 LE] (`deadroll_combat::tables::Op::decode`). */
+export function validate_op(e: Uint8Array): boolean {
+  if (e.length < OP_SIZE) return false;
+  const kind = e[0] & ~CRIT_ONLY;
+  if (kind >= OP_KINDS) return false;
+  if (kind === OP_KIND.None) return e.subarray(0, OP_SIZE).every((b) => b === 0);
+  const arg = e[1];
+  switch (opArg(kind)) {
+    case "Zero":
+      return arg === 0;
+    case "State":
+      return arg === NATIVE || isStateKind(arg);
+    case "StateOnly":
+      return isStateKind(arg);
+    case "StateOrAny":
+      return arg === ANY_STATE || isStateKind(arg);
+    case "Mod":
+      return arg < Object.keys(MOD_KIND).length;
+    case "Aspect":
+      return isAspect(arg);
   }
 }
 
@@ -204,6 +287,8 @@ export function validate_monster(r: Uint8Array): boolean {
     predispositionOk &&
     (r[10] & ~aspectMask) === 0 &&
     (r[11] & ~aspectMask) === 0 &&
+    (r[38] & ~((1 << Object.keys(STATE_KIND).length) - 1)) === 0 &&
+    r.subarray(39).every((b) => b === 0) &&
     u16At(r, 30) <= u16At(r, 32)
   );
 }
@@ -213,9 +298,38 @@ export function validate_record(kind: TableKind, index: number, r: Uint8Array): 
   if (r.length !== recordSize(kind)) return false;
   switch (kind) {
     case TableKind.Aspects:
-      return r[0] === index && isAspect(r[0]) && isFamily(r[1]);
+      // [aspect, family, flags, native state, trait, condition, 0, 0]
+      return (
+        r[0] === index &&
+        isAspect(r[0]) &&
+        isFamily(r[1]) &&
+        (r[3] === NO_STATE || isStateKind(r[3])) &&
+        r[4] < Object.keys(TINT_TRAIT).length &&
+        r[5] < RESONANCE_CONDITIONS &&
+        r[6] === 0 &&
+        r[7] === 0
+      );
     case TableKind.Resonances:
-      return r[0] < RESONANCE_CONDITIONS && validate_effect(r.subarray(2, 8)) && validate_effect(r.subarray(8, 14));
+      // [condition, flags, op 0, op 1, 0, 0]
+      return (
+        r[0] < RESONANCE_CONDITIONS &&
+        (r[1] & ~PAIR_OVERRIDE) === 0 &&
+        validate_op(r.subarray(2, 8)) &&
+        validate_op(r.subarray(8, 14)) &&
+        r[14] === 0 &&
+        r[15] === 0
+      );
+    case TableKind.Traits:
+      // An all-zero record is an absent trait; else [1, 0, hit op, template op x2, 12 x 0].
+      if (r.every((b) => b === 0)) return true;
+      return (
+        r[0] === 1 &&
+        r[1] === 0 &&
+        validate_op(r.subarray(2, 8)) &&
+        validate_op(r.subarray(8, 14)) &&
+        validate_op(r.subarray(14, 20)) &&
+        r.subarray(20).every((b) => b === 0)
+      );
     case TableKind.Bestiary:
       return validate_monster(r);
     case TableKind.Tileset:
@@ -301,19 +415,41 @@ function traitBits(names: unknown): number {
   return bits;
 }
 
-function encodeEffect(e: unknown, out: Uint8Array, at: number): void {
-  const obj = asObject(e, "effect");
-  const kind = lookup(EFFECT_KIND, obj.kind, "effect kind");
-  out[at] = kind;
-  if (kind === 0) return;
-  if (kind === 1) {
-    putU32(out, at + 2, requireInt(obj.value, "multiplier value", 0, 0xffffffff));
-    return;
+/** One op: `{ kind, arg?, value?, crit? }` (arg by name: a state, "Native", "Any", a modifier, an aspect). */
+function encodeOp(e: unknown, out: Uint8Array, at: number): void {
+  const obj = asObject(e, "op");
+  const kind = lookup(OP_KIND, obj.kind, "op kind");
+  out[at] = kind | (obj.crit === true ? CRIT_ONLY : 0);
+  const need = () => {
+    if (obj.arg === undefined) fail(`${String(obj.kind)} needs an arg`);
+    return obj.arg;
+  };
+  switch (opArg(kind)) {
+    case "Zero":
+      if (obj.arg !== undefined) fail(`${String(obj.kind)} takes no arg`);
+      break;
+    case "State":
+      out[at + 1] = need() === "Native" ? NATIVE : lookup(STATE_KIND, obj.arg, "state");
+      break;
+    case "StateOnly":
+      out[at + 1] = lookup(STATE_KIND, need(), "state");
+      break;
+    case "StateOrAny":
+      out[at + 1] = need() === "Any" ? ANY_STATE : lookup(STATE_KIND, obj.arg, "state");
+      break;
+    case "Mod":
+      out[at + 1] = lookup(MOD_KIND, need(), "modifier");
+      break;
+    case "Aspect":
+      out[at + 1] = lookup(ASPECT, need(), "aspect");
+      break;
   }
-  out[at + 1] = lookup(STATE_KIND, obj.state, "state");
-  if (kind === 3) {
-    putU32(out, at + 2, requireInt(obj.value, "extra state chance", 0, 0xffffffff));
-  }
+  putU32(out, at + 2, obj.value === undefined ? 0 : requireInt(obj.value, "op value", 0, 0xffffffff));
+}
+
+function encodeOps(list: unknown, max: number, out: Uint8Array, at: number, label: string): void {
+  if (!Array.isArray(list) || list.length > max) fail(`${label}: at most ${max} ops`);
+  list.forEach((op, i) => encodeOp(op, out, at + i * OP_SIZE));
 }
 
 export function encodeAspects(json: unknown): Uint8Array {
@@ -328,6 +464,26 @@ export function encodeAspects(json: unknown): Uint8Array {
     out[at] = id;
     out[at + 1] = lookup(FAMILY, rec.family, "family");
     out[at + 2] = rec.flags === undefined ? 0 : requireInt(rec.flags, "flags", 0, 255);
+    out[at + 3] = rec.native === null ? NO_STATE : lookup(STATE_KIND, rec.native, "state");
+    out[at + 4] = lookup(TINT_TRAIT, rec.trait, "trait");
+    out[at + 5] = lookup(CONDITION, rec.condition, "condition");
+  }
+  return out;
+}
+
+export function encodeTraits(json: unknown): Uint8Array {
+  const records = recordsOf(json, "traits");
+  const names = Object.keys(TINT_TRAIT);
+  if (records.length !== names.length) fail(`traits must have ${names.length} records`);
+  const out = new Uint8Array(names.length * TRAIT_SIZE);
+  for (let i = 0; i < records.length; i++) {
+    const rec = asObject(records[i], "trait");
+    if (lookup(TINT_TRAIT, rec.trait, "trait") !== i) fail(`trait record ${i} must be ${names[i]}`);
+    lookup(ASPECT, rec.aspect, "aspect");
+    const at = i * TRAIT_SIZE;
+    out[at] = 1;
+    if (rec.hit !== null && rec.hit !== undefined) encodeOp(rec.hit, out, at + 2);
+    encodeOps(rec.template, 2, out, at + 8, `trait ${names[i]}`);
   }
   return out;
 }
@@ -346,9 +502,9 @@ export function encodeResonances(json: unknown): Uint8Array {
     if (index !== i) fail(`resonance record ${i} must be index base * 6 + tint (${index})`);
     const at = i * RESONANCE_SIZE;
     out[at] = lookup(CONDITION, rec.condition, "condition");
-    if (!Array.isArray(rec.effects) || rec.effects.length !== 2) fail("resonance needs two effects");
-    encodeEffect(rec.effects[0], out, at + 2);
-    encodeEffect(rec.effects[1], out, at + 8);
+    if (typeof rec.override !== "boolean") fail("resonance override must be true or false");
+    out[at + 1] = rec.override ? PAIR_OVERRIDE : 0;
+    encodeOps(rec.ops, 2, out, at + 2, `resonance ${String(rec.base)} + ${String(rec.tint)}`);
   }
   return out;
 }
@@ -374,6 +530,9 @@ export function encodeMonster(json: unknown): Uint8Array {
   }
   out[10] = aspectMask(rec.resistance ?? [], "resistance");
   out[11] = aspectMask(rec.immunity ?? [], "immunity");
+  const states = rec.state_immunity ?? [];
+  if (!Array.isArray(states)) fail("state_immunity must be an array of state names");
+  out[38] = states.reduce((m: number, n: unknown) => m | (1 << lookup(STATE_KIND, n, "state")), 0);
   putU16(out, 12, traitBits(rec.traits ?? []));
   putU16(out, 14, requireInt(rec.armor, "armor", 0, 0xffff));
   putU16(out, 16, requireInt(rec.evasion, "evasion", 0, 0xffff));
@@ -447,6 +606,8 @@ export function encodeRegistryFile(table: string, json: unknown): Uint8Array {
       return encodeTileset(json);
     case "prefabs":
       return encodePrefabs(json);
+    case "traits":
+      return encodeTraits(json);
     default:
       fail(`unknown table ${table}`);
   }

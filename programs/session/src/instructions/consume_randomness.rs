@@ -1,22 +1,28 @@
 use anchor_lang::prelude::*;
 use deadroll_character::state::SkillRecord;
 use deadroll_combat::{
-    Applied as CombatApplied, EffectRoll, HitInput, HitResult, States, TimedMods,
+    AccuracyBuff, Applied as CombatApplied, EffectRoll, HitInput, HitResult, ResonanceTables,
+    States, TimedMods,
 };
-use deadroll_rules::{resolve, HeroStats};
+use deadroll_rules::{
+    resolve,
+    spread::{spread, Field},
+    HeroStats, MonsterDefense,
+};
 use deadroll_skillcheck::{Effect, Purpose};
 use deadroll_types::{seeds, SessionStatus};
+use deadroll_types::{Cell, Monster, MONSTERS_MAX, PARTY_MAX};
 
 use crate::{
     combat_input::{effect_action, skill_stats, EffectAction},
     cpi_out::{character::DeathAccounts, SessionSigner},
     errors::SessionError,
-    events::EffectResolved,
+    events::{EffectResolved, ResonanceSpread, SpreadHitData},
     hit_event::{emit_hit_resolved, HitItemsData, ItemBonusData},
     outcomes,
-    rules::{monster_profile, Unit, BALANCE, BASE_ATTACK},
+    rules::{monster_profile, step_cost, Unit, BALANCE, BASE_ATTACK},
     state::{
-        external::{read_character, read_skill},
+        external::{read_character, read_skill, MapLayoutView},
         mods::from_combat,
         GameSession, Monsters, Participation, PendingAction,
     },
@@ -72,6 +78,10 @@ pub struct ConsumeRandomness<'info> {
     /// for every other roll.
     #[account(mut, address = session.pending_target @ SessionError::InvalidPendingAccounts)]
     pub target_participation: Option<Box<Account<'info, Participation>>>,
+    /// CHECK: the session's `MapLayout` (patch 4): a resonance's knockback and burning cells
+    /// need the walls. Address pinned at `open_session`, read by `MapLayoutView`.
+    #[account(address = session.layout @ SessionError::InvalidLayout)]
+    pub layout: UncheckedAccount<'info>,
 }
 
 pub fn handler(ctx: Context<ConsumeRandomness>, randomness: [u8; 32]) -> Result<()> {
@@ -144,6 +154,7 @@ pub fn handler(ctx: Context<ConsumeRandomness>, randomness: [u8; 32]) -> Result<
                     participation,
                     &hero,
                     skill.as_ref(),
+                    &accounts.layout,
                 )?,
             }
         }
@@ -240,31 +251,39 @@ impl Roll {
 /// A player's weapon or damage skill on a monster, then that skill's effect (if any) when the
 /// hit landed and the monster lives (`deadroll_rules::resolve::attack_monster`).
 #[inline(never)]
-fn attack_monster(
+#[allow(clippy::too_many_arguments)]
+fn attack_monster<'info>(
     roll: &Roll,
     session: &mut GameSession,
     monsters: &Monsters,
     index: u8,
-    participation: &Participation,
+    participation: &mut Participation,
     hero: &HeroStats,
     skill: Option<&SkillRecord>,
+    layout: &AccountInfo<'info>,
 ) -> Result<()> {
-    // Off the 4 KB stack frame: `HitResult` alone is over 1 KB.
+    // Off the 4 KB stack frame: `HitResult` alone is over 1 KB, the tables about 1 KB.
     let mut input = Box::<HitInput>::default();
     let mut result = Box::<HitResult>::default();
+    let mut tables = Box::<ResonanceTables>::default();
+    monsters.tables_into(&mut tables)?;
     let mut monster = monsters.get(index)?;
     let mut mods = monsters.mods(index)?;
-    let profile =
-        monster_profile(monster.bestiary_id, monster.level).ok_or(SessionError::InvalidMonster)?;
+    let defense = monsters.defense(index)?;
+    let profile = monster_profile(monster.bestiary_id, monster.level, &defense)
+        .ok_or(SessionError::InvalidMonster)?;
     let skill = skill.map(skill_stats);
+    let mut accuracy = AccuracyBuff::from(participation.accuracy);
     // One stream for the action: the skill's effect reads the indices after the hit's
     // `rolls_used`, the same as `SyscallRoll::at(seed, rolls_used)`.
     let outcome = resolve::attack_monster(
         BALANCE,
+        &tables,
         roll.pending.attacker,
         hero,
         skill.as_ref(),
         &participation.combat_mods(),
+        &mut accuracy,
         &profile,
         &mut monster,
         &mut mods,
@@ -272,6 +291,7 @@ fn attack_monster(
         &mut result,
         &mut SyscallRoll::new(roll.seed),
     );
+    participation.accuracy = accuracy.into();
     if outcome.died {
         outcomes::monster_killed(
             session,
@@ -295,8 +315,9 @@ fn attack_monster(
         },
     )?;
 
+    // A resonance's timed modifiers landed on `mods` in the hit, a rider's after it.
+    monsters.set_mods(index, &mods)?;
     if let (Some(rider), Some(skill)) = (outcome.rider, skill) {
-        monsters.set_mods(index, &mods)?;
         roll.emit_effect(
             true,
             skill.blocks.effect,
@@ -307,7 +328,167 @@ fn attack_monster(
             &mods,
         );
     }
-    monsters.set(index, &monster)
+    monsters.set(index, &monster)?;
+    let attacker = Cell {
+        x: participation.core.x,
+        y: participation.core.y,
+    };
+    spread_hit(
+        roll, session, monsters, index, attacker, &result, layout, &accuracy,
+    )
+}
+
+/// The map as a resonance's spread sees it: the layout's walls (the registry tile costs) and
+/// every living unit before the spread.
+struct SessionField<'a> {
+    width: u8,
+    height: u8,
+    layout: &'a MapLayoutView<'a>,
+    tile_cost: &'a [u8; deadroll_types::Tile::COUNT],
+    units: [Cell; PARTY_MAX + MONSTERS_MAX],
+    unit_count: usize,
+}
+
+impl Field for SessionField<'_> {
+    fn passable(&self, c: Cell) -> bool {
+        c.x < self.width
+            && c.y < self.height
+            && self
+                .layout
+                .tile(c.x, c.y)
+                .is_ok_and(|t| step_cost(t, self.tile_cost).is_some())
+    }
+
+    fn occupied(&self, c: Cell) -> bool {
+        self.units[..self.unit_count].contains(&c)
+    }
+}
+
+/// Plays the jumps, knockback and burning cells of a player's hit on monster `target` and
+/// writes `ResonanceSpread` (`deadroll_rules::spread`, the simulator's code too).
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn spread_hit<'info>(
+    roll: &Roll,
+    session: &GameSession,
+    monsters: &Monsters,
+    target: u8,
+    attacker: Cell,
+    result: &HitResult,
+    layout: &AccountInfo<'info>,
+    accuracy: &AccuracyBuff,
+) -> Result<()> {
+    if result.jump_count == 0 && result.knockback == 0 && result.ignite_power == 0 {
+        if !result.accuracy_buff.is_empty() {
+            emit_spread(
+                roll,
+                &Default::default(),
+                &[],
+                accuracy,
+                0,
+                session.core.round,
+            );
+        }
+        return Ok(());
+    }
+    let count = monsters.count()?;
+    let mut all = Box::new([Monster::default(); MONSTERS_MAX]);
+    for (i, m) in all.iter_mut().enumerate().take(count as usize) {
+        *m = monsters.get(i as u8)?;
+    }
+    let defense: [MonsterDefense; MONSTERS_MAX] = monsters.defenses()?;
+    let layout = MapLayoutView::load(layout)?;
+    let mut field = SessionField {
+        width: session.width,
+        height: session.height,
+        layout: &layout,
+        tile_cost: &session.tile_cost,
+        units: [Cell::default(); PARTY_MAX + MONSTERS_MAX],
+        unit_count: 0,
+    };
+    for slot in 0..session.core.player_count {
+        if session.player_alive(slot) {
+            field.units[field.unit_count] = session.player_pos[slot as usize];
+            field.unit_count += 1;
+        }
+    }
+    for m in all.iter().take(count as usize).filter(|m| m.alive) {
+        field.units[field.unit_count] = Cell { x: m.x, y: m.y };
+        field.unit_count += 1;
+    }
+    let mut cells = monsters.burning_cells()?;
+    let out = spread(
+        BALANCE,
+        result,
+        attacker,
+        target as usize,
+        &mut all[..count as usize],
+        &defense[..count as usize],
+        &field,
+        &mut cells,
+        session.core.round,
+        roll.pending.attacker,
+    );
+    let mut hits = [SpreadHitData::default(); 8];
+    for (h, data) in out.hits().iter().zip(hits.iter_mut()) {
+        monsters.set(h.monster, &all[h.monster as usize])?;
+        *data = SpreadHitData {
+            monster: h.monster,
+            kind: h.kind,
+            applied: h.applied.into(),
+            states: all[h.monster as usize].states,
+        };
+    }
+    if out.moved.is_some() {
+        monsters.set(target, &all[target as usize])?;
+    }
+    if out.ignited_count > 0 {
+        monsters.set_burning_cells(&cells)?;
+    }
+    let until = session
+        .core
+        .round
+        .saturating_add(BALANCE.combat.burning_cell_rounds as u16);
+    emit_spread(
+        roll,
+        &out,
+        &hits[..out.hit_count as usize],
+        accuracy,
+        result.ignite_power,
+        until,
+    );
+    Ok(())
+}
+
+fn emit_spread(
+    roll: &Roll,
+    out: &deadroll_rules::spread::SpreadOutcome,
+    hits: &[SpreadHitData],
+    accuracy: &AccuracyBuff,
+    ignite_power: u32,
+    until_round: u16,
+) {
+    let mut all_hits = [SpreadHitData::default(); 8];
+    all_hits[..hits.len()].copy_from_slice(hits);
+    let (moved_from, moved_to) = out.moved.unwrap_or_default();
+    let mut ignited = [Cell::default(); 8];
+    ignited[..out.ignited().len()].copy_from_slice(out.ignited());
+    emit!(ResonanceSpread {
+        session: roll.session_key,
+        action_counter: roll.action,
+        attacker: roll.pending.attacker,
+        target: roll.pending.target,
+        hits: all_hits,
+        hit_count: hits.len() as u8,
+        moved: out.moved.is_some(),
+        moved_from,
+        moved_to,
+        ignited,
+        ignited_count: out.ignited_count,
+        ignite_power,
+        until_round,
+        accuracy: (*accuracy).into(),
+    });
 }
 
 /// A debuff skill on a monster: it rolls to land (d20 against the monster's defense).
@@ -322,8 +503,12 @@ fn debuff_monster(
 ) -> Result<()> {
     let mut monster = monsters.get(index)?;
     let mut mods = monsters.mods(index)?;
-    let profile =
-        monster_profile(monster.bestiary_id, monster.level).ok_or(SessionError::InvalidMonster)?;
+    let profile = monster_profile(
+        monster.bestiary_id,
+        monster.level,
+        &monsters.defense(index)?,
+    )
+    .ok_or(SessionError::InvalidMonster)?;
     let out = resolve::debuff_monster(
         BALANCE,
         roll.pending.attacker,
@@ -404,13 +589,20 @@ fn monster_attack<'info>(
 ) -> Result<()> {
     let mut input = Box::<HitInput>::default();
     let mut result = Box::<HitResult>::default();
+    let mut tables = Box::<ResonanceTables>::default();
+    monsters.tables_into(&mut tables)?;
     let slot = participation.core.slot;
     let monster = monsters.get(index)?;
-    let profile =
-        monster_profile(monster.bestiary_id, monster.level).ok_or(SessionError::InvalidMonster)?;
+    let profile = monster_profile(
+        monster.bestiary_id,
+        monster.level,
+        &monsters.defense(index)?,
+    )
+    .ok_or(SessionError::InvalidMonster)?;
     let hero_mods = participation.combat_mods();
     let died = resolve::monster_attack(
         BALANCE,
+        &tables,
         roll.pending.attacker,
         &profile,
         &monsters.mods(index)?,

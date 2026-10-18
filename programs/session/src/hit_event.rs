@@ -9,12 +9,15 @@ use anchor_lang::{prelude::*, Discriminator};
 use deadroll_combat::{
     packet::{PACKETS_MAX, SKILL_ASPECTS_MAX},
     resonance::TINT_ROLLS_MAX,
-    EffectRoll, HitResult, Outcome,
+    EffectRoll, HitResult, Outcome, JUMPS_MAX, RES_OPS_MAX, TARGET_MODS_MAX,
 };
 use deadroll_rules::HeroStats;
 use deadroll_types::{ActiveState, Aspect, ItemBase, StateKind, STATES_MAX};
 
-use crate::events::HitResolved;
+use crate::{
+    events::HitResolved,
+    state::{AccuracyBuffData, TimedModData},
+};
 
 /// `deadroll_combat::Outcome`.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,8 +36,9 @@ pub enum Carrier {
 }
 
 /// `deadroll_combat::Applied`.
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Applied {
+    #[default]
     None,
     Added,
     Refreshed,
@@ -64,6 +68,79 @@ pub struct ResonanceData {
     pub id: u8,
     pub active: bool,
     pub second_tint: Option<Aspect>,
+    /// Patch 4: the second tint of a triple, and a pair with no record (its tint's trait).
+    pub second_tier: u8,
+    pub second_carrier: Carrier,
+    pub generated: bool,
+}
+
+/// `deadroll_combat::tables::OpKind`.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OpKind {
+    None,
+    Multiplier,
+    StateOnCrit,
+    ExtraStateChance,
+    Linked,
+    LinkedChance,
+    LinkedMod,
+    NativeTurns,
+    NativePower,
+    NativeFaster,
+    NativePowerArmor,
+    ThawDamage,
+    RemoveState,
+    Jump,
+    JumpChain,
+    JumpLine,
+    Knockback,
+    IgniteCells,
+    AddPacket,
+    Penetrate,
+    AccuracyBuff,
+}
+
+/// `deadroll_combat::OpOrigin`.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OpOrigin {
+    Pair,
+    Template,
+    Trait,
+}
+
+/// `deadroll_combat::OpResult`: what one op of a resonance did.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OpResultData {
+    pub kind: OpKind,
+    pub crit_only: bool,
+    /// A `StateKind`, `ModKind` or `Aspect` by kind; 255 = the base's native state (or any).
+    pub arg: u8,
+    pub origin: OpOrigin,
+    pub tint: Aspect,
+    pub carrier: Carrier,
+    pub tier: u8,
+    pub acted: bool,
+    pub state: StateRollData,
+    pub amount: u32,
+    pub amount_max: u32,
+}
+
+/// `deadroll_combat::JumpMode`.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JumpMode {
+    Adjacent,
+    Chain,
+    Line,
+}
+
+/// `deadroll_combat::Jump`: a state for the program to pass on (`ResonanceSpread` says where).
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct JumpData {
+    pub mode: JumpMode,
+    pub state: ActiveState,
+    pub filter: StateKind,
+    pub limit: u8,
+    pub base: Aspect,
 }
 
 /// `deadroll_combat::StateRoll`.
@@ -123,6 +200,18 @@ pub struct HitResultData {
     pub states: [ActiveState; STATES_MAX],
     pub damage: u32,
     pub rolls_used: u32,
+    /// Patch 4: per base slot the ops of its resonance (`kind == None` after them).
+    pub res_ops: [[OpResultData; RES_OPS_MAX]; SKILL_ASPECTS_MAX],
+    pub jumps: [JumpData; JUMPS_MAX],
+    pub jump_count: u8,
+    pub knockback: u8,
+    pub ignite_power: u32,
+    /// Timed modifiers on the target (`target_mods[..target_mod_count]`).
+    pub target_mods: [TimedModData; TARGET_MODS_MAX],
+    pub target_mod_count: u8,
+    pub accuracy_buff: AccuracyBuffData,
+    /// `state_bit`s of the states that landed on the target.
+    pub landed: u8,
 }
 
 /// What a player's worn items put into a hit (`deadroll_rules::items::ItemBonus`), so the
@@ -313,6 +402,7 @@ mod tests {
                 resolve_hit_into(
                     &input,
                     &Balance::DEFAULT,
+                    &crate::state::test_support::tables(),
                     &mut VrfRoll::new(seed),
                     &mut result,
                 );

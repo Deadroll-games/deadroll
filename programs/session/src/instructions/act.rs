@@ -244,6 +244,7 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
             skill_set: accounts.skill_set.key(),
             bag: accounts.bag.key(),
             target_participation: (pending_target != Pubkey::default()).then_some(pending_target),
+            layout: session.layout,
         },
     )?;
 

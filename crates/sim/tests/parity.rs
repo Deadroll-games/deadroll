@@ -6,6 +6,11 @@
 //! not move this test) and the default `BalanceConfig` loaded from JSON, and rolls with
 //! `VrfRoll` (`crates/combat`), the same stream as `SyscallRoll`.
 //!
+//! Registry data: the simulator reads `assets/registry/*.json` through `deadroll_rules::registry`;
+//! the program decodes the table bodies it copies at `open_session`. Both come from the same
+//! bytes (`registry_fixture` pins them against the seed script's encoder), and every resonance
+//! pair of DAMAGE_TYPES_AND_MIXES 6.4 runs both ways below.
+//!
 //! Equipment: the program side wears what the character program's own gear code gives
 //! (`deadroll_character::state::Gear`: the starter kit, then unequip), snapshotted the way
 //! `set_ready` does (`Participation::hero`); the simulator side wears the hero preset's
@@ -14,14 +19,17 @@ use deadroll_character::rules::CLASS_START_TIER;
 use deadroll_character::state::Gear as CharacterGear;
 use deadroll_character::state::SkillRecord;
 use deadroll_combat::{
-    resolve_hit, resolve_hit_into, HitInput, HitResult, ModKind, RollSource, TimedMod, TimedMods,
-    VrfRoll,
+    resolve_hit, resolve_hit_into, AccuracyBuff, HitInput, HitResult, ModKind, OpKind,
+    ResonanceTables, RollSource, TimedMod, TimedMods, VrfRoll,
 };
 use deadroll_rules::{
     input::{self, effect_action, EffectAction},
     items::Equipment,
     monster::p0,
-    resolve, BalanceConfig, HeroStats, MonsterProfile,
+    registry::Registry,
+    resolve,
+    spread::{spread, BurningCell, Field, BURNING_CELLS_MAX},
+    BalanceConfig, HeroStats, MonsterDefense, MonsterProfile,
 };
 use deadroll_session::{
     combat_input as program, rules as program_rules, state::participation::hero_of,
@@ -34,7 +42,8 @@ use deadroll_sim::{
 };
 use deadroll_skillcheck::{derive, presets as skill_presets, Purpose};
 use deadroll_types::{
-    ActiveState, Aspect, CharacterData, Class, EquipSlot, ItemBase, Monster, Race, STATES_MAX,
+    ActiveState, Aspect, Cell, CharacterData, Class, EquipSlot, ItemBase, Monster, Race, StateKind,
+    STATES_MAX,
 };
 
 #[path = "../../combat/tests/golden.rs"]
@@ -50,6 +59,23 @@ const NONE: TimedMods = [TimedMod {
 }; deadroll_combat::MODS_MAX];
 
 const SEEDS: u8 = 64;
+
+/// The simulator's registry: `assets/registry` through its JSON loader.
+fn sim_registry() -> Registry {
+    Registry::shipped().unwrap()
+}
+
+/// The program's view of the same data: the table bodies decoded as `Monsters::tables_into`
+/// does, and the defenses as `read_bestiary` reads them.
+fn program_tables(r: &Registry) -> ResonanceTables {
+    ResonanceTables::from_bytes(&r.aspects, &r.traits, &r.resonances).unwrap()
+}
+
+fn program_defense(r: &Registry, id: u8) -> MonsterDefense {
+    let at = id as usize * deadroll_rules::monster::record::SIZE;
+    MonsterDefense::from_record(&r.bestiary[at..at + deadroll_rules::monster::record::SIZE])
+        .unwrap()
+}
 
 /// The default table, through JSON: what the UI starts from.
 fn sim_config() -> BalanceConfig {
@@ -193,8 +219,9 @@ fn sim_fighter(
     f
 }
 
-/// P0 monsters as JSON presets, at level 1.
+/// P0 monsters as JSON presets, at level 1, with their registry defenses.
 fn sim_monsters(cfg: &BalanceConfig) -> Vec<(u8, MonsterProfile, u32)> {
+    let registry = sim_registry();
     (0..5u8)
         .map(|id| {
             let preset: MonsterPreset = round_trip(&MonsterPreset::from_base(
@@ -203,9 +230,15 @@ fn sim_monsters(cfg: &BalanceConfig) -> Vec<(u8, MonsterProfile, u32)> {
                 &p0::monster_base(id).unwrap(),
             ));
             let base = preset.base();
-            (id, base.profile(1, &cfg.monsters), base.hp_at(1))
+            let defense = preset.defense(&registry);
+            (id, base.profile(1, &cfg.monsters, &defense), base.hp_at(1))
         })
         .collect()
+}
+
+/// The program's profile of monster `id` at level 1.
+fn program_profile(id: u8) -> MonsterProfile {
+    program_rules::monster_profile(id, 1, &program_defense(&sim_registry(), id)).unwrap()
 }
 
 fn monster(id: u8, hp: u32) -> Monster {
@@ -222,6 +255,7 @@ fn monster(id: u8, hp: u32) -> Monster {
 /// A monster's natural attack on a fresh hero: the hit, HP and states after it, the death.
 fn bite(
     cfg: &BalanceConfig,
+    tables: &ResonanceTables,
     profile: &MonsterProfile,
     hero: &deadroll_rules::HeroStats,
     hp: u32,
@@ -231,6 +265,7 @@ fn bite(
     let (mut input, mut result) = (HitInput::default(), HitResult::default());
     let died = resolve::monster_attack(
         cfg,
+        tables,
         deadroll_rules::MONSTER_UNIT_BASE,
         profile,
         &NONE,
@@ -248,19 +283,21 @@ fn bite(
 #[test]
 fn golden_fixtures_give_the_same_damage() {
     let cfg = sim_config();
+    let tables = golden::tables();
     for (input, s, damage) in [
         (golden::warrior_vs_wolf(), golden::SEED, 8),
         (golden::mage_vs_goblin(), golden::SEED, 13),
-        (golden::mage_vs_goblin(), golden::RESONANCE_SEED, 13),
+        (golden::mage_vs_goblin(), golden::RESONANCE_SEED, 11),
     ] {
         let mut on_chain = HitResult::default();
         resolve_hit_into(
             &input,
             &program_rules::BALANCE.combat,
+            &tables,
             &mut SyscallRoll::new(s),
             &mut on_chain,
         );
-        let sim = resolve_hit(&input, &cfg.combat, &mut VrfRoll::new(s));
+        let sim = resolve_hit(&input, &cfg.combat, &tables, &mut VrfRoll::new(s));
         assert_eq!(sim, on_chain);
         assert_eq!(sim.damage, damage);
     }
@@ -330,17 +367,14 @@ fn table_numbers_match_the_program() {
     }
     assert_eq!(cfg.players.class_start_tier, CLASS_START_TIER);
     for (id, profile, hp) in sim_monsters(&cfg) {
-        assert_eq!(
-            Some(profile),
-            program_rules::monster_profile(id, 1),
-            "monster {id}"
-        );
+        assert_eq!(profile, program_profile(id), "monster {id}");
         let base = p0::monster_base(id).unwrap();
         let record = deadroll_session::state::external::BestiaryRecord {
             speed: base.speed,
             initiative: base.initiative,
             hp: base.hp,
             hp_per_level: base.hp_per_level,
+            defense: program_defense(&sim_registry(), id),
         };
         assert_eq!(hp, program_rules::monster_hp(&record, 1));
         assert_eq!(
@@ -378,6 +412,8 @@ fn heroes_and_skills_resolve_like_the_character_program() {
 fn every_demo_attack_deals_the_same_damage() {
     let cfg = sim_config();
     let monsters = sim_monsters(&cfg);
+    let registry = sim_registry();
+    let (st, pt) = (registry.tables, program_tables(&registry));
     let (warrior, _) = &demo()[0];
     for ((c, set), gear) in demo()
         .into_iter()
@@ -398,12 +434,25 @@ fn every_demo_attack_deals_the_same_damage() {
         }
         for (rec, stats) in &choices {
             for &(id, profile, hp) in &monsters {
+                let no_buff = AccuracyBuff::default();
                 let prog_input = HitInput {
-                    attacker: program::player_attacker(0, &ph, rec.as_ref(), &NONE),
-                    defender: program::monster_defender(&monster(id, hp), &NONE).unwrap(),
+                    attacker: program::player_attacker(0, &ph, rec.as_ref(), &NONE, &no_buff),
+                    defender: program::monster_defender(
+                        &monster(id, hp),
+                        &program_defense(&registry, id),
+                        &NONE,
+                    )
+                    .unwrap(),
                 };
                 let sim_input = HitInput {
-                    attacker: input::player_attacker(&cfg, 0, &f.hero, stats.as_ref(), &NONE),
+                    attacker: input::player_attacker(
+                        &cfg,
+                        0,
+                        &f.hero,
+                        stats.as_ref(),
+                        &NONE,
+                        &no_buff,
+                    ),
                     defender: input::monster_defender(
                         &profile,
                         &[ActiveState::default(); STATES_MAX],
@@ -420,13 +469,16 @@ fn every_demo_attack_deals_the_same_damage() {
                     // Program: what `consume_randomness` runs.
                     let (mut pm, mut pmods) = (monster(id, hp), NONE);
                     let (mut pin, mut pres) = (HitInput::default(), HitResult::default());
+                    let mut p_acc = AccuracyBuff::default();
                     let p_out = resolve::attack_monster(
                         program_rules::BALANCE,
+                        &pt,
                         0,
                         &ph,
                         rec.as_ref().map(program::skill_stats).as_ref(),
                         &NONE,
-                        &program_rules::monster_profile(id, 1).unwrap(),
+                        &mut p_acc,
+                        &program_profile(id),
                         &mut pm,
                         &mut pmods,
                         &mut pin,
@@ -436,12 +488,15 @@ fn every_demo_attack_deals_the_same_damage() {
                     // Simulator: presets, the JSON table and `VrfRoll`.
                     let (mut sm, mut smods) = (monster(id, hp), NONE);
                     let (mut sin, mut sres) = (HitInput::default(), HitResult::default());
+                    let mut s_acc = AccuracyBuff::default();
                     let s_out = resolve::attack_monster(
                         &cfg,
+                        &st,
                         0,
                         &f.hero,
                         stats.as_ref(),
                         &NONE,
+                        &mut s_acc,
                         &profile,
                         &mut sm,
                         &mut smods,
@@ -452,7 +507,7 @@ fn every_demo_attack_deals_the_same_damage() {
                     assert_eq!(sres, pres);
                     assert_eq!(sres.damage, pres.damage);
                     assert_eq!(s_out, p_out);
-                    assert_eq!((sm, smods), (pm, pmods));
+                    assert_eq!((sm, smods, s_acc), (pm, pmods, p_acc));
                 }
             }
         }
@@ -464,7 +519,13 @@ fn every_demo_attack_deals_the_same_damage() {
     {
         let wf = sim_fighter(warrior, &skill_presets::WARRIOR, &cfg, gear);
         let unit = deadroll_rules::MONSTER_UNIT_BASE;
-        let prog = program::monster_attacker(unit, &monster(id, hp), &NONE).unwrap();
+        let prog = program::monster_attacker(
+            unit,
+            &monster(id, hp),
+            &program_defense(&registry, id),
+            &NONE,
+        )
+        .unwrap();
         assert_eq!(input::monster_attacker(&cfg, unit, &profile, &NONE), prog);
         let ph = program_hero(warrior, gear);
         let states = [ActiveState::default(); STATES_MAX];
@@ -472,10 +533,11 @@ fn every_demo_attack_deals_the_same_damage() {
             input::player_defender(&cfg, &wf.hero, &states, &NONE),
             program::player_defender(&ph, &states, &NONE)
         );
-        let program_profile = program_rules::monster_profile(id, 1).unwrap();
+        let program_profile = program_profile(id);
         for i in 0..SEEDS {
             let p = bite(
                 program_rules::BALANCE,
+                &pt,
                 &program_profile,
                 &ph,
                 program_rules::party_hp_max(warrior.hp_max, &ph),
@@ -483,6 +545,7 @@ fn every_demo_attack_deals_the_same_damage() {
             );
             let s = bite(
                 &cfg,
+                &st,
                 &profile,
                 &wf.hero,
                 wf.hp_max,
@@ -527,7 +590,7 @@ fn every_support_effect_lands_the_same() {
                                 &ph,
                                 &program::skill_stats(rec),
                                 effect,
-                                &program_rules::monster_profile(id, 1).unwrap(),
+                                &program_profile(id),
                                 &mut pm,
                                 &mut pmods,
                                 &mut SyscallRoll::new(seed(i)),
@@ -610,7 +673,9 @@ fn gear_changes_the_fight() {
     assert_eq!(armor(&kit), 30);
     assert_eq!(armor(&program_hero(warrior, Gear::WeaponOnly)), 20);
     assert_eq!(armor(&bare), 20);
-    let weapon = |h: &HeroStats| program::player_attacker(0, h, None, &NONE).weapon;
+    let weapon = |h: &HeroStats| {
+        program::player_attacker(0, h, None, &NONE, &AccuracyBuff::default()).weapon
+    };
     assert_eq!((weapon(&kit).min, weapon(&kit).max), (4, 8));
     let unarmed = program_rules::BALANCE.items.unarmed;
     assert_eq!(
@@ -626,4 +691,211 @@ fn the_character_program_constants_match() {
         deadroll_character::auth::SESSION_PROGRAM,
         deadroll_session::ID
     );
+}
+
+/// An open 12 x 12 floor with living units on `units`.
+struct Open {
+    units: Vec<Cell>,
+}
+
+impl Field for Open {
+    fn passable(&self, c: Cell) -> bool {
+        c.x < 12 && c.y < 12
+    }
+
+    fn occupied(&self, c: Cell) -> bool {
+        self.units.contains(&c)
+    }
+}
+
+/// The attacker stands here; the target is monster 0.
+const ATTACKER: Cell = Cell { x: 3, y: 5 };
+
+/// Goblins around the target at (5, 5): one right behind it (6, 5) and one beside it (5, 6), both
+/// bleeding (Blood Arc), one diagonal (4, 4), one further on the line (7, 5).
+fn cluster(target_states: [ActiveState; STATES_MAX]) -> Vec<Monster> {
+    let hp = p0::monster_base(1).unwrap().hp_at(1);
+    let bleed = ActiveState {
+        kind: StateKind::Bleeding,
+        turns: 3,
+        power: 1,
+        source: 9,
+    };
+    let at = |x, y, states| Monster {
+        x,
+        y,
+        states,
+        ..monster(1, hp)
+    };
+    let mut bleeding = [ActiveState::default(); STATES_MAX];
+    bleeding[0] = bleed;
+    vec![
+        at(5, 5, target_states),
+        at(6, 5, bleeding),
+        at(5, 6, bleeding),
+        at(4, 4, [ActiveState::default(); STATES_MAX]),
+        at(7, 5, [ActiveState::default(); STATES_MAX]),
+    ]
+}
+
+/// A damage skill of `base` by the demo mage, tinted by `tint` (race slot, tier 1) and
+/// `second` (item slot, tier 1), with a state chance and a crit chance high enough to reach
+/// every op over the seeds.
+fn pair_input(cfg: &BalanceConfig, base: Aspect, tint: Aspect, second: Option<Aspect>) -> HitInput {
+    use deadroll_skillcheck::{Category, Effect, SkillBlocks, Target, Trigger};
+    let (c, _) = &demo()[1];
+    let hero = HeroStats::new(c, CLASS_START_TIER);
+    let blocks = SkillBlocks {
+        category: Category::Active,
+        purpose: Purpose::Damage,
+        source: deadroll_types::Source::Magical,
+        form: deadroll_types::Form::Projectile,
+        target: Target::Single,
+        aspects: [base, Aspect::default(), Aspect::default()],
+        aspect_count: 1,
+        effect: Effect::None,
+        trigger: Trigger::None,
+        aura_radius: 0,
+    };
+    let skill = input::SkillStats::derive(blocks, &cfg.skills);
+    let mut a =
+        input::player_attacker(cfg, 0, &hero, Some(&skill), &NONE, &AccuracyBuff::default());
+    a.tints = Default::default();
+    a.tints[0] = deadroll_combat::Tint::new(tint, 1, deadroll_combat::Carrier::Race);
+    if let Some(s) = second {
+        a.tints[1] = deadroll_combat::Tint::new(s, 1, deadroll_combat::Carrier::Item);
+    }
+    a.skill.state_chance_pct = 60;
+    a.crit_chance_pct = 50;
+    let profile = program_profile(1);
+    HitInput {
+        attacker: a,
+        defender: input::monster_defender(&profile, &[ActiveState::default(); STATES_MAX], &NONE),
+    }
+}
+
+/// States on the target before the hit so that every op of `base` + `tint` can act: a frozen
+/// target for Cleaving Ice and Piercing Frost (a crit on a frozen target), Chill near the threshold
+/// for the other Cold pairs (their Freeze ops).
+fn setup_states(base: Aspect, tint: Aspect) -> [ActiveState; STATES_MAX] {
+    let mut s = [ActiveState::default(); STATES_MAX];
+    if base == Aspect::Cold {
+        s[0] = if matches!(tint, Aspect::Blunt | Aspect::Piercing) {
+            ActiveState {
+                kind: StateKind::Freeze,
+                turns: 1,
+                power: 0,
+                source: 9,
+            }
+        } else {
+            ActiveState {
+                kind: StateKind::Chill,
+                turns: 2,
+                power: 6_000,
+                source: 9,
+            }
+        };
+    }
+    s
+}
+
+/// One side of a resonance hit: the hit, then the spread on the cluster.
+fn resonance_side(
+    cfg: &BalanceConfig,
+    tables: &ResonanceTables,
+    input: &HitInput,
+    src: &mut impl RollSource,
+) -> (HitResult, Vec<Monster>, [BurningCell; BURNING_CELLS_MAX]) {
+    let mut result = HitResult::default();
+    resolve_hit_into(input, &cfg.combat, tables, src, &mut result);
+    let mut ms = cluster(result.states);
+    let units = ms.iter().map(|m| Cell { x: m.x, y: m.y }).collect();
+    let defense = vec![program_defense(&sim_registry(), 1); ms.len()];
+    let mut cells = [BurningCell::default(); BURNING_CELLS_MAX];
+    spread(
+        cfg,
+        &result,
+        ATTACKER,
+        0,
+        &mut ms,
+        &defense,
+        &Open { units },
+        &mut cells,
+        1,
+        0,
+    );
+    (result, ms, cells)
+}
+
+#[test]
+fn every_resonance_pair_resolves_the_same_and_every_op_acts() {
+    let cfg = sim_config();
+    let registry = sim_registry();
+    let (st, pt) = (registry.tables, program_tables(&registry));
+    assert_eq!(st, pt);
+    let mut pairs: Vec<(Aspect, Aspect, Option<Aspect>)> = Aspect::ALL
+        .iter()
+        .flat_map(|b| Aspect::ALL.iter().map(move |t| (*b, *t, None)))
+        .filter(|(b, t, _)| b != t)
+        .collect();
+    assert_eq!(pairs.len(), 30);
+    // A triple too: Piercing Frost of the Storm (docs 6.5).
+    pairs.push((Aspect::Cold, Aspect::Piercing, Some(Aspect::Lightning)));
+    for (base, tint, second) in pairs {
+        let mechanics = st.pair(base, tint);
+        assert!(
+            !mechanics.generated,
+            "{base:?} + {tint:?} has its own record"
+        );
+        let mut input = pair_input(&cfg, base, tint, second);
+        input.defender.states = setup_states(base, tint);
+        let mut triggered = 0;
+        let mut acted = [false; deadroll_combat::RES_OPS_MAX];
+        let mut kinds = [OpKind::None; deadroll_combat::RES_OPS_MAX];
+        for i in 0..200u8 {
+            let p = resonance_side(
+                program_rules::BALANCE,
+                &pt,
+                &input,
+                &mut SyscallRoll::new(seed(i)),
+            );
+            let s = resonance_side(&cfg, &st, &input, &mut VrfRoll::new(seed(i)));
+            assert_eq!(s, p, "{base:?} + {tint:?} (+ {second:?}), seed {i}");
+            let r = &s.0;
+            let Some(res) = r.resonances[0].filter(|r| r.active) else {
+                continue;
+            };
+            if second.is_some() && res.second_tint.is_none() {
+                continue;
+            }
+            triggered += 1;
+            for (k, op) in r.ops(0).enumerate() {
+                kinds[k] = op.kind;
+                acted[k] |= op.acted;
+            }
+        }
+        assert!(triggered > 0, "{base:?} + {tint:?} never triggered");
+        for (k, kind) in kinds
+            .iter()
+            .enumerate()
+            .filter(|(_, k)| **k != OpKind::None)
+        {
+            assert!(
+                acted[k],
+                "{base:?} + {tint:?} (+ {second:?}): op {kind:?} never acted"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_program_reads_the_monster_defenses_of_the_registry() {
+    let registry = sim_registry();
+    // Wolf: resists Cold; goblin: nothing.
+    let wolf = program_profile(0);
+    assert!(wolf.resist_bp[Aspect::Cold as usize] > 0);
+    assert_eq!(program_profile(1).resist_bp, [0; Aspect::COUNT]);
+    for id in 0..5u8 {
+        assert_eq!(program_defense(&registry, id), registry.defense_of(id));
+    }
 }

@@ -14,7 +14,7 @@ import {
 import { MPL_CORE_PROGRAM, PROGRAMS, SYSTEM_PROGRAM, VRF } from "../config";
 import { client } from "../wallet/client";
 import { characterAppearance } from "./appearance";
-import { fromBase64, sha256 } from "./bytes";
+import { concat, fromBase64, sha256 } from "./bytes";
 import { buildInstruction, coders } from "./programs";
 import {
   bagPda,
@@ -33,6 +33,9 @@ import {
   skillSetPda,
   stashPda,
   tilesetPda,
+  aspectsPda,
+  traitsPda,
+  resonancesPda,
 } from "./pda";
 import { pathArgs, type Step } from "./route";
 import { PRESETS, SKILL_NAME_LEN, type NamedSkill } from "./skillcheck";
@@ -58,6 +61,10 @@ export type MonsterAcc = {
   flags: number;
   states: ActiveStateAcc[];
 };
+/** `MonsterState.defense`: bits by aspect / state. */
+export type MonsterDefenseAcc = { resist: number; immuneAspects: number; immuneStates: number };
+/** `MonsterState.burning_cells`: Burning of `power` on whoever steps in, through `untilRound`. */
+export type BurningCellAcc = { x: number; y: number; untilRound: number; power: number; source: number };
 export type GameSessionAcc = {
   core: {
     version: number;
@@ -131,6 +138,8 @@ export type ParticipationAcc = {
   skills: Uint8Array;
   /** The character's class trait tier, copied from `Character.classTier` at set_ready. */
   classTier: number;
+  /** A resonance's accuracy buff (Pale Flame): +bonus to the d20 of `aspect` attacks, `turns` 0 = none. */
+  accuracy: { aspect: Enum; turns: number; bonus: number };
 };
 /** programs/character `Gear`: soulbound starter items and what is worn, by `EquipSlot`. */
 export type GearAcc = {
@@ -428,6 +437,9 @@ export async function openSessionIx(dm: TransactionSigner, map: Address, priceLa
       tileset: await tilesetPda(),
       mapProgram: PROGRAMS.map,
       systemProgram: SYSTEM_PROGRAM,
+      aspects: await aspectsPda(),
+      traits: await traitsPda(),
+      resonances: await resonancesPda(),
     },
   );
 }
@@ -630,7 +642,8 @@ export const pendingTargetOf = (s: GameSessionAcc): Address | null => (s.pending
 
 /**
  * consume_randomness for the pending action: the callback gets the pending participation's player,
- * and `targetParticipation` = `pendingTargetOf(session)` for a heal or buff on another ally.
+ * `targetParticipation` = `pendingTargetOf(session)` for a heal or buff on another ally, and the
+ * session's map layout (`GameSession.layout`: a resonance's knockback and burning cells).
  */
 export async function consumeIx(
   session: Address,
@@ -638,6 +651,7 @@ export async function consumeIx(
   character: Address,
   seed: Uint8Array,
   targetParticipation: Address | null,
+  layout: Address,
 ): Promise<Instruction> {
   return buildInstruction("session", "consume_randomness", { randomness: seed }, {
     vrfProgramIdentity: await mockVrfSigner(),
@@ -651,6 +665,7 @@ export async function consumeIx(
     config: await gameConfigPda(),
     characterProgram: PROGRAMS.character,
     targetParticipation,
+    layout,
   });
 }
 
@@ -673,13 +688,14 @@ function fixedSeed(n: number): Uint8Array {
 }
 
 /**
- * Localnet oracle seeds. "random" is a plain VRF stand-in. The others are fixed:
- * natural 20, natural 1, and a crit whose first tint d100 is under 5.
+ * Localnet oracle seeds. "random" is a plain VRF stand-in. The others are fixed: natural 20,
+ * natural 1, and for the demo mage's Frost Burn a crit whose Fire base gets its Cold tint (roll 2,
+ * a d100 under 5) while both staff (Blunt) tints fail (rolls 1 and 3): Pale Flame.
  */
 export async function pickSeed(kind: SeedKind): Promise<Uint8Array> {
   if (kind === "crit") return fixedSeed(9);
   if (kind === "miss") return fixedSeed(17);
-  if (kind === "resonant") return fixedSeed(567);
+  if (kind === "resonant") return fixedSeed(128);
   return crypto.getRandomValues(new Uint8Array(32));
 }
 
@@ -702,6 +718,13 @@ export type Party = {
   monsterCooldowns: Uint8Array[];
   /** Per monster (same index as `monsters`): buffs and debuffs, like `Participation.mods`. */
   monsterMods: TimedModAcc[][];
+  /** Per monster: its registry defenses (`MonsterState.defense`, copied at open_session). */
+  monsterDefense: MonsterDefenseAcc[];
+  /** The resonance tables the session copied (aspects, traits, resonances bodies), or null for a
+   * session opened before patch 4. */
+  resonanceTables: Uint8Array | null;
+  /** Cells a resonance set on fire. */
+  burningCells: BurningCellAcc[];
   escrow: { collected: bigint; claimed: boolean } | null;
   map: MapAcc | null;
   tiles: Uint8Array | null;
@@ -721,7 +744,16 @@ export async function readParty(address: Address, tiles: Uint8Array | null = nul
   if (!rawSession) return null;
   const session = coders.session.decodeAccount<GameSessionAcc>("GameSession", rawSession);
   const monsterState = rawMonsters
-    ? coders.session.decodeAccount<{ core: { monsters: MonsterAcc[]; count: number }; cooldowns?: Uint8Array[]; mods?: TimedModAcc[][] }>("MonsterState", rawMonsters)
+    ? coders.session.decodeAccount<{
+        core: { monsters: MonsterAcc[]; count: number };
+        cooldowns?: Uint8Array[];
+        mods?: TimedModAcc[][];
+        defense?: MonsterDefenseAcc[];
+        resAspects?: Uint8Array;
+        resTraits?: Uint8Array;
+        resPairs?: Uint8Array;
+        burningCells?: BurningCellAcc[];
+      }>("MonsterState", rawMonsters)
     : null;
   const monsters = monsterState?.core ?? { monsters: [], count: 0 };
   const escrow = rawEscrow ? coders.session.decodeAccount<{ collected: bigint; claimed: boolean }>("Escrow", rawEscrow) : null;
@@ -751,7 +783,26 @@ export async function readParty(address: Address, tiles: Uint8Array | null = nul
   }
   const monsterCooldowns = (monsterState?.cooldowns ?? []).slice(0, monsters.count);
   const monsterMods = (monsterState?.mods ?? []).slice(0, monsters.count);
-  return { address, session, monsters: monsters.monsters.slice(0, monsters.count), players, monsterCooldowns, monsterMods, escrow, map, tiles };
+  const monsterDefense = (monsterState?.defense ?? []).slice(0, monsters.count);
+  const resonanceTables =
+    monsterState?.resAspects && monsterState.resTraits && monsterState.resPairs
+      ? concat(Uint8Array.from(monsterState.resAspects), Uint8Array.from(monsterState.resTraits), Uint8Array.from(monsterState.resPairs))
+      : null;
+  const burningCells = (monsterState?.burningCells ?? []).filter((c) => c.power > 0);
+  return {
+    address,
+    session,
+    monsters: monsters.monsters.slice(0, monsters.count),
+    players,
+    monsterCooldowns,
+    monsterMods,
+    monsterDefense,
+    resonanceTables,
+    burningCells,
+    escrow,
+    map,
+    tiles,
+  };
 }
 
 /** Parties in the lobby or in play, any DM. */

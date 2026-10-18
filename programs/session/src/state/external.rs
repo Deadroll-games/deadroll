@@ -11,7 +11,7 @@ use deadroll_registry::state::{
     records::{BESTIARY_MAX, MONSTER_SIZE, TILE_SIZE},
     Table, TableKind, TABLE_CAP,
 };
-use deadroll_rules::items::Equipment;
+use deadroll_rules::{items::Equipment, MonsterDefense};
 use deadroll_types::{Cell, CharacterData, MapData, Spawn, Tile, MAP_CELLS, MAP_MAX, SPAWNS_MAX};
 
 use crate::errors::SessionError;
@@ -20,6 +20,10 @@ use crate::errors::SessionError;
 pub const BESTIARY_TABLE: Pubkey = pubkey!("3uJyWiz7NeVekP4w1iZkKxKnJ5pMbxC6ciz7kxN3MZtM");
 /// Registry `["tileset"]` table (checked against its derivation in the tests).
 pub const TILESET_TABLE: Pubkey = pubkey!("GqzUadKRKmJNT2RQAhrTz31qdoMfTGmya3Cfz2vAhXHu");
+/// Registry `["aspects"]`, `["traits"]` and `["resonances"]` tables (patch 4).
+pub const ASPECTS_TABLE: Pubkey = pubkey!("9MkMBjPca7x6iZV1rKaCT7mn3BmezhXF4DAvFeTpa7aJ");
+pub const TRAITS_TABLE: Pubkey = pubkey!("3yqgW5wFnwbqWAoGvvA1cAmw9gQxqz8TKA4vHX62GxoC");
+pub const RESONANCES_TABLE: Pubkey = pubkey!("5wvxCqYJgp3gckLyZeNz3md4g8qmRxd7nenhkqtBNXjG");
 
 /// `sha256("account:Character")[..8]`.
 pub const CHARACTER_DISCRIMINATOR: [u8; 8] = [0x8c, 0x73, 0xa5, 0x24, 0xf1, 0x99, 0x66, 0x54];
@@ -206,6 +210,16 @@ fn table_record<const N: usize>(
     Ok(Some(record))
 }
 
+/// The first `N` bytes of the registry table `kind` at `address` (a whole table body, every
+/// record written), with the checks of [`table_record`].
+pub fn read_table_body<const N: usize>(
+    info: &AccountInfo,
+    address: &Pubkey,
+    kind: TableKind,
+) -> Result<[u8; N]> {
+    table_record::<N>(info, address, kind, 0)?.ok_or(error!(SessionError::InvalidRegistryTable))
+}
+
 /// The bestiary fields the session uses (record layout: programs/registry/README.md).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BestiaryRecord {
@@ -215,6 +229,8 @@ pub struct BestiaryRecord {
     /// HP at level 0, and per level.
     pub hp: u32,
     pub hp_per_level: u32,
+    /// Resistances and immunities (docs/BESTIARY.md 10).
+    pub defense: MonsterDefense,
 }
 
 /// Bestiary entry `bestiary_id`; `UnknownMonster` if the slot is empty or not written yet.
@@ -238,6 +254,7 @@ pub fn read_bestiary(info: &AccountInfo, bestiary_id: u8) -> Result<BestiaryReco
         initiative: u16_at(20),
         hp: u32_at(22),
         hp_per_level: u32_at(26),
+        defense: MonsterDefense::from_record(&r).ok_or(SessionError::UnknownMonster)?,
     })
 }
 
@@ -290,6 +307,9 @@ mod tests {
         let pda = |seed: &[u8]| Pubkey::find_program_address(&[seed], &deadroll_registry::ID).0;
         assert_eq!(pda(seeds::BESTIARY), BESTIARY_TABLE);
         assert_eq!(pda(seeds::TILESET), TILESET_TABLE);
+        assert_eq!(pda(seeds::ASPECTS), ASPECTS_TABLE);
+        assert_eq!(pda(seeds::TRAITS), TRAITS_TABLE);
+        assert_eq!(pda(seeds::RESONANCES), RESONANCES_TABLE);
     }
 
     #[test]
@@ -306,7 +326,8 @@ mod tests {
                 speed: 6,
                 initiative: 7,
                 hp: 12,
-                hp_per_level: 3
+                hp_per_level: 3,
+                defense: deadroll_rules::MonsterDefense::NONE,
             }
         );
         assert_eq!(read_bestiary(&info, 2).unwrap().hp, 60);

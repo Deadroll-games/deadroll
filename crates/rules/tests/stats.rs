@@ -1,6 +1,8 @@
 //! Core stats and trait tiers (docs/CHARACTER.md, sections 2-6): what each stat scales, which
 //! stat scales a state (the skill's power source decides), trait tiers, level-up points.
-use deadroll_combat::{mod_turns, modifiers::sum_matching, ModKind, TimedMod, TimedMods, MODS_MAX};
+use deadroll_combat::{
+    mod_turns, modifiers::sum_matching, AccuracyBuff, ModKind, TimedMod, TimedMods, MODS_MAX,
+};
 use deadroll_rules::{
     input::{
         buff_extra_turns, effect_chance, hero, land_effect, player_attacker, EffectAction,
@@ -66,7 +68,7 @@ fn damage(source: Source, form: Form, aspect: Aspect) -> SkillStats {
 
 /// Summed increase on a packet of `aspect` from `skill`'s source and form.
 fn increase(h: &HeroStats, s: &SkillStats, aspect: Aspect) -> u32 {
-    let a = player_attacker(&CFG, 0, h, Some(s), &NONE);
+    let a = player_attacker(&CFG, 0, h, Some(s), &NONE, &AccuracyBuff::default());
     sum_matching(&a.increased, aspect, a.skill.source, a.skill.form)
 }
 
@@ -124,8 +126,15 @@ fn accuracy_from_dexterity_and_items_only() {
     assert_eq!(hero::accuracy(&CFG, &other), acc);
     // Every attack and skill uses the same accuracy, whatever its source.
     let magic = damage(Source::Magical, Form::Projectile, Aspect::Cold);
-    let a = player_attacker(&CFG, 0, &other, Some(&magic), &NONE);
-    let b = player_attacker(&CFG, 0, &other, None, &NONE);
+    let a = player_attacker(
+        &CFG,
+        0,
+        &other,
+        Some(&magic),
+        &NONE,
+        &AccuracyBuff::default(),
+    );
+    let b = player_attacker(&CFG, 0, &other, None, &NONE, &AccuracyBuff::default());
     assert_eq!((a.attack_bonus, b.attack_bonus), (acc, acc));
 }
 
@@ -140,7 +149,7 @@ fn crit_only_from_items() {
     let armed = nimble.with_equipment(eq);
     assert_eq!(hero::crit_pct(&cfg, &armed), 6);
     assert_eq!(
-        player_attacker(&cfg, 0, &armed, None, &NONE).crit_chance_pct,
+        player_attacker(&cfg, 0, &armed, None, &NONE, &AccuracyBuff::default()).crit_chance_pct,
         6
     );
 }
@@ -154,9 +163,23 @@ fn the_source_picks_the_state_stat() {
     // A blood mage bleeds through Intelligence, a fire warrior burns through Strength.
     let blood_magic = damage(Source::Magical, Form::Projectile, Aspect::Blood);
     let fire_blade = damage(Source::Combat, Form::Strike, Aspect::Fire);
-    let a = player_attacker(&CFG, 0, &h, Some(&blood_magic), &NONE);
+    let a = player_attacker(
+        &CFG,
+        0,
+        &h,
+        Some(&blood_magic),
+        &NONE,
+        &AccuracyBuff::default(),
+    );
     assert_eq!(a.state_chance_bonus_bp, 30 * t.int_state_chance_bp);
-    let a = player_attacker(&CFG, 0, &h, Some(&fire_blade), &NONE);
+    let a = player_attacker(
+        &CFG,
+        0,
+        &h,
+        Some(&fire_blade),
+        &NONE,
+        &AccuracyBuff::default(),
+    );
     assert_eq!(a.state_chance_bonus_bp, 10 * t.str_state_chance_bp);
     // The basic attack uses the class's source.
     let mage = HeroStats {
@@ -164,11 +187,12 @@ fn the_source_picks_the_state_stat() {
         ..h
     };
     assert_eq!(
-        player_attacker(&CFG, 0, &mage, None, &NONE).state_chance_bonus_bp,
+        player_attacker(&CFG, 0, &mage, None, &NONE, &AccuracyBuff::default())
+            .state_chance_bonus_bp,
         30 * t.int_state_chance_bp
     );
     assert_eq!(
-        player_attacker(&CFG, 0, &h, None, &NONE).state_chance_bonus_bp,
+        player_attacker(&CFG, 0, &h, None, &NONE, &AccuracyBuff::default()).state_chance_bonus_bp,
         10 * t.str_state_chance_bp
     );
 }
@@ -311,7 +335,7 @@ fn trait_tiers_are_separate() {
         class_tier: 1,
         ..low
     };
-    let a = |h: &HeroStats| player_attacker(&CFG, 0, h, None, &NONE);
+    let a = |h: &HeroStats| player_attacker(&CFG, 0, h, None, &NONE, &AccuracyBuff::default());
     assert_eq!(
         a(&race_up).added[0],
         predisposition_added(Aspect::Piercing, 1, t)

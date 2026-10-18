@@ -2,8 +2,59 @@
 //! the website (WASM) must reproduce these numbers exactly. Every number below was checked
 //! by hand against docs/COMBAT_MATH.md, section 6 (comments show the arithmetic).
 
+use deadroll_combat::tables::{AspectEntry, PairEntry, TraitEntry, NATIVE};
 use deadroll_combat::*;
 use deadroll_types::{ActiveState, Aspect, Form, Source, StateKind};
+
+/// Native states, the Fury and Keenness hit parts and the two pairs these hits use, as
+/// assets/registry has them: Cold + Lightning (Ringing Ice: Freeze jumps) and Lightning + Cold
+/// (Frost Spark: Shock also chills). A fixture: `deadroll-rules` checks the shipped tables.
+pub fn tables() -> ResonanceTables {
+    let mut t = ResonanceTables::default();
+    let natives = [
+        StateKind::Burning,
+        StateKind::Chill,
+        StateKind::Shock,
+        StateKind::Bleeding,
+        StateKind::Stun,
+        StateKind::Penetration,
+    ];
+    for (i, a) in Aspect::ALL.iter().enumerate() {
+        t.aspects[i] = AspectEntry {
+            family: family_of(*a),
+            native: Some(natives[i]),
+            trait_id: i as u8,
+            ..AspectEntry::default()
+        };
+    }
+    t.traits[Aspect::Fire as usize] = TraitEntry {
+        present: true,
+        hit: Op::new(OpKind::AddPacket, Aspect::Fire as u8, 10_000),
+        template: [
+            Op::new(OpKind::Linked, StateKind::Burning as u8, 10_000),
+            Op::NONE,
+        ],
+    };
+    t.traits[Aspect::Piercing as usize] = TraitEntry {
+        present: true,
+        hit: Op::new(OpKind::Penetrate, 0, 10_000),
+        template: [Op::new(OpKind::StateOnCrit, NATIVE, 10_000), Op::NONE],
+    };
+    t.pairs[Aspect::Cold as usize][Aspect::Lightning as usize] = PairEntry {
+        condition: ResonanceCondition::CanBeFrozen,
+        set: true,
+        ops: [Op::new(OpKind::Jump, StateKind::Freeze as u8, 0), Op::NONE],
+    };
+    t.pairs[Aspect::Lightning as usize][Aspect::Cold as usize] = PairEntry {
+        condition: ResonanceCondition::CanBeShocked,
+        set: true,
+        ops: [
+            Op::new(OpKind::Linked, StateKind::Chill as u8, 10_000),
+            Op::NONE,
+        ],
+    };
+    t
+}
 
 pub const SEED: [u8; 32] = [7; 32];
 /// A seed on which both tints of the mage succeed: two resonances in one cast.
@@ -105,6 +156,7 @@ fn golden_warrior_vs_wolf() {
     let r = resolve_hit(
         &warrior_vs_wolf(),
         &Balance::DEFAULT,
+        &tables(),
         &mut VrfRoll::new(SEED),
     );
     assert_eq!(r.outcome, Outcome::Hit);
@@ -146,6 +198,7 @@ fn golden_mage_vs_goblin() {
     let r = resolve_hit(
         &mage_vs_goblin(),
         &Balance::DEFAULT,
+        &tables(),
         &mut VrfRoll::new(SEED),
     );
     assert_eq!(r.outcome, Outcome::Hit);
@@ -277,6 +330,7 @@ fn golden_mage_double_resonance() {
     let r = resolve_hit(
         &mage_vs_goblin(),
         &Balance::DEFAULT,
+        &tables(),
         &mut VrfRoll::new(RESONANCE_SEED),
     );
     assert_eq!(r.outcome, Outcome::Hit);
@@ -332,8 +386,9 @@ fn golden_mage_double_resonance() {
         ]
     );
     assert_eq!(r.d100, 47);
-    // Cold: 7.308-11.6928; d100 47 -> 7.308 + 4.3848 x 0.47 = 9.3688.
-    // Lightning: 3.294-5.2704; d100 47 -> 4.2229; resist 10% -> 3.8390.
+    // Resonances no longer multiply: their mechanics are states (DAMAGE_TYPES 6.3).
+    // Cold: 6.3-10.08; d100 47 -> 6.3 + 3.78 x 0.47 = 8.0766.
+    // Lightning: 2.7-4.32; d100 47 -> 3.4614; resist 10% -> 3.1467.
     assert_eq!(
         rows(&r),
         [
@@ -342,33 +397,31 @@ fn golden_mage_double_resonance() {
                 52_500,
                 84_000,
                 2_000,
-                11_600,
-                73_080,
-                116_928,
-                93_688,
+                10_000,
+                63_000,
+                100_800,
+                80_766,
                 0,
                 0,
-                93_688
+                80_766
             ),
             (
                 Aspect::Lightning,
                 22_500,
                 36_000,
                 2_000,
-                12_200,
-                32_940,
-                52_704,
-                42_229,
+                10_000,
+                27_000,
+                43_200,
+                34_614,
                 0,
                 1_000,
-                38_390
+                31_467
             ),
         ]
     );
-    // 9.3688 + 3.8390 = 13.2078 -> 13
-    assert_eq!(r.damage, 13);
-    // Generic pairs carry no state effect in P0.
-    assert_eq!(r.resonance_states, [StateRoll::default(); 3]);
+    // 8.0766 + 3.1467 = 11.2233 -> 11
+    assert_eq!(r.damage, 11);
     let s = r.packets()[0].state;
     assert_eq!((s.chance_pct, s.roll, s.applied), (55, 37, Applied::Added));
     let shock = r.packets()[1].state;
@@ -376,13 +429,30 @@ fn golden_mage_double_resonance() {
         (shock.chance_pct, shock.roll, shock.applied),
         (46, 13, Applied::Added)
     );
+    // Ringing Ice (slot 0) waits for a Freeze that has not landed yet: no jump.
+    let ringing: Vec<_> = r.ops(0).map(|o| (o.kind, o.acted)).collect();
+    assert_eq!(ringing, [(OpKind::Jump, false)]);
+    assert_eq!(r.jump_count, 0);
+    // Frost Spark (slot 1): Shock landed, so it chills without a roll. Buildup
+    // 5000 x (1 + 38% tier 8) / 1.10 (Lightning resist) = 6272; with 6900 from the Cold packet
+    // it passes 10000 and freezes.
+    let spark: Vec<_> = r
+        .ops(1)
+        .map(|o| (o.kind, o.acted, o.state.kind, o.state.applied))
+        .collect();
+    assert_eq!(
+        spark,
+        [(OpKind::Linked, true, StateKind::Chill, Applied::Froze)]
+    );
+    assert_eq!(r.resonance_states[0], StateRoll::default());
+    assert_eq!(r.resonance_states[1].applied, Applied::Froze);
     assert_eq!(
         active(&r),
         [
             ActiveState {
-                kind: StateKind::Chill,
-                turns: 3,
-                power: 6_900,
+                kind: StateKind::Freeze,
+                turns: 1,
+                power: 0,
                 source: 1
             },
             ActiveState {
@@ -393,6 +463,13 @@ fn golden_mage_double_resonance() {
             },
         ]
     );
+    assert_eq!(
+        r.landed,
+        states::state_bit(StateKind::Chill)
+            | states::state_bit(StateKind::Freeze)
+            | states::state_bit(StateKind::Shock)
+    );
+    // d20, crit, 2 tints, d100, chill, shock: the linked Chill rolls nothing.
     assert_eq!(r.rolls_used, 7);
 }
 

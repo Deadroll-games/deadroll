@@ -11,7 +11,7 @@ publish.workspace = true
 default = []
 std = []
 # Serialize / Deserialize on `BalanceConfig` (tools only, never on-chain).
-serde = ["dep:serde", "std"]
+serde = ["dep:serde", "dep:serde_json", "std"]
 
 [dependencies]
 deadroll-types.workspace = true
@@ -20,6 +20,8 @@ deadroll-skillcheck.workspace = true
 # P0 bestiary ids and roles.
 deadroll-mapcheck.workspace = true
 serde = { version = "1", default-features = false, features = ["derive", "std"], optional = true }
+# Reads assets/registry (`registry`, tools only).
+serde_json = { version = "1", optional = true }
 
 [dev-dependencies]
 serde_json = "1"

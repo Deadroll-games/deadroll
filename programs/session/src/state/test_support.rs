@@ -107,6 +107,11 @@ pub fn monsters_account(session: Pubkey, monsters: &[Monster]) -> TestAccount {
         },
         cooldowns: [[0; super::MONSTER_SKILLS_MAX]; MONSTERS_MAX],
         mods: [Default::default(); MONSTERS_MAX],
+        defense: [Default::default(); MONSTERS_MAX],
+        res_aspects: [0; super::RES_ASPECTS_LEN],
+        res_traits: [0; super::RES_TRAITS_LEN],
+        res_pairs: [0; super::RES_PAIRS_LEN],
+        burning_cells: [Default::default(); deadroll_rules::spread::BURNING_CELLS_MAX],
     };
     let mut data = Vec::new();
     state.try_serialize(&mut data).unwrap();
@@ -162,3 +167,17 @@ pub fn session(players: &[Cell]) -> GameSession {
 
 /// `assets/registry/tileset.json` in `Tile` order: Floor, Wall, Water, Door, Entrance, Exit, Trap.
 pub const TILE_COST: [u8; Tile::COUNT] = [1, 0, 2, 1, 1, 1, 1];
+
+/// The shipped registry resonance tables (assets/registry), as `open_session` copies them.
+pub fn tables() -> deadroll_combat::ResonanceTables {
+    deadroll_rules::registry::Registry::shipped()
+        .expect("assets/registry")
+        .tables
+}
+
+/// The shipped registry defenses of bestiary id `id`.
+pub fn defense(id: u8) -> deadroll_rules::MonsterDefense {
+    deadroll_rules::registry::Registry::shipped()
+        .expect("assets/registry")
+        .defense_of(id)
+}

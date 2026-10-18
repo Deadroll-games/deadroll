@@ -1,8 +1,11 @@
 // A unit's combat stats with its buffs and debuffs, as the battle screen shows them.
 // Pure functions. Player defense and armor come from balance.json (deadroll_rules defaults,
-// through ./items); the monster numbers mirror programs/session/src/rules.rs (monster_profile,
-// monster_ap) and crates/combat support.rs (apply_to_attacker / apply_to_defender / speed_ap):
-// keep them in sync. TODO(balance): stats.test.ts pins the current numbers.
+// through ./items); a monster's defense, armor and resistances come from the combat module
+// (`monsterSheet`: crates/rules over the defenses the session copied from the registry), so
+// nothing here repeats the bestiary. The modifier arithmetic mirrors crates/combat support.rs
+// (apply_to_defender, speed_ap); stats.test.ts pins it.
+import balance from "./balance.json";
+import type { CombatWasm, DefenseInput } from "./combatWasm";
 import { heroDefense } from "./items";
 import { MOD_NAMES } from "./support";
 import { Aspect, Class, ModKind, StateKind, type TimedMod } from "./types";
@@ -11,28 +14,33 @@ export type LiveState = { kind: StateKind; turns: number; power: number };
 
 export const BP = 10_000;
 /** crates/combat Balance::resist_cap_bp: a hit never uses more resistance than this. */
-export const RESIST_CAP_BP = 30_000;
+export const RESIST_CAP_BP: number = balance.combat.resist_cap_bp;
 const ASPECT_COUNT = 6;
+const NO_RESIST: readonly number[] = Array.from({ length: ASPECT_COUNT }, () => 0);
 
-export type DefenseProfile = { defense: number; armor: number; resist: readonly [Aspect, number] | null };
-
-/** rules.rs monster_profile: defense, armor and the one special resistance, by P0 bestiary id. */
-export const MONSTER_DEFENSE: Readonly<Record<number, DefenseProfile>> = {
-  0: { defense: 10, armor: 5, resist: [Aspect.Cold, 5_000] }, // wolf
-  1: { defense: 9, armor: 5, resist: null }, // goblin
-  2: { defense: 13, armor: 40, resist: [Aspect.Piercing, 5_000] }, // goblin chieftain
-  3: { defense: 11, armor: 25, resist: null }, // goblin warrior
-  4: { defense: 10, armor: 5, resist: [Aspect.Fire, 5_000] }, // goblin shaman
-};
+/** Evasion, armor and resistance per aspect (bp, before the cap). */
+export type DefenseProfile = { defense: number; armor: number; resist: readonly number[] };
 
 /** deadroll_rules hero::defense: base + Dexterity / div, class armor, plus what `equipment` (the
  * Participation snapshot, ItemBase bytes by slot) adds. Without it: no items. */
 export function playerDefense(cls: Class, stats: readonly number[], equipment: ArrayLike<number> = []): DefenseProfile {
-  return { ...heroDefense(cls, stats, equipment), resist: null };
+  return { ...heroDefense(cls, stats, equipment), resist: NO_RESIST };
 }
 
-/** rules.rs monster_ap: the bestiary speed, 1..12. */
-export const monsterBaseAp = (speed: number): number => Math.min(12, Math.max(1, speed));
+/** A monster at `level` with the defenses of its registry record (`MonsterState.defense`), from
+ * the combat module; null for an unknown bestiary id. */
+export function monsterDefense(combat: CombatWasm, bestiaryId: number, level: number, defense: DefenseInput): DefenseProfile | null {
+  try {
+    const m = combat.monsterSheet({ bestiaryId, level, defense });
+    return { defense: m.evasion, armor: m.armor, resist: m.resistBp };
+  } catch {
+    return null;
+  }
+}
+
+/** rules.rs monster_ap: the bestiary speed within the scaling's bounds. */
+export const monsterBaseAp = (speed: number): number =>
+  Math.min(balance.monsters.ap_max, Math.max(balance.monsters.ap_min, speed));
 
 /** support.rs mod_power: strength of `kind` on the unit, 0 if absent. */
 export function modPower(mods: readonly TimedMod[], kind: ModKind): number {
@@ -40,7 +48,7 @@ export function modPower(mods: readonly TimedMod[], kind: ModKind): number {
 }
 
 /** Chill buildup, times the balance share, is a speed counterweight (COMBAT_MATH 7.4). */
-export const CHILL_SLOW_SHARE_BP = 10_000;
+export const CHILL_SLOW_SHARE_BP: number = balance.combat.chill_slow_share_bp;
 
 /** Slow from a live Chill: power x share / 10_000. */
 export function chillSlowBp(states: readonly LiveState[]): number {
@@ -105,7 +113,7 @@ export function unitStats({ hp, hpMax, apBase, apNow, profile, mods, states = []
   const vuln: AspectStat[] = [];
   for (let a = 0; a < ASPECT_COUNT; a++) {
     const aspect = a as Aspect;
-    const base = profile.resist && profile.resist[0] === aspect ? profile.resist[1] : 0;
+    const base = profile.resist[a] ?? 0;
     resist.push({ aspect, base, final: Math.min(RESIST_CAP_BP, base + protection), by: protection ? [name(ModKind.Protection)] : [] });
     const v = vulnMod && vulnMod.aspect === aspect ? vulnMod.powerBp : 0;
     vuln.push({ aspect, base: 0, final: v, by: v ? [name(ModKind.Vulnerability)] : [] });

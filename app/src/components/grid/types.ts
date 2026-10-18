@@ -35,6 +35,8 @@ export type GridProps = {
   targets?: Cell[];
   /** Path preview, drawn as dots in order. */
   path?: Cell[];
+  /** Cells on fire (a resonance's burning cells); tinted orange under the units. */
+  burning?: Cell[];
   /** Pixel size of one cell on screen. Default 48. Sprites scale by integers, never smoothed. */
   cellPx?: number;
   /**

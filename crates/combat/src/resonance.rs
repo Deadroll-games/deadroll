@@ -1,25 +1,26 @@
-//! Pair resonances (docs/DAMAGE_TYPES_AND_MIXES.md, section 6).
+//! Tint rolls and resonance selection (docs/DAMAGE_TYPES_AND_MIXES.md, section 6).
 //!
 //! Every skill aspect is a base. For each base the target is not immune to, every tint
 //! (another aspect of the character: race, class, item) rolls its own chance from its tier.
-//! The best success makes a pair resonance; there is no cap on resonances per use.
-//! A tint equal to the base makes no roll: it is a pure pair and boosts the native state.
+//! One success makes a pair resonance, two or more a triple from the two best rolls; there is
+//! no cap on resonances per use. A tint equal to the base makes no roll: it is a pure pair and
+//! boosts the native state.
 //!
-//! Mechanics are data: [`RESONANCES`] maps `(base, tint)` to a target condition and a short
-//! list of [`ResonanceEffect`]s. It is the in-crate copy of the future registry
-//! `ResonanceTable`; numbers are placeholder, tune in sim.
+//! What a resonance does is data ([`crate::tables::ResonanceTables`]): this module only picks
+//! the tints and checks the target condition.
 
-use deadroll_types::{ActiveState, Aspect, StateKind, Tier, BP};
+use deadroll_types::{ActiveState, Aspect, StateKind, Tier};
 
 use crate::balance::Balance;
 use crate::packet::SKILL_ASPECTS_MAX;
 use crate::rng::{chance, RollSource};
 use crate::states::state_bit;
+use crate::tables::ResonanceTables;
 
 #[cfg(feature = "borsh")]
 use borsh::{BorshDeserialize, BorshSerialize};
 
-/// Tint slots of one attacker.
+/// Tint slots of one attacker: race, class, then items.
 pub const TINTS_MAX: usize = 4;
 /// Tint rolls of one attack: every base x every tint.
 pub const TINT_ROLLS_MAX: usize = SKILL_ASPECTS_MAX * TINTS_MAX;
@@ -55,7 +56,8 @@ impl Tint {
     }
 }
 
-/// What the target must satisfy for the resonance to trigger.
+/// What the target must satisfy for the resonance to trigger. Discriminants are the registry
+/// format: append only.
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[repr(u8)]
@@ -71,125 +73,6 @@ pub enum ResonanceCondition {
     CanBleed,
     CanBeStunned,
     HasArmor,
-}
-
-/// One mechanic of a resonance.
-#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum ResonanceEffect {
-    #[default]
-    None,
-    /// "More" on the base packet: `Balance::resonance_more(tier) * scale_bp / BP`.
-    Multiplier(u32),
-    /// On a crit the state is applied without a roll (if the target is not immune).
-    StateOnCrit(StateKind),
-    /// One more state roll. The chance is `Balance::extra_state_chance_pct`.
-    ExtraStateChance(StateKind),
-}
-
-/// A row of the resonance table.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ResonanceEntry {
-    pub condition: ResonanceCondition,
-    pub effects: [ResonanceEffect; 2],
-}
-
-const fn generic(condition: ResonanceCondition) -> ResonanceEntry {
-    ResonanceEntry {
-        condition,
-        effects: [ResonanceEffect::Multiplier(BP), ResonanceEffect::None],
-    }
-}
-
-const fn with(condition: ResonanceCondition, extra: ResonanceEffect) -> ResonanceEntry {
-    ResonanceEntry {
-        condition,
-        effects: [ResonanceEffect::Multiplier(BP), extra],
-    }
-}
-
-use ResonanceCondition as C;
-
-/// Pure pair placeholder on the diagonal: never looked up as a resonance.
-const PURE: ResonanceEntry = ResonanceEntry {
-    condition: C::Always,
-    effects: [ResonanceEffect::None; 2],
-};
-
-/// `RESONANCES[base][tint]`, rows and columns in `Aspect` order:
-/// Fire, Cold, Lightning, Blood, Blunt, Piercing.
-///
-/// Every pair gets the generic tier multiplier. Demo pairs carry their state mechanics:
-/// - Cold + Piercing (Piercing Frost): a crit can freeze.
-/// - Piercing + Cold (Icy Point): Penetration chills.
-///
-/// TODO(post-demo): the other pairs' mechanics from section 6.4 (jumps, knockback, armor
-/// penetration, longer states) as more effect kinds and table entries.
-pub const RESONANCES: [[ResonanceEntry; Aspect::COUNT]; Aspect::COUNT] = [
-    // Base Fire: target can burn.
-    [
-        PURE,
-        generic(C::CanBurn),
-        generic(C::CanBurn),
-        generic(C::CanBurn),
-        generic(C::CanBurn),
-        generic(C::CanBurn),
-    ],
-    // Base Cold.
-    [
-        generic(C::CanBeFrozen),
-        PURE,
-        generic(C::CanBeFrozen),
-        generic(C::CanBeChilled),
-        generic(C::IsFrozen),
-        with(
-            C::CanBeFrozen,
-            ResonanceEffect::StateOnCrit(StateKind::Freeze),
-        ),
-    ],
-    // Base Lightning: target can be shocked.
-    [
-        generic(C::CanBeShocked),
-        generic(C::CanBeShocked),
-        PURE,
-        generic(C::CanBeShocked),
-        generic(C::CanBeShocked),
-        generic(C::CanBeShocked),
-    ],
-    // Base Blood: target can bleed.
-    [
-        generic(C::CanBleed),
-        generic(C::CanBleed),
-        generic(C::CanBleed),
-        PURE,
-        generic(C::CanBleed),
-        generic(C::CanBleed),
-    ],
-    // Base Blunt: target can be stunned.
-    [
-        generic(C::CanBeStunned),
-        generic(C::CanBeStunned),
-        generic(C::CanBeStunned),
-        generic(C::CanBeStunned),
-        PURE,
-        generic(C::CanBeStunned),
-    ],
-    // Base Piercing.
-    [
-        generic(C::HasArmor),
-        with(
-            C::HasArmor,
-            ResonanceEffect::ExtraStateChance(StateKind::Chill),
-        ),
-        generic(C::HasArmor),
-        generic(C::CanBleed),
-        generic(C::HasArmor),
-        PURE,
-    ],
-];
-
-pub const fn entry(base: Aspect, tint: Aspect) -> &'static ResonanceEntry {
-    &RESONANCES[base as usize][tint as usize]
 }
 
 /// Id of a pair for names and lore off-chain: `base * 6 + tint`.
@@ -210,18 +93,21 @@ impl TargetView<'_> {
     fn can(&self, kind: StateKind) -> bool {
         self.immune_states & state_bit(kind) == 0
     }
+
+    /// The target had `kind` before the attack.
+    pub fn has(&self, kind: StateKind) -> bool {
+        self.states.iter().any(|s| s.turns > 0 && s.kind == kind)
+    }
 }
 
 pub fn condition_met(condition: ResonanceCondition, target: &TargetView) -> bool {
+    use ResonanceCondition as C;
     match condition {
         C::Always => true,
         C::CanBurn => target.can(StateKind::Burning),
         C::CanBeChilled => target.can(StateKind::Chill),
         C::CanBeFrozen => target.can(StateKind::Freeze),
-        C::IsFrozen => target
-            .states
-            .iter()
-            .any(|s| s.turns > 0 && s.kind == StateKind::Freeze),
+        C::IsFrozen => target.has(StateKind::Freeze),
         C::CanBeShocked => target.can(StateKind::Shock),
         C::CanBleed => target.can(StateKind::Bleeding),
         C::CanBeStunned => target.can(StateKind::Stun),
@@ -243,11 +129,12 @@ pub struct TintRoll {
     pub success: bool,
 }
 
-/// A triggered (or condition-cancelled) pair resonance of one base.
+/// A triggered (or condition-cancelled) resonance of one base.
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Resonance {
     pub base: Aspect,
+    /// The best tint: it picks the pair.
     pub tint: Aspect,
     pub tier: u8,
     pub carrier: Carrier,
@@ -255,8 +142,12 @@ pub struct Resonance {
     pub id: u8,
     /// False: the target condition cancelled it (no effects).
     pub active: bool,
-    /// A second successful tint, recorded for triple resonances (P2), no effect now.
+    /// The second successful tint: a triple (section 6.5), its trait joins the pair.
     pub second_tint: Option<Aspect>,
+    pub second_tier: u8,
+    pub second_carrier: Carrier,
+    /// The pair has no record: its mechanics come from the tint's trait.
+    pub generated: bool,
 }
 
 /// Tint dice of one attack.
@@ -270,15 +161,16 @@ pub struct TintOutcome {
     pub pure_pair_bp: [u32; SKILL_ASPECTS_MAX],
 }
 
-/// Rolls the tints for every base (step 6), picks the pair (step 7) and checks the target
-/// condition (step 8). Bases the target is immune to (`immune_aspects` bit set) and repeated
-/// bases roll nothing. Roll order: bases in order, tints in slot order.
+/// Rolls the tints for every base (step 6), picks the pair or triple (step 7) and checks the
+/// target condition (step 8). Bases the target is immune to (`immune_aspects` bit set) and
+/// repeated bases roll nothing. Roll order: bases in order, tints in slot order.
 pub fn roll_tints(
     bases: &[Aspect],
     tints: &[Tint],
     immune_aspects: u8,
     target: &TargetView,
     balance: &Balance,
+    tables: &ResonanceTables,
     src: &mut impl RollSource,
 ) -> TintOutcome {
     let mut out = TintOutcome::default();
@@ -331,41 +223,30 @@ pub fn roll_tints(
         }
         if let Some((_, _, j)) = best {
             let t = tints[j];
+            let mechanics = tables.pair(base, t.aspect);
+            let second = second.map(|(_, _, k)| tints[k]);
             out.resonances[i] = Some(Resonance {
                 base,
                 tint: t.aspect,
                 tier: t.tier,
                 carrier: t.carrier,
                 id: resonance_id(base, t.aspect),
-                active: condition_met(entry(base, t.aspect).condition, target),
-                second_tint: second.map(|(_, _, k)| tints[k].aspect),
+                active: condition_met(mechanics.condition, target),
+                second_tint: second.map(|s| s.aspect),
+                second_tier: second.map_or(0, |s| s.tier),
+                second_carrier: second.map_or(Carrier::Race, |s| s.carrier),
+                generated: mechanics.generated,
             });
         }
     }
     out
 }
 
-/// "More" bonus of an active resonance on its base packet, bp.
-pub fn multiplier_bp(res: &Resonance, balance: &Balance) -> u32 {
-    let Ok(tier) = Tier::new(res.tier) else {
-        return 0;
-    };
-    entry(res.base, res.tint)
-        .effects
-        .iter()
-        .filter_map(|e| match e {
-            ResonanceEffect::Multiplier(scale) => {
-                Some((balance.resonance_more(tier) as u64 * *scale as u64 / BP as u64) as u32)
-            }
-            _ => None,
-        })
-        .fold(0u32, u32::saturating_add)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::rng::ScriptedRoll;
+    use crate::tables::{PairEntry, ResonanceTables};
 
     const B: Balance = Balance::DEFAULT;
 
@@ -377,28 +258,30 @@ mod tests {
         }
     }
 
-    #[test]
-    fn table_shape() {
-        for a in Aspect::ALL {
-            assert_eq!(*entry(*a, *a), PURE);
-            for t in Aspect::ALL.iter().filter(|t| *t != a) {
-                assert_eq!(entry(*a, *t).effects[0], ResonanceEffect::Multiplier(BP));
+    /// Every pair overridden with `condition`.
+    fn tables(condition: ResonanceCondition) -> ResonanceTables {
+        let mut t = ResonanceTables::default();
+        for row in t.pairs.iter_mut() {
+            for p in row.iter_mut() {
+                *p = PairEntry {
+                    condition,
+                    set: true,
+                    ..PairEntry::default()
+                };
             }
         }
-        assert_eq!(
-            entry(Aspect::Cold, Aspect::Piercing).effects[1],
-            ResonanceEffect::StateOnCrit(StateKind::Freeze)
-        );
-        assert_eq!(
-            entry(Aspect::Piercing, Aspect::Cold).effects[1],
-            ResonanceEffect::ExtraStateChance(StateKind::Chill)
-        );
+        t
+    }
+
+    #[test]
+    fn ids() {
         assert_eq!(resonance_id(Aspect::Cold, Aspect::Piercing), 11);
         assert_eq!(resonance_id(Aspect::Piercing, Aspect::Cold), 31);
     }
 
     #[test]
     fn conditions() {
+        use ResonanceCondition as C;
         let frozen = [ActiveState {
             kind: StateKind::Freeze,
             turns: 1,
@@ -434,24 +317,25 @@ mod tests {
         let tints = [Tint::new(Aspect::Piercing, 1, Carrier::Race)];
         // chance tier 1 = 40; roll 0 succeeds.
         let mut src = ScriptedRoll::new([0]);
-        let out = roll_tints(&[Aspect::Cold], &tints, 0, &view(&[]), &B, &mut src);
+        let t = tables(ResonanceCondition::Always);
+        let out = roll_tints(&[Aspect::Cold], &tints, 0, &view(&[]), &B, &t, &mut src);
         assert_eq!(out.roll_count, 1);
         assert_eq!(out.rolls[0].chance_pct, 40);
         assert!(out.rolls[0].success);
         let r = out.resonances[0].unwrap();
         assert_eq!(
-            (r.base, r.tint, r.tier, r.active),
-            (Aspect::Cold, Aspect::Piercing, 1, true)
+            (r.base, r.tint, r.tier, r.active, r.generated),
+            (Aspect::Cold, Aspect::Piercing, 1, true, false)
         );
         assert_eq!(r.second_tint, None);
-        assert_eq!(multiplier_bp(&r, &B), 3_600);
     }
 
     #[test]
     fn no_pair_on_failure() {
         let tints = [Tint::new(Aspect::Piercing, 14, Carrier::Race)];
         let mut src = ScriptedRoll::new([700]);
-        let out = roll_tints(&[Aspect::Cold], &tints, 0, &view(&[]), &B, &mut src);
+        let t = tables(ResonanceCondition::Always);
+        let out = roll_tints(&[Aspect::Cold], &tints, 0, &view(&[]), &B, &t, &mut src);
         assert_eq!(out.roll_count, 1);
         assert!(!out.rolls[0].success);
         assert_eq!(out.resonances[0], None);
@@ -465,12 +349,14 @@ mod tests {
         ];
         let mut src = ScriptedRoll::new([0, 0, 0]);
         let immune = 1 << Aspect::Fire as u8;
+        let t = tables(ResonanceCondition::Always);
         let out = roll_tints(
             &[Aspect::Cold, Aspect::Fire],
             &tints,
             immune,
             &view(&[]),
             &B,
+            &t,
             &mut src,
         );
         // Only base Cold rolls, and only the Fire tint (Cold is a pure pair).
@@ -482,7 +368,7 @@ mod tests {
     }
 
     #[test]
-    fn best_margin_wins_then_carrier_priority() {
+    fn best_margin_wins_then_carrier_priority_and_the_second_makes_a_triple() {
         let tints = [
             Tint::new(Aspect::Fire, 14, Carrier::Race),     // chance 7
             Tint::new(Aspect::Blood, 1, Carrier::Class),    // chance 40
@@ -491,23 +377,29 @@ mod tests {
         ];
         // margins: 7-0=7, 40-10=30, 40-10=30 -> tie, Item beats Class.
         let mut src = ScriptedRoll::new([0, 10, 10]);
-        let out = roll_tints(&[Aspect::Cold], &tints, 0, &view(&[]), &B, &mut src);
+        let t = tables(ResonanceCondition::Always);
+        let out = roll_tints(&[Aspect::Cold], &tints, 0, &view(&[]), &B, &t, &mut src);
         assert_eq!(out.roll_count, 3);
         let r = out.resonances[0].unwrap();
-        assert_eq!(r.tint, Aspect::Lightning);
-        assert_eq!(r.second_tint, Some(Aspect::Blood));
+        assert_eq!((r.tint, r.carrier), (Aspect::Lightning, Carrier::Item));
+        assert_eq!(
+            (r.second_tint, r.second_tier, r.second_carrier),
+            (Some(Aspect::Blood), 1, Carrier::Class)
+        );
     }
 
     #[test]
     fn no_cap_across_bases_and_repeats_skipped() {
         let tints = [Tint::new(Aspect::Piercing, 1, Carrier::Race)];
         let mut src = ScriptedRoll::new([0, 0, 0]);
+        let t = tables(ResonanceCondition::Always);
         let out = roll_tints(
             &[Aspect::Cold, Aspect::Fire, Aspect::Cold],
             &tints,
             0,
             &view(&[]),
             &B,
+            &t,
             &mut src,
         );
         assert_eq!(out.roll_count, 2);
@@ -516,12 +408,18 @@ mod tests {
     }
 
     #[test]
-    fn condition_cancels() {
+    fn condition_cancels_and_generated_pairs_take_the_base_condition() {
         let tints = [Tint::new(Aspect::Blunt, 1, Carrier::Race)];
         let mut src = ScriptedRoll::new([0]);
         // Cold + Blunt (Cleaving Ice) needs a frozen target.
-        let out = roll_tints(&[Aspect::Cold], &tints, 0, &view(&[]), &B, &mut src);
+        let t = tables(ResonanceCondition::IsFrozen);
+        let out = roll_tints(&[Aspect::Cold], &tints, 0, &view(&[]), &B, &t, &mut src);
+        assert!(!out.resonances[0].unwrap().active);
+        // No record: the base's condition (default `Always`) and the trait's template.
+        let mut src = ScriptedRoll::new([0]);
+        let t = ResonanceTables::default();
+        let out = roll_tints(&[Aspect::Cold], &tints, 0, &view(&[]), &B, &t, &mut src);
         let r = out.resonances[0].unwrap();
-        assert!(!r.active);
+        assert!(r.active && r.generated);
     }
 }

@@ -22,7 +22,13 @@ pub fn monster_killed(
     seed: [u8; 32],
 ) {
     monster.alive = false;
-    let xp = monster_profile(monster.bestiary_id, monster.level).map_or(0, |p| p.xp);
+    // Experience does not depend on the defenses.
+    let xp = monster_profile(
+        monster.bestiary_id,
+        monster.level,
+        &deadroll_rules::MonsterDefense::NONE,
+    )
+    .map_or(0, |p| p.xp);
     session.xp_pool = session.xp_pool.saturating_add(xp);
     let boss = is_boss(monster.bestiary_id);
     emit!(MonsterKilled {

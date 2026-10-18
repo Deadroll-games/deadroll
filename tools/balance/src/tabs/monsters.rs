@@ -3,7 +3,7 @@ use deadroll_sim::{
     named::Named,
     presets::{AttackPreset, MonsterPreset},
 };
-use deadroll_types::{Aspect, Form, Source};
+use deadroll_types::{Aspect, Form, Source, StateKind};
 use eframe::egui::{self, Ui};
 
 use crate::{app::BalanceApp, widgets};
@@ -23,7 +23,9 @@ fn fresh() -> MonsterPreset {
         attack_bonus: 1,
         defense: 10,
         armor: 0,
-        resist: [0; Aspect::COUNT],
+        resistance: Vec::new(),
+        immunity: Vec::new(),
+        state_immunity: Vec::new(),
         xp_per_level: 5,
         hp: 10,
         hp_per_level: 2,
@@ -55,6 +57,7 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
         return;
     };
     let scaling = app.cfg.monsters;
+    let registry = app.presets.registry.clone();
     egui::ScrollArea::vertical()
         .id_salt("monster_edit")
         .show(ui, |ui| {
@@ -107,9 +110,71 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                     ui.label("Armor");
                     widgets::int(ui, &mut m.armor, 0..=10_000);
                     ui.end_row();
-                    for &aspect in Aspect::all() {
-                        ui.label(format!("Resist {}", aspect.name()));
-                        widgets::bp(ui, &mut m.resist[aspect as usize]);
+                    if m.bestiary_id.is_some() {
+                        // The program reads these from the registry record: shown, not edited.
+                        let d = m.defense(&registry);
+                        let names = |mask: u8, all: &[String]| {
+                            let list: Vec<&str> = all
+                                .iter()
+                                .enumerate()
+                                .filter(|(i, _)| mask & (1 << i) != 0)
+                                .map(|(_, n)| n.as_str())
+                                .collect();
+                            if list.is_empty() {
+                                "none".to_string()
+                            } else {
+                                list.join(", ")
+                            }
+                        };
+                        let aspects: Vec<String> = Aspect::all().iter().map(|a| a.name()).collect();
+                        let states: Vec<String> =
+                            StateKind::all().iter().map(|k| k.name()).collect();
+                        ui.label("Resists (registry bestiary.json)");
+                        ui.label(names(d.resist, &aspects));
+                        ui.end_row();
+                        ui.label("Immune to aspects / states");
+                        ui.label(format!(
+                            "{} / {}",
+                            names(d.immune_aspects, &aspects),
+                            names(d.immune_states, &states)
+                        ));
+                        ui.end_row();
+                    } else {
+                        let toggle = |ui: &mut Ui, list: &mut Vec<Aspect>, a: Aspect| {
+                            let mut on = list.contains(&a);
+                            if ui.checkbox(&mut on, a.name()).changed() {
+                                list.retain(|x| *x != a);
+                                if on {
+                                    list.push(a);
+                                }
+                            }
+                        };
+                        ui.label("Resists (at the scaling's resistance)");
+                        ui.horizontal_wrapped(|ui| {
+                            for &a in Aspect::all() {
+                                toggle(ui, &mut m.resistance, a);
+                            }
+                        });
+                        ui.end_row();
+                        ui.label("Immune to aspects");
+                        ui.horizontal_wrapped(|ui| {
+                            for &a in Aspect::all() {
+                                toggle(ui, &mut m.immunity, a);
+                            }
+                        });
+                        ui.end_row();
+                        ui.label("Immune to states");
+                        ui.horizontal_wrapped(|ui| {
+                            for &k in StateKind::all() {
+                                let mut on = m.state_immunity.contains(&k);
+                                if ui.checkbox(&mut on, k.name()).changed() {
+                                    m.state_immunity.retain(|x| *x != k);
+                                    if on {
+                                        m.state_immunity.push(k);
+                                    }
+                                }
+                            }
+                        });
                         ui.end_row();
                     }
                     ui.label("HP (level 0) / per level");
@@ -131,6 +196,7 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
             ui.add_space(8.0);
             ui.strong("By level (current scaling)");
             let base = m.base();
+            let defense = m.defense(&registry);
             egui::Grid::new("monster_levels")
                 .striped(true)
                 .show(ui, |ui| {
@@ -139,7 +205,7 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                     }
                     ui.end_row();
                     for level in [1u8, 2, 3, 5] {
-                        let p = base.profile(level, &scaling);
+                        let p = base.profile(level, &scaling, &defense);
                         ui.label(level.to_string());
                         ui.label(base.hp_at(level).to_string());
                         ui.label(format!("{}..{}", p.weapon.min, p.weapon.max));

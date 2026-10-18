@@ -103,6 +103,7 @@ pub fn handler(ctx: Context<StartSession>) -> Result<()> {
             skill_set: character,
             bag: character,
             target_participation: None,
+            layout: session.layout,
         },
     )?;
 

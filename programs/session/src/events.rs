@@ -4,13 +4,13 @@
 use anchor_lang::prelude::*;
 use deadroll_character::state::{MAP_SKILLS, SKILLS_MAX};
 use deadroll_combat::MODS_MAX;
-use deadroll_types::{ActiveState, SessionStatus, StateKind, STATES_MAX, TURN_ORDER_MAX};
+use deadroll_types::{ActiveState, Cell, SessionStatus, StateKind, STATES_MAX, TURN_ORDER_MAX};
 
 use deadroll_skillcheck::Effect;
 
 use crate::{
     hit_event::{Applied, EffectRollData, HitItemsData, HitResultData},
-    state::TimedModData,
+    state::{AccuracyBuffData, TimedModData},
 };
 
 #[event]
@@ -75,6 +75,8 @@ pub struct TurnTicked {
     /// Cooldowns after the tick, own turn starts until usable: a player's by `SkillSet` slot,
     /// a monster's in the first `MONSTER_SKILLS_MAX` entries.
     pub cooldowns: [u8; SKILLS_MAX],
+    /// Patch 4: the part of `dot_damage` from a Freeze that thawed (Burning Frost).
+    pub thaw_damage: u32,
 }
 
 /// Buffs and debuffs at the start of a unit's turn (`start_turn`, right after `TurnTicked`).
@@ -250,4 +252,54 @@ pub struct EscrowClaimed {
     pub session: Pubkey,
     pub dm: Pubkey,
     pub amount: u64,
+}
+
+/// One monster a resonance passed a state on to (`deadroll_rules::spread`).
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SpreadHitData {
+    /// Monster index.
+    pub monster: u8,
+    pub kind: StateKind,
+    pub applied: Applied,
+    /// The monster's states after.
+    pub states: [ActiveState; STATES_MAX],
+}
+
+/// What a player's hit did beyond its target (docs/DAMAGE_TYPES_AND_MIXES.md 6.4), right after
+/// its `HitResolved`: states that jumped to other monsters, a knockback, burning cells, and the
+/// accuracy buff the attacker got. Only written when something happened.
+#[event]
+pub struct ResonanceSpread {
+    pub session: Pubkey,
+    pub action_counter: u32,
+    /// Turn-order ids.
+    pub attacker: u8,
+    pub target: u8,
+    pub hits: [SpreadHitData; 8],
+    pub hit_count: u8,
+    /// The target was pushed from `moved_from` to `moved_to`.
+    pub moved: bool,
+    pub moved_from: Cell,
+    pub moved_to: Cell,
+    /// Cells set on fire (`ignited[..ignited_count]`): Burning of `ignite_power` on whoever
+    /// steps in, through round `until_round`.
+    pub ignited: [Cell; 8],
+    pub ignited_count: u8,
+    pub ignite_power: u32,
+    pub until_round: u16,
+    /// The attacker's accuracy buff after the hit.
+    pub accuracy: AccuracyBuffData,
+}
+
+/// A unit stepped into a burning cell and caught fire (`move_unit`, `monster_move`).
+#[event]
+pub struct CellBurned {
+    pub session: Pubkey,
+    /// Turn-order id.
+    pub unit: u8,
+    pub x: u8,
+    pub y: u8,
+    pub applied: Applied,
+    /// The unit's states after.
+    pub states: [ActiveState; STATES_MAX],
 }

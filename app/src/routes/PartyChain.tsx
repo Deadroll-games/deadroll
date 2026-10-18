@@ -28,6 +28,8 @@ import {
   currentUnit,
   endTurnIx,
   enumIndex,
+  ASPECT_KEYS,
+  type Enum,
   getAccount,
   joinSessionIx,
   mapStatus,
@@ -56,9 +58,9 @@ import {
   type Party,
   type SeedKind,
 } from "../chain/game";
-import { toHitResolved } from "../chain/hit";
-import { bestiaryName } from "../chain/names";
-import { heroInputOf, previewOnMonster, previewText, statesOf, useCombat } from "../chain/combatWasm";
+import { toHitResolved, toResonanceSpread } from "../chain/hit";
+import { aspectName, bestiaryName, carrierName, resonanceName, stateName } from "../chain/names";
+import { heroInputOf, previewOnMonster, previewText, statesOf, useCombat, type AccuracyInput, type CombatWasm, type HitPreview } from "../chain/combatWasm";
 import { errorName } from "../chain/send";
 import { statusLabel, type SubStatus } from "../chain/subscribe";
 import { cooldownLabel, skillCooldowns, skillUsedText, skipText, startTurnFor, takenOntoMap, tickText, turnActed, turnStarted } from "../chain/turns";
@@ -67,7 +69,7 @@ import { affordable, cheb, reachable, route, type Step } from "../chain/route";
 import { useAutoFreezeTombstone } from "../chain/useAutoFreezeTombstone";
 import { useParty, type PartyEvent } from "../chain/useParty";
 import { Purpose, inReach } from "../chain/skillcheck";
-import { MONSTER_DEFENSE, monsterBaseAp, playerDefense, unitStats } from "../chain/stats";
+import { monsterBaseAp, monsterDefense, playerDefense, unitStats } from "../chain/stats";
 import { activeMods, combatSkill, effectText, modsAt, modsTickText, toEffectResolved, type CombatSkill, type EffectResolved } from "../chain/support";
 import { useTx } from "../chain/useTx";
 import { MAP_MAX, PARTY_MAX, type Cell, type Class, type HitResult, type Race, type Tile } from "../chain/types";
@@ -206,6 +208,19 @@ function PartyView({ address }: { address: Address }) {
   const { send, busy } = useTx();
   const { party, error, events, ingest, refresh, live } = useParty(address);
   const combat = useCombat();
+  // The session's resonance tables (copied from the registry at open_session) into the module,
+  // so the preview resolves the same pairs as the program.
+  const tables = party?.resonanceTables ?? null;
+  const tablesReady = useMemo(() => {
+    if (!combat || !tables) return false;
+    try {
+      combat.setTables(tables);
+      return true;
+    } catch (err) {
+      console.warn(err);
+      return false;
+    }
+  }, [combat, tables]);
   const draw = useSprites();
   const [seedKind, setSeedKind] = useState<SeedKind>("random");
   const [skill, setSkill] = useState<number>(0);
@@ -331,7 +346,7 @@ function PartyView({ address }: { address: Address }) {
       const pl = p.players.find((x) => x.participation === pend);
       if (!pl) return;
       const seed = await pickSeed(kind);
-      const res = await send("VRF roll (localnet oracle)", sk.signer ?? wallet.signer, async () => [await consumeIx(address, pend, pl.character, seed, pendingTargetOf(p.session))], {
+      const res = await send("VRF roll (localnet oracle)", sk.signer ?? wallet.signer, async () => [await consumeIx(address, pend, pl.character, seed, pendingTargetOf(p.session), p.session.layout)], {
         quiet: true,
         silent: quietFail,
       });
@@ -754,18 +769,19 @@ function PartyView({ address }: { address: Address }) {
   // Before the dice (docs/COMBAT_MATH.md 13): the weapon or a damage skill on the hovered monster,
   // else on each monster in reach. The combat module builds the hit as the program does.
   const attackPreviews =
-    combat && activePlayer && myTurn && canAttack && chosenSide === "enemy" && (!chosen || chosen.purpose === Purpose.Damage)
+    combat && tablesReady && activePlayer && myTurn && canAttack && chosenSide === "enemy" && (!chosen || chosen.purpose === Purpose.Damage)
       ? (() => {
           const hero = heroInputOf(activePlayer.char, activePlayer.part.equipment, activePlayer.char.core.stats, activePlayer.part.classTier);
           const heroMods = activeMods(activePlayer.part.mods);
+          const accuracy = accuracyOf(activePlayer.part);
           const record = chosen ? (skillRecords[activePlayer.character]?.[chosen.slot] ?? null) : null;
           const inReach = party.monsters
             .map((m, i) => ({ m, i }))
             .filter(({ m }) => m.alive && reachOk({ x: m.x, y: m.y }));
           const hovered = hover ? inReach.filter(({ m }) => m.x === hover.x && m.y === hover.y) : [];
           return (hovered.length ? hovered : inReach.slice(0, 4)).flatMap(({ m, i }) => {
-            const p = previewOnMonster(combat, hero, heroMods, record, m, activeMods(party.monsterMods[i]));
-            return p ? [{ unit: MONSTER_BASE + i, text: previewText(p) }] : [];
+            const p = previewOnMonster(combat, hero, heroMods, record, m, activeMods(party.monsterMods[i]), defenseOf(party, i), accuracy);
+            return p ? [{ unit: MONSTER_BASE + i, text: `${previewText(p)}${tintPreviewText(p)}` }] : [];
           });
         })()
       : [];
@@ -787,6 +803,7 @@ function PartyView({ address }: { address: Address }) {
             reachable={!ended && canMove ? reach : []}
             targets={!ended ? monsterTargets : []}
             path={preview}
+            burning={party.burningCells.filter((c) => c.untilRound >= s.core.round).map((c) => ({ x: c.x, y: c.y }))}
             cellPx={CELL_PX}
             unitSprite={unitSprite}
             tileSprite={tileSprite}
@@ -915,7 +932,7 @@ function PartyView({ address }: { address: Address }) {
               critChanceBp={roll.effect.critChanceBp}
             />
           )}
-          <StatsPanel units={statsUnits(party, label)} />
+          <StatsPanel units={statsUnits(party, label, combat)} />
           {ended && <Claims party={party} isDm={isDm} me={me} actorFor={actorFor} payer={wallet.signer} send={send} ingest={ingest} busy={busy} />}
           {tombLog.length > 0 && (
             <div className="panel">
@@ -1036,10 +1053,16 @@ function describe(e: PartyEvent, label: (u: number) => string, skillName: SkillN
       if (label(d.attacker) === "initiative") return `initiative roll requested (action ${d.action})`;
       return `${label(d.attacker)} -> ${label(d.target)}: VRF requested (action ${d.action})`;
     case "HitResolved": {
-      const r = d.result;
-      const res = (r.resonances as unknown[]).some((x) => x && (x as { active: boolean }).active);
-      return `${label(d.attacker)} -> ${label(d.target)}: d20 ${r.d20}${r.crit ? " CRIT" : ""}, ${Object.keys(r.outcome)[0]}, ${r.damage} dmg${res ? ", RESONANCE" : ""}`;
+      const hit = toHitResolved(d).result;
+      const res = hit.resonances
+        .filter((x) => x?.active)
+        .map((x) => `${resonanceName(x!.id, x!.secondTint)} (${carrierName(x!.carrier).toLowerCase()})`);
+      return `${label(d.attacker)} -> ${label(d.target)}: d20 ${hit.d20}${hit.crit ? " CRIT" : ""}, ${Object.keys(d.result.outcome)[0]}, ${hit.damage} dmg${res.length ? `, ${res.join(", ")}` : ""}`;
     }
+    case "ResonanceSpread":
+      return spreadText(toResonanceSpread(d), label);
+    case "CellBurned":
+      return `${label(d.unit)} stepped into fire at ${d.x},${d.y}: Burning`;
     case "MonsterKilled":
       return `${label(MONSTER_BASE + d.monster)} killed${d.boss ? " (boss)" : ""}, +${d.xp} xp`;
     case "PlayerDied":
@@ -1063,7 +1086,7 @@ function describe(e: PartyEvent, label: (u: number) => string, skillName: SkillN
  * Combat stats of every living unit with its buffs and debuffs (Participation.mods,
  * MonsterState.mods): HP, AP per turn (Haste / Slow), defense, armor, resistances, vulnerabilities.
  */
-function statsUnits(party: Party, label: (u: number) => string): StatsUnit[] {
+function statsUnits(party: Party, label: (u: number) => string, combat: CombatWasm | null): StatsUnit[] {
   const s = party.session;
   const current = currentUnit(s);
   const running = turnStarted(s);
@@ -1083,7 +1106,8 @@ function statsUnits(party: Party, label: (u: number) => string): StatsUnit[] {
       return { unit: p.slot, label: label(p.slot), kind: "player", current: current === p.slot, stats };
     });
   const monsters = party.monsters.flatMap((m, i): StatsUnit[] => {
-    const profile = MONSTER_DEFENSE[m.bestiaryId];
+    // Defense, armor and resistances: the combat module over the registry defenses the session copied.
+    const profile = combat ? monsterDefense(combat, m.bestiaryId, m.level, defenseOf(party, i)) : null;
     if (!m.alive || !profile) return [];
     const u = MONSTER_BASE + i;
     const stats = unitStats({
@@ -1132,4 +1156,34 @@ function LiveBadge({ status }: { status: SubStatus }) {
       {statusLabel(status)}
     </span>
   );
+}
+
+/** A monster's registry defenses (`MonsterState.defense`); none for a session from before them. */
+function defenseOf(party: Party, i: number) {
+  return party.monsterDefense[i] ?? { resist: 0, immuneAspects: 0, immuneStates: 0 };
+}
+
+/** The player's resonance accuracy buff (`Participation.accuracy`). */
+function accuracyOf(part: { accuracy?: { aspect: Enum; turns: number; bonus: number } }): AccuracyInput {
+  const a = part.accuracy;
+  return a && a.turns > 0 ? { aspect: enumIndex(a.aspect, ASPECT_KEYS), turns: a.turns, bonus: a.bonus } : { aspect: 0, turns: 0, bonus: 0 };
+}
+
+/** " · Piercing Frost 7%: 5-9 (weapon)" for each tint that can trigger on this target. */
+function tintPreviewText(p: HitPreview): string {
+  const live = p.tints.filter((t) => !t.pure && t.conditionMet);
+  if (live.length === 0) return "";
+  return live
+    .map((t) => ` · ${resonanceName(t.id)} ${t.chancePct}%${t.min !== p.min || t.max !== p.max ? `: ${t.min}-${t.max}` : ""} (${carrierName(t.carrier as never).toLowerCase()})`)
+    .join("");
+}
+
+/** What a resonance did beyond its target: jumps, a knockback, burning cells, an accuracy buff. */
+function spreadText(e: ReturnType<typeof toResonanceSpread>, label: (u: number) => string): string | null {
+  const parts: string[] = [];
+  for (const h of e.hits) parts.push(`${stateName(h.kind)} jumped to ${label(MONSTER_BASE + h.monster)}`);
+  if (e.moved) parts.push(`${label(e.target)} knocked back to ${e.moved.to.x},${e.moved.to.y}`);
+  if (e.ignited.length) parts.push(`${e.ignited.length} cells on fire (Burning ${e.ignitePower}) until round ${e.untilRound}`);
+  if (e.accuracy.turns > 0) parts.push(`${label(e.attacker)} +${e.accuracy.bonus} accuracy to ${aspectName(e.accuracy.aspect)} attacks`);
+  return parts.length ? `resonance: ${parts.join(", ")}` : null;
 }

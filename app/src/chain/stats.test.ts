@@ -1,19 +1,39 @@
 import { describe, expect, it } from "vitest";
-import { MONSTER_DEFENSE, RESIST_CAP_BP, deltaText, monsterBaseAp, playerDefense, speedAp, unitStats } from "./stats";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { beforeAll } from "vitest";
+import fixtures from "./__fixtures__/combat-wasm.json";
+import { CombatWasm } from "./combatWasm";
+import { RESIST_CAP_BP, deltaText, monsterBaseAp, monsterDefense, playerDefense, speedAp, unitStats, type DefenseProfile } from "./stats";
 import { Aspect, Class, ModKind, type TimedMod } from "./types";
 
 const m = (kind: ModKind, powerBp: number, aspect: Aspect = Aspect.Cold, turns = 2): TimedMod => ({ kind, aspect, turns, powerBp, source: 1 });
 
-describe("stats mirror of rules.rs", () => {
-  it("monster and player defenses", () => {
-    expect(MONSTER_DEFENSE[0]).toEqual({ defense: 10, armor: 5, resist: [Aspect.Cold, 5_000] });
-    expect(MONSTER_DEFENSE[2]).toEqual({ defense: 13, armor: 40, resist: [Aspect.Piercing, 5_000] });
-    expect(Object.keys(MONSTER_DEFENSE)).toHaveLength(5);
+let combat: CombatWasm;
+beforeAll(async () => {
+  combat = await CombatWasm.instantiate(readFileSync(resolve(import.meta.dirname, "wasm/combat.wasm")));
+});
+
+const NONE = [0, 0, 0, 0, 0, 0];
+/** The wolf at level 1 with the registry defenses the fixture holds (resists Cold). */
+const wolfDefense = () => fixtures.monsters.find((m) => m.input.bestiaryId === 0 && m.input.level === 1)!.input.defense;
+
+describe("stats", () => {
+  it("monster defenses come from the combat module and the registry record", () => {
+    const wolf = monsterDefense(combat, 0, 1, wolfDefense())!;
+    expect(wolf.resist[Aspect.Cold]).toBeGreaterThan(0);
+    expect(wolf.resist.filter((r) => r > 0)).toHaveLength(1);
+    // The same template without the record's defenses resists nothing.
+    expect(monsterDefense(combat, 0, 1, { resist: 0, immuneAspects: 0, immuneStates: 0 })!.resist).toEqual(NONE);
+    expect(monsterDefense(combat, 200, 1, wolfDefense())).toBeNull();
+  });
+
+  it("player defenses", () => {
     // rules.rs test: warrior with Dex 10 has defense 12, armor 30.
     // Class armor, then the starter kit on top (sword + leather armor 10, staff + robe 2).
-    expect(playerDefense(Class.Warrior, [10, 10, 10, 10])).toEqual({ defense: 12, armor: 20, resist: null });
+    expect(playerDefense(Class.Warrior, [10, 10, 10, 10])).toEqual({ defense: 12, armor: 20, resist: NONE });
     const kit = (weapon: number, body: number) => [weapon, 0xff, 0xff, body, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
-    expect(playerDefense(Class.Warrior, [10, 10, 10, 10], kit(0, 3))).toEqual({ defense: 12, armor: 30, resist: null });
+    expect(playerDefense(Class.Warrior, [10, 10, 10, 10], kit(0, 3))).toEqual({ defense: 12, armor: 30, resist: NONE });
     expect(playerDefense(Class.Mage, [5, 7, 13, 5], kit(1, 4)).armor).toBe(5);
     expect(playerDefense(Class.Support, [5, 8, 12, 5], kit(2, 5)).armor).toBe(5);
     expect([monsterBaseAp(0), monsterBaseAp(6), monsterBaseAp(200)]).toEqual([1, 6, 12]);
@@ -31,7 +51,8 @@ describe("stats mirror of rules.rs", () => {
 });
 
 describe("unitStats", () => {
-  const wolf = { hp: 12, hpMax: 15, apBase: 6, apNow: null, profile: MONSTER_DEFENSE[0]! };
+  const wolfProfile: DefenseProfile = { defense: 10, armor: 5, resist: [0, 5_000, 0, 0, 0, 0] };
+  const wolf = { hp: 12, hpMax: 15, apBase: 6, apNow: null, profile: wolfProfile };
 
   it("no mods: base equals final", () => {
     const s = unitStats({ ...wolf, mods: [] });

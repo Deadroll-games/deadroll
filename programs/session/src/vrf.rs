@@ -100,6 +100,8 @@ pub struct CallbackAccounts {
     pub bag: Pubkey,
     /// The ally of a heal or buff that is not the caster (`GameSession.pending_target`).
     pub target_participation: Option<Pubkey>,
+    /// The session's `MapLayout` (`GameSession.layout`), read-only (patch 4).
+    pub layout: Pubkey,
 }
 
 pub fn callback_metas(a: &CallbackAccounts) -> Vec<SerializableAccountMeta> {
@@ -123,6 +125,7 @@ pub fn callback_metas(a: &CallbackAccounts) -> Vec<SerializableAccountMeta> {
             Some(key) => meta(key, true),
             None => meta(&crate::ID, false),
         },
+        meta(&a.layout, false),
     ]
 }
 
@@ -228,7 +231,7 @@ mod tests {
 
     #[test]
     fn callback_metas_follow_consume_randomness() {
-        let keys: Vec<Pubkey> = (0..7).map(|_| Pubkey::new_unique()).collect();
+        let keys: Vec<Pubkey> = (0..8).map(|_| Pubkey::new_unique()).collect();
         for ally in [None, Some(keys[6])] {
             let ours = callback_metas(&CallbackAccounts {
                 session: keys[0],
@@ -238,6 +241,7 @@ mod tests {
                 skill_set: keys[4],
                 bag: keys[5],
                 target_participation: ally,
+                layout: keys[7],
             });
             let anchors = crate::accounts::ConsumeRandomness {
                 vrf_program_identity: VRF_IDENTITY,
@@ -251,6 +255,7 @@ mod tests {
                 config: GAME_CONFIG,
                 character_program: deadroll_character::ID,
                 target_participation: ally,
+                layout: keys[7],
             }
             .to_account_metas(None);
             assert_eq!(anchors.len(), ours.len() + 1);
@@ -261,9 +266,11 @@ mod tests {
                 assert!(!a.is_signer && !o.is_signer);
             }
             assert_eq!(
-                ours.last().unwrap().pubkey.to_bytes(),
+                ours[ours.len() - 2].pubkey.to_bytes(),
                 ally.unwrap_or(crate::ID).to_bytes()
             );
+            assert_eq!(ours.last().unwrap().pubkey.to_bytes(), keys[7].to_bytes());
+            assert!(!ours.last().unwrap().is_writable);
         }
     }
 }

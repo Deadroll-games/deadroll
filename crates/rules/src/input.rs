@@ -3,8 +3,8 @@ use deadroll_combat::modifiers::more;
 use deadroll_combat::DamageRange;
 use deadroll_combat::{
     apply_mod, apply_state, apply_to_attacker, apply_to_defender, mod_range, mod_turns,
-    states::freeze, Applied, Attacker, Carrier, Defender, Mod, ModFilter, ModKind, Skill, States,
-    SupportInput, TimedMod, TimedMods, Tint,
+    states::freeze, AccuracyBuff, Applied, Attacker, Carrier, Defender, Mod, ModFilter, ModKind,
+    Skill, States, SupportInput, TimedMod, TimedMods, Tint,
 };
 use deadroll_skillcheck::{
     derive_with, Category, Effect, Purpose, SkillBlocks, SkillTuning, SKILL_ASPECTS_MAX,
@@ -15,7 +15,7 @@ use deadroll_types::{
 
 use crate::{
     config::BalanceConfig,
-    items::{effective_stats, item_bonus, weapon_range, Equipment},
+    items::{effective_stats, item_bonus, item_tints, weapon_range, Equipment, ITEM_TINTS},
     monster::MonsterProfile,
     player::{
         class_increase, class_source, effect_stat, heal_range, hp_max, player_accuracy,
@@ -238,14 +238,21 @@ pub fn player_form(skill: Option<&SkillStats>) -> Form {
     skill.map_or(Form::Strike, |s| s.blocks.form)
 }
 
+/// Tint slots of a player: race, class, then items.
+pub const RACE_TINT: usize = 0;
+pub const CLASS_TINT: usize = 1;
+pub const ITEM_TINT: usize = 2;
+
 /// A player attacking with `skill` (`None` = the weapon's basic attack). `unit` is the
-/// turn-order id, written as the source of applied states. `mods`: the player's buffs and debuffs.
+/// turn-order id, written as the source of applied states. `mods`: the player's buffs and
+/// debuffs; `accuracy`: its accuracy buff from a resonance (Pale Flame).
 pub fn player_attacker(
     cfg: &BalanceConfig,
     unit: u8,
     c: &HeroStats,
     skill: Option<&SkillStats>,
     mods: &TimedMods,
+    accuracy: &AccuracyBuff,
 ) -> Attacker {
     let t = &cfg.players;
     let source = skill.map_or(class_source(c.class), |s| s.blocks.source);
@@ -275,7 +282,18 @@ pub fn player_attacker(
     // Race trait: the predisposition adds a flat packet and tints resonances (CHARACTER 6.2),
     // both at the race trait tier.
     attacker.added[0] = predisposition_added(c.predisposition, c.predisposition_tier, t);
-    attacker.tints[0] = Tint::new(c.predisposition, c.predisposition_tier, Carrier::Race);
+    attacker.tints[RACE_TINT] = Tint::new(c.predisposition, c.predisposition_tier, Carrier::Race);
+    // CHARACTER 8.1 gives no class an aspect in the first version: the class slot stays empty.
+    // Worn items with an aspect tint too (the weapon's own aspect, SKILL_BUILDER 5.2).
+    attacker.tints[ITEM_TINT..ITEM_TINT + ITEM_TINTS].copy_from_slice(&item_tints(
+        &c.equipment,
+        &cfg.items,
+        skill.is_none(),
+    ));
+    let (bases, count) = attacker.skill.bases(attacker.weapon.aspect);
+    attacker.attack_bonus = attacker
+        .attack_bonus
+        .saturating_add(accuracy.bonus_for(&bases[..count]));
     // Class trait at its own tier, then the core stats in slots 1-3 (empty when 0).
     if let Some((tag, bp)) = class_increase(c.class, c.class_tier, t) {
         attacker.increased[0] = Mod::new(ModFilter::Source(tag), bp);
@@ -328,6 +346,8 @@ pub fn monster_defender(p: &MonsterProfile, states: &States, mods: &TimedMods) -
         defense: p.defense,
         armor: p.armor,
         resist_bp: p.resist_bp,
+        immune_aspects: p.immune_aspects,
+        immune_states: p.immune_states,
         states: *states,
         ..Defender::default()
     };

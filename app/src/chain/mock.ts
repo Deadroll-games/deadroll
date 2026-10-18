@@ -1,5 +1,6 @@
 // Mock data for VITE_DATA=mock and the /dev pages. Shapes match chain/types.ts exactly.
 import demoMap from "../../../assets/registry/maps/demo_16x16.json";
+import bestiaryJson from "../../../assets/registry/bestiary.json";
 import {
   Applied,
   Aspect,
@@ -7,6 +8,8 @@ import {
   Class,
   HitOutcome,
   MAP_CELLS,
+  OpKind,
+  OpOrigin,
   Race,
   StateKind,
   Tile,
@@ -100,6 +103,33 @@ function packet(p: Partial<PacketResult> & Pick<PacketResult, "aspect">): Packet
   };
 }
 
+const NO_STATE_ROLL: StateRoll = { kind: StateKind.Burning, rolled: false, chanceBp: 0, roll: 0, success: false, applied: Applied.None };
+
+/** A hit with no resonance effects. */
+const NO_RESONANCE = {
+  resOps: [[], [], []],
+  jumps: [],
+  knockback: 0,
+  ignitePower: 0,
+  targetMods: [],
+  accuracyBuff: { aspect: Aspect.Fire, turns: 0, bonus: 0 },
+  landed: 0,
+} satisfies Partial<HitResult>;
+
+/** Mock monster defenses: the registry bestiary records (assets/registry/bestiary.json), as
+ * `MonsterState.defense` holds them. */
+export function mockDefense(bestiaryId: number): { resist: number; immuneAspects: number; immuneStates: number } {
+  const r = bestiaryJson.records.find((m) => m.id === bestiaryId);
+  const ASPECTS = ["Fire", "Cold", "Lightning", "Blood", "Blunt", "Piercing"];
+  const STATES = ["Burning", "Chill", "Freeze", "Bleeding", "Shock", "Stun", "Penetration"];
+  const bits = (list: readonly string[] | undefined, names: string[]) => (list ?? []).reduce((m, n) => m | (1 << names.indexOf(n)), 0);
+  return {
+    resist: bits(r?.resistance, ASPECTS),
+    immuneAspects: bits(r?.immunity, ASPECTS),
+    immuneStates: bits(r?.state_immunity, STATES),
+  };
+}
+
 /** Elf mage cold bolt on a wolf: hit, cold resonance with a fire tint, chill applied. */
 export const MOCK_HIT_RESONANCE: HitResult = {
   outcome: HitOutcome.Hit,
@@ -113,7 +143,18 @@ export const MOCK_HIT_RESONANCE: HitResult = {
     { base: Aspect.Cold, tint: Aspect.Lightning, carrier: Carrier.Item, tier: 12, chanceBp: 9, roll: 61, success: false },
   ],
   resonances: [
-    { base: Aspect.Cold, tint: Aspect.Fire, tier: 9, carrier: Carrier.Race, id: Aspect.Cold * 6 + Aspect.Fire, active: true, secondTint: null },
+    {
+      base: Aspect.Cold,
+      tint: Aspect.Fire,
+      tier: 9,
+      carrier: Carrier.Race,
+      id: Aspect.Cold * 6 + Aspect.Fire,
+      active: true,
+      secondTint: null,
+      secondTier: 0,
+      secondCarrier: Carrier.Race,
+      generated: false,
+    },
     null,
     null,
   ],
@@ -151,6 +192,16 @@ export const MOCK_HIT_RESONANCE: HitResult = {
   states: [{ kind: StateKind.Chill, turns: 2, power: 2_000, source: 1 }],
   damage: 9,
   rollsUsed: 9,
+  ...NO_RESONANCE,
+  // Burning Frost (Cold + Fire): Fury adds Fire, the thaw waits for a Freeze.
+  resOps: [
+    [
+      { kind: OpKind.ThawDamage, critOnly: false, arg: 0, origin: OpOrigin.Pair, tint: Aspect.Fire, carrier: Carrier.Race, tier: 9, acted: false, state: NO_STATE_ROLL, amount: 0, amountMax: 0 },
+      { kind: OpKind.AddPacket, critOnly: false, arg: Aspect.Fire, origin: OpOrigin.Trait, tint: Aspect.Fire, carrier: Carrier.Race, tier: 9, acted: true, state: NO_STATE_ROLL, amount: 2, amountMax: 4 },
+    ],
+    [],
+    [],
+  ],
 };
 
 /** Wolf bite on the warrior: miss. */
@@ -169,6 +220,7 @@ export const MOCK_HIT_MISS: HitResult = {
   states: [],
   damage: 0,
   rollsUsed: 1,
+  ...NO_RESONANCE,
 };
 
 /** Human warrior spear thrust on the goblin chief: crit, piercing, bleeding. */
@@ -204,6 +256,7 @@ export const MOCK_HIT_CRIT: HitResult = {
   states: [{ kind: StateKind.Bleeding, turns: 3, power: 1_500, source: 0 }],
   damage: 16,
   rollsUsed: 4,
+  ...NO_RESONANCE,
 };
 
 export const MOCK_HITS = { resonance: MOCK_HIT_RESONANCE, miss: MOCK_HIT_MISS, crit: MOCK_HIT_CRIT };

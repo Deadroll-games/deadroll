@@ -12,6 +12,8 @@ pub const BESTIARY: &[u8] = b"bestiary";
 pub const TILESET: &[u8] = b"tileset";
 /// `["prefabs"]` in registry.
 pub const PREFABS: &[u8] = b"prefabs";
+/// `["traits"]` in registry (patch 4).
+pub const TRAITS: &[u8] = b"traits";
 /// `["authority"]` in every program: the signer for CPI into other game programs.
 pub const AUTHORITY: &[u8] = b"authority";
 /// `["rasterizer", version: u16]` in render.

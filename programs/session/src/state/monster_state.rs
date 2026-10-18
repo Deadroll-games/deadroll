@@ -4,8 +4,12 @@ use anchor_lang::{
         allocate, assign, create_account, transfer, Allocate, Assign, CreateAccount, Transfer,
     },
 };
-use deadroll_combat::{TimedMods, MODS_MAX};
-use deadroll_types::{seeds, Monster, MonsterStateData, MONSTERS_MAX};
+use deadroll_combat::{ResonanceTables, TimedMods, MODS_MAX};
+use deadroll_rules::{
+    spread::{BurningCell, BURNING_CELLS_MAX},
+    MonsterDefense,
+};
+use deadroll_types::{seeds, Cell, Monster, MonsterStateData, MONSTERS_MAX};
 
 use crate::{
     errors::SessionError,
@@ -34,6 +38,73 @@ pub struct MonsterState {
     pub cooldowns: [[u8; MONSTER_SKILLS_MAX]; MONSTERS_MAX],
     /// Per monster: buffs and debuffs (`deadroll_combat::support`), like `Participation.mods`.
     pub mods: [[TimedModData; MODS_MAX]; MONSTERS_MAX],
+    // Patch 4. Registry rules copied at `open_session`, fixed for the party
+    // (docs/DAMAGE_TYPES_AND_MIXES.md 9 and 10.1), then the map state resonances make.
+    /// Per monster: the defenses of its bestiary record.
+    pub defense: [MonsterDefenseData; MONSTERS_MAX],
+    /// The registry `aspects`, `traits` and `resonances` table bodies
+    /// (`deadroll_combat::tables`).
+    pub res_aspects: [u8; RES_ASPECTS_LEN],
+    pub res_traits: [u8; RES_TRAITS_LEN],
+    pub res_pairs: [u8; RES_PAIRS_LEN],
+    /// Cells set on fire by a resonance (`deadroll_rules::spread`); `power == 0` is free.
+    pub burning_cells: [BurningCellData; BURNING_CELLS_MAX],
+}
+
+/// `deadroll_rules::MonsterDefense`: bits by `Aspect` / `StateKind`.
+#[derive(
+    AnchorSerialize, AnchorDeserialize, InitSpace, Clone, Copy, Debug, Default, PartialEq, Eq,
+)]
+pub struct MonsterDefenseData {
+    pub resist: u8,
+    pub immune_aspects: u8,
+    pub immune_states: u8,
+}
+
+/// `deadroll_rules::spread::BurningCell`.
+#[derive(
+    AnchorSerialize, AnchorDeserialize, InitSpace, Clone, Copy, Debug, Default, PartialEq, Eq,
+)]
+pub struct BurningCellData {
+    pub x: u8,
+    pub y: u8,
+    /// Burns through this round.
+    pub until_round: u16,
+    /// Burning per turn on whoever steps in.
+    pub power: u32,
+    /// Turn-order id of the unit that set it on fire.
+    pub source: u8,
+}
+
+/// `deadroll_combat::tables::ASPECTS_LEN`, `TRAITS_LEN`, `PAIRS_LEN` (literals for the IDL;
+/// a test pins them).
+pub const RES_ASPECTS_LEN: usize = 48;
+pub const RES_TRAITS_LEN: usize = 192;
+pub const RES_PAIRS_LEN: usize = 576;
+const DEFENSE_SIZE: usize = 3;
+const BURNING_CELL_SIZE: usize = 9;
+
+impl From<BurningCellData> for BurningCell {
+    fn from(c: BurningCellData) -> Self {
+        BurningCell {
+            cell: Cell { x: c.x, y: c.y },
+            until_round: c.until_round,
+            power: c.power,
+            source: c.source,
+        }
+    }
+}
+
+impl From<BurningCell> for BurningCellData {
+    fn from(c: BurningCell) -> Self {
+        BurningCellData {
+            x: c.cell.x,
+            y: c.cell.y,
+            until_round: c.until_round,
+            power: c.power,
+            source: c.source,
+        }
+    }
 }
 
 /// Cooldown slots per monster.
@@ -55,6 +126,13 @@ mod off {
     pub const BUMP: usize = COUNT + 1;
     pub const COOLDOWNS: usize = BUMP + 1;
     pub const MODS: usize = COOLDOWNS + MONSTERS_MAX * MONSTER_SKILLS_MAX;
+    pub const DEFENSE: usize = MODS + MONSTERS_MAX * super::MODS_LEN;
+    pub const RES_ASPECTS: usize = DEFENSE + MONSTERS_MAX * super::DEFENSE_SIZE;
+    pub const RES_TRAITS: usize = RES_ASPECTS + super::RES_ASPECTS_LEN;
+    pub const RES_PAIRS: usize = RES_TRAITS + super::RES_TRAITS_LEN;
+    pub const BURNING: usize = RES_PAIRS + super::RES_PAIRS_LEN;
+    #[cfg(test)]
+    pub const END: usize = BURNING + BURNING_CELLS_MAX * super::BURNING_CELL_SIZE;
 }
 
 /// Bytes of one monster's `mods`.
@@ -213,6 +291,93 @@ impl<'a, 'info> Monsters<'a, 'info> {
             .map_err(|_| error!(SessionError::InvalidMonsterState))
     }
 
+    /// The registry defenses of monster `index`.
+    pub fn defense(&self, index: u8) -> Result<MonsterDefense> {
+        let start = Self::defense_slot(index)?;
+        let data = self.info.try_borrow_data()?;
+        Ok(MonsterDefense {
+            resist: data[start],
+            immune_aspects: data[start + 1],
+            immune_states: data[start + 2],
+        })
+    }
+
+    pub fn set_defense(&self, index: u8, d: &MonsterDefense) -> Result<()> {
+        let start = Self::defense_slot(index)?;
+        let mut data = self.info.try_borrow_mut_data()?;
+        data[start..start + DEFENSE_SIZE].copy_from_slice(&[
+            d.resist,
+            d.immune_aspects,
+            d.immune_states,
+        ]);
+        Ok(())
+    }
+
+    /// The defenses of every monster slot, by index.
+    pub fn defenses(&self) -> Result<[MonsterDefense; MONSTERS_MAX]> {
+        let mut out = [MonsterDefense::NONE; MONSTERS_MAX];
+        for (i, d) in out.iter_mut().enumerate() {
+            *d = self.defense(i as u8)?;
+        }
+        Ok(out)
+    }
+
+    /// Copies the registry resonance table bodies.
+    pub fn set_tables(
+        &self,
+        aspects: &[u8; RES_ASPECTS_LEN],
+        traits: &[u8; RES_TRAITS_LEN],
+        pairs: &[u8; RES_PAIRS_LEN],
+    ) -> Result<()> {
+        let mut data = self.info.try_borrow_mut_data()?;
+        data[off::RES_ASPECTS..off::RES_TRAITS].copy_from_slice(aspects);
+        data[off::RES_TRAITS..off::RES_PAIRS].copy_from_slice(traits);
+        data[off::RES_PAIRS..off::BURNING].copy_from_slice(pairs);
+        Ok(())
+    }
+
+    /// Decodes the copied resonance tables into `out` (kept in a `Box` by the caller).
+    pub fn tables_into(&self, out: &mut ResonanceTables) -> Result<()> {
+        let data = self.info.try_borrow_data()?;
+        out.decode_into(
+            &data[off::RES_ASPECTS..off::RES_TRAITS],
+            &data[off::RES_TRAITS..off::RES_PAIRS],
+            &data[off::RES_PAIRS..off::BURNING],
+        )
+        .map_err(|_| error!(SessionError::InvalidRegistryTable))
+    }
+
+    pub fn burning_cells(&self) -> Result<[BurningCell; BURNING_CELLS_MAX]> {
+        let data = self.info.try_borrow_data()?;
+        let mut out = [BurningCell::default(); BURNING_CELLS_MAX];
+        for (i, c) in out.iter_mut().enumerate() {
+            let at = off::BURNING + i * BURNING_CELL_SIZE;
+            let d = BurningCellData::deserialize(&mut &data[at..at + BURNING_CELL_SIZE])
+                .map_err(|_| error!(SessionError::InvalidMonsterState))?;
+            *c = d.into();
+        }
+        Ok(out)
+    }
+
+    pub fn set_burning_cells(&self, cells: &[BurningCell; BURNING_CELLS_MAX]) -> Result<()> {
+        let mut data = self.info.try_borrow_mut_data()?;
+        for (i, c) in cells.iter().enumerate() {
+            let at = off::BURNING + i * BURNING_CELL_SIZE;
+            BurningCellData::from(*c)
+                .serialize(&mut &mut data[at..at + BURNING_CELL_SIZE])
+                .map_err(|_| error!(SessionError::InvalidMonsterState))?;
+        }
+        Ok(())
+    }
+
+    fn defense_slot(index: u8) -> Result<usize> {
+        require!(
+            (index as usize) < MONSTERS_MAX,
+            SessionError::InvalidMonster
+        );
+        Ok(off::DEFENSE + index as usize * DEFENSE_SIZE)
+    }
+
     fn mods_slot(index: u8) -> Result<usize> {
         require!(
             (index as usize) < MONSTERS_MAX,
@@ -254,12 +419,19 @@ mod tests {
     #[test]
     fn discriminator_and_size_are_anchors() {
         assert_eq!(MONSTER_STATE_DISCRIMINATOR, *MonsterState::DISCRIMINATOR);
-        assert_eq!(
-            MONSTER_STATE_SPACE,
-            8 + MonsterStateData::SIZE + MONSTERS_MAX * (MONSTER_SKILLS_MAX + MODS_LEN)
-        );
         assert_eq!(off::COOLDOWNS, 8 + MonsterStateData::SIZE);
-        assert_eq!(off::MODS + MONSTERS_MAX * MODS_LEN, MONSTER_STATE_SPACE);
+        assert_eq!(off::END, MONSTER_STATE_SPACE);
+        assert_eq!(RES_ASPECTS_LEN, deadroll_combat::tables::ASPECTS_LEN);
+        assert_eq!(RES_TRAITS_LEN, deadroll_combat::tables::TRAITS_LEN);
+        assert_eq!(RES_PAIRS_LEN, deadroll_combat::tables::PAIRS_LEN);
+        assert_eq!(
+            borsh::to_vec(&MonsterDefenseData::default()).unwrap().len(),
+            DEFENSE_SIZE
+        );
+        assert_eq!(
+            borsh::to_vec(&BurningCellData::default()).unwrap().len(),
+            BURNING_CELL_SIZE
+        );
     }
 
     #[test]
@@ -313,6 +485,50 @@ mod tests {
         assert_eq!(state.mods[1], ModsData::default());
         // The cooldowns of the last monster were not touched by its mods.
         assert_eq!(state.cooldowns[MONSTERS_MAX - 1], [9; 4]);
+    }
+
+    #[test]
+    fn defenses_tables_and_burning_cells_in_place() {
+        let session = Pubkey::new_unique();
+        let mut account = monsters_account(session, &[monster(5, 5)]);
+        let defense = MonsterDefense {
+            resist: 0b10,
+            immune_aspects: 0b1,
+            immune_states: 0b100,
+        };
+        let mut cells = [BurningCell::default(); BURNING_CELLS_MAX];
+        cells[3] = BurningCell {
+            cell: Cell { x: 2, y: 9 },
+            until_round: 7,
+            power: 4,
+            source: 1,
+        };
+        let tables = crate::state::test_support::tables();
+        let (a, t, p) = tables.to_bytes();
+        {
+            let info = account.info();
+            let view = Monsters::load(&info, &session).unwrap();
+            view.set_defense(MONSTERS_MAX as u8 - 1, &defense).unwrap();
+            assert!(view.set_defense(MONSTERS_MAX as u8, &defense).is_err());
+            view.set_burning_cells(&cells).unwrap();
+            view.set_tables(&a, &t, &p).unwrap();
+            assert_eq!(view.defense(MONSTERS_MAX as u8 - 1).unwrap(), defense);
+            assert_eq!(view.defense(0).unwrap(), MonsterDefense::NONE);
+            assert_eq!(view.burning_cells().unwrap(), cells);
+            let mut back = Box::<ResonanceTables>::default();
+            view.tables_into(&mut back).unwrap();
+            assert_eq!(*back, tables);
+        }
+        let state = MonsterState::try_deserialize(&mut &account.data[..]).unwrap();
+        assert_eq!(state.defense[MONSTERS_MAX - 1].immune_states, 0b100);
+        assert_eq!(state.burning_cells[3].power, 4);
+        assert_eq!(state.res_pairs, p);
+        // Garbled tables are refused.
+        let mut account = monsters_account(session, &[]);
+        let info = account.info();
+        let view = Monsters::load(&info, &session).unwrap();
+        let mut back = Box::<ResonanceTables>::default();
+        assert!(view.tables_into(&mut back).is_err());
     }
 
     #[test]

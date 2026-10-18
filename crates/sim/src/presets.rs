@@ -10,12 +10,15 @@ use std::{
 };
 
 use deadroll_combat::DamageRange;
-use deadroll_rules::{items::Equipment, player::predisposition_allowed, MonsterBase, PlayerTuning};
+use deadroll_rules::{
+    items::Equipment, player::predisposition_allowed, registry::Registry, MonsterBase,
+    MonsterDefense, PlayerTuning,
+};
 use deadroll_skillcheck::{
     validate, validate_starting, Category, Effect, Purpose, SkillBlocks, SkillError, Target,
     Trigger, SKILL_ASPECTS_MAX,
 };
-use deadroll_types::{Aspect, Class, Form, Race, Source, Tier, STATS_COUNT};
+use deadroll_types::{Aspect, Class, Form, Race, Source, StateKind, Tier, STATS_COUNT};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::named::{self, Named};
@@ -190,7 +193,8 @@ impl HeroPreset {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MonsterPreset {
     pub name: String,
-    /// The registry bestiary id it mirrors, if any (informational).
+    /// The registry bestiary id it mirrors: its defenses then come from
+    /// `assets/registry/bestiary.json`, the same record the program reads.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bestiary_id: Option<u8>,
     /// Killing it wins the fight.
@@ -200,9 +204,15 @@ pub struct MonsterPreset {
     pub attack_bonus: u32,
     pub defense: u32,
     pub armor: u32,
-    /// Resistance per aspect, bp (counterweight).
-    #[serde(with = "named::by_aspect", default)]
-    pub resist: [u32; Aspect::COUNT],
+    /// Defenses of a monster with no `bestiary_id` (docs/DAMAGE_TYPES_AND_MIXES.md 9): the
+    /// aspects it resists (at `MonsterScaling::resist_bp`), is immune to, and the states it
+    /// never gets.
+    #[serde(with = "named::list", default, skip_serializing_if = "Vec::is_empty")]
+    pub resistance: Vec<Aspect>,
+    #[serde(with = "named::list", default, skip_serializing_if = "Vec::is_empty")]
+    pub immunity: Vec<Aspect>,
+    #[serde(with = "named::list", default, skip_serializing_if = "Vec::is_empty")]
+    pub state_immunity: Vec<StateKind>,
     pub xp_per_level: u32,
     pub hp: u32,
     pub hp_per_level: u32,
@@ -236,7 +246,6 @@ impl MonsterPreset {
             attack_bonus: self.attack_bonus,
             defense: self.defense,
             armor: self.armor,
-            resist_bp: self.resist,
             xp_per_level: self.xp_per_level,
             boss: self.boss,
             hp: self.hp,
@@ -261,7 +270,9 @@ impl MonsterPreset {
             attack_bonus: b.attack_bonus,
             defense: b.defense,
             armor: b.armor,
-            resist: b.resist_bp,
+            resistance: Vec::new(),
+            immunity: Vec::new(),
+            state_immunity: Vec::new(),
             xp_per_level: b.xp_per_level,
             hp: b.hp,
             hp_per_level: b.hp_per_level,
@@ -270,8 +281,34 @@ impl MonsterPreset {
         }
     }
 
+    /// Its defenses: the registry record for a bestiary monster, its own lists otherwise.
+    pub fn defense(&self, registry: &Registry) -> MonsterDefense {
+        let bits = |list: &[u8]| list.iter().fold(0u8, |m, b| m | 1 << b);
+        match self.bestiary_id {
+            Some(id) => registry.defense_of(id),
+            None => MonsterDefense {
+                resist: bits(&self.resistance.iter().map(|a| *a as u8).collect::<Vec<_>>()),
+                immune_aspects: bits(&self.immunity.iter().map(|a| *a as u8).collect::<Vec<_>>()),
+                immune_states: bits(
+                    &self
+                        .state_immunity
+                        .iter()
+                        .map(|k| *k as u8)
+                        .collect::<Vec<_>>(),
+                ),
+            },
+        }
+    }
+
     pub fn warnings(&self) -> Vec<String> {
         let mut out = Vec::new();
+        if self.bestiary_id.is_some()
+            && !(self.resistance.is_empty()
+                && self.immunity.is_empty()
+                && self.state_immunity.is_empty())
+        {
+            out.push("defense lists are ignored: the bestiary record has them".into());
+        }
         if self.attack.max < self.attack.min {
             out.push("attack max below min (max = min is used)".into());
         }
@@ -338,24 +375,45 @@ impl Kind {
     }
 }
 
-/// All presets, by id.
+/// All presets, by id, and the registry data they fight with.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Presets {
     pub heroes: BTreeMap<String, HeroPreset>,
     pub skills: BTreeMap<String, SkillPreset>,
     pub monsters: BTreeMap<String, MonsterPreset>,
     pub encounters: BTreeMap<String, EncounterPreset>,
+    /// `assets/registry`: aspects, traits, resonances and monster defenses, the tables the
+    /// program copies at `open_session`.
+    pub registry: Registry,
+}
+
+/// The registry folder for a presets folder: `DEADROLL_REGISTRY`, else `assets/registry` of the
+/// repository that holds `tools/balance/presets`, else the one this crate was built in.
+pub fn registry_dir(root: &Path) -> PathBuf {
+    if let Some(dir) = std::env::var_os("DEADROLL_REGISTRY") {
+        return PathBuf::from(dir);
+    }
+    let beside = root.join("../../../assets/registry");
+    if beside.join("resonances.json").exists() {
+        return beside;
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/registry")
 }
 
 impl Presets {
     /// Reads every `*.json` under `root`. Files that do not parse are skipped and reported.
     pub fn load(root: &Path) -> (Presets, Vec<String>) {
         let mut errors = Vec::new();
+        let registry = Registry::load(&registry_dir(root)).unwrap_or_else(|e| {
+            errors.push(format!("registry: {e}"));
+            Registry::default()
+        });
         let p = Presets {
             heroes: load_dir(&root.join(Kind::Heroes.dir()), &mut errors),
             skills: load_dir(&root.join(Kind::Skills.dir()), &mut errors),
             monsters: load_dir(&root.join(Kind::Monsters.dir()), &mut errors),
             encounters: load_dir(&root.join(Kind::Encounters.dir()), &mut errors),
+            registry,
         };
         (p, errors)
     }
