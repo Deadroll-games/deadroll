@@ -1,9 +1,9 @@
 // Props contract for the inventory panel (character screen). Pure UI: the route reads the
-// loadout and sends the instructions.
+// character's gear and sends the instructions.
 import type { ReactNode } from "react";
 
 export type InventoryItemView = {
-  /** Soulbound record index in the loadout (the `equip` argument). */
+  /** Soulbound record index in `Character.gear` (the `equip` argument). */
   index: number;
   /** `ItemBase` key ("sword"). */
   base: string;
@@ -20,15 +20,13 @@ export type InventoryItemView = {
 export type InventoryProps = {
   /** Every `EquipSlot` key in on-chain order, with its label. */
   slots: { key: string; label: string }[];
-  /** null: the character has no loadout yet (created before items). */
-  items: InventoryItemView[] | null;
+  /** The character's soulbound items (empty for a tombstone: they vanished with it). */
+  items: InventoryItemView[];
   /** In a session (equipment is locked until it ends), dead, or not the viewer's character. */
   locked: string | null;
   busy: boolean;
   onEquip: (index: number, slot: string) => void;
   onUnequip: (slot: string) => void;
-  /** Creates the loadout with the class starter kit; only when `items` is null. */
-  onCreate?: () => void;
   /** The item's sprite (the app renders it from the on-chain sprite book). */
   icon: (base: string) => ReactNode;
 };

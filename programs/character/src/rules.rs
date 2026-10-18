@@ -2,14 +2,18 @@
 //! Creation and HP numbers come from `deadroll_rules::PlayerTuning::DEFAULT` (shared with the
 //! session program and `tools/balance`); the rest marked BALANCE are placeholders.
 
-use deadroll_rules::{player, PlayerTuning};
+use deadroll_rules::{player, BalanceConfig, PlayerTuning};
 use deadroll_types::{Aspect, Class, Race, STATS_COUNT};
 
-/// The numbers the program plays with.
-const TUNING: &PlayerTuning = &PlayerTuning::DEFAULT;
+/// The balance table the program plays with (item numbers and starter kits: `BALANCE.items`).
+pub const BALANCE: &BalanceConfig = &BalanceConfig::DEFAULT;
+/// Creation and HP numbers.
+const TUNING: &PlayerTuning = &BALANCE.players;
 
 /// Account layout version written by this program.
 pub const ACCOUNT_VERSION: u8 = 1;
+/// `Character` layout version: 2 has `gear` after `nft_frozen`.
+pub const CHARACTER_VERSION: u8 = 2;
 
 /// Every stat starts here before the player spends points.
 pub const STAT_BASE: u16 = TUNING.stat_base;

@@ -30,7 +30,7 @@ pub const SKILLS: &[u8] = b"skills";
 pub const BAG: &[u8] = b"bag";
 /// `["item", asset]` in items.
 pub const ITEM: &[u8] = b"item";
-/// `["loadout", character]` in items.
+/// `["loadout", character]` in items. Not used since patch 1 (gear lives in the character).
 pub const LOADOUT: &[u8] = b"loadout";
 /// `["map", dm, map_index: u32]` in map.
 pub const MAP: &[u8] = b"map";

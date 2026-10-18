@@ -2,7 +2,7 @@
 //! `TurnSkipped`, `ModsTicked`, `EffectResolved`, `SkillUsed`, `PlayerDied`, `FleeVoted`, `RewardsClaimed` and `EscrowClaimed`
 //! are session-local.
 use anchor_lang::prelude::*;
-use deadroll_character::state::SKILLS_MAX;
+use deadroll_character::state::{MAP_SKILLS, SKILLS_MAX};
 use deadroll_combat::MODS_MAX;
 use deadroll_types::{ActiveState, SessionStatus, StateKind, STATES_MAX, TURN_ORDER_MAX};
 
@@ -37,6 +37,10 @@ pub struct PlayerReady {
     pub session: Pubkey,
     pub slot: u8,
     pub ready: bool,
+    /// The skills taken onto the map (`Participation.skills`), empty when not ready.
+    pub skills: [u8; MAP_SKILLS],
+    /// HP with the gear, copied at ready.
+    pub hp: u32,
 }
 
 #[event]

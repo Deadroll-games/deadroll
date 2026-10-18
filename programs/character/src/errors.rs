@@ -42,4 +42,20 @@ pub enum CharacterError {
     NftDisabled,
     #[msg("Arithmetic overflow")]
     MathOverflow,
+    #[msg("Map skill selection rejected: 4 active, 1 reactive, 1 passive of the character's own")]
+    InvalidSkillSelection,
+    #[msg("No such soulbound item")]
+    NoSuchItem,
+    #[msg("This item is not worn in that slot")]
+    WrongSlot,
+    #[msg("Character level too low for this item")]
+    LevelTooLow,
+    #[msg("Nothing is worn in that slot")]
+    SlotEmpty,
+    #[msg("A session key needs its session token account")]
+    SessionTokenMissing,
+    #[msg("Session token does not match the signer, the owner or the game")]
+    InvalidSessionToken,
+    #[msg("Session token expired")]
+    SessionTokenExpired,
 }

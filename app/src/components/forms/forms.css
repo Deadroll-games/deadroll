@@ -251,3 +251,21 @@ canvas.forms-preview {
   padding-left: 18px;
   font-size: 13px;
 }
+
+.forms-skills {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+
+.forms-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 12px;
+}
+
+.forms-field .forms-check input {
+  width: auto;
+  min-width: 0;
+}

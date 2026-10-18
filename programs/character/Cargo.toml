@@ -1,6 +1,6 @@
 [package]
 name = "deadroll-character"
-description = "Deadroll character: player profiles, characters, skills, bag."
+description = "Deadroll character: player profiles, characters, gear, skills, bag."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -18,7 +18,12 @@ default = ["nft"]
 cpi = ["no-entrypoint"]
 no-entrypoint = []
 no-log-ix-name = []
-idl-build = ["anchor-lang/idl-build", "deadroll-types/idl-build", "deadroll-skillcheck/idl-build"]
+idl-build = [
+    "anchor-lang/idl-build",
+    "deadroll-types/idl-build",
+    "deadroll-skillcheck/idl-build",
+    "session-keys/idl-build",
+]
 anchor-debug = []
 custom-heap = []
 custom-panic = []
@@ -30,9 +35,9 @@ deadroll-types = { workspace = true, features = ["anchor"] }
 deadroll-skillcheck = { workspace = true, features = ["anchor"] }
 # Creation and HP numbers, shared with the session program and tools/balance.
 deadroll-rules.workspace = true
-# Program id only (owner of `GameConfig`).
-deadroll-registry.workspace = true
 mpl-core = { workspace = true, optional = true }
+# `SessionTokenV2` layout for the session key check on `equip` / `unequip` (`auth.rs`).
+session-keys.workspace = true
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

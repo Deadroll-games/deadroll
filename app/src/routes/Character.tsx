@@ -72,8 +72,8 @@ export function CharacterPage() {
       ...(d.skills ? { skills: d.skills } : {}),
     });
     if (c.profileIx && !(await send("create_profile", owner, [c.profileIx]))) return;
-    // The class starter kit comes in the same transaction (items init_loadout).
-    const res = await send(`create_character ${d.name} (Core NFT + starter items)`, owner, [c.ix, c.loadoutIx]);
+    // The class starter items come with the character (create_character), worn.
+    const res = await send(`create_character ${d.name} (Core NFT + starter items)`, owner, [c.ix]);
     if (res) {
       setDraft((x) => ({ ...x, name: "" }));
       await refresh();

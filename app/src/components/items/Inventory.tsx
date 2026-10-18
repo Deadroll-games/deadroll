@@ -16,14 +16,14 @@ function WearButtons({ item, busy, locked, onEquip, label }: { item: InventoryIt
   );
 }
 
-export function Inventory({ slots, items, locked, busy, onEquip, onUnequip, onCreate, icon }: InventoryProps) {
+export function Inventory({ slots, items, locked, busy, onEquip, onUnequip, icon }: InventoryProps) {
   const label = (key: string) => slots.find((s) => s.key === key)?.label ?? key;
   return (
     <div className="inventory">
       {locked && <p className="muted">{locked}</p>}
       <ul className="equip-grid" aria-label="equipment">
         {slots.map((slot) => {
-          const item = items?.find((i) => i.worn === slot.key) ?? null;
+          const item = items.find((i) => i.worn === slot.key) ?? null;
           return (
             <li key={slot.key} className={`equip-slot${item ? " worn" : ""}`} data-testid={`slot-${slot.key}`}>
               <span className="equip-slot-name">{slot.label}</span>
@@ -42,15 +42,8 @@ export function Inventory({ slots, items, locked, busy, onEquip, onUnequip, onCr
           );
         })}
       </ul>
-      {items === null ? (
-        <p>
-          <span className="muted">No items yet: this character was created before items existed. </span>
-          {onCreate && (
-            <button type="button" className="btn" disabled={busy || locked !== null} onClick={onCreate}>
-              Get the class starter kit
-            </button>
-          )}
-        </p>
+      {items.length === 0 ? (
+        <p className="muted">No items.</p>
       ) : (
         <table className="inventory-items">
           <thead>
@@ -70,7 +63,7 @@ export function Inventory({ slots, items, locked, busy, onEquip, onUnequip, onCr
                 <td>{item.label} <span className="muted">· soulbound</span></td>
                 <td>{item.level}</td>
                 <td>{item.bonus}</td>
-                <td>{item.worn ? label(item.worn) : <span className="muted">in the bag</span>}</td>
+                <td>{item.worn ? label(item.worn) : <span className="muted">not worn</span>}</td>
                 <td>
                   <WearButtons item={item} busy={busy} locked={locked !== null} onEquip={onEquip} label={label} />
                 </td>

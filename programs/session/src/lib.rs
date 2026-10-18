@@ -16,6 +16,7 @@ pub mod state;
 pub mod turns;
 pub mod vrf;
 
+use deadroll_character::state::MAP_SKILLS;
 use instructions::*;
 use rules::MAX_PATH;
 
@@ -34,14 +35,20 @@ pub mod deadroll_session {
         open_session::handler(ctx, price_lamports, dm_actor)
     }
 
-    /// Player joins with a character, pays a share of the price into escrow, locks the character.
+    /// Player joins with a character and pays a share of the price into escrow.
     pub fn join_session(ctx: Context<JoinSession>, contribution: u64, actor: Pubkey) -> Result<()> {
         join_session::handler(ctx, contribution, actor)
     }
 
-    /// Player marks (or unmarks) ready in the lobby. Main wallet only.
-    pub fn set_ready(ctx: Context<SetReady>, ready: bool) -> Result<()> {
-        set_ready::handler(ctx, ready)
+    /// Player marks (or unmarks) ready in the lobby, main wallet only. Ready takes `selection`
+    /// onto the map (4 active, 1 reactive, 1 passive `SkillSet` indexes) and locks the character;
+    /// unready unlocks it.
+    pub fn set_ready(
+        ctx: Context<SetReady>,
+        ready: bool,
+        selection: [u8; MAP_SKILLS],
+    ) -> Result<()> {
+        set_ready::handler(ctx, ready, selection)
     }
 
     /// DM starts the party once everyone is ready and the price is collected: requests the
@@ -77,7 +84,8 @@ pub mod deadroll_session {
         end_turn::handler(ctx)
     }
 
-    /// Player attacks a monster with a skill slot (`0xFF` = weapon): spends AP, requests VRF.
+    /// Player attacks with the weapon (`0xFF`) or one of the active skills taken onto the map:
+    /// spends AP, requests VRF.
     pub fn act(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
         act::handler(ctx, skill_slot, target)
     }

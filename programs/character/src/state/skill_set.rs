@@ -32,3 +32,21 @@ pub struct SkillSet {
     pub skills: [SkillRecord; SKILLS_MAX],
     pub bump: u8,
 }
+
+impl SkillSet {
+    /// Death: the skills burn with the character (docs/SKILL_BUILDER.md, section 11). Their
+    /// mechanics are erased, the names stay as the tombstone's memorial.
+    pub fn burn(&mut self) {
+        for s in &mut self.skills {
+            *s = SkillRecord {
+                name: s.name,
+                ..SkillRecord::default()
+            };
+        }
+    }
+}
+
+/// Skills taken onto a map (`deadroll_skillcheck::MapSelection`): 4 active, 1 reactive,
+/// 1 passive. A local literal so the IDL can size the instruction argument.
+pub const MAP_SKILLS: usize = 6;
+const _: () = assert!(MAP_SKILLS == deadroll_skillcheck::STARTING_MAX);

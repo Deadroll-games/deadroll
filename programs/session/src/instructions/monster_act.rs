@@ -37,6 +37,20 @@ pub struct MonsterAct<'info> {
     /// CHECK: the target's `Character`; the callback marks it dead at 0 HP.
     #[account(address = participation.core.character @ SessionError::InvalidCharacter)]
     pub character: UncheckedAccount<'info>,
+    /// CHECK: the target's `SkillSet` (address from the seeds); burned if the hit kills.
+    #[account(
+        seeds = [seeds::SKILLS, participation.core.character.as_ref()],
+        bump,
+        seeds::program = deadroll_character::ID,
+    )]
+    pub skill_set: UncheckedAccount<'info>,
+    /// CHECK: the target's `Bag` (address from the seeds); burned if the hit kills.
+    #[account(
+        seeds = [seeds::BAG, participation.core.character.as_ref()],
+        bump,
+        seeds::program = deadroll_character::ID,
+    )]
+    pub bag: UncheckedAccount<'info>,
     /// CHECK: MagicBlock `SessionTokenV2`, checked in `auth::check_actor`.
     pub session_token: Option<UncheckedAccount<'info>>,
     /// CHECK: our `["identity"]` PDA, signs the VRF request.
@@ -135,8 +149,8 @@ pub fn handler(ctx: Context<MonsterAct>, monster: u8, action: u8, target: u8) ->
             monsters: accounts.monsters.key(),
             participation: participation.key(),
             character: accounts.character.key(),
-            // Not read when a monster attacks; the list stays fixed.
-            skill_set: deadroll_character::ID,
+            skill_set: accounts.skill_set.key(),
+            bag: accounts.bag.key(),
             target_participation: None,
         },
     )?;

@@ -13,6 +13,17 @@ pub const REACTIVE_MAX: usize = 1;
 pub const PASSIVE_MAX: usize = 1;
 /// Starting skills: one full loadout.
 pub const STARTING_MAX: usize = ACTIVE_MAX + REACTIVE_MAX + PASSIVE_MAX;
+/// An empty slot of a map selection.
+pub const NO_SKILL: u8 = 0xFF;
+/// The skills taken onto a map: `SkillSet` indexes, slots `0..4` active, `4` reactive,
+/// `5` passive, [`NO_SKILL`] for an empty slot.
+pub type MapSelection = [u8; STARTING_MAX];
+/// Each category's first slot in a [`MapSelection`] and its number of slots.
+pub const SELECTION_SLOTS: [(Category, usize, usize); 3] = [
+    (Category::Active, 0, ACTIVE_MAX),
+    (Category::Reactive, ACTIVE_MAX, REACTIVE_MAX),
+    (Category::Passive, ACTIVE_MAX + REACTIVE_MAX, PASSIVE_MAX),
+];
 
 /// Why a skill was rejected. One variant per rule.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,6 +65,14 @@ pub enum SkillError {
     TooManyActive,
     TooManyReactive,
     TooManyPassive,
+    /// Map selection: an index past the character's skills.
+    SelectionUnknownSkill,
+    /// Map selection: the same skill twice.
+    SelectionRepeated,
+    /// Map selection: a skill in a slot of another category.
+    SelectionCategory,
+    /// Map selection: not exactly min(slots, owned) skills of a category (section 13).
+    SelectionCount,
 }
 
 impl SkillError {
@@ -79,6 +98,12 @@ impl SkillError {
             SkillError::TooManyActive => "more than 4 active skills",
             SkillError::TooManyReactive => "more than 1 reactive skill",
             SkillError::TooManyPassive => "more than 1 passive skill",
+            SkillError::SelectionUnknownSkill => "the character has no such skill",
+            SkillError::SelectionRepeated => "the same skill is chosen twice",
+            SkillError::SelectionCategory => "a skill is in a slot of another category",
+            SkillError::SelectionCount => {
+                "take 4 active, 1 reactive and 1 passive (all of a kind if there are fewer)"
+            }
         }
     }
 }
@@ -192,6 +217,35 @@ pub fn check_loadout<'a>(
     }
     if passive > PASSIVE_MAX {
         return Err(SkillError::TooManyPassive);
+    }
+    Ok(())
+}
+
+/// The skills taken onto a map (sections 3.4, 13): every slot holds a skill of its own category
+/// or [`NO_SKILL`], no skill twice, and each category is full: exactly `min(slots, owned)`.
+/// `owned` is the category of every `SkillSet` skill, by index.
+pub fn check_map_selection(owned: &[Category], selection: &MapSelection) -> Result<(), SkillError> {
+    for (i, &index) in selection.iter().enumerate() {
+        if index != NO_SKILL && selection[i + 1..].contains(&index) {
+            return Err(SkillError::SelectionRepeated);
+        }
+    }
+    for (category, start, slots) in SELECTION_SLOTS {
+        let mut chosen = 0usize;
+        for &index in &selection[start..start + slots] {
+            if index == NO_SKILL {
+                continue;
+            }
+            match owned.get(index as usize) {
+                None => return Err(SkillError::SelectionUnknownSkill),
+                Some(c) if *c != category => return Err(SkillError::SelectionCategory),
+                Some(_) => chosen += 1,
+            }
+        }
+        let have = owned.iter().filter(|c| **c == category).count();
+        if chosen != have.min(slots) {
+            return Err(SkillError::SelectionCount);
+        }
     }
     Ok(())
 }

@@ -99,8 +99,9 @@ pub fn handler(ctx: Context<StartSession>) -> Result<()> {
             monsters: accounts.monsters.key(),
             participation,
             character,
-            // Not read for the initiative roll.
+            // Not read for the initiative roll: no one dies of it.
             skill_set: character,
+            bag: character,
             target_participation: None,
         },
     )?;

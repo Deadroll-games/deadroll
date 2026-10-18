@@ -10,10 +10,10 @@ use crate::{
     cpi_out::nft::MPL_CORE_ID,
     errors::CharacterError,
     events::CharacterCreated,
-    rules::{self, ACCOUNT_VERSION, START_TIER},
+    rules::{self, ACCOUNT_VERSION, CHARACTER_VERSION, START_TIER},
     state::{
-        Bag, Character, PlayerProfile, SkillRecord, SkillSet, NAME_LEN, RESOURCE_KINDS, SKILLS_MAX,
-        SKILL_NAME_LEN,
+        Bag, Character, Gear, PlayerProfile, SkillRecord, SkillSet, NAME_LEN, RESOURCE_KINDS,
+        SKILLS_MAX, SKILL_NAME_LEN,
     },
     trust,
 };
@@ -133,10 +133,12 @@ pub fn handler(ctx: Context<CreateCharacter>, args: CreateCharacterArgs) -> Resu
         .ok_or(CharacterError::TooManyCharacters)?;
 
     let nft = mint_nft(&ctx, &args, &config.uri_base)?;
+    // The class starter soulbound items, worn (docs/CHARACTER.md, section 9, step 5).
+    let gear = Gear::starter(args.class);
 
     ctx.accounts.character.set_inner(Character {
         core: CharacterData {
-            version: ACCOUNT_VERSION,
+            version: CHARACTER_VERSION,
             owner,
             index,
             nft,
@@ -157,6 +159,7 @@ pub fn handler(ctx: Context<CreateCharacter>, args: CreateCharacterArgs) -> Resu
         name: args.name,
         unspent_points: 0,
         nft_frozen: false,
+        gear,
     });
     ctx.accounts.skill_set.set_inner(SkillSet {
         version: ACCOUNT_VERSION,
@@ -183,6 +186,7 @@ pub fn handler(ctx: Context<CreateCharacter>, args: CreateCharacterArgs) -> Resu
         predisposition: args.predisposition,
         nft,
         skill_count: args.skills.len() as u8,
+        item_count: gear.item_count,
     });
     Ok(())
 }

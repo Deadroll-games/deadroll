@@ -5,16 +5,14 @@
 //! (CONTRACTS.md, section 4.1), so only the core prefix is decoded here: lane fields appended
 //! after it never break the reader.
 use anchor_lang::prelude::*;
-use anchor_lang::{Discriminator, Space};
-use deadroll_character::state::{SkillRecord, SkillSet, SKILLS_MAX};
+use anchor_lang::{AccountDeserialize, Discriminator, Space};
+use deadroll_character::state::{Character, SkillRecord, SkillSet, SKILLS_MAX};
 use deadroll_registry::state::{
     records::{BESTIARY_MAX, MONSTER_SIZE, TILE_SIZE},
     Table, TableKind, TABLE_CAP,
 };
 use deadroll_rules::items::Equipment;
-use deadroll_types::{
-    Cell, CharacterData, LoadoutData, MapData, Spawn, Tile, MAP_CELLS, MAP_MAX, SPAWNS_MAX,
-};
+use deadroll_types::{Cell, CharacterData, MapData, Spawn, Tile, MAP_CELLS, MAP_MAX, SPAWNS_MAX};
 
 use crate::errors::SessionError;
 
@@ -55,22 +53,22 @@ pub fn read_character(info: &AccountInfo) -> Result<CharacterData> {
         .ok_or(error!(SessionError::InvalidCharacter))
 }
 
-/// What a character wears, from its `deadroll_items` `Loadout` (address checked by the caller).
-/// A character without a loadout (created before items) wears nothing.
-pub fn read_equipment(info: &AccountInfo) -> Result<Equipment> {
-    if info.owner != &deadroll_items::ID {
-        require!(info.data_is_empty(), SessionError::InvalidLoadout);
-        return Ok(Equipment::EMPTY);
-    }
-    decode::<LoadoutData>(
-        info,
-        &deadroll_items::ID,
-        deadroll_items::state::Loadout::DISCRIMINATOR
-            .try_into()
-            .map_err(|_| error!(SessionError::InvalidLoadout))?,
-    )
-    .map(|l| Equipment(l.equipment()))
-    .ok_or(error!(SessionError::InvalidLoadout))
+/// A `deadroll_character` `Character` with what it wears (`Character.gear`): the whole account,
+/// not only the frozen core. Read once per party, at `set_ready(true)`.
+pub fn read_character_gear(info: &AccountInfo) -> Result<(CharacterData, Equipment)> {
+    require!(
+        info.owner == &deadroll_character::ID,
+        SessionError::InvalidCharacter
+    );
+    let data = info.try_borrow_data()?;
+    let character = Box::new(
+        Character::try_deserialize(&mut &data[..])
+            .map_err(|_| error!(SessionError::InvalidCharacter))?,
+    );
+    Ok((
+        character.core.clone(),
+        Equipment(character.gear.equipment()),
+    ))
 }
 
 /// A `deadroll_map` `Map` account.

@@ -17,3 +17,13 @@ pub struct Bag {
     pub item_count: u8,
     pub bump: u8,
 }
+
+impl Bag {
+    /// Death: everything in the bag burns (docs/ITEMS_AND_CRAFT.md, section 6.4). Item NFTs
+    /// are not in the game yet; when they are, the items program burns the assets themselves.
+    pub fn burn(&mut self) {
+        self.resources = [0; RESOURCE_KINDS];
+        self.items = [Pubkey::default(); BAG_SLOTS];
+        self.item_count = 0;
+    }
+}

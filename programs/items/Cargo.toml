@@ -1,6 +1,6 @@
 [package]
 name = "deadroll-items"
-description = "Deadroll items: loadouts (soulbound starter items, equipment by slot); later item state, affixes, crafting."
+description = "Deadroll items: item NFTs, affixes, crafting (later). Starter items and equipment live in deadroll-character."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -16,18 +16,13 @@ default = []
 cpi = ["no-entrypoint"]
 no-entrypoint = []
 no-log-ix-name = []
-idl-build = ["anchor-lang/idl-build", "deadroll-types/idl-build", "session-keys/idl-build"]
+idl-build = ["anchor-lang/idl-build"]
 anchor-debug = []
 custom-heap = []
 custom-panic = []
 
 [dependencies]
 anchor-lang.workspace = true
-deadroll-types = { workspace = true, features = ["anchor"] }
-# Item numbers, starter kits and equip rules, shared with the session program and tools/balance.
-deadroll-rules.workspace = true
-# `SessionTokenV2` layout for the session key check (`auth.rs`).
-session-keys.workspace = true
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

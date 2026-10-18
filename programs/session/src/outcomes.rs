@@ -4,7 +4,7 @@ use anchor_lang::prelude::*;
 use deadroll_types::{Monster, SessionStatus};
 
 use crate::{
-    cpi_out::{self, SessionSigner},
+    cpi_out::{self, character::DeathAccounts, SessionSigner},
     events::{MonsterKilled, PlayerDied, SessionEnded},
     rules::{is_boss, monster_profile},
     state::GameSession,
@@ -40,20 +40,21 @@ pub fn monster_killed(
 }
 
 /// Player `slot` (its `character`) reached 0 HP, killed by unit `by`: out of the living,
-/// `character.mark_dead` (the tombstone), `PlayerDied`. The last living player wipes the party.
+/// `character.mark_dead` (the tombstone; its skills, bag and soulbound items burn), `PlayerDied`.
+/// The last living player wipes the party.
 pub fn player_killed<'info>(
     session: &mut GameSession,
     session_key: Pubkey,
     slot: u8,
     by: u8,
     signer: &SessionSigner<'_, 'info>,
-    character: &AccountInfo<'info>,
+    death: &DeathAccounts<'_, 'info>,
 ) -> Result<()> {
     session.alive_mask &= !(1 << slot);
-    cpi_out::character::mark_dead(signer, character)?;
+    cpi_out::character::mark_dead(signer, death)?;
     emit!(PlayerDied {
         session: session_key,
-        character: character.key(),
+        character: death.character.key(),
         slot,
         by,
     });

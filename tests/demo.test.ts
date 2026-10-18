@@ -184,7 +184,7 @@ function initiativeOrder(seed: Buffer, units: [number, number][]): { order: numb
 // ---------------------------------------------------------------------------------------------
 // what must be on the validator
 
-const IDLS = ["deadroll_session", "deadroll_character", "deadroll_map", "deadroll_items"].map(
+const IDLS = ["deadroll_session", "deadroll_character", "deadroll_map"].map(
   (n) => new URL(`../target/idl/${n}.json`, import.meta.url),
 );
 const missing: string[] = [];
@@ -204,9 +204,6 @@ const load = (i: number) => JSON.parse(readFileSync(IDLS[i], "utf8"));
 const session: any = SKIP ? null : new Program(load(0), provider);
 const characterProgram: any = SKIP ? null : new Program(load(1), provider);
 const mapProgram: any = SKIP ? null : new Program(load(2), provider);
-const itemsProgram: any = SKIP ? null : new Program(load(3), provider);
-const itemsEvents = SKIP ? null : new EventParser(ITEMS, itemsProgram.coder);
-const loadoutOf = (character: PublicKey) => pda([Buffer.from("loadout"), character.toBuffer()], ITEMS);
 const sessionEvents = SKIP ? null : new EventParser(SESSION, session.coder);
 const characterEvents = SKIP ? null : new EventParser(CHARACTER, characterProgram.coder);
 
@@ -296,11 +293,6 @@ class Demo {
       skills: (warrior ? WARRIOR_SKILLS : MAGE_SKILLS).map(([name, b]) => ({ blocks: structuredClone(b), name: text(name, 24) })),
     };
     const asset = Keypair.generate();
-    // The class starter kit comes in the same transaction (items init_loadout).
-    const initLoadout = await itemsProgram.methods
-      .initLoadout()
-      .accountsStrict({ owner: owner.publicKey, character, loadout: loadoutOf(character), systemProgram: SystemProgram.programId })
-      .instruction();
     const sig = await characterProgram.methods
       .createCharacter(args)
       .accountsStrict({
@@ -314,7 +306,6 @@ class Demo {
         mplCoreProgram: MPL_CORE,
         systemProgram: SystemProgram.programId,
       })
-      .postInstructions([initLoadout])
       .signers([owner, asset])
       .rpc({ commitment: "confirmed" })
       .then(track(`create_character ${kind}`));
@@ -398,6 +389,7 @@ class Demo {
         participation: pl.participation,
         character: pl.character,
         skillSet: pl.skillSet,
+        bag: pl.bag,
         monsters: this.acc.monsters,
         sessionToken: pl.token,
         ...vrfAccounts,
@@ -438,6 +430,9 @@ class Demo {
         sessionAuthority,
         config,
         characterProgram: CHARACTER,
+        // Burned if over-time damage kills the player.
+        skillSet: pl ? pl.skillSet : null,
+        bag: pl ? pl.bag : null,
       })
       .rpc({ commitment: "confirmed" })
       .then(track(`start_turn ${pl?.kind ?? "monster"}`));
@@ -468,6 +463,8 @@ class Demo {
         monsters: this.acc.monsters,
         participation: pl.participation,
         character: pl.character,
+        skillSet: pl.skillSet,
+        bag: pl.bag,
         sessionToken: this.dmToken,
         ...vrfAccounts,
       })
@@ -487,6 +484,7 @@ class Demo {
         participation: pl.participation,
         character: pl.character,
         skillSet: pl.skillSet,
+        bag: pl.bag,
         sessionAuthority,
         config,
         characterProgram: CHARACTER,
@@ -636,15 +634,11 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
       }
       const nft = await connection.getAccountInfo(asset);
       assert.ok(nft?.owner.equals(MPL_CORE), "asset owned by Metaplex Core");
-      // Starter items by class, worn: sword + leather armor, staff + robe.
-      const tx = await connection.getTransaction(sig, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
-      const created = [...itemsEvents!.parseLogs(tx?.meta?.logMessages ?? [])].find((x) => x.name === "loadoutCreated");
-      assert.ok(created, "LoadoutCreated in the creation transaction");
-      assert.equal(created.data.itemCount, 2);
-      const l = await itemsProgram.account.loadout.fetch(loadoutOf(character));
+      // Starter items by class, in the character, worn: sword + leather armor, staff + robe.
+      assert.equal(ev.itemCount, 2);
       const [weapon, armor] = kind === "warrior" ? ["sword", "leatherArmor"] : ["staff", "robe"];
-      assert.ok(l.core.items[0].base[weapon] !== undefined && l.core.items[1].base[armor] !== undefined);
-      assert.ok(l.core.equipped[0].source.soulbound !== undefined && l.core.equipped[3].source.soulbound !== undefined);
+      assert.ok(c.gear.items[0].base[weapon] !== undefined && c.gear.items[1].base[armor] !== undefined);
+      assert.ok(c.gear.equipped[0].source.soulbound !== undefined && c.gear.equipped[3].source.soulbound !== undefined);
       demo.players.push({ kind, wallet, actor, token: PublicKey.default, character, asset, participation: PublicKey.default, stash: PublicKey.default, skillSet: PublicKey.default, bag: PublicKey.default });
     }
   });
@@ -694,29 +688,35 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
           participation: pl.participation,
           stash: pl.stash,
           escrow: demo.acc.escrow,
-          sessionAuthority,
-          config,
-          characterProgram: CHARACTER,
           systemProgram: SystemProgram.programId,
-          loadout: loadoutOf(pl.character),
         })
         .signers([pl.wallet])
         .rpc()
         .then(track(`join_session ${pl.kind}`));
-      assert.ok((await characterProgram.account.character.fetch(pl.character)).core.inSession.equals(demo.acc.session));
       // The one wallet signature of the play session: this key may act for the player.
       pl.token = await issueToken(pl.actor, pl.wallet);
     }
     assert.equal((await connection.getBalance(demo.acc.escrow)) - escrowBefore, PRICE.toNumber());
     demo.dmToken = await issueToken(demo.dmActor, demo.dm);
 
+    // Ready: the 4 + 1 + 1 skills taken onto the map; the character is locked (bag and gear frozen).
     for (const pl of demo.players) {
       await session.methods
-        .setReady(true)
-        .accountsStrict({ player: pl.wallet.publicKey, session: demo.acc.session, participation: pl.participation })
+        .setReady(true, [0, 1, 2, 3, 4, 5])
+        .accountsStrict({
+          player: pl.wallet.publicKey,
+          session: demo.acc.session,
+          participation: pl.participation,
+          character: pl.character,
+          skillSet: pl.skillSet,
+          sessionAuthority,
+          config,
+          characterProgram: CHARACTER,
+        })
         .signers([pl.wallet])
         .rpc()
         .then(track(`set_ready ${pl.kind}`));
+      assert.ok((await characterProgram.account.character.fetch(pl.character)).core.inSession.equals(demo.acc.session));
     }
     await session.methods
       .startSession()
@@ -848,11 +848,14 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
     assert.ok(wolves.every((i) => !ms[i].alive), "both wolves dead");
   });
 
-  it("the dead character becomes a tombstone: NFT frozen", async () => {
+  it("the dead character becomes a tombstone: skills, bag and starter items burn, NFT frozen", async () => {
     const mage = demo.players[MAGE];
     const c = await demo.character(MAGE);
     assert.ok(!c.core.alive);
     assert.ok(c.core.inSession.equals(demo.acc.session));
+    assert.equal(c.gear.itemCount, 0, "soulbound items vanish with the character");
+    const set = await characterProgram.account.skillSet.fetch(mage.skillSet);
+    assert.ok(set.skills.slice(0, set.count).every((k: any) => k.powerBp === 0 && k.name[0] !== 0), "skills burn, names stay");
     const sig = await characterProgram.methods
       .freezeTombstone()
       .accountsStrict({

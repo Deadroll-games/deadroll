@@ -1,7 +1,7 @@
 // Props contracts for the character form, map builder palette and party lobby (L9.5).
 // Pure UI: values in, callbacks out. No chain calls inside the components.
 import type { ReactNode } from "react";
-import type { NamedSkill } from "../../chain/skillcheck";
+import type { Category, NamedSkill } from "../../chain/skillcheck";
 import type { Aspect, Cell, Class, Race, Spawn, Tile } from "../../chain/types";
 
 // ---- Character creation ----
@@ -94,7 +94,10 @@ export type PartyLobbyProps = {
   onJoin: (characterAddress: string) => void;
   /** What Join pays (the player's share); defaults to the full price. */
   joinLamports?: bigint;
-  onReady: (ready: boolean) => void;
+  /** Ready with the skills taken onto the map (SkillSet indexes, 4 + 1 + 1, NO_SKILL = empty), or unready. */
+  onReady: (ready: boolean, selection: number[]) => void;
+  /** For role "player": the joined character's skills, by SkillSet index, for the map selection. */
+  mySkills?: LobbySkill[];
   /** DM only; enabled when every player is ready and there is at least one. */
   onStart: () => void;
   busy?: boolean;
@@ -105,3 +108,6 @@ export type PartyLobbyProps = {
 
 /** Unused by the components; exported for callers that place spawns from clicks. */
 export type SpawnPlacement = Cell & { bestiaryId: number };
+
+/** One skill of the joined character, as the lobby's map selection lists it. */
+export type LobbySkill = { index: number; name: string; category: Category };

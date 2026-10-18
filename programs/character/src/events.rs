@@ -1,7 +1,8 @@
 use anchor_lang::prelude::*;
-use deadroll_types::{Aspect, Class, Race};
 
-use crate::state::RESOURCE_KINDS;
+use deadroll_types::{Aspect, Class, EquipSlot, ItemBase, Race};
+
+use crate::state::{MAP_SKILLS, RESOURCE_KINDS};
 
 #[event]
 pub struct ProfileCreated {
@@ -18,6 +19,8 @@ pub struct CharacterCreated {
     pub predisposition: Aspect,
     pub nft: Option<Pubkey>,
     pub skill_count: u8,
+    /// Soulbound starter items given with the character.
+    pub item_count: u8,
 }
 
 #[event]
@@ -54,4 +57,30 @@ pub struct CharacterUnlocked {
 pub struct TombstoneFrozen {
     pub character: Pubkey,
     pub asset: Pubkey,
+}
+
+#[event]
+pub struct ItemEquipped {
+    pub character: Pubkey,
+    pub slot: EquipSlot,
+    /// The soulbound record worn.
+    pub item_index: u8,
+    pub base: ItemBase,
+    /// What the slot held before, if anything.
+    pub replaced: Option<ItemBase>,
+}
+
+#[event]
+pub struct ItemUnequipped {
+    pub character: Pubkey,
+    pub slot: EquipSlot,
+    pub base: Option<ItemBase>,
+}
+
+#[event]
+pub struct SkillsSelected {
+    pub character: Pubkey,
+    pub session: Pubkey,
+    /// `SkillSet` indexes: 4 active, 1 reactive, 1 passive (`deadroll_skillcheck::NO_SKILL` = empty).
+    pub selection: [u8; MAP_SKILLS],
 }
