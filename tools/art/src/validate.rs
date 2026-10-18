@@ -123,9 +123,9 @@ fn is_line_slope_ok(x0: u8, y0: u8, x1: u8, y1: u8) -> bool {
 
 fn size_ok(layer_type: u8, w: u8, h: u8) -> bool {
     match layer_type {
-        0..=18 | layer::TILE => (w, h) == (32, 32),
-        layer::MONSTER => w == h && matches!(w, 32 | 48 | 64),
-        layer::ICON => (w, h) == (16, 16),
+        0..=18 | layer::TILE => (w, h) == (64, 64),
+        layer::MONSTER => w == h && matches!(w, 64 | 96 | 128),
+        layer::ICON => (w, h) == (32, 32),
         layer::PORTRAIT => true,
         _ => false,
     }

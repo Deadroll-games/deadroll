@@ -190,7 +190,7 @@ pub fn compile_sprites(src: &str) -> TResult<Vec<SpriteSrc>> {
                 }
                 let (w, h) = (num(ln, t[1])?, num(ln, t[2])?);
                 if !sprite::valid_size(w) || !sprite::valid_size(h) {
-                    return err(ln, "size must be 16, 32, 48 or 64");
+                    return err(ln, "size must be 32, 64, 96 or 128");
                 }
                 b.width = Some(w);
                 b.height = h;
@@ -438,20 +438,20 @@ mod tests {
         let s = compile_sprites(src).unwrap();
         assert_eq!(s.len(), 1);
         assert_eq!(s[0].id, 199);
-        assert_eq!(&s[0].bytes[..6], &[1, 32, 32, 16, 0, 7]);
+        assert_eq!(&s[0].bytes[..6], &[2, 32, 32, 16, 0, 7]);
         assert_eq!(&s[0].bytes[6..11], &[0x12, 22, 5, 2, 12]);
         assert_eq!(&s[0].bytes[s[0].bytes.len() - 4..], &[0x92, 22, 5, 3]);
     }
 
     #[test]
     fn all_commands_and_aliases() {
-        let src = "sprite 1 a\nsize 16 16\nlayer head\nflags no_outline\n\
+        let src = "sprite 1 a\nsize 32 32\nlayer head\nflags no_outline\n\
                    POLY K 1 1 5 1 3 4\nMIRROR_X 16\nMIRROR_Y 16\nELLIPSE 1 1 4 4 H\nRING 1 1 4 4 Y\n\
                    PIXEL 2 2 D\nPIXEL 3 3 R\nPIXEL 4 4 O\nPIXEL 5 5 _\n\
-                   sprite 2 b\nsize 16 16\nlayer tile\nRECT 0 0 16 16 E\n";
+                   sprite 2 b\nsize 32 32\nlayer tile\nRECT 0 0 32 32 E\n";
         let s = compile_sprites(src).unwrap();
         assert_eq!(s.len(), 2);
-        assert_eq!(&s[0].bytes[..6], &[1, 16, 16, 11, 1, 9]);
+        assert_eq!(&s[0].bytes[..6], &[2, 32, 32, 11, 1, 9]);
         assert_eq!(&s[0].bytes[6..14], &[0x62, 3, 1, 1, 5, 1, 3, 4]);
         assert_eq!(s[1].bytes[6], 0x15);
     }
@@ -460,30 +460,30 @@ mod tests {
     fn errors_with_lines() {
         let cases = [
             ("RECT 1 1 1 1 P", 1),                                     // no sprite
-            ("sprite 0 a\nsize 16 16\nlayer head", 1),                 // id 0
-            ("sprite 1 A\nsize 16 16\nlayer head", 1),                 // name
+            ("sprite 0 a\nsize 32 32\nlayer head", 1),                 // id 0
+            ("sprite 1 A\nsize 32 32\nlayer head", 1),                 // name
             ("sprite 1 a\nsize 20 16\nlayer head", 2),                 // size
-            ("sprite 1 a\nsize 16 16\nlayer hat", 3),                  // layer name
+            ("sprite 1 a\nsize 32 32\nlayer hat", 3),                  // layer name
             ("sprite 1 a\nlayer head", 2),                             // layer before size
-            ("sprite 1 a\nsize 16 16\nRECT 1 1 1 1 P", 3),             // command before layer
-            ("sprite 1 a\nsize 16 16\nlayer head\nRECT 1 1 1 P", 4),   // argc
-            ("sprite 1 a\nsize 16 16\nlayer head\nRECT 1 1 1 1 Q", 4), // slot
-            ("sprite 1 a\nsize 16 16\nlayer head\nRECT 1 1 1 999 P", 4),
-            ("sprite 1 a\nsize 16 16\nlayer head\nPOLY P 1 1 2 2", 4), // 2 vertices
-            ("sprite 1 a\nsize 16 16\nlayer head\nBOX 1 1", 4),        // unknown
-            ("sprite 1 a\nsize 16 16\nlayer head\nRECT 10 1 10 1 P", 4), // decoder: past edge
+            ("sprite 1 a\nsize 32 32\nRECT 1 1 1 1 P", 3),             // command before layer
+            ("sprite 1 a\nsize 32 32\nlayer head\nRECT 1 1 1 P", 4),   // argc
+            ("sprite 1 a\nsize 32 32\nlayer head\nRECT 1 1 1 1 Q", 4), // slot
+            ("sprite 1 a\nsize 32 32\nlayer head\nRECT 1 1 1 999 P", 4),
+            ("sprite 1 a\nsize 32 32\nlayer head\nPOLY P 1 1 2 2", 4), // 2 vertices
+            ("sprite 1 a\nsize 32 32\nlayer head\nBOX 1 1", 4),        // unknown
+            ("sprite 1 a\nsize 32 32\nlayer head\nRECT 30 1 10 1 P", 4), // decoder: past edge
             (
-                "sprite 1 a\nsize 16 16\nlayer head\nsprite 1 b\nsize 16 16\nlayer head",
+                "sprite 1 a\nsize 32 32\nlayer head\nsprite 1 b\nsize 32 32\nlayer head",
                 4,
             ), // dup id
-            ("sprite 1 a\nsize 16 16\nlayer head\nflags shiny", 4),
+            ("sprite 1 a\nsize 32 32\nlayer head\nflags shiny", 4),
         ];
         for (src, line) in cases {
             let e = compile_sprites(src).unwrap_err();
             assert_eq!(e.line, line, "{src:?}: {e}");
         }
         // Missing layer at end of file.
-        assert!(compile_sprites("sprite 1 a\nsize 16 16").is_err());
+        assert!(compile_sprites("sprite 1 a\nsize 32 32").is_err());
     }
 
     #[test]

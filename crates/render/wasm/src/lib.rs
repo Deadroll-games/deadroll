@@ -37,7 +37,7 @@ mod abi {
         error: 0,
     }));
 
-    fn state() -> &'static mut Out {
+    fn state_mut() -> &'static mut Out {
         // SAFETY: single-threaded module; no reference outlives one exported call.
         unsafe { &mut *STATE.0.get() }
     }
@@ -60,23 +60,51 @@ mod abi {
         }
     }
 
-    /// Renders; returns a pointer to the result (valid until the next call) or 0 on error.
-    #[no_mangle]
-    pub extern "C" fn render(
-        input_ptr: *const u8,
-        input_len: u32,
-        out_mode: u32,
-        scale: u32,
-    ) -> *const u8 {
-        let input: &[u8] = if input_ptr.is_null() || input_len == 0 {
+    /// `len` bytes at `ptr`, or empty for a null pointer or zero length.
+    ///
+    /// SAFETY: the host passes buffers it got from `alloc` and filled.
+    unsafe fn bytes<'a>(ptr: *const u8, len: u32) -> &'a [u8] {
+        if ptr.is_null() || len == 0 {
             &[]
         } else {
-            // SAFETY: the host passes a buffer it got from `alloc` and filled.
-            unsafe { core::slice::from_raw_parts(input_ptr, input_len as usize) }
+            unsafe { core::slice::from_raw_parts(ptr, len as usize) }
+        }
+    }
+
+    /// `render(sprites, palette, state, asset, mode)` of `ART_DESCRIPTION.md` 2.2. Returns a
+    /// pointer to the result (valid until the next call) or 0 on error.
+    #[no_mangle]
+    #[allow(clippy::too_many_arguments)]
+    pub extern "C" fn render(
+        sprites_ptr: *const u8,
+        sprites_len: u32,
+        palette_ptr: *const u8,
+        palette_len: u32,
+        state_ptr: *const u8,
+        state_len: u32,
+        asset_ptr: *const u8,
+        mode: u32,
+    ) -> *const u8 {
+        // SAFETY: see `bytes`.
+        let (sprites, palette, state, asset) = unsafe {
+            (
+                bytes(sprites_ptr, sprites_len),
+                bytes(palette_ptr, palette_len),
+                bytes(state_ptr, state_len),
+                bytes(asset_ptr, deadroll_render::ASSET_LEN as u32),
+            )
         };
-        let s = state();
+        let s = state_mut();
         s.bytes = Vec::new();
-        match deadroll_render::render(input, out_mode, scale) {
+        let result = match (
+            <&[u8; deadroll_render::ASSET_LEN]>::try_from(asset),
+            deadroll_render::OutputMode::from_u32(mode),
+        ) {
+            (Ok(asset), Ok(mode)) => deadroll_render::render(sprites, palette, state, asset, mode),
+            (_, Err(e)) => Err(e),
+            (Err(_), _) => Err(deadroll_render::Error::Request),
+        };
+        match result {
             Ok(out) => {
                 *s = Out {
                     bytes: out.bytes,
@@ -100,21 +128,21 @@ mod abi {
 
     #[no_mangle]
     pub extern "C" fn result_len() -> u32 {
-        state().bytes.len() as u32
+        state_mut().bytes.len() as u32
     }
 
     #[no_mangle]
     pub extern "C" fn result_width() -> u32 {
-        state().width
+        state_mut().width
     }
 
     #[no_mangle]
     pub extern "C" fn result_height() -> u32 {
-        state().height
+        state_mut().height
     }
 
     #[no_mangle]
     pub extern "C" fn last_error() -> u32 {
-        state().error
+        state_mut().error
     }
 }

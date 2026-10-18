@@ -81,6 +81,7 @@ pub fn compose(req: &RenderRequest, palette: &Palette, books: &[Book]) -> Result
             }
         }
         let body = layer::is_body(l.header.layer_type);
+        let gray = req.flags & FLAG_GRAY != 0;
         let shadow = l.header.layer_type == layer::SHADOW;
         for (i, c) in g
             .cells
@@ -103,18 +104,12 @@ pub fn compose(req: &RenderRequest, palette: &Palette, books: &[Book]) -> Result
                     &mut rgba,
                     x,
                     y,
-                    color(palette, &l.lref, body, c.slot, c.shade),
+                    color(palette, &l.lref, body, gray, c.slot, c.shade),
                 );
             }
         }
     }
 
-    if req.flags & FLAG_GRAY != 0 {
-        for px in rgba.chunks_exact_mut(4).filter(|p| p[3] != 0) {
-            let l = ((77 * px[0] as u32 + 150 * px[1] as u32 + 29 * px[2] as u32) >> 8) as u8;
-            px[..3].copy_from_slice(&[l, l, l]);
-        }
-    }
     Ok(Image {
         width,
         height,
@@ -122,8 +117,15 @@ pub fn compose(req: &RenderRequest, palette: &Palette, books: &[Book]) -> Result
     })
 }
 
-/// Slot + shade -> color (`FORMAT.md` 1.3, 2.8, 3.2).
-fn color(p: &Palette, l: &LayerRef, body: bool, s: u8, shade: u8) -> Rgb {
+/// Gray copy of a ramp color: a dead character is drawn with every ramp in gray
+/// (`ART_DESCRIPTION.md` 9.2, 11). The outline is not a ramp and keeps its color.
+pub const fn gray(c: Rgb) -> Rgb {
+    let l = ((77 * c[0] as u32 + 150 * c[1] as u32 + 29 * c[2] as u32) >> 8) as u8;
+    [l, l, l]
+}
+
+/// Slot + shade -> color (`FORMAT.md` 1.3, 2.8, 3.2, 3.4).
+fn color(p: &Palette, l: &LayerRef, body: bool, gray_ramps: bool, s: u8, shade: u8) -> Rgb {
     let n = slot::shades(s);
     let ci = if n <= 1 { 0 } else { shade * 3 / (n - 1) };
     let (primary, secondary) = p.material(l.material_ramp);
@@ -142,7 +144,12 @@ fn color(p: &Palette, l: &LayerRef, body: bool, s: u8, shade: u8) -> Rgb {
         slot::RUNE if body => element,
         _ => primary, // slot::RUNE on items
     };
-    p.color(ramp, ci)
+    let c = p.color(ramp, ci);
+    if gray_ramps {
+        gray(c)
+    } else {
+        c
+    }
 }
 
 /// Nearest-neighbor integer scale, `1..=16`.
@@ -202,12 +209,13 @@ mod tests {
         }
     }
 
-    // 16x16 item layer with one PIXEL P at (2,2); and a body layer with D at (2,2).
+    // 32x32 item layer with one PIXEL P at (2,2); and a body layer with D at (2,2).
     fn sprites() -> Vec<u8> {
-        let item = [1u8, 16, 16, 16, 0, 1, 0x22, 2, 2];
-        let body = [1u8, 16, 16, 11, 0, 1, 0x25, 2, 2];
-        let shadow = [1u8, 16, 16, 0, 1, 1, 0x12, 0, 0, 4, 4];
-        let big = [1u8, 32, 32, 16, 1, 1, 0x22, 20, 20];
+        let v = sprite::FORMAT_VERSION;
+        let item = [v, 32, 32, 16, 0, 1, 0x22, 2, 2];
+        let body = [v, 32, 32, 11, 0, 1, 0x25, 2, 2];
+        let shadow = [v, 32, 32, 0, 1, 1, 0x12, 0, 0, 4, 4];
+        let big = [v, 64, 64, 16, 1, 1, 0x22, 40, 40];
         pack(
             1,
             &[
@@ -232,7 +240,7 @@ mod tests {
         let b = sprites();
         let books = [Book::parse(&b).unwrap()];
         let img = compose(&req(&[(0, lref(1))], 0), &p, &books).unwrap();
-        assert_eq!((img.width, img.height), (16, 16));
+        assert_eq!((img.width, img.height), (32, 32));
         // Single pixel: L,T,R,B all foreign -> middle shade 1 of steel (ramp 1).
         assert_eq!(px(&img, 2, 2), [51, 61, 71, 255]);
         assert_eq!(px(&img, 2, 1), [0x12, 0x0c, 0x16, 255]); // outline
@@ -256,14 +264,18 @@ mod tests {
         let img = compose(&req(&[(0, lref(1)), (5, lref(3))], 0), &p, &books).unwrap();
         let d = |c: u32| (c * 165 / 255) as u8;
         assert_eq!(px(&img, 2, 2), [d(51), d(61), d(71), 255]);
-        // Gray flag.
+        // Gray flag: the ramps turn gray, the outline keeps its color, the shadow still darkens.
         let img = compose(&req(&[(0, lref(1))], FLAG_GRAY), &p, &books).unwrap();
         let l = ((77 * 51 + 150 * 61 + 29 * 71) >> 8) as u8;
         assert_eq!(px(&img, 2, 2), [l, l, l, 255]);
+        assert_eq!(px(&img, 2, 1), [0x12, 0x0c, 0x16, 255]);
+        let img = compose(&req(&[(0, lref(1)), (5, lref(3))], FLAG_GRAY), &p, &books).unwrap();
+        let g = d(l as u32);
+        assert_eq!(px(&img, 2, 2), [g, g, g, 255]);
         // Canvas is the max size; smaller layers are top-left aligned.
         let img = compose(&req(&[(0, lref(1)), (1, lref(4))], 0), &p, &books).unwrap();
-        assert_eq!((img.width, img.height), (32, 32));
-        assert_eq!(px(&img, 20, 20)[3], 255);
+        assert_eq!((img.width, img.height), (64, 64));
+        assert_eq!(px(&img, 40, 40)[3], 255);
     }
 
     #[test]

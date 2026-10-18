@@ -1,67 +1,67 @@
 # Warrior kit for the reference human body.
 
 sprite 100 warrior_cape
-size 32 32
+size 64 64
 layer back_item
-# hangs to y=29, flares left under the shield
-RECT 10 15 5 2 P
-RECT 8 17 7 10 P
-RECT 5 27 9 3 P
+# hangs to y=59, flares left under the shield
+RECT 20 30 10 4 P
+RECT 16 34 14 20 P
+RECT 10 54 18 6 P
 
 sprite 101 warrior_shield
-size 32 32
+size 64 64
 layer offhand
-RECT 4 15 5 2 P
-RECT 3 17 7 6 P
-RECT 4 23 5 2 P
-RECT 5 25 3 2 P
-RECT 5 18 3 3 A
+RECT 8 30 10 4 P
+RECT 6 34 14 12 P
+RECT 8 46 10 4 P
+RECT 10 50 6 4 P
+RECT 10 36 6 6 A
 
 sprite 102 warrior_pants
-size 32 32
+size 64 64
 layer pants
-RECT 12 23 7 2 P
-RECT 12 25 3 3 P
-RECT 16 25 3 3 P
+RECT 24 46 14 4 P
+RECT 24 50 6 6 P
+RECT 32 50 6 6 P
 
 sprite 103 warrior_boots
-size 32 32
+size 64 64
 layer boots
-RECT 12 27 3 4 P
-RECT 16 27 3 4 P
-RECT 19 29 2 2 P
-RECT 12 27 3 2 S
-RECT 16 27 3 2 S
+RECT 24 54 6 8 P
+RECT 32 54 6 8 P
+RECT 38 58 4 4 P
+RECT 24 54 6 4 S
+RECT 32 54 6 4 S
 
 sprite 104 warrior_armor
-size 32 32
+size 64 64
 layer armor_body
-RECT 11 15 9 6 P
-RECT 8 13 4 4 P
-RECT 18 13 4 4 P
-RECT 9 14 2 2 A
-RECT 19 14 2 2 A
-RECT 14 16 2 4 A
-RECT 11 21 9 2 S
-RECT 14 21 3 2 A
+RECT 22 30 18 12 P
+RECT 16 26 8 8 P
+RECT 36 26 8 8 P
+RECT 18 28 4 4 A
+RECT 38 28 4 4 A
+RECT 28 32 4 8 A
+RECT 22 42 18 4 S
+RECT 28 42 6 4 A
 
 sprite 105 warrior_helmet
-size 32 32
+size 64 64
 layer helmet
 # open face: dome, brow band and cheek guards only
-RECT 15 2 2 3 P
-RECT 13 4 6 2 P
-RECT 11 6 9 2 P
-RECT 12 7 7 1 A
-RECT 11 8 2 5 P
-RECT 18 8 2 3 P
+RECT 30 4 4 6 P
+RECT 26 8 12 4 P
+RECT 22 12 18 4 P
+RECT 24 14 14 2 A
+RECT 22 16 4 10 P
+RECT 36 16 4 6 P
 
 sprite 106 warrior_sword
-size 32 32
+size 64 64
 layer mainhand
-RECT 22 4 2 2 P
-RECT 21 6 3 11 P
-RECT 19 17 6 2 A
-RECT 21 19 2 3 S
-RECT 21 22 2 2 A
-RECT 22 7 1 8 U
+RECT 44 8 4 4 P
+RECT 42 12 6 22 P
+RECT 38 34 12 4 A
+RECT 42 38 4 6 S
+RECT 42 44 4 4 A
+RECT 44 14 2 16 U

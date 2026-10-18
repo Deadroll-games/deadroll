@@ -1,6 +1,7 @@
 # FORMAT: sprite DSL, binary encodings and rasterizer ABI
 
-Format version **1**. This file is the contract between `crates/render`, `tools/art`, the sprite authors
+Format version **2** (rasterizer version 2). Format 1 (canvases 16, 32, 48, 64) is drawn only by
+rasterizer version 1; format 2 doubled every canvas side, and `art upscale` moved the sources. This file is the contract between `crates/render`, `tools/art`, the sprite authors
 (`assets/sprites/*.dsl`), `tools/scripts/upload-sprites.ts` and the app loader.
 It is derived from `docs/ART_DESCRIPTION.md` (sections 4-6). Where they differ, this file wins for code.
 Any change to the rules below after sprites ship is a **new rasterizer version**, never a silent fix.
@@ -20,15 +21,16 @@ Keywords are case-sensitive.
 ```
 # Warrior one-handed sword, held in the front hand
 sprite 199 example_sword
-size 32 32
+size 64 64
 layer mainhand
-RECT 22 5 2 12 P
-PIXEL 22 4 P
-RECT 20 17 6 1 A
-RECT 22 18 2 2 S
-LINE 22 7 22 14 U
-SOCKET 22 17
-SHADE 22 5 P 3
+RECT 44 10 4 24 P
+RECT 44 8 2 2 P
+RECT 40 34 12 2 A
+RECT 44 36 4 4 S
+RECT 44 14 2 16 U
+SOCKET 44 34
+RECT 44 10 2 2 P
+SHADE 44 10 P 3
 ```
 
 ### 1.1 Sprite header (in this order, once per sprite)
@@ -36,7 +38,7 @@ SHADE 22 5 P 3
 | Statement | Meaning |
 |---|---|
 | `sprite <id> <name>` | starts a sprite. `id` 1..65535, unique in the whole repo (ranges in 1.5). `name` is `[a-z0-9_]{1,32}`, unique in the repo |
-| `size <w> <h>` | canvas, each of `16 32 48 64` |
+| `size <w> <h>` | canvas, each of `32 64 96 128` |
 | `layer <type>` | layer type name from 1.4 |
 | `flags no_outline` | optional; the layer gets no auto outline |
 
@@ -101,14 +103,14 @@ the `shadow` blend (4.3). Use the same index in `Character.appearance` as the la
 | 7 | `boots` | 17 | `overlay_wounds` |
 | 8 | `torso` | 18 | `overlay_element` |
 | 9 | `armor_body` | 19 | `fx` (reserved, not stored) |
-| 20 | `tile` (map cell, 32x32) | 22 | `icon` (16x16) |
-| 21 | `monster` (whole monster in one sprite, 32, 48 or 64 square) | 23 | `portrait` |
+| 20 | `tile` (map cell, 64x64) | 22 | `icon` (32x32) |
+| 21 | `monster` (whole monster in one sprite, 64, 96 or 128 square) | 23 | `portrait` |
 
 Layers that must carry `flags no_outline`: `shadow`, `necklace`, `overlay_wounds`, `overlay_element`,
 floor tiles.
 
-Sizes per layer type: character layers 0..18 and `tile` are 32x32, `icon` is 16x16, `monster` is
-32x32, 48x48 or 64x64, `portrait` any allowed size. A bigger monster is drawn on its own canvas;
+Sizes per layer type: character layers 0..18 and `tile` are 64x64, `icon` is 32x32, `monster` is
+64x64, 96x96 or 128x128, `portrait` any allowed size. A bigger monster is drawn on its own canvas;
 the app aligns it bottom-center on its map cell, the rasterizer does not.
 
 ### 1.5 Sprite id ranges
@@ -186,13 +188,13 @@ filled, on a right edge it is not. Centers never lie on a vertex or a horizontal
 
 `MIRROR_X a`: for every non-empty cell `(X, Y)`, in row-major order of a snapshot taken before the
 command, write the same cell (slot, shade, explicit) to `(a - 1 - X, Y)`. Targets outside the canvas
-are skipped. `a = 32` mirrors between pixels 15 and 16, `a = 31` through the center of pixel 15.
+are skipped. `a = 64` mirrors between pixels 31 and 32, `a = 63` through the center of pixel 31.
 `MIRROR_Y a`: same with `(X, a - 1 - Y)`. The source cells do not change. Empty cells are not copied.
 
 ### 2.7 SHADE, SOCKET
 
 `SHADE` sets slot, shade and `explicit = true`; auto shading leaves it alone.
-`SOCKET` draws nothing. Sockets, runes and enchantment effects are `TODO(post-demo)`; in format 1 the
+`SOCKET` draws nothing. Sockets, runes and enchantment effects are `TODO(post-demo)`; in format 2 the
 points are decoded, validated and ignored by the renderer.
 
 ### 2.8 Auto shading (light from the top left)
@@ -223,9 +225,9 @@ canvas edge or their outline is cut off.
 ### 3.1 Sprite (as stored in a sprite book)
 
 ```
-u8 version      = 1
-u8 width        16 | 32 | 48 | 64
-u8 height       16 | 32 | 48 | 64
+u8 version      = 2
+u8 width        32 | 64 | 96 | 128
+u8 height       32 | 64 | 96 | 128
 u8 layer_type   0..23 (1.4)
 u8 flags        bit0 = no_outline, other bits must be 0
 u8 cmd_count
@@ -284,7 +286,7 @@ sprite blobs  offset is from the start of the book body
 
 | Flag bit | Meaning |
 |---|---|
-| 0 `GRAY` | dead character: every output color becomes gray `l = (77r + 150g + 29b) >> 8` |
+| 0 `GRAY` | dead character: every ramp is drawn in gray, each ramp color `(r, g, b)` becomes `l = (77r + 150g + 29b) >> 8` (`ART_DESCRIPTION.md` 9.2, 11). The outline color is not a ramp and stays; a `shadow` layer still darkens |
 | 1..31 | reserved, must be 0 |
 
 ---
@@ -299,10 +301,19 @@ sprite blobs  offset is from the start of the book body
 3. A layer of type `shadow` is not opaque: every filled cell blends black with alpha `90`:
    over a transparent pixel it writes `(0, 0, 0, 90)`; over a non-transparent one
    `rgb = rgb * 165 / 255` (alpha unchanged).
-4. All other pixels are opaque (alpha 255). Then the `GRAY` flag is applied.
-5. Output `RGBA`: `width*scale x height*scale` pixels, row-major, 4 bytes each, nearest neighbor
-   integer scale `1..=16`. Output `PNG`: the same pixels as an RGBA8 PNG with stored (uncompressed)
-   deflate blocks (`TODO(post-demo)`: indexed PNG with fixed Huffman, `ART_DESCRIPTION.md` 13).
+4. All other pixels are opaque (alpha 255). Ramp colors are gray under the `GRAY` flag (3.4).
+5. Output `RAW_RGBA`: the canvas as is, `width x height` pixels, row-major, 4 bytes each.
+6. Output `PNG` (`ART_DESCRIPTION.md` 13): the canvas enlarged by nearest neighbor with the integer
+   scale `k = 512 / max(width, height)` (64 -> x8, 96 -> x5, 128 -> x4, 32 -> x16):
+   - color type 3 (indexed), bit depth 8. `PLTE` holds the image colors in the order they first
+     appear (row-major over the unscaled canvas); `tRNS` holds the alpha of entries `0..=last`
+     non-opaque one and is omitted when every color is opaque. More than 256 colors is error 10;
+   - filters: each canvas row becomes `k` identical rows, the first one with filter `None`, the
+     other `k - 1` with `Up` (zeros after the filter);
+   - one IDAT: zlib header `78 01`, one final fixed-Huffman deflate block, then Adler-32. At each
+     position the longer repeat at distance 1 or at the row length (`width*k + 1`) is taken if it
+     is 3..258 bytes (distance 1 wins a tie), otherwise a literal;
+   - chunks `IHDR PLTE [tRNS] IDAT IEND`, CRC-32 each.
 
 ## 5. Errors (never panic)
 
@@ -312,13 +323,14 @@ The decoder rejects, with an error code:
 |---|---|
 | 1 | truncated input or trailing bytes |
 | 2 | unsupported format version |
-| 3 | canvas size not in 16/32/48/64, unknown layer type, or reserved flag bits |
+| 3 | canvas size not in 32/64/96/128, unknown layer type, or reserved flag bits |
 | 4 | unknown opcode (0x0, 0xB..0xF) |
 | 5 | slot > 6, or non-zero slot on `MIRROR_*`/`SOCKET`, or slot 0 on `SHADE` |
 | 6 | argument out of range: rect/ellipse with `w` or `h` 0 or past the canvas, pixel/line point outside, POLY `n` not 3..8 or vertex past `w`/`h`, mirror axis > `2*size`, shade >= `n`, socket square outside |
 | 7 | sprite id not found in any book, or book index not sorted / out of bounds |
 | 8 | palette: bad format, version mismatch, ramp or material index out of range |
-| 9 | bad render request, reserved flag bits, bad output mode or scale |
+| 9 | bad render request, reserved flag bits, bad output mode or scale, no sprite book |
+| 10 | more than 256 colors: the image cannot be an indexed PNG |
 
 ## 6. Validator rules (`tools/art`, not the decoder)
 
@@ -333,22 +345,23 @@ The decoder rejects, with an error code:
 
 ## 7. WASM C ABI
 
-Exports (no `wasm-bindgen`; same module in the browser, a worker and Node):
+The interface of `ART_DESCRIPTION.md` 2.2. Exports (no `wasm-bindgen`; same module in the browser,
+a worker and Node):
 
 ```
 alloc(len: u32) -> ptr          dealloc(ptr: u32, len: u32)
-render(input_ptr: u32, input_len: u32, out_mode: u32, scale: u32) -> result_ptr   (0 = error)
+render(sprites_ptr, sprites_len, palette_ptr, palette_len, state_ptr, state_len, asset_ptr, mode)
+       -> result_ptr   (all u32; 0 = error)
 result_len() -> u32             result_width() -> u32      result_height() -> u32
 last_error() -> u32             (section 5 code, 0 = ok)
 ```
-`out_mode`: 0 = RGBA, 1 = PNG. `scale`: 1..=16. `result_width/height` are the scaled size.
-The result buffer is owned by the module and valid until the next `render` call.
 
-Input layout:
-```
-u32 len + RenderRequest (Borsh, 3.4)
-[u8; 32] asset address (PRNG seed for effects; unused in format 1, pass zeros)
-u32 len + palette (3.2)
-then one or more: u32 len + sprite book (3.3), until the end of the input
-```
-A sprite id is looked up in the books in the order they are given.
+- `sprites`: one or more `u32 len + sprite book (3.3)`; a sprite id is looked up in the books in
+  the order given (the website passes the books of `GameConfig.sprite_books` in that order);
+- `palette`: the palette body (3.2);
+- `state`: the `RenderRequest` (3.4), Borsh, 106 bytes;
+- `asset`: 32 bytes, the asset address (PRNG seed for effects; unused in format 2, pass zeros);
+- `mode`: 0 = `RAW_RGBA`, 1 = `PNG` (section 4).
+
+`result_width/height` are the size of the output: the canvas for `RAW_RGBA`, the enlarged image
+for `PNG`. The result buffer is owned by the module and valid until the next `render` call.

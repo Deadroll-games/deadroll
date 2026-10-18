@@ -1,13 +1,17 @@
 //! Golden test: the reference warrior (pixel-sprite skill) with the demo palette.
-//! Also writes `target/render-golden/{input.bin,expected.sha256,warrior.png}` for the WASM
-//! parity check (`crates/render/wasm/golden.mjs`).
+//! Also writes `target/render-golden/{state,sprites,palette,book}.bin`, `expected.sha256` and
+//! `warrior.png` for the WASM parity check (`crates/render/wasm/golden.mjs`), the app and the
+//! validator tests.
 
 use deadroll_render::text::{compile_palette, compile_sprites, PaletteSrc};
-use deadroll_render::{book, encode_input, render, LayerRef, RenderRequest, OUT_PNG, OUT_RGBA};
+use deadroll_render::{
+    book, encode_books, render, scale, LayerRef, OutputMode, RenderRequest, ASSET_LEN,
+};
 use sha2::{Digest, Sha256};
 
-/// SHA-256 of the x8 PNG. Changing it means the rendering rules changed: new rasterizer version.
-const WARRIOR_PNG_SHA256: &str = "2e14ab1c59f6883c8e344e8738c5a67b46a744ebc127cdab50ca05b44b8a2e5b";
+/// SHA-256 of the 512 px PNG. Changing it means the rendering rules changed: new rasterizer version.
+const WARRIOR_PNG_SHA256: &str = "9aee38466684c1354f2a5b42c1765672c7bd4f273ff26504f1d59646ce19f337";
+const ASSET: [u8; ASSET_LEN] = [0; ASSET_LEN];
 
 fn root() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -36,7 +40,15 @@ const LAYERS: &[(u16, usize, &str, &str, &str)] = &[
     (106, 16, "steel", "gold", "gray"),
 ];
 
-fn warrior_input(flags: u32) -> Vec<u8> {
+/// The render arguments of the warrior: `(sprites, palette, state)`.
+struct Args {
+    sprites: Vec<u8>,
+    book: Vec<u8>,
+    palette: Vec<u8>,
+    state: Vec<u8>,
+}
+
+fn warrior(flags: u32) -> Args {
     let pal = palette();
     let src = std::fs::read_to_string(root().join("crates/render/tests/data/warrior.dsl")).unwrap();
     let sprites = compile_sprites(&src).unwrap();
@@ -59,7 +71,16 @@ fn warrior_input(flags: u32) -> Vec<u8> {
             element_ramp: element,
         };
     }
-    encode_input(&req.encode(), &[0; 32], &pal.bytes, &[&book])
+    Args {
+        sprites: encode_books(&[&book]),
+        book,
+        palette: pal.bytes,
+        state: req.encode(),
+    }
+}
+
+fn run(a: &Args, mode: OutputMode) -> deadroll_render::Result<deadroll_render::Output> {
+    render(&a.sprites, &a.palette, &a.state, &ASSET, mode)
 }
 
 fn hex(d: &[u8]) -> String {
@@ -68,23 +89,29 @@ fn hex(d: &[u8]) -> String {
 
 #[test]
 fn warrior_png_is_stable() {
-    let input = warrior_input(0);
-    let out = render(&input, OUT_PNG, 8).unwrap();
-    assert_eq!((out.width, out.height), (256, 256));
+    let a = warrior(0);
+    let out = run(&a, OutputMode::Png).unwrap();
+    // 64 px canvas, enlarged x8 to 512 px.
+    assert_eq!((out.width, out.height), (512, 512));
     let sha = hex(&Sha256::digest(&out.bytes));
 
     let dir = root().join("target/render-golden");
     std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join("input.bin"), &input).unwrap();
+    for (name, bytes) in [
+        ("state.bin", &a.state),
+        ("sprites.bin", &a.sprites),
+        // Palette and sprite book bodies, as uploaded on-chain (tools/scripts/upload-*.ts dry runs).
+        ("palette.bin", &a.palette),
+        ("book.bin", &a.book),
+        ("warrior.png", &out.bytes),
+    ] {
+        std::fs::write(dir.join(name), bytes).unwrap();
+    }
     std::fs::write(dir.join("expected.sha256"), &sha).unwrap();
-    std::fs::write(dir.join("warrior.png"), &out.bytes).unwrap();
-    // Palette and sprite book bodies, as uploaded on-chain (tools/scripts/upload-*.ts dry runs).
-    let parts = deadroll_render::parse_input(&input).unwrap();
-    std::fs::write(dir.join("palette.bin"), parts.palette).unwrap();
-    std::fs::write(dir.join("book.bin"), parts.books[0]).unwrap();
+    let _ = std::fs::remove_file(dir.join("input.bin"));
 
     // Deterministic: same bytes on a second run.
-    assert_eq!(render(&input, OUT_PNG, 8).unwrap(), out);
+    assert_eq!(run(&a, OutputMode::Png).unwrap(), out);
     assert_eq!(
         sha, WARRIOR_PNG_SHA256,
         "rendering changed; see target/render-golden/warrior.png"
@@ -92,46 +119,73 @@ fn warrior_png_is_stable() {
 }
 
 #[test]
-fn warrior_rgba_matches_png_pixels() {
-    let input = warrior_input(0);
-    let rgba = render(&input, OUT_RGBA, 2).unwrap();
-    let png_bytes = render(&input, OUT_PNG, 2).unwrap().bytes;
-    let mut reader = png::Decoder::new(&png_bytes[..]).read_info().unwrap();
+fn warrior_png_pixels_are_the_scaled_rgba() {
+    let a = warrior(0);
+    let rgba = run(&a, OutputMode::RawRgba).unwrap();
+    assert_eq!((rgba.width, rgba.height), (64, 64));
+    let png_bytes = run(&a, OutputMode::Png).unwrap().bytes;
+    let mut dec = png::Decoder::new(&png_bytes[..]);
+    dec.set_transformations(png::Transformations::EXPAND | png::Transformations::ALPHA);
+    let mut reader = dec.read_info().unwrap();
+    assert_eq!(reader.info().color_type, png::ColorType::Indexed);
     let mut buf = vec![0; reader.output_buffer_size()];
     let info = reader.next_frame(&mut buf).unwrap();
     buf.truncate(info.buffer_size());
-    assert_eq!((info.width, info.height), (rgba.width, rgba.height));
-    assert_eq!(buf, rgba.bytes);
+    let img = deadroll_render::Image {
+        width: 64,
+        height: 64,
+        rgba: rgba.bytes,
+    };
+    assert_eq!(buf, scale(&img, 8).unwrap().rgba);
+    // Wallet-sized and small: a few kilobytes.
+    assert!(png_bytes.len() < 8 * 1024, "{} bytes", png_bytes.len());
 }
 
 #[test]
-fn dead_warrior_is_gray() {
-    let out = render(&warrior_input(1), OUT_RGBA, 1).unwrap();
-    for px in out.bytes.chunks_exact(4).filter(|p| p[3] != 0) {
-        assert!(px[0] == px[1] && px[1] == px[2], "{px:?}");
+fn dead_warrior_has_gray_ramps() {
+    let pal = palette();
+    let outline = deadroll_render::Palette::parse(&pal.bytes).unwrap().outline;
+    let alive = run(&warrior(0), OutputMode::RawRgba).unwrap().bytes;
+    let dead = run(&warrior(1), OutputMode::RawRgba).unwrap().bytes;
+    for (a, d) in alive.chunks_exact(4).zip(dead.chunks_exact(4)) {
+        assert_eq!(a[3], d[3], "same alpha");
+        if a[..3] == outline {
+            assert_eq!(a, d, "the outline is not a ramp");
+        } else {
+            assert!(d[0] == d[1] && d[1] == d[2], "{d:?}");
+        }
     }
 }
 
 #[test]
-fn input_rejections() {
-    let input = warrior_input(0);
-    assert!(render(&input, 2, 1).is_err(), "out mode");
-    assert!(render(&input, OUT_RGBA, 0).is_err(), "scale 0");
-    assert!(render(&input, OUT_RGBA, 17).is_err(), "scale 17");
-    assert!(
-        render(&input[..input.len() - 1], OUT_RGBA, 1).is_err(),
+fn rejections() {
+    let a = warrior(0);
+    let r = |sprites: &[u8], palette: &[u8], state: &[u8]| {
+        render(sprites, palette, state, &ASSET, OutputMode::RawRgba).map_err(|e| e.code())
+    };
+    assert_eq!(
+        OutputMode::from_u32(2),
+        Err(deadroll_render::Error::Request)
+    );
+    assert_eq!(OutputMode::from_u32(1), Ok(OutputMode::Png));
+    assert_eq!(
+        r(&a.sprites[..a.sprites.len() - 1], &a.palette, &a.state),
+        Err(1),
         "truncated book"
     );
-    assert!(
-        render(&input[..10], OUT_RGBA, 1).is_err(),
-        "truncated request"
-    );
-    let mut no_books = input.clone();
-    let pal_len = palette().bytes.len();
-    no_books.truncate(4 + 106 + 32 + 4 + pal_len);
     assert_eq!(
-        render(&no_books, OUT_RGBA, 1).unwrap_err().code(),
-        9,
-        "no books"
+        r(&a.sprites[..3], &a.palette, &a.state),
+        Err(1),
+        "truncated length"
     );
+    assert_eq!(r(&[], &a.palette, &a.state), Err(9), "no books");
+    assert_eq!(
+        r(&a.sprites, &a.palette, &a.state[..10]),
+        Err(9),
+        "short state"
+    );
+    assert_eq!(r(&a.sprites, &a.palette[..10], &a.state), Err(8), "palette");
+    // Two books: an id is found in the second one.
+    let two = encode_books(&[&book::pack(9, &[]).unwrap(), &a.book]);
+    assert!(r(&two, &a.palette, &a.state).is_ok());
 }
