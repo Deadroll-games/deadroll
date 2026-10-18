@@ -1,10 +1,12 @@
 // Devnet smoke test for the character gear and the real MagicBlock VRF: a warrior created with its
-// starter kit (create_character), unequip and equip, a tiny party on a room whose boss pack stands
+// starter kit (create_character), unequip and equip, a party of two on a room whose boss pack stands
 // on the entrance's diagonal (patch 6), set_ready with the 4 + 1 + 1 skills, start_session, then
 // turns until the warrior's Bleeding Cleave hits the line chieftain, goblin warrior, shaman: the
 // heaviest callback path (three hits, the monsters' auras, Battle Cry when the dice cross 50%).
-// Prints the oracle's InitiativeRolled and HitResolved transactions, and what the callback used of
-// the compute budget the oracle gave it.
+// Then the chieftain throws daggers (a monster skill) at the second hero until it is down, and
+// start_turn finalizes the queued death (patch 6).
+// Prints the oracle's callback transactions and what each used of the compute budget the oracle
+// gave it.
 // Needs tools/scripts/deploy-devnet.ts. The session must be the real-VRF build: nothing here plays the oracle.
 //
 // cd tests && ANCHOR_PROVIDER_URL=<devnet rpc> ANCHOR_WALLET=<keypair.json> node --import tsx smoke-devnet.ts
@@ -55,6 +57,10 @@ const CAMP = [
   { id: SHAMAN, x: 4, y: 4, pack: 3, skills: 0b111 },
 ];
 const CHIEFTAIN_INDEX = 4;
+/** The chieftain's Dagger Throw: pool bit 2, the third active slot (`deadroll_rules::monster::select_skills`). */
+const DAGGER_THROW_SLOT = 2;
+/** Bleeding Cleave tries for the line with Battle Cry before the smoke goes on with the line alone. */
+const CLEAVE_TRIES = 3;
 /** `EMPTY_ITEM`, `ItemBase` and `EquipSlot` discriminants (crates/types). */
 const EMPTY_ITEM = 0xff;
 const [SWORD, LEATHER] = [0, 3];
@@ -137,33 +143,38 @@ async function waitVrf(sessionPda: PublicKey, what: string) {
 }
 
 const dm = Keypair.generate();
-const player = Keypair.generate();
 const dmActor = Keypair.generate();
-const playerActor = Keypair.generate();
 await fund(dm.publicKey, 0.12);
-await fund(player.publicKey, 0.15);
 
-// character with its starter kit in one transaction (create_character gives it, worn)
-const profile = pda([Buffer.from("profile"), player.publicKey.toBuffer()], CHARACTER);
-await characterProgram.methods.createProfile().accountsStrict({ owner: player.publicKey, profile, systemProgram: SystemProgram.programId }).signers([player]).rpc();
-const character = pda([Buffer.from("character"), player.publicKey.toBuffer(), Buffer.from([0])], CHARACTER);
-const skillSet = pda([Buffer.from("skills"), character.toBuffer()], CHARACTER);
-const bag = pda([Buffer.from("bag"), character.toBuffer()], CHARACTER);
-const skillExtras = pda([Buffer.from("skill_extras"), character.toBuffer()], CHARACTER);
-const layer = { spriteId: 1, materialRamp: 2, accentRamp: 3, elementRamp: 0 };
-const asset = Keypair.generate();
-const createSig = await characterProgram.methods
-  .createCharacter({
-    name: text("Smoke", 32), race: e("human"), class: e("warrior"), predisposition: e("piercing"),
-    stats: [10, 7, 5, 8], appearance: new Array(20).fill(layer),
-    skills: WARRIOR_SKILLS.map(([name, b]) => newSkill(name, b, text)),
-  })
-  .accountsStrict({
-    owner: player.publicKey, profile, character, skillSet, bag,
-    config, asset: asset.publicKey, mplCoreProgram: MPL_CORE, systemProgram: SystemProgram.programId, skillExtras,
-  })
-  .signers([player, asset])
-  .rpc({ commitment: "confirmed" });
+/** A warrior with its starter kit in one transaction (create_character gives it, worn). */
+async function newHero(name: string) {
+  const wallet = Keypair.generate();
+  await fund(wallet.publicKey, 0.15);
+  const profile = pda([Buffer.from("profile"), wallet.publicKey.toBuffer()], CHARACTER);
+  await characterProgram.methods.createProfile().accountsStrict({ owner: wallet.publicKey, profile, systemProgram: SystemProgram.programId }).signers([wallet]).rpc();
+  const character = pda([Buffer.from("character"), wallet.publicKey.toBuffer(), Buffer.from([0])], CHARACTER);
+  const skillSet = pda([Buffer.from("skills"), character.toBuffer()], CHARACTER);
+  const bag = pda([Buffer.from("bag"), character.toBuffer()], CHARACTER);
+  const skillExtras = pda([Buffer.from("skill_extras"), character.toBuffer()], CHARACTER);
+  const layer = { spriteId: 1, materialRamp: 2, accentRamp: 3, elementRamp: 0 };
+  const asset = Keypair.generate();
+  const createSig = await characterProgram.methods
+    .createCharacter({
+      name: text(name, 32), race: e("human"), class: e("warrior"), predisposition: e("piercing"),
+      stats: [10, 7, 5, 8], appearance: new Array(20).fill(layer),
+      skills: WARRIOR_SKILLS.map(([n, b]) => newSkill(n, b, text)),
+    })
+    .accountsStrict({
+      owner: wallet.publicKey, profile, character, skillSet, bag,
+      config, asset: asset.publicKey, mplCoreProgram: MPL_CORE, systemProgram: SystemProgram.programId, skillExtras,
+    })
+    .signers([wallet, asset])
+    .rpc({ commitment: "confirmed" });
+  return { wallet, actor: Keypair.generate(), character, skillSet, bag, skillExtras, asset, createSig, participation: PublicKey.default };
+}
+const hero = await newHero("Smoke");
+const bait = await newHero("Bait");
+const { wallet: player, character, skillSet, bag, skillExtras, asset, createSig } = hero;
 console.log("character + Core NFT + starter kit:", character.toBase58(), asset.publicKey.toBase58());
 console.log("create_character:", explorer(createSig));
 const created = [...characterEvents.parseLogs(await logsOf(createSig))].find((x) => x.name === "characterCreated");
@@ -218,25 +229,34 @@ await session.methods
   })
   .signers([dm])
   .rpc();
-const participation = pda([Buffer.from("participation"), sessionPda.toBuffer(), character.toBuffer()], SESSION);
-await session.methods
-  .joinSession(PRICE, playerActor.publicKey)
-  .accountsStrict({
-    player: player.publicKey, session: sessionPda, character, participation,
-    stash: pda([Buffer.from("stash"), sessionPda.toBuffer(), character.toBuffer()], SESSION),
-    escrow, systemProgram: SystemProgram.programId,
-  })
-  .signers([player])
-  .rpc();
+// Slot 0 the warrior who cleaves, slot 1 the hero the chieftain puts down.
+const heroes = [hero, bait];
+for (const h of heroes) {
+  h.participation = pda([Buffer.from("participation"), sessionPda.toBuffer(), h.character.toBuffer()], SESSION);
+  await session.methods
+    .joinSession(PRICE, h.actor.publicKey)
+    .accountsStrict({
+      player: h.wallet.publicKey, session: sessionPda, character: h.character, participation: h.participation,
+      stash: pda([Buffer.from("stash"), sessionPda.toBuffer(), h.character.toBuffer()], SESSION),
+      escrow, systemProgram: SystemProgram.programId,
+    })
+    .signers([h.wallet])
+    .rpc();
+  // Ready: the 4 + 1 + 1 skills taken onto the map; the character is locked and its gear copied.
+  await session.methods
+    .setReady(true, [0, 1, 2, 3, 4, 5])
+    .accountsStrict({
+      player: h.wallet.publicKey, session: sessionPda, participation: h.participation, character: h.character,
+      skillSet: h.skillSet, sessionAuthority, config, characterProgram: CHARACTER, skillExtras: h.skillExtras,
+    })
+    .signers([h.wallet])
+    .rpc({ commitment: "confirmed" });
+  const ready = await session.account.participation.fetch(h.participation);
+  assert.deepEqual(ready.equipment, worn({ [MAIN_HAND]: SWORD, [BODY]: LEATHER }), "set_ready snapshot of the worn items");
+}
+const participation = hero.participation;
 const part = () => session.account.participation.fetch(participation);
-// Ready: the 4 + 1 + 1 skills taken onto the map; the character is locked and its gear copied.
-await session.methods
-  .setReady(true, [0, 1, 2, 3, 4, 5])
-  .accountsStrict({ player: player.publicKey, session: sessionPda, participation, character, skillSet, sessionAuthority, config, characterProgram: CHARACTER, skillExtras })
-  .signers([player])
-  .rpc({ commitment: "confirmed" });
-assert.deepEqual((await part()).equipment, worn({ [MAIN_HAND]: SWORD, [BODY]: LEATHER }), "set_ready snapshot of the worn items");
-console.log("set_ready: equipment snapshot sword + leather armor, skills 4 + 1 + 1");
+console.log("set_ready x2: equipment snapshot sword + leather armor, skills 4 + 1 + 1");
 
 const startSig = await session.methods
   .startSession()
@@ -269,10 +289,10 @@ const endTurn = (signer: Keypair, p: PublicKey | null) =>
   session.methods.endTurn().accountsStrict({ signer: signer.publicKey, session: sessionPda, monsters, participation: p, sessionToken: null }).signers([signer]).rpc();
 
 /** What the oracle's callback transaction used and the budget it ran under. */
-async function callbackBudget(sig: string) {
+async function callbackBudget(sig: string, what: string) {
   const tx = await connection.getTransaction(sig, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
   assert.ok(tx?.meta, "the callback transaction is readable");
-  console.log("callback tx:", explorer(sig));
+  console.log(`callback tx (${what}):`, explorer(sig));
   console.log("computeUnitsConsumed (whole tx):", tx.meta.computeUnitsConsumed);
   const own = `Program ${SESSION.toBase58()} consumed `;
   for (const line of tx.meta.logMessages ?? []) if (line.startsWith(own)) console.log("session program:", line.slice(`Program ${SESSION.toBase58()} `.length));
@@ -291,34 +311,101 @@ async function callbackBudget(sig: string) {
   if (!budgets) console.log("oracle sent no ComputeBudget instruction");
 }
 
-// Turns until the warrior (slot 0, on the entrance) cleaves the line chieftain, goblin warrior, shaman.
-for (let guard = 0; guard < 80; guard++) {
+await callbackBudget(init.signature, "initiative");
+
+const monsterState = () => session.account.monsterState.fetch(monsters);
+const named = (events: any[], name: string) => events.filter((x) => x.name.toLowerCase() === name);
+const BAIT_SLOT = 1;
+let cleaves = 0;
+let cried = false;
+let daggerShown = false;
+let actedSeq = -1;
+
+// The warrior (slot 0, on the entrance) cleaves the line chieftain, goblin warrior, shaman, until
+// Battle Cry fires or CLEAVE_TRIES; then the chieftain throws daggers at the bait (slot 1) until
+// it is down, and start_turn finalizes the death. The DM lets every other monster pass.
+for (let guard = 0; guard < 400; guard++) {
   const s = await state();
   assert.ok(s.core.status.active, "party still active");
   const unit = s.core.turnOrder[s.core.turnIndex];
   if (s.startedSeq !== s.turnSeq || s.pendingDeaths !== 0) {
-    const pl = unit < MONSTER_BASE;
-    await session.methods
+    const queued = s.pendingDeaths as number;
+    const h = unit < MONSTER_BASE ? heroes[unit] : null;
+    const sig = await session.methods
       .startTurn()
       .accountsStrict({
-        session: sessionPda, monsters, participation: pl ? participation : null, character: pl ? character : null,
-        sessionAuthority, config, characterProgram: CHARACTER, skillSet: pl ? skillSet : null, bag: pl ? bag : null,
+        session: sessionPda, monsters, participation: h?.participation ?? null, character: h?.character ?? null,
+        sessionAuthority, config, characterProgram: CHARACTER, skillSet: h?.skillSet ?? null, bag: h?.bag ?? null,
         payer: provider.wallet.publicKey, ...vrfAccounts,
       })
       .remainingAccounts(deathAccounts(s))
       .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: FINALIZE_CU })])
       .rpc({ commitment: "confirmed" });
+    if (queued) {
+      const tx = await connection.getTransaction(sig, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
+      const fin = named([...sessionEvents.parseLogs(tx?.meta?.logMessages ?? [])], "deathfinalized");
+      assert.deepEqual(fin.map((d) => d.data.slot), [BAIT_SLOT], "start_turn finalized the queued death");
+      assert.equal((await state()).pendingDeaths, 0, "death queue empty");
+      assert.equal((await characterProgram.account.character.fetch(bait.character)).core.alive, false, "tombstone through character.mark_dead");
+      console.log(`start_turn finalized the death of slot ${BAIT_SLOT} (${tx?.meta?.computeUnitsConsumed} CU):`, explorer(sig));
+      process.exit(0);
+    }
     if ((await state()).core.pendingVrf) await waitVrf(sessionPda, "a reactive roll");
     continue;
   }
+  const acted = actedSeq === s.turnSeq;
   if (unit >= MONSTER_BASE) {
-    // The DM lets every monster pass: the smoke only needs the warrior's cleave.
-    await endTurn(dm, null);
+    const mi = unit - MONSTER_BASE;
+    const baitUp = (s.aliveMask & (1 << BAIT_SLOT)) !== 0;
+    if (acted || cleaves === 0 || mi !== CHIEFTAIN_INDEX || !baitUp) {
+      await endTurn(dm, null);
+      continue;
+    }
+    const cd = (await monsterState()).skillCooldowns[mi];
+    const action = cd[DAGGER_THROW_SLOT] === 0 ? 1 + DAGGER_THROW_SLOT : 0;
+    const actSig = await session.methods
+      .monsterAct(mi, action, BAIT_SLOT)
+      .accountsStrict({
+        signer: dm.publicKey, session: sessionPda, monsters, participation: bait.participation, character: bait.character,
+        skillSet: bait.skillSet, bag: bait.bag, sessionToken: null, ...vrfAccounts, layout,
+      })
+      .signers([dm])
+      .rpc({ commitment: "confirmed" });
+    actedSeq = s.turnSeq;
+    const what = action ? "Dagger Throw" : "natural attack";
+    console.log(`monster_act (chieftain, ${what} on slot ${BAIT_SLOT}):`, explorer(actSig));
+    await waitVrf(sessionPda, `the chieftain's ${what}`);
+    const hit = await findSessionEvent(sessionPda, "hitresolved", (d) => d.attacker === MONSTER_BASE + mi);
+    assert.ok(hit, "pendingVrf cleared but no HitResolved event found");
+    const events = [...sessionEvents.parseLogs(await logsOf(hit.signature))];
+    const r = named(events, "hitresolved")[0].data.result;
+    const died = named(events, "playerdied").map((d) => d.data.slot);
+    console.log(`  d20 ${r.d20}, ${Object.keys(r.outcome)[0]}, damage ${r.damage}${died.length ? `, down: slot ${died.join(", ")}` : ""}`);
+    if (action && !daggerShown) {
+      daggerShown = true;
+      await callbackBudget(hit.signature, "monster skill: Dagger Throw");
+    }
+    if (died.length) {
+      assert.deepEqual(died, [BAIT_SLOT]);
+      assert.equal(named(events, "characterdied").length, 0, "no mark_dead in the callback");
+      const after = await state();
+      assert.ok(after.pendingDeaths & (1 << BAIT_SLOT), "the death is queued");
+      if (!daggerShown) await callbackBudget(hit.signature, "the killing hit");
+      console.log(`slot ${BAIT_SLOT} down; the death waits for start_turn`);
+    }
+    continue;
+  }
+  const h = heroes[unit];
+  if (unit !== 0 || acted || (cleaves > 0 && (cried || cleaves >= CLEAVE_TRIES))) {
+    await endTurn(h.wallet, h.participation);
     continue;
   }
   const p = await part();
   const ap = p.apSeq === s.turnSeq ? p.core.actionPoints : p.maxAp;
-  if (p.cooldowns[BLEEDING_CLEAVE] !== 0 || ap < p.mapSkills[BLEEDING_CLEAVE].apCost) {
+  const m = await monsterState();
+  const lineUp = [CHIEFTAIN_INDEX, CHIEFTAIN_INDEX + 1, CHIEFTAIN_INDEX + 2].every((i) => m.core.monsters[i].alive);
+  if (p.cooldowns[BLEEDING_CLEAVE] !== 0 || ap < p.mapSkills[BLEEDING_CLEAVE].apCost || !lineUp) {
+    if (!lineUp && cleaves > 0) cleaves = CLEAVE_TRIES;
     await endTurn(player, participation);
     continue;
   }
@@ -330,17 +417,18 @@ for (let guard = 0; guard < 80; guard++) {
     })
     .signers([player])
     .rpc({ commitment: "confirmed" });
-  console.log("act (Bleeding Cleave through chieftain, goblin warrior, shaman):", explorer(actSig));
+  actedSeq = s.turnSeq;
+  cleaves++;
+  console.log(`act ${cleaves} (Bleeding Cleave through chieftain, goblin warrior, shaman):`, explorer(actSig));
   await waitVrf(sessionPda, "the cleave");
   const hit = await findSessionEvent(sessionPda, "hitresolved", (d) => d.attacker === 0);
   assert.ok(hit, "pendingVrf cleared but no HitResolved event found");
   const events = [...sessionEvents.parseLogs(await logsOf(hit.signature))];
-  const hits = events.filter((x) => x.name.toLowerCase() === "hitresolved");
-  console.log(`hits: ${hits.length} (targets ${hits.map((h) => h.data.target).join(", ")})`);
-  for (const h of hits) console.log(`  d20 ${h.data.result.d20}, ${Object.keys(h.data.result.outcome)[0]}, damage ${h.data.result.damage}`);
-  const cry = events.some((x) => x.name.toLowerCase() === "monsterreactivetriggered");
-  console.log(cry ? "Battle Cry fired (the heaviest path)" : "Battle Cry did not fire on these dice (the line alone)");
-  await callbackBudget(hit.signature);
-  process.exit(0);
+  const hits = named(events, "hitresolved");
+  console.log(`hits: ${hits.length} (targets ${hits.map((x) => x.data.target).join(", ")})`);
+  for (const x of hits) console.log(`  d20 ${x.data.result.d20}, ${Object.keys(x.data.result.outcome)[0]}, damage ${x.data.result.damage}`);
+  cried = named(events, "monsterreactivetriggered").length > 0;
+  console.log(cried ? "Battle Cry fired (the heaviest path)" : "Battle Cry did not fire on these dice (the line alone)");
+  await callbackBudget(hit.signature, `cleave ${cleaves}`);
 }
-throw new Error("the warrior never cleaved within 80 turns");
+throw new Error("the bait was never finalized within 400 steps");
