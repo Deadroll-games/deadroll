@@ -7,7 +7,7 @@ programs read without CPI (`docs/ARCHITECTURE.md` 4.2, 4.3). Owner lane: L4.
 
 | Account | Seeds | Body |
 |---|---|---|
-| `GameConfig` | `["config"]` | `GameConfigData` from `crates/types` (frozen), nothing appended |
+| `GameConfig` | `["config"]` | `GameConfigData` from `crates/types` (frozen), then `sprite_books: [Pubkey; 4]` (patch 7, offset 428, lookup order, `Pubkey::default()` = empty); `8 + 420 + 128` bytes |
 | `Table` (aspects, resonances, bestiary, tileset, prefabs, traits) | `["aspects"]`, `["resonances"]`, `["bestiary"]`, `["tileset"]`, `["prefabs"]`, `["traits"]` | 8-byte header + 4096-byte body, zero copy |
 
 `Table` data: 8 discriminator, `version u8`, `kind u8`, `bump u8`, `pad u8`, `len u32 LE` (highest end offset
@@ -21,11 +21,13 @@ written), then the body at offset 16. Readers take records straight from the bod
 | `set_programs(programs[7])`, `set_uri_base(uri_base)` | authority | replace the list / the uri prefix |
 | `set_rasterizer()` | authority | **pulls** from render (no CPI): `blob` must be owned by `programs[Render]`, be its PDA `["rasterizer", id]`, kind 1, `finalized`; copies `id`, address, `sha256` (offsets in `programs/render/README.md`) |
 | `set_palette()` | authority | same pull for `Palette` (kind 2), copies the address |
+| `set_sprite_books()` | authority | 1..=4 `SpriteBook`s (kind 3) as remaining accounts, each pulled like above, distinct; stored in order, other slots cleared |
+| `set_rasterizer_from_render()` | render `["authority"]` PDA (CPI from `render::finalize_rasterizer`) | the `set_rasterizer` pull; `STORAGE_AND_DELIVERY.md` 3.2 |
+| `resize_config()` | authority | grows a pre-patch-7 `GameConfig` (`8 + 420`) to the current size, tops up rent; refused once done |
 | `init_table(kind)` | authority | creates an empty table |
 | `write_table(kind, offset, bytes)` | authority | whole, aligned, valid records only; tables stay editable |
 
 `TableKind`: 0 Aspects, 1 Resonances, 2 Bestiary, 3 Tileset, 4 Prefabs, 5 Traits, 6 MonsterSkills (append only).
-TODO(post-demo): the same pull for `SpriteBook` (`GameConfigData` has no field for it).
 
 ## Record layouts (little-endian, validated by `write_table`, source: `src/state/records.rs`)
 

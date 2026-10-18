@@ -9,7 +9,7 @@ cargo run -p art -- assets/sprites/monsters.dsl --scale 4 --out target/art      
 cargo run -p art -- assets/sprites/monsters.dsl --id 402 --out chief.png
 cargo run -p art -- sheet characters --scale 4 --out target/art/characters.png  # full characters
 cargo run -p art -- sheet contact --scale 2 --out target/art/all.png            # every sprite
-cargo run -p art -- pack                           # target/render-assets/{palette,book}.bin for upload
+cargo run -p art -- pack                           # target/render-assets/{palette,book}.bin (book 2) for upload
 cargo run -p art -- upscale old.dsl                # format 1 source (16..64 px) -> format 2, in place
 ```
 

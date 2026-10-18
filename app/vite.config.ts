@@ -13,7 +13,7 @@ const root = resolve(import.meta.dirname, "..");
  */
 const DEV_ASSETS: Record<string, string> = {
   "rasterizer.wasm": "target/render-wasm/deadroll_render.wasm",
-  "golden-input.bin": "target/render-golden/input.bin",
+  "golden-state.bin": "target/render-golden/state.bin",
   "palette.bin": "target/render-golden/palette.bin",
   "book.bin": "target/render-golden/book.bin",
   "combat.wasm": "target/wasm32-unknown-unknown/wasm/deadroll_combat_wasm.wasm",

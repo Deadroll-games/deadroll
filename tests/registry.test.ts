@@ -55,7 +55,10 @@ const BESTIARY_MAX = 32;
 /** Body starts after the discriminator and the 8-byte table header. */
 const TABLE_BODY = 16;
 /** `GameConfigData` offsets after the 8-byte discriminator. */
-const CFG = { authority: 9, programs: 41, rasterizerVersion: 265, rasterizer: 267, sha: 299, palette: 331, uri: 363 };
+const CFG = { authority: 9, programs: 41, rasterizerVersion: 265, rasterizer: 267, sha: 299, palette: 331, uri: 363, spriteBooks: 428 };
+/** Patch 7: `GameConfigData` (420) then the registry field `sprite_books: [Pubkey; 4]`. */
+const CONFIG_LEN = 8 + 420 + 4 * 32;
+const EMPTY = "11111111111111111111111111111111";
 
 const rpcUrl = new URL(process.env.ANCHOR_PROVIDER_URL ?? "http://127.0.0.1:8899");
 const wsUrl = new URL(rpcUrl);
@@ -150,6 +153,34 @@ const editIx = async (authority: Signer, name: string, args: Uint8Array) => ({
   accounts: [signerMeta(authority), meta(await configAddress(), true)],
   data: concat(disc(name), args),
 });
+
+const resizeIx = async (authority: Signer) => ({
+  programAddress: REGISTRY,
+  accounts: [signerMeta(authority, true), meta(await configAddress(), true), meta(SYSTEM_PROGRAM)],
+  data: disc("resize_config"),
+});
+
+/** set_sprite_books: the books are remaining accounts after the EditConfig pair. */
+const booksIx = async (authority: Signer, books: string[]) => ({
+  programAddress: REGISTRY,
+  accounts: [signerMeta(authority), meta(await configAddress(), true), ...books.map((b) => meta(b))],
+  data: disc("set_sprite_books"),
+});
+
+/** set_rasterizer_from_render with any signer in the render authority slot. */
+const fromRenderIx = async (signer: Signer, blob: string) => ({
+  programAddress: REGISTRY,
+  accounts: [signerMeta(signer), meta(await configAddress(), true), meta(blob)],
+  data: disc("set_rasterizer_from_render"),
+});
+
+/** Finalized render blobs of a kind on this validator (1 rasterizer, 2 palette, 3 sprite book). */
+async function finalizedBlobs(kind: number): Promise<{ pubkey: string; data: Uint8Array }[]> {
+  const accounts = await rpc.getProgramAccounts(RENDER_PROGRAM, { encoding: "base64", commitment: "confirmed" }).send();
+  return accounts
+    .map((a: any) => ({ pubkey: a.pubkey as string, data: Uint8Array.from(getBase64Encoder().encode(a.account.data[0])) }))
+    .filter((a: { data: Uint8Array }) => a.data[9] === kind && a.data[10] === 1);
+}
 
 const pullIx = async (authority: Signer, name: string, blob: string) => ({
   programAddress: REGISTRY,
@@ -284,7 +315,7 @@ describe("registry", () => {
         const at = CFG.programs + i * 32;
         assert.equal(bs58(cfg.slice(at, at + 32)), PROGRAMS[i], `programs[${i}]`);
       }
-      assert.equal(cfg.length, 8 + 420, "discriminator + GameConfigData::SIZE");
+      assert.equal(cfg.length, CONFIG_LEN, "discriminator + GameConfigData::SIZE + sprite_books");
     });
 
     it("rejects a second init", async () => {
@@ -353,11 +384,61 @@ describe("registry", () => {
       });
       if (!finalized) return t.skip("no finalized RasterizerCode on this validator (upload one first)");
       const blob = Uint8Array.from(getBase64Encoder().encode(finalized.account.data[0]));
+      const original = bs58(cfg.slice(CFG.rasterizer, CFG.rasterizer + 32));
       await send(authority, [await pullIx(authority, "set_rasterizer", finalized.pubkey)]);
       const after = await data(await configAddress());
       assert.equal(after[CFG.rasterizerVersion] | (after[CFG.rasterizerVersion + 1] << 8), blob[16] | (blob[17] << 8));
       assert.equal(bs58(after.slice(CFG.rasterizer, CFG.rasterizer + 32)), finalized.pubkey);
       assert.deepEqual(Array.from(after.slice(CFG.sha, CFG.sha + 32)), Array.from(blob.slice(84, 116)));
+      // Put the deployed rasterizer back (the website reads this pointer).
+      if (original !== EMPTY) await send(authority, [await pullIx(authority, "set_rasterizer", original)]);
+    });
+  });
+
+  describe("patch 7: resize_config, set_sprite_books, set_rasterizer_from_render", () => {
+    it("resize_config is refused once GameConfig has its current size", async () => {
+      assert.equal((await data(await configAddress())).length, CONFIG_LEN);
+      await expectErr(send(authority, [await resizeIx(authority)]), err("ConfigAlreadyResized"));
+      await expectErr(send(stranger, [await resizeIx(stranger)]), err("ConfigAlreadyResized"));
+    });
+
+    it("set_rasterizer_from_render accepts only the render authority PDA", async () => {
+      const config = await configAddress();
+      await expectErr(send(stranger, [await fromRenderIx(stranger, config)]), err("UntrustedCaller"));
+      // Not even the game authority: only render's finalize_rasterizer (CPI) may call it.
+      await expectErr(send(authority, [await fromRenderIx(authority, config)]), err("UntrustedCaller"));
+    });
+
+    it("set_sprite_books rejects a non-authority, no books, duplicates and wrong accounts", async (t) => {
+      const config = await configAddress();
+      await expectErr(send(stranger, [await booksIx(stranger, [config])]), err("Unauthorized"));
+      if (!owned) return t.skip(ownerSkip);
+      await expectErr(send(authority, [await booksIx(authority, [])]), err("SpriteBookCount"));
+      const five = await Promise.all([0, 1, 2, 3, 4].map(async () => (await generateKeyPairSigner()).address));
+      await expectErr(send(authority, [await booksIx(authority, five)]), err("SpriteBookCount"));
+      await expectErr(send(authority, [await booksIx(authority, [config])]), err("WrongBlobOwner"));
+      if (!(await maybeData(RENDER_PROGRAM))) return t.skip("render program is not deployed on this validator");
+      const [palette] = await finalizedBlobs(2);
+      if (palette) await expectErr(send(authority, [await booksIx(authority, [palette.pubkey])]), err("WrongBlobKind"));
+      const [book] = await finalizedBlobs(3);
+      if (!book) return t.skip("no finalized SpriteBook on this validator (upload one first)");
+      await expectErr(send(authority, [await booksIx(authority, [book.pubkey, book.pubkey])]), err("DuplicateSpriteBook"));
+    });
+
+    it("set_sprite_books stores the books in order and clears the other slots", async (t) => {
+      if (!owned) return t.skip(ownerSkip);
+      if (!(await maybeData(RENDER_PROGRAM))) return t.skip("render program is not deployed on this validator");
+      const books = await finalizedBlobs(3);
+      if (books.length < 2) return t.skip("needs two finalized SpriteBooks on this validator");
+      const cfg = await data(await configAddress());
+      const slots = (d: Uint8Array) => [0, 1, 2, 3].map((i) => bs58(d.slice(CFG.spriteBooks + i * 32, CFG.spriteBooks + (i + 1) * 32)));
+      const original = slots(cfg).filter((b) => b !== EMPTY);
+      const pick = [books[1]!.pubkey, books[0]!.pubkey];
+      await send(authority, [await booksIx(authority, pick)]);
+      assert.deepEqual(slots(await data(await configAddress())), [...pick, EMPTY, EMPTY]);
+      // Put the deployed list back.
+      if (original.length > 0) await send(authority, [await booksIx(authority, original)]);
+      assert.deepEqual(slots(await data(await configAddress())).filter((b) => b !== EMPTY), original);
     });
   });
 

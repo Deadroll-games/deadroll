@@ -39,8 +39,10 @@ describe("GameConfig", () => {
       rasterizerSha256: A(0xab),
       palette: addrOf(2),
       uriBase: "https://deadroll.example/",
+      spriteBooks: [addrOf(3), addrOf(4)],
     });
-    expect(data.length).toBe(8 + 420);
+    // GameConfigData, then the registry field sprite_books: [Pubkey; 4] at 428.
+    expect(data.length).toBe(8 + 420 + 128);
     // Absolute offsets: rasterizer_version at 265, rasterizer_sha256 at 299.
     expect([data[265], data[266], data[299]]).toEqual([0x03, 0x02, 0xab]);
     const c = decodeGameConfig(data);
@@ -53,11 +55,14 @@ describe("GameConfig", () => {
     expect(c.palette).toBe(addrOf(2));
     expect(c.uriBase).toBe("https://deadroll.example/");
     expect(c.bump).toBe(255);
+    expect(c.spriteBooks).toEqual([addrOf(3), addrOf(4)]);
   });
 
   it("rejects a wrong discriminator and short data", () => {
     expect(() => decodeGameConfig(new Uint8Array(428))).toThrow(/not a GameConfig/);
     expect(() => decodeGameConfig(concat(ACCOUNT_DISC.GameConfig, new Uint8Array(10)))).toThrow(/too short/);
+    // A pre-patch-7 account (no sprite_books) is not read: the registry resize_config runs first.
+    expect(() => decodeGameConfig(concat(ACCOUNT_DISC.GameConfig, new Uint8Array(420)))).toThrow(/too short/);
   });
 });
 

@@ -479,3 +479,42 @@ category), `ai_heal_below_pct` added.
 Combat WASM ABI 6: monsters by record bytes (`RecordInput`); exports `monster_skill`,
 `spawn_skills`, `preview_monster_attack`, `monster_plan`; `PartyInput.bearers`
 (`crates/combat/wasm/README.md`).
+
+## 14. Patch 7: render format 2, sprite books in GameConfig, finalize writes GameConfig
+
+Additions only. `crates/types` is unchanged.
+
+`GameConfig` (registry): one registry field after the core (section 4.1), account size `8 + 420 + 128`:
+```
+GameConfig { core: GameConfigData, sprite_books: [Pubkey; 4] }   lookup order, Pubkey::default() = empty slot
+```
+A `GameConfig` created before patch 7 (`8 + 420` bytes) is grown once by `registry::resize_config()`
+(authority; rent top-up; new bytes zero). Until then no instruction loads it as `GameConfig`; programs
+that read only `GameConfigData` at offset 8 are not affected.
+
+New registry instructions:
+
+| Instruction | Who | Accounts | What |
+|---|---|---|---|
+| `resize_config()` | `GameConfig.authority` | `authority (w, signer), config (w), system_program` | one-time migration to the patch 7 size |
+| `set_sprite_books()` | `GameConfig.authority` | `authority (signer), config (w)`, then 1..=4 finalized `SpriteBook`s as remaining accounts | `sprite_books` = the books in order, other slots cleared; `SpriteBooksSet` |
+| `set_rasterizer_from_render()` | render `["authority"]` PDA (CPI only) | `render_authority (signer), config (w), blob` | the same pull as `set_rasterizer` |
+
+New CPI (section 5):
+
+| Caller | Callee instruction | Signer check in callee |
+|---|---|---|
+| render `finalize_rasterizer` | `registry::set_rasterizer_from_render()` | render `["authority"]` PDA from `GameConfig.programs[Render]` |
+
+`render::finalize_rasterizer` accounts: `authority (signer, = GameConfig.authority), rasterizer (w),
+config (w), render_authority, registry_program`. Finalize hashes, checks, freezes and then points
+`GameConfig` at the new rasterizer (`docs/STORAGE_AND_DELIVERY.md` 3.2).
+
+Events: registry `SpriteBooksSet { sprite_books: [Pubkey; 4] }`, `ConfigResized { old_len: u32, new_len: u32 }`.
+Errors (registry, appended): `UntrustedCaller, WrongConfigAccount, ConfigAlreadyResized, SpriteBookCount, DuplicateSpriteBook`.
+
+Sprites (`crates/render/FORMAT.md`): sprite format 2, canvases 32/64/96/128 (character layers and
+tiles 64x64, icons 32x32, monsters 64/96/128). Rasterizer version 2 and sprite book 2 hold format 2;
+version 1 and book 1 stay for format 1 images. Sprite ids, `LayerRef` and `RenderRequest` are unchanged.
+The rasterizer interface is `render(sprites, palette, state, asset, mode)` (`ART_DESCRIPTION.md` 2.2):
+RAW_RGBA is the canvas 1:1, PNG is an indexed PNG of 512 px on the longer side.

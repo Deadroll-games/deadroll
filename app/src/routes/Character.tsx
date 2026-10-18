@@ -100,7 +100,7 @@ export function CharacterPage() {
         statMin={STAT_MIN}
         allowedPredispositions={allowed}
         busy={busy !== null}
-        preview={<SpriteCanvas image={preview.image} scale={6} label="character preview" />}
+        preview={<SpriteCanvas image={preview.image} scale={3} label="character preview" />}
       />
       {mockCreated && (
         <p className="ok">
@@ -134,7 +134,7 @@ export function CharacterCard({ address, c }: { address: Address; c: CharacterAc
   return (
     <Link to={`/character/${address}`} className="char-card-link" aria-label={`Open ${bytesText(c.name)}`}>
       <figure className={`panel char-card${dead ? " dead" : ""}`}>
-        <SpriteCanvas image={img.image} scale={3} label={bytesText(c.name)} />
+        <SpriteCanvas image={img.image} scale={1.5} label={bytesText(c.name)} />
         <figcaption>
           <b>{bytesText(c.name)}</b>
           <span className="muted">

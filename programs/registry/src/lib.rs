@@ -50,6 +50,22 @@ pub mod deadroll_registry {
         set_palette::handler(ctx)
     }
 
+    /// Render `finalize_rasterizer` (CPI, render `["authority"]` signer) points the config at
+    /// the rasterizer it just finalized (`docs/STORAGE_AND_DELIVERY.md` 3.2).
+    pub fn set_rasterizer_from_render(ctx: Context<SetRasterizerFromRender>) -> Result<()> {
+        set_rasterizer_from_render::handler(ctx)
+    }
+
+    /// Authority sets the sprite books (remaining accounts, 1..=4 finalized, lookup order).
+    pub fn set_sprite_books(ctx: Context<EditConfig>) -> Result<()> {
+        set_sprite_books::handler(ctx)
+    }
+
+    /// Authority grows a pre-patch-7 `GameConfig` to the current size (one-time migration).
+    pub fn resize_config(ctx: Context<ResizeConfig>) -> Result<()> {
+        resize_config::handler(ctx)
+    }
+
     /// Authority creates an empty table.
     pub fn init_table(ctx: Context<InitTable>, kind: TableKind) -> Result<()> {
         init_table::handler(ctx, kind)

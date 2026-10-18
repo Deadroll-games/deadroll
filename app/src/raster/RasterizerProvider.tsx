@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { rpcAccountSource } from "../chain/accounts";
 import type { RenderRequest } from "../chain/types";
-import { DATA_SOURCE, SPRITE_BOOK_IDS } from "../config";
+import { DATA_SOURCE } from "../config";
 import { client } from "../wallet/client";
 import { idbWasmCache } from "./idb";
 import { loadRender, type LoadedRender } from "./loader";
@@ -18,10 +18,10 @@ const Ctx = createContext<RasterizerState>({ status: "loading" });
 
 async function load(): Promise<{ render: LoadedRender; sample: RenderRequest | null }> {
   if (DATA_SOURCE === "mock") {
-    const { source, bookIds, sample } = await mockRenderSource();
-    return { render: await loadRender(source, { cache: idbWasmCache, bookIds }), sample };
+    const { source, sample } = await mockRenderSource();
+    return { render: await loadRender(source, { cache: idbWasmCache }), sample };
   }
-  const render = await loadRender(rpcAccountSource(client.rpc), { cache: idbWasmCache, bookIds: SPRITE_BOOK_IDS });
+  const render = await loadRender(rpcAccountSource(client.rpc), { cache: idbWasmCache });
   // The demo warrior from sprite book 1, as tools/art draws it.
   return { render, sample: renderRequest(characterAppearance(Race.Human, Class.Warrior, Aspect.Piercing)) };
 }

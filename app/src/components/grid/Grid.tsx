@@ -1,6 +1,7 @@
 // Battle map canvas: tiles, units, move highlights, and cell clicks.
 import { useEffect, useRef, type MouseEvent } from "react";
 import { Tile, cellIndex, type Cell } from "../../chain/types";
+import { SPRITE_PX } from "../../raster/SpriteCanvas";
 import type { GridProps, GridUnit } from "./types";
 import "./grid.css";
 
@@ -31,6 +32,15 @@ const INK = "#120c16";
 const LETTER = "#f4efe6";
 
 type Rect = { left: number; top: number; width: number; height: number };
+
+/**
+ * Canvas pixels per cell: at least one sprite canvas (64 px tiles and units drawn 1:1), more when
+ * the cell is shown larger. The CSS size stays `cellPx`, so a smaller cell shows the sprite scaled
+ * down by the browser and stays sharp on high-density screens.
+ */
+export function backingCell(cellPx: number): number {
+  return Math.max(SPRITE_PX, Math.round(cellPx));
+}
 
 /** clientX/clientY to a cell. Uses the CSS box, so a scaled canvas still maps. Null outside. */
 export function cellFromPoint(px: number, py: number, rect: Rect, width: number, height: number): Cell | null {
@@ -348,6 +358,7 @@ function cellKey(cell: Cell | null): string | null {
 
 export function Grid(props: GridProps) {
   const { width, height, cellPx = 48, onCellClick, onUnitClick, onCellHover } = props;
+  const cell = backingCell(cellPx);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const hoverKey = useRef<string | null>(null);
 
@@ -356,8 +367,8 @@ export function Grid(props: GridProps) {
     if (!canvas) return;
     const ctx = context2d(canvas);
     if (!ctx) return;
-    drawGrid(ctx, props, cellPx);
-  }, [props, cellPx]);
+    drawGrid(ctx, props, cell);
+  }, [props, cell]);
 
   function handleClick(event: MouseEvent<HTMLCanvasElement>) {
     const cell = cellFromPoint(event.clientX, event.clientY, event.currentTarget.getBoundingClientRect(), width, height);
@@ -384,8 +395,9 @@ export function Grid(props: GridProps) {
     <canvas
       ref={canvasRef}
       className="pixel grid-canvas"
-      width={width * cellPx}
-      height={height * cellPx}
+      width={width * cell}
+      height={height * cell}
+      style={{ width: width * cellPx, height: height * cellPx }}
       role="img"
       aria-label={`Battle map, ${width} by ${height} cells`}
       onClick={handleClick}

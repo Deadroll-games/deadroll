@@ -124,13 +124,16 @@ fn request(pal: &Pal, layers: &[(usize, u16, Look)]) -> Result<RenderRequest, St
     Ok(req)
 }
 
-/// Sprite books for rendering: one book holding every compiled sprite.
+/// Id of the book `art pack` builds: book 2 holds sprite format 2 (book 1, format 1, is frozen on-chain).
+pub const BOOK_ID: u16 = 2;
+
+/// Sprite books for rendering and upload: one book holding every compiled sprite.
 pub fn pack_book(sprites: &[Compiled]) -> Result<Vec<u8>, String> {
     let items: Vec<(u16, &[u8])> = sprites
         .iter()
         .map(|c| (c.src.id, c.src.bytes.as_slice()))
         .collect();
-    book::pack(1, &items).map_err(|e| format!("book: {e:?}"))
+    book::pack(BOOK_ID, &items).map_err(|e| format!("book: {e:?}"))
 }
 
 fn run(pal: &Pal, book_bytes: &[u8], req: &RenderRequest, k: u32) -> Result<Img, String> {

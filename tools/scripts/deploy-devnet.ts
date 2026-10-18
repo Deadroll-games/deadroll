@@ -9,8 +9,7 @@ import {
   intFlag,
   parseFlags,
   resolveBins,
-  sessionVrfMode,
-} from "./lib/deploy.ts";
+  sessionVrfMode, BOOK_ID, RASTERIZER_VERSION } from "./lib/deploy.ts";
 
 const USAGE = `usage: deploy-devnet.ts [--url <rpc>] [--wallet <keypair.json>] [--skip-build] [--map-index <u32>]
                         [--uri-base <text>] [--rasterizer-version <u16>] [--book-id <u16>]
@@ -83,8 +82,8 @@ async function main() {
     skipBuild: f["--skip-build"] === true,
     uriBase: (f["--uri-base"] as string) ?? "https://deadroll.invalid/nft",
     uriBaseExplicit: f["--uri-base"] !== undefined,
-    rasterizerVersion: intFlag(f["--rasterizer-version"], 1, 0xffff, "--rasterizer-version"),
-    bookId: intFlag(f["--book-id"], 1, 0xffff, "--book-id"),
+    rasterizerVersion: intFlag(f["--rasterizer-version"], RASTERIZER_VERSION, 0xffff, "--rasterizer-version"),
+    bookId: intFlag(f["--book-id"], BOOK_ID, 0xffff, "--book-id"),
     mapIndex: intFlag(f["--map-index"], 0, 0xffffffff, "--map-index"),
     computeUnitPrice: f["--compute-unit-price"] === undefined ? undefined : intFlag(f["--compute-unit-price"], 0, 10_000_000, "--compute-unit-price"),
     confirmCost,

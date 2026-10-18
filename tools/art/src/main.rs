@@ -15,7 +15,7 @@ const USAGE: &str = "usage:
   art <file.dsl> [--id N] [--scale 4] [--out DIR|FILE.png] [--material NAME] [--bg #rrggbb]
   art sheet characters [--scale 4] [--out FILE.png]
   art sheet contact [files.dsl ...] [--scale 2] [--out FILE.png]
-  art pack [--out DIR]                          palette.bin + book.bin (book 1, every sprite) for upload
+  art pack [--out DIR]                          palette.bin + book.bin (book 2, every sprite) for upload
   art upscale [files.dsl ...]                  rewrite format 1 sources (16..64 px) for format 2, in place
 options: --palette FILE.pal (default assets/palette/palette_1.pal)";
 

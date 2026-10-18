@@ -16,7 +16,8 @@ export type LoadedRender = {
   fromCache: boolean;
   palette: Uint8Array;
   paletteVersion: number;
-  books: { id: number; body: Uint8Array }[];
+  /** The sprite books of `GameConfig.sprite_books`, in lookup order. */
+  books: { id: number; address: Address; body: Uint8Array }[];
 };
 
 async function must(src: AccountSource, address: Address, what: string): Promise<Uint8Array> {
@@ -52,7 +53,7 @@ export async function loadRasterizerWasm(
 
 export async function loadRender(
   src: AccountSource,
-  opts: { cache: WasmCache; bookIds: number[]; configAddress?: Address },
+  opts: { cache: WasmCache; configAddress?: Address },
 ): Promise<LoadedRender> {
   const config = decodeGameConfig(await must(src, opts.configAddress ?? (await gameConfigPda()), "GameConfig"));
   const { wasm, fromCache } = await loadRasterizerWasm(src, config, opts.cache);
@@ -63,11 +64,14 @@ export async function loadRender(
   if ((await palettePda(paletteVersion)) !== config.palette) throw new Error("GameConfig.palette is not a palette PDA");
   const palette = decodeBlob(palData, "palette", paletteVersion).body;
 
+  if (config.spriteBooks.length === 0) throw new Error("GameConfig has no sprite books (registry set_sprite_books)");
   const books = await Promise.all(
-    opts.bookIds.map(async (id) => ({
-      id,
-      body: decodeBlob(await must(src, await spriteBookPda(id), `SpriteBook ${id}`), "sprite_book", id).body,
-    })),
+    config.spriteBooks.map(async (address) => {
+      const data = await must(src, address, "SpriteBook");
+      const id = decodeBlobHeader(data).id;
+      if ((await spriteBookPda(id)) !== address) throw new Error(`GameConfig sprite book ${address} is not the SpriteBook PDA for id ${id}`);
+      return { id, address, body: decodeBlob(data, "sprite_book", id).body };
+    }),
   );
   return { rasterizer, config, sha256Hex: toHex(config.rasterizerSha256), source: src.label, fromCache, palette, paletteVersion, books };
 }

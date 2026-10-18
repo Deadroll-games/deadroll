@@ -7,8 +7,6 @@ use crate::{
     state::pull::{pull, KIND_PALETTE, PALETTE_DISCRIMINATOR},
 };
 
-// TODO(post-demo): the same pull for `SpriteBook`; `GameConfigData` has no field for it yet.
-
 /// Points `GameConfig` at a finalized `Palette` (address only: the config has no palette hash).
 pub fn handler(ctx: Context<PullBlob>) -> Result<()> {
     let cfg = &mut ctx.accounts.config.core;

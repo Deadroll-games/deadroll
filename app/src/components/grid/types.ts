@@ -14,7 +14,7 @@ export type GridUnit = {
   alive: boolean;
   /** Short label for the fallback marker and the tooltip, e.g. "Wolf" or "Aria". */
   label: string;
-  /** Sprite size in cells: 1 for 32 px, 2 for 64 px monsters. Drawn bottom-center on its cell. */
+  /** Sprite size in cells: 1 for 64 px, 2 for 128 px monsters. Drawn bottom-center on its cell. */
   size?: 1 | 2;
 };
 
@@ -47,7 +47,10 @@ export type GridProps = {
   auras?: GridAura[];
   /** Patch 5: the cells of a line target under the pointer, tinted. */
   line?: Cell[];
-  /** Pixel size of one cell on screen. Default 48. Sprites scale by integers, never smoothed. */
+  /**
+   * CSS pixel size of one cell on screen. Default 48. The canvas draws at least 64 canvas pixels per
+   * cell (one format 2 sprite 1:1); sprites scale by integers, never smoothed.
+   */
   cellPx?: number;
   /**
    * Rendered sprite for a unit (RGBA from the on-chain rasterizer), or null to draw the fallback

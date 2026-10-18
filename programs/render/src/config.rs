@@ -19,3 +19,11 @@ pub fn game_authority(config: &AccountInfo) -> Result<Pubkey> {
     let cfg = GameConfigData::deserialize(&mut core).map_err(|_| RenderError::WrongConfig)?;
     Ok(cfg.authority)
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn registry_id_matches_the_crate() {
+        assert_eq!(super::REGISTRY_ID, deadroll_registry::ID);
+    }
+}

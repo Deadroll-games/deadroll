@@ -8,6 +8,10 @@ import {
   writeChunkData,
   setComputeUnitLimitData,
   FINALIZE_CU,
+  GAME_CONFIG,
+  REGISTRY_PROGRAM,
+  finalizeInstruction,
+  renderAuthorityPda,
 } from "./render-program.ts";
 
 const EXPECTED: Record<string, string> = {
@@ -92,4 +96,23 @@ test("parseHeader reads the documented offsets", () => {
 
 test("parseHeader rejects a short account", () => {
   assert.throws(() => parseHeader(new Uint8Array(115)), /header needs 116/);
+});
+
+test("finalize_rasterizer carries the GameConfig CPI accounts, the others do not", async () => {
+  const signer = { address: "11111111111111111111111111111112" } as any;
+  const target = "11111111111111111111111111111113";
+  const r = await finalizeInstruction("rasterizer", signer, target);
+  assert.deepEqual(
+    r.accounts.map((a: any) => [a.address, a.role]),
+    [
+      [signer.address, 2],
+      [target, 1],
+      [GAME_CONFIG, 1],
+      [await renderAuthorityPda(), 0],
+      [REGISTRY_PROGRAM, 0],
+    ],
+  );
+  for (const kind of ["palette", "sprite_book"] as const) {
+    assert.equal((await finalizeInstruction(kind, signer, target)).accounts.length, 2, kind);
+  }
 });

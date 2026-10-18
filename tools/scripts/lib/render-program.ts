@@ -18,6 +18,7 @@ import {
 
 export const RENDER_PROGRAM = address("DgQCsXAe7Q7h8zdtToiTvk8XqNjjbXuD6xith2BmEiRB");
 export const GAME_CONFIG = address("HYGYnuyssMfrHr2gT3AC3hkQpD6xt37a5hrCc2Z97JHN");
+export const REGISTRY_PROGRAM = address("dZ1jraMfS3bAUTkRw2TA1ddg8UDGzgUdFQz5pmBxjoG");
 const SYSTEM_PROGRAM = address("11111111111111111111111111111111");
 const COMPUTE_BUDGET_PROGRAM = address("ComputeBudget111111111111111111111111111111");
 
@@ -268,11 +269,28 @@ export function writeChunkInstruction(authority: Signer, target: string, offset:
   };
 }
 
-export function finalizeInstruction(kind: Kind, authority: Signer, target: string) {
+/** The render `["authority"]` PDA: signs `finalize_rasterizer`'s CPI into the registry. */
+export async function renderAuthorityPda(): Promise<string> {
+  const [a] = await getProgramDerivedAddress({
+    programAddress: RENDER_PROGRAM,
+    seeds: [new TextEncoder().encode("authority")],
+  });
+  return a;
+}
+
+/**
+ * `finalize_*`. The rasterizer one also writes `GameConfig` (CPI into the registry), so it takes
+ * the config, the render authority PDA and the registry program (programs/render/README.md).
+ */
+export async function finalizeInstruction(kind: Kind, authority: Signer, target: string, config: string = GAME_CONFIG) {
   requireKind(kind);
+  const accounts = [signerMeta(authority, false), writable(target)];
+  if (kind === "rasterizer") {
+    accounts.push(writable(config), readonly(await renderAuthorityPda()), readonly(REGISTRY_PROGRAM));
+  }
   return {
     programAddress: RENDER_PROGRAM,
-    accounts: [signerMeta(authority, false), writable(target)],
+    accounts,
     data: FINALIZE_DISC[kind],
   };
 }
@@ -472,7 +490,7 @@ export async function uploadBlob(args: {
 
   await send(rpc, rpcSubscriptions, authority, [
     setComputeUnitLimitInstruction(FINALIZE_CU),
-    finalizeInstruction(kind, authority, target),
+    await finalizeInstruction(kind, authority, target, config),
   ]);
   console.log(`${target} ${toHex(hash)}`);
 }

@@ -36,14 +36,22 @@ Byte offsets in the account data (for the registry and RPC readers):
 | `init_rasterizer(version, len, sha256)`, `init_palette(version, len, sha256)`, `init_sprite_book(book_id, len, sha256)` | `GameConfig.authority` (registry account read, no CPI) | creates the PDA with at most 10 KB |
 | `extend()` | blob authority | grows by up to 10 KB (runtime limit per instruction), tops up rent; several per transaction |
 | `write_chunk(offset, bytes)` | blob authority, before finalize | writes inside the body and the allocated part (~900 bytes per transaction) |
-| `finalize_rasterizer()`, `finalize_palette()`, `finalize_sprite_book()` | blob authority | SHA-256 == expected, content check (WASM magic / palette parses with this version / book parses with this id), freeze; emits `RasterizerFinalized` / `PaletteFinalized` / `SpriteBookFinalized` |
+| `finalize_rasterizer()` | blob authority, who must also be `GameConfig.authority` | SHA-256 == expected, WASM magic, freeze, then CPI `registry::set_rasterizer_from_render` signed by the render `["authority"]` PDA: `GameConfig` gets the version, address and SHA-256 (`docs/STORAGE_AND_DELIVERY.md` 3.2); emits `RasterizerFinalized` |
+| `finalize_palette()`, `finalize_sprite_book()` | blob authority | SHA-256 == expected, content check (palette parses with this version / book parses with this id), freeze; emits `PaletteFinalized` / `SpriteBookFinalized` |
 
-No outgoing CPI. The registry pulls (L4.1): `set_rasterizer` is authority-only, takes the
-`RasterizerCode` account, checks `owner == GameConfig.programs[Render]` and `finalized == 1`
-(offset 10), then copies `id`, the address and `sha256` (offsets 16, 84).
+One outgoing CPI: `finalize_rasterizer` -> `registry::set_rasterizer_from_render` (accounts:
+`render_authority` signer, `config` mut, `blob`). The registry checks the signer against
+`GameConfig.programs[Render]`, then pulls the finalized account like `set_rasterizer`: it checks
+`owner == GameConfig.programs[Render]` and `finalized == 1` (offset 10), then copies `id`, the
+address and `sha256` (offsets 16, 84). `set_rasterizer` (authority-only) stays for pointing back
+at an older version. Palettes and books are pulled: `set_palette`, `set_sprite_books`.
+
+`finalize_rasterizer` accounts: `authority` (signer), `rasterizer` (mut), `config` (mut, registry
+`["config"]`), `render_authority` (this program `["authority"]` PDA), `registry_program`.
 
 Upload order: `init_*` -> `extend` until `data_len == 116 + len` -> `write_chunk` for every chunk
--> re-read and compare -> `finalize_*` (request more compute units for large bodies).
+-> re-read and compare -> `finalize_*` (request more compute units for large bodies). Sprite
+books hold format 2 sprites (`crates/render/FORMAT.md`); a new format needs new book ids.
 
 ## Build and test
 

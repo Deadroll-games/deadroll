@@ -1,7 +1,7 @@
 // Deploy the whole stack to the shared local validator (session with mock-vrf), seed it and
 // create the demo map. Idempotent: rerun it after any change.
 // node --experimental-strip-types --no-warnings deploy-local.ts [flags]
-import { defaultWallet, deploy, intFlag, parseFlags } from "./lib/deploy.ts";
+import { defaultWallet, deploy, intFlag, parseFlags, BOOK_ID, RASTERIZER_VERSION } from "./lib/deploy.ts";
 
 const USAGE = `usage: deploy-local.ts [--url <rpc>] [--wallet <keypair.json>] [--skip-build] [--map-index <u32>]
                        [--uri-base <text>] [--rasterizer-version <u16>] [--book-id <u16>]
@@ -38,8 +38,8 @@ deploy({
   skipBuild: f["--skip-build"] === true,
   uriBase: (f["--uri-base"] as string) ?? "http://127.0.0.1:8787/nft",
   uriBaseExplicit: f["--uri-base"] !== undefined,
-  rasterizerVersion: intFlag(f["--rasterizer-version"], 1, 0xffff, "--rasterizer-version"),
-  bookId: intFlag(f["--book-id"], 1, 0xffff, "--book-id"),
+  rasterizerVersion: intFlag(f["--rasterizer-version"], RASTERIZER_VERSION, 0xffff, "--rasterizer-version"),
+  bookId: intFlag(f["--book-id"], BOOK_ID, 0xffff, "--book-id"),
   mapIndex: intFlag(f["--map-index"], 0, 0xffffffff, "--map-index"),
 }).catch((err: unknown) => {
   console.error(`\ndeploy-local failed: ${err instanceof Error ? err.message : String(err)}`);
