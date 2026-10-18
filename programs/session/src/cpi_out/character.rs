@@ -45,8 +45,8 @@ pub struct DeathAccounts<'a, 'info> {
     pub bag: &'a AccountInfo<'info>,
 }
 
-/// `character::mark_dead()` when a player's HP reaches 0 (inside the VRF callback or
-/// `start_turn`): the tombstone, and the skills, bag and soulbound items burn. The NFT freeze is
+/// `character::mark_dead()`: a death made final (the tombstone; the skills, bag and soulbound
+/// items burn), in `start_turn` or a claim (patch 6: never in the VRF callback). The NFT freeze is
 /// the permissionless `character::freeze_tombstone`.
 pub fn mark_dead<'info>(s: &SessionSigner<'_, 'info>, d: &DeathAccounts<'_, 'info>) -> Result<()> {
     signed(s.bump, |seeds| {

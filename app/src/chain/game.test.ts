@@ -19,6 +19,10 @@ import {
   moveIx,
   partyAccountsOf,
   startTurnIx,
+  computeLimitIx,
+  deathAccountsOf,
+  withDeaths,
+  FINALIZE_CU,
   textBytes,
   type Actor,
 } from "./game";
@@ -77,12 +81,18 @@ describe("session builders", () => {
     const want = concat(ixDisc("move_unit"), Uint8Array.from([1, 1, 2, ...new Array(13).fill(0)]), Uint8Array.of(3));
     expect(toHex(ix.data as Uint8Array)).toBe(toHex(want));
     expect(ix.accounts!.map((a) => [a.address, a.role])).toEqual([
-      [signer.address, AccountRole.READONLY_SIGNER],
+      [signer.address, AccountRole.WRITABLE_SIGNER],
       [session, AccountRole.WRITABLE],
       [await participationPda(session, character), AccountRole.WRITABLE],
       [await monstersPda(session), AccountRole.READONLY],
       [addrOf(10), AccountRole.READONLY],
       [addrOf(9), AccountRole.READONLY],
+      // Patch 6: a monster's EnemyAdjacent reaction is a VRF roll the mover pays for.
+      [await programIdentityPda(), AccountRole.READONLY],
+      [VRF.oracleQueue, AccountRole.WRITABLE],
+      [VRF.program, AccountRole.READONLY],
+      [VRF.slotHashes, AccountRole.READONLY],
+      ['11111111111111111111111111111111', AccountRole.READONLY],
     ]);
   });
 
@@ -118,6 +128,28 @@ describe("session builders", () => {
     const ix = await endTurnIx({ signer, token: addrOf(9) }, session, null);
     expect(ix.accounts![3]).toEqual({ address: PROGRAMS.session, role: AccountRole.READONLY });
     expect(toHex(ix.data as Uint8Array)).toBe(toHex(ixDisc("end_turn")));
+  });
+
+  it("patch 6: start_turn finalizes the pending deaths: a writable Character, SkillSet and Bag per queued slot, a compute limit in front", async () => {
+    const chars = [addrOf(30), addrOf(31), addrOf(32)];
+    const s = { core: { playerCount: 3, players: chars }, pendingDeaths: 0b101 } as never;
+    const deaths = await deathAccountsOf(s);
+    expect(deaths).toEqual([
+      { address: chars[0], writable: true },
+      { address: await skillSetPda(chars[0]!), writable: true },
+      { address: await bagPda(chars[0]!), writable: true },
+      { address: chars[2], writable: true },
+      { address: await skillSetPda(chars[2]!), writable: true },
+      { address: await bagPda(chars[2]!), writable: true },
+    ]);
+    const payer = await generateKeyPairSigner();
+    const ix = await startTurnIx(session, null, payer, deaths);
+    expect(ix.accounts!.slice(-6).map((a) => [a.address, a.role])).toEqual(deaths.map((d) => [d.address, AccountRole.WRITABLE]));
+    const [limit, same] = withDeaths(deaths, ix);
+    expect(same).toBe(ix);
+    expect(Array.from(limit!.data as Uint8Array)).toEqual(Array.from(computeLimitIx(FINALIZE_CU).data as Uint8Array));
+    expect((limit!.data as Uint8Array)[0]).toBe(2);
+    expect(withDeaths([], ix)).toEqual([ix]);
   });
 
   it("start_turn: no args, the participation and character of a player turn, its SkillSet and Bag, then the payer and the VRF accounts", async () => {
@@ -203,7 +235,7 @@ describe("session builders", () => {
     const chars = [addrOf(30), addrOf(31), addrOf(32), addrOf(33)];
     // Slot 1 is the pending player (its accounts are named), slot 2 is dead.
     const s = { core: { playerCount: 4, players: chars }, aliveMask: 0b1011, participations: parts } as never;
-    const party = partyAccountsOf(s, parts[1]!);
+    const party = await partyAccountsOf(s, parts[1]!);
     expect(party.map((a) => [a.address, a.writable])).toEqual([
       [parts[0], true],
       [chars[0], false],
@@ -291,9 +323,15 @@ describe("decoders", () => {
       v.participations[2] = ally;
       v.auras[1][1].turns = 3;
       v.pendingReactive.kind = 2;
+      v.pendingDeaths = 0b101;
     });
-    // Patch 5 appends participations (4 x 32), reactives (4), auras (4 x 2) and pending_reactive.
-    const p5 = 4 * 32 + 4 * sizeOf({ defined: { name: "ReactiveData" } }) + 8 * sizeOf({ defined: { name: "AuraData" } }) + sizeOf({ defined: { name: "PendingReactiveData" } });
+    expect(s.bytes[s.bytes.length - 1]).toBe(0b101);
+    expect(s.back.pendingDeaths).toBe(0b101);
+    // Patch 5 appends participations (4 x 32), reactives (4), auras (4 x 2) and pending_reactive;
+    // patch 6 pending_monster_reactive.
+    // ... and pending_deaths (u8).
+    const p6 = sizeOf({ defined: { name: "PendingMonsterReactiveData" } }) + 1;
+    const p5 = 4 * 32 + 4 * sizeOf({ defined: { name: "ReactiveData" } }) + 8 * sizeOf({ defined: { name: "AuraData" } }) + sizeOf({ defined: { name: "PendingReactiveData" } }) + p6;
     // Before them: acted_seq and started_seq, then pending_target (32).
     expect(Array.from(s.bytes.subarray(-p5 - 40, -p5 - 32))).toEqual([9, 0, 0, 0, 8, 0, 0, 0]);
     expect(Array.from(s.bytes.subarray(-p5 - 32, -p5))).toEqual(Array.from(pk(ally)));
@@ -338,7 +376,23 @@ describe("decoders", () => {
       v.mods[2][ModKind.Slow] = { kind: "slow", aspect: "cold", turns: 2, powerBp: 2_500, source: 1 };
       v.defense[1] = { resist: 2, immuneAspects: 0, immuneStates: 4 };
       v.burningCells[0] = { x: 3, y: 4, untilRound: 7, power: 5, source: 1 };
+      v.records[1] = Uint8Array.from({ length: 48 }, (_, i) => i);
+      v.skillTable[0] = Uint8Array.from({ length: 16 }, (_, i) => 100 + i);
+      v.skillCount = 1;
+      v.skills[1] = Uint8Array.of(0, 0xff, 0xff, 0xff, 0xff, 0xff, 0);
+      v.skillCooldowns[1] = Uint8Array.of(2, 0, 0, 0, 0, 0, 0);
+      v.auras[1][0].aura.turns = 255;
+      v.auras[1][0].kinOnly = true;
     });
+    // Patch 6 appends records (24 x 48), skill_table (32 x 16), skill_count, skills and
+    // skill_cooldowns (24 x 7 each), auras (24 x 2).
+    const p6m = 24 * 48 + 32 * 16 + 1 + 2 * 24 * 7 + 48 * sizeOf({ defined: { name: "MonsterAuraData" } });
+    expect(Array.from(m.bytes.subarray(-p6m + 48, -p6m + 52))).toEqual([0, 1, 2, 3]);
+    expect(m.bytes[m.bytes.length - p6m + 24 * 48]).toBe(100);
+    expect(m.bytes[m.bytes.length - p6m + 24 * 48 + 32 * 16]).toBe(1);
+    expect([m.back.skillCount, Array.from(m.back.skills[1]), Array.from(m.back.skillCooldowns[1]).slice(0, 1)]).toEqual([1, [0, 0xff, 0xff, 0xff, 0xff, 0xff, 0], [2]]);
+    expect([m.back.auras[1][0].aura.turns, m.back.auras[1][0].kinOnly]).toEqual([255, true]);
+    m.bytes = m.bytes.subarray(0, -p6m);
     expect(m.back.cooldowns).toHaveLength(24);
     expect(Array.from(m.back.cooldowns[2])).toEqual([1, 0, 3, 0]);
     // After the mods (24 x 6 x 8): defense (24 x 3), the tables (48 + 192 + 576), burning cells (16 x 9).

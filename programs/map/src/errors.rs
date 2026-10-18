@@ -62,6 +62,21 @@ pub enum MapError {
     ExitUnreachable,
     #[msg("A spawn cannot be reached from the entrance")]
     SpawnUnreachable,
+    // Patch 6, in MapCheckError order, then the program's own.
+    #[msg("Map tier is below the monster's minimum tier")]
+    TierBelowTemplate,
+    #[msg("A chosen skill is not in the monster's pool")]
+    MonsterSkillUnknown,
+    #[msg("Choose as many skills of each kind as the monster has slots (all if fewer)")]
+    MonsterSkillCount,
+    #[msg("A boss cannot be elite")]
+    EliteBoss,
+    #[msg("Too many elite monsters for the map tier")]
+    TooManyElites,
+    #[msg("Too many different monster skills for one party")]
+    TooManySessionSkills,
+    #[msg("Account is not the registry bestiary or monster skills table")]
+    InvalidRegistryTable,
 }
 
 impl From<MapCheckError> for MapError {
@@ -91,6 +106,12 @@ impl From<MapCheckError> for MapError {
             C::PackTooSpread => MapError::PackTooSpread,
             C::ExitUnreachable => MapError::ExitUnreachable,
             C::SpawnUnreachable => MapError::SpawnUnreachable,
+            C::TierBelowTemplate => MapError::TierBelowTemplate,
+            C::MonsterSkillUnknown => MapError::MonsterSkillUnknown,
+            C::MonsterSkillCount => MapError::MonsterSkillCount,
+            C::EliteBoss => MapError::EliteBoss,
+            C::TooManyElites => MapError::TooManyElites,
+            C::TooManySessionSkills => MapError::TooManySessionSkills,
         }
     }
 }

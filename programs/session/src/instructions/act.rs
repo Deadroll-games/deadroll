@@ -108,6 +108,8 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
         SessionError::NotActive
     );
     require!(!session.core.pending_vrf, SessionError::RollPending);
+    // Patch 6: a player down in the last callback is finalized first (`start_turn`).
+    require!(session.pending_deaths == 0, SessionError::DeathsPending);
     let slot = participation.core.slot;
     require!(
         session.current_unit() == Some(Unit::Player(slot)),
@@ -215,8 +217,9 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
         }
     }
 
-    let auras = session.party_auras();
-    participation.refresh_ap(session.turn_seq, &session.aura_field(&auras));
+    // Patch 6: a monster's debuff aura over the player counts too.
+    let field = crate::monster_cb::Field::load(session, &monsters)?;
+    participation.refresh_ap(session.turn_seq, &field.view());
     participation.core.action_points = participation
         .core
         .action_points

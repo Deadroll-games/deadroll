@@ -97,6 +97,8 @@ pub struct BalanceApp {
     pub builds: Option<BuildsResult>,
     pub selected: [Option<String>; 4],
     pub status: String,
+    /// `assets/registry/bestiary.json` as the Monsters tab edits it (read on first use).
+    pub bestiary: Option<deadroll_rules::registry::BestiaryJson>,
     job: Option<Job>,
     /// Issues and label of the running job, moved into its result.
     batch_meta: Option<(Issues, String)>,
@@ -116,7 +118,7 @@ impl BalanceApp {
             "{} heroes, {} skills, {} monsters, {} encounters from {}",
             presets.heroes.len(),
             presets.skills.len(),
-            presets.monsters.len(),
+            presets.registry.templates.iter().flatten().count(),
             presets.encounters.len(),
             root.display()
         );
@@ -142,6 +144,7 @@ impl BalanceApp {
             batch: None,
             builds: None,
             selected: Default::default(),
+            bestiary: None,
             status,
             job: None,
             batch_meta: None,
@@ -177,7 +180,7 @@ impl BalanceApp {
     /// Resolves the selection; `None` when nothing can fight.
     fn prepare(&self) -> Option<(Vec<deadroll_sim::Fighter>, deadroll_sim::Fight, Issues)> {
         let (team, mut issues) = resolve_party(&self.presets, &self.party, &self.cfg);
-        let (fight, fight_issues) = resolve_fight(&self.presets, &self.encounter);
+        let (fight, fight_issues) = resolve_fight(&self.presets, &self.encounter, &self.cfg);
         issues.extend(fight_issues);
         match (team.is_empty(), fight) {
             (false, Some(f)) => Some((team, f, issues)),
@@ -481,7 +484,7 @@ mod tests {
         for (tab, item) in [
             ("Heroes", "Human warrior  (human_warrior)"),
             ("Skills", "Ice Prison  (ice_prison)"),
-            ("Monsters", "Goblin chieftain  (goblin_chieftain)"),
+            ("Monsters", "goblin chieftain"),
             ("Encounters", "Wolves (demo pack 1)  (wolves)"),
         ] {
             h.get_all_by_label(tab).next().unwrap().click();

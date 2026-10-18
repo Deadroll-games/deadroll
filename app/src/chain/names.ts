@@ -2,6 +2,8 @@
 import { EFFECT_NAMES, Effect } from "./skillcheck";
 import type { EffectResolved } from "./support";
 import aspectsJson from "../../../assets/registry/aspects.json";
+import bestiaryJson from "../../../assets/registry/bestiary.json";
+import monsterSkillsJson from "../../../assets/registry/monster_skills.json";
 import resonancesJson from "../../../assets/registry/resonances.json";
 import traitsJson from "../../../assets/registry/traits.json";
 import { MOD_NAMES } from "./support";
@@ -16,14 +18,14 @@ export const TILE_NAMES = ["Floor", "Wall", "Water", "Door", "Entrance", "Exit",
 export const CARRIER_NAMES = ["Race", "Class", "Weapon"] as const;
 export const STAT_NAMES = ["Strength", "Dexterity", "Intelligence", "Endurance"] as const;
 
-/** Placeholder names for the demo bestiary ids until the registry Bestiary account is read (L9.6). */
-export const BESTIARY_NAMES: Record<number, string> = {
-  0: "Wolf",
-  1: "Goblin",
-  2: "Goblin chief",
-  3: "Goblin archer",
-  4: "Goblin shaman",
-};
+/** Monster names by bestiary id: off-chain text next to the records the chain holds
+ * (assets/registry/bestiary.json, docs/DAMAGE_TYPES_AND_MIXES.md 10.1), capitalized for the UI. */
+export const BESTIARY_NAMES: Record<number, string> = Object.fromEntries(
+  bestiaryJson.records.map((r) => [r.id, r.name.charAt(0).toUpperCase() + r.name.slice(1)]),
+);
+
+/** Monster skill names by registry `monster_skills` index (assets/registry/monster_skills.json). */
+export const MONSTER_SKILL_NAMES: string[] = monsterSkillsJson.records.map((r) => r.name);
 
 export const aspectName = (a: Aspect): string => ASPECT_NAMES[a] ?? `aspect ${a}`;
 export const stateName = (s: StateKind): string => STATE_NAMES[s] ?? `state ${s}`;

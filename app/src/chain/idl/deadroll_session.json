@@ -346,6 +346,7 @@
         },
         {
           "name": "session",
+          "writable": true,
           "pda": {
             "seeds": [
               {
@@ -474,6 +475,10 @@
         {
           "name": "map_program",
           "address": "2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH"
+        },
+        {
+          "name": "character_program",
+          "address": "9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL"
         }
       ],
       "args": []
@@ -748,26 +753,30 @@
         {
           "name": "character",
           "docs": [
-            "`character::mark_dead`."
+            "longer written here (a death is finalized by `start_turn` or a claim); kept writable so the",
+            "account list stays the same."
           ],
           "writable": true
         },
         {
           "name": "skill_set",
           "docs": [
-            "from its seeds): skills read by `read_skill`; burned by `character::mark_dead`."
+            "from its seeds): the caster's skills. Patch 6: not burned here any more (see `character`)."
           ],
           "writable": true
         },
         {
           "name": "bag",
           "docs": [
-            "`character::mark_dead`."
+            "unused here, kept for the account list."
           ],
           "writable": true
         },
         {
           "name": "session_authority",
+          "docs": [
+            "any more; kept for the account list (with `config` and `character_program`)."
+          ],
           "address": "3o8dkZ2aXofZQpeTjHHDvWNCahXrfqvY3GodqKtVMomB"
         },
         {
@@ -1206,7 +1215,8 @@
         {
           "name": "participation",
           "docs": [
-            "The target player's participation."
+            "The target player's participation; for a heal or buff on a monster (patch 6), the",
+            "participation of the lowest living player slot (the callback's account list is fixed)."
           ],
           "pda": {
             "seeds": [
@@ -1400,6 +1410,12 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "layout",
+          "docs": [
+            "`open_session`, read by `MapLayoutView`."
+          ]
         }
       ],
       "args": [
@@ -1558,8 +1574,10 @@
         {
           "name": "signer",
           "docs": [
-            "Main wallet or the participation's session key."
+            "Main wallet or the participation's session key; pays the VRF fee when the move triggers a",
+            "monster's reactive skill (patch 6)."
           ],
+          "writable": true,
           "signer": true
         },
         {
@@ -1634,6 +1652,43 @@
         {
           "name": "session_token",
           "optional": true
+        },
+        {
+          "name": "program_identity",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "oracle_queue",
+          "writable": true,
+          "address": "Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh"
+        },
+        {
+          "name": "vrf_program",
+          "address": "Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz"
+        },
+        {
+          "name": "slot_hashes",
+          "address": "SysvarS1otHashes111111111111111111111111111"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
         }
       ],
       "args": [
@@ -1830,6 +1885,9 @@
         },
         {
           "name": "bestiary",
+          "docs": [
+            "is copied into `MonsterState.records`."
+          ],
           "address": "3uJyWiz7NeVekP4w1iZkKxKnJ5pMbxC6ciz7kxN3MZtM"
         },
         {
@@ -1855,6 +1913,13 @@
         {
           "name": "resonances",
           "address": "5wvxCqYJgp3gckLyZeNz3md4g8qmRxd7nenhkqtBNXjG"
+        },
+        {
+          "name": "monster_skills",
+          "docs": [
+            "pools, copied into `MonsterState`."
+          ],
+          "address": "NQNEuKDUZhACnTJ9sD3dW49BoiPtJPatp6bpY61r81p"
         }
       ],
       "args": [
@@ -2521,6 +2586,19 @@
       ]
     },
     {
+      "name": "DeathFinalized",
+      "discriminator": [
+        187,
+        17,
+        138,
+        124,
+        244,
+        124,
+        136,
+        27
+      ]
+    },
+    {
       "name": "EffectResolved",
       "discriminator": [
         122,
@@ -2599,6 +2677,19 @@
       ]
     },
     {
+      "name": "MonsterAuraChanged",
+      "discriminator": [
+        64,
+        201,
+        92,
+        67,
+        155,
+        20,
+        193,
+        98
+      ]
+    },
+    {
       "name": "MonsterKilled",
       "discriminator": [
         134,
@@ -2609,6 +2700,19 @@
         201,
         150,
         11
+      ]
+    },
+    {
+      "name": "MonsterReactiveTriggered",
+      "discriminator": [
+        254,
+        209,
+        164,
+        102,
+        158,
+        141,
+        168,
+        105
       ]
     },
     {
@@ -3086,6 +3190,36 @@
       "code": 6060,
       "name": "ReactiveAccountsMissing",
       "msg": "A reactive skill triggers here: the VRF accounts and the payer are required"
+    },
+    {
+      "code": 6061,
+      "name": "TooManyMonsterSkills",
+      "msg": "Too many different monster skills for one party"
+    },
+    {
+      "code": 6062,
+      "name": "MonsterSkillMissing",
+      "msg": "This monster has no active skill in that slot"
+    },
+    {
+      "code": 6063,
+      "name": "NotSameKin",
+      "msg": "A kin-only monster skill reaches allies of its own kin only"
+    },
+    {
+      "code": 6064,
+      "name": "InvalidMonsterSkills",
+      "msg": "Account is not the registry monster skills table, or a pool skill is missing"
+    },
+    {
+      "code": 6065,
+      "name": "DeathsPending",
+      "msg": "A death is waiting to be finalized: start_turn (or a claim) first"
+    },
+    {
+      "code": 6066,
+      "name": "InvalidDeathAccounts",
+      "msg": "The remaining accounts are not the character, skill set and bag of each pending death, in slot order"
     }
   ],
   "types": [
@@ -3511,6 +3645,30 @@
                 6
               ]
             }
+          }
+        ]
+      }
+    },
+    {
+      "name": "DeathFinalized",
+      "docs": [
+        "Patch 6: the death of a player who went down in a VRF callback is final: `character.mark_dead`",
+        "ran (the tombstone; skills, bag and soulbound items burn). `PlayerDied` came at the fall."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "character",
+            "type": "pubkey"
+          },
+          {
+            "name": "slot",
+            "type": "u8"
           }
         ]
       }
@@ -4143,6 +4301,27 @@
                 "name": "PendingReactiveData"
               }
             }
+          },
+          {
+            "name": "pending_monster_reactive",
+            "docs": [
+              "A pending roll that only resolves monster reactives (`move_unit`, `start_turn`);",
+              "`kind == NONE` for every other roll."
+            ],
+            "type": {
+              "defined": {
+                "name": "PendingMonsterReactiveData"
+              }
+            }
+          },
+          {
+            "name": "pending_deaths",
+            "docs": [
+              "Players down in a VRF callback whose death is not finalized yet (`character.mark_dead`),",
+              "one bit per slot: the queue `start_turn` and the claims finalize first, in slot order.",
+              "While it is not empty no turn starts and no action is taken."
+            ],
+            "type": "u8"
           }
         ]
       }
@@ -4972,6 +5151,74 @@
       }
     },
     {
+      "name": "MonsterAuraChanged",
+      "docs": [
+        "Patch 6: a monster's aura started, or ended (`aura.turns == 0`). A passive one starts at",
+        "`open_session` and ends with the bearer's death."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "bearer",
+            "docs": [
+              "Monster index of the bearer."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "aura_slot",
+            "docs": [
+              "`0` the passive skill's aura, `1` the reactive skill's."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "aura",
+            "type": {
+              "defined": {
+                "name": "AuraData"
+              }
+            }
+          },
+          {
+            "name": "kin_only",
+            "docs": [
+              "On allies of the bearer's kin only."
+            ],
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MonsterAuraData",
+      "docs": [
+        "`deadroll_rules::aura::Aura` of a monster: an aura plus its kin-only flag."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "aura",
+            "type": {
+              "defined": {
+                "name": "AuraData"
+              }
+            }
+          },
+          {
+            "name": "kin_only",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
       "name": "MonsterDefenseData",
       "docs": [
         "`deadroll_rules::MonsterDefense`: bits by `Aspect` / `StateKind`."
@@ -5027,6 +5274,68 @@
       }
     },
     {
+      "name": "MonsterReactiveTriggered",
+      "docs": [
+        "Patch 6: a monster's reactive skill triggered by itself (docs/SKILL_BUILDER.md 3.2,",
+        "docs/BESTIARY.md 3.2), on the dice of the action that caused it, after the players' reactions."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "action_counter",
+            "type": "u32"
+          },
+          {
+            "name": "bearer",
+            "docs": [
+              "Monster index of the bearer."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "skill_slot",
+            "docs": [
+              "The reactive skill's monster slot (`deadroll_rules::monster::REACTIVE_SLOT`)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "trigger",
+            "type": {
+              "defined": {
+                "name": "Trigger"
+              }
+            }
+          },
+          {
+            "name": "reaction",
+            "type": {
+              "defined": {
+                "name": "ReactionKind"
+              }
+            }
+          },
+          {
+            "name": "target",
+            "docs": [
+              "Turn-order id the reaction goes to: the player, the buffed monster, or the bearer for an",
+              "aura."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "cooldown_left",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
       "name": "MonsterState",
       "docs": [
         "`[\"monsters\", session]`: every monster of the party, spawned from the map layout.",
@@ -5055,9 +5364,7 @@
           {
             "name": "cooldowns",
             "docs": [
-              "Per monster, per skill: own turn starts until usable, 0 = usable (like",
-              "`Participation.cooldowns`). Counted down by `start_turn`; nothing sets them in P0: the",
-              "natural attack has no cooldown. TODO(post-demo): monster skills from the spawn's pool."
+              "Not used since patch 6 (`skill_cooldowns` holds every monster slot). Kept for the layout."
             ],
             "type": {
               "array": [
@@ -5152,6 +5459,102 @@
                   }
                 },
                 16
+              ]
+            }
+          },
+          {
+            "name": "records",
+            "docs": [
+              "Per monster: its bestiary record (`deadroll_rules::monster::record`)."
+            ],
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    "u8",
+                    48
+                  ]
+                },
+                24
+              ]
+            }
+          },
+          {
+            "name": "skill_table",
+            "docs": [
+              "Every skill the spawns took, each once (the session copy of",
+              "`deadroll_skillcheck::monster`); the first `skill_count` are used."
+            ],
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    "u8",
+                    16
+                  ]
+                },
+                32
+              ]
+            }
+          },
+          {
+            "name": "skill_count",
+            "type": "u8"
+          },
+          {
+            "name": "skills",
+            "docs": [
+              "Per monster, per slot (`0..5` active, `5` reactive, `6` passive): an index into",
+              "`skill_table`, `NO_SKILL` (0xFF) = empty."
+            ],
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    "u8",
+                    7
+                  ]
+                },
+                24
+              ]
+            }
+          },
+          {
+            "name": "skill_cooldowns",
+            "docs": [
+              "Per monster, per slot: own turn starts until usable (the reactive's too), counted down by",
+              "`start_turn`."
+            ],
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    "u8",
+                    7
+                  ]
+                },
+                24
+              ]
+            }
+          },
+          {
+            "name": "auras",
+            "docs": [
+              "Per monster: its passive skill's aura (from `open_session`), then its reactive skill's."
+            ],
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    {
+                      "defined": {
+                        "name": "MonsterAuraData"
+                      }
+                    },
+                    2
+                  ]
+                },
+                24
               ]
             }
           }
@@ -5762,6 +6165,56 @@
       }
     },
     {
+      "name": "PendingMonsterReactiveData",
+      "docs": [
+        "A roll that only resolves monster reactives (patch 6), requested by `move_unit` (a player",
+        "came next to monsters) or `start_turn` (over-time damage dropped a monster's HP): what",
+        "happened, and to which monsters. `kind` as [`pending_kind`]."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "kind",
+            "type": "u8"
+          },
+          {
+            "name": "bearers",
+            "docs": [
+              "Bit per monster index whose reactive answers."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "source",
+            "docs": [
+              "Turn-order id of the unit that caused it (`EMPTY_UNIT` = none)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "victim",
+            "docs": [
+              "`HP_DROP`: the monster whose HP dropped, from `hp_before` to `hp_after` of `hp_max`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "hp_before",
+            "type": "u32"
+          },
+          {
+            "name": "hp_after",
+            "type": "u32"
+          },
+          {
+            "name": "hp_max",
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
       "name": "PendingReactiveData",
       "docs": [
         "A roll that only resolves reactives, requested by `monster_move` or `start_turn` (they have",
@@ -5813,7 +6266,9 @@
     {
       "name": "PlayerDied",
       "docs": [
-        "A player's character reached 0 HP; `character.mark_dead` ran in the same callback."
+        "A player reached 0 HP: out of the battle at once (no turn, no target). Since patch 6 the",
+        "tombstone (`character.mark_dead`) follows in `start_turn` or a claim, `DeathFinalized`; a death",
+        "from over-time damage in `start_turn` is final in the same instruction."
       ],
       "type": {
         "kind": "struct",
@@ -7066,7 +7521,7 @@
             "name": "cooldowns",
             "docs": [
               "Cooldowns after the tick, own turn starts until usable: a player's by `SkillSet` slot,",
-              "a monster's in the first `MONSTER_SKILLS_MAX` entries."
+              "a monster's by skill slot in the first `MONSTER_SLOTS` entries (patch 6)."
             ],
             "type": {
               "array": [

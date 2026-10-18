@@ -14,6 +14,9 @@
 //!   ally's permanent aura included, does not reach it.
 //! - The aura keeps its aspect for the reactions of allies (docs/DAMAGE_TYPES_AND_MIXES.md 7,
 //!   a later patch).
+//! - Monsters (patch 6) bear auras the same way: a friendly one works on the allied monsters
+//!   around (of the bearer's own kin for a kin-only skill, docs/BESTIARY.md 8.1 "nearby Goblins"),
+//!   a hostile one on the players around.
 //!
 //! The merged modifiers are a view for one calculation (a hit, the action points of a turn);
 //! the stored ones never take the auras in.
@@ -23,8 +26,11 @@ use deadroll_types::{Aspect, Cell, PARTY_MAX};
 
 use crate::{
     config::BalanceConfig,
-    input::{effect_action, effect_range, EffectAction, HeroStats, SkillStats},
-    units::chebyshev,
+    input::{
+        effect_action, effect_range, monster_effect_range, EffectAction, HeroStats, SkillStats,
+    },
+    monster::{kin_reaches, MonsterProfile, MonsterSkillStats},
+    units::{chebyshev, MONSTER_UNIT_BASE},
 };
 
 /// Aura slots of one player: its passive skill's, then its reactive skill's.
@@ -51,6 +57,8 @@ pub struct Aura {
     pub passive: bool,
     /// A passive skill without an aura: on the bearer only.
     pub self_only: bool,
+    /// Patch 6, monster bearers: a friendly aura on allies of the bearer's kin only.
+    pub kin_only: bool,
 }
 
 impl Aura {
@@ -66,8 +74,47 @@ impl Aura {
 
 pub type PlayerAuras = [Aura; AURAS_PER_PLAYER];
 pub type PartyAuras = [PlayerAuras; PARTY_MAX];
+/// A monster's auras: its passive skill's, then its reactive skill's (like a player's).
+pub type MonsterAuras = PlayerAuras;
 
-/// The party as the auras see it.
+/// One living monster with an aura, as the auras see it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MonsterBearer {
+    pub index: u8,
+    pub cell: Cell,
+    /// `MonsterTemplate::kin`.
+    pub kin: u8,
+    pub auras: MonsterAuras,
+}
+
+impl MonsterBearer {
+    pub fn has_aura(auras: &MonsterAuras) -> bool {
+        auras.iter().any(|a| !a.is_empty())
+    }
+}
+
+/// The monsters as the auras see them: the living ones that bear an aura (a dead bearer's auras
+/// are gone), in any order.
+#[derive(Clone, Copy, Debug)]
+pub struct MonsterAuraField<'a> {
+    pub bearers: &'a [MonsterBearer],
+}
+
+impl MonsterAuraField<'_> {
+    /// No monster auras (a view without the monsters).
+    pub const EMPTY: MonsterAuraField<'static> = MonsterAuraField { bearers: &[] };
+
+    fn active(&self) -> impl Iterator<Item = (&MonsterBearer, &Aura)> + '_ {
+        self.bearers.iter().flat_map(|b| {
+            b.auras
+                .iter()
+                .filter(|a| !a.is_empty())
+                .map(move |a| (b, a))
+        })
+    }
+}
+
+/// The party (and, since patch 6, the monsters) as the auras see them.
 #[derive(Clone, Copy, Debug)]
 pub struct AuraField<'a> {
     pub auras: &'a PartyAuras,
@@ -75,6 +122,7 @@ pub struct AuraField<'a> {
     pub cells: &'a [Cell; PARTY_MAX],
     /// Bit per living player slot (a dead bearer's auras are gone).
     pub alive: u8,
+    pub monsters: MonsterAuraField<'a>,
 }
 
 impl AuraField<'_> {
@@ -113,16 +161,47 @@ impl AuraField<'_> {
             }
             merge(&mut out, a, bearer);
         }
+        // Debuff auras of the monsters around.
+        for (b, a) in self.monsters.active() {
+            if a.hostile && a.reaches(b.cell, at) {
+                merge(&mut out, a, MONSTER_UNIT_BASE + b.index);
+            }
+        }
         out
     }
 
-    /// A monster at `at` with its own modifiers, plus every debuff aura over it.
-    pub fn monster_mods(&self, own: &TimedMods, at: Cell) -> TimedMods {
+    /// Monster `index` (of kin `kin`) at `at` with its own modifiers, plus every debuff aura of the
+    /// players over it and every friendly aura of the monsters (its own passive skill included).
+    /// `basic_attack`: for its natural attack, which no passive Empowerment strengthens (one
+    /// engine for everyone, docs/BESTIARY.md 1.2; SKILL_BUILDER.md 3.1).
+    pub fn monster_mods(
+        &self,
+        own: &TimedMods,
+        index: u8,
+        at: Cell,
+        kin: u8,
+        basic_attack: bool,
+    ) -> TimedMods {
         let mut out = *own;
         for (bearer, cell, a) in self.active() {
             if a.hostile && a.reaches(cell, at) {
                 merge(&mut out, a, bearer);
             }
+        }
+        for (b, a) in self.monsters.active() {
+            if a.hostile {
+                continue;
+            }
+            let me = b.index == index;
+            let over = if a.self_only {
+                me
+            } else {
+                a.reaches(b.cell, at) && kin_reaches(a.kin_only, b.kin, kin, me)
+            };
+            if !over || (basic_attack && a.passive && a.kind == ModKind::Empowerment) {
+                continue;
+            }
+            merge(&mut out, a, MONSTER_UNIT_BASE + b.index);
         }
         out
     }
@@ -174,6 +253,7 @@ fn aura_of(skill: &SkillStats, kind: ModKind, power_bp: u32, turns: u8) -> Aura 
         hostile: b.purpose == Purpose::Debuff,
         passive: b.category == Category::Passive,
         self_only: !b.is_aura(),
+        kin_only: false,
     }
 }
 
@@ -187,6 +267,26 @@ pub fn passive_aura(cfg: &BalanceConfig, hero: &HeroStats, skill: &SkillStats) -
     let (min, max) = effect_range(cfg, hero, skill.power_bp, EffectAction::Mod(kind));
     let power = cfg.support.passive_point(min, max);
     Some(aura_of(skill, kind, power, PERMANENT))
+}
+
+/// A monster's passive skill as it works in the fight: like [`passive_aura`] with the monster's
+/// numbers and its kin-only flag.
+pub fn monster_passive_aura(
+    cfg: &BalanceConfig,
+    profile: &MonsterProfile,
+    skill: &MonsterSkillStats,
+) -> Option<Aura> {
+    let s = &skill.stats;
+    if s.blocks.category != Category::Passive {
+        return None;
+    }
+    let kind = aura_kind(s)?;
+    let (min, max) = monster_effect_range(cfg, profile, s.power_bp, EffectAction::Mod(kind));
+    let power = cfg.support.passive_point(min, max);
+    Some(Aura {
+        kin_only: skill.kin_only,
+        ..aura_of(s, kind, power, PERMANENT)
+    })
 }
 
 /// A reactive skill's temporary aura of the rolled strength `amount`, for its effect's duration.

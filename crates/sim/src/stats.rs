@@ -127,6 +127,10 @@ pub struct Report {
     pub reactions_per_fight: f64,
     pub line_extra_per_fight: f64,
     pub aura_reach_per_fight: f64,
+    /// Patch 6: monster active skills used, HP monsters healed, monster reactives that fired.
+    pub monster_skills_per_fight: f64,
+    pub monster_healed_per_fight: f64,
+    pub monster_reactions_per_fight: f64,
 }
 
 fn ratio(a: u64, b: u64) -> f64 {
@@ -242,6 +246,9 @@ impl Report {
             reactions_per_fight: per_fight(|f| f.reactions),
             line_extra_per_fight: per_fight(|f| f.line_extra_hits),
             aura_reach_per_fight: per_fight(|f| f.aura_reach),
+            monster_skills_per_fight: per_fight(|f| f.monster_skills),
+            monster_healed_per_fight: per_fight(|f| f.monster_healed.min(u32::MAX as u64) as u32),
+            monster_reactions_per_fight: per_fight(|f| f.monster_reactions),
         }
     }
 }

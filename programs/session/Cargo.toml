@@ -44,8 +44,6 @@ deadroll-map.workspace = true
 deadroll-registry.workspace = true
 # Hit resolution; `borsh` encodes the full `HitResult` into the `HitResolved` event.
 deadroll-combat = { workspace = true, features = ["borsh"] }
-# P0 bestiary roles (boss detection), shared with map validation.
-deadroll-mapcheck.workspace = true
 # Shared game rules and the balance table (no Anchor), also used by tools/balance.
 deadroll-rules.workspace = true
 # Skill block enums (category, purpose) of the character's `SkillRecord`.

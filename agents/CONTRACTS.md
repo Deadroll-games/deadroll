@@ -395,3 +395,87 @@ Buff, Aura }`.
 
 Combat WASM ABI 5: `AttackRequest.party`, `slot`, `target_at` appended; `unit_mods` and `line`
 exports (`crates/combat/wasm/README.md`).
+
+## 13. Patch 6: monsters from the registry (skills, kin, elite)
+
+`crates/types` (added only): seed `MONSTER_SKILLS = b"monster_skills"`; `SPAWN_ELITE: u8 = 1`
+(bit of `Spawn.flags` and `Monster.flags`); `MONSTER_SLOTS = 7`; `SESSION_SKILLS_MAX = 32`.
+
+`crates/skillcheck` (not frozen): module `monster` (record codec), `validate_monster_skill`,
+`check_monster_selection`; `SkillError` gains, at the end, `HealCategory`, `MonsterSkillUnknown`,
+`MonsterSkillCount`.
+
+Registry:
+
+```
+TableKind::MonsterSkills = 6     ["monster_skills"], 128 x 32 B
+  [0] present, [1..13] SkillBlocks (borsh), [13..16] SkillExt, [16] flags (bit 0 kin only),
+  [17..32] zero; write_table runs deadroll_skillcheck::validate_monster_skill (Heal allowed,
+  never passive or an aura)
+Bestiary record                  [39] pool_start, [40] pool_len (<= 16, a run of MonsterSkills),
+                                 [41] kin (0xFF none; names in crates/rules registry.rs KINS),
+                                 [42..48] zero
+```
+
+The p0 monster table is gone: every monster number (accuracy, evasion, armor, damage, XP, size,
+range, pool, kin) comes from the bestiary record.
+
+Map: `finalize_map` accounts `bestiary`, `monster_skills` (registry tables, addresses checked,
+`InvalidRegistryTable`) appended. `Spawn.skills` is the chosen pool bits: exactly
+`min(slots, pool)` per category (slots by rank in `BalanceConfig.monsters.slots`: regular
+`[3, 0, 1]`, elite `[4, 0, 1]`, boss `[5, 1, 1]`). Errors appended to `MapError`:
+`TierBelowTemplate`, `MonsterSkillUnknown`, `MonsterSkillCount`, `EliteBoss`, `TooManyElites`,
+`TooManySessionSkills`, `InvalidRegistryTable`.
+
+Session program, accounts (fields appended at the end):
+
+```
+MonsterState:  ... burning_cells, records: [[u8; 48]; 24], skill_table: [[u8; 16]; 32],
+               skill_count: u8, skills: [[u8; 7]; 24], skill_cooldowns: [[u8; 7]; 24],
+               auras: [[MonsterAuraData; 2]; 24]
+  records[i]      the spawn's bestiary record, copied at open_session
+  skill_table     each chosen registry skill once (its record bytes 1..17)
+  skills[i][slot] skill_table index or 0xFF; slots 0..5 active, 5 reactive, 6 passive
+  MonsterAuraData { aura: AuraData, kin_only: bool }; auras[i][0] passive (from open_session,
+                  turns 255), [1] the reactive skill's (temporary)
+  cooldowns       unused since patch 6 (skill_cooldowns replaces it)
+GameSession:   ... pending_reactive, pending_monster_reactive: PendingMonsterReactiveData
+                 { kind, bearers: u32 (monster bits), source, victim, hp_before, hp_after, hp_max },
+               pending_deaths: u8
+  pending_deaths  players down in a VRF callback whose death is not final yet, one bit per slot
+                  (the queue, finalized in slot order)
+```
+
+`MonsterState` and `GameSession` grow, so sessions opened before this upgrade no longer load.
+`MonsterState` costs about 2.6 KB more rent per session.
+
+| Instruction | Change |
+|---|---|
+| `open_session` | `monster_skills` (registry table) appended; elite HP `+ elite_hp_bp` |
+| `monster_act(monster, action, target)` | `action` 0 = natural attack, `1 + slot` = an active skill (`InvalidAction` above 7). Enemy skills: `target` = player slot, `participation` = its. Heal and buff: `target` = monster index (itself allowed, the same kin for a kin-only skill), `participation` = the lowest living player's. `layout` appended. Sets the slot's cooldown, emits `SkillUsed { unit: 4 + monster }` |
+| `move_unit` | `signer` writable, the VRF accounts appended (a monster's `EnemyAdjacent` reactive) |
+| `consume_randomness` | account list unchanged; it no longer calls `character.mark_dead`: a player at 0 HP is down (`alive_mask` cleared, `PlayerDied`) and queued in `pending_deaths`. `character`, `skill_set`, `bag`, `session_authority`, `config`, `character_program` stay in the list but are not written |
+| `start_turn` | remaining accounts: a writable `Character, SkillSet, Bag` triple per `pending_deaths` bit, in slot order (`InvalidDeathAccounts` otherwise; none when the queue is empty). It finalizes them first (`mark_dead` each, `DeathFinalized`); when the turn already started it returns after that, ending the turn of a current player who went down |
+| `claim_rewards` | the same remaining accounts; the queue is finalized first |
+| `claim_escrow` | `session` writable, `character_program` appended; the same remaining accounts, finalized first |
+| `act`, `monster_act`, `move_unit`, `monster_move`, `end_turn`, `flee` | `DeathsPending` while `pending_deaths != 0` |
+
+`ActionRequested.skill_slot` / `EffectResolved.skill_slot` of a monster: the action (0 natural
+attack, `1 + slot`) and the monster skill slot respectively. A monster's reactive-only roll puts
+the named player's Participation in `GameSession.pending`.
+
+Errors appended to `SessionError`: `TooManyMonsterSkills`, `MonsterSkillMissing`, `NotSameKin`,
+`InvalidMonsterSkills`, `DeathsPending`, `InvalidDeathAccounts`. Events appended:
+`MonsterReactiveTriggered { session, action_counter, bearer, skill_slot, trigger, reaction, target,
+cooldown_left }`, `MonsterAuraChanged { session, bearer, aura_slot, aura, kin_only }`,
+`DeathFinalized { session, character, slot }`. `PlayerDied` now marks the fall; the tombstone
+(`CharacterDied` from the character program) comes with `DeathFinalized`. A death from over-time
+damage in `start_turn` is final in the same instruction. The callback's party accounts stay pairs
+(patch 5).
+
+`BalanceConfig.monsters` (`MonsterScaling`): `elite_hp_bp`, `slots: [[u8; 3]; 3]` (rank x
+category), `ai_heal_below_pct` added.
+
+Combat WASM ABI 6: monsters by record bytes (`RecordInput`); exports `monster_skill`,
+`spawn_skills`, `preview_monster_attack`, `monster_plan`; `PartyInput.bearers`
+(`crates/combat/wasm/README.md`).

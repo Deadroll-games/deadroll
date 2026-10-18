@@ -111,6 +111,7 @@ impl From<AuraData> for Aura {
             hostile: a.hostile,
             passive: a.passive,
             self_only: a.self_only,
+            kin_only: false,
         }
     }
 }
@@ -147,6 +148,25 @@ pub mod pending_kind {
     pub const ENEMY_ENTERED: u8 = 1;
     /// Over-time damage at the start of `victim`'s turn dropped its HP (`start_turn`).
     pub const HP_DROP: u8 = 2;
+}
+
+/// A roll that only resolves monster reactives (patch 6), requested by `move_unit` (a player
+/// came next to monsters) or `start_turn` (over-time damage dropped a monster's HP): what
+/// happened, and to which monsters. `kind` as [`pending_kind`].
+#[derive(
+    AnchorSerialize, AnchorDeserialize, InitSpace, Clone, Copy, Debug, Default, PartialEq, Eq,
+)]
+pub struct PendingMonsterReactiveData {
+    pub kind: u8,
+    /// Bit per monster index whose reactive answers.
+    pub bearers: u32,
+    /// Turn-order id of the unit that caused it (`EMPTY_UNIT` = none).
+    pub source: u8,
+    /// `HP_DROP`: the monster whose HP dropped, from `hp_before` to `hp_after` of `hp_max`.
+    pub victim: u8,
+    pub hp_before: u32,
+    pub hp_after: u32,
+    pub hp_max: u32,
 }
 
 /// A roll that only resolves reactives, requested by `monster_move` or `start_turn` (they have

@@ -12,22 +12,30 @@ export const turnStarted = (s: GameSessionAcc): boolean => s.startedSeq === s.tu
 export const turnActed = (s: GameSessionAcc): boolean => s.actedSeq === s.turnSeq;
 
 /** The turn start this tab has to send: `player` null for a monster turn. */
-export type TurnStart = { unit: number; turnSeq: number; player: PartyPlayer | null };
+/** `finalize` (patch 6): players went down in the last callback; this start_turn finalizes them
+ * first, also when the turn already started. */
+export type TurnStart = { unit: number; turnSeq: number; player: PartyPlayer | null; finalize: boolean };
 
 /**
  * Whether `me` sends start_turn now: the tab whose player is next does it for that player, the DM
  * tab for monsters. Nothing while a roll is pending, the party is not active or the turn started.
+ * Patch 6: while deaths wait to be finalized, any tab of the party sends it (anyone may).
  */
 export function startTurnFor(p: Party, me: Address | null): TurnStart | null {
   const s = p.session;
-  if (!me || status(s) !== "active" || s.core.pendingVrf || turnStarted(s)) return null;
+  if (!me || status(s) !== "active" || s.core.pendingVrf) return null;
   const unit = currentUnit(s);
   if (unit === null) return null;
-  if (unit < MONSTER_BASE) {
-    const player = p.players.find((x) => x.slot === unit);
-    return player && player.part.player === me ? { unit, turnSeq: s.turnSeq, player } : null;
+  const current = unit < MONSTER_BASE ? (p.players.find((x) => x.slot === unit) ?? null) : null;
+  if (s.pendingDeaths) {
+    const inParty = s.core.dm === me || p.players.some((x) => x.part.player === me);
+    return inParty ? { unit, turnSeq: s.turnSeq, player: current, finalize: true } : null;
   }
-  return s.core.dm === me ? { unit, turnSeq: s.turnSeq, player: null } : null;
+  if (turnStarted(s)) return null;
+  if (unit < MONSTER_BASE) {
+    return current && current.part.player === me ? { unit, turnSeq: s.turnSeq, player: current, finalize: false } : null;
+  }
+  return s.core.dm === me ? { unit, turnSeq: s.turnSeq, player: null, finalize: false } : null;
 }
 
 /**

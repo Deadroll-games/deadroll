@@ -123,6 +123,7 @@ export function MapPalette(p: MapPaletteProps) {
             >
               Remove
             </button>
+            {p.renderSpawn?.(spawn, index)}
           </li>
         ))}
       </ul>

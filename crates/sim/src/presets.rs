@@ -1,5 +1,7 @@
-//! Heroes, skills, monsters and encounters as JSON files:
-//! `<root>/{heroes,skills,monsters,encounters}/<id>.json`, the id is the file stem.
+//! Heroes, skills and encounters as JSON files: `<root>/{heroes,skills,encounters}/<id>.json`,
+//! the id is the file stem. Monsters and their skills are registry data
+//! (`assets/registry/bestiary.json`, `monster_skills.json`): the bytes the program copies at
+//! `open_session`, no copy here.
 //!
 //! Nothing here is game content: the files are. Enums are written by variant name (see
 //! [`crate::named`]), so new variants work in presets without code changes.
@@ -9,18 +11,14 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use deadroll_combat::DamageRange;
 use deadroll_rules::{
-    items::Equipment, player::predisposition_allowed, registry::Registry, MonsterBase,
-    MonsterDefense, PlayerTuning,
+    items::Equipment, player::predisposition_allowed, registry::Registry, PlayerTuning,
 };
 use deadroll_skillcheck::{
     validate_skill, validate_starting, Category, Effect, Purpose, SkillBlocks, SkillError,
     SkillExt, Target, Trigger, SKILL_ASPECTS_MAX,
 };
-use deadroll_types::{
-    Aspect, Class, Form, Race, RangeTag, Source, StateKind, Tier, TimeTag, STATS_COUNT,
-};
+use deadroll_types::{Aspect, Class, Form, Race, RangeTag, Source, Tier, TimeTag, STATS_COUNT};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::named::{self, Named};
@@ -215,137 +213,7 @@ impl HeroPreset {
     }
 }
 
-/// A monster template (`deadroll_rules::MonsterBase` as JSON).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MonsterPreset {
-    pub name: String,
-    /// The registry bestiary id it mirrors: its defenses then come from
-    /// `assets/registry/bestiary.json`, the same record the program reads.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bestiary_id: Option<u8>,
-    /// Killing it wins the fight.
-    #[serde(default)]
-    pub boss: bool,
-    pub attack: AttackPreset,
-    pub attack_bonus: u32,
-    pub defense: u32,
-    pub armor: u32,
-    /// Defenses of a monster with no `bestiary_id` (docs/DAMAGE_TYPES_AND_MIXES.md 9): the
-    /// aspects it resists (at `MonsterScaling::resist_bp`), is immune to, and the states it
-    /// never gets.
-    #[serde(with = "named::list", default, skip_serializing_if = "Vec::is_empty")]
-    pub resistance: Vec<Aspect>,
-    #[serde(with = "named::list", default, skip_serializing_if = "Vec::is_empty")]
-    pub immunity: Vec<Aspect>,
-    #[serde(with = "named::list", default, skip_serializing_if = "Vec::is_empty")]
-    pub state_immunity: Vec<StateKind>,
-    pub xp_per_level: u32,
-    pub hp: u32,
-    pub hp_per_level: u32,
-    pub speed: u8,
-    pub initiative: u16,
-}
-
-/// A natural attack at level 0.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AttackPreset {
-    #[serde(with = "named::variant")]
-    pub aspect: Aspect,
-    #[serde(with = "named::variant")]
-    pub source: Source,
-    #[serde(with = "named::variant")]
-    pub form: Form,
-    pub min: u32,
-    pub max: u32,
-}
-
-impl MonsterPreset {
-    pub fn base(&self) -> MonsterBase {
-        MonsterBase {
-            weapon: DamageRange::new(
-                self.attack.aspect,
-                self.attack.min,
-                self.attack.max.max(self.attack.min),
-            ),
-            source: self.attack.source,
-            form: self.attack.form,
-            attack_bonus: self.attack_bonus,
-            defense: self.defense,
-            armor: self.armor,
-            xp_per_level: self.xp_per_level,
-            boss: self.boss,
-            hp: self.hp,
-            hp_per_level: self.hp_per_level,
-            speed: self.speed,
-            initiative: self.initiative,
-        }
-    }
-
-    pub fn from_base(name: &str, bestiary_id: Option<u8>, b: &MonsterBase) -> Self {
-        MonsterPreset {
-            name: name.to_string(),
-            bestiary_id,
-            boss: b.boss,
-            attack: AttackPreset {
-                aspect: b.weapon.aspect,
-                source: b.source,
-                form: b.form,
-                min: b.weapon.min,
-                max: b.weapon.max,
-            },
-            attack_bonus: b.attack_bonus,
-            defense: b.defense,
-            armor: b.armor,
-            resistance: Vec::new(),
-            immunity: Vec::new(),
-            state_immunity: Vec::new(),
-            xp_per_level: b.xp_per_level,
-            hp: b.hp,
-            hp_per_level: b.hp_per_level,
-            speed: b.speed,
-            initiative: b.initiative,
-        }
-    }
-
-    /// Its defenses: the registry record for a bestiary monster, its own lists otherwise.
-    pub fn defense(&self, registry: &Registry) -> MonsterDefense {
-        let bits = |list: &[u8]| list.iter().fold(0u8, |m, b| m | 1 << b);
-        match self.bestiary_id {
-            Some(id) => registry.defense_of(id),
-            None => MonsterDefense {
-                resist: bits(&self.resistance.iter().map(|a| *a as u8).collect::<Vec<_>>()),
-                immune_aspects: bits(&self.immunity.iter().map(|a| *a as u8).collect::<Vec<_>>()),
-                immune_states: bits(
-                    &self
-                        .state_immunity
-                        .iter()
-                        .map(|k| *k as u8)
-                        .collect::<Vec<_>>(),
-                ),
-            },
-        }
-    }
-
-    pub fn warnings(&self) -> Vec<String> {
-        let mut out = Vec::new();
-        if self.bestiary_id.is_some()
-            && !(self.resistance.is_empty()
-                && self.immunity.is_empty()
-                && self.state_immunity.is_empty())
-        {
-            out.push("defense lists are ignored: the bestiary record has them".into());
-        }
-        if self.attack.max < self.attack.min {
-            out.push("attack max below min (max = min is used)".into());
-        }
-        if self.hp == 0 && self.hp_per_level == 0 {
-            out.push("0 HP (spawns with 1)".into());
-        }
-        out
-    }
-}
-
-/// A fight: monsters (ids of monster presets) on an open arena.
+/// A fight: registry monsters (by their `bestiary.json` name) on an open arena.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EncounterPreset {
     pub name: String,
@@ -356,9 +224,17 @@ pub struct EncounterPreset {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EncounterSlot {
+    /// A `bestiary.json` name.
     pub monster: String,
     pub level: u8,
     pub count: u8,
+    /// The elite version (docs/BESTIARY.md 5).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub elite: bool,
+    /// The pool bits the DM chose (`Spawn.skills`); left out = the first of each category that
+    /// fill the slots.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skills: Option<u16>,
 }
 
 /// An open floor: the party in column 1, the monsters `gap` columns to the right.
@@ -384,18 +260,16 @@ impl Default for Arena {
 pub enum Kind {
     Heroes,
     Skills,
-    Monsters,
     Encounters,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 4] = [Kind::Heroes, Kind::Skills, Kind::Monsters, Kind::Encounters];
+    pub const ALL: [Kind; 3] = [Kind::Heroes, Kind::Skills, Kind::Encounters];
 
     pub fn dir(self) -> &'static str {
         match self {
             Kind::Heroes => "heroes",
             Kind::Skills => "skills",
-            Kind::Monsters => "monsters",
             Kind::Encounters => "encounters",
         }
     }
@@ -406,10 +280,9 @@ impl Kind {
 pub struct Presets {
     pub heroes: BTreeMap<String, HeroPreset>,
     pub skills: BTreeMap<String, SkillPreset>,
-    pub monsters: BTreeMap<String, MonsterPreset>,
     pub encounters: BTreeMap<String, EncounterPreset>,
-    /// `assets/registry`: aspects, traits, resonances and monster defenses, the tables the
-    /// program copies at `open_session`.
+    /// `assets/registry`: aspects, traits, resonances, the bestiary and the monster skills, the
+    /// tables the program copies at `open_session`.
     pub registry: Registry,
 }
 
@@ -437,7 +310,6 @@ impl Presets {
         let p = Presets {
             heroes: load_dir(&root.join(Kind::Heroes.dir()), &mut errors),
             skills: load_dir(&root.join(Kind::Skills.dir()), &mut errors),
-            monsters: load_dir(&root.join(Kind::Monsters.dir()), &mut errors),
             encounters: load_dir(&root.join(Kind::Encounters.dir()), &mut errors),
             registry,
         };
@@ -449,7 +321,6 @@ impl Presets {
     pub fn save(&self, root: &Path) -> io::Result<()> {
         save_dir(&root.join(Kind::Heroes.dir()), &self.heroes)?;
         save_dir(&root.join(Kind::Skills.dir()), &self.skills)?;
-        save_dir(&root.join(Kind::Monsters.dir()), &self.monsters)?;
         save_dir(&root.join(Kind::Encounters.dir()), &self.encounters)
     }
 
@@ -457,7 +328,6 @@ impl Presets {
         match kind {
             Kind::Heroes => self.heroes.keys().cloned().collect(),
             Kind::Skills => self.skills.keys().cloned().collect(),
-            Kind::Monsters => self.monsters.keys().cloned().collect(),
             Kind::Encounters => self.encounters.keys().cloned().collect(),
         }
     }

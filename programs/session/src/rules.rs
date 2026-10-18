@@ -1,13 +1,12 @@
 //! Session-local game rules: step costs, instruction constants, rewards, and the shared rules of
 //! `deadroll-rules` with the program's numbers ([`BALANCE`]).
 //!
-//! Monster HP, speed, initiative and tile costs come from the registry tables (copied at
-//! `open_session`). Every combat number lives in `deadroll_rules::BalanceConfig` (placeholders
+//! Monster templates (every monster number), monster skills and tile costs come from the registry
+//! tables (copied at `open_session` into `MonsterState` / `GameSession`). Every combat number lives in `deadroll_rules::BalanceConfig` (placeholders
 //! until balancing, tuned in `tools/balance`); the wrappers below keep one call per rule.
 use deadroll_combat::{DamageRange, RollSource};
-use deadroll_mapcheck::roster::{p0_role, Role};
 use deadroll_rules::{
-    config::BalanceConfig, input::hero, items, monster, player, units, HeroStats, MonsterDefense,
+    config::BalanceConfig, input::hero, items, monster, player, units, HeroStats,
 };
 use deadroll_types::{Aspect, Cell, Class, Form, Race, RangeTag, Source, Tile, STATS_COUNT};
 
@@ -17,7 +16,7 @@ pub use deadroll_rules::units::{
 };
 pub use deadroll_rules::MonsterProfile;
 
-use crate::state::{external::BestiaryRecord, STASH_RESOURCES};
+use crate::state::STASH_RESOURCES;
 
 /// The numbers the program plays with.
 pub const BALANCE: &BalanceConfig = &BalanceConfig::DEFAULT;
@@ -38,11 +37,6 @@ pub fn player_ap(race: Race, class: Class, dexterity: u16) -> u8 {
 /// Action points per turn for a monster: its registry bestiary speed (copied at open).
 pub fn monster_ap(speed: u8) -> u8 {
     monster::monster_ap(speed, &BALANCE.monsters)
-}
-
-/// Monster HP at spawn from its registry bestiary record (at least 1).
-pub fn monster_hp(record: &BestiaryRecord, level: u8) -> u32 {
-    monster::monster_hp(record.hp, record.hp_per_level, level)
 }
 
 /// Action points to step onto a tile, `None` if it cannot be entered. `costs` is the registry
@@ -99,7 +93,8 @@ pub fn item_bonus(h: &HeroStats) -> items::ItemBonus {
 
 /// `act` skill slot for the weapon's basic attack.
 pub const BASE_ATTACK: u8 = 0xFF;
-/// `monster_act` action: the monster's natural attack (the only P0 action).
+/// `monster_act` action: the monster's natural attack; `1 + slot` is the skill in that slot
+/// (`deadroll_rules::monster::ACTIVE_SLOT..`, patch 6).
 pub const NATURAL_ATTACK: u8 = 0;
 /// Action points of the basic attack and of a monster's natural attack; an active skill costs
 /// its own (`MapSkillData::ap_cost`).
@@ -173,21 +168,6 @@ pub fn player_defense(class: Class, stats: &[u16; STATS_COUNT]) -> (u32, u32) {
     player::player_defense(class, stats, &BALANCE.players)
 }
 
-/// One P0 bestiary template at a level (`deadroll_rules::monster::p0`) with the defenses of its
-/// registry record (`MonsterState.defense`, copied at `open_session`).
-pub fn monster_profile(
-    bestiary_id: u8,
-    level: u8,
-    defense: &MonsterDefense,
-) -> Option<MonsterProfile> {
-    monster::p0::monster_base(bestiary_id).map(|b| b.profile(level, &BALANCE.monsters, defense))
-}
-
-/// Killing this monster wins the party (docs/PARTY_AND_TURNS.md, section 7.1).
-pub fn is_boss(bestiary_id: u8) -> bool {
-    p0_role(bestiary_id) == Some(Role::Boss)
-}
-
 // ---------------------------------------------------------------------------------------------
 // Rewards (L7.5). TODO(post-demo): reward tables and levels from the map (PARTY_AND_TURNS 9).
 
@@ -216,7 +196,6 @@ pub fn boss_rewards(src: &mut impl RollSource) -> [u32; STASH_RESOURCES] {
 mod tests {
     use super::*;
     use deadroll_combat::SeededRoll;
-    use deadroll_mapcheck::roster::ids;
     use deadroll_types::BP;
 
     #[test]
@@ -237,30 +216,6 @@ mod tests {
         assert_eq!(monster_ap(0), 1);
         assert_eq!(monster_ap(6), 6);
         assert_eq!(monster_ap(200), 12);
-    }
-
-    #[test]
-    fn monster_hp_from_the_bestiary() {
-        let wolf = BestiaryRecord {
-            speed: 6,
-            initiative: 6,
-            hp: 12,
-            hp_per_level: 3,
-            defense: deadroll_rules::MonsterDefense::NONE,
-        };
-        assert_eq!(monster_hp(&wolf, 0), 12);
-        assert_eq!(monster_hp(&wolf, 2), 18);
-        let zero = BestiaryRecord {
-            hp: 0,
-            hp_per_level: 0,
-            ..wolf
-        };
-        assert_eq!(monster_hp(&zero, 5), 1);
-        let huge = BestiaryRecord {
-            hp: u32::MAX,
-            ..wolf
-        };
-        assert_eq!(monster_hp(&huge, 255), u32::MAX);
     }
 
     #[test]
@@ -358,39 +313,6 @@ mod tests {
         assert_eq!(
             (reach(RangeTag::Melee), reach(RangeTag::Ranged)),
             (MELEE_RANGE, RANGED_RANGE)
-        );
-    }
-
-    #[test]
-    fn every_p0_monster_has_a_profile_and_one_boss() {
-        for id in 0..=4u8 {
-            let p = monster_profile(id, 1, &crate::state::test_support::defense(id)).unwrap();
-            assert!(p.weapon.min >= 1 && p.weapon.max >= p.weapon.min);
-            assert!(p.xp > 0);
-        }
-        assert_eq!(
-            monster_profile(5, 1, &crate::state::test_support::defense(5)),
-            None
-        );
-        assert!(is_boss(ids::GOBLIN_CHIEFTAIN));
-        for id in [
-            ids::WOLF,
-            ids::GOBLIN,
-            ids::GOBLIN_WARRIOR,
-            ids::GOBLIN_SHAMAN,
-            9,
-        ] {
-            assert!(!is_boss(id));
-        }
-        assert_eq!(
-            monster_profile(
-                ids::GOBLIN_SHAMAN,
-                1,
-                &crate::state::test_support::defense(ids::GOBLIN_SHAMAN)
-            )
-            .unwrap()
-            .form,
-            Form::Projectile
         );
     }
 

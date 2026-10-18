@@ -410,7 +410,7 @@ async function estimateCost(conn: Rpc, opts: DeployOptions, programIds: Record<s
     }
   }
   if (!(await fetchData(conn.rpc, GAME_CONFIG))) add("GameConfig", await rentFor(conn.rpc, 8 + 420));
-  for (const seed of ["aspects", "resonances", "bestiary", "tileset", "prefabs", "traits"]) {
+  for (const seed of ["aspects", "resonances", "bestiary", "tileset", "prefabs", "traits", "monster_skills"]) {
     const [table] = await getProgramDerivedAddress({ programAddress: address(programIds.registry), seeds: [enc.encode(seed)] });
     if (!(await fetchData(conn.rpc, table))) add(`registry table ${seed}`, await rentFor(conn.rpc, 16 + 4096));
   }
@@ -506,9 +506,10 @@ function paletteVersion(): number {
 async function uploadRender(conn: Rpc, opts: DeployOptions, wallet: KeyPairSigner, programIds: Record<string, string>) {
   step("registry tables");
   script("seed-registry.ts", [], opts);
-  // open_session reads monster HP, speed, initiative, defenses and tile costs, and copies the
-  // resonance tables (aspects, traits, resonances) into the session.
-  for (const seed of ["bestiary", "tileset", "aspects", "traits", "resonances"]) {
+  // open_session copies the bestiary records, the spawns' monster skills, the tile costs and the
+  // resonance tables (aspects, traits, resonances) into the session; finalize_map reads the
+  // bestiary and the monster skills (patch 6).
+  for (const seed of ["bestiary", "tileset", "aspects", "traits", "resonances", "monster_skills"]) {
     const [table] = await getProgramDerivedAddress({ programAddress: address(programIds.registry), seeds: [enc.encode(seed)] });
     const data = await fetchData(conn.rpc, table);
     if (!data || data.subarray(16).every((b) => b === 0)) throw new Error(`registry ${seed} table ${table} is not seeded`);
@@ -586,8 +587,12 @@ async function ensureDemoMap(conn: Rpc, opts: DeployOptions, wallet: KeyPairSign
   if (MAP_STRIDE !== 32) throw new Error("unexpected stride");
   await send(conn, wallet, [ixFromIdl(prog, "deadroll_map", "write_layout", edit, cat(u16(0), vec(layoutBytes(preset))))]);
   await send(conn, wallet, [ixFromIdl(prog, "deadroll_map", "write_spawns", edit, spawnsArgs(preset))]);
-  // No secret cells in the demo preset; a fixed root keeps reruns identical.
-  await send(conn, wallet, [ixFromIdl(prog, "deadroll_map", "finalize_map", edit, sha256(enc.encode(`deadroll:${preset.name}:no-secrets`)))]);
+  // No secret cells in the demo preset; a fixed root keeps reruns identical. The builder rules
+  // read the registry bestiary and monster skills (roles, pools, slots).
+  const table = async (seed: string) =>
+    (await getProgramDerivedAddress({ programAddress: address(programIds.registry), seeds: [enc.encode(seed)] }))[0];
+  const finalize = { ...edit, bestiary: await table("bestiary"), monster_skills: await table("monster_skills") };
+  await send(conn, wallet, [ixFromIdl(prog, "deadroll_map", "finalize_map", finalize, sha256(enc.encode(`deadroll:${preset.name}:no-secrets`)))]);
   console.log(`write_layout, write_spawns, finalize_map: ${map} Finalized`);
   return { map, layout, status: "Finalized", preset };
 }

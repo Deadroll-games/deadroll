@@ -776,6 +776,27 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                                 &mut m.resist_bp,
                                 dm.resist_bp,
                             );
+                            bp_row(ui, "Elite HP increase", &mut m.elite_hp_bp, dm.elite_hp_bp);
+                            for (rank, name) in ["regular", "elite", "boss"].iter().enumerate() {
+                                for (k, kind) in
+                                    ["active", "reactive", "passive"].iter().enumerate()
+                                {
+                                    int_row(
+                                        ui,
+                                        &format!("Skill slots, {name}, {kind}"),
+                                        &mut m.slots[rank][k],
+                                        dm.slots[rank][k],
+                                        0..=5,
+                                    );
+                                }
+                            }
+                            int_row(
+                                ui,
+                                "Monster AI: heal an ally below, %",
+                                &mut m.ai_heal_below_pct,
+                                dm.ai_heal_below_pct,
+                                0..=100,
+                            );
                         });
                 });
         });

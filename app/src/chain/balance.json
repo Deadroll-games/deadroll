@@ -501,7 +501,26 @@
     "attack_per_level_bp": 10000,
     "ap_min": 1,
     "ap_max": 12,
-    "resist_bp": 5000
+    "resist_bp": 5000,
+    "elite_hp_bp": 5000,
+    "slots": [
+      [
+        3,
+        0,
+        1
+      ],
+      [
+        4,
+        0,
+        1
+      ],
+      [
+        5,
+        1,
+        1
+      ]
+    ],
+    "ai_heal_below_pct": 60
   },
   "items": {
     "bases": {

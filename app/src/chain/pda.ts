@@ -32,6 +32,8 @@ export const tilesetPda = () => pda(PROGRAMS.registry, ["tileset"]);
 export const aspectsPda = () => pda(PROGRAMS.registry, ["aspects"]);
 export const traitsPda = () => pda(PROGRAMS.registry, ["traits"]);
 export const resonancesPda = () => pda(PROGRAMS.registry, ["resonances"]);
+/** Patch 6: the skills of the bestiary pools. */
+export const monsterSkillsPda = () => pda(PROGRAMS.registry, ["monster_skills"]);
 
 export const mapPda = (dm: Address, index: number) => pda(PROGRAMS.map, ["map", enc.encode(dm) as Uint8Array, u32le(index)]);
 export const layoutPda = (map: Address) => pda(PROGRAMS.map, ["layout", enc.encode(map) as Uint8Array]);

@@ -12,7 +12,8 @@
 //! - Reactions: what happened to the players in this action (a monster's hit, an HP drop, hard
 //!   control, an enemy pushed next to them) is checked against every living player's reactive
 //!   skill, in slot order; each fires at most once per action, and what a reaction does triggers
-//!   no further reactions.
+//!   no further reactions. Patch 6: then the monsters' reactive skills, in index order, answer
+//!   what the action did to them (`crate::monster_cb`).
 use anchor_lang::prelude::*;
 use deadroll_combat::{
     AccuracyBuff, Applied as CombatApplied, EffectRoll, HitInput, HitResult, ResonanceTables,
@@ -22,7 +23,7 @@ use deadroll_rules::{
     aura::REACTIVE_AURA,
     input::{effect_action, EffectAction, SkillStats},
     line::{targets_on_line, LINE_TARGETS_MAX},
-    reactive::{entered_next_to, hit_events, nearby, reaction, Event, Reaction},
+    reactive::{entered_next_to, reaction, Event, Reaction},
     resolve,
     spread::{spread, Field, SpreadOutcome},
     HeroStats, MonsterDefense,
@@ -31,7 +32,6 @@ use deadroll_skillcheck::{Purpose, Target};
 use deadroll_types::{seeds, Cell, Monster, SessionStatus, MONSTERS_MAX, PARTY_MAX};
 
 use crate::{
-    cpi_out::{character::DeathAccounts, SessionSigner},
     errors::SessionError,
     events::{
         ActionRequested, AuraChanged, EffectResolved, ReactionKind, ReactiveTriggered,
@@ -39,9 +39,10 @@ use crate::{
     },
     hit_event::{emit_hit_resolved, HitItemsData, ItemBonusData},
     line::skill_line,
+    monster_cb::{self, MonsterEvents},
     outcomes,
     party::{party_keys, Party},
-    rules::{cooldown_after_use, monster_profile, step_cost, Unit, BALANCE},
+    rules::{cooldown_after_use, step_cost, Unit, BALANCE},
     state::{
         external::MapLayoutView, mods::from_combat, pending_kind, GameSession, Monsters,
         Participation, PendingAction, PendingReactiveData,
@@ -157,17 +158,22 @@ pub struct Cb<'a, 'info> {
     pub seed: [u8; 32],
     /// `GameSession.action_counter` of this action.
     pub action: u32,
-    monsters: &'a Monsters<'a, 'info>,
-    layout: &'a AccountInfo<'info>,
+    pub(crate) monsters: &'a Monsters<'a, 'info>,
+    pub(crate) layout: &'a AccountInfo<'info>,
     pub party: Party<'a, 'info>,
-    src: SyscallRoll,
+    pub(crate) src: SyscallRoll,
     /// The callback's own participation's character, with what it wears.
     main_hero: HeroStats,
-    input: Box<HitInput>,
-    result: Box<HitResult>,
-    tables: Option<Box<ResonanceTables>>,
+    pub(crate) input: Box<HitInput>,
+    pub(crate) result: Box<HitResult>,
+    pub(crate) tables: Option<Box<ResonanceTables>>,
     /// Bit per player slot whose reactive skill fired in this action.
     fired: u8,
+    /// Patch 6: what the action did to the monsters (for their reactives), the monsters whose
+    /// reactive fired, the monsters that have one (read once).
+    pub(crate) monster_events: Box<MonsterEvents>,
+    pub(crate) monster_fired: u32,
+    pub(crate) reactive_monsters: Option<u32>,
 }
 
 impl<'a, 'info> Cb<'a, 'info> {
@@ -194,10 +200,13 @@ impl<'a, 'info> Cb<'a, 'info> {
             result: Box::default(),
             tables: None,
             fired: 0,
+            monster_events: Box::default(),
+            monster_fired: 0,
+            reactive_monsters: None,
         }
     }
 
-    fn load_tables(&mut self) -> Result<()> {
+    pub(crate) fn load_tables(&mut self) -> Result<()> {
         if self.tables.is_none() {
             let mut t = Box::<ResonanceTables>::default();
             self.monsters.tables_into(&mut t)?;
@@ -206,7 +215,7 @@ impl<'a, 'info> Cb<'a, 'info> {
         Ok(())
     }
 
-    fn hero_of(&mut self, main: &Participation, slot: u8) -> Result<HeroStats> {
+    pub(crate) fn hero_of(&mut self, main: &Participation, slot: u8) -> Result<HeroStats> {
         if slot == main.core.slot {
             Ok(self.main_hero)
         } else {
@@ -215,7 +224,7 @@ impl<'a, 'info> Cb<'a, 'info> {
     }
 
     /// Runs `f` on player `slot`'s participation: the callback's own, or one of the party's.
-    fn on_player<R>(
+    pub(crate) fn on_player<R>(
         &mut self,
         main: &mut Participation,
         slot: u8,
@@ -231,7 +240,7 @@ impl<'a, 'info> Cb<'a, 'info> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn emit_effect(
+    pub(crate) fn emit_effect(
         &self,
         caster: u8,
         target: u8,
@@ -262,7 +271,7 @@ impl<'a, 'info> Cb<'a, 'info> {
     }
 
     /// The monsters on the line of `skill` from `from` through monster `target`, in line order.
-    fn line_monsters(
+    pub(crate) fn line_monsters(
         &self,
         session: &GameSession,
         from: Cell,
@@ -305,17 +314,16 @@ impl<'a, 'info> Cb<'a, 'info> {
         }
         self.load_tables()?;
         let mut mods = self.monsters.mods(index)?;
+        let profile = self.monsters.profile(index, monster.level)?;
         let (hero_mods, view) = {
-            let auras = session.party_auras();
-            let field = session.aura_field(&auras);
+            let field = monster_cb::Field::load(session, self.monsters)?;
+            let view = field.view();
             (
-                p.mods_with_auras(&field, skill.is_none()),
-                field.monster_mods(&mods, cell_of(&monster)),
+                p.mods_with_auras(&view, skill.is_none()),
+                view.monster_mods(&mods, index, cell_of(&monster), profile.kin, false),
             )
         };
-        let defense = self.monsters.defense(index)?;
-        let profile = monster_profile(monster.bestiary_id, monster.level, &defense)
-            .ok_or(SessionError::InvalidMonster)?;
+        let before = monster.hp;
         let attacker = Unit::Player(p.core.slot).id();
         let target = Unit::Monster(index).id();
         let mut accuracy = AccuracyBuff::from(p.accuracy);
@@ -344,11 +352,12 @@ impl<'a, 'info> Cb<'a, 'info> {
             outcomes::monster_killed(
                 session,
                 self.session_key,
+                self.monsters,
                 &mut monster,
                 index,
                 attacker,
                 self.seed,
-            );
+            )?;
         }
         emit_hit_resolved(
             &self.session_key,
@@ -379,6 +388,7 @@ impl<'a, 'info> Cb<'a, 'info> {
             );
         }
         self.monsters.set(index, &monster)?;
+        self.note_monster_hit(index, before, p.core.slot)?;
         self.spread_hit(
             session,
             index,
@@ -576,6 +586,7 @@ impl<'a, 'info> Cb<'a, 'info> {
             one[0] = target;
             (one, 1)
         };
+        let caster_slot = caster;
         let caster = Unit::Player(caster).id();
         for &index in &targets[..n] {
             let mut monster = self.monsters.get(index)?;
@@ -583,12 +594,7 @@ impl<'a, 'info> Cb<'a, 'info> {
                 continue;
             }
             let mut mods = self.monsters.mods(index)?;
-            let profile = monster_profile(
-                monster.bestiary_id,
-                monster.level,
-                &self.monsters.defense(index)?,
-            )
-            .ok_or(SessionError::InvalidMonster)?;
+            let profile = self.monsters.profile(index, monster.level)?;
             let out = resolve::debuff_monster(
                 BALANCE,
                 caster,
@@ -614,6 +620,9 @@ impl<'a, 'info> Cb<'a, 'info> {
                 &monster.states,
                 &mods,
             );
+            if monster_cb::controls(effect, out.applied) {
+                self.note_monster_controlled(index, caster_slot)?;
+            }
         }
         Ok(())
     }
@@ -687,107 +696,6 @@ impl<'a, 'info> Cb<'a, 'info> {
         Ok(())
     }
 
-    /// Monster `index`'s natural attack on the callback's own player `victim`, then the
-    /// reactions to it: the victim's (hit, crit, HP below, control) and its nearby allies'
-    /// (HP below).
-    #[inline(never)]
-    pub fn monster_hits_player(
-        &mut self,
-        session: &mut GameSession,
-        victim: &mut Participation,
-        index: u8,
-        signer: &SessionSigner<'_, 'info>,
-        death: &DeathAccounts<'_, 'info>,
-    ) -> Result<()> {
-        self.load_tables()?;
-        let slot = victim.core.slot;
-        let monster = self.monsters.get(index)?;
-        let profile = monster_profile(
-            monster.bestiary_id,
-            monster.level,
-            &self.monsters.defense(index)?,
-        )
-        .ok_or(SessionError::InvalidMonster)?;
-        let (monster_mods, hero_mods) = {
-            let auras = session.party_auras();
-            let field = session.aura_field(&auras);
-            (
-                field.monster_mods(&self.monsters.mods(index)?, cell_of(&monster)),
-                victim.mods_with_auras(&field, false),
-            )
-        };
-        let attacker = Unit::Monster(index).id();
-        let before = victim.core.hp;
-        let tables = self
-            .tables
-            .as_deref()
-            .ok_or(SessionError::InvalidMonsterState)?;
-        let died = resolve::monster_attack(
-            BALANCE,
-            tables,
-            attacker,
-            &profile,
-            &monster_mods,
-            &self.main_hero,
-            &mut victim.core.hp,
-            &mut victim.core.states,
-            &hero_mods,
-            &mut self.input,
-            &mut self.result,
-            &mut self.src,
-        );
-        if died {
-            outcomes::player_killed(session, self.session_key, slot, attacker, signer, death)?;
-        }
-        emit_hit_resolved(
-            &self.session_key,
-            attacker,
-            Unit::Player(slot).id(),
-            &self.seed,
-            self.action,
-            &self.result,
-            &HitItemsData {
-                attacker: ItemBonusData::default(),
-                defender: ItemBonusData::of(&self.main_hero),
-            },
-        )?;
-
-        let mut events = ReactEvents::default();
-        let after = victim.core.hp;
-        let hp_max = victim.hp_max;
-        for e in hit_events(&self.result, before, after, hp_max)
-            .into_iter()
-            .flatten()
-        {
-            events.push(ReactEvent {
-                bearer: slot,
-                event: e,
-                source: Some(index),
-            });
-        }
-        if after < before {
-            let at = session.player_pos[slot as usize];
-            for b in 0..session.core.player_count {
-                if b != slot
-                    && session.player_alive(b)
-                    && nearby(BALANCE, session.player_pos[b as usize], at)
-                {
-                    events.push(ReactEvent {
-                        bearer: b,
-                        event: Event::AllyHpDrop {
-                            ally: slot,
-                            before,
-                            after,
-                            hp_max,
-                        },
-                        source: Some(index),
-                    });
-                }
-            }
-        }
-        self.react(session, victim, &events)
-    }
-
     /// Reactions to monsters pushed next to players by this action's knockbacks.
     pub fn react_to_moves(
         &mut self,
@@ -853,7 +761,7 @@ impl<'a, 'info> Cb<'a, 'info> {
     }
 
     /// Every bearer's reaction to `events`, in player slot order.
-    fn react(
+    pub(crate) fn react(
         &mut self,
         session: &mut GameSession,
         main: &mut Participation,
@@ -1064,6 +972,7 @@ pub const REACTIVE_ROLL: u8 = 0xFE;
 /// Requests a VRF value only for the reactives of `pending` (`monster_move`, `start_turn`): the
 /// callback's `participation` is the first bearer's, the other living players come as the party
 /// accounts. Not an action: `acted_seq` and the escape intents stay.
+#[allow(clippy::too_many_arguments)]
 pub fn request_reactive_roll(
     session: &mut GameSession,
     session_key: Pubkey,

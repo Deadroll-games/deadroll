@@ -73,6 +73,8 @@ pub fn handler(
         SessionError::NotActive
     );
     require!(!session.core.pending_vrf, SessionError::RollPending);
+    // Patch 6: a player down in the last callback is finalized first (`start_turn`).
+    require!(session.pending_deaths == 0, SessionError::DeathsPending);
     let session_key = session.key();
     let monsters = Monsters::load(&accounts.monsters, &session_key)?;
     require!(monster < monsters.count()?, SessionError::InvalidMonster);

@@ -25,11 +25,10 @@ use deadroll_combat::{
 use deadroll_rules::{
     input::{self, effect_action, EffectAction},
     items::Equipment,
-    monster::p0,
     registry::Registry,
     resolve,
     spread::{spread, BurningCell, Field, BURNING_CELLS_MAX},
-    BalanceConfig, HeroStats, MonsterDefense, MonsterProfile,
+    BalanceConfig, HeroStats, MonsterDefense, MonsterProfile, MonsterTemplate,
 };
 use deadroll_session::{
     combat_input as program, rules as program_rules, state::participation::hero_of,
@@ -37,8 +36,8 @@ use deadroll_session::{
 };
 use deadroll_sim::{
     config_io,
-    presets::{HeroPreset, MonsterPreset, Presets, SkillPreset},
-    setup::{fighter, Fighter, Issues},
+    presets::{HeroPreset, Presets, SkillPreset},
+    setup::{fighter, spawn, Fighter, Issues},
 };
 use deadroll_skillcheck::{derive, presets as skill_presets, Purpose};
 use deadroll_types::{
@@ -221,26 +220,33 @@ fn sim_fighter(
     f
 }
 
-/// P0 monsters as JSON presets, at level 1, with their registry defenses.
+/// The shipped bestiary monsters as the simulator spawns them (`setup::spawn`), at level 1.
 fn sim_monsters(cfg: &BalanceConfig) -> Vec<(u8, MonsterProfile, u32)> {
     let registry = sim_registry();
     (0..5u8)
         .map(|id| {
-            let preset: MonsterPreset = round_trip(&MonsterPreset::from_base(
-                "m",
-                Some(id),
-                &p0::monster_base(id).unwrap(),
-            ));
-            let base = preset.base();
-            let defense = preset.defense(&registry);
-            (id, base.profile(1, &cfg.monsters, &defense), base.hp_at(1))
+            let s = spawn(&registry, id, 1, false, None, cfg).unwrap();
+            (
+                id,
+                s.template.profile(1, &cfg.monsters),
+                s.template.hp_at(1, 0, &cfg.monsters),
+            )
         })
         .collect()
 }
 
-/// The program's profile of monster `id` at level 1.
+/// The program's template of bestiary id `id`: the record bytes `open_session` copies into
+/// `MonsterState.records`, decoded as `Monsters::template` does.
+fn program_template(id: u8) -> MonsterTemplate {
+    let r = sim_registry();
+    let at = id as usize * deadroll_rules::monster::record::SIZE;
+    MonsterTemplate::from_record(&r.bestiary[at..at + deadroll_rules::monster::record::SIZE])
+        .unwrap()
+}
+
+/// The program's profile of monster `id` at level 1 (`Monsters::profile`).
 fn program_profile(id: u8) -> MonsterProfile {
-    program_rules::monster_profile(id, 1, &program_defense(&sim_registry(), id)).unwrap()
+    program_template(id).profile(1, &program_rules::BALANCE.monsters)
 }
 
 fn monster(id: u8, hp: u32) -> Monster {
@@ -265,21 +271,24 @@ fn bite(
 ) -> (HitResult, u32, [ActiveState; STATES_MAX], bool) {
     let (mut hp, mut states) = (hp, [ActiveState::default(); STATES_MAX]);
     let (mut input, mut result) = (HitInput::default(), HitResult::default());
-    let died = resolve::monster_attack(
+    let mut own = NONE;
+    let out = resolve::monster_attack(
         cfg,
         tables,
         deadroll_rules::MONSTER_UNIT_BASE,
         profile,
+        None,
         &NONE,
         hero,
         &mut hp,
         &mut states,
+        &mut own,
         &NONE,
         &mut input,
         &mut result,
         src,
     );
-    (result, hp, states, died)
+    (result, hp, states, out.died)
 }
 
 #[test]
@@ -370,19 +379,25 @@ fn table_numbers_match_the_program() {
     assert_eq!(cfg.players.class_start_tier, CLASS_START_TIER);
     for (id, profile, hp) in sim_monsters(&cfg) {
         assert_eq!(profile, program_profile(id), "monster {id}");
-        let base = p0::monster_base(id).unwrap();
-        let record = deadroll_session::state::external::BestiaryRecord {
-            speed: base.speed,
-            initiative: base.initiative,
-            hp: base.hp,
-            hp_per_level: base.hp_per_level,
-            defense: program_defense(&sim_registry(), id),
-        };
-        assert_eq!(hp, program_rules::monster_hp(&record, 1));
+        let t = program_template(id);
+        assert_eq!(hp, t.hp_at(1, 0, &program_rules::BALANCE.monsters));
         assert_eq!(
-            deadroll_rules::monster::monster_ap(base.speed, &cfg.monsters),
-            program_rules::monster_ap(base.speed)
+            sim_registry().template(id).unwrap().hp_at(
+                1,
+                deadroll_types::SPAWN_ELITE,
+                &cfg.monsters
+            ),
+            t.hp_at(
+                1,
+                deadroll_types::SPAWN_ELITE,
+                &program_rules::BALANCE.monsters
+            )
         );
+        assert_eq!(
+            deadroll_rules::monster::monster_ap(t.speed, &cfg.monsters),
+            program_rules::monster_ap(t.speed)
+        );
+        assert_eq!(cfg.monsters.slots, program_rules::BALANCE.monsters.slots);
     }
 }
 
@@ -442,10 +457,9 @@ fn every_demo_attack_deals_the_same_damage() {
                     attacker: program::player_attacker(0, &ph, rec.as_ref(), &NONE, &no_buff),
                     defender: program::monster_defender(
                         &monster(id, hp),
-                        &program_defense(&registry, id),
+                        &program_profile(id),
                         &NONE,
-                    )
-                    .unwrap(),
+                    ),
                 };
                 let sim_input = HitInput {
                     attacker: input::player_attacker(
@@ -524,14 +538,12 @@ fn every_demo_attack_deals_the_same_damage() {
     {
         let wf = sim_fighter(warrior, &skill_presets::WARRIOR, &cfg, gear);
         let unit = deadroll_rules::MONSTER_UNIT_BASE;
-        let prog = program::monster_attacker(
-            unit,
-            &monster(id, hp),
-            &program_defense(&registry, id),
-            &NONE,
-        )
-        .unwrap();
-        assert_eq!(input::monster_attacker(&cfg, unit, &profile, &NONE), prog);
+        let prog = program::monster_attacker(unit, &program_profile(id), None, &NONE);
+        let _ = hp;
+        assert_eq!(
+            input::monster_attacker(&cfg, unit, &profile, None, &NONE),
+            prog
+        );
         let ph = program_hero(warrior, gear);
         let states = [ActiveState::default(); STATES_MAX];
         assert_eq!(
@@ -719,7 +731,7 @@ const ATTACKER: Cell = Cell { x: 3, y: 5 };
 /// Goblins around the target at (5, 5): one right behind it (6, 5) and one beside it (5, 6), both
 /// bleeding (Blood Arc), one diagonal (4, 4), one further on the line (7, 5).
 fn cluster(target_states: [ActiveState; STATES_MAX]) -> Vec<Monster> {
-    let hp = p0::monster_base(1).unwrap().hp_at(1);
+    let hp = program_template(1).hp_at(1, 0, &program_rules::BALANCE.monsters);
     let bleed = ActiveState {
         kind: StateKind::Bleeding,
         turns: 3,
@@ -1203,5 +1215,297 @@ fn a_line_hits_the_same_units_in_the_same_order_on_the_same_dice() {
             sides.push((results, ms));
         }
         assert_eq!(sides[0], sides[1], "seed {i}");
+    }
+}
+
+// -------------------------------------------------------------------------------------------
+// Patch 6: monster skills. The program copies a spawn's pool skills into `MonsterState` (the
+// 16-byte session copy) and derives them with `BALANCE.skills`; the simulator spawns the same
+// registry records with the JSON config.
+
+/// The program's view of a pool skill: the session copy `open_session` writes, read back as
+/// `Monsters::skill` does.
+fn program_skill(
+    k: &deadroll_skillcheck::monster::MonsterSkill,
+) -> deadroll_rules::MonsterSkillStats {
+    let copy = k.encode_session();
+    let back = deadroll_skillcheck::monster::MonsterSkill::decode_session(&copy).unwrap();
+    deadroll_rules::MonsterSkillStats::new(&back, &program_rules::BALANCE.skills)
+}
+
+/// The registry index of the skill named `name`.
+fn skill_index(reg: &Registry, name: &str) -> usize {
+    reg.skill_names.iter().position(|n| n == name).unwrap()
+}
+
+#[test]
+fn monster_skills_snapshot_the_same() {
+    let cfg = sim_config();
+    let reg = sim_registry();
+    for id in 0..5u8 {
+        for elite in [false, true] {
+            let s = spawn(&reg, id, 1, elite, None, &cfg).unwrap();
+            let t = program_template(id);
+            let pool = reg.pool(&t);
+            let cats: Vec<_> = pool.iter().map(|k| k.unwrap().blocks.category).collect();
+            let flags = if elite {
+                deadroll_types::SPAWN_ELITE
+            } else {
+                0
+            };
+            let slots = t.slots(flags, &program_rules::BALANCE.monsters);
+            let mask = deadroll_sim::setup::default_skills(&cats, slots);
+            let chosen = deadroll_rules::monster::select_skills(&cats, mask, slots);
+            for (slot, &i) in chosen.iter().enumerate() {
+                let prog = (i != deadroll_rules::monster::NO_SKILL)
+                    .then(|| program_skill(&pool[i as usize].unwrap()));
+                assert_eq!(
+                    s.skills[slot], prog,
+                    "monster {id} elite {elite} slot {slot}"
+                );
+            }
+        }
+    }
+}
+
+/// A monster's skill (`None`: the natural attack) on a fresh hero: the hit, the rider on the
+/// player's stored modifiers, HP and states.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn monster_hit(
+    cfg: &BalanceConfig,
+    tables: &ResonanceTables,
+    profile: &MonsterProfile,
+    skill: Option<&deadroll_rules::MonsterSkillStats>,
+    hero: &HeroStats,
+    src: &mut impl RollSource,
+) -> (
+    HitResult,
+    u32,
+    [ActiveState; STATES_MAX],
+    TimedMods,
+    resolve::AttackOutcome,
+) {
+    let (mut hp, mut states, mut own) = (30u32, [ActiveState::default(); STATES_MAX], NONE);
+    let (mut inp, mut res) = (HitInput::default(), HitResult::default());
+    let out = resolve::monster_attack(
+        cfg,
+        tables,
+        deadroll_rules::MONSTER_UNIT_BASE,
+        profile,
+        skill.map(|k| &k.stats),
+        &NONE,
+        hero,
+        &mut hp,
+        &mut states,
+        &mut own,
+        &NONE,
+        &mut inp,
+        &mut res,
+        src,
+    );
+    (res, hp, states, own, out)
+}
+
+/// Every damage skill of every shipped monster on the warrior, on the same dice.
+#[test]
+fn monster_skill_hits_resolve_the_same() {
+    let cfg = sim_config();
+    let reg = sim_registry();
+    let (st, pt) = (reg.tables, program_tables(&reg));
+    let (warrior, _) = &demo()[0];
+    let wf = sim_fighter(warrior, &skill_presets::WARRIOR, &cfg, Gear::Kit);
+    let ph = program_hero(warrior, Gear::Kit);
+    let mut riders = 0;
+    for id in 0..5u8 {
+        let s = spawn(&reg, id, 1, false, None, &cfg).unwrap();
+        let sim_profile = s.template.profile(1, &cfg.monsters);
+        let prog_profile = program_profile(id);
+        assert_eq!(sim_profile, prog_profile);
+        for (k, name) in s.skills.iter().zip(&s.skill_names) {
+            let Some(k) = k else { continue };
+            if k.stats.blocks.purpose != Purpose::Damage {
+                continue;
+            }
+            let prog_skill = program_skill(&reg.skills[skill_index(&reg, name)].unwrap());
+            assert_eq!(prog_skill, *k, "{name}");
+            let unit = deadroll_rules::MONSTER_UNIT_BASE;
+            assert_eq!(
+                input::monster_attacker(&cfg, unit, &sim_profile, Some(&k.stats), &NONE),
+                program::monster_attacker(unit, &prog_profile, Some(&prog_skill.stats), &NONE)
+            );
+            for i in 0..SEEDS {
+                let p = monster_hit(
+                    program_rules::BALANCE,
+                    &pt,
+                    &prog_profile,
+                    Some(&prog_skill),
+                    &ph,
+                    &mut SyscallRoll::new(seed(i)),
+                );
+                let q = monster_hit(
+                    &cfg,
+                    &st,
+                    &sim_profile,
+                    Some(k),
+                    &wf.hero,
+                    &mut VrfRoll::new(seed(i)),
+                );
+                assert_eq!(p, q, "{name} seed {i}");
+                riders += p.4.rider.is_some() as u32;
+            }
+        }
+    }
+    assert!(riders > 0, "no skill rider rolled");
+}
+
+/// The chieftain's Net Throw on the warrior and the shaman's Mending and Quicken on a goblin:
+/// the same rolls, the same landing.
+#[test]
+fn monster_debuffs_and_support_resolve_the_same() {
+    let cfg = sim_config();
+    let reg = sim_registry();
+    let (warrior, _) = &demo()[0];
+    let wf = sim_fighter(warrior, &skill_presets::WARRIOR, &cfg, Gear::Kit);
+    let ph = program_hero(warrior, Gear::Kit);
+    let named = |id: u8, name: &str| {
+        let s = spawn(&reg, id, 1, false, None, &cfg).unwrap();
+        let slot = s.skill_names.iter().position(|n| n == name).unwrap();
+        let k = s.skills[slot].unwrap();
+        (s, k)
+    };
+    let (chief, net) = named(2, "Net Throw");
+    let prog_net = program_skill(&reg.skills[skill_index(&reg, "Net Throw")].unwrap());
+    assert_eq!(prog_net, net);
+    let effect = effect_action(net.stats.blocks.effect).unwrap();
+    let mut landed = 0;
+    for i in 0..SEEDS {
+        let (mut ps, mut ss) = (
+            [ActiveState::default(); STATES_MAX],
+            [ActiveState::default(); STATES_MAX],
+        );
+        let (mut pm, mut sm) = (NONE, NONE);
+        let p = resolve::monster_debuff_player(
+            program_rules::BALANCE,
+            6,
+            &program_profile(2),
+            &prog_net.stats,
+            effect,
+            &ph,
+            30,
+            &mut ps,
+            &mut pm,
+            &NONE,
+            &mut SyscallRoll::new(seed(i)),
+        );
+        let s = resolve::monster_debuff_player(
+            &cfg,
+            6,
+            &chief.template.profile(1, &cfg.monsters),
+            &net.stats,
+            effect,
+            &wf.hero,
+            30,
+            &mut ss,
+            &mut sm,
+            &NONE,
+            &mut VrfRoll::new(seed(i)),
+        );
+        assert_eq!((p, ps, pm), (s, ss, sm), "seed {i}");
+        landed += (p.applied != deadroll_combat::Applied::None) as u32;
+    }
+    assert!(landed > 0);
+    for name in ["Mending", "Quicken"] {
+        let (shaman, k) = named(4, name);
+        let effect = effect_action(k.stats.blocks.effect).unwrap();
+        let prog = program_skill(&reg.skills[skill_index(&reg, name)].unwrap());
+        assert_eq!(prog, k);
+        for i in 0..SEEDS {
+            let (mut pg, mut sg) = (monster(1, 12), monster(1, 12));
+            pg.hp = 3;
+            sg.hp = 3;
+            let (mut pm, mut sm) = (NONE, NONE);
+            let p = resolve::monster_support(
+                program_rules::BALANCE,
+                8,
+                &program_profile(4),
+                &prog.stats,
+                effect,
+                &mut pg,
+                &mut pm,
+                &mut SyscallRoll::new(seed(i)),
+            );
+            let s = resolve::monster_support(
+                &cfg,
+                8,
+                &shaman.template.profile(1, &cfg.monsters),
+                &k.stats,
+                effect,
+                &mut sg,
+                &mut sm,
+                &mut VrfRoll::new(seed(i)),
+            );
+            assert_eq!((p, pg, pm), (s, sg, sm), "{name} seed {i}");
+        }
+    }
+}
+
+/// Monster auras (the chieftain's Leader and Battle Cry) and the monster AI give the same on
+/// both sides.
+#[test]
+fn monster_auras_and_ai_are_the_same() {
+    use deadroll_rules::{
+        aura::monster_passive_aura,
+        monster_ai::{plan, AiMonster, AiUnit},
+        resolve::monster_start_aura,
+    };
+    let cfg = sim_config();
+    let reg = sim_registry();
+    let chief = spawn(&reg, 2, 1, false, None, &cfg).unwrap();
+    let leader = chief.skills[deadroll_rules::monster::PASSIVE_SLOT].unwrap();
+    let cry = chief.skills[deadroll_rules::monster::REACTIVE_SLOT].unwrap();
+    let sp = chief.template.profile(1, &cfg.monsters);
+    let pp = program_profile(2);
+    assert_eq!(
+        monster_passive_aura(&cfg, &sp, &leader),
+        monster_passive_aura(program_rules::BALANCE, &pp, &leader)
+    );
+    for i in 0..SEEDS {
+        assert_eq!(
+            monster_start_aura(&cfg, &sp, &cry, &mut VrfRoll::new(seed(i))),
+            monster_start_aura(
+                program_rules::BALANCE,
+                &pp,
+                &cry,
+                &mut SyscallRoll::new(seed(i))
+            )
+        );
+    }
+    let shaman = spawn(&reg, 4, 1, false, None, &cfg).unwrap();
+    let cooldowns = [0u8; deadroll_types::MONSTER_SLOTS];
+    let kin = shaman.template.kin;
+    let unit = |x, hp| AiUnit {
+        cell: Cell { x, y: 5 },
+        hp,
+        hp_max: 10,
+        alive: true,
+        kin,
+        ..AiUnit::default()
+    };
+    let heroes = [unit(9, 10)];
+    let sp = shaman.template.profile(1, &cfg.monsters);
+    let pp = program_profile(4);
+    for hurt in [2, 9] {
+        let monsters = [unit(5, 10), unit(6, hurt)];
+        let me = |profile| AiMonster {
+            index: 0,
+            ap: 3,
+            profile,
+            skills: &shaman.skills,
+            cooldowns: &cooldowns,
+        };
+        assert_eq!(
+            plan(&cfg, &me(&sp), &heroes, &monsters),
+            plan(program_rules::BALANCE, &me(&pp), &heroes, &monsters)
+        );
     }
 }

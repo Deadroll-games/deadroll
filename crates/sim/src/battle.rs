@@ -5,10 +5,13 @@
 //!   AP from speed with Haste / Slow and the auras over the unit, moves, at most one attack or
 //!   active skill, each at its own AP cost;
 //! - an action resolves like `consume_randomness` (`deadroll_rules::resolve`): a line hits every
-//!   unit of its side on it, then the reactive skills it triggered fire on the same dice;
+//!   unit of its side on it, then the reactive skills it triggered fire on the same dice, the
+//!   heroes' in slot order, then the monsters' in index order;
 //! - passive skills work all the time (`deadroll_rules::aura`), reactive ones trigger by
-//!   themselves (`deadroll_rules::reactive`): on a monster's hit, an HP drop (a hit or over-time
-//!   damage), hard control, and a monster coming next to a hero.
+//!   themselves (`deadroll_rules::reactive`): on an enemy's hit, an HP drop (a hit or over-time
+//!   damage), hard control, and an enemy coming next to the bearer. Monsters (patch 6) have the
+//!   skills of their spawn: actives chosen by `deadroll_rules::monster_ai`, a passive aura from the
+//!   start, a reactive skill.
 //!
 //! Dice: one seeded stream per fight hands out one seed per action (the VRF value on-chain).
 //! Ends: a boss dies (or every monster, when there is no boss) = victory, every hero dead =
@@ -19,21 +22,24 @@ use deadroll_combat::{
 };
 use deadroll_rules::{
     aura::{
-        passive_aura, tick_auras, Aura, AuraField, PartyAuras, PlayerAuras, PASSIVE_AURA,
-        REACTIVE_AURA,
+        monster_passive_aura, passive_aura, tick_auras, Aura, AuraField, MonsterAuraField,
+        MonsterAuras, MonsterBearer, PartyAuras, PlayerAuras, PASSIVE_AURA, REACTIVE_AURA,
     },
     input::hero,
     input::{effect_action, EffectAction, SkillStats},
     line::{line_cells, targets_on_line},
-    monster::monster_ap,
+    monster::{kin_reaches, monster_ap, PASSIVE_SLOT, REACTIVE_SLOT},
+    monster_ai::{AiChoice, AiTarget},
     reactive::{entered_next_to, hit_events, nearby, reaction, Event, Reaction},
     resolve,
     spread::{spread, step_into, BurningCell, Field, BURNING_CELLS_MAX},
     units::{cooldown_after_use, roll_initiative},
-    BalanceConfig, MonsterDefense, MonsterProfile, Unit,
+    BalanceConfig, MonsterDefense, MonsterProfile, MonsterSkillStats, Unit,
 };
-use deadroll_skillcheck::{Target, ACTIVE_MAX};
-use deadroll_types::{ActiveState, Cell, Monster, StateKind, BP, PARTY_MAX, STATES_MAX};
+use deadroll_skillcheck::{Purpose, Target, ACTIVE_MAX};
+use deadroll_types::{
+    ActiveState, Cell, Monster, StateKind, BP, MONSTER_SLOTS, PARTY_MAX, STATES_MAX,
+};
 
 use crate::setup::{Fight, Fighter};
 
@@ -106,13 +112,17 @@ pub struct BattleStats {
     pub knockbacks: u32,
     pub cells_ignited: u32,
     pub burned_by_cells: u32,
-    /// Reactive skills that triggered.
+    /// Reactive skills that triggered (heroes' and monsters').
     pub reactions: u32,
     /// Units a line hit beyond its chosen target.
     pub line_extra_hits: u32,
     /// At each hero's turn start: the other units (allies, or enemies of a debuff aura) its
     /// auras covered.
     pub aura_reach: u32,
+    /// Patch 6. Monster active skills used, monster heals (HP restored), monster reactives.
+    pub monster_skills: u32,
+    pub monster_healed: u64,
+    pub monster_reactions: u32,
 }
 
 pub(crate) struct Hero {
@@ -143,6 +153,10 @@ pub(crate) struct Foe {
     pub max_ap: u8,
     pub initiative: u16,
     pub attacks_taken: u16,
+    /// Its spawn's skills by slot, their cooldowns (the reactive's included), its auras.
+    pub skills: [Option<MonsterSkillStats>; MONSTER_SLOTS],
+    pub cooldowns: [u8; MONSTER_SLOTS],
+    pub auras: MonsterAuras,
 }
 
 /// A hero's action this turn.
@@ -182,11 +196,12 @@ const NO_MODS: TimedMods = [deadroll_combat::TimedMod {
     source: 0,
 }; deadroll_combat::MODS_MAX];
 
-/// The party's auras as the rules see them (`AuraField` borrows it).
+/// Every unit's auras as the rules see them (`AuraField` borrows it).
 pub(crate) struct PartyView {
     auras: PartyAuras,
     cells: [Cell; PARTY_MAX],
     alive: u8,
+    bearers: Vec<MonsterBearer>,
 }
 
 impl PartyView {
@@ -195,6 +210,9 @@ impl PartyView {
             auras: &self.auras,
             cells: &self.cells,
             alive: self.alive,
+            monsters: MonsterAuraField {
+                bearers: &self.bearers,
+            },
         }
     }
 }
@@ -205,6 +223,15 @@ pub(crate) struct ReactEvent {
     bearer: usize,
     event: Event,
     /// The monster that caused it.
+    source: Option<usize>,
+}
+
+/// What happened to a monster in this action, for its reactive skill.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct FoeEvent {
+    bearer: usize,
+    event: Event,
+    /// The hero that caused it.
     source: Option<usize>,
 }
 
@@ -276,7 +303,17 @@ impl<'a> Battle<'a> {
                 // Rows from the middle outwards, like the heroes.
                 let off = (row as i16 + 1) / 2 * if row % 2 == 1 { -1 } else { 1 };
                 let y = (mid as i16 + off).rem_euclid(arena.height as i16) as u8;
-                let hp = s.base.hp_at(s.level);
+                let t = &s.template;
+                let hp = t.hp_at(s.level, s.flags, &cfg.monsters);
+                let profile = t.profile(s.level, &cfg.monsters);
+                // The passive skill works from the start, like `open_session` copies it.
+                let mut auras = [Aura::default(); 2];
+                if let Some(a) = s.skills[PASSIVE_SLOT]
+                    .as_ref()
+                    .and_then(|k| monster_passive_aura(cfg, &profile, k))
+                {
+                    auras[PASSIVE_AURA] = a;
+                }
                 Foe {
                     m: Monster {
                         bestiary_id: i as u8,
@@ -286,15 +323,19 @@ impl<'a> Battle<'a> {
                         hp,
                         hp_max: hp,
                         alive: true,
+                        flags: s.flags,
                         ..Monster::default()
                     },
                     mods: NO_MODS,
-                    defense: s.defense,
-                    profile: s.base.profile(s.level, &cfg.monsters, &s.defense),
-                    boss: s.base.boss,
-                    max_ap: monster_ap(s.base.speed, &cfg.monsters),
-                    initiative: s.base.initiative,
+                    defense: t.defense,
+                    profile,
+                    boss: t.is_boss(),
+                    max_ap: monster_ap(t.speed, &cfg.monsters),
+                    initiative: t.initiative,
                     attacks_taken: 0,
+                    skills: s.skills,
+                    cooldowns: [0; MONSTER_SLOTS],
+                    auras,
                 }
             })
             .collect();
@@ -330,6 +371,9 @@ impl<'a> Battle<'a> {
                 reactions: 0,
                 line_extra_hits: 0,
                 aura_reach: 0,
+                monster_skills: 0,
+                monster_healed: 0,
+                monster_reactions: 0,
             },
             boss_dead: false,
         }
@@ -340,12 +384,21 @@ impl<'a> Battle<'a> {
         SeededRoll::new(self.rng.next_u64())
     }
 
-    /// The party's auras over the heroes' cells.
+    /// Every unit's auras over the units' cells.
     pub(crate) fn party_view(&self) -> PartyView {
         let mut v = PartyView {
             auras: [[Aura::default(); 2]; PARTY_MAX],
             cells: [Cell::default(); PARTY_MAX],
             alive: 0,
+            bearers: (0..self.foes.len())
+                .filter(|&i| self.foes[i].m.alive && MonsterBearer::has_aura(&self.foes[i].auras))
+                .map(|i| MonsterBearer {
+                    index: i as u8,
+                    cell: self.foe_cell_of(i),
+                    kin: self.foes[i].profile.kin,
+                    auras: self.foes[i].auras,
+                })
+                .collect(),
         };
         for (s, h) in self.heroes.iter().enumerate().take(PARTY_MAX) {
             v.auras[s] = h.auras;
@@ -365,12 +418,16 @@ impl<'a> Battle<'a> {
             .hero_mods(&h.mods, s as u8, h.cell, basic)
     }
 
-    /// Monster `i`'s buffs and debuffs with the debuff auras over it.
-    pub(crate) fn foe_mods(&self, i: usize) -> TimedMods {
+    /// Monster `i`'s buffs and debuffs with the auras over it (`basic`: for its natural attack).
+    pub(crate) fn foe_mods(&self, i: usize, basic: bool) -> TimedMods {
         let f = &self.foes[i];
-        self.party_view()
-            .field()
-            .monster_mods(&f.mods, Cell { x: f.m.x, y: f.m.y })
+        self.party_view().field().monster_mods(
+            &f.mods,
+            i as u8,
+            self.foe_cell_of(i),
+            f.profile.kin,
+            basic,
+        )
     }
 
     fn run(&mut self) {
@@ -417,7 +474,7 @@ impl<'a> Battle<'a> {
         }
     }
 
-    fn ended(&self) -> Option<Outcome> {
+    pub(crate) fn ended(&self) -> Option<Outcome> {
         if self.heroes.iter().all(|h| !h.alive) {
             Some(Outcome::Defeat)
         } else if self.boss_dead || self.foes.iter().all(|f| !f.m.alive) {
@@ -470,26 +527,41 @@ impl<'a> Battle<'a> {
             Unit::Monster(i) => {
                 let i = i as usize;
                 let f = &mut self.foes[i];
-                let mut cooldowns = [0u8; 0];
+                let before = f.m.hp;
+                // Skill cooldowns (the reactive's too) and the temporary aura count own turns.
                 let start = deadroll_rules::start_of_turn(
                     &mut f.m.states,
                     &mut f.mods,
-                    &mut cooldowns,
+                    &mut f.cooldowns,
                     f.m.hp,
                 );
                 f.m.hp = start.hp;
+                tick_auras(&mut f.auras);
                 self.stats.monster_turns += 1;
                 self.credit_dot(start.dot_source, start.dot_damage);
                 if start.died {
                     self.foe_died(i);
                     return;
                 }
-                if start.skip.is_some() {
-                    self.stats.monster_turns_skipped += 1;
+                if start.hp < before {
+                    let source = match Unit::from_id(start.dot_source) {
+                        Some(Unit::Player(s)) => Some(s as usize),
+                        _ => None,
+                    };
+                    let events = self.foe_hp_drop_events(i, before, start.hp, source);
+                    if events.iter().any(|e| self.foe_reacts(e)) {
+                        let mut src = self.action_rolls();
+                        self.react_foes(&events, &mut src);
+                    }
+                }
+                if start.skip.is_some() || !self.foes[i].m.alive || self.ended().is_some() {
+                    if start.skip.is_some() {
+                        self.stats.monster_turns_skipped += 1;
+                    }
                     return;
                 }
                 let chill = chill_slow_bp(&self.foes[i].m.states, &self.cfg.combat);
-                let ap = speed_ap(self.foes[i].max_ap, &self.foe_mods(i), chill);
+                let ap = speed_ap(self.foes[i].max_ap, &self.foe_mods(i, false), chill);
                 self.foe_turn(i, ap);
             }
         }
@@ -542,7 +614,7 @@ impl<'a> Battle<'a> {
         }
     }
 
-    fn foe_cell_of(&self, i: usize) -> Cell {
+    pub(crate) fn foe_cell_of(&self, i: usize) -> Cell {
         Cell {
             x: self.foes[i].m.x,
             y: self.foes[i].m.y,
@@ -565,26 +637,37 @@ impl<'a> Battle<'a> {
         t[..n].iter().map(|&i| i as usize).collect()
     }
 
-    /// The living heroes but `s` on the line of `skill` from hero `s` through hero `ally`.
-    pub(crate) fn line_heroes(&self, s: usize, ally: usize, skill: &SkillStats) -> Vec<usize> {
-        if ally == s {
-            return vec![s];
-        }
+    /// The living heroes but `skip` on the line of `skill` from `from` through hero `target`.
+    fn heroes_on_line(
+        &self,
+        from: Cell,
+        target: usize,
+        skip: Option<usize>,
+        skill: &SkillStats,
+    ) -> Vec<usize> {
         let reach = deadroll_rules::units::reach(skill.ext.range, &self.cfg.players);
         let (w, h) = (self.width, self.height);
-        let line = line_cells(self.heroes[s].cell, self.heroes[ally].cell, reach, |c| {
+        let line = line_cells(from, self.heroes[target].cell, reach, |c| {
             c.x < w && c.y < h
         });
         let units: Vec<(u8, Cell)> = (0..self.heroes.len())
-            .filter(|&a| a != s && self.heroes[a].alive)
+            .filter(|&a| Some(a) != skip && self.heroes[a].alive)
             .map(|a| (a as u8, self.heroes[a].cell))
             .collect();
         let (t, n) = targets_on_line(&line, units.iter().copied());
         t[..n].iter().map(|&a| a as usize).collect()
     }
 
+    /// The living heroes but `s` on the line of `skill` from hero `s` through hero `ally`.
+    pub(crate) fn line_heroes(&self, s: usize, ally: usize, skill: &SkillStats) -> Vec<usize> {
+        if ally == s {
+            return vec![s];
+        }
+        self.heroes_on_line(self.heroes[s].cell, ally, Some(s), skill)
+    }
+
     /// Resolves a hero's action (the AI picked it and moved into range), then the reactions it
-    /// triggered (monsters pushed next to heroes), on the same dice.
+    /// triggered (monsters pushed next to heroes, then the monsters' own), on the same dice.
     pub(crate) fn hero_act(&mut self, s: usize, action: Action) {
         let party = self.party;
         let fighter = &party[self.heroes[s].fighter];
@@ -599,14 +682,16 @@ impl<'a> Battle<'a> {
         match action {
             Action::Attack { skill, target } => {
                 let skill = skill.map(skill_of);
-                let moves = self.strike(s, skill.as_ref(), target, &mut src);
+                let (moves, foe_events) = self.strike(s, skill.as_ref(), target, &mut src);
                 let events = self.moved_events(&moves);
                 self.react(&events, &mut src);
+                self.react_foes(&foe_events, &mut src);
             }
             Action::Debuff { skill, target } => {
                 let stats = skill_of(skill);
                 if let Some(effect) = effect_action(stats.blocks.effect) {
-                    self.debuff(s, &stats, effect, target, &mut src);
+                    let foe_events = self.debuff(s, &stats, effect, target, &mut src);
+                    self.react_foes(&foe_events, &mut src);
                 }
             }
             Action::Support { skill, ally } => {
@@ -619,29 +704,33 @@ impl<'a> Battle<'a> {
     }
 
     /// Hero `s`'s weapon or damage skill on monster `target` (every monster of its line for a
-    /// line). Returns the knockbacks: monster, from, to.
+    /// line). Returns the knockbacks (monster, from, to) and what the hits did to the monsters.
     fn strike(
         &mut self,
         s: usize,
         skill: Option<&SkillStats>,
         target: usize,
         src: &mut SeededRoll,
-    ) -> Vec<(usize, Cell, Cell)> {
+    ) -> (Vec<(usize, Cell, Cell)>, Vec<FoeEvent>) {
         let targets = match skill.filter(|k| k.blocks.target == Target::Line) {
             Some(k) => self.line_foes(self.heroes[s].cell, target, k),
             None => vec![target],
         };
         self.stats.line_extra_hits += targets.len().saturating_sub(1) as u32;
         let mut moves = Vec::new();
+        let mut events = Vec::new();
         for i in targets {
             if self.ended().is_some() || !self.foes[i].m.alive {
                 continue;
             }
-            if let Some((from, to)) = self.hit_foe(s, skill, i, src) {
+            let before = self.foes[i].m.hp;
+            let moved = self.hit_foe(s, skill, i, src);
+            if let Some((from, to)) = moved {
                 moves.push((i, from, to));
             }
+            events.extend(self.foe_hit_events(i, before, s));
         }
-        moves
+        (moves, events)
     }
 
     /// One hit of hero `s` on monster `target`, then its spread.
@@ -657,7 +746,7 @@ impl<'a> Battle<'a> {
         let fighter = &party[self.heroes[s].fighter];
         let caster = Unit::Player(s as u8).id();
         let hero_mods = self.hero_mods(s, skill.is_none());
-        let view = self.foe_mods(target);
+        let view = self.foe_mods(target, false);
         let mut accuracy = self.heroes[s].accuracy;
         let foe = &mut self.foes[target];
         foe.attacks_taken = foe.attacks_taken.saturating_add(1);
@@ -700,7 +789,8 @@ impl<'a> Battle<'a> {
         self.spread(s, target, caster)
     }
 
-    /// Hero `s`'s debuff on monster `target` (every monster of its line for a line).
+    /// Hero `s`'s debuff on monster `target` (every monster of its line for a line). Returns
+    /// the monsters it froze or stunned.
     fn debuff(
         &mut self,
         s: usize,
@@ -708,7 +798,7 @@ impl<'a> Battle<'a> {
         effect: EffectAction,
         target: usize,
         src: &mut SeededRoll,
-    ) {
+    ) -> Vec<FoeEvent> {
         let targets = if stats.blocks.target == Target::Line {
             self.line_foes(self.heroes[s].cell, target, stats)
         } else {
@@ -718,6 +808,7 @@ impl<'a> Battle<'a> {
         let caster = Unit::Player(s as u8).id();
         let party = self.party;
         let fighter = &party[self.heroes[s].fighter];
+        let mut events = Vec::new();
         for i in targets {
             let foe = &mut self.foes[i];
             if !foe.m.alive {
@@ -737,7 +828,15 @@ impl<'a> Battle<'a> {
             if out.roll.outcome == HitOutcome::Hit {
                 self.stats.slots[s].effects_landed += 1;
             }
+            if controls(effect, out.applied) {
+                events.push(FoeEvent {
+                    bearer: i,
+                    event: Event::Controlled,
+                    source: Some(s),
+                });
+            }
         }
+        events
     }
 
     /// Hero `s`'s heal or buff on hero `ally` (every ally of its line for a line).
@@ -787,54 +886,209 @@ impl<'a> Battle<'a> {
         }
     }
 
-    /// Resolves a monster's natural attack on hero `s`, then the reactions to it.
-    pub(crate) fn foe_attack(&mut self, i: usize, s: usize) {
-        let cfg = self.cfg;
+    /// Monster `i`'s action the AI chose (it moved into reach), then the reactions to it.
+    pub(crate) fn foe_act(&mut self, i: usize, c: AiChoice) {
+        let skill = c.slot.and_then(|k| self.foes[i].skills[k as usize]);
+        if let (Some(k), Some(s)) = (c.slot, skill.as_ref()) {
+            self.foes[i].cooldowns[k as usize] = cooldown_after_use(s.stats.cooldown);
+            self.stats.monster_skills += 1;
+        }
         let mut src = self.action_rolls();
-        let foe_mods = self.foe_mods(i);
-        let hero_mods = self.hero_mods(s, false);
-        let foe = &self.foes[i];
-        let party = self.party;
-        let fighter = &party[self.heroes[s].fighter];
-        let h = &mut self.heroes[s];
-        let before = h.hp;
-        let died = resolve::monster_attack(
-            cfg,
-            &self.tables,
-            Unit::Monster(i as u8).id(),
-            &foe.profile,
-            &foe_mods,
-            &fighter.hero,
-            &mut h.hp,
-            &mut h.states,
-            &hero_mods,
-            &mut self.input,
-            &mut self.result,
-            &mut src,
-        );
-        let after = h.hp;
-        let hp_max = h.hp_max;
-        if died {
-            self.hero_died(s);
+        match c.target {
+            AiTarget::Player(slot) => {
+                let effect = skill.and_then(|s| effect_action(s.stats.blocks.effect));
+                let events = match (skill.as_ref(), effect) {
+                    (Some(s), Some(effect)) if s.stats.blocks.purpose == Purpose::Debuff => {
+                        self.foe_debuff(i, s, effect, slot as usize, &mut src)
+                    }
+                    _ => self.foe_strike(i, skill.as_ref(), slot as usize, &mut src),
+                };
+                self.react(&events, &mut src);
+            }
+            AiTarget::Monster(ally) => {
+                let effect = skill.and_then(|s| effect_action(s.stats.blocks.effect));
+                if let (Some(s), Some(effect)) = (skill.as_ref(), effect) {
+                    self.foe_support(i, s, effect, ally as usize, &mut src);
+                }
+            }
         }
-        note_states(&mut self.stats, &self.result);
-        let mut events: Vec<ReactEvent> = hit_events(&self.result, before, after, hp_max)
-            .into_iter()
-            .flatten()
-            .map(|event| ReactEvent {
-                bearer: s,
-                event,
-                source: Some(i),
-            })
-            .collect();
-        if after < before {
-            events.extend(
-                self.hp_drop_events(s, before, after, Some(i))
-                    .into_iter()
-                    .filter(|e| e.bearer != s),
-            );
-        }
+    }
+
+    /// Resolves a monster's natural attack on hero `s`, then the reactions to it.
+    #[cfg(test)]
+    pub(crate) fn foe_attack(&mut self, i: usize, s: usize) {
+        let mut src = self.action_rolls();
+        let events = self.foe_strike(i, None, s, &mut src);
         self.react(&events, &mut src);
+    }
+
+    /// Monster `i`'s natural attack (`skill = None`) or damage skill on hero `target` (every hero
+    /// of its line for a line). Returns what it did to the heroes, for their reactives.
+    fn foe_strike(
+        &mut self,
+        i: usize,
+        skill: Option<&MonsterSkillStats>,
+        target: usize,
+        src: &mut SeededRoll,
+    ) -> Vec<ReactEvent> {
+        let from = self.foe_cell_of(i);
+        let targets = match skill.filter(|k| k.stats.blocks.target == Target::Line) {
+            Some(k) => self.heroes_on_line(from, target, None, &k.stats),
+            None => vec![target],
+        };
+        self.stats.line_extra_hits += targets.len().saturating_sub(1) as u32;
+        let mut events = Vec::new();
+        for s in targets {
+            if self.ended().is_some() || !self.heroes[s].alive {
+                continue;
+            }
+            let cfg = self.cfg;
+            let foe_mods = self.foe_mods(i, skill.is_none());
+            let hero_mods = self.hero_mods(s, false);
+            let foe = &self.foes[i];
+            let party = self.party;
+            let fighter = &party[self.heroes[s].fighter];
+            let h = &mut self.heroes[s];
+            let before = h.hp;
+            let out = resolve::monster_attack(
+                cfg,
+                &self.tables,
+                Unit::Monster(i as u8).id(),
+                &foe.profile,
+                skill.map(|k| &k.stats),
+                &foe_mods,
+                &fighter.hero,
+                &mut h.hp,
+                &mut h.states,
+                &mut h.mods,
+                &hero_mods,
+                &mut self.input,
+                &mut self.result,
+                src,
+            );
+            let after = h.hp;
+            let hp_max = h.hp_max;
+            if out.died {
+                self.hero_died(s);
+            }
+            note_states(&mut self.stats, &self.result);
+            let rider_controls = out
+                .rider
+                .zip(skill.and_then(|k| effect_action(k.stats.blocks.effect)))
+                .is_some_and(|(r, e)| controls(e, r.applied));
+            events.extend(
+                hit_events(&self.result, before, after, hp_max)
+                    .into_iter()
+                    .flatten()
+                    .chain(rider_controls.then_some(Event::Controlled))
+                    .map(|event| ReactEvent {
+                        bearer: s,
+                        event,
+                        source: Some(i),
+                    }),
+            );
+            if after < before {
+                events.extend(
+                    self.hp_drop_events(s, before, after, Some(i))
+                        .into_iter()
+                        .filter(|e| e.bearer != s),
+                );
+            }
+        }
+        events
+    }
+
+    /// Monster `i`'s debuff skill on hero `target` (every hero of its line for a line).
+    fn foe_debuff(
+        &mut self,
+        i: usize,
+        skill: &MonsterSkillStats,
+        effect: EffectAction,
+        target: usize,
+        src: &mut SeededRoll,
+    ) -> Vec<ReactEvent> {
+        let from = self.foe_cell_of(i);
+        let targets = if skill.stats.blocks.target == Target::Line {
+            self.heroes_on_line(from, target, None, &skill.stats)
+        } else {
+            vec![target]
+        };
+        self.stats.line_extra_hits += targets.len().saturating_sub(1) as u32;
+        let caster = Unit::Monster(i as u8).id();
+        let mut events = Vec::new();
+        for s in targets {
+            if !self.heroes[s].alive {
+                continue;
+            }
+            let view = self.hero_mods(s, false);
+            let party = self.party;
+            let fighter = &party[self.heroes[s].fighter];
+            let profile = self.foes[i].profile;
+            let h = &mut self.heroes[s];
+            let out = resolve::monster_debuff_player(
+                self.cfg,
+                caster,
+                &profile,
+                &skill.stats,
+                effect,
+                &fighter.hero,
+                h.hp,
+                &mut h.states,
+                &mut h.mods,
+                &view,
+                src,
+            );
+            if controls(effect, out.applied) {
+                events.push(ReactEvent {
+                    bearer: s,
+                    event: Event::Controlled,
+                    source: Some(i),
+                });
+            }
+        }
+        events
+    }
+
+    /// Monster `i`'s heal or buff on monster `ally` (every allied monster of its line for a line,
+    /// itself left out; a kin-only skill skips other kins).
+    fn foe_support(
+        &mut self,
+        i: usize,
+        skill: &MonsterSkillStats,
+        effect: EffectAction,
+        ally: usize,
+        src: &mut SeededRoll,
+    ) {
+        let from = self.foe_cell_of(i);
+        let targets = if skill.stats.blocks.target == Target::Line && ally != i {
+            self.line_foes(from, ally, &skill.stats)
+                .into_iter()
+                .filter(|&j| j != i)
+                .collect()
+        } else {
+            vec![ally]
+        };
+        let kin = self.foes[i].profile.kin;
+        let caster = Unit::Monster(i as u8).id();
+        let profile = self.foes[i].profile;
+        for j in targets {
+            let f = &mut self.foes[j];
+            if !f.m.alive || !kin_reaches(skill.kin_only, kin, f.profile.kin, j == i) {
+                continue;
+            }
+            let before = f.m.hp;
+            resolve::monster_support(
+                self.cfg,
+                caster,
+                &profile,
+                &skill.stats,
+                effect,
+                &mut f.m,
+                &mut f.mods,
+                src,
+            );
+            self.stats.monster_healed += (self.foes[j].m.hp - before) as u64;
+        }
     }
 
     /// Hero `s`'s HP drop from `before` to `after`: its own event and its nearby allies'.
@@ -862,6 +1116,61 @@ impl<'a> Battle<'a> {
                     bearer: b,
                     event: Event::AllyHpDrop {
                         ally: s as u8,
+                        before,
+                        after,
+                        hp_max,
+                    },
+                    source,
+                });
+            }
+        }
+        out
+    }
+
+    /// What hero `s`'s last hit (`self.result`) did to monster `i` (HP `before` the hit).
+    fn foe_hit_events(&self, i: usize, before: u32, s: usize) -> Vec<FoeEvent> {
+        let f = &self.foes[i];
+        let mut out: Vec<FoeEvent> = hit_events(&self.result, before, f.m.hp, f.m.hp_max)
+            .into_iter()
+            .flatten()
+            .filter(|e| !matches!(e, Event::HpDrop { .. }))
+            .map(|event| FoeEvent {
+                bearer: i,
+                event,
+                source: Some(s),
+            })
+            .collect();
+        if f.m.hp < before {
+            out.extend(self.foe_hp_drop_events(i, before, f.m.hp, Some(s)));
+        }
+        out
+    }
+
+    /// Monster `i`'s HP drop: its own event and its nearby allied monsters'.
+    fn foe_hp_drop_events(
+        &self,
+        i: usize,
+        before: u32,
+        after: u32,
+        source: Option<usize>,
+    ) -> Vec<FoeEvent> {
+        let hp_max = self.foes[i].m.hp_max;
+        let at = self.foe_cell_of(i);
+        let mut out = vec![FoeEvent {
+            bearer: i,
+            event: Event::HpDrop {
+                before,
+                after,
+                hp_max,
+            },
+            source,
+        }];
+        for (b, f) in self.foes.iter().enumerate() {
+            if b != i && f.m.alive && nearby(self.cfg, self.foe_cell_of(b), at) {
+                out.push(FoeEvent {
+                    bearer: b,
+                    event: Event::AllyHpDrop {
+                        ally: i as u8,
                         before,
                         after,
                         hp_max,
@@ -963,6 +1272,92 @@ impl<'a> Battle<'a> {
         true
     }
 
+    /// The reaction of monster `e.bearer`'s reactive skill to `e`, without acting on it.
+    fn foe_reaction(&self, e: &FoeEvent) -> Option<(MonsterSkillStats, Reaction)> {
+        let b = e.bearer;
+        let f = &self.foes[b];
+        let skill = f.skills[REACTIVE_SLOT]?;
+        if !f.m.alive {
+            return None;
+        }
+        let source = e
+            .source
+            .filter(|&s| self.heroes[s].alive)
+            .map(|s| (s as u8, self.heroes[s].cell));
+        let ally_cell = match e.event {
+            Event::AllyHpDrop { ally, .. } => {
+                // A kin-only skill answers allies of its kin only.
+                let a = &self.foes[ally as usize];
+                if !kin_reaches(skill.kin_only, f.profile.kin, a.profile.kin, false) {
+                    return None;
+                }
+                Some(self.foe_cell_of(ally as usize))
+            }
+            Event::Hit { .. } | Event::HpDrop { .. } | Event::Controlled | Event::EnemyEntered => {
+                None
+            }
+        };
+        let r = reaction(
+            self.cfg,
+            &skill.stats,
+            f.cooldowns[REACTIVE_SLOT],
+            b as u8,
+            self.foe_cell_of(b),
+            &e.event,
+            source,
+            ally_cell,
+        )?;
+        Some((skill, r))
+    }
+
+    /// Whether `e` would trigger its monster bearer's reactive (the program asks before it rolls).
+    fn foe_reacts(&self, e: &FoeEvent) -> bool {
+        self.foe_reaction(e).is_some()
+    }
+
+    /// Every monster bearer's reaction to `events`, in monster index order, each at most once.
+    /// What a reaction does triggers no further reactions.
+    pub(crate) fn react_foes(&mut self, events: &[FoeEvent], src: &mut SeededRoll) {
+        for b in 0..self.foes.len() {
+            for e in events.iter().filter(|e| e.bearer == b) {
+                if self.ended().is_some() {
+                    return;
+                }
+                let Some((skill, r)) = self.foe_reaction(e) else {
+                    continue;
+                };
+                self.foes[b].cooldowns[REACTIVE_SLOT] = cooldown_after_use(skill.stats.cooldown);
+                self.stats.reactions += 1;
+                self.stats.monster_reactions += 1;
+                let effect = effect_action(skill.stats.blocks.effect);
+                match r {
+                    Reaction::Strike { monster: slot } => {
+                        self.foe_strike(b, Some(&skill), slot as usize, src);
+                    }
+                    Reaction::Debuff { monster: slot } => {
+                        if let Some(effect) = effect {
+                            self.foe_debuff(b, &skill, effect, slot as usize, src);
+                        }
+                    }
+                    Reaction::Buff { slot: ally } => {
+                        if let Some(effect) = effect {
+                            self.foe_support(b, &skill, effect, ally as usize, src);
+                        }
+                    }
+                    Reaction::Aura => {
+                        let profile = self.foes[b].profile;
+                        let (_, aura) =
+                            resolve::monster_start_aura(self.cfg, &profile, &skill, src);
+                        if let Some(a) = aura {
+                            self.foes[b].auras[REACTIVE_AURA] = a;
+                        }
+                    }
+                }
+                break;
+            }
+        }
+    }
+
     /// The jumps, knockback and burning cells of hero `s`'s last hit on monster `target`
     /// (`deadroll_rules::spread`, the code the program runs). Returns the knockback.
     fn spread(&mut self, s: usize, target: usize, caster: u8) -> Option<(Cell, Cell)> {
@@ -1015,8 +1410,10 @@ impl<'a> Battle<'a> {
     }
 
     /// Hero `s` moves to `cell`; a burning cell sets it on fire. The simulator moves in one
-    /// jump, so only the cell it ends on counts (the program checks every step).
+    /// jump, so only the cell it ends on counts (the program checks every step). Coming next to
+    /// a monster triggers its `EnemyAdjacent` reactive on a roll of its own (`move_unit`).
     pub(crate) fn move_hero(&mut self, s: usize, cell: Cell) {
+        let from = self.heroes[s].cell;
         let h = &mut self.heroes[s];
         if h.cell == cell {
             return;
@@ -1024,6 +1421,18 @@ impl<'a> Battle<'a> {
         h.cell = cell;
         if step_into(&self.cells, cell, self.round, &mut h.states, 0, self.cfg).is_some() {
             self.stats.burned_by_cells += 1;
+        }
+        let events: Vec<FoeEvent> = (0..self.foes.len())
+            .filter(|&i| self.foes[i].m.alive && entered_next_to(from, cell, self.foe_cell_of(i)))
+            .map(|i| FoeEvent {
+                bearer: i,
+                event: Event::EnemyEntered,
+                source: Some(s),
+            })
+            .collect();
+        if events.iter().any(|e| self.foe_reacts(e)) {
+            let mut src = self.action_rolls();
+            self.react_foes(&events, &mut src);
         }
     }
 
@@ -1083,6 +1492,14 @@ impl<'a> Battle<'a> {
     }
 }
 
+/// Whether `effect` landing as `applied` put hard control (Freeze, Stun) on its target.
+fn controls(effect: EffectAction, applied: Applied) -> bool {
+    match effect {
+        EffectAction::Stun | EffectAction::Freeze => applied != Applied::None,
+        EffectAction::Heal | EffectAction::Mod(_) => false,
+    }
+}
+
 /// The open arena as the spread sees it: no walls, living units block.
 struct OpenArena {
     width: u8,
@@ -1127,7 +1544,11 @@ fn note_states(stats: &mut BattleStats, result: &HitResult) {
 #[cfg(test)]
 mod tests {
     use deadroll_combat::ModKind;
-    use deadroll_rules::{monster::p0, HeroStats, SkillStats};
+    use deadroll_rules::{
+        aura::{PASSIVE_AURA, REACTIVE_AURA},
+        monster::REACTIVE_SLOT,
+        HeroStats, SkillStats,
+    };
     use deadroll_skillcheck::{Category, Effect, Purpose, SkillBlocks, SkillExt, Target, Trigger};
     use deadroll_types::{Aspect, Class, Form, Race, RangeTag, Source, StateKind};
 
@@ -1198,9 +1619,13 @@ mod tests {
             spawns: (0..n)
                 .map(|_| Spawn {
                     name: "goblin".into(),
-                    base: p0::monster_base(1).unwrap(),
-                    defense: deadroll_rules::MonsterDefense::NONE,
+                    bestiary_id: 1,
+                    template: registry().template(1).unwrap(),
                     level: 1,
+                    flags: 0,
+                    // The natural attack only.
+                    skills: [None; deadroll_types::MONSTER_SLOTS],
+                    skill_names: Default::default(),
                 })
                 .collect(),
             arena: Arena {
@@ -1208,10 +1633,12 @@ mod tests {
                 height: 6,
                 gap: 3,
             },
-            tables: deadroll_rules::registry::Registry::shipped()
-                .unwrap()
-                .tables,
+            tables: registry().tables,
         }
+    }
+
+    fn registry() -> deadroll_rules::registry::Registry {
+        deadroll_rules::registry::Registry::shipped().unwrap()
     }
 
     fn plan(b: &Battle, s: usize) -> Option<Action> {
@@ -1620,5 +2047,118 @@ mod tests {
         let dist2 = b2.distances(b2.heroes[0].cell);
         assert!(b2.plan(0, &dist2, 2).is_some());
         assert_eq!(b.plan(0, &dist, 1), None);
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Patch 6: monsters with their skills.
+
+    /// Registry monsters by bestiary id, with their default skills (`setup::spawn`).
+    fn pack(ids: &[(u8, bool)]) -> Fight {
+        let reg = registry();
+        Fight {
+            name: "pack".into(),
+            spawns: ids
+                .iter()
+                .map(|&(id, elite)| crate::setup::spawn(&reg, id, 1, elite, None, CFG).unwrap())
+                .collect(),
+            arena: Arena {
+                width: 12,
+                height: 8,
+                gap: 6,
+            },
+            tables: reg.tables,
+        }
+    }
+
+    const GOBLIN: u8 = 1;
+    const CHIEFTAIN: u8 = 2;
+    const SHAMAN: u8 = 4;
+    const WOLF: u8 = 0;
+
+    #[test]
+    fn the_shaman_heals_a_hurt_goblin_but_not_a_wolf() {
+        let party = [hero(Class::Warrior, vec![])];
+        for (ally, healed) in [(GOBLIN, true), (WOLF, false)] {
+            let fight = pack(&[(SHAMAN, false), (ally, false)]);
+            let mut b = Battle::new(CFG, &party, &fight, Settings::default(), 3);
+            place_foe(&mut b, 0, Cell { x: 8, y: 3 });
+            place_foe(&mut b, 1, Cell { x: 9, y: 3 });
+            b.foes[1].m.hp = 1;
+            b.foe_turn(0, b.foes[0].max_ap);
+            assert_eq!(b.foes[1].m.hp > 1, healed, "ally {ally}");
+            assert_eq!(b.stats.monster_healed > 0, healed);
+            // A skill was used: it waits out its cooldown.
+            assert_eq!(b.stats.monster_skills, 1);
+            assert!(b.foes[0].cooldowns.iter().any(|&c| c > 0));
+        }
+    }
+
+    #[test]
+    fn leader_works_from_the_start_and_battle_cry_answers_a_drop_below_half() {
+        let party = [hero(Class::Warrior, vec![])];
+        let fight = pack(&[(CHIEFTAIN, false), (GOBLIN, false)]);
+        let b = Battle::new(CFG, &party, &fight, Settings::default(), 1);
+        let leader = b.foes[0].auras[PASSIVE_AURA];
+        assert!(!leader.is_empty() && leader.kin_only && leader.passive);
+        let mut fired = false;
+        for seed in 0..60 {
+            let mut b = Battle::new(CFG, &party, &fight, Settings::default(), seed);
+            let next = Cell {
+                x: b.heroes[0].cell.x + 1,
+                y: b.heroes[0].cell.y,
+            };
+            place_foe(&mut b, 0, next);
+            // Just above half: a landed hit takes it below.
+            b.foes[0].m.hp = b.foes[0].m.hp_max / 2 + 1;
+            b.hero_act(
+                0,
+                Action::Attack {
+                    skill: None,
+                    target: 0,
+                },
+            );
+            let f = &b.foes[0];
+            if f.m.alive && f.m.hp * 2 < f.m.hp_max {
+                assert_eq!(b.stats.monster_reactions, 1, "seed {seed}");
+                assert!(!f.auras[REACTIVE_AURA].is_empty());
+                assert!(f.cooldowns[REACTIVE_SLOT] > 0);
+                fired = true;
+            } else {
+                assert_eq!(b.stats.monster_reactions, 0);
+            }
+        }
+        assert!(fired);
+    }
+
+    #[test]
+    fn an_elite_has_more_hp_and_a_fourth_active() {
+        let fight = pack(&[(WOLF, false), (WOLF, true)]);
+        let (regular, elite) = (&fight.spawns[0], &fight.spawns[1]);
+        let count = |s: &crate::setup::Spawn| s.skills[..5].iter().flatten().count();
+        assert_eq!((count(regular), count(elite)), (3, 4));
+        let party = [hero(Class::Warrior, vec![])];
+        let b = Battle::new(CFG, &party, &fight, Settings::default(), 1);
+        assert!(b.foes[1].m.hp_max > b.foes[0].m.hp_max);
+    }
+
+    #[test]
+    fn monsters_fight_whole_encounters_with_their_skills() {
+        let party = [hero(Class::Warrior, vec![]), hero(Class::Mage, vec![])];
+        let fight = pack(&[
+            (CHIEFTAIN, false),
+            (GOBLIN, false),
+            (SHAMAN, false),
+            (WOLF, false),
+        ]);
+        let mut used = 0;
+        for seed in 0..20 {
+            let stats = fight_one(&party, &fight, seed);
+            used += stats.monster_skills;
+        }
+        assert!(used > 0, "no monster ever used a skill");
+    }
+
+    fn fight_one(party: &[Fighter], fight: &Fight, seed: u64) -> BattleStats {
+        super::fight(CFG, party, fight, Settings::default(), seed)
     }
 }

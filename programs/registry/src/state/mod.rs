@@ -3,6 +3,7 @@ pub mod game_config;
 pub mod pull;
 pub mod records;
 pub mod table;
+pub mod view;
 
 pub use game_config::*;
 pub use records::TableKind;

@@ -24,7 +24,7 @@ written), then the body at offset 16. Readers take records straight from the bod
 | `init_table(kind)` | authority | creates an empty table |
 | `write_table(kind, offset, bytes)` | authority | whole, aligned, valid records only; tables stay editable |
 
-`TableKind`: 0 Aspects, 1 Resonances, 2 Bestiary, 3 Tileset, 4 Prefabs, 5 Traits (append only).
+`TableKind`: 0 Aspects, 1 Resonances, 2 Bestiary, 3 Tileset, 4 Prefabs, 5 Traits, 6 MonsterSkills (append only).
 TODO(post-demo): the same pull for `SpriteBook` (`GameConfigData` has no field for it).
 
 ## Record layouts (little-endian, validated by `write_table`, source: `src/state/records.rs`)
@@ -69,7 +69,14 @@ Op (6 B): `[0] kind` (`deadroll_combat::tables::OpKind`, 0..=20; bit 7 = only on
 | 32 | attack damage max | u16 |
 | 34 | xp reward | u32 |
 | 38 | state immunity mask, bit i = `StateKind` i | u8 |
-| 39..48 | reserved | |
+| 39 | skill pool start, index into MonsterSkills | u8 |
+| 40 | skill pool length (<= 16, the bits of `Spawn.skills`) | u8 |
+| 41 | kin, `0xFF` = none (0 Wolf, 1 Goblin, 2 Bear, 3 Treant, 4 Fairy, 5 Troll; names in `crates/rules/src/registry.rs`) | u8 |
+| 42..48 | reserved | |
+
+The registry is the only source of monster numbers: the session copies the record at `open_session`, the simulator and the website decode the same bytes (`deadroll_rules::MonsterTemplate::from_record`).
+
+**MonsterSkills** (128 x 32 B, index = skill id, names in `assets/registry/monster_skills.json`; an all-zero record is an empty slot): `[0] present (1)`, `[1..13] SkillBlocks` (borsh, as a character skill), `[13..16] SkillExt` (range, timing, HP threshold), `[16] flags` (bit 0: a heal or buff reaches allies of the bearer's kin only), `[17..32]` reserved. `write_table` runs `deadroll_skillcheck::validate_monster_skill`: the player builder rules without class limits, Heal allowed as an active or reactive skill on one unit (never passive or an aura).
 
 **Tileset** (7 x 8 B in `Tile` order): `[0] passable (0/1)`, `[1] move cost in action points (>= 1 if passable)`, `[2] blocks line of sight (0/1)`, `[3] flags`, `[4..8]` reserved.
 

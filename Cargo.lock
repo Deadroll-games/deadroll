@@ -1323,6 +1323,8 @@ dependencies = [
  "anchor-lang",
  "deadroll-mapcheck",
  "deadroll-registry",
+ "deadroll-rules",
+ "deadroll-skillcheck",
  "deadroll-types",
  "solana-sha256-hasher",
 ]
@@ -1331,8 +1333,8 @@ dependencies = [
 name = "deadroll-mapcheck"
 version = "0.1.0"
 dependencies = [
+ "deadroll-skillcheck",
  "deadroll-types",
- "serde_json",
 ]
 
 [[package]]
@@ -1342,6 +1344,7 @@ dependencies = [
  "anchor-lang",
  "bytemuck",
  "deadroll-combat",
+ "deadroll-skillcheck",
  "deadroll-types",
  "solana-sha256-hasher",
 ]
@@ -1396,7 +1399,6 @@ dependencies = [
  "deadroll-character",
  "deadroll-combat",
  "deadroll-map",
- "deadroll-mapcheck",
  "deadroll-registry",
  "deadroll-rules",
  "deadroll-skillcheck",

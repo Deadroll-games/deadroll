@@ -20,7 +20,7 @@ pub mod stats;
 
 pub use battle::{fight, BattleStats, Outcome, Settings, SlotStats};
 pub use deadroll_rules::BalanceConfig;
-pub use presets::{Arena, EncounterPreset, HeroPreset, Kind, MonsterPreset, Presets, SkillPreset};
+pub use presets::{Arena, EncounterPreset, EncounterSlot, HeroPreset, Kind, Presets, SkillPreset};
 pub use run::{random_builds, run_batch, BuildScore, Progress, RandomBuilds};
 pub use setup::{resolve_fight, resolve_party, Fight, Fighter, Issues};
 pub use stats::{Histogram, Percentiles, Report, SlotReport};

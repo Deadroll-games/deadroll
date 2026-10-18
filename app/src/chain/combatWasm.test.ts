@@ -15,13 +15,19 @@ import {
   encodeHero,
   encodeLine,
   encodeMonster,
+  encodeMonsterAttack,
+  encodeMonsterPlan,
+  encodeSpawnSkills,
   encodeUnitMods,
   partyInputOf,
   percent,
   type AttackRequest,
   type HeroInput,
   type LineRequest,
+  type MonsterAttackRequest,
   type MonsterInput,
+  type MonsterPlanRequest,
+  type SpawnSkillsRequest,
   type UnitModsRequest,
 } from "./combatWasm";
 import { Tile } from "./types";
@@ -82,7 +88,8 @@ describe("combat wasm", () => {
 
   it("an unknown monster is an error, not a wrong number", () => {
     const input = { ...(fixtures.attacks[0]!.input as unknown as AttackRequest) };
-    input.target = { ...input.target, bestiaryId: 200 };
+    // An absent bestiary record (byte 0 = 0).
+    input.target = { ...input.target, record: "00".repeat(48) };
     expect(() => combat.previewAttack(input)).toThrow("unknown monster");
   });
 
@@ -112,6 +119,8 @@ describe("combat wasm", () => {
       auras: [[{ kind: 4, aspect: 1, powerBp: 2_500, radius: 2, turns: 255, hostile: false, passive: true, selfOnly: false }, { kind: 0, aspect: 0, powerBp: 0, radius: 0, turns: 0, hostile: false, passive: false, selfOnly: false }]],
       cells: [[3, 4]],
       alive: 1,
+      // No monster bearers unless given (patch 6).
+      bearers: [],
     });
     // A wall (cost 0) at (2, 1) on an otherwise open map: bit 1 * 32 + 2.
     const tiles = new Uint8Array(1024);
@@ -123,6 +132,32 @@ describe("combat wasm", () => {
     expect(blocked.reduce((n, b) => n + (b ? 1 : 0), 0)).toBe(1);
     // From (0, 1) east through (1, 1): the wall ends the line before it.
     expect(combat.line({ from: [0, 1], through: [1, 1], reach: 6, width: 16, height: 16, blocked })).toEqual([[1, 1]]);
+  });
+
+  it("patch 6: monster skills from their session copy, the spawn check, monster attacks, the AI's plan", () => {
+    combat.setTables(tables());
+    expect(fixtures.monsterSkills.length).toBeGreaterThan(0);
+    for (const f of fixtures.monsterSkills) expect(combat.monsterSkill(f.copy)).toEqual(f.sheet);
+    // Every verdict of the builder rule: valid, a bit past the pool, a wrong count.
+    expect(new Set(fixtures.spawnSkills.map((f) => f.result.error)).size).toBeGreaterThan(1);
+    for (const f of fixtures.spawnSkills) {
+      const input = f.input as SpawnSkillsRequest;
+      expect(hex(encodeSpawnSkills(input))).toBe(f.bytes);
+      expect(combat.spawnSkills(input)).toEqual(f.result);
+    }
+    expect(fixtures.monsterAttacks.length).toBeGreaterThan(0);
+    for (const f of fixtures.monsterAttacks) {
+      const input = f.input as unknown as MonsterAttackRequest;
+      expect(hex(encodeMonsterAttack(input))).toBe(f.bytes);
+      expect(combat.previewMonsterAttack(input)).toEqual(f.preview);
+    }
+    // Heal, haste, natural attack and nothing to do are all in the fixture.
+    expect(fixtures.monsterPlans.some((f) => f.plan.ally) && fixtures.monsterPlans.some((f) => !f.plan.found)).toBe(true);
+    for (const f of fixtures.monsterPlans) {
+      const input = f.input as unknown as MonsterPlanRequest;
+      expect(hex(encodeMonsterPlan(input))).toBe(f.bytes);
+      expect(combat.monsterPlan(input)).toEqual(f.plan);
+    }
   });
 
   it("formats percents", () => {

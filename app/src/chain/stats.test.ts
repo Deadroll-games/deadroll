@@ -15,17 +15,27 @@ beforeAll(async () => {
 });
 
 const NONE = [0, 0, 0, 0, 0, 0];
-/** The wolf at level 1 with the registry defenses the fixture holds (resists Cold). */
-const wolfDefense = () => fixtures.monsters.find((m) => m.input.bestiaryId === 0 && m.input.level === 1)!.input.defense;
+/** The wolf's registry record at level 1, as the fixture holds it (resists Cold). */
+const wolfRecord = () => fixtures.monsters.find((m) => m.sheet.kin === 0 && m.input.level === 1 && m.input.flags === 0)!.input.record;
+/** A record as bytes with byte `at` set to `v`. */
+const withByte = (hex: string, at: number, v: number) => {
+  const b = Uint8Array.from((hex.match(/../g) ?? []).map((h) => parseInt(h, 16)));
+  b[at] = v;
+  return b;
+};
+/** Bestiary record bytes (`deadroll_rules::monster::record`): present, resistances. */
+const PRESENT = 0;
+const RESIST = 10;
 
 describe("stats", () => {
   it("monster defenses come from the combat module and the registry record", () => {
-    const wolf = monsterDefense(combat, 0, 1, wolfDefense())!;
+    const wolf = monsterDefense(combat, wolfRecord(), 1)!;
     expect(wolf.resist[Aspect.Cold]).toBeGreaterThan(0);
     expect(wolf.resist.filter((r) => r > 0)).toHaveLength(1);
-    // The same template without the record's defenses resists nothing.
-    expect(monsterDefense(combat, 0, 1, { resist: 0, immuneAspects: 0, immuneStates: 0 })!.resist).toEqual(NONE);
-    expect(monsterDefense(combat, 200, 1, wolfDefense())).toBeNull();
+    // The same record without its resistances resists nothing.
+    expect(monsterDefense(combat, withByte(wolfRecord(), RESIST, 0), 1)!.resist).toEqual(NONE);
+    // An absent record (an unknown monster) is no profile, not a wrong number.
+    expect(monsterDefense(combat, withByte(wolfRecord(), PRESENT, 0), 1)).toBeNull();
   });
 
   it("player defenses", () => {

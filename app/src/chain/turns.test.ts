@@ -21,7 +21,7 @@ function party(turn: number, over: Partial<GameSessionAcc> = {}, core: Partial<G
   } as unknown as GameSessionAcc;
   const player = (slot: number, owner: Address) =>
     ({ slot, character: A(20 + slot), participation: A(30 + slot), part: { player: owner, core: { actor: A(40 + slot) } } }) as unknown as PartyPlayer;
-  return { address: A(5), session, monsters: [], players: [player(0, ALICE), player(1, BOB)], monsterCooldowns: [], monsterMods: [], monsterDefense: [], resonanceTables: null, burningCells: [], escrow: null, map: null, tiles: null };
+  return { address: A(5), session, monsters: [], players: [player(0, ALICE), player(1, BOB)], monsterCooldowns: [], monsterRecords: [], monsterSkills: [], monsterAuras: [], monsterMods: [], monsterDefense: [], resonanceTables: null, burningCells: [], escrow: null, map: null, tiles: null };
 }
 
 describe("turn state", () => {
@@ -43,8 +43,17 @@ describe("startTurnFor", () => {
   });
 
   it("the DM sends it for a monster, without player accounts", () => {
-    expect(startTurnFor(party(1), DM)).toEqual({ unit: 4, turnSeq: 7, player: null });
+    expect(startTurnFor(party(1), DM)).toEqual({ unit: 4, turnSeq: 7, player: null, finalize: false });
     expect(startTurnFor(party(1), ALICE)).toBeNull();
+  });
+
+  it("patch 6: pending deaths: anyone in the party finalizes them, also once the turn started", () => {
+    const started = party(0, { startedSeq: 7, pendingDeaths: 0b10 } as never);
+    expect(startTurnFor(started, BOB)).toMatchObject({ unit: 0, finalize: true, player: { slot: 0 } });
+    expect(startTurnFor(started, DM)).toMatchObject({ unit: 0, finalize: true });
+    expect(startTurnFor(started, A(99))).toBeNull();
+    expect(startTurnFor(party(1, { pendingDeaths: 1 } as never), ALICE)).toMatchObject({ unit: 4, player: null, finalize: true });
+    expect(startTurnFor(party(0, { pendingDeaths: 1 } as never, { pendingVrf: true }), ALICE)).toBeNull();
   });
 
   it("nothing once started, while a roll is pending, outside an active party or without a wallet", () => {

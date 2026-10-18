@@ -27,6 +27,8 @@ pub struct TierLimits {
     pub monsters: u8,
     /// Packs outside the boss pack.
     pub packs: u8,
+    /// Elite spawns (docs/BESTIARY.md 5: the limit per map is set by the map tier).
+    pub elites: u8,
 }
 
 pub const fn tier_limits(tier: u8) -> Option<TierLimits> {
@@ -36,12 +38,14 @@ pub const fn tier_limits(tier: u8) -> Option<TierLimits> {
             level_max: 2,
             monsters: 4,
             packs: 3,
+            elites: 1,
         }),
         2 => Some(TierLimits {
             level_min: 3,
             level_max: 4,
             monsters: 8,
             packs: 4,
+            elites: 2,
         }),
         _ => None,
     }
