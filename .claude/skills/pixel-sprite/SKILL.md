@@ -57,7 +57,7 @@ Keywords and command names are case-sensitive. Numbers are decimal. Tokens are s
 | `BITMAP x y w h` + `h` rows | pixel by pixel, one character per pixel (legend below) |
 
 After `layer`, `copy <name>` takes the commands of an earlier sprite of the same file (an elf
-body is `copy human_torso`); the book stores the bytes once.
+body is `copy human_body` plus its ear); identical sprites are stored once in a book.
 
 `BITMAP` legend: `.` keep what is under, `_` erase, `O` outline pixel, a slot letter
 (`P S A E U` / `K H Y D R`) auto shaded, or a slot with an explicit ramp color 0-5:
@@ -119,20 +119,24 @@ Colors come from the palette at render time. Slot `D` always uses the palette's 
 ## Layer types and sizes
 
 Character layers, bottom to top (the name is what you write after `layer`), all **96x96**:
-`shadow`, `back_item`, `arm_back`, `glove_back`, `offhand`, `legs`, `pants`, `boots`, `torso`,
-`armor_body`, `necklace`, `head`, `hair`, `helmet`, `arm_front`, `glove_front`, `mainhand`,
-`overlay_wounds`, `overlay_element`.
+`shadow`, `back_item`, `body`, `glove_back`, `pants`, `boots`, `armor_body`, `necklace`, `offhand`,
+`hair`, `helmet`, `mainhand`, `fist_front`, `glove_front`, `overlay_element`.
+The body of a race is ONE sprite (head, torso, arms, legs, briefs): separate body parts would get
+outline seams at the shoulder, elbow, wrist and knee. `fist_front` is the front fist alone, pixel for
+pixel the fist of the body, drawn over the weapon so the fingers wrap the grip (no outline). The
+shield (`offhand`) is held in front of the torso on the back arm, over the armor, its near rim in
+front. No wound overlays and no torn items: only worn items change the image, plus death gray.
 Other: `tile` **64x64** (one map cell), `monster` **96 or 128** square, `icon` **32x32**, `portrait`
 any allowed size (64x64; long items 32x96 or 64x128). Characters and monsters stand bottom-center
 on their cell at the tile's pixel size and overlap the row above. Old 64 px character layers and
 monsters still validate (with a note) until they are redrawn.
-Must have `flags no_outline`: `shadow`, `necklace`, `overlay_wounds`, `overlay_element`, floor tiles.
+Must have `flags no_outline`: `shadow`, `necklace`, `fist_front`, `overlay_element`, floor tiles.
 
 ## Sprite id ranges
 
 | Ids | Content |
 |---|---|
-| 1-99 | bodies: races, shadow, arms, heads, hair |
+| 1-99 | shadow, race bodies, hair, the front fist |
 | 100-199 | warrior kit |
 | 200-299 | mage kit |
 | 300-399 | support kit |
@@ -148,17 +152,18 @@ never change the id or layer of an existing sprite (characters store them on-cha
   13x14, shoulders about 26 px wide, normal proportions.
 - Every race has the same silhouette and anchors below the neck (an elf body is `copy` of the
   human one); races differ in head, ears, hair, face and skin ramp. Any item fits any race.
-- The front upper arm belongs to the `torso` layer (armor covers it); `arm_front` is the forearm
-  and hand from the elbow (y 50) down, drawn over the armor.
+- Anatomy: shoulders slope into the neck (no deltoid ball), the waist narrows into the hips and the
+  briefs sit on the hips, limbs taper smoothly (no bumps at elbows and knees, no horizontal stripes),
+  hands slightly elongated, a little wider than the wrist, with a thumb.
 
 | Anchor | Point | Used by |
 |---|---|---|
 | `HAND_FRONT` | (63, 62) | main weapon grip, front glove |
-| `HAND_BACK` | (33, 62) | shield, second weapon, back glove |
+| `HAND_BACK` | (34, 63) | shield, second weapon, back glove |
 | `HEAD_CENTER` | (48, 27) | helmets, hoods |
-| `NECK` | (48, 37) | necklace, pendant around y = 38-40 |
+| `NECK` | (48, 35) | necklace, pendant around y = 38-40 |
 | `BACK` | (44, 42) | cloak, bag, weapon on the back |
-| `WAIST` | (48, 60) | belt, top of the pants |
+| `WAIST` | (48, 57) | belt, top of the pants |
 | `FEET` | (48, 91) | boots, shadow |
 
 - Weapon length: one-handed 26-34 px, two-handed and staves 44-60 px. A weapon sticks out of the
