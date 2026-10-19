@@ -3,7 +3,7 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
-use crate::sprite::{layer, slot, Cmd, Sprite, POLY_MAX};
+use crate::sprite::{bitmap, layer, slot, Cmd, Sprite, POLY_MAX};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Cell {
@@ -68,13 +68,13 @@ pub fn rasterize(sprite: &Sprite) -> Grid {
     let h = &sprite.header;
     let mut g = Grid::new(h.width as usize, h.height as usize);
     for cmd in &sprite.cmds {
-        draw(&mut g, cmd);
+        draw(&mut g, cmd, &sprite.bitmaps);
     }
     shade(&mut g, layer::is_body(h.layer_type));
     g
 }
 
-fn draw(g: &mut Grid, cmd: &Cmd) {
+fn draw(g: &mut Grid, cmd: &Cmd, bitmaps: &[Vec<u8>]) {
     match *cmd {
         Cmd::Rect { x, y, w, h, slot } => {
             for yy in y as i32..y as i32 + h as i32 {
@@ -144,6 +144,26 @@ fn draw(g: &mut Grid, cmd: &Cmd) {
         }
         // TODO(post-demo): sockets are drawn after shading (ART_DESCRIPTION 9.4).
         Cmd::Socket { .. } => {}
+        // FORMAT.md 2.8: skip pixels draw nothing, code 0 is auto shaded, code c + 1 is color c.
+        Cmd::Bitmap { x, y, w, index, .. } => {
+            let px = bitmaps.get(index as usize).map_or(&[][..], Vec::as_slice);
+            let w = w as usize;
+            for (i, &v) in px.iter().enumerate() {
+                let (s, code) = (bitmap::slot(v), bitmap::code(v));
+                if s == bitmap::SKIP {
+                    continue;
+                }
+                g.set(
+                    x as i32 + (i % w) as i32,
+                    y as i32 + (i / w) as i32,
+                    Cell {
+                        slot: s,
+                        shade: code.saturating_sub(1),
+                        explicit: code != 0,
+                    },
+                );
+            }
+        }
     }
 }
 
@@ -245,7 +265,7 @@ fn own_class(s: u8, body: bool) -> u8 {
     }
 }
 
-/// `FORMAT.md` 2.8.
+/// `FORMAT.md` 2.8: a level per cell, stored as its ramp color (`slot::auto_color`).
 fn shade(g: &mut Grid, body: bool) {
     let src = g.clone();
     for y in 0..g.height as i32 {
@@ -254,7 +274,7 @@ fn shade(g: &mut Grid, body: bool) {
             if c.slot == slot::ERASE || c.explicit {
                 continue;
             }
-            let n = slot::shades(c.slot);
+            let n = slot::levels(c.slot);
             if n <= 2 {
                 g.set(x, y, Cell { shade: 0, ..c });
                 continue;
@@ -276,7 +296,14 @@ fn shade(g: &mut Grid, body: bool) {
             } else {
                 1
             };
-            g.set(x, y, Cell { shade: s, ..c });
+            g.set(
+                x,
+                y,
+                Cell {
+                    shade: slot::auto_color(c.slot, s),
+                    ..c
+                },
+            );
         }
     }
 }
@@ -313,7 +340,7 @@ mod tests {
         };
         let mut g = Grid::new(w as usize, h as usize);
         for c in cmds {
-            draw(&mut g, c);
+            draw(&mut g, c, &[]);
         }
         let _ = header;
         g
@@ -531,6 +558,67 @@ mod tests {
         assert_eq!(ascii(&g, 3, 1), "#.#");
     }
 
+    #[test]
+    fn bitmap_mixes_with_geometry() {
+        // A 3x3 P rect, then a 3x1 bitmap over its middle row: skip, erase, explicit S color 5.
+        let sprite = Sprite {
+            header: Header {
+                width: 32,
+                height: 32,
+                layer_type: 16,
+                flags: 0,
+            },
+            cmds: vec![
+                Cmd::Rect {
+                    x: 1,
+                    y: 1,
+                    w: 3,
+                    h: 3,
+                    slot: 2,
+                },
+                Cmd::Bitmap {
+                    x: 1,
+                    y: 2,
+                    w: 3,
+                    h: 1,
+                    index: 0,
+                },
+                Cmd::Bitmap {
+                    x: 6,
+                    y: 6,
+                    w: 2,
+                    h: 2,
+                    index: 1,
+                },
+            ],
+            bitmaps: vec![
+                vec![
+                    bitmap::value(bitmap::SKIP, 0),
+                    bitmap::value(0, 0),
+                    bitmap::value(3, 6),
+                ],
+                vec![bitmap::value(2, 0); 4],
+            ],
+        };
+        let g = rasterize(&sprite);
+        let c = |x: usize, y: usize| g.cells[y * 32 + x];
+        assert_eq!(c(1, 2).slot, 2, "skip keeps the rect");
+        assert_eq!(c(2, 2).slot, 0, "erase");
+        assert_eq!(
+            (c(3, 2).slot, c(3, 2).shade, c(3, 2).explicit),
+            (3, 5, true)
+        );
+        // Auto pixels are shaded like geometry: a lone 2x2 square.
+        assert_eq!(
+            [c(6, 6).shade, c(7, 6).shade, c(6, 7).shade, c(7, 7).shade],
+            [4, 2, 2, 1]
+        );
+        assert!(
+            outline_mask(&g)[2 * 32 + 2],
+            "the erased hole gets an outline"
+        );
+    }
+
     fn shaded(cmds: &[Cmd], body: bool) -> Grid {
         let mut g = grid(cmds, 16, 16);
         shade(&mut g, body);
@@ -550,13 +638,13 @@ mod tests {
             false,
         );
         let s = |x: usize, y: usize| g.cells[y * 16 + x].shade;
-        assert_eq!(s(1, 1), 3); // corner highlight, L and T
-        assert_eq!(s(2, 1), 2); // top edge
-        assert_eq!(s(1, 2), 2); // left edge
-        assert_eq!(s(2, 2), 1); // middle
-        assert_eq!(s(3, 3), 0); // shadow corner
-        assert_eq!(s(3, 1), 1); // top-right: T and R
-                                // Secondary slot has 3 shades: corner highlight is 2.
+        assert_eq!(s(1, 1), 4); // corner highlight, L and T: level 3 -> color 4
+        assert_eq!(s(2, 1), 3); // top edge
+        assert_eq!(s(1, 2), 3); // left edge
+        assert_eq!(s(2, 2), 2); // middle
+        assert_eq!(s(3, 3), 1); // shadow corner (color 0 is the outline)
+        assert_eq!(s(3, 1), 2); // top-right: T and R
+                                // Secondary slot has 3 levels: the corner highlight is color 4.
         let g = shaded(
             &[Cmd::Rect {
                 x: 1,
@@ -567,7 +655,7 @@ mod tests {
             }],
             false,
         );
-        assert_eq!(g.cells[16 + 1].shade, 2);
+        assert_eq!(g.cells[16 + 1].shade, 4);
         // Explicit shade survives.
         let g = shaded(
             &[
@@ -606,8 +694,8 @@ mod tests {
                 slot: 6,
             },
         ];
-        assert_eq!(shaded(&cmds, false).cells[2 * 16 + 2].shade, 1); // surrounded by own
-        assert_eq!(shaded(&cmds, true).cells[2 * 16 + 2].shade, 1); // all sides foreign -> middle
+        assert_eq!(shaded(&cmds, false).cells[2 * 16 + 2].shade, 2); // surrounded by own
+        assert_eq!(shaded(&cmds, true).cells[2 * 16 + 2].shade, 2); // all sides foreign -> middle
         let cmds = [
             Cmd::Rect {
                 x: 1,
@@ -622,9 +710,9 @@ mod tests {
                 slot: 6,
             },
         ];
-        assert_eq!(shaded(&cmds, false).cells[16 + 1].shade, 3);
+        assert_eq!(shaded(&cmds, false).cells[16 + 1].shade, 4);
         // On a body layer R at the corner sees P on R and B: not own -> middle shade.
-        assert_eq!(shaded(&cmds, true).cells[16 + 1].shade, 1);
+        assert_eq!(shaded(&cmds, true).cells[16 + 1].shade, 2);
     }
 
     #[test]

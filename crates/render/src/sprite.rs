@@ -11,6 +11,8 @@ pub const POLY_MIN: u8 = 3;
 pub const POLY_MAX: u8 = 8;
 /// Side of the socket square at a `SOCKET` point (`FORMAT.md` 2.7).
 pub const SOCKET_SIZE: u8 = 4;
+/// Colors of a palette ramp (palette format 2). A cell's shade is the ramp color index.
+pub const RAMP_COLORS: u8 = 6;
 
 /// Slot values (`FORMAT.md` 1.3). Items and body share the numbers.
 pub mod slot {
@@ -28,12 +30,33 @@ pub mod slot {
     pub const RUNE: u8 = 6;
     pub const MAX: u8 = 6;
 
-    /// Number of shades of a slot (`FORMAT.md` 1.3). 0 for erase.
+    /// Number of shades a cell of the slot can have (`FORMAT.md` 1.3): the ramp colors, or 1 for
+    /// the outline. 0 for erase.
     pub const fn shades(slot: u8) -> u8 {
+        match slot {
+            OUTLINE => 1,
+            PRIMARY..=RUNE => super::RAMP_COLORS,
+            _ => 0,
+        }
+    }
+
+    /// Auto shading levels of a slot (`FORMAT.md` 2.8): 4 or 3, 1 for the outline.
+    pub const fn levels(slot: u8) -> u8 {
         match slot {
             OUTLINE => 1,
             PRIMARY | ELEMENT | RUNE => 4,
             SECONDARY | ACCENT => 3,
+            _ => 0,
+        }
+    }
+
+    /// Ramp color of auto shading level `level` (0 = shadow) of a slot (`FORMAT.md` 2.8).
+    /// Color 0 is left to the outline and color 5 to explicit highlights.
+    pub const fn auto_color(slot: u8, level: u8) -> u8 {
+        match (levels(slot), level) {
+            (4, l) => 1 + l,
+            (3, 2) => 4,
+            (3, l) => 1 + l,
             _ => 0,
         }
     }
@@ -103,6 +126,53 @@ pub mod op {
     pub const MIRROR_Y: u8 = 0x8;
     pub const SHADE: u8 = 0x9;
     pub const SOCKET: u8 = 0xA;
+    pub const BITMAP: u8 = 0xB;
+}
+
+/// `BITMAP` pixel values and run-length coding (`FORMAT.md` 1.2, 3.1).
+pub mod bitmap {
+    use alloc::vec::Vec;
+
+    /// Slot field of a pixel that draws nothing.
+    pub const SKIP: u8 = 7;
+    /// A run byte is `len << 6 | value`: `len` 0..=2 is a run of `len + 1`, 3 takes the next byte
+    /// `n` for a run of `RUN_LONG + n`.
+    pub const RUN_LONG: usize = 4;
+    pub const RUN_MAX: usize = RUN_LONG + 255;
+
+    /// Pixel value: `slot << 3 | code`; code 0 = auto shading, `1 + c` = explicit ramp color `c`.
+    pub const fn value(slot: u8, code: u8) -> u8 {
+        slot << 3 | code
+    }
+
+    pub const fn slot(v: u8) -> u8 {
+        v >> 3
+    }
+
+    pub const fn code(v: u8) -> u8 {
+        v & 7
+    }
+
+    /// Run-length codes row-major pixel values (each `< 64`).
+    pub fn encode(pixels: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < pixels.len() {
+            let v = pixels[i];
+            let mut n = 1;
+            while i + n < pixels.len() && pixels[i + n] == v && n < RUN_MAX {
+                n += 1;
+            }
+            if n < RUN_LONG {
+                out.push(((n - 1) as u8) << 6 | v);
+            } else {
+                out.push(3 << 6 | v);
+                out.push((n - RUN_LONG) as u8);
+            }
+            i += n;
+        }
+        out
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -175,12 +245,22 @@ pub enum Cmd {
         x: u8,
         y: u8,
     },
+    /// Pixels `Sprite.bitmaps[index]`: `w * h` row-major values (`bitmap::value`).
+    Bitmap {
+        x: u8,
+        y: u8,
+        w: u8,
+        h: u8,
+        index: u16,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Sprite {
     pub header: Header,
     pub cmds: Vec<Cmd>,
+    /// Decoded `BITMAP` pixels in command order.
+    pub bitmaps: Vec<Vec<u8>>,
 }
 
 /// Allowed canvas sides (`FORMAT.md` 1.1). Format 2 doubled the format 1 sizes.
@@ -223,6 +303,7 @@ pub fn decode(bytes: &[u8]) -> Result<Sprite> {
     let count = r.u8()?;
     let (w, h) = (header.width, header.height);
     let mut cmds = Vec::with_capacity(count as usize);
+    let mut bitmaps: Vec<Vec<u8>> = Vec::new();
     for _ in 0..count {
         let b = r.u8()?;
         let (opcode, s) = (b >> 4, b & 0x0F);
@@ -332,6 +413,37 @@ pub fn decode(bytes: &[u8]) -> Result<Sprite> {
                 }
                 Cmd::Socket { x, y }
             }
+            op::BITMAP => {
+                let (x, y, cw, ch) = (r.u8()?, r.u8()?, r.u8()?, r.u8()?);
+                if s != 0 {
+                    return Err(Error::Slot);
+                }
+                check_rect(x, y, cw, ch, w, h)?;
+                let total = cw as usize * ch as usize;
+                let mut px = Vec::with_capacity(total);
+                while px.len() < total {
+                    let b = r.u8()?;
+                    let v = b & 0x3F;
+                    let n = match b >> 6 {
+                        3 => bitmap::RUN_LONG + r.u8()? as usize,
+                        l => l as usize + 1,
+                    };
+                    check_pixel(v)?;
+                    if px.len() + n > total {
+                        return Err(Error::Arg);
+                    }
+                    px.resize(px.len() + n, v);
+                }
+                let index = bitmaps.len() as u16;
+                bitmaps.push(px);
+                Cmd::Bitmap {
+                    x,
+                    y,
+                    w: cw,
+                    h: ch,
+                    index,
+                }
+            }
             _ => return Err(Error::Opcode),
         };
         cmds.push(cmd);
@@ -339,7 +451,29 @@ pub fn decode(bytes: &[u8]) -> Result<Sprite> {
     if r.pos != bytes.len() {
         return Err(Error::Truncated);
     }
-    Ok(Sprite { header, cmds })
+    Ok(Sprite {
+        header,
+        cmds,
+        bitmaps,
+    })
+}
+
+/// A `BITMAP` pixel value: slot 0..=6 or skip. Erase and skip take no shade, the outline only
+/// color 0, the other slots a color below `RAMP_COLORS`.
+fn check_pixel(v: u8) -> Result<()> {
+    let (s, code) = (bitmap::slot(v), bitmap::code(v));
+    if s != bitmap::SKIP && s > slot::MAX {
+        return Err(Error::Slot);
+    }
+    let max_code = match s {
+        slot::ERASE | bitmap::SKIP => 0,
+        slot::OUTLINE => 1,
+        _ => RAMP_COLORS,
+    };
+    if code > max_code {
+        return Err(Error::Arg);
+    }
+    Ok(())
 }
 
 fn check_slot(s: u8) -> Result<()> {
@@ -439,8 +573,8 @@ mod tests {
             v[i] = b;
             assert_eq!(decode(&v), Err(Error::Header), "byte {i}");
         }
-        // opcodes 0 and 0xB..=0xF
-        for o in [0x0u8, 0xB, 0xF] {
+        // opcodes 0 and 0xC..=0xF
+        for o in [0x0u8, 0xC, 0xF] {
             assert_eq!(
                 decode(&sprite(&[o << 4, 0, 0, 1, 1], 1)),
                 Err(Error::Opcode)
@@ -461,12 +595,77 @@ mod tests {
             &[0x62, 2, 0, 0, 1, 1],        // poly n = 2
             &[0x62, 3, 0, 0, 33, 0, 0, 1], // poly vertex past w
             &[0x70, 65],                   // mirror axis
-            &[0x93, 0, 0, 3],              // shade >= n (S has 3)
+            &[0x93, 0, 0, 6],              // shade >= 6 ramp colors
             &[0xA0, 29, 0],                // socket square (4x4) past the right edge
             &[0xA0, 0, 29],                // socket square past the bottom edge
         ] {
             assert_eq!(decode(&sprite(cmd, 1)), Err(Error::Arg), "{cmd:?}");
         }
+    }
+
+    #[test]
+    fn bitmap_runs_and_rejections() {
+        // 3x2 at (1, 1): P auto x2, skip x4 (a long run crossing the row).
+        let p = bitmap::value(2, 0);
+        let skip = bitmap::value(bitmap::SKIP, 0);
+        let ok = sprite(&[0xB0, 1, 1, 3, 2, 1 << 6 | p, 3 << 6 | skip, 0], 1);
+        let s = decode(&ok).unwrap();
+        assert_eq!(
+            s.cmds[0],
+            Cmd::Bitmap {
+                x: 1,
+                y: 1,
+                w: 3,
+                h: 2,
+                index: 0
+            }
+        );
+        assert_eq!(s.bitmaps[0], vec![p, p, skip, skip, skip, skip]);
+        // Every explicit color of a ramp slot, the outline color 0, erase.
+        let px = [
+            bitmap::value(3, 6),
+            bitmap::value(1, 1),
+            bitmap::value(0, 0),
+            bitmap::value(6, 1),
+        ];
+        let v = sprite(&[0xB0, 0, 0, 2, 2, px[0], px[1], px[2], px[3]], 1);
+        assert_eq!(decode(&v).unwrap().bitmaps[0], px.to_vec());
+        // Rejections: slot nibble, rect past the canvas, zero size, run past w*h, truncated
+        // runs, shades out of range, slots that do not exist.
+        let bad = [
+            (&[0xB2, 0, 0, 1, 1, p][..], Error::Slot),
+            (&[0xB0, 31, 0, 2, 1, 1 << 6 | p], Error::Arg),
+            (&[0xB0, 0, 0, 0, 1], Error::Arg),
+            (&[0xB0, 0, 0, 2, 1, 2 << 6 | p], Error::Arg),
+            (&[0xB0, 0, 0, 2, 1, 3 << 6 | p, 0], Error::Arg),
+            (&[0xB0, 0, 0, 2, 1, p], Error::Truncated),
+            (&[0xB0, 0, 0, 9, 1, 3 << 6 | p], Error::Truncated),
+            (&[0xB0, 0, 0, 1, 1, bitmap::value(2, 7)], Error::Arg),
+            (&[0xB0, 0, 0, 1, 1, bitmap::value(1, 2)], Error::Arg),
+            (&[0xB0, 0, 0, 1, 1, bitmap::value(0, 1)], Error::Arg),
+            (
+                &[0xB0, 0, 0, 1, 1, bitmap::value(bitmap::SKIP, 1)],
+                Error::Arg,
+            ),
+        ];
+        for (cmd, e) in bad {
+            assert_eq!(decode(&sprite(cmd, 1)), Err(e), "{cmd:?}");
+        }
+    }
+
+    #[test]
+    fn bitmap_rle_round_trip() {
+        let mut px = vec![bitmap::value(bitmap::SKIP, 0); 300];
+        px.extend([bitmap::value(2, 3); 3]);
+        px.extend([bitmap::value(4, 0), bitmap::value(5, 1)]);
+        px.extend([bitmap::value(3, 0); 4]);
+        let (w, h) = (31u8, 10u8);
+        px.resize(w as usize * h as usize, bitmap::value(0, 0));
+        let mut cmd = vec![0xB0, 0, 0, w, h];
+        cmd.extend(bitmap::encode(&px));
+        assert_eq!(decode(&sprite(&cmd, 1)).unwrap().bitmaps[0], px);
+        // 300 skips need two runs (259 + 41).
+        assert_eq!(&bitmap::encode(&px)[..4], &[0xF8, 255, 0xF8, 37]);
     }
 
     #[test]

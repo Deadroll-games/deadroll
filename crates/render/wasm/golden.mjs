@@ -50,7 +50,8 @@ for (let i = 0; i < 3; i++) {
   if (again !== sha) { console.error("non-deterministic"); failed = true; }
 }
 const raw = run(args, 0);
-if (raw.width !== 64 || raw.height !== 64 || raw.bytes.length !== 64 * 64 * 4) {
+const k = Math.floor(512 / Math.max(raw.width, raw.height));
+if (raw.width * k !== png.width || raw.height * k !== png.height || raw.bytes.length !== raw.width * raw.height * 4) {
   console.error(`raw rgba: ${raw.width}x${raw.height}`); failed = true;
 }
 const checks = [

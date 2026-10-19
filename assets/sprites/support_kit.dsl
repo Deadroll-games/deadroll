@@ -62,4 +62,4 @@ flags no_outline
 RECT 28 28 6 4 A
 RECT 30 32 4 4 A
 RECT 30 32 2 2 A
-SHADE 30 32 A 2
+SHADE 30 32 A 5

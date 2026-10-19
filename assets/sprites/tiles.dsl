@@ -16,9 +16,9 @@ RECT 10 16 2 2 A
 RECT 44 12 2 2 A
 RECT 24 48 2 2 A
 RECT 54 44 2 2 P
-SHADE 54 44 P 3
+SHADE 54 44 P 5
 RECT 12 52 2 2 P
-SHADE 12 52 P 2
+SHADE 12 52 P 3
 
 # Block wall. Lighter top plane, brick joints on the front.
 sprite 501 tile_wall
@@ -99,7 +99,7 @@ RECT 38 16 6 28 P
 RECT 20 16 24 6 P
 RECT 26 22 12 22 E
 RECT 30 30 2 2 E
-SHADE 30 30 E 3
+SHADE 30 30 E 5
 
 # Floor plate with spikes. Item slots only, no dark-detail slot.
 sprite 506 tile_trap

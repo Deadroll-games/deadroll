@@ -5,12 +5,12 @@
 
 use deadroll_render::text::{compile_palette, compile_sprites, PaletteSrc};
 use deadroll_render::{
-    book, encode_books, render, scale, LayerRef, OutputMode, RenderRequest, ASSET_LEN,
+    book, encode_books, png_scale, render, scale, LayerRef, OutputMode, RenderRequest, ASSET_LEN,
 };
 use sha2::{Digest, Sha256};
 
-/// SHA-256 of the 512 px PNG. Changing it means the rendering rules changed: new rasterizer version.
-const WARRIOR_PNG_SHA256: &str = "9aee38466684c1354f2a5b42c1765672c7bd4f273ff26504f1d59646ce19f337";
+/// SHA-256 of the PNG (the canvas enlarged to at most 512 px). Changing it means the rendering rules changed: new rasterizer version.
+const WARRIOR_PNG_SHA256: &str = "a34415a24e67203191221bb9725acd91acd6a8b4504a9ddc0db3ed21c4165eea";
 const ASSET: [u8; ASSET_LEN] = [0; ASSET_LEN];
 
 fn root() -> std::path::PathBuf {
@@ -18,7 +18,7 @@ fn root() -> std::path::PathBuf {
 }
 
 fn palette() -> PaletteSrc {
-    let src = std::fs::read_to_string(root().join("assets/palette/palette_1.pal")).unwrap();
+    let src = std::fs::read_to_string(root().join("assets/palette/palette_2.pal")).unwrap();
     compile_palette(&src).unwrap()
 }
 
@@ -91,8 +91,11 @@ fn hex(d: &[u8]) -> String {
 fn warrior_png_is_stable() {
     let a = warrior(0);
     let out = run(&a, OutputMode::Png).unwrap();
-    // 64 px canvas, enlarged x8 to 512 px.
-    assert_eq!((out.width, out.height), (512, 512));
+    // The canvas enlarged by the integer scale that fits 512 px.
+    let raw = run(&a, OutputMode::RawRgba).unwrap();
+    let k = png_scale(raw.width as usize, raw.height as usize);
+    assert_eq!((out.width, out.height), (raw.width * k, raw.height * k));
+    assert!(out.width <= 512 && out.width + raw.width > 512);
     let sha = hex(&Sha256::digest(&out.bytes));
 
     let dir = root().join("target/render-golden");
@@ -122,7 +125,8 @@ fn warrior_png_is_stable() {
 fn warrior_png_pixels_are_the_scaled_rgba() {
     let a = warrior(0);
     let rgba = run(&a, OutputMode::RawRgba).unwrap();
-    assert_eq!((rgba.width, rgba.height), (64, 64));
+    let (w, h) = (rgba.width as usize, rgba.height as usize);
+    let k = png_scale(w, h);
     let png_bytes = run(&a, OutputMode::Png).unwrap().bytes;
     let mut dec = png::Decoder::new(&png_bytes[..]);
     dec.set_transformations(png::Transformations::EXPAND | png::Transformations::ALPHA);
@@ -132,11 +136,11 @@ fn warrior_png_pixels_are_the_scaled_rgba() {
     let info = reader.next_frame(&mut buf).unwrap();
     buf.truncate(info.buffer_size());
     let img = deadroll_render::Image {
-        width: 64,
-        height: 64,
+        width: w,
+        height: h,
         rgba: rgba.bytes,
     };
-    assert_eq!(buf, scale(&img, 8).unwrap().rgba);
+    assert_eq!(buf, scale(&img, k).unwrap().rgba);
     // Wallet-sized and small: a few kilobytes.
     assert!(png_bytes.len() < 8 * 1024, "{} bytes", png_bytes.len());
 }
@@ -150,7 +154,7 @@ fn dead_warrior_has_gray_ramps() {
     for (a, d) in alive.chunks_exact(4).zip(dead.chunks_exact(4)) {
         assert_eq!(a[3], d[3], "same alpha");
         if a[..3] == outline {
-            assert_eq!(a, d, "the outline is not a ramp");
+            assert_eq!(a, d, "the palette outline is not a ramp");
         } else {
             assert!(d[0] == d[1] && d[1] == d[2], "{d:?}");
         }

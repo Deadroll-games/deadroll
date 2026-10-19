@@ -79,7 +79,8 @@ impl<'a> Book<'a> {
 }
 
 /// Packs sprites into a book body. Sprites are sorted by id; duplicate ids or a sprite
-/// longer than `u16::MAX` bytes are an error.
+/// longer than `u16::MAX` bytes are an error. Sprites with identical bytes are stored once and
+/// their index entries share the offset (an elf body that copies the human one costs no bytes).
 pub fn pack(book_id: u16, sprites: &[(u16, &[u8])]) -> Result<Vec<u8>> {
     let mut sorted: Vec<(u16, &[u8])> = sprites.to_vec();
     sorted.sort_by_key(|s| s.0);
@@ -94,14 +95,22 @@ pub fn pack(book_id: u16, sprites: &[(u16, &[u8])]) -> Result<Vec<u8>> {
     out.extend_from_slice(&book_id.to_le_bytes());
     out.extend_from_slice(&(sorted.len() as u16).to_le_bytes());
     let mut off = HEADER_LEN + sorted.len() * ENTRY_LEN;
+    let mut blobs: Vec<(&[u8], usize)> = Vec::new();
     for (id, bytes) in &sorted {
         let len = u16::try_from(bytes.len()).map_err(|_| Error::Sprite)?;
+        let at = match blobs.iter().find(|b| b.0 == *bytes) {
+            Some(b) => b.1,
+            None => {
+                blobs.push((bytes, off));
+                off += bytes.len();
+                off - bytes.len()
+            }
+        };
         out.extend_from_slice(&id.to_le_bytes());
-        out.extend_from_slice(&(off as u32).to_le_bytes());
+        out.extend_from_slice(&(at as u32).to_le_bytes());
         out.extend_from_slice(&len.to_le_bytes());
-        off += bytes.len();
     }
-    for (_, bytes) in &sorted {
+    for (bytes, _) in &blobs {
         out.extend_from_slice(bytes);
     }
     Ok(out)
@@ -121,6 +130,21 @@ mod tests {
         assert_eq!(book.get(11), Some(&[2u8, 2][..]));
         assert_eq!(book.get(30), Some(&[3u8, 3, 3][..]));
         assert_eq!(book.get(5), None);
+    }
+
+    #[test]
+    fn identical_sprites_share_bytes() {
+        let one = pack(1, &[(2, &[1, 2, 3][..]), (9, &[4][..])]).unwrap();
+        let alias = pack(
+            1,
+            &[(2, &[1, 2, 3][..]), (9, &[4][..]), (20, &[1, 2, 3][..])],
+        )
+        .unwrap();
+        assert_eq!(alias.len(), one.len() + ENTRY_LEN);
+        let book = Book::parse(&alias).unwrap();
+        assert_eq!(book.get(20), Some(&[1u8, 2, 3][..]));
+        assert_eq!(book.get(2), book.get(20));
+        assert_eq!(book.get(9), Some(&[4u8][..]));
     }
 
     #[test]
