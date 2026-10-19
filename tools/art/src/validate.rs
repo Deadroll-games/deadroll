@@ -13,7 +13,6 @@ pub const MAX_SOCKET: usize = 4;
 pub const MIN_RUNE_WEAPON: usize = 12;
 /// Margin of an item portrait with a rune zone: three 2 px glow bands (`deadroll_render::craft`).
 pub const PORTRAIT_RUNE_MARGIN: i32 = 6;
-const MAINHAND: u8 = 16;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Issue {
@@ -152,7 +151,7 @@ pub const LEGACY_SIZE: u8 = 64;
 
 fn size_ok(layer_type: u8, w: u8, h: u8) -> bool {
     match layer_type {
-        0..=18 => w == h && (w == CHARACTER_SIZE || w == LEGACY_SIZE),
+        0..=layer::CHARACTER_MAX => w == h && (w == CHARACTER_SIZE || w == LEGACY_SIZE),
         layer::TILE => (w, h) == (64, 64),
         layer::MONSTER => w == h && matches!(w, 64 | 96 | 128),
         layer::ICON => (w, h) == (32, 32),
@@ -165,11 +164,16 @@ fn size_ok(layer_type: u8, w: u8, h: u8) -> bool {
 /// the 96 px bodies until it is redrawn.
 pub fn is_legacy_size(c: &Compiled) -> bool {
     let h = &c.sprite.header;
-    matches!(h.layer_type, 0..=18 | layer::MONSTER) && h.width == LEGACY_SIZE
+    matches!(h.layer_type, 0..=layer::CHARACTER_MAX | layer::MONSTER) && h.width == LEGACY_SIZE
 }
 
 fn must_no_outline(layer_type: u8, name: &str) -> bool {
-    matches!(layer_type, 0 | 10 | 17 | 18) || (layer_type == layer::TILE && name.contains("floor"))
+    // The front fist repaints the body's fist over the weapon: an outline would draw a seam at the
+    // wrist.
+    matches!(
+        layer_type,
+        layer::SHADOW | layer::NECKLACE | layer::FIST_FRONT | layer::OVERLAY_ELEMENT
+    ) || (layer_type == layer::TILE && name.contains("floor"))
 }
 
 fn slot_at(g: &Grid, x: i32, y: i32) -> u8 {
@@ -289,7 +293,7 @@ fn check_sprite(c: &Compiled, out: &mut Vec<Issue>) {
         if let Some((x, y)) = outside {
             bad(format!("U pixel ({x}, {y}) is not inside the P mask"));
         }
-        if runes > 0 && h.layer_type == MAINHAND && runes < MIN_RUNE_WEAPON {
+        if runes > 0 && h.layer_type == layer::MAINHAND && runes < MIN_RUNE_WEAPON {
             bad(format!(
                 "rune zone has {runes} px, a weapon needs at least {MIN_RUNE_WEAPON}"
             ));

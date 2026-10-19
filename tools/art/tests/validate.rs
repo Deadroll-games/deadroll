@@ -98,7 +98,7 @@ fn rejects_wrong_slot_letters_for_layer_kind() {
         "not allowed on a item",
     );
     rejects(
-        "sprite 100 a\nsize 64 64\nlayer torso\nRECT 2 2 3 3 P\n",
+        "sprite 100 a\nsize 64 64\nlayer body\nRECT 2 2 3 3 P\n",
         "not allowed on a body",
     );
 }
@@ -228,7 +228,8 @@ fn all_repo_sprites_are_valid_and_render_deterministically() {
     // The craft matrix renders for every item sprite.
     for c in sprites.iter().filter(|c| {
         let lt = c.sprite.header.layer_type;
-        !deadroll_render::sprite::layer::is_body(lt) && lt < 19
+        !deadroll_render::sprite::layer::is_body(lt)
+            && lt <= deadroll_render::sprite::layer::CHARACTER_MAX
     }) {
         let row = preview::craft_row(&pal, &book, c, 1).unwrap();
         assert_eq!(row.len(), preview::MATRIX_COLUMNS.len(), "{}", c.src.name);
@@ -319,7 +320,7 @@ fn bitmap_rows_use_the_layer_slot_letters() {
         "sprite 100 a\nsize 96 96\nlayer boots\nBITMAP 10 10 3 1\nPK.\n",
         "BITMAP slot `K` not allowed on a item layer",
     );
-    let body = "sprite 2 a\nsize 96 96\nlayer head\nBITMAP 10 10 2 1\nKY\n";
+    let body = "sprite 2 a\nsize 96 96\nlayer body\nBITMAP 10 10 2 1\nKY\n";
     let m = validate_text("bodies.dsl", body).1;
     assert!(m.is_empty(), "{m:?}");
     // Character layers are 96 (or 64 until redrawn), never 128.
@@ -406,7 +407,8 @@ fn every_frame_fits_an_indexed_png() {
     }
     for c in sprites.iter().filter(|c| {
         let lt = c.sprite.header.layer_type;
-        !deadroll_render::sprite::layer::is_body(lt) && lt < 19
+        !deadroll_render::sprite::layer::is_body(lt)
+            && lt <= deadroll_render::sprite::layer::CHARACTER_MAX
     }) {
         for (i, img) in preview::craft_row(&pal, &book, c, 1)
             .unwrap()
@@ -421,4 +423,43 @@ fn every_frame_fits_an_indexed_png() {
         }
     }
     println!("most colors in one frame: {} ({})", most.0, most.1);
+}
+
+#[test]
+fn front_fist_repeats_the_fist_of_every_body() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let text = std::fs::read_to_string(root.join("assets/sprites/bodies.dsl")).unwrap();
+    let (sprites, issues) = validate_text("bodies.dsl", &text);
+    assert!(issues.is_empty(), "{issues:?}");
+    let grid = |name: &str| {
+        let c = sprites.iter().find(|c| c.src.name == name).unwrap();
+        (c, deadroll_render::raster::rasterize(&c.sprite))
+    };
+    let (fist, fg) = grid("fist_front");
+    assert!(fist.sprite.header.no_outline());
+    let cells: Vec<_> = fg
+        .cells
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| c.slot != 0)
+        .collect();
+    assert!(cells.len() > 20, "the fist is drawn");
+    for body in ["human_body", "elf_body"] {
+        let (_, bg) = grid(body);
+        for &(i, c) in &cells {
+            assert_eq!(
+                bg.cells[i],
+                *c,
+                "{body}: fist pixel ({}, {})",
+                i % 96,
+                i / 96
+            );
+        }
+    }
+    // Without no_outline the validator refuses a front fist.
+    let bad = "sprite 14 fist_front\nsize 96 96\nlayer fist_front\nRECT 60 60 4 4 K\n";
+    assert!(validate_text("bodies.dsl", bad)
+        .1
+        .iter()
+        .any(|i| i.msg.contains("no_outline")));
 }

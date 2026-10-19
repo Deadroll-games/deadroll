@@ -243,7 +243,11 @@ pub fn render_sprite(
     if let Some(m) = material {
         look.material = m;
     }
-    let idx = if (lt as usize) < 20 { lt as usize } else { 0 };
+    let idx = if lt <= layer::CHARACTER_MAX {
+        lt as usize
+    } else {
+        0
+    };
     run(
         pal,
         book_bytes,
@@ -263,9 +267,18 @@ const fn lk(material: &'static str, accent: &'static str) -> Look {
     }
 }
 
-/// Body layers of a race: (layer type, sprite id).
-const HUMAN: [(u8, u16); 6] = [(2, 2), (5, 3), (8, 4), (11, 5), (12, 6), (14, 7)];
-const ELF: [(u8, u16); 6] = [(2, 20), (5, 21), (8, 22), (11, 23), (12, 24), (14, 25)];
+/// Body layers of a race: (layer type, sprite id). The whole body is one sprite, hair is its own
+/// (helmets cover it), and the front fist (shared by every race) is drawn over the weapon.
+const HUMAN: [(u8, u16); 3] = [
+    (layer::BODY, 10),
+    (layer::HAIR, 11),
+    (layer::FIST_FRONT, 14),
+];
+const ELF: [(u8, u16); 3] = [
+    (layer::BODY, 12),
+    (layer::HAIR, 13),
+    (layer::FIST_FRONT, 14),
+];
 
 /// A kit item: layer type, sprite id, material.
 type KitItem = (u8, u16, &'static str);
@@ -275,35 +288,35 @@ const KITS: [(&str, &[KitItem]); 3] = [
     (
         "warrior",
         &[
-            (1, 100, "cape"),
-            (4, 101, "steel"),
-            (6, 102, "leather"),
-            (7, 103, "leather"),
-            (9, 104, "steel"),
-            (13, 105, "steel"),
-            (16, 106, "steel"),
+            (layer::BACK_ITEM, 100, "cape"),
+            (layer::OFFHAND, 101, "steel"),
+            (layer::PANTS, 102, "leather"),
+            (layer::BOOTS, 103, "leather"),
+            (layer::ARMOR_BODY, 104, "steel"),
+            (layer::HELMET, 105, "steel"),
+            (layer::MAINHAND, 106, "steel"),
         ],
     ),
     (
         "mage",
         &[
-            (1, 205, "leather"),
-            (6, 202, "robe"),
-            (7, 203, "leather"),
-            (9, 201, "robe"),
-            (13, 200, "robe"),
-            (16, 204, "leather"),
+            (layer::BACK_ITEM, 205, "leather"),
+            (layer::PANTS, 202, "robe"),
+            (layer::BOOTS, 203, "leather"),
+            (layer::ARMOR_BODY, 201, "robe"),
+            (layer::HELMET, 200, "robe"),
+            (layer::MAINHAND, 204, "leather"),
         ],
     ),
     (
         "support",
         &[
-            (1, 304, "leather"),
-            (7, 302, "leather"),
-            (9, 301, "leather"),
-            (10, 305, "leather"),
-            (13, 300, "leather"),
-            (16, 303, "leather"),
+            (layer::BACK_ITEM, 304, "leather"),
+            (layer::BOOTS, 302, "leather"),
+            (layer::ARMOR_BODY, 301, "leather"),
+            (layer::NECKLACE, 305, "leather"),
+            (layer::HELMET, 300, "leather"),
+            (layer::MAINHAND, 303, "leather"),
         ],
     ),
 ];
@@ -314,7 +327,7 @@ fn body(race: &str) -> Vec<Entry> {
     } else {
         (HUMAN, "human")
     };
-    let mut v = vec![(0, 1, lk("stone", GOLD))];
+    let mut v = vec![(layer::SHADOW, 1, lk("stone", GOLD))];
     v.extend(layers.iter().map(|&(ty, id)| (ty, id, lk(mat, EYES))));
     v
 }
@@ -373,7 +386,7 @@ pub const MATRIX_COLUMNS: [&str; 11] = [
 /// One row of the craft matrix for an item sprite: see [`MATRIX_COLUMNS`].
 pub fn craft_row(pal: &Pal, book_bytes: &[u8], c: &Compiled, k: u32) -> Result<Vec<Img>, String> {
     let lt = c.sprite.header.layer_type;
-    let character_layer = (lt as usize) < 19;
+    let character_layer = lt <= layer::CHARACTER_MAX;
     let idx = if character_layer { lt as usize } else { 0 };
     let points = c
         .sprite
