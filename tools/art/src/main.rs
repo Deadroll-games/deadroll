@@ -14,10 +14,12 @@ const USAGE: &str = "usage:
   art <file.dsl> [--id N] [--scale 4] [--out DIR|FILE.png] [--material NAME] [--bg #rrggbb]
   art sheet characters [figures ...] [--scale 4] [--out FILE.png]   bodies, kits on both bodies, alive and dead
   art sheet contact [files.dsl ...] [--scale 2] [--out FILE.png]
-  art sheet matrix [files.dsl ...] [--scale 4] [--out FILE.png]   items x materials, enchants, runes, sockets
+  art sheet matrix [files.dsl ...] [--id N] [--scale 4] [--out FILE.png]   items x materials, enchants, runes, sockets
+  art sheet scene [--scale 4] [--out FILE.png]        tiles, a trap, the probe chest and warriors in one pixel scale
+  art sheet join <a.png> <b.png> ... [--out FILE.png]  PNGs side by side (old and new sprites)
   art pack [--out DIR]                          palette.bin + book_<id>.bin (books 2.., 64 KiB each) for upload
   art upscale [files.dsl ...]                  rewrite format 1 sources (16..64 px) for format 2, in place
-options: --palette FILE.pal (default assets/palette/palette_1.pal)";
+options: --palette FILE.pal (default assets/palette/palette_2.pal)";
 
 struct Opts {
     pos: Vec<String>,
@@ -212,8 +214,72 @@ fn cmd_render(o: &Opts) -> Result<bool, String> {
     Ok(true)
 }
 
+/// Probe sprites outside the books (`tools/art/probe`), for the scene sheet.
+const PROBE_CHEST: &str = "tools/art/probe/chest.dsl";
+const PROBE_CHEST_ID: u16 = 590;
+
 fn cmd_sheet(o: &Opts) -> Result<bool, String> {
     let kind = o.pos.get(1).map(String::as_str).unwrap_or("");
+    let bg = o.bg.unwrap_or(SHEET_BG);
+    if kind == "join" {
+        let mut images = Vec::new();
+        for f in &o.pos[2..] {
+            let bytes = fs::read(f).map_err(|e| format!("{f}: {e}"))?;
+            let mut img = preview::from_png(&bytes)?;
+            preview::flatten(&mut img, bg);
+            images.push(img);
+        }
+        let sheet = preview::grid(&images, images.len(), 16, bg);
+        let path = o
+            .out
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("target/art/join.png"));
+        write(&path, &preview::to_png(&sheet))?;
+        println!("{} ({} images)", path.display(), images.len());
+        return Ok(true);
+    }
+    if kind == "scene" {
+        let mut files = repo_files();
+        files.push(PathBuf::from(PROBE_CHEST));
+        let (sprites, _) = load_all(&files)?;
+        let pal = load_pal(o)?;
+        let book = preview::pack_book(&sprites)?;
+        let figures = preview::characters();
+        let fig = |name: &str| {
+            figures
+                .iter()
+                .find(|f| f.0 == name)
+                .map(|f| f.1.as_slice())
+                .ok_or(format!("no figure {name}"))
+        };
+        let (w, f, t) = (501, 500, 506);
+        let tiles: [&[u16]; 4] = [
+            &[w, w, w, w, w],
+            &[f, f, t, f, f],
+            &[f, f, f, f, f],
+            &[f, f, f, f, f],
+        ];
+        let img = preview::scene(
+            &pal,
+            &book,
+            &sprites,
+            &tiles,
+            &[(4, 1, PROBE_CHEST_ID)],
+            &[
+                (1, 2, fig("human_warrior")?),
+                (3, 2, fig("elf_warrior")?),
+                (2, 3, fig("human")?),
+            ],
+            if o.scale == 0 { 4 } else { o.scale },
+        )?;
+        let path = o
+            .out
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("target/art/scene.png"));
+        write(&path, &finish(img, Some(bg)))?;
+        println!("{}", path.display());
+        return Ok(true);
+    }
     // `sheet characters` takes figure names (human, elf_mage, ...), the other kinds take files.
     let files: Vec<PathBuf> = if o.pos.len() > 2 && kind != "characters" {
         o.pos[2..].iter().map(PathBuf::from).collect()
@@ -223,17 +289,19 @@ fn cmd_sheet(o: &Opts) -> Result<bool, String> {
     let (sprites, _) = load_all(&files)?;
     let pal = load_pal(o)?;
     let book = preview::pack_book(&sprites)?;
-    let bg = o.bg.unwrap_or(SHEET_BG);
     let (default_scale, default_out) = match kind {
         "characters" => (4, "target/art/characters.png"),
         "contact" => (2, "target/art/contact.png"),
         "matrix" => (4, "target/art/matrix.png"),
-        _ => return Err("sheet kind: characters | contact | matrix".into()),
+        _ => return Err("sheet kind: characters | contact | matrix | scene | join".into()),
     };
     let scale = if o.scale == 0 { default_scale } else { o.scale };
     let named: Vec<String> = files.iter().map(|p| norm(p)).collect();
     let only = o.pos.len() > 2;
-    let picked = sprites.iter().filter(|c| !only || named.contains(&c.file));
+    let picked = sprites
+        .iter()
+        .filter(|c| !only || named.contains(&c.file))
+        .filter(|c| o.id.is_none_or(|id| c.src.id == id));
     let mut images = Vec::new();
     let mut cols = 8;
     match kind {

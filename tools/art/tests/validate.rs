@@ -366,3 +366,59 @@ fn pack_splits_books_at_64_kib() {
         .sum();
     assert_eq!(total, 9);
 }
+
+#[test]
+fn every_frame_fits_an_indexed_png() {
+    // Error 10: a frame with more than 256 colors has no indexed PNG. Characters alive and dead,
+    // and every crafted item column on its own canvas.
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut files = Vec::new();
+    for e in std::fs::read_dir(root.join("assets/sprites")).unwrap() {
+        let p = e.unwrap().path();
+        if p.extension().is_some_and(|x| x == "dsl") {
+            files.push((
+                p.to_string_lossy().replace('\\', "/"),
+                std::fs::read_to_string(&p).unwrap(),
+            ));
+        }
+    }
+    let (sprites, _) = validate_files(&files);
+    let pal =
+        Pal::load(&std::fs::read_to_string(root.join("assets/palette/palette_2.pal")).unwrap())
+            .unwrap();
+    let book = preview::pack_book(&sprites).unwrap();
+    let colors = |img: &preview::Img| {
+        let mut set: Vec<&[u8]> = img.rgba.chunks_exact(4).collect();
+        set.sort();
+        set.dedup();
+        set.len()
+    };
+    let mut most = (0, String::new());
+    for (name, layers) in preview::characters() {
+        for dead in [false, true] {
+            let img = preview::render_character(&pal, &book, &layers, 1, dead).unwrap();
+            let n = colors(&img);
+            assert!(n <= 256, "{name} dead={dead}: {n} colors");
+            if n > most.0 {
+                most = (n, format!("{name} dead={dead}"));
+            }
+        }
+    }
+    for c in sprites.iter().filter(|c| {
+        let lt = c.sprite.header.layer_type;
+        !deadroll_render::sprite::layer::is_body(lt) && lt < 19
+    }) {
+        for (i, img) in preview::craft_row(&pal, &book, c, 1)
+            .unwrap()
+            .iter()
+            .enumerate()
+        {
+            let n = colors(img);
+            assert!(n <= 256, "{} column {i}: {n} colors", c.src.name);
+            if n > most.0 {
+                most = (n, format!("{} column {i}", c.src.name));
+            }
+        }
+    }
+    println!("most colors in one frame: {} ({})", most.0, most.1);
+}

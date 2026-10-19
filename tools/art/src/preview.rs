@@ -89,6 +89,8 @@ pub fn default_look(name: &str, layer_type: u8) -> Look {
         }
     } else if name.contains("tombstone") {
         "stone"
+    } else if name.contains("chest") {
+        "chest"
     } else if layer::is_body(layer_type) {
         "human"
     } else {
@@ -100,7 +102,7 @@ pub fn default_look(name: &str, layer_type: u8) -> Look {
             EYES
         } else if name == "tile_water" {
             COLD
-        } else if name == "tile_door" {
+        } else if name == "tile_door" || name.contains("chest") {
             GOLD
         } else if layer_type == layer::TILE {
             "steel"
@@ -251,7 +253,7 @@ pub fn render_sprite(
 }
 
 /// One kit entry: layer type, sprite id, look.
-type Entry = (u8, u16, Look);
+pub type Entry = (u8, u16, Look);
 
 const fn lk(material: &'static str, accent: &'static str) -> Look {
     Look {
@@ -555,6 +557,112 @@ pub fn to_png(img: &Img) -> Vec<u8> {
     w.write_image_data(&img.rgba).expect("png data");
     drop(w);
     out
+}
+
+/// Reads a PNG (any color type) as RGBA.
+pub fn from_png(bytes: &[u8]) -> Result<Img, String> {
+    let mut dec = png::Decoder::new(bytes);
+    dec.set_transformations(png::Transformations::EXPAND | png::Transformations::ALPHA);
+    let mut reader = dec.read_info().map_err(|e| format!("png: {e}"))?;
+    let mut buf = vec![0; reader.output_buffer_size()];
+    let info = reader
+        .next_frame(&mut buf)
+        .map_err(|e| format!("png: {e}"))?;
+    buf.truncate(info.buffer_size());
+    let (w, h) = (info.width as usize, info.height as usize);
+    let rgba = match info.color_type {
+        png::ColorType::Rgba => buf,
+        png::ColorType::GrayscaleAlpha => buf
+            .chunks_exact(2)
+            .flat_map(|p| [p[0], p[0], p[0], p[1]])
+            .collect(),
+        other => return Err(format!("png: unexpected color type {other:?}")),
+    };
+    Ok(Img { w, h, rgba })
+}
+
+/// Draws `top` over `dst` at `(x, y)` with alpha (source over), clipped.
+fn over(dst: &mut Img, top: &Img, x: i32, y: i32) {
+    for ty in 0..top.h as i32 {
+        for tx in 0..top.w as i32 {
+            let (dx, dy) = (x + tx, y + ty);
+            if dx < 0 || dy < 0 || dx >= dst.w as i32 || dy >= dst.h as i32 {
+                continue;
+            }
+            let s = &top.rgba[(ty as usize * top.w + tx as usize) * 4..][..4];
+            let o = (dy as usize * dst.w + dx as usize) * 4;
+            let a = s[3] as u32;
+            let px = &mut dst.rgba[o..o + 4];
+            for (d, &c) in px.iter_mut().zip(&s[..3]) {
+                *d = ((c as u32 * a + *d as u32 * (255 - a)) / 255) as u8;
+            }
+            px[3] = px[3].max(s[3]);
+        }
+    }
+}
+
+/// Map cell side: one tile (`FORMAT.md` 1.4).
+pub const CELL: usize = 64;
+
+/// A small map at one pixel scale: a wall row, flagstones, a trap, a chest and figures standing
+/// bottom-center on their cells, the way the app draws them (`app/src/components/grid`).
+/// `objects` are `(cell x, cell y, sprite id)` drawn alone; `figures` are `(cell x, cell y, layers)`.
+pub fn scene(
+    pal: &Pal,
+    book_bytes: &[u8],
+    sprites: &[Compiled],
+    tiles: &[&[u16]],
+    objects: &[(usize, usize, u16)],
+    figures: &[(usize, usize, &[Entry])],
+    k: u32,
+) -> Result<Img, String> {
+    let ids = by_id(sprites);
+    let sprite = |id: u16| ids.get(&id).copied().ok_or(format!("sprite {id} missing"));
+    let (cw, ch) = (
+        tiles.iter().map(|r| r.len()).max().unwrap_or(0),
+        tiles.len(),
+    );
+    let mut img = Img {
+        w: cw * CELL,
+        h: ch * CELL,
+        rgba: vec![0; cw * CELL * ch * CELL * 4],
+    };
+    for (cy, row) in tiles.iter().enumerate() {
+        for (cx, &id) in row.iter().enumerate() {
+            let t = render_sprite(pal, book_bytes, sprite(id)?, 1, None)?;
+            over(&mut img, &t, (cx * CELL) as i32, (cy * CELL) as i32);
+        }
+    }
+    // Bottom-center on the cell: a canvas taller or wider than the cell overlaps its neighbors.
+    let place = |img: &mut Img, t: &Img, cx: usize, cy: usize| {
+        let x = (cx * CELL + CELL / 2) as i32 - t.w as i32 / 2;
+        let y = ((cy + 1) * CELL) as i32 - t.h as i32;
+        over(img, t, x, y);
+    };
+    for &(cx, cy, id) in objects {
+        let t = render_sprite(pal, book_bytes, sprite(id)?, 1, None)?;
+        place(&mut img, &t, cx, cy);
+    }
+    let mut figs: Vec<_> = figures.to_vec();
+    figs.sort_by_key(|f| (f.1, f.0));
+    for (cx, cy, layers) in figs {
+        let t = render_character(pal, book_bytes, layers, 1, false)?;
+        place(&mut img, &t, cx, cy);
+    }
+    let big = scale(
+        &Image {
+            width: img.w,
+            height: img.h,
+            rgba: img.rgba,
+        },
+        k,
+    )
+    .map_err(|e| format!("scale {k}: {e:?}"))?;
+    Ok(Img {
+        w: big.width,
+        h: big.height,
+        rgba: big.rgba,
+    })
 }
 
 /// Parses `#rrggbb`.
