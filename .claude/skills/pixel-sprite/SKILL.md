@@ -1,17 +1,19 @@
 ---
 name: pixel-sprite
-description: Use when drawing characters, monsters, items or tiles as sprite DSL files in assets/sprites. Sprites are geometry (rects, pixels, ellipses) with role slots, auto-shaded and outlined by crates/render, never hand-painted bitmaps.
+description: Use when drawing characters, monsters, items or tiles as sprite DSL files in assets/sprites. Sprites are drawn pixel by pixel (BITMAP) or from geometry; every pixel stores a role slot, never a color, and crates/render colors, shades and outlines it.
 ---
 
-# Pixel sprites from geometry
+# Pixel sprites with role slots
 
 **Source of truth: `crates/render/FORMAT.md`** (text DSL, exact rasterization rules, binary format,
 validator rules, crafted look). Design background: `docs/ART_DESCRIPTION.md` (its sizes are still
-the 32 px ones; format 2 doubled them, the numbers below are the current ones). If this skill and
+the 32 px ones; the numbers below are the current ones: characters 96 px, tiles 64 px). If this skill and
 FORMAT.md ever disagree, FORMAT.md wins.
 You write sprites as text in `assets/sprites/<name>.dsl`. `tools/art` compiles and renders them,
-`art pack` builds the on-chain sprite book 2. Shading and outline are done by the rasterizer: you
-only place shapes and slots.
+`art pack` builds the on-chain sprite book 2. Each pixel keeps its slot, so materials, enchantments, runes,
+sockets, death and curse work on it. Draw the look pixel by pixel with `BITMAP` and explicit
+ramp colors where you want control; let the rasterizer shade (2.8), outline (colored, 2.9),
+dither (2.10) and drop overlap shadows (2.11) where you do not.
 
 ## Workflow
 
@@ -52,33 +54,44 @@ Keywords and command names are case-sensitive. Numbers are decimal. Tokens are s
 | `MIRROR_Y a` | same, horizontal axis |
 | `SHADE x y S shade` | one pixel with a fixed shade, 0 = darkest |
 | `SOCKET x y` | marks a **4x4** socket square at `(x, y)`, draws nothing |
+| `BITMAP x y w h` + `h` rows | pixel by pixel, one character per pixel (legend below) |
+
+After `layer`, `copy <name>` takes the commands of an earlier sprite of the same file (an elf
+body is `copy human_torso`); the book stores the bytes once.
+
+`BITMAP` legend: `.` keep what is under, `_` erase, `O` outline pixel, a slot letter
+(`P S A E U` / `K H Y D R`) auto shaded, or a slot with an explicit ramp color 0-5:
+`0-5` P/K, `a-f` S/H, `g-l` A/Y, `m-r` E/D, `s-x` U/R. Color 0 is the outline shade of the
+ramp, 1-4 the body of the form, 5 the highlight. Rows have exactly `w` characters.
 
 `S` in the table is the slot letter. Later commands overwrite earlier ones; slot `_` erases.
 
 ## Limits (validator, `FORMAT.md` 6)
 
-- at most **48 commands**, at most **8 `SHADE`**, at most **4 `SOCKET`** per sprite;
+- at most **48 commands** (a `BITMAP` counts as one), at most **8 `SHADE`**, at most **4 `SOCKET`** per sprite;
 - every shape 1 px from the canvas edge (the outline needs it), except `no_outline` layers;
 - line slopes only 0, 90, 45 degrees, 1:2, 2:1;
 - body layers use only `K H Y D R O _`, other layers `P S A E U O _`;
 - socket squares 4x4, entirely inside `P` (not on `U`, `E`, `A`), not overlapping;
 - rune zone `U` inside the `P` mask (every 4-neighbor is `P` or `U`), **at least 12 px** on a weapon;
 - a `portrait` with `U` keeps **6 px** from every edge (three rune glow bands of 2 px);
-- minimum detail **2 px** (exceptions: eye pupils and highlights, bowstrings, chains, `SHADE`).
-
-If a shape does not fit in 48 commands it is too detailed: simplify, merge rects, use `MIRROR_X`.
+- minimum detail **2 px** for geometry (exceptions: eye pupils and highlights, bowstrings, chains, `SHADE`);
+  a `BITMAP` is drawn pixel by pixel, 1 px details are fine;
+- `art validate` prints the bytes of every sprite: keep an eye on the book size (64 KiB per book).
 
 ## Slots, not colors
 
-| Letter (items) | Letter (body) | Role | Shades |
+| Letter (items) | Letter (body) | Role | Auto levels |
 |---|---|---|---|
 | `_` | `_` | erase | |
-| `O` | `O` | explicit outline pixel (visor slit, finger gap, seam) | 1 |
+| `O` | `O` | explicit outline pixel (visor slit, finger gap, seam, dark joints) | 1 |
 | `P` | `K` | primary material / skin | 4 |
 | `S` | `H` | secondary material (handle, leather, straps) / hair, fur | 3 |
 | `A` | `Y` | accent (trim, buckles, studs) / eyes | 3 |
 | `E` | `D` | element core (staff head, blade center) / dark details (pupils, mouth, brows, nostrils) | 4 |
 | `U` | `R` | rune zone (strip along the blade, inside `P`) / racial features | 4 |
+
+Every ramp has 6 colors (palette 2); explicit shades and `SHADE` take 0-5.
 
 Colors come from the palette at render time. Slot `D` always uses the palette's dark ramp.
 
@@ -95,20 +108,24 @@ Colors come from the palette at render time. Slot `D` always uses the palette's 
     on a shield or armor at the center and corners of the main plate.
 - Inside one slot, use `O` (1 px lines) for seams and finger gaps, `SHADE` for highlights
   (an eye highlight, a buckle glint), and a second slot border as a facet (`P` next to `S`).
-- Faces at 64 px (head about 16x16): eye white = `Y` (the lightest shade via `SHADE ... Y 2`),
-  pupil 2x2 or 1x2 in `D`, a 1 px highlight with `SHADE`, brows in `D` or `H`, nose as a 2 px step
-  in `K` with a `SHADE`, mouth 4x1..2 in `D`. Keep both eyes on the same rows across races.
+- Faces at 96 px (head about 13x14, `bodies.dsl`): eye white `l`/`k`, iris `j`, brows in hair
+  `b`, nose a 1 px step out of the face edge with a lit top, mouth 2 px of `o`. Keep both eyes on
+  the same rows across races.
+- Thin lines inside a slot (grout, mortar, plate seams) are lit by auto shading: draw them as `O`
+  or with explicit dark colors.
 - Tiles: texture from shapes with meaning (bricks and mortar, planks and nails, wave crests),
   never random noise.
 
 ## Layer types and sizes
 
-Character layers, bottom to top (the name is what you write after `layer`), all **64x64**:
+Character layers, bottom to top (the name is what you write after `layer`), all **96x96**:
 `shadow`, `back_item`, `arm_back`, `glove_back`, `offhand`, `legs`, `pants`, `boots`, `torso`,
 `armor_body`, `necklace`, `head`, `hair`, `helmet`, `arm_front`, `glove_front`, `mainhand`,
 `overlay_wounds`, `overlay_element`.
-Other: `tile` **64x64**, `monster` **64, 96 or 128** square (bigger ones stand bottom-center on
-their map cell), `icon` **32x32**, `portrait` any allowed size (64x64; long items 32x96 or 64x128).
+Other: `tile` **64x64** (one map cell), `monster` **96 or 128** square, `icon` **32x32**, `portrait`
+any allowed size (64x64; long items 32x96 or 64x128). Characters and monsters stand bottom-center
+on their cell at the tile's pixel size and overlap the row above. Old 64 px character layers and
+monsters still validate (with a note) until they are redrawn.
 Must have `flags no_outline`: `shadow`, `necklace`, `overlay_wounds`, `overlay_element`, floor tiles.
 
 ## Sprite id ranges
@@ -125,26 +142,28 @@ Must have `flags no_outline`: `shadow`, `necklace`, `overlay_wounds`, `overlay_e
 0 is the empty layer. Never reuse an id or a name that already exists in `assets/sprites/`, and
 never change the id or layer of an existing sprite (characters store them on-chain).
 
-## Canvas, pose and anchors (64x64)
+## Canvas, pose and anchors (96x96)
 
-- 3/4 view facing right. Height about 44-48 px, **feet on y = 61**, 12 px headroom for helmets
-  and raised weapons, body 20-24 px wide, head 16-18 px.
-- Anchors, shared by every body and every kit: equipment must sit on both human and elf without
-  shifting.
+- 3/4 view facing right. Figure about 70-74 px from the hair to **feet on y = 91**, head about
+  13x14, shoulders about 26 px wide, normal proportions.
+- Every race has the same silhouette and anchors below the neck (an elf body is `copy` of the
+  human one); races differ in head, ears, hair, face and skin ramp. Any item fits any race.
+- The front upper arm belongs to the `torso` layer (armor covers it); `arm_front` is the forearm
+  and hand from the elbow (y 50) down, drawn over the armor.
 
 | Anchor | Point | Used by |
 |---|---|---|
-| `HAND_FRONT` | (42, 38) | main weapon grip, front glove |
-| `HAND_BACK` | (20, 38) | shield, second weapon, back glove |
-| `HEAD_CENTER` | (30, 20) | helmets, hoods |
-| `NECK` | (30, 30) | necklace, pendant around y = 32-34 |
-| `BACK` | (24, 30) | cloak, bag, weapon on the back |
-| `WAIST` | (30, 44) | belt, top of the pants |
-| `FEET` | (30, 61) | boots, shadow |
+| `HAND_FRONT` | (63, 62) | main weapon grip, front glove |
+| `HAND_BACK` | (33, 62) | shield, second weapon, back glove |
+| `HEAD_CENTER` | (48, 27) | helmets, hoods |
+| `NECK` | (48, 37) | necklace, pendant around y = 38-40 |
+| `BACK` | (44, 42) | cloak, bag, weapon on the back |
+| `WAIST` | (48, 60) | belt, top of the pants |
+| `FEET` | (48, 91) | boots, shadow |
 
-- Weapon length: one-handed 20-28 px, two-handed and staves 32-44 px. A weapon sticks out of the
+- Weapon length: one-handed 26-34 px, two-handed and staves 44-60 px. A weapon sticks out of the
   body silhouette and must not cover the face.
-- Tiles: one 64x64 sprite per map cell.
+- Tiles: one 64x64 sprite per map cell, same pixel size as the characters.
 
 ## Auto shading (done by the rasterizer, light from the top left)
 
@@ -171,7 +190,7 @@ So you know what your marks turn into in the matrix:
 - each rune adds a 2 px glow band around the `P`/`U`/`E` mask: rune 1 at 1-2 px, rune 2 at
   3-4 px, rune 3 at 5-6 px; an enchantment recolors `P` and `U` and fills `E`.
 
-## Example (64x64, valid DSL)
+## Example (geometry, a 64x64 legacy canvas, valid DSL)
 
 ```
 sprite 199 example_sword
@@ -186,16 +205,16 @@ SOCKET 44 26
 SHADE 44 10 P 3
 ```
 
-The current bodies and kits in `assets/sprites/` are the reference: read `bodies.dsl` before
-drawing anything worn.
+The current bodies and the warrior kit in `assets/sprites/` are the reference (BITMAP at 96 px):
+read `bodies.dsl` before drawing anything worn. `art sheet scene` shows tiles, the probe chest
+(`tools/art/probe/`) and warriors at one pixel scale.
 
-## Ramps used in the demo palette
+## Palette
 
-steel `#3a4250 #5c6676 #8a94a4 #c8d0dc`, skin `#7a4a32 #a86c4a #d09268 #ecbc92`,
-robe `#1e1638 #2e2257 #43337f #5c48a8`, green `#14321e #1f4d2c #2f6e3e #4a9455`,
-leather `#3a2416 #5e3c24 #86583a #a8764e`, gold `#5e3e0a #8a5e10 #d9a832 #f6e08a`,
-cold `#1d3f63 #2a5f8a #4f8fc0 #cfe8ff`, fire `#5a1208 #a8300c #e8741c #ffd860`.
-Full list: `assets/palette/palette_1.pal` (frozen on-chain as palette 1).
+`assets/palette/palette_2.pal`: 6-color ramps, shadows cold, lights warm, color 0 is the ramp's
+outline shade. Materials of cloth, leather, stone and plants carry `dither`. Indices of palette 1
+never move: new ramps and materials are appended. Palette 1 (`palette_1.pal`, 4-color ramps) is
+frozen for rasterizer 1.
 
 ## Checklist
 

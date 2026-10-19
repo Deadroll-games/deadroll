@@ -13,9 +13,10 @@ everywhere**.
 
 ## Versions
 
-- Sprite format **2**, rasterizer version **2**, sprite book **2**: canvases 32/64/96/128
-  (character layers and tiles 64x64, icons 32x32, monsters 64/96/128 square). Format 1
-  (16..64 px) is drawn only by rasterizer 1 from book 1.
+- Sprite format **2**, rasterizer version **2**, sprite books **2..** (at most 4, 64 KiB each),
+  palette format **2** (6-color ramps, material dither flag, curse and cold ramps): canvases
+  32/64/96/128 (character layers 96x96, tiles 64x64, icons 32x32, monsters 96/128 square),
+  `BITMAP` pixel sprites. Format 1 (16..64 px) and palette 1 are drawn only by rasterizer 1.
 - A rule change after a version is frozen on a chain is a **new rasterizer version**, never a
   silent fix. Until devnet holds version 2, version 2 may still change; on the local validator a
   frozen v2 means asking the user to restart it with `--reset`, then `pnpm deploy:local`.
@@ -24,9 +25,11 @@ everywhere**.
 
 - `#![no_std]` + `alloc`, **integers only**, no floats, no randomness, no time, no hash maps with
   random seeds. Unknown opcode or out-of-range arg -> error code (FORMAT.md 5), never panic.
-- Pipeline (`render`): decode the books -> per layer: commands -> slot grid -> auto shading
-  -> outline -> composite in `RenderRequest.layers` order -> ramps from the `Palette` (gray ramps
-  under `FLAG_GRAY`) -> `RAW_RGBA` canvas, or `PNG` enlarged to 512 px on the longer side.
+- Pipeline (`render`): decode the books -> per layer: commands (geometry, `BITMAP`) -> slot grid
+  -> auto shading (levels to ramp colors) -> dithering (material flag) -> overlap shadow on the
+  canvas below -> colored outline -> fill, into an indexed canvas (ramp + color per pixel) ->
+  colors last: enchantment cast, `FLAG_CURSE` blend, `FLAG_GRAY` -> `RAW_RGBA`, or `PNG`
+  enlarged by the integer scale that fits 512 px (96 -> x5 = 480).
 - `SOCKET` marks a 4x4 square (decoder bound `SOCKET_SIZE`); `render` ignores it.
 - Features: `text` (DSL and palette compilers, tools only) and `craft` (`render_crafted`:
   enchantment cast, runes in `U`, 4x4 sockets, 2 px rune glow bands; FORMAT.md 8; uses `sha2`).
@@ -55,7 +58,8 @@ everywhere**.
   `sprites` = one or more `u32 len + book`; `state` = Borsh `RenderRequest` (106 bytes);
   `asset` = 32 bytes; `mode` 0 = RAW_RGBA, 1 = PNG.
 - Profile `wasm`: `opt-level = "z"`, LTO, one codegen unit, `panic = "abort"`, stripped; then
-  `wasm-opt -Oz` (binaryen pinned in the script). **Budget 60 KB.** Report the size in the PR.
+  `wasm-opt -Oz` (binaryen pinned in the script). **Budget 60 KB** (25,364 bytes with `BITMAP` and
+  palette 2). Report the size in the PR.
 - Golden: `cargo test -p deadroll-render --test golden` renders the reference warrior
   (`crates/render/tests/data/warrior.dsl`) and writes `target/render-golden/`; then
   `node crates/render/wasm/golden.mjs target/render-wasm/deadroll_render.wasm` must print
@@ -77,9 +81,11 @@ everywhere**.
 
 ## Upload
 
-`cargo run -p art -- pack` writes `target/render-assets/{palette,book}.bin` (book 2).
-`tools/scripts` (`pnpm deploy:local`, `deploy-devnet.ts`) upload palette and book, then the
-rasterizer, then `set_sprite_books`. Uploads are resumable (chunks already equal on-chain are
+`cargo run -p art -- pack` writes `target/render-assets/palette.bin` and `book_<id>.bin` (books 2..,
+split at 64 KiB, identical sprites stored once). `tools/scripts` (`pnpm deploy:local`,
+`deploy-devnet.ts`) upload the palette and every book, then the rasterizer, then
+`set_sprite_books` with all books in id order. The app takes the palette version from the palette
+`GameConfig.palette` points at. Uploads are resumable (chunks already equal on-chain are
 skipped) and re-read the account before finalize.
 
 ## App loader
