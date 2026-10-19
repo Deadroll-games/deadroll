@@ -5,26 +5,33 @@ description: Use when drawing characters, monsters, items or tiles as sprite DSL
 
 # Pixel sprites from geometry
 
-**Source of truth: `crates/render/FORMAT.md`** (text DSL, exact rasterization rules, binary format).
-Design background: `docs/ART_DESCRIPTION.md`. If this skill and FORMAT.md ever disagree, FORMAT.md wins.
+**Source of truth: `crates/render/FORMAT.md`** (text DSL, exact rasterization rules, binary format,
+validator rules, crafted look). Design background: `docs/ART_DESCRIPTION.md` (its sizes are still
+the 32 px ones; format 2 doubled them, the numbers below are the current ones). If this skill and
+FORMAT.md ever disagree, FORMAT.md wins.
 You write sprites as text in `assets/sprites/<name>.dsl`. `tools/art` compiles and renders them,
-`tools/scripts/upload-sprites.ts` packs them into the on-chain `SpriteBook`. Shading and outline are
-done by the rasterizer: you only place shapes and slots.
+`art pack` builds the on-chain sprite book 2. Shading and outline are done by the rasterizer: you
+only place shapes and slots.
 
 ## Workflow
 
-1. Take your id range (below) and the reference layers at the end as the base pose.
-2. Write the `.dsl` file. One file may hold several sprites.
-3. `cargo run -p art -- assets/sprites/<name>.dsl --scale 8 --out <scratch>/<name>.png`, look at the PNG.
+1. Take your id range (below) and the current bodies in `assets/sprites/bodies.dsl` as the pose.
+2. Write the `.dsl` file. One file holds several sprites. Touch only your own file.
+3. Look at it:
+   - `cargo run -p art -- assets/sprites/<name>.dsl --scale 8 --out target/art/<name>` (one PNG per sprite);
+   - `cargo run -p art -- sheet characters` (bare bodies and every kit on both bodies, alive and dead);
+   - `cargo run -p art -- sheet matrix assets/sprites/<name>.dsl` (each item: 3 materials,
+     2 enchantments, 3 runes, empty and filled sockets, a debug slot view, on the body).
+   All previews go to `target/`, never to `/tmp` or the disk root.
 4. `cargo run -p art -- validate assets/sprites/<name>.dsl` must pass.
-5. Fix until the checklist passes. Touch only your own `.dsl` file.
+5. Fix until the checklist passes.
 
 ## File syntax
 
 ```
 # comment
 sprite <id> <name>        # id unique in the repo, name [a-z0-9_]{1,32}
-size <w> <h>              # 16 32 48 64
+size <w> <h>              # 32 64 96 128 (per layer type, below)
 layer <type>              # names below
 flags no_outline          # optional
 <commands, one per line>
@@ -41,36 +48,67 @@ Keywords and command names are case-sensitive. Numbers are decimal. Tokens are s
 | `ELLIPSE x y w h S` | filled ellipse inside the **bounding rect** `x y w h` (not center and radius) |
 | `RING x y w h S` | 1 px ellipse outline inside the bounding rect |
 | `POLY S x1 y1 x2 y2 x3 y3 ...` | filled polygon, 3..8 vertices; vertices are pixel **corners**; slot comes **first** |
-| `MIRROR_X a` | mirror everything drawn so far about a vertical axis, `a` doubled: `a = 32` between px 15 and 16, `a = 31` through px 15 |
+| `MIRROR_X a` | mirror everything drawn so far about a vertical axis, `a` doubled: `a = 64` between px 31 and 32, `a = 63` through px 31 |
 | `MIRROR_Y a` | same, horizontal axis |
-| `SHADE x y S shade` | one pixel with a fixed shade, 0 = darkest (max 4 per sprite) |
-| `SOCKET x y` | marks a 2x2 socket square at `(x, y)`, draws nothing (max 4) |
+| `SHADE x y S shade` | one pixel with a fixed shade, 0 = darkest |
+| `SOCKET x y` | marks a **4x4** socket square at `(x, y)`, draws nothing |
 
 `S` in the table is the slot letter. Later commands overwrite earlier ones; slot `_` erases.
-Keep every shape at least 1 px from the canvas edge (the outline needs it), except `no_outline` layers.
-At most 24 commands per sprite. Line slopes only 0, 90, 45 degrees, 1:2, 2:1.
+
+## Limits (validator, `FORMAT.md` 6)
+
+- at most **48 commands**, at most **8 `SHADE`**, at most **4 `SOCKET`** per sprite;
+- every shape 1 px from the canvas edge (the outline needs it), except `no_outline` layers;
+- line slopes only 0, 90, 45 degrees, 1:2, 2:1;
+- body layers use only `K H Y D R O _`, other layers `P S A E U O _`;
+- socket squares 4x4, entirely inside `P` (not on `U`, `E`, `A`), not overlapping;
+- rune zone `U` inside the `P` mask (every 4-neighbor is `P` or `U`), **at least 12 px** on a weapon;
+- a `portrait` with `U` keeps **6 px** from every edge (three rune glow bands of 2 px);
+- minimum detail **2 px** (exceptions: eye pupils and highlights, bowstrings, chains, `SHADE`).
+
+If a shape does not fit in 48 commands it is too detailed: simplify, merge rects, use `MIRROR_X`.
 
 ## Slots, not colors
 
 | Letter (items) | Letter (body) | Role | Shades |
 |---|---|---|---|
 | `_` | `_` | erase | |
-| `O` | `O` | explicit outline pixel (visor slit, finger gap) | 1 |
+| `O` | `O` | explicit outline pixel (visor slit, finger gap, seam) | 1 |
 | `P` | `K` | primary material / skin | 4 |
-| `S` | `H` | secondary material (handle, leather) / hair, fur | 3 |
-| `A` | `Y` | accent (trim, gems) / eyes | 3 |
-| `E` | `D` | element core (staff head, blade center) / dark details (mouth, brows, scars) | 4 |
-| `U` | `R` | rune zone (1 px strip along the blade, inside `P`) / racial features | 4 |
+| `S` | `H` | secondary material (handle, leather, straps) / hair, fur | 3 |
+| `A` | `Y` | accent (trim, buckles, studs) / eyes | 3 |
+| `E` | `D` | element core (staff head, blade center) / dark details (pupils, mouth, brows, nostrils) | 4 |
+| `U` | `R` | rune zone (strip along the blade, inside `P`) / racial features | 4 |
 
-Body layers use only `K H Y D R O _`. Colors come from the palette at render time.
+Colors come from the palette at render time. Slot `D` always uses the palette's dark ramp.
+
+## What to draw and what not to
+
+- **Silhouette first** (`ART_DESCRIPTION.md` 12): the sprite must read when filled with one color.
+  Details come after and never break the outline of the shape.
+- Draw only **permanent details of the shape**: folds, trim, straps, buckles, seams, soles, teeth,
+  claws, fur tufts, stone texture. Do **not** draw materials, enchantments, runes or gems: crafting
+  gives them (`ART_DESCRIPTION.md` 1.6, 8). You only mark where they go:
+  - `U`: rune zone, a strip at least 2 px wide along the main plate or blade (12+ px);
+  - `E`: element core, where an enchantment glows (staff or wand head, blade center);
+  - `SOCKET`: on a weapon at the guard and pommel (two-handed: also the blade near the guard);
+    on a shield or armor at the center and corners of the main plate.
+- Inside one slot, use `O` (1 px lines) for seams and finger gaps, `SHADE` for highlights
+  (an eye highlight, a buckle glint), and a second slot border as a facet (`P` next to `S`).
+- Faces at 64 px (head about 16x16): eye white = `Y` (the lightest shade via `SHADE ... Y 2`),
+  pupil 2x2 or 1x2 in `D`, a 1 px highlight with `SHADE`, brows in `D` or `H`, nose as a 2 px step
+  in `K` with a `SHADE`, mouth 4x1..2 in `D`. Keep both eyes on the same rows across races.
+- Tiles: texture from shapes with meaning (bricks and mortar, planks and nails, wave crests),
+  never random noise.
 
 ## Layer types and sizes
 
-Character layers, bottom to top (the name is what you write after `layer`):
+Character layers, bottom to top (the name is what you write after `layer`), all **64x64**:
 `shadow`, `back_item`, `arm_back`, `glove_back`, `offhand`, `legs`, `pants`, `boots`, `torso`,
 `armor_body`, `necklace`, `head`, `hair`, `helmet`, `arm_front`, `glove_front`, `mainhand`,
-`overlay_wounds`, `overlay_element`. All 32x32.
-Other: `tile` (32x32), `monster` (32, 48 or 64 square), `icon` (16x16), `portrait`.
+`overlay_wounds`, `overlay_element`.
+Other: `tile` **64x64**, `monster` **64, 96 or 128** square (bigger ones stand bottom-center on
+their map cell), `icon` **32x32**, `portrait` any allowed size (64x64; long items 32x96 or 64x128).
 Must have `flags no_outline`: `shadow`, `necklace`, `overlay_wounds`, `overlay_element`, floor tiles.
 
 ## Sprite id ranges
@@ -84,18 +122,33 @@ Must have `flags no_outline`: `shadow`, `necklace`, `overlay_wounds`, `overlay_e
 | 400-499 | monsters, tombstone |
 | 500-599 | tiles |
 
-0 is the empty layer. Never reuse an id or a name that already exists in `assets/sprites/`.
+0 is the empty layer. Never reuse an id or a name that already exists in `assets/sprites/`, and
+never change the id or layer of an existing sprite (characters store them on-chain).
 
-## Canvas and pose
+## Canvas, pose and anchors (64x64)
 
-- Character and monster layers: 3/4 view facing right, feet on y = 30.
-- Anchors: main hand (21,19), off hand (10,19), head center (15,10), neck (15,15), back (12,15),
-  waist (15,22), feet (15,30).
-- Tiles: one 32x32 sprite per map cell.
+- 3/4 view facing right. Height about 44-48 px, **feet on y = 61**, 12 px headroom for helmets
+  and raised weapons, body 20-24 px wide, head 16-18 px.
+- Anchors, shared by every body and every kit: equipment must sit on both human and elf without
+  shifting.
+
+| Anchor | Point | Used by |
+|---|---|---|
+| `HAND_FRONT` | (42, 38) | main weapon grip, front glove |
+| `HAND_BACK` | (20, 38) | shield, second weapon, back glove |
+| `HEAD_CENTER` | (30, 20) | helmets, hoods |
+| `NECK` | (30, 30) | necklace, pendant around y = 32-34 |
+| `BACK` | (24, 30) | cloak, bag, weapon on the back |
+| `WAIST` | (30, 44) | belt, top of the pants |
+| `FEET` | (30, 61) | boots, shadow |
+
+- Weapon length: one-handed 20-28 px, two-handed and staves 32-44 px. A weapon sticks out of the
+  body silhouette and must not cover the face.
+- Tiles: one 64x64 sprite per map cell.
 
 ## Auto shading (done by the rasterizer, light from the top left)
 
-A neighbor is "own" if it has the same slot in the same sprite (`U` counts as `P`).
+A neighbor is "own" if it has the same slot in the same sprite (`U` counts as `P` on items).
 ```
 L,T,R,B = left/top/right/bottom neighbor is NOT own; n = shades of the slot
 if (L||T) && !(R||B): shade = (L&&T) ? n-1 : min(2,n-1)
@@ -109,126 +162,48 @@ A border between two slots works as a facet: blade `P` next to hilt `S` gets a l
 Every empty pixel with a filled 4-neighbor in the same sprite becomes outline `#120c16`, drawn over
 lower layers and under the sprite's own fill.
 
-## Reference layers (human warrior, 32x32, valid DSL)
+## Crafted look (done by the rasterizer, `FORMAT.md` 8)
+
+So you know what your marks turn into in the matrix:
+- empty socket: the 4x4 square in material shade 0 with a 1 px frame in shade 1 around it;
+  filled: the square in the gem ramp, lightest pixel top left;
+- runes: the `U` zone split into segments, each pixel carved (shade 0) or glowing;
+- each rune adds a 2 px glow band around the `P`/`U`/`E` mask: rune 1 at 1-2 px, rune 2 at
+  3-4 px, rune 3 at 5-6 px; an enchantment recolors `P` and `U` and fills `E`.
+
+## Example (64x64, valid DSL)
 
 ```
-sprite 1 shadow
-size 32 32
-layer shadow
-flags no_outline
-RECT 10 31 12 1 P
-
-sprite 2 human_arm_back
-size 32 32
-layer arm_back
-RECT 9 16 2 3 K
-RECT 9 19 3 2 K
-
-sprite 3 human_legs
-size 32 32
-layer legs
-RECT 12 23 3 8 K
-RECT 16 23 3 8 K
-
-sprite 4 human_torso
-size 32 32
-layer torso
-RECT 12 15 7 8 K
-RECT 14 14 3 1 K
-
-sprite 5 human_head
-size 32 32
-layer head
-RECT 12 6 7 8 K
-PIXEL 14 10 Y
-PIXEL 17 10 Y
-PIXEL 16 12 D
-PIXEL 17 12 D
-
-sprite 6 human_hair
-size 32 32
-layer hair
-RECT 11 7 2 6 H
-RECT 12 5 7 2 H
-
-sprite 7 human_arm_front
-size 32 32
-layer arm_front
-RECT 19 16 2 3 K
-RECT 20 19 3 2 K
-
-sprite 100 warrior_cape
-size 32 32
-layer back_item
-RECT 10 16 6 11 P
-RECT 9 19 1 8 P
-
-sprite 101 warrior_shield
-size 32 32
-layer offhand
-RECT 4 15 5 1 P
-RECT 3 16 7 6 P
-RECT 4 22 5 1 P
-RECT 5 23 3 1 P
-PIXEL 6 24 P
-RECT 5 18 3 3 A
-
-sprite 102 warrior_pants
-size 32 32
-layer pants
-RECT 12 23 7 2 P
-RECT 12 25 3 3 P
-RECT 16 25 3 3 P
-
-sprite 103 warrior_boots
-size 32 32
-layer boots
-RECT 12 28 3 3 P
-RECT 16 28 3 3 P
-RECT 19 29 1 2 P
-RECT 12 28 3 1 S
-RECT 16 28 3 1 S
-
-sprite 104 warrior_armor
-size 32 32
-layer armor_body
-RECT 11 15 9 7 P
-RECT 18 14 3 3 P
-RECT 10 14 2 3 P
-RECT 11 22 9 1 S
-PIXEL 15 22 A
-
-sprite 105 warrior_helmet
-size 32 32
-layer helmet
-RECT 13 3 5 1 P
-RECT 12 4 7 1 P
-RECT 11 5 9 3 P
-RECT 11 8 9 1 A
-RECT 11 9 2 3 P
-
-sprite 106 warrior_sword
-size 32 32
+sprite 199 example_sword
+size 64 64
 layer mainhand
-RECT 22 5 2 12 P
-PIXEL 22 4 P
-RECT 20 17 6 1 A
+RECT 44 10 4 24 P
+RECT 44 8 2 2 P
+RECT 40 34 12 2 A
+RECT 44 36 4 4 S
+RECT 45 12 2 12 U
+SOCKET 44 26
+SHADE 44 10 P 3
 ```
+
+The current bodies and kits in `assets/sprites/` are the reference: read `bodies.dsl` before
+drawing anything worn.
 
 ## Ramps used in the demo palette
 
 steel `#3a4250 #5c6676 #8a94a4 #c8d0dc`, skin `#7a4a32 #a86c4a #d09268 #ecbc92`,
 robe `#1e1638 #2e2257 #43337f #5c48a8`, green `#14321e #1f4d2c #2f6e3e #4a9455`,
-leather `#3a2416 #5e3c24 #86583a #a8764e`, gold `#8a5e10 #d9a832 #f6e08a`,
+leather `#3a2416 #5e3c24 #86583a #a8764e`, gold `#5e3e0a #8a5e10 #d9a832 #f6e08a`,
 cold `#1d3f63 #2a5f8a #4f8fc0 #cfe8ff`, fire `#5a1208 #a8300c #e8741c #ffd860`.
-Slot `D` always uses the palette's dark ramp.
+Full list: `assets/palette/palette_1.pal` (frozen on-chain as palette 1).
 
 ## Checklist
 
 - [ ] `cargo run -p art -- validate <file>` passes
 - [ ] Silhouette reads when filled with one color
-- [ ] Weapon sticks out of the body silhouette
-- [ ] No detail thinner than 2 px except eyes, bowstrings, chains, `SHADE` highlights
-- [ ] Same anchors as the reference body
-- [ ] Ids inside your range, no duplicates
-- [ ] Dead character: tombstone sprite (400-499); grayness comes from the `GRAY` render flag
+- [ ] Weapon sticks out of the body silhouette and does not cover the face
+- [ ] No detail thinner than 2 px except pupils, highlights, bowstrings, chains, seams in `O`
+- [ ] Same anchors as the bodies; worn items checked on human and elf in `sheet characters`
+- [ ] `U`, `E` and `SOCKET` only where crafting can put something; checked in `sheet matrix`
+- [ ] Ids and layers unchanged for existing sprites, new ids inside your range
+- [ ] Dead character: grayness comes from the `GRAY` render flag, no extra sprite
