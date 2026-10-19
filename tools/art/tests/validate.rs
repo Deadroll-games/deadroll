@@ -2,7 +2,7 @@ use art::preview::{self, Pal};
 use art::validate::{validate_files, validate_text};
 
 const OK: &str =
-    "sprite 100 warrior_ok\nsize 64 64\nlayer mainhand\nRECT 21 5 4 12 P\nRECT 22 7 1 8 U\n";
+    "sprite 100 warrior_ok\nsize 64 64\nlayer mainhand\nRECT 21 5 4 16 P\nRECT 22 7 1 12 U\n";
 
 fn msgs(text: &str) -> Vec<String> {
     validate_text("warrior_kit.dsl", text)
@@ -28,22 +28,22 @@ fn accepts_a_good_sprite() {
 #[test]
 fn rejects_too_many_commands() {
     let mut t = String::from("sprite 100 a\nsize 64 64\nlayer boots\n");
-    for i in 0..25 {
+    for i in 0..49 {
         t += &format!("PIXEL {} 5 P\n", i + 2);
     }
-    rejects(&t, "commands, at most 24");
+    rejects(&t, "commands, at most 48");
 }
 
 #[test]
 fn rejects_too_many_shades_and_sockets() {
     let mut t = String::from("sprite 100 a\nsize 64 64\nlayer boots\nRECT 2 2 20 20 P\n");
-    for i in 0..5 {
+    for i in 0..9 {
         t += &format!("SHADE {} 5 P 1\n", i + 3);
     }
     rejects(&t, "SHADE commands");
     let mut t = String::from("sprite 100 a\nsize 64 64\nlayer boots\nRECT 2 2 28 28 P\n");
     for i in 0..5 {
-        t += &format!("SOCKET {} 4\n", 2 + i * 3);
+        t += &format!("SOCKET {} 4\n", 2 + i * 5);
     }
     rejects(&t, "SOCKET commands");
 }
@@ -109,14 +109,39 @@ fn rejects_sockets_outside_p_and_rune_problems() {
         "sprite 100 a\nsize 64 64\nlayer boots\nRECT 2 2 6 6 S\nSOCKET 3 3\n",
         "P mask",
     );
+    // The socket square is 4x4: 3x3 of it inside P is not enough.
     rejects(
-        "sprite 100 a\nsize 64 64\nlayer mainhand\nRECT 22 5 2 12 P\nRECT 22 7 1 3 U\n",
-        "at least 6",
+        "sprite 100 a\nsize 64 64\nlayer boots\nRECT 2 2 4 4 P\nSOCKET 3 3\n",
+        "4x4 square is not inside the P mask",
+    );
+    assert!(msgs("sprite 100 a\nsize 64 64\nlayer boots\nRECT 2 2 6 6 P\nSOCKET 3 3\n").is_empty());
+    rejects(
+        "sprite 100 a\nsize 64 64\nlayer boots\nRECT 2 2 10 10 P\nSOCKET 3 3\nSOCKET 6 6\n",
+        "overlaps another socket",
+    );
+    // 11 px of U on a weapon is too short, 12 is enough (OK).
+    rejects(
+        "sprite 100 a\nsize 64 64\nlayer mainhand\nRECT 22 5 3 16 P\nRECT 23 7 1 11 U\n",
+        "at least 12",
     );
     rejects(
         "sprite 100 a\nsize 64 64\nlayer mainhand\nRECT 22 5 4 12 P\nPIXEL 22 5 U\n",
         "inside the P mask",
     );
+}
+
+#[test]
+fn portrait_with_runes_keeps_the_glow_margin() {
+    rejects(
+        "sprite 100 a\nsize 64 64\nlayer portrait\nRECT 5 10 6 30 P\nRECT 7 12 1 12 U\n",
+        "keeps 6 px from the edges",
+    );
+    // 6 px from the edge is fine, and without a rune zone the margin is the outline's 1 px.
+    assert!(
+        msgs("sprite 100 a\nsize 64 64\nlayer portrait\nRECT 6 10 6 30 P\nRECT 8 12 1 12 U\n")
+            .is_empty()
+    );
+    assert!(msgs("sprite 100 a\nsize 64 64\nlayer portrait\nRECT 1 10 6 30 P\n").is_empty());
 }
 
 #[test]
@@ -195,8 +220,18 @@ fn all_repo_sprites_are_valid_and_render_deterministically() {
         );
     }
     for (name, layers) in preview::characters() {
-        let img = preview::render_character(&pal, &book, &layers, 1).unwrap();
-        assert!(img.w == 64 && img.h == 64, "{name}");
+        for dead in [false, true] {
+            let img = preview::render_character(&pal, &book, &layers, 1, dead).unwrap();
+            assert!(img.w == 64 && img.h == 64, "{name}");
+        }
+    }
+    // The craft matrix renders for every item sprite.
+    for c in sprites.iter().filter(|c| {
+        let lt = c.sprite.header.layer_type;
+        !deadroll_render::sprite::layer::is_body(lt) && lt < 19
+    }) {
+        let row = preview::craft_row(&pal, &book, c, 1).unwrap();
+        assert_eq!(row.len(), preview::MATRIX_COLUMNS.len(), "{}", c.src.name);
     }
 }
 

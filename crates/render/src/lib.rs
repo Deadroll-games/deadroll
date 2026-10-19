@@ -9,6 +9,8 @@ extern crate alloc;
 
 pub mod book;
 pub mod compose;
+#[cfg(feature = "craft")]
+pub mod craft;
 pub mod error;
 pub mod palette;
 pub mod png;
@@ -124,6 +126,30 @@ pub fn render(
         books.push(Book::parse(b)?);
     }
     let img = compose(&request, &palette, &books)?;
+    output(img, mode)
+}
+
+/// [`render`] with crafted item layers (`FORMAT.md` 8): `crafts` holds
+/// `(index in RenderRequest.layers, craft)`. Tools only until crafting adds it to the request.
+#[cfg(feature = "craft")]
+pub fn render_crafted(
+    sprites: &[u8],
+    palette: &[u8],
+    state: &[u8],
+    crafts: &[(usize, craft::Craft)],
+    mode: OutputMode,
+) -> Result<Output> {
+    let request = RenderRequest::decode(state)?;
+    let palette = Palette::parse(palette)?;
+    let mut books = Vec::new();
+    for b in parse_books(sprites)? {
+        books.push(Book::parse(b)?);
+    }
+    let img = craft::compose_crafted(&request, &palette, &books, crafts)?;
+    output(img, mode)
+}
+
+fn output(img: Image, mode: OutputMode) -> Result<Output> {
     Ok(match mode {
         OutputMode::RawRgba => Output {
             width: img.width as u32,

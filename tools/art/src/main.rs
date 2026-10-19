@@ -4,6 +4,7 @@ use std::process::ExitCode;
 
 use art::preview::{self, Img, Pal, SHEET_BG};
 use art::validate::{validate_files, Compiled, Issue};
+use deadroll_render::sprite::layer;
 
 const DEFAULT_PALETTE: &str = "assets/palette/palette_1.pal";
 const SPRITES_DIR: &str = "assets/sprites";
@@ -13,8 +14,9 @@ const BOOK_MAX: usize = 64 * 1024;
 const USAGE: &str = "usage:
   art validate [files.dsl ...]                 default: every file in assets/sprites
   art <file.dsl> [--id N] [--scale 4] [--out DIR|FILE.png] [--material NAME] [--bg #rrggbb]
-  art sheet characters [--scale 4] [--out FILE.png]
+  art sheet characters [--scale 4] [--out FILE.png]        bodies and kits on both bodies, alive and dead
   art sheet contact [files.dsl ...] [--scale 2] [--out FILE.png]
+  art sheet matrix [files.dsl ...] [--scale 4] [--out FILE.png]   items x materials, enchants, runes, sockets
   art pack [--out DIR]                          palette.bin + book.bin (book 2, every sprite) for upload
   art upscale [files.dsl ...]                  rewrite format 1 sources (16..64 px) for format 2, in place
 options: --palette FILE.pal (default assets/palette/palette_1.pal)";
@@ -197,26 +199,62 @@ fn cmd_sheet(o: &Opts) -> Result<bool, String> {
     let (default_scale, default_out) = match kind {
         "characters" => (4, "target/art/characters.png"),
         "contact" => (2, "target/art/contact.png"),
-        _ => return Err("sheet kind: characters | contact".into()),
+        "matrix" => (4, "target/art/matrix.png"),
+        _ => return Err("sheet kind: characters | contact | matrix".into()),
     };
     let scale = if o.scale == 0 { default_scale } else { o.scale };
+    let named: Vec<String> = files.iter().map(|p| norm(p)).collect();
+    let only = o.pos.len() > 2;
+    let picked = sprites.iter().filter(|c| !only || named.contains(&c.file));
     let mut images = Vec::new();
-    if kind == "characters" {
-        for (_, layers) in preview::characters() {
-            let mut img = preview::render_character(&pal, &book, &layers, scale)?;
-            preview::flatten(&mut img, bg);
-            images.push(img);
+    let mut cols = 8;
+    match kind {
+        "characters" => {
+            let figures = preview::characters();
+            cols = figures.len();
+            for dead in [false, true] {
+                for (_, layers) in &figures {
+                    let mut img = preview::render_character(&pal, &book, layers, scale, dead)?;
+                    preview::flatten(&mut img, bg);
+                    images.push(img);
+                }
+            }
+            let titles: Vec<&str> = figures.iter().map(|f| f.0.as_str()).collect();
+            println!("columns: {}; row 1 alive, row 2 dead", titles.join(", "));
         }
-    } else {
-        let named: Vec<String> = files.iter().map(|p| norm(p)).collect();
-        let only = o.pos.len() > 2;
-        for c in sprites.iter().filter(|c| !only || named.contains(&c.file)) {
-            let mut img = preview::render_sprite(&pal, &book, c, scale, None)?;
-            preview::flatten(&mut img, bg);
-            images.push(img);
+        "matrix" => {
+            cols = preview::MATRIX_COLUMNS.len();
+            let items = picked.filter(|c| {
+                let lt = c.sprite.header.layer_type;
+                !layer::is_body(lt) && lt != layer::TILE && lt != layer::MONSTER
+            });
+            for c in items {
+                let row = preview::craft_row(&pal, &book, c, scale)?;
+                let n = row.len();
+                for mut img in row {
+                    preview::flatten(&mut img, bg);
+                    images.push(img);
+                }
+                // Pad short rows (no body column) so every sprite starts a new row.
+                for _ in n..cols {
+                    images.push(Img {
+                        w: 1,
+                        h: 1,
+                        rgba: [bg[0], bg[1], bg[2], 255].to_vec(),
+                    });
+                }
+                println!("row: {} {}", c.src.id, c.src.name);
+            }
+            println!("columns: {}", preview::MATRIX_COLUMNS.join(" | "));
+        }
+        _ => {
+            for c in picked {
+                let mut img = preview::render_sprite(&pal, &book, c, scale, None)?;
+                preview::flatten(&mut img, bg);
+                images.push(img);
+            }
         }
     }
-    let cols = if kind == "characters" { 3 } else { 8 };
     let sheet = preview::grid(&images, cols, 4 * scale as usize, bg);
     let path = o.out.clone().unwrap_or_else(|| PathBuf::from(default_out));
     write(&path, &preview::to_png(&sheet))?;

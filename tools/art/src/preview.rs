@@ -2,10 +2,13 @@
 
 use std::collections::BTreeMap;
 
-use deadroll_render::sprite::layer;
+use deadroll_render::craft::{Craft, Rune, SocketFill, SOCKETS_MAX};
+use deadroll_render::raster::rasterize;
+use deadroll_render::sprite::{layer, slot, Cmd, SOCKET_SIZE};
 use deadroll_render::text::{compile_palette, PaletteSrc};
 use deadroll_render::{
-    book, encode_books, render, scale, Image, LayerRef, OutputMode, RenderRequest, ASSET_LEN,
+    book, encode_books, render, render_crafted, scale, Image, LayerRef, Output, OutputMode,
+    RenderRequest, ASSET_LEN, FLAG_GRAY,
 };
 
 use crate::validate::Compiled;
@@ -145,6 +148,29 @@ fn run(pal: &Pal, book_bytes: &[u8], req: &RenderRequest, k: u32) -> Result<Img,
         OutputMode::RawRgba,
     )
     .map_err(|e| format!("render: {e:?}"))?;
+    scaled(out, k)
+}
+
+/// [`run`] with crafted layers (`deadroll_render::render_crafted`).
+fn run_crafted(
+    pal: &Pal,
+    book_bytes: &[u8],
+    req: &RenderRequest,
+    crafts: &[(usize, Craft)],
+    k: u32,
+) -> Result<Img, String> {
+    let out = render_crafted(
+        &encode_books(&[book_bytes]),
+        &pal.src.bytes,
+        &req.encode(),
+        crafts,
+        OutputMode::RawRgba,
+    )
+    .map_err(|e| format!("render: {e:?}"))?;
+    scaled(out, k)
+}
+
+fn scaled(out: Output, k: u32) -> Result<Img, String> {
     let img = Image {
         width: out.width as usize,
         height: out.height as usize,
@@ -191,75 +217,254 @@ const fn lk(material: &'static str, accent: &'static str) -> Look {
     }
 }
 
-/// The three demo characters: (title, layers).
-pub fn characters() -> Vec<(&'static str, Vec<Entry>)> {
-    let body_h = |ty, id| (ty, id, lk("human", EYES));
-    let body_e = |ty, id| (ty, id, lk("elf", EYES));
-    let warrior = vec![
-        (0, 1, lk("stone", GOLD)),
-        (1, 100, lk("cape", GOLD)),
-        (4, 101, lk("steel", GOLD)),
-        body_h(2, 2),
-        body_h(5, 3),
-        (6, 102, lk("leather", GOLD)),
-        (7, 103, lk("leather", GOLD)),
-        body_h(8, 4),
-        (9, 104, lk("steel", GOLD)),
-        body_h(11, 5),
-        body_h(12, 6),
-        (13, 105, lk("steel", GOLD)),
-        body_h(14, 7),
-        (16, 106, lk("steel", GOLD)),
-    ];
-    let mage = vec![
-        (0, 1, lk("stone", GOLD)),
-        (1, 205, lk("leather", GOLD)),
-        body_e(2, 20),
-        body_e(5, 21),
-        (6, 202, lk("robe", GOLD)),
-        (7, 203, lk("leather", GOLD)),
-        body_e(8, 22),
-        (9, 201, lk("robe", GOLD)),
-        body_e(11, 23),
-        body_e(12, 24),
-        (13, 200, lk("robe", GOLD)),
-        body_e(14, 25),
-        (16, 204, lk("leather", GOLD)),
-    ];
-    let support = vec![
-        (0, 1, lk("stone", GOLD)),
-        (1, 304, lk("leather", GOLD)),
-        body_h(2, 2),
-        body_h(5, 3),
-        (7, 302, lk("leather", GOLD)),
-        body_h(8, 4),
-        (9, 301, lk("leather", GOLD)),
-        (10, 305, lk("leather", GOLD)),
-        body_h(11, 5),
-        body_h(12, 6),
-        (13, 300, lk("leather", GOLD)),
-        body_h(14, 7),
-        (16, 303, lk("leather", GOLD)),
-    ];
-    vec![
-        ("human_warrior", warrior),
-        ("elf_mage", mage),
-        ("human_support", support),
-    ]
+/// Body layers of a race: (layer type, sprite id).
+const HUMAN: [(u8, u16); 6] = [(2, 2), (5, 3), (8, 4), (11, 5), (12, 6), (14, 7)];
+const ELF: [(u8, u16); 6] = [(2, 20), (5, 21), (8, 22), (11, 23), (12, 24), (14, 25)];
+
+/// A kit item: layer type, sprite id, material.
+type KitItem = (u8, u16, &'static str);
+
+/// Class kits.
+const KITS: [(&str, &[KitItem]); 3] = [
+    (
+        "warrior",
+        &[
+            (1, 100, "cape"),
+            (4, 101, "steel"),
+            (6, 102, "leather"),
+            (7, 103, "leather"),
+            (9, 104, "steel"),
+            (13, 105, "steel"),
+            (16, 106, "steel"),
+        ],
+    ),
+    (
+        "mage",
+        &[
+            (1, 205, "leather"),
+            (6, 202, "robe"),
+            (7, 203, "leather"),
+            (9, 201, "robe"),
+            (13, 200, "robe"),
+            (16, 204, "leather"),
+        ],
+    ),
+    (
+        "support",
+        &[
+            (1, 304, "leather"),
+            (7, 302, "leather"),
+            (9, 301, "leather"),
+            (10, 305, "leather"),
+            (13, 300, "leather"),
+            (16, 303, "leather"),
+        ],
+    ),
+];
+
+fn body(race: &str) -> Vec<Entry> {
+    let (layers, mat) = if race == "elf" {
+        (ELF, "elf")
+    } else {
+        (HUMAN, "human")
+    };
+    let mut v = vec![(0, 1, lk("stone", GOLD))];
+    v.extend(layers.iter().map(|&(ty, id)| (ty, id, lk(mat, EYES))));
+    v
 }
 
-/// Renders one composed character. Fails if a sprite id is missing from the book.
+/// Preview figures: each bare body, then every kit on each body: (title, layers).
+pub fn characters() -> Vec<(String, Vec<Entry>)> {
+    let mut out = Vec::new();
+    for race in ["human", "elf"] {
+        out.push((race.to_string(), body(race)));
+    }
+    for (kit, items) in KITS {
+        for race in ["human", "elf"] {
+            let mut layers = body(race);
+            layers.extend(items.iter().map(|&(ty, id, m)| (ty, id, lk(m, GOLD))));
+            layers.sort_by_key(|l| l.0);
+            out.push((format!("{race}_{kit}"), layers));
+        }
+    }
+    out
+}
+
+/// Renders one composed character, alive or dead (gray ramps). Fails if a sprite id is missing.
 pub fn render_character(
     pal: &Pal,
     book_bytes: &[u8],
     layers: &[Entry],
     scale: u32,
+    dead: bool,
 ) -> Result<Img, String> {
     let l: Vec<(usize, u16, Look)> = layers
         .iter()
         .map(|&(t, id, lk)| (t as usize, id, lk))
         .collect();
-    run(pal, book_bytes, &request(pal, &l)?, scale)
+    let mut req = request(pal, &l)?;
+    if dead {
+        req.flags = FLAG_GRAY;
+    }
+    run(pal, book_bytes, &req, scale)
+}
+
+/// Columns of the craft matrix (`ART_DESCRIPTION.md` 14 step 5), in order.
+pub const MATRIX_COLUMNS: [&str; 11] = [
+    "steel",
+    "stone",
+    "leather",
+    "steel + darkness enchant",
+    "steel + cold enchant level 4",
+    "steel + 3 runes (fire, cold, darkness)",
+    "steel + empty sockets",
+    "steel + filled sockets",
+    "steel + darkness + 3 runes + filled sockets",
+    "debug slots (P red, S green, A yellow, E magenta, U cyan, sockets white)",
+    "on the human body, full craft (character layers only)",
+];
+
+/// One row of the craft matrix for an item sprite: see [`MATRIX_COLUMNS`].
+pub fn craft_row(pal: &Pal, book_bytes: &[u8], c: &Compiled, k: u32) -> Result<Vec<Img>, String> {
+    let lt = c.sprite.header.layer_type;
+    let character_layer = (lt as usize) < 19;
+    let idx = if character_layer { lt as usize } else { 0 };
+    let points = c
+        .sprite
+        .cmds
+        .iter()
+        .filter(|c| matches!(c, Cmd::Socket { .. }))
+        .count() as u8;
+    let rune = |name: &str, darkens| -> Result<Option<Rune>, String> {
+        Ok(Some(Rune {
+            ramp: pal.ramp(name)?,
+            darkens,
+        }))
+    };
+    let runes = [
+        rune("fire", false)?,
+        rune(COLD, false)?,
+        rune("dark", true)?,
+    ];
+    let mut gems = [SocketFill::Empty; SOCKETS_MAX];
+    for (g, name) in gems.iter_mut().zip([GOLD, "green", COLD, "fire"]) {
+        *g = SocketFill::Ramp(pal.ramp(name)?);
+    }
+    let plain = Craft {
+        seed: [c.src.id as u8; 32],
+        ..Default::default()
+    };
+    let item = |material: &str, element: &str| -> Result<LayerRef, String> {
+        Ok(LayerRef {
+            sprite_id: c.src.id,
+            material_ramp: pal.material(material)?,
+            accent_ramp: pal.ramp(GOLD)?,
+            element_ramp: if element.is_empty() {
+                0
+            } else {
+                pal.ramp(element)?
+            },
+        })
+    };
+    let one = |l: LayerRef, craft: Craft| -> Result<Img, String> {
+        let mut req = request(pal, &[])?;
+        req.layers[idx] = l;
+        run_crafted(pal, book_bytes, &req, &[(idx, craft)], k)
+    };
+    let full = Craft {
+        enchant_level: 2,
+        runes,
+        sockets_len: points,
+        sockets: gems,
+        ..plain
+    };
+    let mut row = vec![
+        one(item("steel", "")?, plain)?,
+        one(item("stone", "")?, plain)?,
+        one(item("leather", "")?, plain)?,
+        one(item("steel", "dark")?, plain)?,
+        one(
+            item("steel", COLD)?,
+            Craft {
+                enchant_level: 4,
+                ..plain
+            },
+        )?,
+        one(item("steel", "")?, Craft { runes, ..plain })?,
+        one(
+            item("steel", "")?,
+            Craft {
+                sockets_len: points,
+                ..plain
+            },
+        )?,
+        one(
+            item("steel", "")?,
+            Craft {
+                sockets_len: points,
+                sockets: gems,
+                ..plain
+            },
+        )?,
+        one(item("steel", "dark")?, full)?,
+        debug_slots(c, k),
+    ];
+    if character_layer {
+        let l: Vec<(usize, u16, Look)> = body("human")
+            .iter()
+            .map(|&(t, id, lk)| (t as usize, id, lk))
+            .collect();
+        let mut req = request(pal, &l)?;
+        req.layers[idx] = item("steel", "dark")?;
+        row.push(run_crafted(pal, book_bytes, &req, &[(idx, full)], k)?);
+    }
+    Ok(row)
+}
+
+/// The slot grid of a sprite in fixed debug colors (brighter = lighter shade), socket squares white.
+pub fn debug_slots(c: &Compiled, k: u32) -> Img {
+    let g = rasterize(&c.sprite);
+    let mut rgba = vec![0u8; g.width * g.height * 4];
+    for (i, cell) in g.cells.iter().enumerate() {
+        let base: Rgb = match cell.slot {
+            slot::OUTLINE => [0x12, 0x0c, 0x16],
+            slot::PRIMARY => [210, 70, 70],
+            slot::SECONDARY => [70, 180, 80],
+            slot::ACCENT => [235, 205, 50],
+            slot::ELEMENT => [205, 70, 205],
+            slot::RUNE => [70, 205, 225],
+            _ => continue,
+        };
+        let n = slot::shades(cell.slot).max(2) as u32;
+        let f = 55 + 45 * cell.shade as u32 / (n - 1);
+        let o = i * 4;
+        for ch in 0..3 {
+            rgba[o + ch] = (base[ch] as u32 * f / 100) as u8;
+        }
+        rgba[o + 3] = 255;
+    }
+    let side = SOCKET_SIZE as usize;
+    for cmd in &c.sprite.cmds {
+        if let Cmd::Socket { x, y } = *cmd {
+            for py in y as usize..(y as usize + side).min(g.height) {
+                for px in x as usize..(x as usize + side).min(g.width) {
+                    let o = (py * g.width + px) * 4;
+                    rgba[o..o + 4].copy_from_slice(&[245, 245, 245, 255]);
+                }
+            }
+        }
+    }
+    let img = Image {
+        width: g.width,
+        height: g.height,
+        rgba,
+    };
+    let big = scale(&img, k).expect("debug scale");
+    Img {
+        w: big.width,
+        h: big.height,
+        rgba: big.rgba,
+    }
 }
 
 /// Alpha-blends onto a flat background, making every pixel opaque.

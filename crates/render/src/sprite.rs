@@ -9,6 +9,8 @@ pub const HEADER_LEN: usize = 6;
 pub const FLAG_NO_OUTLINE: u8 = 1;
 pub const POLY_MIN: u8 = 3;
 pub const POLY_MAX: u8 = 8;
+/// Side of the socket square at a `SOCKET` point (`FORMAT.md` 2.7).
+pub const SOCKET_SIZE: u8 = 4;
 
 /// Slot values (`FORMAT.md` 1.3). Items and body share the numbers.
 pub mod slot {
@@ -324,7 +326,8 @@ pub fn decode(bytes: &[u8]) -> Result<Sprite> {
                 if s != 0 {
                     return Err(Error::Slot);
                 }
-                if x as u16 + 2 > w as u16 || y as u16 + 2 > h as u16 {
+                let side = SOCKET_SIZE as u16;
+                if x as u16 + side > w as u16 || y as u16 + side > h as u16 {
                     return Err(Error::Arg);
                 }
                 Cmd::Socket { x, y }
@@ -387,7 +390,7 @@ mod tests {
                 0x70, 32, // MIRROR_X
                 0x80, 64, // MIRROR_Y
                 0x91, 4, 4, 0, // SHADE O
-                0xA0, 30, 30, // SOCKET
+                0xA0, 28, 28, // SOCKET
             ],
             10,
         );
@@ -403,7 +406,7 @@ mod tests {
                 slot: 2
             }
         );
-        assert_eq!(s.cmds[9], Cmd::Socket { x: 30, y: 30 });
+        assert_eq!(s.cmds[9], Cmd::Socket { x: 28, y: 28 });
     }
 
     #[test]
@@ -459,7 +462,8 @@ mod tests {
             &[0x62, 3, 0, 0, 33, 0, 0, 1], // poly vertex past w
             &[0x70, 65],                   // mirror axis
             &[0x93, 0, 0, 3],              // shade >= n (S has 3)
-            &[0xA0, 31, 0],                // socket square outside
+            &[0xA0, 29, 0],                // socket square (4x4) past the right edge
+            &[0xA0, 0, 29],                // socket square past the bottom edge
         ] {
             assert_eq!(decode(&sprite(cmd, 1)), Err(Error::Arg), "{cmd:?}");
         }
@@ -470,7 +474,7 @@ mod tests {
         // 128x128: coordinates up to 127, a rect to the edge, the widest mirror axis.
         let mut v = vec![FORMAT_VERSION, 128, 128, 21, 0, 4];
         v.extend_from_slice(&[
-            0x12, 0, 0, 128, 128, 0x22, 127, 127, 0x70, 255, 0xA0, 126, 126,
+            0x12, 0, 0, 128, 128, 0x22, 127, 127, 0x70, 255, 0xA0, 124, 124,
         ]);
         assert_eq!(decode(&v).unwrap().cmds.len(), 4);
         v.extend_from_slice(&[0x12, 1, 0, 128, 1]);

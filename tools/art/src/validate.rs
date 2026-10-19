@@ -4,13 +4,15 @@
 use std::collections::BTreeMap;
 
 use deadroll_render::raster::{rasterize, Grid};
-use deadroll_render::sprite::{self, layer, slot, Cmd, Sprite};
+use deadroll_render::sprite::{self, layer, slot, Cmd, Sprite, SOCKET_SIZE};
 use deadroll_render::text::{compile_sprites, SpriteSrc};
 
-pub const MAX_CMDS: usize = 24;
-pub const MAX_SHADE: usize = 4;
+pub const MAX_CMDS: usize = 48;
+pub const MAX_SHADE: usize = 8;
 pub const MAX_SOCKET: usize = 4;
-pub const MIN_RUNE_WEAPON: usize = 6;
+pub const MIN_RUNE_WEAPON: usize = 12;
+/// Margin of an item portrait with a rune zone: three 2 px glow bands (`deadroll_render::craft`).
+pub const PORTRAIT_RUNE_MARGIN: i32 = 6;
 const MAINHAND: u8 = 16;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -206,18 +208,21 @@ fn check_sprite(c: &Compiled, out: &mut Vec<Issue>) {
         }
     }
 
-    // Sockets: 2x2 squares inside the P mask, not overlapping each other.
+    // Sockets: SOCKET_SIZE squares inside the P mask, not overlapping each other.
+    let n = SOCKET_SIZE as i32;
     let mut taken: Vec<(i32, i32)> = Vec::new();
     for cmd in &s.cmds {
         if let Cmd::Socket { x, y } = *cmd {
             let (x, y) = (x as i32, y as i32);
-            let sq = [(x, y), (x + 1, y), (x, y + 1), (x + 1, y + 1)];
+            let sq: Vec<(i32, i32)> = (0..n)
+                .flat_map(|dy| (0..n).map(move |dx| (x + dx, y + dy)))
+                .collect();
             if sq
                 .iter()
                 .any(|&(px, py)| slot_at(&g, px, py) != slot::PRIMARY)
             {
                 bad(format!(
-                    "SOCKET {x} {y}: the 2x2 square is not inside the P mask"
+                    "SOCKET {x} {y}: the {n}x{n} square is not inside the P mask"
                 ));
             }
             if sq.iter().any(|p| taken.contains(p)) {
@@ -227,7 +232,8 @@ fn check_sprite(c: &Compiled, out: &mut Vec<Issue>) {
         }
     }
 
-    // Rune zone `U` (item layers): inside the P mask, at least 6 px on a weapon.
+    // Rune zone `U` (item layers): inside the P mask, at least MIN_RUNE_WEAPON px on a weapon,
+    // and a portrait with runes keeps PORTRAIT_RUNE_MARGIN from the edges for the glow bands.
     if !layer::is_body(h.layer_type) {
         let mut runes = 0usize;
         let mut outside = None;
@@ -252,6 +258,19 @@ fn check_sprite(c: &Compiled, out: &mut Vec<Issue>) {
             bad(format!(
                 "rune zone has {runes} px, a weapon needs at least {MIN_RUNE_WEAPON}"
             ));
+        }
+        let m = PORTRAIT_RUNE_MARGIN;
+        if runes > 0 && h.layer_type == layer::PORTRAIT {
+            let near = (0..hh)
+                .flat_map(|y| (0..w).map(move |x| (x, y)))
+                .find(|&(x, y)| {
+                    slot_at(&g, x, y) != 0 && (x < m || y < m || x >= w - m || y >= hh - m)
+                });
+            if let Some((x, y)) = near {
+                bad(format!(
+                    "pixel ({x}, {y}): a portrait with a rune zone keeps {m} px from the edges"
+                ));
+            }
         }
     }
 }

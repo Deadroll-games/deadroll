@@ -9,7 +9,7 @@ use crate::book::Book;
 use crate::error::{Error, Result};
 use crate::palette::{Palette, Rgb};
 use crate::raster::{outline_mask, rasterize, Grid};
-use crate::sprite::{self, layer, slot, Header};
+use crate::sprite::{self, layer, slot, Cmd, Header};
 
 /// Alpha of a `shadow` layer pixel over transparency, and the matching darkening factor.
 pub const SHADOW_ALPHA: u32 = 90;
@@ -23,14 +23,30 @@ pub struct Image {
     pub rgba: Vec<u8>,
 }
 
-struct Layer {
-    lref: LayerRef,
-    header: Header,
-    grid: Grid,
+/// One decoded and shaded layer of a request.
+#[cfg_attr(not(feature = "craft"), allow(dead_code))]
+pub(crate) struct Layer {
+    /// Index in `RenderRequest.layers`.
+    pub index: usize,
+    pub lref: LayerRef,
+    pub header: Header,
+    pub grid: Grid,
+    /// The decoded commands (crafting reads the `SOCKET` points).
+    pub cmds: Vec<Cmd>,
 }
 
 /// Renders a request to an unscaled RGBA image.
 pub fn compose(req: &RenderRequest, palette: &Palette, books: &[Book]) -> Result<Image> {
+    compose_with(req, palette, books, |_, _| Ok(()))
+}
+
+/// [`compose`] with a step run on the canvas right after each layer's fill (crafting, `FORMAT.md` 8).
+pub(crate) fn compose_with(
+    req: &RenderRequest,
+    palette: &Palette,
+    books: &[Book],
+    mut after_layer: impl FnMut(&Layer, &mut Image) -> Result<()>,
+) -> Result<Image> {
     if req.flags & !FLAG_GRAY != 0 {
         return Err(Error::Request);
     }
@@ -38,7 +54,7 @@ pub fn compose(req: &RenderRequest, palette: &Palette, books: &[Book]) -> Result
         return Err(Error::Palette);
     }
     let mut layers = Vec::new();
-    for l in req.layers.iter().filter(|l| !l.is_empty()) {
+    for (index, l) in req.layers.iter().enumerate().filter(|(_, l)| !l.is_empty()) {
         if l.material_ramp as usize >= palette.material_count()
             || l.accent_ramp as usize >= palette.ramp_count()
             || l.element_ramp as usize >= palette.ramp_count()
@@ -51,9 +67,11 @@ pub fn compose(req: &RenderRequest, palette: &Palette, books: &[Book]) -> Result
             .ok_or(Error::Sprite)?;
         let s = sprite::decode(bytes)?;
         layers.push(Layer {
+            index,
             lref: *l,
             header: s.header,
             grid: rasterize(&s),
+            cmds: s.cmds,
         });
     }
     let width = layers
@@ -66,10 +84,15 @@ pub fn compose(req: &RenderRequest, palette: &Palette, books: &[Book]) -> Result
         .map(|l| l.grid.height)
         .max()
         .ok_or(Error::Request)?;
-    let mut rgba = vec![0u8; width * height * 4];
+    let mut img = Image {
+        width,
+        height,
+        rgba: vec![0u8; width * height * 4],
+    };
 
     for l in &layers {
         let g = &l.grid;
+        let rgba = &mut img.rgba;
         let put = |rgba: &mut [u8], x: usize, y: usize, c: Rgb| {
             let o = (y * width + x) * 4;
             rgba[o..o + 4].copy_from_slice(&[c[0], c[1], c[2], 255]);
@@ -77,7 +100,7 @@ pub fn compose(req: &RenderRequest, palette: &Palette, books: &[Book]) -> Result
         if !l.header.no_outline() {
             let mask = outline_mask(g);
             for (i, _) in mask.iter().enumerate().filter(|(_, &m)| m) {
-                put(&mut rgba, i % g.width, i / g.width, palette.outline);
+                put(rgba, i % g.width, i / g.width, palette.outline);
             }
         }
         let body = layer::is_body(l.header.layer_type);
@@ -101,20 +124,17 @@ pub fn compose(req: &RenderRequest, palette: &Palette, books: &[Book]) -> Result
                 }
             } else {
                 put(
-                    &mut rgba,
+                    rgba,
                     x,
                     y,
                     color(palette, &l.lref, body, gray, c.slot, c.shade),
                 );
             }
         }
+        after_layer(l, &mut img)?;
     }
 
-    Ok(Image {
-        width,
-        height,
-        rgba,
-    })
+    Ok(img)
 }
 
 /// Gray copy of a ramp color: a dead character is drawn with every ramp in gray
@@ -125,7 +145,14 @@ pub const fn gray(c: Rgb) -> Rgb {
 }
 
 /// Slot + shade -> color (`FORMAT.md` 1.3, 2.8, 3.2, 3.4).
-fn color(p: &Palette, l: &LayerRef, body: bool, gray_ramps: bool, s: u8, shade: u8) -> Rgb {
+pub(crate) fn color(
+    p: &Palette,
+    l: &LayerRef,
+    body: bool,
+    gray_ramps: bool,
+    s: u8,
+    shade: u8,
+) -> Rgb {
     let n = slot::shades(s);
     let ci = if n <= 1 { 0 } else { shade * 3 / (n - 1) };
     let (primary, secondary) = p.material(l.material_ramp);

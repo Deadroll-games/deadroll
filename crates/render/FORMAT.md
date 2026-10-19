@@ -27,8 +27,8 @@ RECT 44 10 4 24 P
 RECT 44 8 2 2 P
 RECT 40 34 12 2 A
 RECT 44 36 4 4 S
-RECT 44 14 2 16 U
-SOCKET 44 34
+RECT 45 12 2 12 U
+SOCKET 44 26
 RECT 44 10 2 2 P
 SHADE 44 10 P 3
 ```
@@ -57,7 +57,7 @@ Then the commands until the next `sprite` or end of file.
 | `MIRROR_X a` | 0x7 | 2 | mirror the layer about a vertical axis, `a` in doubled coordinates (2.6) |
 | `MIRROR_Y a` | 0x8 | 2 | same, horizontal axis |
 | `SHADE x y S shade` | 0x9 | 4 | one pixel with an explicit shade `0..n-1` of the slot (0 = darkest) |
-| `SOCKET x y` | 0xA | 3 | socket point, draws nothing; the 2x2 square at `(x, y)` is the socket |
+| `SOCKET x y` | 0xA | 3 | socket point, draws nothing; the 4x4 square at `(x, y)` is the socket |
 
 Note: the slot comes last for every command except `POLY` (first, because the vertex list is variable)
 and `SHADE` (before the shade). `ELLIPSE`/`RING` take the **bounding rect**, not center and radii.
@@ -194,8 +194,9 @@ are skipped. `a = 64` mirrors between pixels 31 and 32, `a = 63` through the cen
 ### 2.7 SHADE, SOCKET
 
 `SHADE` sets slot, shade and `explicit = true`; auto shading leaves it alone.
-`SOCKET` draws nothing. Sockets, runes and enchantment effects are `TODO(post-demo)`; in format 2 the
-points are decoded, validated and ignored by the renderer.
+`SOCKET` draws nothing. The socket is the 4x4 square with its top left corner at `(x, y)`; it must
+lie inside the canvas (error 6). `render` ignores the points; the crafted look (section 8) draws
+sockets, runes and the enchantment cast.
 
 ### 2.8 Auto shading (light from the top left)
 
@@ -326,7 +327,7 @@ The decoder rejects, with an error code:
 | 3 | canvas size not in 32/64/96/128, unknown layer type, or reserved flag bits |
 | 4 | unknown opcode (0x0, 0xB..0xF) |
 | 5 | slot > 6, or non-zero slot on `MIRROR_*`/`SOCKET`, or slot 0 on `SHADE` |
-| 6 | argument out of range: rect/ellipse with `w` or `h` 0 or past the canvas, pixel/line point outside, POLY `n` not 3..8 or vertex past `w`/`h`, mirror axis > `2*size`, shade >= `n`, socket square outside |
+| 6 | argument out of range: rect/ellipse with `w` or `h` 0 or past the canvas, pixel/line point outside, POLY `n` not 3..8 or vertex past `w`/`h`, mirror axis > `2*size`, shade >= `n`, socket square (4x4) outside |
 | 7 | sprite id not found in any book, or book index not sorted / out of bounds |
 | 8 | palette: bad format, version mismatch, ramp or material index out of range |
 | 9 | bad render request, reserved flag bits, bad output mode or scale, no sprite book |
@@ -334,12 +335,13 @@ The decoder rejects, with an error code:
 
 ## 6. Validator rules (`tools/art`, not the decoder)
 
-- at most 24 commands, at most 4 `SHADE`, at most 4 `SOCKET`;
+- at most 48 commands, at most 8 `SHADE`, at most 4 `SOCKET`;
 - every shape at least 1 px from the canvas edge (not for `no_outline` layers);
 - `LINE` slopes only 0, 90, 45 degrees, 1:2 and 2:1;
 - required `no_outline` for the layer types listed in 1.4; size allowed for the layer type (1.4);
 - slots allowed for the layer type (body layers: `K H Y D R O _`);
-- socket squares inside the `P` mask and not overlapping; `U` inside the `P` mask, at least 6 px for a weapon;
+- socket squares (4x4) inside the `P` mask and not overlapping; `U` inside the `P` mask, at least 12 px for a weapon;
+- a `portrait` with a `U` zone keeps 6 px from every canvas edge (three 2 px glow bands, section 8);
 - id range and unique ids and names across `assets/sprites/`;
 - the same sprite rendered twice gives the same bytes.
 
@@ -365,3 +367,45 @@ last_error() -> u32             (section 5 code, 0 = ok)
 
 `result_width/height` are the size of the output: the canvas for `RAW_RGBA`, the enlarged image
 for `PNG`. The result buffer is owned by the module and valid until the next `render` call.
+
+## 8. Crafted look (feature `craft`, previews only)
+
+`render_crafted(sprites, palette, state, crafts, mode)` is `render` plus a `Craft` per item layer
+(`ART_DESCRIPTION.md` 9.2, 9.4, 10). It is not in `RenderRequest` or the WASM ABI yet; `tools/art`
+renders the preview matrix with it, and crafting adds the same struct to the item state.
+
+```
+Craft {
+  seed: [u8; 32]                 item address, the rune pattern seed
+  enchant_level: u8
+  runes: [Option<Rune>; 3]       insertion order, no Some after a None
+  sockets_len: u8                sockets that exist, <= SOCKET points of the sprite, <= 4
+  sockets: [SocketFill; 4]       Empty | Ramp(r): the gem or rune set in socket i
+}
+Rune { ramp: u8, darkens: bool } the rune type's ramp; darkens = a darkness rune
+```
+
+The enchantment is the layer's `element_ramp` (0 = none), so it also colors `E`. `crafts` holds
+`(index in RenderRequest.layers, craft)`; each index at most once, on a non-empty item layer
+(otherwise error 9). A rune or gem ramp past the palette is error 8; `sockets_len` past the
+points, a rune after an empty rune slot or a body layer is error 9.
+
+Right after a crafted layer's fill (2.9 outline, then cells), in this order, all colors grayed
+under `GRAY`:
+
+1. **Enchantment cast** (`element_ramp != 0`): every `P` and `U` cell gets material color `i`
+   blended per channel with color `i` of the enchantment ramp:
+   `k = min(64 + 16 * enchant_level, 160)`, `c = (m * (256 - k) + e * k) / 256`.
+2. **Runes**: the `U` cells in row-major order are split into `r` equal segments
+   (segment `j` = cells `j*N/r .. (j+1)*N/r`). Segment `j` uses splitmix64 seeded with the first
+   8 bytes (little-endian) of `SHA-256(seed || j as u8)`; per cell an even `next()` is carved
+   (material color 0, with the cast), otherwise the rune ramp at the cell's shade.
+3. **Sockets**, the first `sockets_len` points in command order: a 1 px frame around the 4x4
+   square in material color 1, only on cells of the layer's `P`/`U`/`E` mask; then the square:
+   empty = material color 0; filled = the fill ramp shaded as a lone 4x4 shape (2.8 with 4
+   shades, the top left cell is the lightest).
+4. **Glow bands**: Chebyshev distance `d` from the layer's `P`/`U`/`E` mask, within the layer
+   canvas. Rune `j` (0-based) covers `d = 2j+1 ..= 2j+2`, opacity 55, 40, 30 percent. The color is
+   ramp color 3, or color 0 for a darkening rune. Over a transparent pixel the band writes
+   `(color, opacity * 255 / 100)`; otherwise `rgb = (rgb * (100 - op) + color * op) / 100` and the
+   alpha becomes the larger of the two.
