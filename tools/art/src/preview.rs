@@ -127,16 +127,60 @@ fn request(pal: &Pal, layers: &[(usize, u16, Look)]) -> Result<RenderRequest, St
     Ok(req)
 }
 
-/// Id of the book `art pack` builds: book 2 holds sprite format 2 (book 1, format 1, is frozen on-chain).
+/// Id of the first book `art pack` builds: books 2.. hold sprite format 2 (book 1, format 1, is
+/// frozen on-chain).
 pub const BOOK_ID: u16 = 2;
+/// `SpriteBook` body limit in programs/render.
+pub const BOOK_MAX: usize = 64 * 1024;
+/// `GameConfig.sprite_books` slots.
+pub const BOOKS_MAX: usize = 4;
 
-/// Sprite books for rendering and upload: one book holding every compiled sprite.
-pub fn pack_book(sprites: &[Compiled]) -> Result<Vec<u8>, String> {
-    let items: Vec<(u16, &[u8])> = sprites
+fn items(sprites: &[&Compiled]) -> Vec<(u16, Vec<u8>)> {
+    sprites
         .iter()
-        .map(|c| (c.src.id, c.src.bytes.as_slice()))
-        .collect();
-    book::pack(BOOK_ID, &items).map_err(|e| format!("book: {e:?}"))
+        .map(|c| (c.src.id, c.src.bytes.clone()))
+        .collect()
+}
+
+fn pack_items(id: u16, items: &[(u16, Vec<u8>)]) -> Result<Vec<u8>, String> {
+    let list: Vec<(u16, &[u8])> = items.iter().map(|(i, b)| (*i, b.as_slice())).collect();
+    book::pack(id, &list).map_err(|e| format!("book: {e:?}"))
+}
+
+/// One book holding every compiled sprite, for previews (no size limit).
+pub fn pack_book(sprites: &[Compiled]) -> Result<Vec<u8>, String> {
+    pack_items(BOOK_ID, &items(&sprites.iter().collect::<Vec<_>>()))
+}
+
+/// Books for upload: sprites in id order, a new book (id + 1) whenever the next sprite would push
+/// the body past `BOOK_MAX`. At most `BOOKS_MAX` books (the `GameConfig` slots).
+pub fn pack_books(sprites: &[Compiled]) -> Result<Vec<Vec<u8>>, String> {
+    let mut sorted: Vec<&Compiled> = sprites.iter().collect();
+    sorted.sort_by_key(|c| c.src.id);
+    let mut books = Vec::new();
+    let mut cur: Vec<(u16, Vec<u8>)> = Vec::new();
+    for c in sorted {
+        cur.push((c.src.id, c.src.bytes.clone()));
+        let id = BOOK_ID + books.len() as u16;
+        if pack_items(id, &cur)?.len() > BOOK_MAX {
+            let last = cur.pop().expect("just pushed");
+            if cur.is_empty() {
+                return Err(format!("sprite {} alone is over {BOOK_MAX} bytes", last.0));
+            }
+            books.push(pack_items(id, &cur)?);
+            cur = vec![last];
+        }
+    }
+    if !cur.is_empty() {
+        books.push(pack_items(BOOK_ID + books.len() as u16, &cur)?);
+    }
+    if books.len() > BOOKS_MAX {
+        return Err(format!(
+            "{} books, GameConfig holds {BOOKS_MAX}",
+            books.len()
+        ));
+    }
+    Ok(books)
 }
 
 fn run(pal: &Pal, book_bytes: &[u8], req: &RenderRequest, k: u32) -> Result<Img, String> {

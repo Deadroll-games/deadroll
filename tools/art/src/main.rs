@@ -3,13 +3,11 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use art::preview::{self, Img, Pal, SHEET_BG};
-use art::validate::{validate_files, Compiled, Issue};
-use deadroll_render::sprite::layer;
+use art::validate::{is_legacy_size, validate_files, Compiled, Issue};
+use deadroll_render::sprite::{layer, Cmd};
 
-const DEFAULT_PALETTE: &str = "assets/palette/palette_1.pal";
+const DEFAULT_PALETTE: &str = "assets/palette/palette_2.pal";
 const SPRITES_DIR: &str = "assets/sprites";
-/// `SpriteBook` body limit in programs/render.
-const BOOK_MAX: usize = 64 * 1024;
 
 const USAGE: &str = "usage:
   art validate [files.dsl ...]                 default: every file in assets/sprites
@@ -17,7 +15,7 @@ const USAGE: &str = "usage:
   art sheet characters [figures ...] [--scale 4] [--out FILE.png]   bodies, kits on both bodies, alive and dead
   art sheet contact [files.dsl ...] [--scale 2] [--out FILE.png]
   art sheet matrix [files.dsl ...] [--scale 4] [--out FILE.png]   items x materials, enchants, runes, sockets
-  art pack [--out DIR]                          palette.bin + book.bin (book 2, every sprite) for upload
+  art pack [--out DIR]                          palette.bin + book_<id>.bin (books 2.., 64 KiB each) for upload
   art upscale [files.dsl ...]                  rewrite format 1 sources (16..64 px) for format 2, in place
 options: --palette FILE.pal (default assets/palette/palette_1.pal)";
 
@@ -116,7 +114,36 @@ fn cmd_validate(o: &Opts) -> Result<bool, String> {
     for i in &shown {
         eprintln!("{i}");
     }
-    let n = sprites.iter().filter(|s| wanted.contains(&s.file)).count();
+    let mine: Vec<_> = sprites
+        .iter()
+        .filter(|s| wanted.contains(&s.file))
+        .collect();
+    let n = mine.len();
+    // Bytes per sprite as stored in a book (FORMAT.md 3.1), and the sprites still at 64 px.
+    let mut total = 0;
+    for s in &mine {
+        let bitmap = s
+            .sprite
+            .cmds
+            .iter()
+            .any(|c| matches!(c, Cmd::Bitmap { .. }));
+        println!(
+            "{:>5} {:<24} {:>3}x{:<3} {:>6} B{}{}",
+            s.src.id,
+            s.src.name,
+            s.sprite.header.width,
+            s.sprite.header.height,
+            s.src.bytes.len(),
+            if bitmap { "  bitmap" } else { "" },
+            if is_legacy_size(s) {
+                "  (64 px, redraw at 96)"
+            } else {
+                ""
+            },
+        );
+        total += s.src.bytes.len();
+    }
+    println!("{total} bytes in {n} sprites");
     if shown.is_empty() {
         println!("ok: {n} sprites in {} files", files.len());
         Ok(true)
@@ -269,7 +296,8 @@ fn cmd_sheet(o: &Opts) -> Result<bool, String> {
     Ok(true)
 }
 
-/// Writes the upload inputs: the compiled palette and one sprite book (id 1) with every repo sprite.
+/// Writes the upload inputs: the compiled palette and the sprite books (ids 2..) with every repo
+/// sprite, each at most `BOOK_MAX` bytes: `palette.bin`, `book_<id>.bin`.
 fn cmd_pack(o: &Opts) -> Result<bool, String> {
     let (sprites, issues) = load_all(&repo_files())?;
     if !issues.is_empty() {
@@ -279,21 +307,32 @@ fn cmd_pack(o: &Opts) -> Result<bool, String> {
         return Err(format!("{} problems, run `art validate`", issues.len()));
     }
     let pal = load_pal(o)?;
-    let book = preview::pack_book(&sprites)?;
-    if book.len() > BOOK_MAX {
-        return Err(format!("book is {} bytes, over {BOOK_MAX}", book.len()));
-    }
+    let books = preview::pack_books(&sprites)?;
     let dir = o
         .out
         .clone()
         .unwrap_or_else(|| PathBuf::from("target/render-assets"));
+    // Books of an earlier pack that this one no longer writes would be uploaded too.
+    if let Ok(entries) = fs::read_dir(&dir) {
+        for e in entries.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            if name.starts_with("book") && name.ends_with(".bin") {
+                fs::remove_file(e.path()).map_err(|err| format!("{name}: {err}"))?;
+            }
+        }
+    }
     write(&dir.join("palette.bin"), &pal.src.bytes)?;
-    write(&dir.join("book.bin"), &book)?;
+    let mut sizes = Vec::new();
+    for (i, book) in books.iter().enumerate() {
+        let id = preview::BOOK_ID + i as u16;
+        write(&dir.join(format!("book_{id}.bin")), book)?;
+        sizes.push(format!("book {id} {} bytes", book.len()));
+    }
     println!(
-        "{}: palette {} bytes, book {} bytes ({} sprites)",
+        "{}: palette {} bytes, {} ({} sprites)",
         dir.display(),
         pal.src.bytes.len(),
-        book.len(),
+        sizes.join(", "),
         sprites.len()
     );
     Ok(true)

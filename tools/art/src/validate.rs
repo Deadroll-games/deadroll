@@ -77,10 +77,32 @@ fn strip_comment(l: &str) -> &str {
 fn check_letters(file: &str, text: &str, out: &mut Vec<Issue>) {
     let mut name = String::new();
     let mut body = false;
+    // Rows left in the current BITMAP: their uppercase letters are slot letters too.
+    let mut rows = 0usize;
     for (i, l) in text.lines().enumerate() {
         let t: Vec<&str> = strip_comment(l).split_whitespace().collect();
         let Some(&cmd) = t.first() else { continue };
+        if rows > 0 {
+            rows -= 1;
+            let allowed = if body { "KHYDRO" } else { "PSAEUO" };
+            if let Some(c) = cmd
+                .chars()
+                .find(|c| c.is_ascii_uppercase() && !allowed.contains(*c))
+            {
+                out.push(Issue {
+                    file: file.into(),
+                    line: i + 1,
+                    sprite: name.clone(),
+                    msg: format!(
+                        "BITMAP slot `{c}` not allowed on a {} layer (allowed: {allowed})",
+                        if body { "body" } else { "item" }
+                    ),
+                });
+            }
+            continue;
+        }
         match cmd {
+            "BITMAP" => rows = t.get(4).and_then(|h| h.parse().ok()).unwrap_or(0),
             "sprite" => {
                 name = t.get(2).copied().unwrap_or("").to_string();
                 body = false;
@@ -123,14 +145,27 @@ fn is_line_slope_ok(x0: u8, y0: u8, x1: u8, y1: u8) -> bool {
     dx == 0 || dy == 0 || dx == dy || dx == 2 * dy || dy == 2 * dx
 }
 
+/// Canvas of the character layers (`FORMAT.md` 1.4).
+pub const CHARACTER_SIZE: u8 = 96;
+/// Canvas of the character layers and monsters before patch 7c, accepted until they are redrawn.
+pub const LEGACY_SIZE: u8 = 64;
+
 fn size_ok(layer_type: u8, w: u8, h: u8) -> bool {
     match layer_type {
-        0..=18 | layer::TILE => (w, h) == (64, 64),
+        0..=18 => w == h && (w == CHARACTER_SIZE || w == LEGACY_SIZE),
+        layer::TILE => (w, h) == (64, 64),
         layer::MONSTER => w == h && matches!(w, 64 | 96 | 128),
         layer::ICON => (w, h) == (32, 32),
         layer::PORTRAIT => true,
         _ => false,
     }
+}
+
+/// A character layer or monster still on the 64 px canvas: valid, but it does not line up with
+/// the 96 px bodies until it is redrawn.
+pub fn is_legacy_size(c: &Compiled) -> bool {
+    let h = &c.sprite.header;
+    matches!(h.layer_type, 0..=18 | layer::MONSTER) && h.width == LEGACY_SIZE
 }
 
 fn must_no_outline(layer_type: u8, name: &str) -> bool {

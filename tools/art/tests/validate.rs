@@ -206,7 +206,7 @@ fn all_repo_sprites_are_valid_and_render_deterministically() {
         issues.iter().map(|i| i.to_string()).collect::<Vec<_>>()
     );
     let pal =
-        Pal::load(&std::fs::read_to_string(root.join("assets/palette/palette_1.pal")).unwrap())
+        Pal::load(&std::fs::read_to_string(root.join("assets/palette/palette_2.pal")).unwrap())
             .unwrap();
     let book = preview::pack_book(&sprites).unwrap();
     for c in &sprites {
@@ -222,7 +222,7 @@ fn all_repo_sprites_are_valid_and_render_deterministically() {
     for (name, layers) in preview::characters() {
         for dead in [false, true] {
             let img = preview::render_character(&pal, &book, &layers, 1, dead).unwrap();
-            assert!(img.w == 64 && img.h == 64, "{name}");
+            assert!(img.w == img.h && matches!(img.w, 64 | 96), "{name}");
         }
     }
     // The craft matrix renders for every item sprite.
@@ -239,7 +239,7 @@ fn all_repo_sprites_are_valid_and_render_deterministically() {
 fn tiles_use_tile_materials_and_support_is_leather() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let pal =
-        Pal::load(&std::fs::read_to_string(root.join("assets/palette/palette_1.pal")).unwrap())
+        Pal::load(&std::fs::read_to_string(root.join("assets/palette/palette_2.pal")).unwrap())
             .unwrap();
     for (name, want) in [
         ("tile_wall", "tile_wall"),
@@ -309,4 +309,60 @@ fn format_2_sizes_per_layer() {
             "{ok}: {issues:?}"
         );
     }
+}
+
+#[test]
+fn bitmap_rows_use_the_layer_slot_letters() {
+    let item = "sprite 100 a\nsize 96 96\nlayer boots\nBITMAP 10 10 3 2\nPS.\n04h\n";
+    assert_eq!(msgs(item), Vec::<String>::new());
+    rejects(
+        "sprite 100 a\nsize 96 96\nlayer boots\nBITMAP 10 10 3 1\nPK.\n",
+        "BITMAP slot `K` not allowed on a item layer",
+    );
+    let body = "sprite 2 a\nsize 96 96\nlayer head\nBITMAP 10 10 2 1\nKY\n";
+    let m = validate_text("bodies.dsl", body).1;
+    assert!(m.is_empty(), "{m:?}");
+    // Character layers are 96 (or 64 until redrawn), never 128.
+    rejects(
+        "sprite 100 a\nsize 128 128\nlayer boots\nRECT 10 10 4 4 P\n",
+        "size 128x128 not allowed",
+    );
+}
+
+#[test]
+fn pack_splits_books_at_64_kib() {
+    // Nine different 96 px sprites of about 8.8 KB each: a checkerboard defeats the run-length
+    // coding, the accent pixel at x = i keeps them from sharing bytes.
+    let mut text = String::new();
+    for i in 0..9 {
+        text += &format!(
+            "sprite {} s{i}\nsize 96 96\nlayer boots\nBITMAP 1 1 94 94\n",
+            100 + i
+        );
+        for y in 0..94 {
+            let row: String = (0..94)
+                .map(|x| match (x, y) {
+                    (x, 0) if x == i => 'A',
+                    _ if (x + y) % 2 == 0 => 'P',
+                    _ => 'S',
+                })
+                .collect();
+            text += &row;
+            text += "\n";
+        }
+    }
+    let (sprites, issues) = validate_text("warrior_kit.dsl", &text);
+    assert!(issues.is_empty(), "{issues:?}");
+    let books = preview::pack_books(&sprites).unwrap();
+    assert!(books.len() >= 2, "{} books", books.len());
+    for (i, b) in books.iter().enumerate() {
+        assert!(b.len() <= preview::BOOK_MAX);
+        let book = deadroll_render::Book::parse(b).unwrap();
+        assert_eq!(book.book_id, preview::BOOK_ID + i as u16);
+    }
+    let total: usize = books
+        .iter()
+        .map(|b| deadroll_render::Book::parse(b).unwrap().len())
+        .sum();
+    assert_eq!(total, 9);
 }
