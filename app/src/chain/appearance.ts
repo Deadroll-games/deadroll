@@ -17,6 +17,12 @@ export const MATERIAL = {
 
 export const SPRITE = { tombstone: 403 } as const;
 
+/** Character layer slots: the index in `RenderRequest.layers` (crates/render/FORMAT.md 1.4). */
+export const LAYER = {
+  shadow: 0, backItem: 1, body: 2, gloveBack: 3, pants: 4, boots: 5, armorBody: 6, necklace: 7,
+  offhand: 8, hair: 9, helmet: 10, mainhand: 11, fistFront: 12, gloveFront: 13, overlayElement: 14,
+} as const;
+
 type Entry = [layer: number, spriteId: number, material: number, accent: number];
 
 const EMPTY: LayerRef = { spriteId: 0, materialRamp: 0, accentRamp: 0, elementRamp: 0 };
@@ -27,21 +33,29 @@ function layers(entries: Entry[], element: number): LayerRef[] {
   return out;
 }
 
+/** Body sprites: the whole body of a race, its hair, and the front fist every race shares. */
+const BODY = { human: 10, humanHair: 11, elf: 12, elfHair: 13, fistFront: 14 } as const;
+
 function body(race: Race): Entry[] {
-  const [m, ids] = race === Race.ForestElf ? [MATERIAL.elf, [20, 21, 22, 23, 24, 25]] : [MATERIAL.human, [2, 3, 4, 5, 6, 7]];
-  // arm_back, legs, torso, head, hair, arm_front at their layer slots.
-  return [2, 5, 8, 11, 12, 14].map((slot, i) => [slot, ids[i]!, m, RAMP.eyes] as Entry);
+  const elf = race === Race.ForestElf;
+  const m = elf ? MATERIAL.elf : MATERIAL.human;
+  return [
+    [LAYER.body, elf ? BODY.elf : BODY.human, m, RAMP.eyes],
+    [LAYER.hair, elf ? BODY.elfHair : BODY.humanHair, m, RAMP.eyes],
+    [LAYER.fistFront, BODY.fistFront, m, RAMP.eyes],
+  ];
 }
 
 function kit(cls: Class): Entry[] {
   const G = RAMP.gold;
+  const L = LAYER;
   switch (cls) {
     case Class.Mage:
-      return [[1, 205, MATERIAL.leather, G], [6, 202, MATERIAL.robe, G], [7, 203, MATERIAL.leather, G], [9, 201, MATERIAL.robe, G], [13, 200, MATERIAL.robe, G], [16, 204, MATERIAL.leather, G]];
+      return [[L.backItem, 205, MATERIAL.leather, G], [L.pants, 202, MATERIAL.robe, G], [L.boots, 203, MATERIAL.leather, G], [L.armorBody, 201, MATERIAL.robe, G], [L.helmet, 200, MATERIAL.robe, G], [L.mainhand, 204, MATERIAL.leather, G]];
     case Class.Support:
-      return [[1, 304, MATERIAL.leather, G], [7, 302, MATERIAL.leather, G], [9, 301, MATERIAL.leather, G], [10, 305, MATERIAL.leather, G], [13, 300, MATERIAL.leather, G], [16, 303, MATERIAL.leather, G]];
+      return [[L.backItem, 304, MATERIAL.leather, G], [L.boots, 302, MATERIAL.leather, G], [L.armorBody, 301, MATERIAL.leather, G], [L.necklace, 305, MATERIAL.leather, G], [L.helmet, 300, MATERIAL.leather, G], [L.mainhand, 303, MATERIAL.leather, G]];
     default:
-      return [[1, 100, MATERIAL.cape, G], [4, 101, MATERIAL.steel, G], [6, 102, MATERIAL.leather, G], [7, 103, MATERIAL.leather, G], [9, 104, MATERIAL.steel, G], [13, 105, MATERIAL.steel, G], [16, 106, MATERIAL.steel, G]];
+      return [[L.backItem, 100, MATERIAL.cape, G], [L.offhand, 101, MATERIAL.steel, G], [L.pants, 102, MATERIAL.leather, G], [L.boots, 103, MATERIAL.leather, G], [L.armorBody, 104, MATERIAL.steel, G], [L.helmet, 105, MATERIAL.steel, G], [L.mainhand, 106, MATERIAL.steel, G]];
   }
 }
 
@@ -49,7 +63,7 @@ const ELEMENT_RAMP: Record<number, number> = { [Aspect.Fire]: RAMP.fire, [Aspect
 
 /** `Character.appearance` for a new character: shadow, body by race, kit by class. */
 export function characterAppearance(race: Race, cls: Class, predisposition: Aspect): LayerRef[] {
-  const shadow: Entry = [0, 1, MATERIAL.stone, RAMP.gold];
+  const shadow: Entry = [LAYER.shadow, 1, MATERIAL.stone, RAMP.gold];
   return layers([shadow, ...body(race), ...kit(cls)], ELEMENT_RAMP[predisposition] ?? RAMP.cold);
 }
 
