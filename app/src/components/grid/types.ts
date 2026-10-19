@@ -14,7 +14,7 @@ export type GridUnit = {
   alive: boolean;
   /** Short label for the fallback marker and the tooltip, e.g. "Wolf" or "Aria". */
   label: string;
-  /** Sprite size in cells: 1 for 64 px, 2 for 128 px monsters. Drawn bottom-center on its cell. */
+  /** Footprint in cells (1, or 2 for big monsters). The sprite is drawn bottom-center on its cell at the tile pixel scale. */
   size?: 1 | 2;
 };
 

@@ -1,7 +1,7 @@
 // Battle map canvas: tiles, units, move highlights, and cell clicks.
 import { useEffect, useRef, type MouseEvent } from "react";
 import { Tile, cellIndex, type Cell } from "../../chain/types";
-import { SPRITE_PX } from "../../raster/SpriteCanvas";
+import { TILE_PX } from "../../raster/SpriteCanvas";
 import type { GridProps, GridUnit } from "./types";
 import "./grid.css";
 
@@ -34,12 +34,12 @@ const LETTER = "#f4efe6";
 type Rect = { left: number; top: number; width: number; height: number };
 
 /**
- * Canvas pixels per cell: at least one sprite canvas (64 px tiles and units drawn 1:1), more when
- * the cell is shown larger. The CSS size stays `cellPx`, so a smaller cell shows the sprite scaled
- * down by the browser and stays sharp on high-density screens.
+ * Canvas pixels per cell: at least one tile (64 px, drawn 1:1), more when the cell is shown larger.
+ * The CSS size stays `cellPx`, so a smaller cell shows the sprite scaled down by the browser and
+ * stays sharp on high-density screens.
  */
 export function backingCell(cellPx: number): number {
-  return Math.max(SPRITE_PX, Math.round(cellPx));
+  return Math.max(TILE_PX, Math.round(cellPx));
 }
 
 /** clientX/clientY to a cell. Uses the CSS box, so a scaled canvas still maps. Null outside. */
@@ -124,12 +124,12 @@ function paintImage(
   ctx.drawImage(scratch, dx, dy, dw, dh);
 }
 
-/** Largest integer scale of `image` that fits in maxW x maxH, at least 1. */
-function integerDest(image: ImageData, maxW: number, maxH: number): { w: number; h: number } {
-  const sx = Math.floor(maxW / image.width);
-  const sy = Math.floor(maxH / image.height);
-  const scale = Math.max(1, Math.min(sx, sy));
-  return { w: image.width * scale, h: image.height * scale };
+/**
+ * Size of a unit sprite at the tile pixel scale: a cell is one 64 px tile, so a 96 px character or
+ * a 128 px monster keeps the same pixel size as the floor under it.
+ */
+export function unitDest(image: { width: number; height: number }, cell: number): { w: number; h: number } {
+  return { w: Math.round((image.width * cell) / TILE_PX), h: Math.round((image.height * cell) / TILE_PX) };
 }
 
 function hpColor(ratio: number): string {
@@ -238,8 +238,8 @@ function drawUnit(
   selected: boolean,
 ) {
   if (sprite) {
-    const cells = unit.size === 2 ? 2 : 1;
-    const dest = integerDest(sprite, cells * cell, cells * cell);
+    // Bottom-center on the cell; a canvas wider or taller than the cell overlaps its neighbors.
+    const dest = unitDest(sprite, cell);
     const dx = Math.round(unit.x * cell + cell / 2 - dest.w / 2);
     const dy = Math.round((unit.y + 1) * cell - dest.h);
     paintImage(ctx, scratch, sprite, dx, dy, dest.w, dest.h);

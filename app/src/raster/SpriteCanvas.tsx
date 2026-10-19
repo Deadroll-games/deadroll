@@ -1,11 +1,13 @@
 import { useEffect, useRef } from "react";
 
-/** Sprite canvas side in format 2 (crates/render/FORMAT.md 1.4): characters, tiles, 64 px monsters. */
-export const SPRITE_PX = 64;
+/** Character canvas side (crates/render/FORMAT.md 1.4): every character layer is 96x96. */
+export const SPRITE_PX = 96;
+/** Map tile side: one cell. Characters and monsters stand bottom-center on it at the same pixel size. */
+export const TILE_PX = 64;
 
 /**
  * Draws RGBA ImageData with nearest-neighbor scaling (never smoothed). `scale` may be a half step
- * (1.5 shows a 64 px sprite at 96 px): the canvas is drawn at the next integer scale and sized
+ * (1.5 shows a 96 px sprite at 144 px): the canvas is drawn at the next integer scale and sized
  * down by CSS, so pixels stay square on high-density screens.
  */
 export function SpriteCanvas({ image, scale = 2, label }: { image: ImageData | null; scale?: number; label?: string }) {

@@ -41,7 +41,7 @@ describe("Grid", () => {
     const canvas = screen.getByRole("img", { name: "Battle map, 4 by 3 cells" });
     expect(canvas.tagName).toBe("CANVAS");
     expect(canvas.className).toContain("pixel");
-    // 64 canvas pixels per cell (format 2 sprites 1:1), shown at the default 48 CSS px.
+    // 64 canvas pixels per cell (one tile 1:1), shown at the default 48 CSS px.
     expect((canvas as HTMLCanvasElement).width).toBe(4 * 64);
     expect(canvas.style.width).toBe(`${4 * 48}px`);
   });
@@ -119,11 +119,21 @@ describe("Grid", () => {
 });
 
 describe("backingCell", () => {
-  it("draws at least one 64 px sprite per cell and keeps larger cells", async () => {
+  it("draws at least one 64 px tile per cell and keeps larger cells", async () => {
     const { backingCell } = await import("./Grid");
     expect(backingCell(12)).toBe(64);
     expect(backingCell(32)).toBe(64);
     expect(backingCell(48)).toBe(64);
     expect(backingCell(96)).toBe(96);
+  });
+});
+
+describe("unitDest", () => {
+  it("draws units at the tile pixel scale, bigger than the cell", async () => {
+    const { unitDest } = await import("./Grid");
+    expect(unitDest({ width: 96, height: 96 }, 64)).toEqual({ w: 96, h: 96 });
+    expect(unitDest({ width: 96, height: 96 }, 128)).toEqual({ w: 192, h: 192 });
+    expect(unitDest({ width: 128, height: 128 }, 96)).toEqual({ w: 192, h: 192 });
+    expect(unitDest({ width: 64, height: 64 }, 64)).toEqual({ w: 64, h: 64 });
   });
 });

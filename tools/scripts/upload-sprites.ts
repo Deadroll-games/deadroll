@@ -1,10 +1,12 @@
-// Upload a palette and/or a sprite book to the render program.
-// node --experimental-strip-types --no-warnings upload-sprites.ts --palette <bin> --palette-version <u16> [--book <bin> --book-id <u16>]
+// Upload a palette and/or sprite books to the render program.
+// node --experimental-strip-types --no-warnings upload-sprites.ts --palette <bin> --palette-version <u16> [--book <bin> --book-id <u16>]...
 import { readFileSync } from "node:fs";
 import { createKeyPairSignerFromBytes, address } from "@solana/kit";
 import { GAME_CONFIG, connect, planUpload, uploadBlob, type Kind } from "./lib/render-program.ts";
 
-const USAGE = `usage: upload-sprites.ts (--palette <bin> --palette-version <u16>) and/or (--book <bin> --book-id <u16>) [--url <rpc>] [--wallet <keypair.json>] [--config <pubkey>] [--dry-run]
+const USAGE = `usage: upload-sprites.ts (--palette <bin> --palette-version <u16>) and/or (--book <bin> --book-id <u16>)... [--url <rpc>] [--wallet <keypair.json>] [--config <pubkey>] [--dry-run]
+
+--book and --book-id repeat, one pair per sprite book, in order.
 
 --url defaults to ANCHOR_PROVIDER_URL or http://127.0.0.1:8899.
 --wallet defaults to ANCHOR_WALLET, a 64-byte JSON array. Required unless --dry-run.
@@ -36,8 +38,8 @@ function parseArgs(argv: string[]) {
   ]);
   let palette: string | undefined;
   let paletteVersion: number | undefined;
-  let book: string | undefined;
-  let bookId: number | undefined;
+  const books: string[] = [];
+  const bookIds: number[] = [];
   let url = process.env.ANCHOR_PROVIDER_URL ?? "http://127.0.0.1:8899";
   let wallet = process.env.ANCHOR_WALLET;
   let config = GAME_CONFIG;
@@ -54,20 +56,24 @@ function parseArgs(argv: string[]) {
     if (value === undefined || value.startsWith("--")) usage();
     if (flag === "--palette") palette = value;
     else if (flag === "--palette-version") paletteVersion = parseU16(value);
-    else if (flag === "--book") book = value;
-    else if (flag === "--book-id") bookId = parseU16(value);
+    else if (flag === "--book") books.push(value);
+    else if (flag === "--book-id") bookIds.push(parseU16(value));
     else if (flag === "--url") url = value;
     else if (flag === "--wallet") wallet = value;
     else if (flag === "--config") config = address(value);
   }
-  return { palette, paletteVersion, book, bookId, url, wallet, config, dryRun };
+  return { palette, paletteVersion, books, bookIds, url, wallet, config, dryRun };
 }
 
-/** format byte 0 == 1, and the u16 at bytes 1..3 equals the flag. */
-function assertHeader(body: Uint8Array, label: string, flag: string, expected: number): void {
+/** Body formats (crates/render/FORMAT.md 3.2, 3.3): palette 2 (6-color ramps), sprite book 1. */
+export const PALETTE_FORMAT = 2;
+export const BOOK_FORMAT = 1;
+
+/** format byte 0 == `format`, and the u16 at bytes 1..3 equals the flag. */
+function assertHeader(body: Uint8Array, label: string, flag: string, expected: number, format: number): void {
   if (body.length < 3) throw new Error(`${label} is shorter than the 3-byte header`);
-  if (body[0] !== 1) {
-    throw new Error(`${label} format mismatch: byte 0 is ${body[0]}, expected 1`);
+  if (body[0] !== format) {
+    throw new Error(`${label} format mismatch: byte 0 is ${body[0]}, expected ${format}`);
   }
   const found = body[1] | (body[2] << 8);
   if (found !== expected) {
@@ -95,15 +101,15 @@ async function main() {
   if (flags.palette !== undefined || flags.paletteVersion !== undefined) {
     if (flags.palette === undefined || flags.paletteVersion === undefined) usage();
     const body = new Uint8Array(readFileSync(flags.palette));
-    assertHeader(body, "palette", "--palette-version", flags.paletteVersion);
+    assertHeader(body, "palette", "--palette-version", flags.paletteVersion, PALETTE_FORMAT);
     jobs.push({ kind: "palette", id: flags.paletteVersion, body });
   }
-  if (flags.book !== undefined || flags.bookId !== undefined) {
-    if (flags.book === undefined || flags.bookId === undefined) usage();
-    const body = new Uint8Array(readFileSync(flags.book));
-    assertHeader(body, "sprite book", "--book-id", flags.bookId);
-    jobs.push({ kind: "sprite_book", id: flags.bookId, body });
-  }
+  if (flags.books.length !== flags.bookIds.length) usage();
+  flags.books.forEach((file, i) => {
+    const body = new Uint8Array(readFileSync(file));
+    assertHeader(body, `sprite book ${file}`, "--book-id", flags.bookIds[i], BOOK_FORMAT);
+    jobs.push({ kind: "sprite_book", id: flags.bookIds[i], body });
+  });
   if (jobs.length === 0) usage();
 
   if (flags.dryRun) {

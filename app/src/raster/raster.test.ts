@@ -12,7 +12,7 @@ import { gameConfigPda, palettePda, rasterizerPda, spriteBookPda } from "../chai
 import { PROGRAMS } from "../config";
 import { idbWasmCache, noCache, type WasmCache } from "./idb";
 import { loadRasterizerWasm, loadRender } from "./loader";
-import { OutMode, RENDER_REQUEST_LEN, RenderError, decodeRenderRequest, encodeRenderRequest } from "./rasterizer";
+import { OutMode, RENDER_REQUEST_LEN, RenderError, decodeRenderRequest, encodeRenderRequest, paletteVersionOf } from "./rasterizer";
 
 const root = resolve(import.meta.dirname, "../../..");
 const file = (rel: string) => resolve(root, rel);
@@ -102,7 +102,7 @@ describe("RenderRequest", () => {
 });
 
 describe.skipIf(!haveBuild)("rasterizer from accounts (golden parity)", () => {
-  async function loaded(opts: { books?: Address[] } = {}) {
+  async function loaded(opts: { books?: Address[]; extra?: [Address, Uint8Array][] } = {}) {
     const wasm = new Uint8Array(readFileSync(WASM));
     const palette = new Uint8Array(readFileSync(resolve(GOLDEN, "palette.bin")));
     const book = new Uint8Array(readFileSync(resolve(GOLDEN, "book.bin")));
@@ -127,24 +127,53 @@ describe.skipIf(!haveBuild)("rasterizer from accounts (golden parity)", () => {
       [rasterizer, encodeBlob("rasterizer", 2, wasm, wasmSha)],
       [await palettePda(paletteVersion), encodeBlob("palette", paletteVersion, palette, await sha256(palette))],
       [bookAddr, encodeBlob("sprite_book", bookId, book, await sha256(book))],
+      ...(opts.extra ?? []),
     ]);
     return loadRender(mapAccountSource(accounts), { cache: noCache });
   }
 
   const golden = () => decodeRenderRequest(new Uint8Array(readFileSync(resolve(GOLDEN, "state.bin"))));
 
-  it("renders the reference warrior byte-identical to native (PNG, 512 px)", async () => {
+  it("renders the reference warrior byte-identical to native (PNG up to 512 px)", async () => {
     const r = await loaded();
     expect(r.books.map((b) => b.id)).toEqual([new Uint8Array(readFileSync(resolve(GOLDEN, "book.bin")))[1]]);
     const req = golden();
     const png = r.rasterizer.render(req, r.palette, r.books.map((b) => b.body), OutMode.PNG);
     const expected = readFileSync(resolve(GOLDEN, "expected.sha256"), "utf8").trim();
     expect(createHash("sha256").update(png.bytes).digest("hex")).toBe(expected);
-    expect([png.width, png.height]).toEqual([512, 512]);
     // Indexed PNG: color type 3 in IHDR.
     expect(png.bytes[25]).toBe(3);
     const rgba = r.rasterizer.render(req, r.palette, r.books.map((b) => b.body), OutMode.RGBA);
-    expect([rgba.width, rgba.height, rgba.bytes.length]).toEqual([64, 64, 64 * 64 * 4]);
+    expect(rgba.bytes.length).toBe(rgba.width * rgba.height * 4);
+    // The canvas enlarged by the integer scale that fits 512 px: 64 -> x8, 96 -> x5.
+    const k = Math.floor(512 / Math.max(rgba.width, rgba.height));
+    expect([png.width, png.height]).toEqual([rgba.width * k, rgba.height * k]);
+  });
+
+  it("draws with the palette version of the loaded palette, whatever the request says", async () => {
+    const r = await loaded();
+    const req = golden();
+    const books = r.books.map((b) => b.body);
+    const want = r.rasterizer.render(req, r.palette, books).bytes;
+    expect(r.rasterizer.render({ ...req, paletteVersion: 0 }, r.palette, books).bytes).toEqual(want);
+    expect(paletteVersionOf(r.palette)).toBe(r.paletteVersion);
+  });
+
+  it("looks sprites up in every GameConfig book, in order", async () => {
+    // An empty book first (format 1, id 3, no sprites): every sprite comes from the second one.
+    const empty = new Uint8Array([1, 3, 0, 0, 0]);
+    const emptyAddr = await spriteBookPda(3);
+    const golden1 = await loaded();
+    const goldenAddr = golden1.books[0]!.address;
+    const r = await loaded({
+      books: [emptyAddr, goldenAddr],
+      extra: [[emptyAddr, encodeBlob("sprite_book", 3, empty, await sha256(empty))]],
+    });
+    expect(r.books.map((b) => b.id)).toEqual([3, golden1.books[0]!.id]);
+    const req = golden();
+    const one = golden1.rasterizer.render(req, golden1.palette, golden1.books.map((b) => b.body));
+    const two = r.rasterizer.render(req, r.palette, r.books.map((b) => b.body));
+    expect(two.bytes).toEqual(one.bytes);
   });
 
   it("takes the books from GameConfig and rejects a missing or foreign one", async () => {

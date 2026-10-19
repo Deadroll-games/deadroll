@@ -235,7 +235,7 @@ export function CharacterDetailView({
   return (
     <div className="char-detail">
       <header className={`panel char-detail-head${dead ? " dead" : ""}`}>
-        <SpriteCanvas image={img.image} scale={4} label={name} />
+        <SpriteCanvas image={img.image} scale={2.5} label={name} />
         <div>
           <h1>{name}</h1>
           <p>

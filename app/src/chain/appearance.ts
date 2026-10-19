@@ -1,15 +1,15 @@
-// Sprite layers for characters, monsters and tiles from sprite book 1 (assets/sprites, packed by
-// `art pack`). Ramp and material indices are positions in assets/palette/palette_1.pal; the
-// character presets mirror tools/art/src/preview.rs `characters()`.
-import { PALETTE_VERSION } from "../config";
+// Sprite layers for characters, monsters and tiles from the sprite books (assets/sprites, packed by
+// `art pack`). Ramp and material indices are positions in assets/palette/palette_2.pal (the first
+// 20 ramps and 13 materials are those of palette 1); the character presets mirror
+// tools/art/src/preview.rs `characters()`.
 import { Aspect, Class, LAYERS_MAX, Race, Tile, type LayerRef, type RenderRequest } from "./types";
 
-/** palette_1.pal `ramp` lines, in order. */
+/** palette_2.pal `ramp` lines, in order (append only). */
 export const RAMP = {
   gray: 0, steel: 1, skin: 2, skinElf: 3, hair: 4, hairElf: 5, robe: 6, green: 7, leather: 8, gold: 9,
   cold: 10, fire: 11, dark: 12, eyes: 13, capeRed: 14, fur: 15, stone: 16, floor: 17, water: 18, wood: 19,
 } as const;
-/** palette_1.pal `material` lines, in order. */
+/** palette_2.pal `material` lines, in order (append only). */
 export const MATERIAL = {
   steel: 0, human: 1, elf: 2, robe: 3, leather: 4, cape: 5, wolf: 6, goblin: 7, stone: 8,
   tileWall: 9, tileFloor: 10, tileWater: 11, tileDoor: 12,
@@ -53,8 +53,10 @@ export function characterAppearance(race: Race, cls: Class, predisposition: Aspe
   return layers([shadow, ...body(race), ...kit(cls)], ELEMENT_RAMP[predisposition] ?? RAMP.cold);
 }
 
+/** A request for the rasterizer. The palette version is filled in at render time from the palette
+ * GameConfig points at (`Rasterizer.render`). */
 export function renderRequest(appearance: LayerRef[], dead = false): RenderRequest {
-  return { paletteVersion: PALETTE_VERSION, layers: appearance, flags: dead ? 1 : 0 };
+  return { paletteVersion: 0, layers: appearance, flags: dead ? 1 : 0 };
 }
 
 /** A tombstone in place of a dead character on the grid. */
