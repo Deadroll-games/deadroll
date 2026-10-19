@@ -14,7 +14,7 @@ const BOOK_MAX: usize = 64 * 1024;
 const USAGE: &str = "usage:
   art validate [files.dsl ...]                 default: every file in assets/sprites
   art <file.dsl> [--id N] [--scale 4] [--out DIR|FILE.png] [--material NAME] [--bg #rrggbb]
-  art sheet characters [--scale 4] [--out FILE.png]        bodies and kits on both bodies, alive and dead
+  art sheet characters [figures ...] [--scale 4] [--out FILE.png]   bodies, kits on both bodies, alive and dead
   art sheet contact [files.dsl ...] [--scale 2] [--out FILE.png]
   art sheet matrix [files.dsl ...] [--scale 4] [--out FILE.png]   items x materials, enchants, runes, sockets
   art pack [--out DIR]                          palette.bin + book.bin (book 2, every sprite) for upload
@@ -187,7 +187,8 @@ fn cmd_render(o: &Opts) -> Result<bool, String> {
 
 fn cmd_sheet(o: &Opts) -> Result<bool, String> {
     let kind = o.pos.get(1).map(String::as_str).unwrap_or("");
-    let files: Vec<PathBuf> = if o.pos.len() > 2 {
+    // `sheet characters` takes figure names (human, elf_mage, ...), the other kinds take files.
+    let files: Vec<PathBuf> = if o.pos.len() > 2 && kind != "characters" {
         o.pos[2..].iter().map(PathBuf::from).collect()
     } else {
         repo_files()
@@ -210,7 +211,13 @@ fn cmd_sheet(o: &Opts) -> Result<bool, String> {
     let mut cols = 8;
     match kind {
         "characters" => {
-            let figures = preview::characters();
+            let figures: Vec<_> = preview::characters()
+                .into_iter()
+                .filter(|f| o.pos.len() <= 2 || o.pos[2..].contains(&f.0))
+                .collect();
+            if figures.is_empty() {
+                return Err("no figure matches".into());
+            }
             cols = figures.len();
             for dead in [false, true] {
                 for (_, layers) in &figures {
