@@ -335,7 +335,7 @@ mod tests {
         let header = Header {
             width: w,
             height: h,
-            layer_type: 16,
+            layer_type: 11,
             flags: 0,
         };
         let mut g = Grid::new(w as usize, h as usize);
@@ -565,7 +565,7 @@ mod tests {
             header: Header {
                 width: 32,
                 height: 32,
-                layer_type: 16,
+                layer_type: 11,
                 flags: 0,
             },
             cmds: vec![

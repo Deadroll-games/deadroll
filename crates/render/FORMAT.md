@@ -108,37 +108,43 @@ color itself. `O` has only color 0.
 
 Values 7..15 are invalid.
 
-**Body layers** use the body meaning of slots 2..6 (colors and shading): layer types `arm_back`,
-`legs`, `torso`, `head`, `hair`, `arm_front` and `monster`. Every other layer type uses the item
-meaning. So value 5 is `D` (dark ramp) on a body layer and `E` (element ramp) elsewhere; value 6 is
+**Body layers** use the body meaning of slots 2..6 (colors and shading): layer types `body`,
+`hair`, `fist_front` and `monster`. Every other layer type uses the item meaning. So value 5 is `D` (dark ramp) on a body layer and `E` (element ramp) elsewhere; value 6 is
 `R` (element ramp, own slot when shading) on a body layer and `U` (primary ramp, shaded as `P`)
 elsewhere.
 
 ### 1.4 Layer types
 
-Character layers 0..19 follow the stacking order of `ART_DESCRIPTION.md` 6.4. The render order is the
-**index in `RenderRequest.layers`**, not this byte; the layer type is used by the validator and for
-the `shadow` blend (4.3). Use the same index in `Character.appearance` as the layer type.
+Character layers 0..15 are the stacking order of `ART_DESCRIPTION.md` 6.4, bottom to top. The render
+order is the **index in `RenderRequest.layers`**, not this byte; the layer type is used by the
+validator and for the `shadow` blend (4.3). Use the same index in `Character.appearance` as the
+layer type.
 
 | Byte | Name | Byte | Name |
 |---|---|---|---|
-| 0 | `shadow` | 10 | `necklace` |
-| 1 | `back_item` | 11 | `head` |
-| 2 | `arm_back` | 12 | `hair` |
-| 3 | `glove_back` | 13 | `helmet` |
-| 4 | `offhand` | 14 | `arm_front` |
-| 5 | `legs` | 15 | `glove_front` |
-| 6 | `pants` | 16 | `mainhand` |
-| 7 | `boots` | 17 | `overlay_wounds` |
-| 8 | `torso` | 18 | `overlay_element` |
-| 9 | `armor_body` | 19 | `fx` (reserved, not stored) |
+| 0 | `shadow` | 8 | `offhand` (shield, second weapon: in front of the body on the back arm) |
+| 1 | `back_item` (cloak, bag) | 9 | `hair` |
+| 2 | `body` (the whole body of a race) | 10 | `helmet` |
+| 3 | `glove_back` | 11 | `mainhand` |
+| 4 | `pants` | 12 | `fist_front` (the front fist alone, over the weapon) |
+| 5 | `boots` | 13 | `glove_front` |
+| 6 | `armor_body` | 14 | `overlay_element` |
+| 7 | `necklace` | 15 | `fx` (reserved, not stored) |
+| 16..19 | reserved (error 3) | | |
 | 20 | `tile` (map cell, 64x64) | 22 | `icon` (32x32) |
-| 21 | `monster` (whole monster in one sprite, 64, 96 or 128 square) | 23 | `portrait` |
+| 21 | `monster` (whole monster in one sprite, 96 or 128 square) | 23 | `portrait` |
 
-Layers that must carry `flags no_outline`: `shadow`, `necklace`, `overlay_wounds`, `overlay_element`,
-floor tiles.
+The body of a race is **one** sprite: head, torso, arms, legs and briefs in one grid, so the outline
+never draws seams at the shoulder, elbow, wrist or knee. Hair is its own layer (a helmet covers it).
+`fist_front` repeats the body's front fist pixel for pixel and is drawn over `mainhand`, so the
+fingers wrap the grip; it is shared by every race (the race material colors it). A glove on the
+front hand goes over the fist. There is no wound overlay: only worn items change the image, plus
+the gray of death.
 
-Sizes per layer type: character layers 0..18 are **96x96**, `tile` is 64x64 (one map cell),
+Layers that must carry `flags no_outline`: `shadow`, `necklace`, `fist_front` (the body under it
+already has the outline; its own would draw a seam across the wrist), `overlay_element`, floor tiles.
+
+Sizes per layer type: character layers 0..14 are **96x96**, `tile` is 64x64 (one map cell),
 `icon` is 32x32, `monster` is 96x96 or 128x128, `portrait` any allowed size. The validator still
 accepts 64x64 character layers and monsters drawn before format 2 had 96 px characters, with a note:
 they do not line up with the 96 px bodies until redrawn. Characters and monsters are drawn at the
@@ -146,8 +152,8 @@ tile pixel size, bottom-center on their map cell, overlapping the row above; the
 the rasterizer does not.
 
 Character anchors on the 96 canvas (shared by every race and every item, `ART_DESCRIPTION.md` 6.2):
-`HAND_FRONT` (63, 62), `HAND_BACK` (33, 62), `HEAD_CENTER` (48, 27), `NECK` (48, 37),
-`BACK` (44, 42), `WAIST` (48, 60), `FEET` (48, 91). Every race has the same silhouette and
+`HAND_FRONT` (63, 62), `HAND_BACK` (34, 63), `HEAD_CENTER` (48, 27), `NECK` (48, 35),
+`BACK` (44, 42), `WAIST` (48, 57), `FEET` (48, 91). Every race has the same silhouette and
 anchors below the neck; races differ in head, ears, hair, face and skin ramp.
 
 ### 1.5 Sprite id ranges
@@ -155,7 +161,7 @@ anchors below the neck; races differ in head, ears, hair, face and skin ramp.
 | Ids | Content | Ids | Content |
 |---|---|---|---|
 | 0 | empty layer (never a sprite) | 300-399 | support kit |
-| 1-99 | bodies: races, shadow, arms, heads, hair | 400-499 | monsters, tombstone |
+| 1-99 | shadow (1), race bodies, hair, the front fist | 400-499 | monsters, tombstone |
 | 100-199 | warrior kit | 500-599 | tiles |
 | 200-299 | mage kit | 600+ | reserved |
 

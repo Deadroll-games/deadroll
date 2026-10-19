@@ -425,19 +425,19 @@ mod tests {
     /// 7: item 4x1 P rect at (1,5) (an upper layer for the overlap shadow).
     fn sprites() -> Vec<u8> {
         let s = |sl: u8, c: u8| bitmap::value(sl, c);
-        let item = spr(32, 16, 0, &[&[0x22, 2, 2]]);
-        let body = spr(32, 11, 0, &[&[0x25, 2, 2]]);
+        let item = spr(32, 11, 0, &[&[0x22, 2, 2]]);
+        let body = spr(32, 2, 0, &[&[0x25, 2, 2]]);
         let shadow = spr(32, 0, 1, &[&[0x12, 0, 0, 4, 4]]);
-        let big = spr(64, 16, 1, &[&[0x22, 40, 40]]);
+        let big = spr(64, 11, 1, &[&[0x22, 40, 40]]);
         let pixels = spr(
             32,
-            16,
+            11,
             0,
             &[&bm(2, 2, 2, 2, &[s(2, 5), s(4, 0), s(1, 0), s(3, 4)])],
         );
         let column = spr(
             32,
-            9,
+            6,
             0,
             &[&bm(
                 10,
@@ -456,7 +456,7 @@ mod tests {
                 ],
             )],
         );
-        let upper = spr(32, 13, 0, &[&[0x12, 1, 5, 4, 1]]);
+        let upper = spr(32, 10, 0, &[&[0x12, 1, 5, 4, 1]]);
         pack(
             1,
             &[

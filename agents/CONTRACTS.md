@@ -544,3 +544,22 @@ color). Character layers are 96x96, tiles 64x64, monsters 96 or 128. Sprite ids 
 writes `book_<id>.bin` books of at most 64 KiB (ids 2, 3, ..., at most 4); identical sprites share
 bytes inside a book. Deploy scripts upload every book and pass all of them to `set_sprite_books` in
 id order. The app takes the palette version from the palette `GameConfig.palette` points at.
+
+Character layers (sprite format 2, before it reaches devnet): the body of a race is one sprite and
+the stacking order changed. `Character.appearance[i]` is the layer of type `i`
+(`crates/render/FORMAT.md` 1.4):
+
+| Index | Layer | Index | Layer |
+|---|---|---|---|
+| 0 | shadow | 8 | offhand (shield, in front of the body) |
+| 1 | back_item | 9 | hair |
+| 2 | body (one sprite per race) | 10 | helmet |
+| 3 | glove_back | 11 | mainhand |
+| 4 | pants | 12 | fist_front (over the weapon) |
+| 5 | boots | 13 | glove_front |
+| 6 | armor_body | 14 | overlay_element |
+| 7 | necklace | 15..19 | not used |
+
+Body sprites: 1 shadow, 10 human body, 11 human hair, 12 elf body, 13 elf hair, 14 front fist. The
+old body part ids (2-7, 20-25) and the wound overlay are gone: a character created before this
+change fails to render (error 7) until its appearance is rebuilt.

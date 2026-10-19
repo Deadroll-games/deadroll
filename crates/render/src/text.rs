@@ -519,16 +519,16 @@ mod tests {
         let s = compile_sprites(src).unwrap();
         assert_eq!(s.len(), 1);
         assert_eq!(s[0].id, 199);
-        assert_eq!(&s[0].bytes[..6], &[2, 32, 32, 16, 0, 7]);
+        assert_eq!(&s[0].bytes[..6], &[2, 32, 32, 11, 0, 7]);
         assert_eq!(&s[0].bytes[6..11], &[0x12, 22, 5, 2, 12]);
         assert_eq!(&s[0].bytes[s[0].bytes.len() - 4..], &[0x92, 22, 5, 3]);
     }
 
     #[test]
     fn bitmap_rows_legend_and_copy() {
-        let src = "sprite 1 a\nsize 32 32\nlayer head\nRECT 1 1 2 2 K\n\
+        let src = "sprite 1 a\nsize 32 32\nlayer body\nRECT 1 1 2 2 K\n\
                    BITMAP 2 3 4 2\n.K_O\n5ajx\n\
-                   sprite 2 b\nsize 32 32\nlayer head\ncopy a\nPIXEL 9 9 H\n";
+                   sprite 2 b\nsize 32 32\nlayer body\ncopy a\nPIXEL 9 9 H\n";
         let s = compile_sprites(src).unwrap();
         assert_eq!(s[0].bytes[5], 2, "RECT + BITMAP");
         let d = sprite::decode(&s[0].bytes).unwrap();
@@ -563,13 +563,13 @@ mod tests {
 
     #[test]
     fn all_commands_and_aliases() {
-        let src = "sprite 1 a\nsize 32 32\nlayer head\nflags no_outline\n\
+        let src = "sprite 1 a\nsize 32 32\nlayer body\nflags no_outline\n\
                    POLY K 1 1 5 1 3 4\nMIRROR_X 16\nMIRROR_Y 16\nELLIPSE 1 1 4 4 H\nRING 1 1 4 4 Y\n\
                    PIXEL 2 2 D\nPIXEL 3 3 R\nPIXEL 4 4 O\nPIXEL 5 5 _\n\
                    sprite 2 b\nsize 32 32\nlayer tile\nRECT 0 0 32 32 E\n";
         let s = compile_sprites(src).unwrap();
         assert_eq!(s.len(), 2);
-        assert_eq!(&s[0].bytes[..6], &[2, 32, 32, 11, 1, 9]);
+        assert_eq!(&s[0].bytes[..6], &[2, 32, 32, 2, 1, 9]);
         assert_eq!(&s[0].bytes[6..14], &[0x62, 3, 1, 1, 5, 1, 3, 4]);
         assert_eq!(s[1].bytes[6], 0x15);
     }
@@ -578,29 +578,29 @@ mod tests {
     fn errors_with_lines() {
         let cases = [
             ("RECT 1 1 1 1 P", 1),                                     // no sprite
-            ("sprite 0 a\nsize 32 32\nlayer head", 1),                 // id 0
-            ("sprite 1 A\nsize 32 32\nlayer head", 1),                 // name
-            ("sprite 1 a\nsize 20 16\nlayer head", 2),                 // size
+            ("sprite 0 a\nsize 32 32\nlayer body", 1),                 // id 0
+            ("sprite 1 A\nsize 32 32\nlayer body", 1),                 // name
+            ("sprite 1 a\nsize 20 16\nlayer body", 2),                 // size
             ("sprite 1 a\nsize 32 32\nlayer hat", 3),                  // layer name
-            ("sprite 1 a\nlayer head", 2),                             // layer before size
+            ("sprite 1 a\nlayer body", 2),                             // layer before size
             ("sprite 1 a\nsize 32 32\nRECT 1 1 1 1 P", 3),             // command before layer
-            ("sprite 1 a\nsize 32 32\nlayer head\nRECT 1 1 1 P", 4),   // argc
-            ("sprite 1 a\nsize 32 32\nlayer head\nRECT 1 1 1 1 Q", 4), // slot
-            ("sprite 1 a\nsize 32 32\nlayer head\nRECT 1 1 1 999 P", 4),
-            ("sprite 1 a\nsize 32 32\nlayer head\nPOLY P 1 1 2 2", 4), // 2 vertices
-            ("sprite 1 a\nsize 32 32\nlayer head\nBOX 1 1", 4),        // unknown
-            ("sprite 1 a\nsize 32 32\nlayer head\nRECT 30 1 10 1 P", 4), // decoder: past edge
+            ("sprite 1 a\nsize 32 32\nlayer body\nRECT 1 1 1 P", 4),   // argc
+            ("sprite 1 a\nsize 32 32\nlayer body\nRECT 1 1 1 1 Q", 4), // slot
+            ("sprite 1 a\nsize 32 32\nlayer body\nRECT 1 1 1 999 P", 4),
+            ("sprite 1 a\nsize 32 32\nlayer body\nPOLY P 1 1 2 2", 4), // 2 vertices
+            ("sprite 1 a\nsize 32 32\nlayer body\nBOX 1 1", 4),        // unknown
+            ("sprite 1 a\nsize 32 32\nlayer body\nRECT 30 1 10 1 P", 4), // decoder: past edge
             (
-                "sprite 1 a\nsize 32 32\nlayer head\nsprite 1 b\nsize 32 32\nlayer head",
+                "sprite 1 a\nsize 32 32\nlayer body\nsprite 1 b\nsize 32 32\nlayer body",
                 4,
             ), // dup id
-            ("sprite 1 a\nsize 32 32\nlayer head\nflags shiny", 4),
-            ("sprite 1 a\nsize 32 32\nlayer head\nBITMAP 0 0 2 1\nK", 5), // row width
-            ("sprite 1 a\nsize 32 32\nlayer head\nBITMAP 0 0 2 1\nKz", 5), // character
-            ("sprite 1 a\nsize 32 32\nlayer head\nBITMAP 0 0 2 2\nKK", 5), // missing row
-            ("sprite 1 a\nsize 32 32\nlayer head\nBITMAP 31 0 2 1\nKK", 5), // past edge
-            ("sprite 1 a\nsize 32 32\nlayer head\nBITMAP 0 0 0 1", 4),    // zero width
-            ("sprite 1 a\nsize 32 32\nlayer head\ncopy b", 4),            // no such sprite
+            ("sprite 1 a\nsize 32 32\nlayer body\nflags shiny", 4),
+            ("sprite 1 a\nsize 32 32\nlayer body\nBITMAP 0 0 2 1\nK", 5), // row width
+            ("sprite 1 a\nsize 32 32\nlayer body\nBITMAP 0 0 2 1\nKz", 5), // character
+            ("sprite 1 a\nsize 32 32\nlayer body\nBITMAP 0 0 2 2\nKK", 5), // missing row
+            ("sprite 1 a\nsize 32 32\nlayer body\nBITMAP 31 0 2 1\nKK", 5), // past edge
+            ("sprite 1 a\nsize 32 32\nlayer body\nBITMAP 0 0 0 1", 4),    // zero width
+            ("sprite 1 a\nsize 32 32\nlayer body\ncopy b", 4),            // no such sprite
         ];
         for (src, line) in cases {
             let e = compile_sprites(src).unwrap_err();

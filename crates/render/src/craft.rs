@@ -311,13 +311,13 @@ mod tests {
     // Item (mainhand) 32x32: P block 10..22 x 10..22, U strip 12..20 x 15, socket at (14, 17).
     fn item() -> Vec<u8> {
         let v = FORMAT_VERSION;
-        let mut s = vec![v, 32, 32, 16, 0, 3];
+        let mut s = vec![v, 32, 32, 11, 0, 3];
         s.extend_from_slice(&[0x12, 10, 10, 12, 12, 0x16, 12, 15, 8, 1, 0xA0, 14, 17]);
         s
     }
 
     fn body() -> Vec<u8> {
-        vec![FORMAT_VERSION, 32, 32, 11, 0, 1, 0x12, 10, 10, 4, 4]
+        vec![FORMAT_VERSION, 32, 32, 2, 0, 1, 0x12, 10, 10, 4, 4]
     }
 
     /// The item of [`item`] drawn as one BITMAP (P auto, the U row auto) and the same socket.
@@ -331,7 +331,7 @@ mod tests {
             FORMAT_VERSION,
             32,
             32,
-            16,
+            11,
             0,
             2,
             op::BITMAP << 4,

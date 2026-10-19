@@ -65,52 +65,69 @@ pub mod slot {
 /// Layer types (`FORMAT.md` 1.4).
 pub mod layer {
     pub const SHADOW: u8 = 0;
-    pub const ARM_BACK: u8 = 2;
-    pub const LEGS: u8 = 5;
-    pub const TORSO: u8 = 8;
-    pub const HEAD: u8 = 11;
-    pub const HAIR: u8 = 12;
-    pub const ARM_FRONT: u8 = 14;
+    pub const BACK_ITEM: u8 = 1;
+    /// The whole body of a race in one sprite: head, torso, arms and legs.
+    pub const BODY: u8 = 2;
+    pub const GLOVE_BACK: u8 = 3;
+    pub const PANTS: u8 = 4;
+    pub const BOOTS: u8 = 5;
+    pub const ARMOR_BODY: u8 = 6;
+    pub const NECKLACE: u8 = 7;
+    /// Shield or second weapon, held in front of the body on the back arm.
+    pub const OFFHAND: u8 = 8;
+    pub const HAIR: u8 = 9;
+    pub const HELMET: u8 = 10;
+    pub const MAINHAND: u8 = 11;
+    /// The front fist alone, drawn over the weapon so the fingers wrap the grip.
+    pub const FIST_FRONT: u8 = 12;
+    pub const GLOVE_FRONT: u8 = 13;
+    pub const OVERLAY_ELEMENT: u8 = 14;
+    /// Procedural effects, not stored as sprites.
+    pub const FX: u8 = 15;
+    /// Character layers are `0..=CHARACTER_MAX`; `16..=19` are reserved.
+    pub const CHARACTER_MAX: u8 = FX;
     pub const TILE: u8 = 20;
     pub const MONSTER: u8 = 21;
     pub const ICON: u8 = 22;
     pub const PORTRAIT: u8 = 23;
     pub const MAX: u8 = PORTRAIT;
 
-    /// Names in byte order, as written after `layer` in the DSL.
+    /// Names in byte order, as written after `layer` in the DSL. Reserved bytes have no name.
     pub const NAMES: [&str; 24] = [
         "shadow",
         "back_item",
-        "arm_back",
+        "body",
         "glove_back",
-        "offhand",
-        "legs",
         "pants",
         "boots",
-        "torso",
         "armor_body",
         "necklace",
-        "head",
+        "offhand",
         "hair",
         "helmet",
-        "arm_front",
-        "glove_front",
         "mainhand",
-        "overlay_wounds",
+        "fist_front",
+        "glove_front",
         "overlay_element",
         "fx",
+        "",
+        "",
+        "",
+        "",
         "tile",
         "monster",
         "icon",
         "portrait",
     ];
 
+    /// A layer type the decoder accepts (`FORMAT.md` 1.4).
+    pub const fn is_valid(layer_type: u8) -> bool {
+        layer_type <= CHARACTER_MAX || (layer_type >= TILE && layer_type <= MAX)
+    }
+
     /// Body layers use the body meaning of slots 2..6 (`FORMAT.md` 1.3).
     pub const fn is_body(layer_type: u8) -> bool {
-        matches!(
-            layer_type,
-            ARM_BACK | LEGS | TORSO | HEAD | HAIR | ARM_FRONT | MONSTER
-        )
+        matches!(layer_type, BODY | HAIR | FIST_FRONT | MONSTER)
     }
 }
 
@@ -295,7 +312,7 @@ pub fn decode(bytes: &[u8]) -> Result<Sprite> {
     };
     if !valid_size(header.width)
         || !valid_size(header.height)
-        || header.layer_type > layer::MAX
+        || !layer::is_valid(header.layer_type)
         || header.flags & !FLAG_NO_OUTLINE != 0
     {
         return Err(Error::Header);
@@ -506,7 +523,7 @@ mod tests {
     use alloc::vec;
 
     fn sprite(cmds: &[u8], count: u8) -> Vec<u8> {
-        let mut v = vec![FORMAT_VERSION, 32, 32, 16, 0, count];
+        let mut v = vec![FORMAT_VERSION, 32, 32, 11, 0, count];
         v.extend_from_slice(cmds);
         v
     }
@@ -567,6 +584,8 @@ mod tests {
             (1, 129),
             (2, 0),
             (3, 24),
+            (3, 16),
+            (3, 19),
             (4, 2),
         ] {
             let mut v = ok.clone();
