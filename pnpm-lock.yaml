@@ -95,6 +95,10 @@ importers:
         version: 5.9.3
 
   tests:
+    dependencies:
+      '@deadroll/sdk':
+        specifier: workspace:*
+        version: link:../sdk
     devDependencies:
       '@anchor-lang/core':
         specifier: 1.2.1
@@ -116,6 +120,10 @@ importers:
         version: 5.9.3
 
   tools/scripts:
+    dependencies:
+      '@deadroll/sdk':
+        specifier: workspace:*
+        version: link:../../sdk
     devDependencies:
       '@solana/kit':
         specifier: 8.4.0

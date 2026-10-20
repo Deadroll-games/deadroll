@@ -1,26 +1,41 @@
 // Client for the on-chain render blobs: rasterizer WASM, palette, sprite book.
-// Account layout and instruction bytes match programs/render (see its README).
+// Instructions, the header layout and the PDAs come from the sdk (generated from the render IDL).
 import { createHash } from "node:crypto";
 import {
-  AccountRole,
   address,
   appendTransactionMessageInstructions,
   createSolanaRpc,
   createSolanaRpcSubscriptions,
   createTransactionMessage,
-  getProgramDerivedAddress,
   pipe,
   sendAndConfirmTransactionFactory,
   setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
   signTransactionMessageWithSigners,
+  type Instruction,
+  type TransactionSigner,
 } from "@solana/kit";
+import { COMPUTE_BUDGET_PROGRAM, PROGRAMS } from "@deadroll/sdk";
+import { findConfigPda } from "@deadroll/sdk/registry";
+import {
+  findPalettePda,
+  findRasterizerPda,
+  findRenderAuthorityPda,
+  findSpriteBookPda,
+  getBlobHeaderDecoder,
+  getExtendInstruction,
+  getFinalizePaletteInstruction,
+  getFinalizeRasterizerInstruction,
+  getFinalizeSpriteBookInstruction,
+  getInitPaletteInstruction,
+  getInitRasterizerInstruction,
+  getInitSpriteBookInstruction,
+  getWriteChunkInstruction,
+} from "@deadroll/sdk/render";
 
-export const RENDER_PROGRAM = address("DgQCsXAe7Q7h8zdtToiTvk8XqNjjbXuD6xith2BmEiRB");
-export const GAME_CONFIG = address("HYGYnuyssMfrHr2gT3AC3hkQpD6xt37a5hrCc2Z97JHN");
-export const REGISTRY_PROGRAM = address("dZ1jraMfS3bAUTkRw2TA1ddg8UDGzgUdFQz5pmBxjoG");
-const SYSTEM_PROGRAM = address("11111111111111111111111111111111");
-const COMPUTE_BUDGET_PROGRAM = address("ComputeBudget111111111111111111111111111111");
+export const RENDER_PROGRAM = PROGRAMS.render;
+export const REGISTRY_PROGRAM = PROGRAMS.registry;
+export const GAME_CONFIG = (await findConfigPda())[0];
 
 /** Bytes before the body: discriminator + BlobHeader. */
 export const BODY_OFFSET = 116;
@@ -38,11 +53,6 @@ export const WASM_MAGIC = new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x
 
 export type Kind = "rasterizer" | "palette" | "sprite_book";
 
-const SEED: Record<Kind, string> = {
-  rasterizer: "rasterizer",
-  palette: "palette",
-  sprite_book: "sprites",
-};
 const KIND_BYTE: Record<Kind, number> = {
   rasterizer: 1,
   palette: 2,
@@ -54,37 +64,8 @@ const MAX_LEN: Record<Kind, number> = {
   sprite_book: 64 * 1024,
 };
 
-function fromHex(hex: string): Uint8Array {
-  const out = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < out.length; i++) out[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-  return out;
-}
-
-/** First 8 bytes of sha256("global:<name>"), pinned so a rename cannot drift quietly. */
-export const DISC = {
-  init_rasterizer: fromHex("82bff24f597b42d2"),
-  init_palette: fromHex("7ed0d30cb6daa922"),
-  init_sprite_book: fromHex("2f2e5ac9c2467b79"),
-  extend: fromHex("e47f0001e39a36a8"),
-  write_chunk: fromHex("5d8da70fd1858933"),
-  finalize_rasterizer: fromHex("2680cb91554cc31e"),
-  finalize_palette: fromHex("2201740fd300a563"),
-  finalize_sprite_book: fromHex("80761daaae3cf1fe"),
-};
-
-const INIT_DISC: Record<Kind, Uint8Array> = {
-  rasterizer: DISC.init_rasterizer,
-  palette: DISC.init_palette,
-  sprite_book: DISC.init_sprite_book,
-};
-const FINALIZE_DISC: Record<Kind, Uint8Array> = {
-  rasterizer: DISC.finalize_rasterizer,
-  palette: DISC.finalize_palette,
-  sprite_book: DISC.finalize_sprite_book,
-};
-
 function requireKind(kind: Kind): void {
-  if (SEED[kind] === undefined) throw new Error(`unknown blob kind ${String(kind)}`);
+  if (KIND_BYTE[kind] === undefined) throw new Error(`unknown blob kind ${String(kind)}`);
 }
 
 export function u16(n: number): Uint8Array {
@@ -100,18 +81,6 @@ export function u32(n: number): Uint8Array {
   out[1] = (n >>> 8) & 0xff;
   out[2] = (n >>> 16) & 0xff;
   out[3] = (n >>> 24) & 0xff;
-  return out;
-}
-
-function cat(...parts: Uint8Array[]): Uint8Array {
-  let n = 0;
-  for (const part of parts) n += part.length;
-  const out = new Uint8Array(n);
-  let offset = 0;
-  for (const part of parts) {
-    out.set(part, offset);
-    offset += part.length;
-  }
   return out;
 }
 
@@ -149,32 +118,30 @@ export type ParsedHeader = {
   sha256: Uint8Array;
 };
 
-/** Reads BlobHeader at the documented offsets. Ignores the 8-byte discriminator. */
+/** Reads the BlobHeader after the 8-byte discriminator (the sdk's decoder). */
 export function parseHeader(data: Uint8Array): ParsedHeader {
   if (data.length < BODY_OFFSET) {
     throw new Error(`account data is ${data.length} bytes, header needs ${BODY_OFFSET}`);
   }
-  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const h = getBlobHeaderDecoder().decode(data, 8);
   return {
-    version: data[8],
-    kind: data[9],
-    finalized: data[10],
-    bump: data[11],
-    len: view.getUint32(12, true),
-    id: view.getUint16(16, true),
+    version: h.version,
+    kind: h.kind,
+    finalized: h.finalized,
+    bump: h.bump,
+    len: h.len,
+    id: h.id,
     authority: data.slice(20, 52),
-    expectedSha256: data.slice(52, 84),
-    sha256: data.slice(84, 116),
+    expectedSha256: Uint8Array.from(h.expectedSha256),
+    sha256: Uint8Array.from(h.sha256),
   };
 }
 
-export async function pda(kind: Kind, id: number) {
+export async function pda(kind: Kind, id: number): Promise<string> {
   requireKind(kind);
-  const [derived] = await getProgramDerivedAddress({
-    programAddress: RENDER_PROGRAM,
-    seeds: [new TextEncoder().encode(SEED[kind]), u16(id)],
-  });
-  return derived;
+  if (kind === "rasterizer") return (await findRasterizerPda({ version: id }))[0];
+  if (kind === "palette") return (await findPalettePda({ version: id }))[0];
+  return (await findSpriteBookPda({ bookId: id }))[0];
 }
 
 export type UploadPlan = {
@@ -212,95 +179,59 @@ export async function planUpload(kind: Kind, id: number, body: Uint8Array): Prom
   };
 }
 
-type Signer = { address: string };
-
-const signerMeta = (signer: Signer, writable: boolean) => ({
-  address: signer.address,
-  role: writable ? AccountRole.WRITABLE_SIGNER : AccountRole.READONLY_SIGNER,
-  signer,
-});
-const writable = (account: string) => ({ address: address(account), role: AccountRole.WRITABLE });
-const readonly = (account: string) => ({ address: address(account), role: AccountRole.READONLY });
-
-export function initData(kind: Kind, id: number, len: number, hash: Uint8Array): Uint8Array {
-  requireKind(kind);
-  if (hash.length !== 32) throw new Error("sha256 must be 32 bytes");
-  return cat(INIT_DISC[kind], u16(id), u32(len), hash);
-}
-
-export function writeChunkData(offset: number, bytes: Uint8Array): Uint8Array {
-  return cat(DISC.write_chunk, u32(offset), u32(bytes.length), bytes);
-}
+type Signer = TransactionSigner;
 
 /** ComputeBudget SetComputeUnitLimit. Opcode 2, then units as u32 little-endian. No accounts. */
 export function setComputeUnitLimitData(units: number): Uint8Array {
-  return cat(new Uint8Array([2]), u32(units));
+  const out = new Uint8Array(5);
+  out[0] = 2;
+  out.set(u32(units), 1);
+  return out;
 }
 
-export function initInstruction(
-  kind: Kind,
-  authority: Signer,
-  config: string,
-  target: string,
-  id: number,
-  len: number,
-  hash: Uint8Array,
-) {
-  return {
-    programAddress: RENDER_PROGRAM,
-    accounts: [signerMeta(authority, true), readonly(config), writable(target), readonly(SYSTEM_PROGRAM)],
-    data: initData(kind, id, len, hash),
-  };
+export function initInstruction(kind: Kind, authority: Signer, config: string, target: string, id: number, len: number, hash: Uint8Array): Instruction {
+  requireKind(kind);
+  if (hash.length !== 32) throw new Error("sha256 must be 32 bytes");
+  const accounts = { authority, config: address(config) };
+  if (kind === "rasterizer") return getInitRasterizerInstruction({ ...accounts, rasterizer: address(target), version: id, len, sha256: hash });
+  if (kind === "palette") return getInitPaletteInstruction({ ...accounts, palette: address(target), version: id, len, sha256: hash });
+  return getInitSpriteBookInstruction({ ...accounts, spriteBook: address(target), bookId: id, len, sha256: hash });
 }
 
-export function extendInstruction(authority: Signer, target: string) {
-  return {
-    programAddress: RENDER_PROGRAM,
-    accounts: [signerMeta(authority, true), writable(target), readonly(SYSTEM_PROGRAM)],
-    data: DISC.extend,
-  };
+export function extendInstruction(authority: Signer, target: string): Instruction {
+  return getExtendInstruction({ authority, target: address(target) });
 }
 
-export function writeChunkInstruction(authority: Signer, target: string, offset: number, bytes: Uint8Array) {
-  return {
-    programAddress: RENDER_PROGRAM,
-    accounts: [signerMeta(authority, false), writable(target)],
-    data: writeChunkData(offset, bytes),
-  };
+export function writeChunkInstruction(authority: Signer, target: string, offset: number, bytes: Uint8Array): Instruction {
+  return getWriteChunkInstruction({ authority, target: address(target), offset, bytes });
 }
 
 /** The render `["authority"]` PDA: signs `finalize_rasterizer`'s CPI into the registry. */
 export async function renderAuthorityPda(): Promise<string> {
-  const [a] = await getProgramDerivedAddress({
-    programAddress: RENDER_PROGRAM,
-    seeds: [new TextEncoder().encode("authority")],
-  });
-  return a;
+  return (await findRenderAuthorityPda())[0];
 }
 
 /**
  * `finalize_*`. The rasterizer one also writes `GameConfig` (CPI into the registry), so it takes
  * the config, the render authority PDA and the registry program (programs/render/README.md).
  */
-export async function finalizeInstruction(kind: Kind, authority: Signer, target: string, config: string = GAME_CONFIG) {
+export async function finalizeInstruction(kind: Kind, authority: Signer, target: string, config: string = GAME_CONFIG): Promise<Instruction> {
   requireKind(kind);
-  const accounts = [signerMeta(authority, false), writable(target)];
   if (kind === "rasterizer") {
-    accounts.push(writable(config), readonly(await renderAuthorityPda()), readonly(REGISTRY_PROGRAM));
+    return getFinalizeRasterizerInstruction({
+      authority,
+      rasterizer: address(target),
+      config: address(config),
+      renderAuthority: address(await renderAuthorityPda()),
+      registryProgram: REGISTRY_PROGRAM,
+    });
   }
-  return {
-    programAddress: RENDER_PROGRAM,
-    accounts,
-    data: FINALIZE_DISC[kind],
-  };
+  if (kind === "palette") return getFinalizePaletteInstruction({ authority, palette: address(target) });
+  return getFinalizeSpriteBookInstruction({ authority, spriteBook: address(target) });
 }
 
-export function setComputeUnitLimitInstruction(units: number) {
-  return {
-    programAddress: COMPUTE_BUDGET_PROGRAM,
-    accounts: [],
-    data: setComputeUnitLimitData(units),
-  };
+export function setComputeUnitLimitInstruction(units: number): Instruction {
+  return { programAddress: COMPUTE_BUDGET_PROGRAM, accounts: [], data: setComputeUnitLimitData(units) };
 }
 
 /** Subscription URL: a local validator uses ws: on the port plus one; a remote RPC uses wss: on the same host and port. */

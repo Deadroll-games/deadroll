@@ -4,14 +4,18 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "upload-rasterizer": "node --experimental-strip-types --no-warnings upload-rasterizer.ts",
-    "upload-sprites": "node --experimental-strip-types --no-warnings upload-sprites.ts",
-    "seed-registry": "node --experimental-strip-types --no-warnings seed-registry.ts",
-    "test": "node --experimental-strip-types --no-warnings --test lib/render-program.test.ts lib/registry-records.test.ts",
-    "deploy:local": "node --experimental-strip-types --no-warnings deploy-local.ts",
-    "deploy:devnet": "node --experimental-strip-types --no-warnings deploy-devnet.ts"
+    "sdk": "pnpm --filter @deadroll/sdk build",
+    "upload-rasterizer": "pnpm sdk && node --experimental-strip-types --no-warnings upload-rasterizer.ts",
+    "upload-sprites": "pnpm sdk && node --experimental-strip-types --no-warnings upload-sprites.ts",
+    "seed-registry": "pnpm sdk && node --experimental-strip-types --no-warnings seed-registry.ts",
+    "test": "pnpm sdk && node --experimental-strip-types --no-warnings --test lib/render-program.test.ts lib/registry-records.test.ts",
+    "deploy:local": "pnpm sdk && node --experimental-strip-types --no-warnings deploy-local.ts",
+    "deploy:devnet": "pnpm sdk && node --experimental-strip-types --no-warnings deploy-devnet.ts"
   },
   "devDependencies": {
     "@solana/kit": "8.4.0"
+  },
+  "dependencies": {
+    "@deadroll/sdk": "workspace:*"
   }
 }

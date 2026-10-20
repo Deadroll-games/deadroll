@@ -19,7 +19,7 @@ pnpm --filter @deadroll/scripts run deploy:devnet           # https://api.devnet
 ```
 
 Steps (each one skips itself when done):
-1. preflight: RPC, wallet, `target/deploy/*-keypair.json` match `Anchor.toml` (keypairs are never generated);
+1. preflight: RPC, wallet, `target/deploy/*-keypair.json` match the ids in `@deadroll/sdk` (= `Anchor.toml`; keypairs are never generated);
 2. build: `anchor build --tools-version v1.54 -p <program>` for each program (local: session with `--features mock-vrf`),
    `crates/render/wasm/build.sh`, `cargo run -p art -- pack` (palette + sprite book 1 from `assets/`);
 3. `solana program deploy` for the 7 programs whose on-chain bytes differ from the build. Each program is
