@@ -15,7 +15,7 @@ Related documents:
 2. **No negative values.** No stat, bonus or result is ever negative. "Bad" effects do not subtract, they **divide** (section 3).
 3. **Values cannot "drop to zero" or "go to infinity" from stacking.** No matter how many Slows, Weakenings or resistances are applied, the effect approaches the limit but does not cross it.
 4. **Rounding once, at the very end.** Intermediate steps are calculated with spare precision, and rounding down is done only when the final number is obtained.
-5. **One piece of randomness per check.** The die answers the question "did it work or not". The strength of an effect comes from tiers and stats, not from the roll.
+5. **One piece of randomness per check.** The die answers the question "did it work or not". The strength of an effect is calculated from the skill, the weapon and the modifiers into a range; the d100 only picks a point in that range (section 5).
 6. **Every calculation is explainable.** Every attack leaves a full hit breakdown: which rolls, which bonuses, which defenses. This is both fairness and content for streams.
 7. **One code everywhere.** The combat logic lives in one Rust crate, which is used by the on-chain program, the balance simulator and the website (a preview of "roughly how much will I deal").
 
@@ -101,13 +101,15 @@ All rolls are made on-chain and recorded in the hit breakdown.
 | **Damage**              | d100                                           | a point in the range of each packet: 0 = minimum, 100 = maximum; one roll for the whole attack |
 | **Resonance tint**      | d100 against the chance, one per each tint     | whether the tint triggered or not                                                            |
 | **State application**   | d100 against the chance                        | whether the state was applied or not                                                         |
+
+All chances (crit, tint, state) are rolled on a d100, from 0 to 100, against the chance in basis points.
 | **Special checks**      | d20 against difficulty                         | trap detection, searching, resistance to an effect                                           |
 
 Rules:
 
 - **One piece of randomness per action.** The action requests a random value from MagicBlock Solana VRF; all rolls of the action (d20, tints, damage, states) are derived from it deterministically: seed + roll number → hash → number. The action has two steps: a request and a callback, but for the player it is one click.
 - **Rolls that are not needed are not made.** A miss ends the attack; if the target is immune to the base, the tints are not rolled; if the target is immune to a state, its application is not rolled.
-- **Strength is not rolled.** The die gives "yes or no" (or a point in the damage range), and strength comes from the tier, the stat or the damage of the attack.
+- **Strength is not a yes-or-no roll.** The strength of an effect is calculated from the skill, the weapon and the modifiers into a range (minimum to maximum). The d100 picks a point in that range: 0 is the minimum, 100 is the maximum. Chances (crit, tint, state) are the only yes-or-no rolls.
 - **Chances always stay within limits.** Any chance is bounded by a minimum and a maximum (section 10), so there are no guaranteed or impossible events, except for explicit rules such as immunity.
 - The hit modifier is D&D-style: a bonus is added to the d20 roll, and target defense is the threshold. Summing is acceptable here because all the values are positive.
 - The website shows the rolls as a **cascade of animations**: the hit d20, the tint dice, the damage d100, the state dice.
@@ -188,7 +190,7 @@ Some states build up: **Chill → Freeze**. Each Cold hit adds buildup, and when
 | Type          | Example                | How it is calculated                                          |
 | ------------- | ---------------------- | ------------------------------------------------------------- |
 | **Soft**      | Chill, Slow            | through a counterweight to Speed (section 3)                  |
-| **Hard**      | Freeze, Stun           | an explicit rule: the target skips an action or movement      |
+| **Hard**      | Freeze, Stun           | an explicit rule: the target skips an action or movement. For now Freeze and Stun skip the whole turn |
 
 After hard control, the target receives **temporary tenacity** to the same control, so that it cannot be held frozen for the whole party.
 

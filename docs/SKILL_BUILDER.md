@@ -37,6 +37,10 @@ Mechanics come **only** from blocks, text is identity and lore, as in the brief.
 
 Tag compatibility rules from `DAMAGE_TYPES_AND_MIXES.md`, section 2.1: magical ✗ martial, strike ✗ projectile.
 
+**Line target.** A line goes from the caster through the chosen target up to the range of the skill. A wall stops it. It hits the units of the skill's side (enemies for damage and debuffs, allies for buffs). Every unit gets its own roll, all on the same VRF value, in the order along the line. In melee a line reaches 1 cell.
+
+**Range.** A staff and a wand attack at range (projectile); a sword and a fist attack in melee (strike). A monster's range comes from the form of its attack.
+
 ## 3. Categories and slots
 
 | Category     | Slots per map | How it works                                                       |
@@ -70,13 +74,22 @@ This is a passive ability with a trigger condition. Examples of conditions:
 
 A reactive skill also has a cooldown, so that it does not trigger every turn. A reactive skill can be a **temporary aura** (section 3.5).
 
+How a reaction works:
+
+- A reaction is not an action: it spends no AP, and it works under Freeze and Stun too. It has its own cooldown.
+- The target of damage and debuffs is the enemy that caused the trigger.
+- A buff goes on the character themselves; for the condition "a nearby ally dropped below an HP threshold" it goes on that ally.
+- A counterattack checks the range of the skill.
+- A monster that enters a cell adjacent to the carrier of the condition "an enemy entered an adjacent cell" stops there.
+- The HP threshold triggers when HP goes from the threshold level or higher to a level below it.
+
 ### 3.3 Passive skills
 
-They work constantly while the skill is selected for the map: an addition to a stat, tag-based increase, resistance. A passive skill can be a **permanent aura** (section 3.5).
+They work constantly while the skill is selected for the map: an addition to a stat, tag-based increase, resistance. A passive skill can be a **permanent aura** (section 3.5). A passive skill works at a fixed strength, without a roll. A passive Empowerment does not strengthen the basic attack.
 
 ### 3.4 Choosing skills for the map
 
-- Before entering a map the player chooses **4 active, 1 reactive, 1 passive** from their skills.
+- Before entering a map the player chooses **4 active, 1 reactive, 1 passive** from their skills: exactly min(slots, number of skills the character has in that category). The same applies at a spawn.
 - The choice is recorded **in the same transaction** as joining the party (in `Participation`).
 - Until the end of the map the set **does not change**. The character's other skills are unavailable on this map.
 
@@ -93,7 +106,8 @@ Rules:
 
 - An aura can belong to **any class**, not only to Support. Support simply strengthens auras more (`CHARACTER.md`, section 8.1).
 - **One aura = one effect.** An aura gives only one thing: one stat, one resistance, one increase. This way auras do not turn into over-buffing.
-- Identical auras from different allies **do not stack**: the strongest one applies.
+- Identical auras from different allies **do not stack**: the strongest one applies. Auras of one kind do not stack with each other.
+- A passive debuff works only as an aura on enemies within the radius. A passive debuff without an aura is not allowed. An aura has no hard control (Stun, Freeze).
 - An aura has an aspect, and it takes part in the **reactions** of allies, like any buff: Protection with Blood on an ally with Fire can produce Searing Rage.
 - The aura radius is in cells, line of sight is not needed.
 
@@ -206,6 +220,8 @@ This limit applies only to the builder. The same states can arise in other ways:
 
 Haste, Empowerment, Protection. The buff's aspect determines the recipient's reaction.
 
+**Heal** is open to monsters only: as an active or reactive skill on a single target (not a passive, not an aura). A kin-only skill heals and buffs only the monster's own kin (`BESTIARY.md`, section 2). Players cannot take Heal.
+
 ### 6.3 Effect and states
 
 A skill's effect is **separate from the aspect's native state**. A Cold skill with the Freeze effect has both the effect chance and the usual Chill chance from Cold damage.
@@ -309,6 +325,8 @@ A choice for the player: either up to 21 regular lenses gradually, or one Mythic
 
 Race **does not limit** starting skills: aspects are chosen freely. Race has its influence through predisposition (`CHARACTER.md`, section 7).
 
+In the starter presets Bleeding Cleave is a ranged line skill, and Last Stand triggers at an HP threshold of 40%.
+
 ### 10.2 Uncut skills
 
 - After the start, new skills are created from an **uncut skill** (a working name; possibly an empty scroll): a special item obtained in the game.
@@ -325,7 +343,7 @@ Creation is checked by the program: category, tags, number of aspects, effect, t
 - It cannot be sold or transferred.
 - The character's bag holds **no more than 50 skills** (a starting limit, may change).
 - A skill can be **deleted** to free up space. Lenses invested in it are **destroyed** together with it.
-- When the character dies, the skills **burn** together with them, the tombstone keeps their names and descriptions as a memorial.
+- When the character dies, the mechanics of the skills are erased together with them; the skill names and descriptions stay on the tombstone as a memorial.
 - In the late game a Skillsmith can modify skills with lenses (section 9).
 
 ---
@@ -341,7 +359,7 @@ The skill account (PDA, bound to the character):
 | Power     | the power multiplier with penalties (computed at creation and stored)        |
 | Fusion    | fusion id (computed from the pair of aspects)                                |
 | Lenses    | counters of applied lenses by lens tier, Mythic flag                         |
-| Story     | name, description **up to 200 characters**                                   |
+| Story     | name, description **up to 200 printable ASCII characters**; the description is written once, by a separate instruction, and is not burned at death |
 
 The game is in English: players write skill names and descriptions in English. The names in these documents are working names.
 
@@ -360,7 +378,7 @@ The cooldown and the choice for the map are stored not in the skill, but in the 
 - [ ] A buff and a debuff have exactly one aspect and one effect kind
 - [ ] A reactive skill has a trigger condition
 - [ ] Aura: only a passive or reactive skill, exactly one effect, a radius is set
-- [ ] The name is not longer than the limit, the description is not longer than 200 characters
+- [ ] The name is not longer than the limit, the description is not longer than 200 printable ASCII characters
 - [ ] **Starting skill:** power source and purpose are allowed by the class (section 10.1)
 - [ ] **Skill from an uncut skill:** the character has an uncut skill and the needed resources, both are burned at creation
 - [ ] Slots on entering the map: exactly 4 active, 1 reactive, 1 passive (or fewer, if there are fewer skills)

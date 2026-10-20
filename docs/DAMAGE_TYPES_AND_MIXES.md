@@ -54,6 +54,8 @@ Each skill and each hit is described by a set of tags along independent axes. Ta
 | **Range**        | from where                | melee, ranged                                                                         | one                           |
 | **Timing**       | when it is dealt          | instant, over time                                                                    | one                           |
 
+For now the timing tag is only a tag: it does not change any mechanic.
+
 ### 2.1 Compatibility rules
 
 | Rule                    | Explanation                                      |
@@ -141,6 +143,8 @@ A tier from 14 to 1 (1 is the strongest) sets:
 
 **The die only decides "triggered or not".** The strength of the effect always comes from the tier, not from the roll. A single point of randomness per resonance keeps the calculations tunable, even when effects stack on each other.
 
+The aspect of the weapon does not become a tint of the character's own basic attack: the weapon is already the base there. The hit parts of tint traits (Fury, Keenness) work every time their tint triggers.
+
 Tier ranges for each carrier are set at balancing.
 
 ---
@@ -190,13 +194,22 @@ The same pair gives different resonances depending on the skill category:
 | **Self-targeted** (aura, buff)          | on the character themselves                   |
 | **Reactive** (defense, counterattack)   | on the character, triggers from events        |
 
-In version 0.2 only the **attacking** resonances are filled in. Columns for the other categories are added as the wiki grows.
+In version 0.2 only the **attacking** resonances are filled in. A counterattack hits through the table of attacking resonances. Self-targeted buffs, auras and reactive buffs have no resonances for now. Columns for the other categories are added as the wiki grows.
 
 ### 6.3 How the mechanics are calculated
 
 **Resonance mechanics = native state of the base + tint trait.** The name and lore are written by hand. So any new pair gets its mechanics immediately, and the wiki only has to give it a name.
 
 Order matters: "Cold with a Piercing tint" and "Piercing with a Cold tint" are different resonances.
+
+Calculation rules for the tables below:
+
+- A linked state is applied together with the native state of the base, without a roll of its own. A resonance rolls its own die only where its essence says "a chance of".
+- A jump passes the state to the next target, not the damage.
+- An adjacent target is a cell at Chebyshev distance 1; if there are several, the one with the lower index is taken.
+- "Next in line" is the cell behind the target in the direction from the attacker to the target.
+- Pale Flame: the accuracy bonus is a buff on the attacker for 2 turns.
+- Blasting Flame sets adjacent cells on fire for `burning_cell_rounds` rounds.
 
 ### 6.4 Attacking pair resonances
 

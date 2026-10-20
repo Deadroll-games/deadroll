@@ -33,6 +33,7 @@ Related documents:
 | **Natural attack**        | like a character's basic attack: damage range, aspect, power source, form                               |
 | **Predisposition**        | an optional aspect: then the monster takes part in **reactions** and **resonances** like a character    |
 | **Defenses by aspect**    | normal, resistance or immunity (section 10)                                                             |
+| **Kin**                   | the kin the monster belongs to (Wolf, Goblin and so on); a skill marked kin-only heals and buffs only its own kin |
 | **State immunities**      | for example, insensitivity to Blood magic or to Freeze                                                  |
 | **Traits**                | special permanent rules: swarm, regeneration, hunt                                                      |
 | **Skill pool**            | the skills the DM chooses from (section 3)                                                              |
@@ -96,10 +97,10 @@ The template's pool is larger than the number of slots, so that the DM has a cho
 
 - The DM can make a regular monster **elite** for map budget points (`MAP_DESCRIPTION.md`, section 10).
 - An elite monster gets:
-  - more HP;
+  - **+50% HP** (`elite_hp_bp`);
   - **one additional active skill** from the pool (4 instead of 3).
 - Elite versions give the DM a tool for making a unique encounter without new templates.
-- The elite monster limit per map is set by the map tier.
+- The elite monster limit per map is set by the map tier: tier 1 allows one elite, tier 2 allows two (placeholders in `crates/mapcheck/src/limits.rs`).
 
 ---
 
@@ -270,6 +271,7 @@ Bosses must be valuable. From a boss, in addition to the party's regular reward 
 ## 10. Defenses
 
 - Defense levels by aspect: **normal, resistance, immunity** (`DAMAGE_TYPES_AND_MIXES.md`, section 9).
+- Resistances, immunities and all combat numbers of monsters are taken from `assets/registry/bestiary.json` (the registry). The scale is tuned for players (patch 6). The Goblin Shaman has no resistances, and its attack is Lightning.
 - Immunities to states and to specific kinds of magic are set separately (for example, future ghosts are insensitive to Blood magic and curses).
 - Traits such as "dry wood" or "regeneration that fire stops" are **trait rules**, not defense levels.
 
