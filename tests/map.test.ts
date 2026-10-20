@@ -1,12 +1,10 @@
 // Map program tests on a local validator: `anchor build --tools-version v1.54`, then run them
 // the way the decision block of agents/TASKS.md says (lane L6 port: 8919).
-// Instruction discriminators and error codes come from target/idl/deadroll_map.json.
+// Instructions, accounts, PDAs and error codes come from @deadroll/sdk (generated from the IDL).
 import { strict as assert } from "node:assert";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
-  AccountRole,
   address,
   airdropFactory,
   appendTransactionMessageInstructions,
@@ -16,7 +14,6 @@ import {
   generateKeyPairSigner,
   getAddressEncoder,
   getBase64Encoder,
-  getProgramDerivedAddress,
   getSignatureFromTransaction,
   lamports,
   pipe,
@@ -25,11 +22,21 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
   signTransactionMessageWithSigners,
 } from "@solana/kit";
-
-const idl = JSON.parse(readFileSync(new URL("../target/idl/deadroll_map.json", import.meta.url), "utf8"));
-const MAP_PROGRAM = address(idl.address);
-const REGISTRY_PROGRAM = address("dZ1jraMfS3bAUTkRw2TA1ddg8UDGzgUdFQz5pmBxjoG");
-const SYSTEM_PROGRAM = address("11111111111111111111111111111111");
+import { PROGRAMS, SYSTEM_PROGRAM, errorCode } from "@deadroll/sdk";
+import {
+  findLayoutPda,
+  findMapPda,
+  getCreateMapInstruction,
+  getFinalizeMapInstruction,
+  getMapDecoder,
+  getMapLayoutDecoder,
+  getSetStatusInstruction,
+  getSpawnEncoder,
+  getWriteLayoutInstruction,
+  getWriteSpawnsInstruction,
+  type MapStatus,
+} from "@deadroll/sdk/map";
+import { findConfigPda, findTablePda } from "@deadroll/sdk/registry";
 
 // `anchor test` passes the cluster; the websocket is the RPC port + 1.
 const rpcUrl = new URL(process.env.ANCHOR_PROVIDER_URL ?? "http://127.0.0.1:8899");
@@ -64,104 +71,57 @@ type Spawn = { id: number; x: number; y: number; pack: number; level?: number; s
 // ---------- encoding ----------
 
 function err(name: string): number {
-  const e = idl.errors.find((x: { name: string }) => x.name === name);
-  assert.ok(e, `no error ${name} in the IDL`);
-  return e.code;
-}
-
-function disc(ix: string): Uint8Array {
-  const i = idl.instructions.find((x: { name: string }) => x.name === ix);
-  assert.ok(i, `no instruction ${ix} in the IDL`);
-  return Uint8Array.from(i.discriminator);
-}
-
-function concat(...parts: (Uint8Array | number[])[]): Uint8Array {
-  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
-  let o = 0;
-  for (const p of parts) {
-    out.set(p, o);
-    o += p.length;
-  }
-  return out;
+  const code = errorCode("map", name);
+  assert.ok(code !== null, `no error ${name} in the IDL`);
+  return code;
 }
 
 const u16 = (v: number) => [v & 0xff, (v >> 8) & 0xff];
-const u32 = (v: number) => [v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff, (v >>> 24) & 0xff];
-const vec = (bytes: Uint8Array | number[]) => concat(u32(bytes.length), bytes);
-const cell = (c: Cell) => [c.x, c.y];
+/** The program's `Spawn` record (expected bytes). */
 const spawnBytes = (s: Spawn) => [s.id, s.x, s.y, s.level ?? 1, ...u16(s.skills), s.flags ?? 0, 0, s.pack];
+const spawnArgs = (s: Spawn) => ({ bestiaryId: s.id, x: s.x, y: s.y, level: s.level ?? 1, skills: s.skills, flags: s.flags ?? 0, aspects: 0, pack: s.pack });
 
 // ---------- addresses ----------
 
-async function pda(seeds: (string | Uint8Array | number[])[], program = MAP_PROGRAM) {
-  const bytes = seeds.map((s) => (typeof s === "string" ? new TextEncoder().encode(s) : Uint8Array.from(s)));
-  const [addr] = await getProgramDerivedAddress({ programAddress: program, seeds: bytes });
-  return addr;
-}
-
-const mapAddress = (dm: string, index: number) => pda(["map", enc.encode(address(dm)), u32(index)]);
-const layoutAddress = (map: string) => pda(["layout", enc.encode(address(map))]);
-const configAddress = () => pda(["config"], REGISTRY_PROGRAM);
+const mapAddress = async (dm: string, index: number) => (await findMapPda({ dm: address(dm), index }))[0];
+const layoutAddress = async (map: string) => (await findLayoutPda({ map: address(map) }))[0];
+const configAddress = async () => (await findConfigPda())[0];
+const tableAddress = async (seed: string) => (await findTablePda({ seed }))[0];
 
 // ---------- instructions ----------
 
 type Signer = Awaited<ReturnType<typeof generateKeyPairSigner>>;
 
-const signerMeta = (s: Signer, writable = false) => ({
-  address: s.address,
-  role: writable ? AccountRole.WRITABLE_SIGNER : AccountRole.READONLY_SIGNER,
-  signer: s,
-});
-const meta = (a: string, writable = false) => ({
-  address: address(a),
-  role: writable ? AccountRole.WRITABLE : AccountRole.READONLY,
-});
-
 async function createMapIx(dm: Signer, index: number, width: number, height: number, tier: number) {
   const map = await mapAddress(dm.address, index);
-  return {
-    programAddress: MAP_PROGRAM,
-    accounts: [signerMeta(dm, true), meta(map, true), meta(await layoutAddress(map), true), meta(SYSTEM_PROGRAM)],
-    data: concat(disc("create_map"), u32(index), [width, height, tier]),
-  };
+  return getCreateMapInstruction({ dm, map, layout: await layoutAddress(map), index, width, height, tier });
 }
 
 async function editAccounts(dm: Signer, map: string) {
-  return [signerMeta(dm), meta(map), meta(await layoutAddress(map), true)];
+  return { dm, map: address(map), layout: await layoutAddress(map) };
 }
 
 async function writeLayoutIx(dm: Signer, map: string, offset: number, tiles: Uint8Array | number[]) {
-  return {
-    programAddress: MAP_PROGRAM,
-    accounts: await editAccounts(dm, map),
-    data: concat(disc("write_layout"), u16(offset), vec(tiles)),
-  };
+  return getWriteLayoutInstruction({ ...(await editAccounts(dm, map)), offset, tiles: Uint8Array.from(tiles) });
 }
 
 async function writeSpawnsIx(dm: Signer, map: string, entrance: Cell, exit: Cell, spawns: Spawn[]) {
-  return {
-    programAddress: MAP_PROGRAM,
-    accounts: await editAccounts(dm, map),
-    data: concat(disc("write_spawns"), cell(entrance), cell(exit), u32(spawns.length), ...spawns.map(spawnBytes)),
-  };
+  return getWriteSpawnsInstruction({ ...(await editAccounts(dm, map)), entrance, exit, spawns: spawns.map(spawnArgs) });
 }
 
 /** Patch 6: the registry bestiary and monster skills tables follow the layout; `tables` overrides them. */
 async function finalizeIx(dm: Signer, map: string, root: number[], tables: string[] | null = null) {
-  const [bestiary, skills] = tables ?? [await pda(["bestiary"], REGISTRY_PROGRAM), await pda(["monster_skills"], REGISTRY_PROGRAM)];
-  return {
-    programAddress: MAP_PROGRAM,
-    accounts: [signerMeta(dm), meta(map, true), meta(await layoutAddress(map)), meta(bestiary), meta(skills)],
-    data: concat(disc("finalize_map"), root),
-  };
+  const [bestiary, skills] = tables ?? [await tableAddress("bestiary"), await tableAddress("monster_skills")];
+  return getFinalizeMapInstruction({
+    ...(await editAccounts(dm, map)),
+    bestiary: address(bestiary),
+    monsterSkills: address(skills),
+    secretsRoot: Uint8Array.from(root),
+  });
 }
 
 function setStatusIx(map: string, authority: Signer, config: string, status: number) {
-  return {
-    programAddress: MAP_PROGRAM,
-    accounts: [meta(map, true), signerMeta(authority), meta(config)],
-    data: concat(disc("set_status"), [status]),
-  };
+  return getSetStatusInstruction({ map: address(map), sessionAuthority: authority, config: address(config), status: status as MapStatus });
 }
 
 // ---------- transactions ----------
@@ -229,33 +189,33 @@ async function data(addr: string): Promise<Uint8Array> {
 }
 
 async function readMap(addr: string) {
-  const d = await data(addr);
+  const { core, tier } = getMapDecoder().decode(await data(addr));
   return {
-    version: d[8],
-    dm: d.slice(9, 41),
-    index: d[41] | (d[42] << 8) | (d[43] << 16) | (d[44] << 24),
-    width: d[45],
-    height: d[46],
-    status: d[47],
-    layoutHash: Array.from(d.slice(48, 80)),
-    secretsRoot: Array.from(d.slice(80, 112)),
-    tier: d[113],
+    version: core.version,
+    dm: Uint8Array.from(enc.encode(core.dm)),
+    index: core.index,
+    width: core.width,
+    height: core.height,
+    status: core.status,
+    layoutHash: Array.from(core.layoutHash),
+    secretsRoot: Array.from(core.secretsRoot),
+    tier,
   };
 }
 
 async function readLayout(addr: string) {
-  const d = await data(addr);
-  const spawnsAt = 41 + MAP_CELLS;
-  const countAt = spawnsAt + SPAWNS_MAX * 9;
+  const raw = await data(addr);
+  const { core } = getMapLayoutDecoder().decode(raw);
+  const spawn = getSpawnEncoder();
   return {
-    raw: d,
-    version: d[8],
-    map: d.slice(9, 41),
-    tiles: d.slice(41, 41 + MAP_CELLS),
-    spawns: d.slice(spawnsAt, countAt),
-    spawnCount: d[countAt],
-    entrance: { x: d[countAt + 1], y: d[countAt + 2] },
-    exit: { x: d[countAt + 3], y: d[countAt + 4] },
+    raw,
+    version: core.version,
+    map: Uint8Array.from(enc.encode(core.map)),
+    tiles: Uint8Array.from(core.tiles),
+    spawns: Uint8Array.from(core.spawns.flatMap((s) => Array.from(spawn.encode(s)))),
+    spawnCount: core.spawnCount,
+    entrance: core.entrance,
+    exit: core.exit,
   };
 }
 
@@ -516,8 +476,8 @@ describe("map: finalize_map", () => {
     );
     // Other accounts in place of the registry tables.
     await send(dm, [await writeSpawnsIx(dm, map, ENTRANCE, EXIT, demoSpawns())]);
-    const tileset = await pda(["tileset"], REGISTRY_PROGRAM);
-    const skills = await pda(["monster_skills"], REGISTRY_PROGRAM);
+    const tileset = await tableAddress("tileset");
+    const skills = await tableAddress("monster_skills");
     await expectErr(send(dm, [await finalizeIx(dm, map, new Array(32).fill(0), [tileset, skills])]), err("InvalidRegistryTable"));
     // An elite wolf with all 4 skills finalizes.
     const cu = await finalizeWith((s) => {
@@ -559,7 +519,7 @@ describe("map: set_status", () => {
     const config = await configAddress();
     // GameConfig is a shared singleton: read it if it exists instead of assuming either way.
     const { value } = await rpc.getAccountInfo(config, { encoding: "base64", commitment: "confirmed" }).send();
-    const registryConfig = value?.owner === REGISTRY_PROGRAM;
+    const registryConfig = value?.owner === PROGRAMS.registry;
     const ix = setStatusIx(map, dm, config, STATUS.InSession);
     await expectErr(send(dm, [ix]), err(registryConfig ? "UntrustedCaller" : "InvalidConfig"));
     assert.equal((await readMap(map)).status, STATUS.Finalized);

@@ -18,6 +18,7 @@ import { ComputeBudgetProgram, Connection, Keypair, LAMPORTS_PER_SOL, PublicKey,
 import { randomBytes } from "node:crypto";
 import { MAP_STRIDE, Tile } from "../tools/scripts/lib/demo-map.ts";
 import { newSkill } from "./skill_ext.ts";
+import { MPL_CORE_PROGRAM, PROGRAMS, VRF } from "@deadroll/sdk";
 
 const { AnchorProvider, BN, EventParser, Program } = anchor;
 
@@ -28,14 +29,14 @@ const provider = new AnchorProvider(new Connection(env.connection.rpcEndpoint, {
 });
 const connection = provider.connection;
 
-const REGISTRY = new PublicKey("dZ1jraMfS3bAUTkRw2TA1ddg8UDGzgUdFQz5pmBxjoG");
-const CHARACTER = new PublicKey("9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL");
-const MAP = new PublicKey("2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH");
-const SESSION = new PublicKey("3gzfih2WaBgXcYZ57jWokmZM3FDE6QHX5y4R9EvKZoNJ");
-const MPL_CORE = new PublicKey("CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d");
-const VRF_PROGRAM = new PublicKey("Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz");
-const ORACLE_QUEUE = new PublicKey("Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh");
-const SLOT_HASHES = new PublicKey("SysvarS1otHashes111111111111111111111111111");
+const REGISTRY = new PublicKey(PROGRAMS.registry);
+const CHARACTER = new PublicKey(PROGRAMS.character);
+const MAP = new PublicKey(PROGRAMS.map);
+const SESSION = new PublicKey(PROGRAMS.session);
+const MPL_CORE = new PublicKey(MPL_CORE_PROGRAM);
+const VRF_PROGRAM = new PublicKey(VRF.program);
+const ORACLE_QUEUE = new PublicKey(VRF.oracleQueue);
+const SLOT_HASHES = new PublicKey(VRF.slotHashes);
 
 const PRICE = new BN(10_000_000);
 const MONSTER_BASE = 4;

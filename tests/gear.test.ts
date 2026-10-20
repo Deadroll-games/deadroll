@@ -21,6 +21,7 @@ import {
   Transaction,
   TransactionInstruction,
 } from "@solana/web3.js";
+import { MPL_CORE_PROGRAM, PROGRAMS, SESSION_KEYS_PROGRAM } from "@deadroll/sdk";
 
 const { AnchorProvider, BN, EventParser, Program } = anchor;
 
@@ -31,12 +32,12 @@ const provider = new AnchorProvider(new Connection(env.connection.rpcEndpoint, "
 });
 const connection = provider.connection;
 
-const ITEMS = new PublicKey("48FtbrDegNrAUHFza9HdJzZAvUo3uUNqs1kNnZxFsqJS");
-const CHARACTER = new PublicKey("9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL");
-const SESSION = new PublicKey("3gzfih2WaBgXcYZ57jWokmZM3FDE6QHX5y4R9EvKZoNJ");
-const REGISTRY = new PublicKey("dZ1jraMfS3bAUTkRw2TA1ddg8UDGzgUdFQz5pmBxjoG");
-const SESSION_KEYS = new PublicKey("KeyspM2ssCJbqUhQ4k7sveSiY4WjnYsrXkC8oDbwde5");
-const MPL_CORE = new PublicKey("CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d");
+const ITEMS = new PublicKey(PROGRAMS.items);
+const CHARACTER = new PublicKey(PROGRAMS.character);
+const SESSION = new PublicKey(PROGRAMS.session);
+const REGISTRY = new PublicKey(PROGRAMS.registry);
+const SESSION_KEYS = new PublicKey(SESSION_KEYS_PROGRAM);
+const MPL_CORE = new PublicKey(MPL_CORE_PROGRAM);
 
 const CHARACTER_IDL = new URL("../target/idl/deadroll_character.json", import.meta.url);
 

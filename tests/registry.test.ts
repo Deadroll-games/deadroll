@@ -20,7 +20,6 @@ import {
   generateKeyPairSigner,
   getAddressEncoder,
   getBase64Encoder,
-  getProgramDerivedAddress,
   lamports,
   pipe,
   sendAndConfirmTransactionFactory,
@@ -28,22 +27,29 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
   signTransactionMessageWithSigners,
 } from "@solana/kit";
-
-const idl = JSON.parse(readFileSync(new URL("../target/idl/deadroll_registry.json", import.meta.url), "utf8"));
-const REGISTRY = address(idl.address);
-const SYSTEM_PROGRAM = address("11111111111111111111111111111111");
+import { PROGRAMS as SDK_PROGRAMS, errorCode } from "@deadroll/sdk";
+import {
+  findConfigPda,
+  findTablePda,
+  getGameConfigDataDecoder,
+  getGameConfigDecoder,
+  getInitConfigInstruction,
+  getInitTableInstruction,
+  getResizeConfigInstruction,
+  getSetPaletteInstruction,
+  getSetProgramsInstruction,
+  getSetRasterizerFromRenderInstruction,
+  getSetRasterizerInstruction,
+  getSetSpriteBooksInstruction,
+  getSetUriBaseInstruction,
+  getWriteTableInstruction,
+  type TableKind,
+} from "@deadroll/sdk/registry";
+import { getBlobHeaderDecoder } from "@deadroll/sdk/render";
 
 // Program ids in `ProgramIdx` order (Anchor.toml, agents/CONTRACTS.md 1).
-const PROGRAMS = [
-  "dZ1jraMfS3bAUTkRw2TA1ddg8UDGzgUdFQz5pmBxjoG", // Registry
-  "DgQCsXAe7Q7h8zdtToiTvk8XqNjjbXuD6xith2BmEiRB", // Render
-  "9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL", // Character
-  "48FtbrDegNrAUHFza9HdJzZAvUo3uUNqs1kNnZxFsqJS", // Items
-  "2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH", // Map
-  "3gzfih2WaBgXcYZ57jWokmZM3FDE6QHX5y4R9EvKZoNJ", // Session
-  "2Cr5vB5awqDVx6XRcxtFFYQEG6Zy3aSAcKcqzh1xbVjS", // City
-];
-const RENDER_PROGRAM = address(PROGRAMS[1]);
+const PROGRAMS: string[] = Object.values(SDK_PROGRAMS);
+const RENDER_PROGRAM = SDK_PROGRAMS.render;
 
 const TABLE = { Aspects: 0, Resonances: 1, Bestiary: 2, Tileset: 3, Prefabs: 4, Traits: 5, MonsterSkills: 6 };
 const TABLE_SEED = ["aspects", "resonances", "bestiary", "tileset", "prefabs", "traits", "monster_skills"];
@@ -54,8 +60,6 @@ const MONSTER_SIZE = 48;
 const BESTIARY_MAX = 32;
 /** Body starts after the discriminator and the 8-byte table header. */
 const TABLE_BODY = 16;
-/** `GameConfigData` offsets after the 8-byte discriminator. */
-const CFG = { authority: 9, programs: 41, rasterizerVersion: 265, rasterizer: 267, sha: 299, palette: 331, uri: 363, spriteBooks: 428 };
 /** Patch 7: `GameConfigData` (420) then the registry field `sprite_books: [Pubkey; 4]`. */
 const CONFIG_LEN = 8 + 420 + 4 * 32;
 const EMPTY = "11111111111111111111111111111111";
@@ -73,36 +77,21 @@ const enc = getAddressEncoder();
 // ---------- encoding ----------
 
 function err(name: string): number {
-  const e = idl.errors.find((x: { name: string }) => x.name === name);
-  assert.ok(e, `no error ${name} in the IDL`);
-  return e.code;
-}
-
-function disc(ix: string): Uint8Array {
-  const i = idl.instructions.find((x: { name: string }) => x.name === ix);
-  assert.ok(i, `no instruction ${ix} in the IDL`);
-  return Uint8Array.from(i.discriminator);
-}
-
-function concat(...parts: (Uint8Array | number[])[]): Uint8Array {
-  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
-  let o = 0;
-  for (const p of parts) {
-    out.set(p, o);
-    o += p.length;
-  }
-  return out;
+  const code = errorCode("registry", name);
+  assert.ok(code !== null, `no error ${name} in the IDL`);
+  return code;
 }
 
 const u16 = (v: number) => [v & 0xff, (v >> 8) & 0xff];
-const u32 = (v: number) => [v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff, (v >>> 24) & 0xff];
-const vec = (bytes: Uint8Array | number[]) => concat(u32(bytes.length), bytes);
-const programsBytes = (list: string[]) => concat(...list.map((p) => enc.encode(address(p))));
+/** The edit instructions with their args, as the tests send them. */
+type Edit = { name: "set_programs"; programs: string[] } | { name: "set_uri_base"; uri: string };
 const uriBytes = (s: string) => {
   const out = new Uint8Array(64);
   out.set(new TextEncoder().encode(s));
   return out;
 };
+const config = (d: Uint8Array) => getGameConfigDecoder().decode(d);
+const blobHeader = (d: Uint8Array) => getBlobHeaderDecoder().decode(d, 8);
 
 /** A valid bestiary record (a wolf-like fast monster). */
 function monster(overrides: Record<number, number> = {}): Uint8Array {
@@ -123,87 +112,56 @@ function monster(overrides: Record<number, number> = {}): Uint8Array {
 
 type Signer = Awaited<ReturnType<typeof generateKeyPairSigner>>;
 
-async function pda(seeds: string[], program = REGISTRY) {
-  const bytes = seeds.map((s) => new TextEncoder().encode(s));
-  const [addr] = await getProgramDerivedAddress({ programAddress: program, seeds: bytes });
-  return addr;
-}
+const configAddress = async () => (await findConfigPda())[0];
+const tableAddress = async (kind: number) => (await findTablePda({ seed: TABLE_SEED[kind]! }))[0];
 
-const configAddress = () => pda(["config"]);
-const tableAddress = (kind: number) => pda([TABLE_SEED[kind]]);
+const initConfigIx = async (authority: Signer, programs: string[], uri: string) =>
+  getInitConfigInstruction({ authority, config: await configAddress(), programs: programs.map((p) => address(p)), uriBase: uriBytes(uri) });
 
-const signerMeta = (s: Signer, writable = false) => ({
-  address: s.address,
-  role: writable ? AccountRole.WRITABLE_SIGNER : AccountRole.READONLY_SIGNER,
-  signer: s,
-});
-const meta = (a: string, writable = false) => ({
-  address: address(a),
-  role: writable ? AccountRole.WRITABLE : AccountRole.READONLY,
-});
+const editIx = async (authority: Signer, edit: Edit) => {
+  const accounts = { authority, config: await configAddress() };
+  return edit.name === "set_programs"
+    ? getSetProgramsInstruction({ ...accounts, programs: edit.programs.map((p) => address(p)) })
+    : getSetUriBaseInstruction({ ...accounts, uriBase: uriBytes(edit.uri) });
+};
 
-const initConfigIx = async (authority: Signer, programs: string[], uri: string) => ({
-  programAddress: REGISTRY,
-  accounts: [signerMeta(authority, true), meta(await configAddress(), true), meta(SYSTEM_PROGRAM)],
-  data: concat(disc("init_config"), programsBytes(programs), uriBytes(uri)),
-});
-
-const editIx = async (authority: Signer, name: string, args: Uint8Array) => ({
-  programAddress: REGISTRY,
-  accounts: [signerMeta(authority), meta(await configAddress(), true)],
-  data: concat(disc(name), args),
-});
-
-const resizeIx = async (authority: Signer) => ({
-  programAddress: REGISTRY,
-  accounts: [signerMeta(authority, true), meta(await configAddress(), true), meta(SYSTEM_PROGRAM)],
-  data: disc("resize_config"),
-});
+const resizeIx = async (authority: Signer) => getResizeConfigInstruction({ authority, config: await configAddress() });
 
 /** set_sprite_books: the books are remaining accounts after the EditConfig pair. */
-const booksIx = async (authority: Signer, books: string[]) => ({
-  programAddress: REGISTRY,
-  accounts: [signerMeta(authority), meta(await configAddress(), true), ...books.map((b) => meta(b))],
-  data: disc("set_sprite_books"),
-});
+const booksIx = async (authority: Signer, books: string[]) => {
+  const ix = getSetSpriteBooksInstruction({ authority, config: await configAddress() });
+  return { ...ix, accounts: [...ix.accounts, ...books.map((b) => ({ address: address(b), role: AccountRole.READONLY }))] };
+};
 
 /** set_rasterizer_from_render with any signer in the render authority slot. */
-const fromRenderIx = async (signer: Signer, blob: string) => ({
-  programAddress: REGISTRY,
-  accounts: [signerMeta(signer), meta(await configAddress(), true), meta(blob)],
-  data: disc("set_rasterizer_from_render"),
-});
+const fromRenderIx = async (signer: Signer, blob: string) =>
+  getSetRasterizerFromRenderInstruction({ renderAuthority: signer, config: await configAddress(), blob: address(blob) });
 
 /** Finalized render blobs of a kind on this validator (1 rasterizer, 2 palette, 3 sprite book). */
 async function finalizedBlobs(kind: number): Promise<{ pubkey: string; data: Uint8Array }[]> {
   const accounts = await rpc.getProgramAccounts(RENDER_PROGRAM, { encoding: "base64", commitment: "confirmed" }).send();
   return accounts
     .map((a: any) => ({ pubkey: a.pubkey as string, data: Uint8Array.from(getBase64Encoder().encode(a.account.data[0])) }))
-    .filter((a: { data: Uint8Array }) => a.data[9] === kind && a.data[10] === 1);
+    .filter((a: { data: Uint8Array }) => blobHeader(a.data).kind === kind && blobHeader(a.data).finalized === 1);
 }
 
-const pullIx = async (authority: Signer, name: string, blob: string) => ({
-  programAddress: REGISTRY,
-  accounts: [signerMeta(authority), meta(await configAddress(), true), meta(blob)],
-  data: disc(name),
-});
+const pullIx = async (authority: Signer, name: "set_rasterizer" | "set_palette", blob: string) => {
+  const accounts = { authority, config: await configAddress(), blob: address(blob) };
+  return name === "set_rasterizer" ? getSetRasterizerInstruction(accounts) : getSetPaletteInstruction(accounts);
+};
 
-const initTableIx = async (authority: Signer, kind: number) => ({
-  programAddress: REGISTRY,
-  accounts: [
-    signerMeta(authority, true),
-    meta(await configAddress()),
-    meta(await tableAddress(kind), true),
-    meta(SYSTEM_PROGRAM),
-  ],
-  data: concat(disc("init_table"), [kind]),
-});
+const initTableIx = async (authority: Signer, kind: number) =>
+  getInitTableInstruction({ authority, config: await configAddress(), table: await tableAddress(kind), kind: kind as TableKind });
 
-const writeTableIx = async (authority: Signer, kind: number, offset: number, bytes: Uint8Array | number[]) => ({
-  programAddress: REGISTRY,
-  accounts: [signerMeta(authority), meta(await configAddress()), meta(await tableAddress(kind), true)],
-  data: concat(disc("write_table"), [kind], u16(offset), vec(bytes)),
-});
+const writeTableIx = async (authority: Signer, kind: number, offset: number, bytes: Uint8Array | number[]) =>
+  getWriteTableInstruction({
+    authority,
+    config: await configAddress(),
+    table: await tableAddress(kind),
+    kind: kind as TableKind,
+    offset,
+    bytes: Uint8Array.from(bytes),
+  });
 
 // ---------- transactions ----------
 
@@ -267,23 +225,6 @@ async function data(addr: string): Promise<Uint8Array> {
   return d;
 }
 
-/** Minimal base58 encoder (accounts are read as raw bytes). */
-function bs58(bytes: Uint8Array): string {
-  const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-  let n = 0n;
-  for (const b of bytes) n = (n << 8n) | BigInt(b);
-  let out = "";
-  while (n > 0n) {
-    out = alphabet[Number(n % 58n)] + out;
-    n /= 58n;
-  }
-  for (const b of bytes) {
-    if (b !== 0) break;
-    out = "1" + out;
-  }
-  return out;
-}
-
 // ---------- tests ----------
 
 describe("registry", () => {
@@ -303,7 +244,7 @@ describe("registry", () => {
       await send(authority, [await initConfigIx(authority, PROGRAMS, "https://example.invalid/nft/")]);
       owned = true;
     } else {
-      owned = bs58(cfg.slice(CFG.authority, CFG.authority + 32)) === authority.address;
+      owned = getGameConfigDataDecoder().decode(cfg, 8).authority === authority.address;
     }
   });
 
@@ -311,10 +252,8 @@ describe("registry", () => {
     it("stores the authority and all 7 program ids", async () => {
       const cfg = await data(await configAddress());
       assert.equal(cfg[8], 1, "version first after the discriminator");
-      for (let i = 0; i < PROGRAMS.length; i++) {
-        const at = CFG.programs + i * 32;
-        assert.equal(bs58(cfg.slice(at, at + 32)), PROGRAMS[i], `programs[${i}]`);
-      }
+      const stored = config(cfg).core.programs;
+      for (let i = 0; i < PROGRAMS.length; i++) assert.equal(stored[i], PROGRAMS[i], `programs[${i}]`);
       assert.equal(cfg.length, CONFIG_LEN, "discriminator + GameConfigData::SIZE + sprite_books");
     });
 
@@ -326,11 +265,11 @@ describe("registry", () => {
   describe("set_programs / set_uri_base", () => {
     it("rejects a non-authority", async () => {
       await expectErr(
-        send(stranger, [await editIx(stranger, "set_programs", programsBytes(PROGRAMS))]),
+        send(stranger, [await editIx(stranger, { name: "set_programs", programs: PROGRAMS })]),
         err("Unauthorized"),
       );
       await expectErr(
-        send(stranger, [await editIx(stranger, "set_uri_base", uriBytes("https://evil.invalid/"))]),
+        send(stranger, [await editIx(stranger, { name: "set_uri_base", uri: "https://evil.invalid/" })]),
         err("Unauthorized"),
       );
     });
@@ -339,21 +278,21 @@ describe("registry", () => {
       if (!owned) return t.skip(ownerSkip);
       const empty = [...PROGRAMS];
       empty[6] = "11111111111111111111111111111111";
-      await expectErr(send(authority, [await editIx(authority, "set_programs", programsBytes(empty))]), err("EmptyProgramId"));
+      await expectErr(send(authority, [await editIx(authority, { name: "set_programs", programs: empty })]), err("EmptyProgramId"));
       const foreign = [...PROGRAMS];
       foreign[0] = PROGRAMS[1];
       await expectErr(
-        send(authority, [await editIx(authority, "set_programs", programsBytes(foreign))]),
+        send(authority, [await editIx(authority, { name: "set_programs", programs: foreign })]),
         err("WrongRegistryId"),
       );
     });
 
     it("authority updates the program list and the uri base", async (t) => {
       if (!owned) return t.skip(ownerSkip);
-      await send(authority, [await editIx(authority, "set_programs", programsBytes(PROGRAMS))]);
-      await send(authority, [await editIx(authority, "set_uri_base", uriBytes("https://example.invalid/nft/"))]);
+      await send(authority, [await editIx(authority, { name: "set_programs", programs: PROGRAMS })]);
+      await send(authority, [await editIx(authority, { name: "set_uri_base", uri: "https://example.invalid/nft/" })]);
       const cfg = await data(await configAddress());
-      assert.equal(new TextDecoder().decode(cfg.slice(CFG.uri, CFG.uri + 28)), "https://example.invalid/nft/");
+      assert.equal(new TextDecoder().decode(Uint8Array.from(config(cfg).core.uriBase).slice(0, 28)), "https://example.invalid/nft/");
     });
   });
 
@@ -374,22 +313,22 @@ describe("registry", () => {
     it("copies version, address and sha256 of a finalized RasterizerCode", async (t) => {
       if (!owned) return t.skip(ownerSkip);
       const cfg = await data(await configAddress());
-      assert.equal(bs58(cfg.slice(CFG.programs + 32, CFG.programs + 64)), RENDER_PROGRAM);
+      assert.equal(config(cfg).core.programs[1], RENDER_PROGRAM);
       const exists = await maybeData(RENDER_PROGRAM);
       if (!exists) return t.skip("render program is not deployed on this validator");
       const accounts = await rpc.getProgramAccounts(RENDER_PROGRAM, { encoding: "base64", commitment: "confirmed" }).send();
       const finalized = accounts.find((a: any) => {
         const d = Uint8Array.from(getBase64Encoder().encode(a.account.data[0]));
-        return d[9] === 1 && d[10] === 1; // kind rasterizer, finalized
+        return blobHeader(d).kind === 1 && blobHeader(d).finalized === 1; // kind rasterizer, finalized
       });
       if (!finalized) return t.skip("no finalized RasterizerCode on this validator (upload one first)");
       const blob = Uint8Array.from(getBase64Encoder().encode(finalized.account.data[0]));
-      const original = bs58(cfg.slice(CFG.rasterizer, CFG.rasterizer + 32));
+      const original: string = config(cfg).core.rasterizer;
       await send(authority, [await pullIx(authority, "set_rasterizer", finalized.pubkey)]);
-      const after = await data(await configAddress());
-      assert.equal(after[CFG.rasterizerVersion] | (after[CFG.rasterizerVersion + 1] << 8), blob[16] | (blob[17] << 8));
-      assert.equal(bs58(after.slice(CFG.rasterizer, CFG.rasterizer + 32)), finalized.pubkey);
-      assert.deepEqual(Array.from(after.slice(CFG.sha, CFG.sha + 32)), Array.from(blob.slice(84, 116)));
+      const after = config(await data(await configAddress())).core;
+      assert.equal(after.rasterizerVersion, blobHeader(blob).id);
+      assert.equal(after.rasterizer, finalized.pubkey);
+      assert.deepEqual(Array.from(after.rasterizerSha256), Array.from(blobHeader(blob).sha256));
       // Put the deployed rasterizer back (the website reads this pointer).
       if (original !== EMPTY) await send(authority, [await pullIx(authority, "set_rasterizer", original)]);
     });
@@ -431,7 +370,7 @@ describe("registry", () => {
       const books = await finalizedBlobs(3);
       if (books.length < 2) return t.skip("needs two finalized SpriteBooks on this validator");
       const cfg = await data(await configAddress());
-      const slots = (d: Uint8Array) => [0, 1, 2, 3].map((i) => bs58(d.slice(CFG.spriteBooks + i * 32, CFG.spriteBooks + (i + 1) * 32)));
+      const slots = (d: Uint8Array): string[] => config(d).spriteBooks;
       const original = slots(cfg).filter((b) => b !== EMPTY);
       const pick = [books[1]!.pubkey, books[0]!.pubkey];
       await send(authority, [await booksIx(authority, pick)]);

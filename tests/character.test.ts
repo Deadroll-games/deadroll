@@ -21,9 +21,10 @@ import {
   TransactionInstruction,
 } from "@solana/web3.js";
 import { newSkill } from "./skill_ext.ts";
+import { MPL_CORE_PROGRAM, PROGRAMS } from "@deadroll/sdk";
 
-const MPL_CORE = new PublicKey("CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d");
-const REGISTRY = new PublicKey("dZ1jraMfS3bAUTkRw2TA1ddg8UDGzgUdFQz5pmBxjoG");
+const MPL_CORE = new PublicKey(MPL_CORE_PROGRAM);
+const REGISTRY = new PublicKey(PROGRAMS.registry);
 const idl = JSON.parse(
   readFileSync(new URL("../target/idl/deadroll_character.json", import.meta.url), "utf8"),
 ) as Idl;

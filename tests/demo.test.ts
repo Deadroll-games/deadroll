@@ -24,6 +24,7 @@ import {
 } from "@solana/web3.js";
 import { MAP_STRIDE, Tile, layoutBytes, loadMapPreset } from "../tools/scripts/lib/demo-map.ts";
 import { newSkill, partyAccounts } from "./skill_ext.ts";
+import { MPL_CORE_PROGRAM, PROGRAMS, SESSION_KEYS_PROGRAM, VRF } from "@deadroll/sdk";
 
 const { AnchorProvider, BN, EventParser, Program } = anchor;
 type BN = InstanceType<typeof BN>;
@@ -37,17 +38,17 @@ const provider = new AnchorProvider(new Connection(env.connection.rpcEndpoint, "
 });
 const connection = provider.connection;
 
-const REGISTRY = new PublicKey("dZ1jraMfS3bAUTkRw2TA1ddg8UDGzgUdFQz5pmBxjoG");
-const CHARACTER = new PublicKey("9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL");
-const MAP = new PublicKey("2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH");
-const SESSION = new PublicKey("3gzfih2WaBgXcYZ57jWokmZM3FDE6QHX5y4R9EvKZoNJ");
-const ITEMS = new PublicKey("48FtbrDegNrAUHFza9HdJzZAvUo3uUNqs1kNnZxFsqJS");
-const SESSION_KEYS = new PublicKey("KeyspM2ssCJbqUhQ4k7sveSiY4WjnYsrXkC8oDbwde5");
-const MPL_CORE = new PublicKey("CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d");
+const REGISTRY = new PublicKey(PROGRAMS.registry);
+const CHARACTER = new PublicKey(PROGRAMS.character);
+const MAP = new PublicKey(PROGRAMS.map);
+const SESSION = new PublicKey(PROGRAMS.session);
+const ITEMS = new PublicKey(PROGRAMS.items);
+const SESSION_KEYS = new PublicKey(SESSION_KEYS_PROGRAM);
+const MPL_CORE = new PublicKey(MPL_CORE_PROGRAM);
 // MagicBlock VRF accounts (ephemeral-vrf-sdk consts); under mock-vrf they only pass address checks.
-const VRF_PROGRAM = new PublicKey("Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz");
-const ORACLE_QUEUE = new PublicKey("Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh");
-const SLOT_HASHES = new PublicKey("SysvarS1otHashes111111111111111111111111111");
+const VRF_PROGRAM = new PublicKey(VRF.program);
+const ORACLE_QUEUE = new PublicKey(VRF.oracleQueue);
+const SLOT_HASHES = new PublicKey(VRF.slotHashes);
 
 const PRICE = new BN(LAMPORTS_PER_SOL / 10);
 const [N, E, S, W] = [0, 1, 2, 3];

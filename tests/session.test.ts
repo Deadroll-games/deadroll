@@ -26,6 +26,7 @@ import {
   ComputeBudgetProgram,
   TransactionInstruction,
 } from "@solana/web3.js";
+import { MPL_CORE_PROGRAM, PROGRAMS, SESSION_KEYS_PROGRAM, VRF } from "@deadroll/sdk";
 
 const { AnchorProvider, BN, EventParser, Program } = anchor;
 
@@ -51,15 +52,15 @@ const provider = new AnchorProvider(new Connection(env.connection.rpcEndpoint, "
 const connection = provider.connection;
 const program = new Program<DeadrollSession>(idl, provider);
 const SESSION = program.programId;
-const CHARACTER = new PublicKey("9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL");
-const MAP = new PublicKey("2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH");
-const REGISTRY = new PublicKey("dZ1jraMfS3bAUTkRw2TA1ddg8UDGzgUdFQz5pmBxjoG");
-const SESSION_KEYS = new PublicKey("KeyspM2ssCJbqUhQ4k7sveSiY4WjnYsrXkC8oDbwde5");
-const MPL_CORE = new PublicKey("CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d");
+const CHARACTER = new PublicKey(PROGRAMS.character);
+const MAP = new PublicKey(PROGRAMS.map);
+const REGISTRY = new PublicKey(PROGRAMS.registry);
+const SESSION_KEYS = new PublicKey(SESSION_KEYS_PROGRAM);
+const MPL_CORE = new PublicKey(MPL_CORE_PROGRAM);
 // MagicBlock VRF (ephemeral-vrf-sdk 0.17.3 consts); none of them has to exist under mock-vrf.
-const VRF_PROGRAM = new PublicKey("Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz");
-const ORACLE_QUEUE = new PublicKey("Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh");
-const SLOT_HASHES = new PublicKey("SysvarS1otHashes111111111111111111111111111");
+const VRF_PROGRAM = new PublicKey(VRF.program);
+const ORACLE_QUEUE = new PublicKey(VRF.oracleQueue);
+const SLOT_HASHES = new PublicKey(VRF.slotHashes);
 
 const PRICE = new BN(LAMPORTS_PER_SOL / 10);
 const MIN_PRICE = new BN(10_000_000);

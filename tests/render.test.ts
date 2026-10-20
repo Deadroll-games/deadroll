@@ -11,13 +11,12 @@
 // Fresh random keypairs and random blob ids every run. `init_*` needs the signer to be
 // `GameConfig.authority`: the upload flows run only when the registry GameConfig exists and its
 // authority is the provider wallet; otherwise they are skipped with the reason (registry L4.1).
-// Instructions are encoded by hand until the Codama sdk exists (L8.1).
+// Instructions, PDAs, error codes and the GameConfig layout come from @deadroll/sdk.
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import {
-  AccountRole,
   address,
   airdropFactory,
   appendTransactionMessageInstructions,
@@ -26,42 +25,54 @@ import {
   createSolanaRpcSubscriptions,
   createTransactionMessage,
   generateKeyPairSigner,
-  getAddressDecoder,
-  getProgramDerivedAddress,
   lamports,
   pipe,
   sendAndConfirmTransactionFactory,
   setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
   signTransactionMessageWithSigners,
+  type Address,
 } from "@solana/kit";
+import { PROGRAMS, errorCode } from "@deadroll/sdk";
+import { findConfigPda, getGameConfigDataDecoder, getGameConfigDecoder, getSetRasterizerInstruction } from "@deadroll/sdk/registry";
+import {
+  findPalettePda,
+  findRasterizerPda,
+  findRenderAuthorityPda,
+  findSpriteBookPda,
+  getBlobHeaderDecoder,
+  getExtendInstruction,
+  getFinalizePaletteInstruction,
+  getFinalizeRasterizerInstruction,
+  getFinalizeSpriteBookInstruction,
+  getInitPaletteInstruction,
+  getInitRasterizerInstruction,
+  getInitSpriteBookInstruction,
+  getWriteChunkInstruction,
+} from "@deadroll/sdk/render";
 
 const root = new URL("../", import.meta.url);
 const read = (p: string) => readFileSync(new URL(p, root));
 
-const PROGRAM = address("DgQCsXAe7Q7h8zdtToiTvk8XqNjjbXuD6xith2BmEiRB");
-const SYSTEM = address("11111111111111111111111111111111");
-const CONFIG = address("HYGYnuyssMfrHr2gT3AC3hkQpD6xt37a5hrCc2Z97JHN");
-const REGISTRY = address("dZ1jraMfS3bAUTkRw2TA1ddg8UDGzgUdFQz5pmBxjoG");
-/** `GameConfig` offsets (discriminator included): rasterizer_version, rasterizer, rasterizer_sha256. */
-const CFG = { rasterizerVersion: 265, rasterizer: 267, sha: 299 };
+const CONFIG = (await findConfigPda())[0];
 const BODY_OFFSET = 116;
 const GROW_STEP = 10 * 1024;
 const CHUNK = 900;
 
-// RenderError codes (Anchor offset 6000, declaration order in programs/render/src/errors.rs).
-const E = {
-  Unauthorized: 6000,
-  InvalidLength: 6001,
-  AlreadyFinalized: 6002,
-  OutOfBounds: 6003,
-  NotFullyAllocated: 6004,
-  AlreadyFullyAllocated: 6005,
-  HashMismatch: 6006,
-  InvalidBody: 6007,
-  WrongAccount: 6008,
-  WrongConfig: 6009,
-};
+// RenderError codes, from the render IDL.
+const RENDER_ERRORS = [
+  "Unauthorized",
+  "InvalidLength",
+  "AlreadyFinalized",
+  "OutOfBounds",
+  "NotFullyAllocated",
+  "AlreadyFullyAllocated",
+  "HashMismatch",
+  "InvalidBody",
+  "WrongAccount",
+  "WrongConfig",
+] as const;
+const E = Object.fromEntries(RENDER_ERRORS.map((n) => [n, errorCode("render", n)!])) as Record<(typeof RENDER_ERRORS)[number], number>;
 
 const url = process.env.ANCHOR_PROVIDER_URL ?? "http://127.0.0.1:8899";
 const rpc = createSolanaRpc(url);
@@ -79,12 +90,10 @@ async function funded(sol = 5n) {
 }
 
 // GameConfig is a registry singleton: read it, never create or overwrite it.
-// Data: 8-byte discriminator, version u8, authority at 9..41 (agents/CONTRACTS.md 4).
 async function gameConfigAuthority(): Promise<string | null> {
   const { value } = await rpc.getAccountInfo(CONFIG, { encoding: "base64", commitment: "confirmed" }).send();
   if (!value) return null;
-  const raw = Buffer.from(value.data[0], "base64");
-  return getAddressDecoder().decode(raw.subarray(9, 41));
+  return getGameConfigDataDecoder().decode(Buffer.from(value.data[0], "base64"), 8).authority;
 }
 
 // The provider wallet can upload only if it is GameConfig.authority; other keypairs are random.
@@ -114,7 +123,6 @@ async function freshId(kind: Kind): Promise<number> {
 }
 
 const sha256 = (b: Uint8Array) => new Uint8Array(createHash("sha256").update(b).digest());
-const disc = (name: string) => sha256(new TextEncoder().encode(`global:${name}`)).subarray(0, 8);
 const u16 = (n: number) => new Uint8Array(new Uint16Array([n]).buffer);
 const u32 = (n: number) => new Uint8Array(new Uint32Array([n]).buffer);
 const cat = (...parts: Uint8Array[]) => {
@@ -129,61 +137,41 @@ const cat = (...parts: Uint8Array[]) => {
 
 type Signer = Awaited<ReturnType<typeof generateKeyPairSigner>>;
 type Kind = "rasterizer" | "palette" | "sprite_book";
-const SEED: Record<Kind, string> = { rasterizer: "rasterizer", palette: "palette", sprite_book: "sprites" };
 
-async function pda(kind: Kind, id: number) {
-  const [a] = await getProgramDerivedAddress({
-    programAddress: PROGRAM,
-    seeds: [new TextEncoder().encode(SEED[kind]), u16(id)],
-  });
-  return a;
+async function pda(kind: Kind, id: number): Promise<Address> {
+  if (kind === "rasterizer") return (await findRasterizerPda({ version: id }))[0];
+  if (kind === "palette") return (await findPalettePda({ version: id }))[0];
+  return (await findSpriteBookPda({ bookId: id }))[0];
 }
-
-const signerMeta = (s: Signer, writable: boolean) => ({
-  address: s.address,
-  role: writable ? AccountRole.WRITABLE_SIGNER : AccountRole.READONLY_SIGNER,
-  signer: s,
-});
-const writable = (a: string) => ({ address: address(a), role: AccountRole.WRITABLE });
-const readonly = (a: string) => ({ address: address(a), role: AccountRole.READONLY });
 
 const ix = {
-  init: async (kind: Kind, s: Signer, id: number, len: number, hash: Uint8Array, config: string = CONFIG) => ({
-    programAddress: PROGRAM,
-    accounts: [signerMeta(s, true), readonly(config), writable(await pda(kind, id)), readonly(SYSTEM)],
-    data: cat(disc(`init_${kind}`), u16(id), u32(len), hash),
-  }),
-  extend: (s: Signer, target: string) => ({
-    programAddress: PROGRAM,
-    accounts: [signerMeta(s, true), writable(target), readonly(SYSTEM)],
-    data: disc("extend"),
-  }),
-  write: (s: Signer, target: string, offset: number, bytes: Uint8Array) => ({
-    programAddress: PROGRAM,
-    accounts: [signerMeta(s, false), writable(target)],
-    data: cat(disc("write_chunk"), u32(offset), u32(bytes.length), bytes),
-  }),
+  init: async (kind: Kind, s: Signer, id: number, len: number, hash: Uint8Array, config: string = CONFIG) => {
+    const accounts = { authority: s, config: address(config) };
+    const target = address(await pda(kind, id));
+    if (kind === "rasterizer") return getInitRasterizerInstruction({ ...accounts, rasterizer: target, version: id, len, sha256: hash });
+    if (kind === "palette") return getInitPaletteInstruction({ ...accounts, palette: target, version: id, len, sha256: hash });
+    return getInitSpriteBookInstruction({ ...accounts, spriteBook: target, bookId: id, len, sha256: hash });
+  },
+  extend: (s: Signer, target: string) => getExtendInstruction({ authority: s, target: address(target) }),
+  write: (s: Signer, target: string, offset: number, bytes: Uint8Array) =>
+    getWriteChunkInstruction({ authority: s, target: address(target), offset, bytes }),
   // finalize_rasterizer also takes GameConfig, the render ["authority"] PDA and the registry.
-  finalize: async (kind: Kind, s: Signer, target: string, config: string = CONFIG) => ({
-    programAddress: PROGRAM,
-    accounts:
-      kind === "rasterizer"
-        ? [signerMeta(s, false), writable(target), writable(config), readonly(await renderAuthority()), readonly(REGISTRY)]
-        : [signerMeta(s, false), writable(target)],
-    data: disc(`finalize_${kind}`),
-  }),
+  finalize: async (kind: Kind, s: Signer, target: string, config: string = CONFIG) => {
+    if (kind === "rasterizer") {
+      return getFinalizeRasterizerInstruction({
+        authority: s,
+        rasterizer: address(target),
+        config: address(config),
+        renderAuthority: (await findRenderAuthorityPda())[0],
+        registryProgram: PROGRAMS.registry,
+      });
+    }
+    if (kind === "palette") return getFinalizePaletteInstruction({ authority: s, palette: address(target) });
+    return getFinalizeSpriteBookInstruction({ authority: s, spriteBook: address(target) });
+  },
   /** registry set_rasterizer: authority points GameConfig at a finalized rasterizer. */
-  setRasterizer: (s: Signer, blob: string) => ({
-    programAddress: REGISTRY,
-    accounts: [signerMeta(s, false), writable(CONFIG), readonly(blob)],
-    data: disc("set_rasterizer"),
-  }),
+  setRasterizer: (s: Signer, blob: string) => getSetRasterizerInstruction({ authority: s, config: CONFIG, blob: address(blob) }),
 };
-
-async function renderAuthority() {
-  const [a] = await getProgramDerivedAddress({ programAddress: PROGRAM, seeds: [new TextEncoder().encode("authority")] });
-  return a;
-}
 
 async function send(payer: Signer, ...instructions: any[]) {
   const { value: blockhash } = await rpc.getLatestBlockhash().send();
@@ -292,7 +280,10 @@ function renderWithWasm(wasm: Uint8Array, books: Uint8Array[], palette: Uint8Arr
 
 const wasm = new Uint8Array(read("target/render-wasm/deadroll_render.wasm"));
 const golden = goldenInput();
-const header = (d: Uint8Array) => ({ version: d[8], kind: d[9], finalized: d[10], len: new DataView(d.buffer).getUint32(12, true) });
+const header = (d: Uint8Array) => {
+  const h = getBlobHeaderDecoder().decode(d, 8);
+  return { version: h.version, kind: h.kind, finalized: h.finalized, len: h.len };
+};
 
 /** Copy of a palette or sprite book body with its u16 version / book id (bytes 1..3) set to `id`. */
 function withId(body: Uint8Array, id: number) {
@@ -306,7 +297,7 @@ if (skipUploads) console.log(`# render upload flows skipped: ${skipUploads}`);
 
 // Put back the rasterizer GameConfig pointed at before the uploads repointed it.
 const before = skipUploads ? null : await data(CONFIG);
-const configRasterizer = (d: Uint8Array) => getAddressDecoder().decode(d.subarray(CFG.rasterizer, CFG.rasterizer + 32));
+const configRasterizer = (d: Uint8Array): string => getGameConfigDecoder().decode(d).core.rasterizer;
 after(async () => {
   if (!before) return;
   const original = configRasterizer(before);
@@ -334,10 +325,10 @@ test("demo step 1: rasterizer, palette and sprite book from chain render the gol
   assert.equal(Buffer.from(sha256(png)).toString("hex"), golden.expected);
 
   // finalize_rasterizer wrote its version, address and hash to GameConfig (STORAGE_AND_DELIVERY 3.2).
-  const cfg = await data(CONFIG);
-  assert.equal(cfg[CFG.rasterizerVersion] | (cfg[CFG.rasterizerVersion + 1] << 8), rv);
-  assert.equal(configRasterizer(cfg), r);
-  assert.deepEqual(cfg.subarray(CFG.sha, CFG.sha + 32), sha256(wasm));
+  const cfg = getGameConfigDecoder().decode(await data(CONFIG)).core;
+  assert.equal(cfg.rasterizerVersion, rv);
+  assert.equal(cfg.rasterizer, r);
+  assert.deepEqual(Uint8Array.from(cfg.rasterizerSha256), sha256(wasm));
 });
 
 test("rejections that need no GameConfig", async () => {
