@@ -13,8 +13,7 @@
 import { useEffect, useState } from "react";
 import wasmUrl from "./wasm/combat.wasm?url";
 import { Reader, concat, u16le, u32le } from "./bytes";
-import { ASPECT_KEYS, CLASS_KEYS, MOD_KEYS, RACE_KEYS, enumIndex, type ActiveStateAcc, type AuraAcc, type CharacterAcc, type Enum, type MonsterAcc, type SkillRecordAcc } from "./game";
-import characterIdl from "./idl/deadroll_character.json";
+import type { ActiveStateAcc, AuraAcc, CharacterAcc, MonsterAcc, SkillRecordAcc } from "./game";
 import type { ActiveState, Cell, TimedMod } from "./types";
 
 /** `ABI_VERSION` of the module this wrapper speaks. */
@@ -680,43 +679,31 @@ export function percent(bp: number): string {
  */
 export function heroInputOf(c: CharacterAcc, equipment: ArrayLike<number>, stats: readonly number[] = c.core.stats, classTier = c.classTier): HeroInput {
   return {
-    race: enumIndex(c.core.race, RACE_KEYS),
-    class: enumIndex(c.core.class, CLASS_KEYS),
+    race: c.core.race,
+    class: c.core.class,
     level: c.core.level,
     stats,
-    predisposition: enumIndex(c.core.predisposition, ASPECT_KEYS),
+    predisposition: c.core.predisposition,
     predispositionTier: c.core.predispositionTier,
     classTier,
     equipment,
   };
 }
 
-/** Variant names of a character IDL enum in on-chain order ("Active", ...). */
-function idlVariants(name: string): string[] {
-  const t = (characterIdl as { types: { name: string; type: { kind: string; variants?: { name: string }[] } }[] }).types.find((x) => x.name === name);
-  if (!t?.type.variants) throw new Error(`character IDL has no enum ${name}`);
-  return t.type.variants.map((v) => v.name.charAt(0).toLowerCase() + v.name.slice(1));
-}
-const variantIndex = (type: string, e: Enum) => {
-  const i = idlVariants(type).indexOf(Object.keys(e)[0] ?? "");
-  if (i < 0) throw new Error(`unknown ${type} variant ${Object.keys(e)[0]}`);
-  return i;
-};
-
 /** A skill account record as the module's skill (discriminants in `SkillBlocks` field order). */
 export function skillInputOf(k: SkillRecordAcc): SkillInput {
   const b = k.blocks;
   return {
     blocks: [
-      variantIndex("Category", b.category),
-      variantIndex("Purpose", b.purpose),
-      variantIndex("Source", b.source),
-      variantIndex("Form", b.form),
-      variantIndex("Target", b.target),
-      ...b.aspects.slice(0, 3).map((a) => variantIndex("Aspect", a)),
+      b.category,
+      b.purpose,
+      b.source,
+      b.form,
+      b.target,
+      ...b.aspects.slice(0, 3),
       b.aspectCount,
-      variantIndex("Effect", b.effect),
-      variantIndex("Trigger", b.trigger),
+      b.effect,
+      b.trigger,
       b.auraRadius,
     ],
     sharesBp: k.sharesBp,
@@ -724,18 +711,16 @@ export function skillInputOf(k: SkillRecordAcc): SkillInput {
   };
 }
 
-const STATE_KEYS = ["burning", "chill", "freeze", "bleeding", "shock", "stun", "penetration"] as const;
-
 /** Account states (`ActiveStateData`) as the module's states. */
 export function statesOf(states: readonly ActiveStateAcc[]): ActiveState[] {
-  return states.map((s) => ({ kind: enumIndex(s.kind, STATE_KEYS), turns: s.turns, power: s.power, source: s.source }) as ActiveState);
+  return states.map((s) => ({ kind: s.kind, turns: s.turns, power: s.power, source: s.source }) as ActiveState);
 }
 
 /** One account aura (`AuraData`) as the module's. */
 export function auraInputOf(a: AuraAcc): AuraInput {
   return {
-    kind: enumIndex(a.kind, MOD_KEYS),
-    aspect: enumIndex(a.aspect, ASPECT_KEYS),
+    kind: a.kind,
+    aspect: a.aspect,
     powerBp: a.powerBp,
     radius: a.radius,
     turns: a.turns,

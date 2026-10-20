@@ -1,6 +1,5 @@
-// Runtime config from Vite env (app/.env.local). Program ids: agents/CONTRACTS.md, section 1.
+// Runtime config from Vite env (app/.env.local). Program ids: @deadroll/sdk (agents/CONTRACTS.md, section 1).
 // `vite --mode localnet` (pnpm dev:localnet) defaults everything to the shared local validator.
-import { address } from "@solana/kit";
 import { loadCustomRpc, PUBLIC_DEVNET_RPC, PUBLIC_DEVNET_WS } from "./rpcSettings";
 
 export type DataSource = "mock" | "chain";
@@ -34,25 +33,8 @@ export const IS_LOCALNET = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?\/?$/.tes
  */
 export const MOCK_VRF: boolean = DEV_TOOLS && IS_LOCALNET &&(env.VITE_MOCK_VRF ?? (LOCALNET_MODE ? "1" : "0")) === "1";
 
-export const PROGRAMS = {
-  registry: address("dZ1jraMfS3bAUTkRw2TA1ddg8UDGzgUdFQz5pmBxjoG"),
-  render: address("DgQCsXAe7Q7h8zdtToiTvk8XqNjjbXuD6xith2BmEiRB"),
-  character: address("9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL"),
-  items: address("48FtbrDegNrAUHFza9HdJzZAvUo3uUNqs1kNnZxFsqJS"),
-  map: address("2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH"),
-  session: address("3gzfih2WaBgXcYZ57jWokmZM3FDE6QHX5y4R9EvKZoNJ"),
-  city: address("2Cr5vB5awqDVx6XRcxtFFYQEG6Zy3aSAcKcqzh1xbVjS"),
-} as const;
-
-export const MPL_CORE_PROGRAM = address("CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d");
-export const SYSTEM_PROGRAM = address("11111111111111111111111111111111");
-
-/** MagicBlock VRF accounts (ephemeral-vrf-sdk consts); under mock-vrf they only pass address checks. */
-export const VRF = {
-  program: address("Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz"),
-  oracleQueue: address("Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh"),
-  slotHashes: address("SysvarS1otHashes111111111111111111111111111"),
-} as const;
+// Program addresses live in the sdk (generated from the IDLs).
+export { MPL_CORE_PROGRAM, PROGRAMS, SYSTEM_PROGRAM, VRF } from "@deadroll/sdk";
 
 /** Explorer link for a transaction or account on the configured cluster. */
 export function explorerUrl(kind: "tx" | "address", id: string): string {

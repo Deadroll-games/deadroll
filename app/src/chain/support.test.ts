@@ -1,13 +1,13 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { textBytes, type MapSkillAcc, type SkillRecordAcc, type TimedModAcc } from "./game";
-import { Category, Effect, Form, Purpose, RangeTag, Source, inReach, makeBlocks, skillSide, usableInCombat } from "./skillcheck";
+import { Category, Effect, Form, Purpose, RangeTag, Source, Target, Trigger, inReach, makeBlocks, skillSide, usableInCombat } from "./skillcheck";
 import { activeMods, combatSkill, effectText, modLabel, modTurnsLeft, modsAt, modsTickText, type EffectResolved } from "./support";
 import { Applied, Aspect, HitOutcome, ModKind } from "./types";
 
-const e = (k: string) => ({ [k]: {} });
-const mod = (kind: string, turns: number, powerBp = 2_500): TimedModAcc => ({ kind: e(kind), aspect: e("lightning"), turns, powerBp, source: 2 });
-const empty = (): TimedModAcc[] => ["haste", "slow", "empowerment", "weakening", "protection", "vulnerability"].map((k) => mod(k, 0, 0));
+const MODS = ["haste", "slow", "empowerment", "weakening", "protection", "vulnerability"];
+const mod = (kind: string, turns: number, powerBp = 2_500): TimedModAcc => ({ kind: MODS.indexOf(kind) as ModKind, aspect: Aspect.Lightning, turns, powerBp, source: 2 });
+const empty = (): TimedModAcc[] => MODS.map((k) => mod(k, 0, 0));
 
 describe("skill side and reach", () => {
   it("heals and buffs target allies, damage and debuffs monsters", () => {
@@ -30,15 +30,15 @@ describe("skill side and reach", () => {
   it("combatSkill reads a SkillRecord", () => {
     const rec = {
       blocks: {
-        category: e("active"),
-        purpose: e("buff"),
-        source: e("magical"),
-        form: e("projectile"),
-        target: e("single"),
-        aspects: [e("blood"), e("fire"), e("fire")],
+        category: Category.Active,
+        purpose: Purpose.Buff,
+        source: Source.Magical,
+        form: Form.Projectile,
+        target: Target.Single,
+        aspects: [Aspect.Blood, Aspect.Fire, Aspect.Fire],
         aspectCount: 1,
-        effect: e("protection"),
-        trigger: e("none"),
+        effect: Effect.Protection,
+        trigger: Trigger.None,
         auraRadius: 0,
       },
       sharesBp: [10_000, 0, 0],
@@ -51,7 +51,7 @@ describe("skill side and reach", () => {
     // Without the session snapshot: the form's range and the derived AP cost.
     expect(combatSkill(3, rec)).toEqual({ ...ward, range: RangeTag.Ranged, apCost: 2, line: false });
     // With it (Participation.map_skills): the stored range tag and AP cost.
-    const map = { ext: { range: e("melee"), timing: e("instant"), hpBelowPct: 0 }, apCost: 3 } as unknown as MapSkillAcc;
+    const map = { ext: { range: RangeTag.Melee, timing: 0, hpBelowPct: 0 }, apCost: 3 } as unknown as MapSkillAcc;
     expect(combatSkill(3, rec, map)).toEqual({ ...ward, range: RangeTag.Melee, apCost: 3, line: false });
   });
 });
@@ -72,7 +72,7 @@ describe("mods", () => {
 
   it("Vulnerability reads as more damage taken, from its aspect only", () => {
     const mods = empty();
-    mods[ModKind.Vulnerability] = { ...mod("vulnerability", 2), aspect: e("fire") };
+    mods[ModKind.Vulnerability] = { ...mod("vulnerability", 2), aspect: Aspect.Fire };
     mods[ModKind.Protection] = mod("protection", 3, 2_000);
     expect(activeMods(mods).map(modLabel)).toEqual(["Protection +20% resist (2)", "Vulnerability +25% Fire damage taken (1)"]);
   });

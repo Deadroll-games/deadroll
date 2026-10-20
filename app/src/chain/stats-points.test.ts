@@ -3,7 +3,8 @@
 // skill record encoding the combat module reads.
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { AccountRole, generateKeyPairSigner, getAddressDecoder, type Address } from "@solana/kit";
+import { AccountRole, generateKeyPairSigner, getAddressDecoder, none, some, type Address } from "@solana/kit";
+import { Aspect as SdkAspect, Category, Effect, Form, Purpose, Source, Target, Trigger } from "@deadroll/sdk/character";
 import { PROGRAMS } from "../config";
 import { spendLock } from "../routes/CharacterDetail";
 import { concat, toHex, u16le } from "./bytes";
@@ -13,7 +14,6 @@ import { spendStatPointsIx, type CharacterAcc, type SkillRecordAcc } from "./gam
 
 const addrOf = (n: number): Address => getAddressDecoder().decode(new Uint8Array(32).fill(n));
 const ixDisc = (name: string) => createHash("sha256").update(`global:${name}`).digest().subarray(0, 8);
-const e = (name: string) => ({ [name]: {} });
 
 describe("spend_stat_points", () => {
   it("character program, points as four u16 in Stat order; owner (signer), character (w)", async () => {
@@ -29,11 +29,11 @@ describe("spend_stat_points", () => {
 
   it("only the owner, a living character, outside a party", () => {
     const owner = addrOf(1);
-    const c = { core: { owner, alive: true, inSession: null } } as unknown as CharacterAcc;
+    const c = { core: { owner, alive: true, inSession: none() } } as unknown as CharacterAcc;
     expect(spendLock(c, owner)).toBeNull();
     expect(spendLock(c, addrOf(2))).toMatch(/owner/);
     expect(spendLock(c, null)).toMatch(/owner/);
-    expect(spendLock({ core: { ...c.core, inSession: addrOf(3) } } as unknown as CharacterAcc, owner)).toMatch(/party/);
+    expect(spendLock({ core: { ...c.core, inSession: some(addrOf(3)) } } as unknown as CharacterAcc, owner)).toMatch(/party/);
     expect(spendLock({ core: { ...c.core, alive: false } } as unknown as CharacterAcc, owner)).toMatch(/tombstone/i);
   });
 });
@@ -43,15 +43,15 @@ describe("skillInputOf", () => {
     // Bleeding Cleave: active damage, martial strike, line, Blood + Piercing.
     const k: SkillRecordAcc = {
       blocks: {
-        category: e("active"),
-        purpose: e("damage"),
-        source: e("combat"),
-        form: e("strike"),
-        target: e("line"),
-        aspects: [e("blood"), e("piercing"), e("fire")],
+        category: Category.Active,
+        purpose: Purpose.Damage,
+        source: Source.Combat,
+        form: Form.Strike,
+        target: Target.Line,
+        aspects: [SdkAspect.Blood, SdkAspect.Piercing, SdkAspect.Fire],
         aspectCount: 2,
-        effect: e("none"),
-        trigger: e("none"),
+        effect: Effect.None,
+        trigger: Trigger.None,
         auraRadius: 0,
       },
       sharesBp: [6_500, 3_500, 0],

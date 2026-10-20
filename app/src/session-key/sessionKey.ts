@@ -13,8 +13,11 @@ import {
 } from "@solana/kit";
 import { SYSTEM_PROGRAM } from "../config";
 import { concat } from "../chain/bytes";
-import { IX_DISC } from "../chain/disc";
 import { SESSION_KEYS_PROGRAM, sessionTokenPda } from "../chain/pda";
+
+/** session-keys `create_session_v2` discriminator: an external program, not in the sdk. game.test.ts
+ * recomputes it from Anchor's sha256 rule. */
+export const CREATE_SESSION_V2_DISC = Uint8Array.of(0xdf, 0xe9, 0x6c, 0x07, 0x41, 0xc2, 0xeb, 0x26);
 
 /** The program caps validity at one week; the demo needs a few hours. */
 export const SESSION_VALIDITY_SECS = 3 * 60 * 60;
@@ -37,7 +40,7 @@ function u64le(v: bigint): Uint8Array {
 /** Borsh args: top_up Option<bool>, valid_until Option<i64>, lamports Option<u64>. */
 export function createSessionV2Data(validUntil: bigint, topUpLamports: bigint): Uint8Array {
   return concat(
-    IX_DISC.create_session_v2,
+    CREATE_SESSION_V2_DISC,
     new Uint8Array([1, 1]),
     new Uint8Array([1]),
     i64le(validUntil),

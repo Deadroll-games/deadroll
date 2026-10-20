@@ -1,13 +1,10 @@
 // Sends instructions with a payer and reports through toasts. One hook for every screen.
 import { useCallback, useState } from "react";
 import type { Instruction, TransactionSigner } from "@solana/kit";
-import { DEV_TOOLS, PROGRAMS } from "../config";
+import { DEV_TOOLS } from "../config";
 import { useToast } from "../components/toast/Toast";
 import { decodeEvents, type ChainEvent } from "./events";
-import { coders } from "./programs";
 import { sendTx } from "./send";
-
-const IDS = { session: PROGRAMS.session, character: PROGRAMS.character, items: PROGRAMS.items, map: PROGRAMS.map };
 
 export type TxResult = { signature: string; events: ChainEvent[] };
 
@@ -21,7 +18,7 @@ export type SendOptions = {
 };
 
 export function eventsOfLogs(logs: readonly string[]): ChainEvent[] {
-  return decodeEvents(logs, coders, IDS);
+  return decodeEvents(logs);
 }
 
 export function useTx() {

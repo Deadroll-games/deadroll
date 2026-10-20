@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { getAddressDecoder, type Address } from "@solana/kit";
 import type { GameSessionAcc, Party, PartyPlayer } from "./game";
 import { errorName } from "./send";
+import { StateKind } from "./types";
+import { SessionStatus } from "@deadroll/sdk/session";
 import { cooldownLabel, skillCooldowns, skillUsedText, skipText, startTurnFor, tickText, turnActed, turnStarted } from "./turns";
 
 const A = (n: number) => getAddressDecoder().decode(new Uint8Array(32).fill(n)) as Address;
@@ -11,7 +13,7 @@ const [ALICE, BOB] = [A(2), A(3)];
 /** Two players (slots 0, 1) and a monster (unit 4); turn order 0, 4, 1; `turn` is the index in it. */
 function party(turn: number, over: Partial<GameSessionAcc> = {}, core: Partial<GameSessionAcc["core"]> = {}): Party {
   const session = {
-    core: { status: { active: {} }, dm: DM, turnOrder: Uint8Array.of(0, 4, 1), turnIndex: turn, pendingVrf: false, ...core },
+    core: { status: SessionStatus.Active, dm: DM, turnOrder: Uint8Array.of(0, 4, 1), turnIndex: turn, pendingVrf: false, ...core },
     turnOrderLen: 3,
     turnSeq: 7,
     startedSeq: 6,
@@ -59,7 +61,7 @@ describe("startTurnFor", () => {
   it("nothing once started, while a roll is pending, outside an active party or without a wallet", () => {
     expect(startTurnFor(party(0, { startedSeq: 7 }), ALICE)).toBeNull();
     expect(startTurnFor(party(0, {}, { pendingVrf: true }), ALICE)).toBeNull();
-    expect(startTurnFor(party(0, {}, { status: { victory: {} } } as never), ALICE)).toBeNull();
+    expect(startTurnFor(party(0, {}, { status: SessionStatus.Victory } as never), ALICE)).toBeNull();
     expect(startTurnFor(party(0, { turnOrderLen: 0 }), ALICE)).toBeNull();
     expect(startTurnFor(party(0), null)).toBeNull();
   });
@@ -98,7 +100,8 @@ describe("skillCooldowns", () => {
 });
 
 describe("log texts", () => {
-  const st = (kind: string, turns: number) => ({ kind: { [kind]: {} }, turns });
+  const STATES = ["burning", "chill", "freeze", "bleeding", "shock", "stun", "penetration"];
+  const st = (kind: string, turns: number) => ({ kind: STATES.indexOf(kind), turns });
   const empty = st("burning", 0);
   const tick = (over: object) => ({ dotDamage: 0, hp: 10, died: false, expired: 0, states: [empty, empty], ...over });
 
@@ -116,8 +119,8 @@ describe("log texts", () => {
   });
 
   it("TurnSkipped and SkillUsed", () => {
-    expect(skipText({ state: { freeze: {} } }, "Wolf 1")).toBe("Wolf 1 is frozen: turn skipped");
-    expect(skipText({ state: { stun: {} } }, "Bran")).toBe("Bran is stunned: turn skipped");
+    expect(skipText({ state: StateKind.Freeze }, "Wolf 1")).toBe("Wolf 1 is frozen: turn skipped");
+    expect(skipText({ state: StateKind.Stun }, "Bran")).toBe("Bran is stunned: turn skipped");
     expect(skillUsedText({ cooldown: 2 }, "Ilyra", "Frost Burn")).toBe("Ilyra used Frost Burn: cooldown 2 turns");
     expect(skillUsedText({ cooldown: 1 }, "Ilyra", "Frost Bolt")).toBe("Ilyra used Frost Bolt: cooldown 1 turn");
     expect(skillUsedText({ cooldown: 0 }, "Bran", "Jab")).toBe("Bran used Jab");

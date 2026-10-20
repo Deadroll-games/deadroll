@@ -4,17 +4,19 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "dev:localnet": "vite --mode localnet",
-    "dev:devnet": "vite --mode devnet",
-    "build": "tsc -p . && vite build",
-    "build:devnet": "tsc -p . && vite build --mode devnet",
+    "sdk": "pnpm --filter @deadroll/sdk build",
+    "dev": "pnpm sdk && vite",
+    "dev:localnet": "pnpm sdk && vite --mode localnet",
+    "dev:devnet": "pnpm sdk && vite --mode devnet",
+    "build": "pnpm sdk && tsc -p . && vite build",
+    "build:devnet": "pnpm sdk && tsc -p . && vite build --mode devnet",
     "preview": "vite preview",
     "preview:devnet": "vite preview --mode devnet",
-    "typecheck": "tsc -p .",
-    "test": "vitest run --passWithNoTests"
+    "typecheck": "pnpm sdk && tsc -p .",
+    "test": "pnpm sdk && vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@deadroll/sdk": "workspace:*",
     "@solana/kit": "8.4.0",
     "@solana/kit-plugin-rpc": "0.19.0",
     "@solana/kit-plugin-wallet": "0.21.0",

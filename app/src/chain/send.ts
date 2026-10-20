@@ -21,8 +21,7 @@ import {
   type TransactionSigner,
 } from "@solana/kit";
 import { client } from "../wallet/client";
-import { coders } from "./programs";
-import { PROGRAMS } from "../config";
+import { errorMessage, errorName as sdkErrorName, programNameOf } from "@deadroll/sdk";
 import { TX_SENT_EVENT } from "./txEvents";
 
 export type Sent = { signature: Signature; logs: string[] };
@@ -111,12 +110,14 @@ function errorLogs(e: unknown): string[] {
   return [];
 }
 
-const PROGRAM_CODERS: Record<string, keyof typeof coders> = {
-  [PROGRAMS.session]: "session",
-  [PROGRAMS.character]: "character",
-  [PROGRAMS.items]: "items",
-  [PROGRAMS.map]: "map",
-};
+/** "Name: message" of a Deadroll program's custom error, or null for another program or code. */
+function programError(program: string, code: number): string | null {
+  const name = programNameOf(program);
+  const label = name ? sdkErrorName(name, code) : null;
+  if (!name || !label) return null;
+  const msg = errorMessage(name, code);
+  return msg ? `${label}: ${msg}` : label;
+}
 
 /** The Anchor error name at the start of an `explainFailure` text ("AlreadyActed: ..."), or null. */
 export function errorName(message: string): string | null {
@@ -132,9 +133,8 @@ export function explainFailure(e: unknown, logs: string[], instructions: readonl
   for (const line of [...logs].reverse()) {
     const m = /^Program (\w+) failed: custom program error: 0x([0-9a-f]+)/i.exec(line);
     if (m) {
-      const coder = PROGRAM_CODERS[m[1]!];
       const code = parseInt(m[2]!, 16);
-      const name = coder ? coders[coder].errorName(code) : null;
+      const name = programError(m[1]!, code);
       return name ?? `program ${m[1]!.slice(0, 6)}.. error ${code}`;
     }
   }
@@ -143,8 +143,7 @@ export function explainFailure(e: unknown, logs: string[], instructions: readonl
   const custom = /#(\d+) \(instruction #(\d+)\)/.exec(msg);
   if (custom) {
     const program = instructions[Number(custom[2]) - 1]?.programAddress;
-    const coder = program ? PROGRAM_CODERS[program] : undefined;
-    const name = coder ? coders[coder].errorName(Number(custom[1])) : null;
+    const name = program ? programError(program, Number(custom[1])) : null;
     if (name) return name;
   }
   const last = logs.filter((l) => /failed|Error/i.test(l)).pop();

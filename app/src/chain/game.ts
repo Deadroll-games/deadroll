@@ -1,21 +1,91 @@
 // The demo script as instructions and reads, mirroring tests/demo.test.ts (class Demo) call for
 // call: same instructions, same account lists, same seeds. Screens call these; nothing here
-// touches React.
+// touches React. Instructions and accounts come from the generated sdk (@deadroll/sdk).
 import {
+  AccountRole,
   createKeyPairSignerFromPrivateKeyBytes,
   generateKeyPairSigner,
   getAddressEncoder,
+  isSome,
   type Address,
   type Base64EncodedDataResponse,
   type Instruction,
   type KeyPairSigner,
+  type Option,
+  type ReadonlyUint8Array,
   type TransactionSigner,
 } from "@solana/kit";
+import {
+  CHARACTER_DISCRIMINATOR,
+  PLAYER_PROFILE_DISCRIMINATOR,
+  SKILL_EXTRAS_DISCRIMINATOR,
+  SKILL_SET_DISCRIMINATOR,
+  getCharacterDecoder,
+  getCreateCharacterInstruction,
+  getCreateProfileInstruction,
+  getFreezeTombstoneInstruction,
+  getPlayerProfileDecoder,
+  getSetSkillDescriptionInstruction,
+  getSkillExtrasDecoder,
+  getSkillSetDecoder,
+  getSpendStatPointsInstruction,
+  type Character,
+  type Gear,
+  type SkillRecord,
+  type SkillSet,
+} from "@deadroll/sdk/character";
+import {
+  MAP_DISCRIMINATOR,
+  MAP_LAYOUT_DISCRIMINATOR,
+  getCreateMapInstruction,
+  getFinalizeMapInstruction,
+  getMapDecoder,
+  getMapLayoutDecoder,
+  getWriteLayoutInstruction,
+  getWriteSpawnsInstruction,
+  MapStatus,
+  type Map as MapAccount,
+} from "@deadroll/sdk/map";
+import {
+  ESCROW_DISCRIMINATOR,
+  GAME_SESSION_DISCRIMINATOR,
+  MONSTER_STATE_DISCRIMINATOR,
+  PARTICIPATION_DISCRIMINATOR,
+  SessionStatus,
+  getActInstruction,
+  getClaimEscrowInstruction,
+  getClaimRewardsInstruction,
+  getConsumeRandomnessInstruction,
+  getEndTurnInstruction,
+  getEscrowDecoder,
+  getGameSessionDecoder,
+  getJoinSessionInstruction,
+  getMonsterActInstruction,
+  getMonsterMoveInstruction,
+  getMonsterStateDecoder,
+  getMoveUnitInstruction,
+  getOpenSessionInstruction,
+  getParticipationDecoder,
+  getSetReadyInstruction,
+  getStartSessionInstruction,
+  getStartTurnInstruction,
+  type ActiveState,
+  type AuraData,
+  type BurningCellData,
+  type GameSession,
+  type MapSkillData,
+  type Monster,
+  type MonsterAuraData,
+  type MonsterDefenseData,
+  type Participation,
+  type ReactiveData,
+  type TimedModData,
+} from "@deadroll/sdk/session";
+import { COMPUTE_BUDGET_PROGRAM } from "@deadroll/sdk";
 import { MPL_CORE_PROGRAM, PROGRAMS, SYSTEM_PROGRAM, VRF } from "../config";
 import { client } from "../wallet/client";
 import { characterAppearance } from "./appearance";
 import { concat, fromBase64, sha256 } from "./bytes";
-import { buildInstruction, coders, type RemainingAccount } from "./programs";
 import {
   bagPda,
   bestiaryPda,
@@ -44,216 +114,62 @@ import { PRESETS, SKILL_DESCRIPTION_LEN, SKILL_NAME_LEN, type NamedSkill } from 
 import { Aspect, Class, MAP_CELLS, MAP_MAX, Race, Tile, type Cell, type Spawn } from "./types";
 
 // ---------------------------------------------------------------------------------------------
-// decoded account shapes (Anchor TS coder conventions, see coder.ts)
+// decoded account shapes: the generated sdk types (numbers for enums, `Option` for Rust options)
 
-export type Enum = Record<string, Record<string, unknown>>;
-export type ActiveStateAcc = { kind: Enum; turns: number; power: number; source: number };
+export type ActiveStateAcc = ActiveState;
 /** A buff or debuff slot (session TimedModData): active while `turns > 0`. One per kind, in the first free slot: find by `kind`. */
-export type TimedModAcc = { kind: Enum; aspect: Enum; turns: number; powerBp: number; source: number };
-export type MonsterAcc = {
-  bestiaryId: number;
-  level: number;
-  x: number;
-  y: number;
-  hp: number;
-  hpMax: number;
-  actionPoints: number;
-  alive: boolean;
-  pack: number;
-  flags: number;
-  states: ActiveStateAcc[];
-};
+export type TimedModAcc = TimedModData;
+export type MonsterAcc = Monster;
 /** `MonsterState.defense`: bits by aspect / state. */
-export type MonsterDefenseAcc = { resist: number; immuneAspects: number; immuneStates: number };
+export type MonsterDefenseAcc = MonsterDefenseData;
 /** `MonsterState.auras` (patch 6): a monster's aura and its kin-only flag. */
-export type MonsterAuraAcc = { aura: AuraAcc; kinOnly: boolean };
+export type MonsterAuraAcc = MonsterAuraData;
 /** `MonsterState.burning_cells`: Burning of `power` on whoever steps in, through `untilRound`. */
-export type BurningCellAcc = { x: number; y: number; untilRound: number; power: number; source: number };
-export type GameSessionAcc = {
-  core: {
-    version: number;
-    map: Address;
-    dm: Address;
-    status: Enum;
-    priceLamports: bigint;
-    players: Address[];
-    playerCount: number;
-    turnOrder: Uint8Array;
-    turnIndex: number;
-    round: number;
-    actionCounter: number;
-    pendingVrf: boolean;
-    lastSeed: Uint8Array;
-    bump: number;
-  };
-  layout: Address;
-  width: number;
-  height: number;
-  entrance: Cell;
-  dmActor: Address;
-  turnOrderLen: number;
-  turnSeq: number;
-  turnStartedAt: bigint;
-  playerPos: Cell[];
-  aliveMask: number;
-  readyMask: number;
-  pending: { attacker: number; target: number; skillSlot: number; participation: Address };
-  fleeMask: number;
-  settledMask: number;
-  xpPool: number;
-  victorySeed: Uint8Array;
-  monsterSpeed: Uint8Array;
-  monsterInitiative: number[];
-  playerInitiative: number[];
-  tileCost: Uint8Array;
-  /** `turnSeq` in which the current unit used its one attack or active skill. */
-  actedSeq: number;
-  /** `turnSeq` whose `start_turn` ran; every other turn instruction waits for it. */
-  startedSeq: number;
-  /** Unused since patch 5 (allies come with the party accounts); the default key. */
-  pendingTarget: Address;
-  /** Patch 5: each slot's Participation (set at join), reactive skill, auras (passive, reactive). */
-  participations: Address[];
-  reactives: ReactiveAcc[];
-  auras: AuraAcc[][];
-  pendingReactive: { kind: number; bearers: number; source: number; victim: number; hpBefore: number; hpAfter: number; hpMax: number };
-  /** Patch 6: a roll for monster reactives only (`kind` 0 = none). */
-  pendingMonsterReactive: { kind: number; bearers: number; source: number; victim: number; hpBefore: number; hpAfter: number; hpMax: number };
-  /** Patch 6: players down in a callback whose death is not finalized yet, one bit per slot. While
-   * not 0 no turn starts and no action is taken: `start_turn` (anyone) or a claim finalizes them. */
-  pendingDeaths: number;
-};
-export type ParticipationAcc = {
-  core: {
-    session: Address;
-    character: Address;
-    actor: Address;
-    slot: number;
-    x: number;
-    y: number;
-    hp: number;
-    actionPoints: number;
-    states: ActiveStateAcc[];
-    ready: boolean;
-  };
-  player: Address;
-  maxAp: number;
-  apSeq: number;
-  contribution: bigint;
-  /** Per SkillSet slot: own turn starts until the skill is usable again, 0 = usable. */
-  cooldowns: Uint8Array;
-  /** The character's maximum HP with its gear, copied at set_ready (heals stop here). */
-  hpMax: number;
-  /** Buffs and debuffs on this player (one per kind, any slot: read them with support.ts activeMods). */
-  mods: TimedModAcc[];
-  /** What the character wears, `ItemBase` bytes by `EquipSlot` (0xFF = none), copied from `Character.gear` at set_ready. */
-  equipment: Uint8Array;
-  /** Skills taken onto the map, SkillSet indexes: 0-3 active, 4 reactive, 5 passive (0xFF = empty). Set by set_ready. */
-  skills: Uint8Array;
-  /** The character's class trait tier, copied from `Character.classTier` at set_ready. */
-  classTier: number;
-  /** A resonance's accuracy buff (Pale Flame): +bonus to the d20 of `aspect` attacks, `turns` 0 = none. */
-  accuracy: { aspect: Enum; turns: number; bonus: number };
-  /** Patch 5: the map skills of `skills`, slot by slot, as the rules see them (copied at set_ready). */
-  mapSkills: MapSkillAcc[];
-};
+export type BurningCellAcc = BurningCellData;
+export type GameSessionAcc = GameSession;
+export type ParticipationAcc = Participation;
 /** session MapSkillData: a skill taken onto the map (blocks, derived values, the patch 5 ext). */
-export type MapSkillAcc = {
-  blocks: SkillRecordAcc["blocks"];
-  sharesBp: number[];
-  powerBp: number;
-  cooldown: number;
-  ext: { range: Enum; timing: Enum; hpBelowPct: number };
-  apCost: number;
-};
+export type MapSkillAcc = MapSkillData;
 /** session AuraData (docs/SKILL_BUILDER.md 3.5): `turns` 255 = permanent (a passive), 0 = none. */
-export type AuraAcc = {
-  kind: Enum;
-  aspect: Enum;
-  powerBp: number;
-  radius: number;
-  turns: number;
-  hostile: boolean;
-  passive: boolean;
-  selfOnly: boolean;
-};
+export type AuraAcc = AuraData;
 /** session ReactiveData: a player's reactive skill on the map, `skillSlot` 0xFF = none. */
-export type ReactiveAcc = { skillSlot: number; skill: MapSkillAcc; cooldownLeft: number };
-/** programs/character SkillExtras: the patch 5 part of every skill, by SkillSet index (zero-copy, raw bytes). */
+export type ReactiveAcc = ReactiveData;
+/** programs/character SkillExtras: the patch 5 part of every skill, by SkillSet index. */
 export type SkillExtraAcc = { range: number; timing: number; hpBelowPct: number; apCost: number; description: string };
 /** programs/character `Gear`: soulbound starter items and what is worn, by `EquipSlot`. */
-export type GearAcc = {
-  items: { base: Enum; level: number }[];
-  itemCount: number;
-  equipped: { source: Enum; index: number; asset: Address }[];
-};
-export type CharacterAcc = {
-  core: {
-    owner: Address;
-    index: number;
-    nft: Address | null;
-    race: Enum;
-    class: Enum;
-    level: number;
-    xp: number;
-    stats: number[];
-    predisposition: Enum;
-    /** Race trait tier, 1 best .. 14. */
-    predispositionTier: number;
-    hpMax: number;
-    alive: boolean;
-    inSession: Address | null;
-    appearance: { spriteId: number; materialRamp: number; accentRamp: number; elementRamp: number }[];
-    stateVersion: number;
-  };
-  name: Uint8Array;
-  unspentPoints: number;
-  nftFrozen: boolean;
-  gear: GearAcc;
-  /** Class trait tier, 1 best .. 14 (docs/CHARACTER.md 6.3). */
-  classTier: number;
-};
+export type GearAcc = Gear;
+export type CharacterAcc = Character;
 /** programs/character SkillRecord: crates/skillcheck SkillBlocks + derived values. */
-export type SkillRecordAcc = {
-  blocks: {
-    category: Enum;
-    purpose: Enum;
-    source: Enum;
-    form: Enum;
-    target: Enum;
-    aspects: Enum[];
-    aspectCount: number;
-    effect: Enum;
-    trigger: Enum;
-    auraRadius: number;
-  };
-  sharesBp: number[];
-  powerBp: number;
-  fusion: number;
-  cooldown: number;
-  name: Uint8Array;
-};
-export type SkillSetAcc = { character: Address; count: number; skills: SkillRecordAcc[] };
-export const variantKey = (e: Enum): string => Object.keys(e)[0] ?? "";
-/** Enum variant as a label: { enemyAdjacent: {} } -> "Enemy adjacent". */
-export function variantLabel(e: Enum): string {
-  const words = variantKey(e).replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase();
+export type SkillRecordAcc = SkillRecord;
+export type SkillSetAcc = SkillSet;
+export type MapAcc = MapAccount;
+
+/** A generated enum object (`{ Human: 0, ForestElf: 1, 0: "Human", 1: "ForestElf" }`). */
+export type EnumObject = Readonly<Record<string | number, string | number>>;
+const lowerFirst = (s: string): string => s.charAt(0).toLowerCase() + s.slice(1);
+/** Variant names of an enum in on-chain order, lower camel ("mainHand"). */
+export function enumKeys(e: EnumObject): string[] {
+  return Object.entries(e)
+    .filter((kv): kv is [string, number] => typeof kv[1] === "number")
+    .sort((a, b) => a[1] - b[1])
+    .map(([k]) => lowerFirst(k));
+}
+/** The variant name of `value`, lower camel ("enemyAdjacent"), or "" when out of range. */
+export const variantKey = (e: EnumObject, value: number): string => lowerFirst(String(e[value] ?? ""));
+/** Enum variant as a label: EnemyAdjacent -> "Enemy adjacent". */
+export function variantLabel(e: EnumObject, value: number): string {
+  const words = variantKey(e, value).replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase();
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
-export type MapAcc = {
-  core: { dm: Address; index: number; width: number; height: number; status: Enum; layoutHash: Uint8Array };
-  tier: number;
-};
+/** A Rust `Option` field as the value or null. */
+export const optional = <T>(o: Option<T>): T | null => (isSome(o) ? o.value : null);
 
 export const MONSTER_BASE = 4;
 export const BASE_ATTACK = 0xff;
-export const status = (s: GameSessionAcc) => Object.keys(s.core.status)[0] as "lobby" | "active" | "victory" | "wiped" | "fled" | "abandoned";
-export const mapStatus = (m: MapAcc) => Object.keys(m.core.status)[0] as "draft" | "finalized" | "inSession" | "finished";
-export const enumIndex = (e: Enum, names: readonly string[]) => names.indexOf(Object.keys(e)[0] ?? "");
-export const ASPECT_KEYS = ["fire", "cold", "lightning", "blood", "blunt", "piercing"] as const;
-export const RACE_KEYS = ["human", "forestElf"] as const;
-export const CLASS_KEYS = ["warrior", "mage", "support"] as const;
-/** ModKindData variants in on-chain order; `expired` bit i is `1 << i` (deadroll_combat::support::mod_bit). */
+export type SessionStatusKey = "lobby" | "active" | "victory" | "wiped" | "fled" | "abandoned";
+export const status = (s: GameSessionAcc) => variantKey(SessionStatus, s.core.status) as SessionStatusKey;
+export const mapStatus = (m: MapAcc) => variantKey(MapStatus, m.core.status) as "draft" | "finalized" | "inSession" | "finished";
+/** Modifier variants in on-chain order (`ModKindData`); `expired` bit i is `1 << i` (deadroll_combat::support::mod_bit). */
 export const MOD_KEYS = ["haste", "slow", "empowerment", "weakening", "protection", "vulnerability"] as const;
 /** `Pubkey::default()`: no account. */
 export const DEFAULT_KEY = "11111111111111111111111111111111" as Address;
@@ -265,7 +181,7 @@ export function textBytes(s: string, len: number): Uint8Array {
   out.set(new TextEncoder().encode(s.replace(/[^\x20-\x7e]/g, "?")).subarray(0, len));
   return out;
 }
-export function bytesText(b: Uint8Array): string {
+export function bytesText(b: ReadonlyUint8Array): string {
   const end = b.indexOf(0);
   return new TextDecoder().decode(end < 0 ? b : b.subarray(0, end));
 }
@@ -273,32 +189,45 @@ export function bytesText(b: Uint8Array): string {
 // ---------------------------------------------------------------------------------------------
 // reads
 
+/** The accounts the app reads: program, discriminator and generated decoder. */
+const ACCOUNTS = {
+  PlayerProfile: { program: "character", disc: PLAYER_PROFILE_DISCRIMINATOR, decoder: getPlayerProfileDecoder() },
+  Character: { program: "character", disc: CHARACTER_DISCRIMINATOR, decoder: getCharacterDecoder() },
+  SkillSet: { program: "character", disc: SKILL_SET_DISCRIMINATOR, decoder: getSkillSetDecoder() },
+  SkillExtras: { program: "character", disc: SKILL_EXTRAS_DISCRIMINATOR, decoder: getSkillExtrasDecoder() },
+  Map: { program: "map", disc: MAP_DISCRIMINATOR, decoder: getMapDecoder() },
+  MapLayout: { program: "map", disc: MAP_LAYOUT_DISCRIMINATOR, decoder: getMapLayoutDecoder() },
+  GameSession: { program: "session", disc: GAME_SESSION_DISCRIMINATOR, decoder: getGameSessionDecoder() },
+  Participation: { program: "session", disc: PARTICIPATION_DISCRIMINATOR, decoder: getParticipationDecoder() },
+  MonsterState: { program: "session", disc: MONSTER_STATE_DISCRIMINATOR, decoder: getMonsterStateDecoder() },
+  Escrow: { program: "session", disc: ESCROW_DISCRIMINATOR, decoder: getEscrowDecoder() },
+} as const;
+export type AccountName = keyof typeof ACCOUNTS;
+export type AccountOf<K extends AccountName> = ReturnType<(typeof ACCOUNTS)[K]["decoder"]["decode"]>;
+
+/** Decodes an account by name; throws on another account's discriminator. */
+export function decodeAccount<K extends AccountName>(name: K, raw: ReadonlyUint8Array): AccountOf<K> {
+  const { disc, decoder } = ACCOUNTS[name];
+  if (raw.length < 8 || disc.some((b, i) => raw[i] !== b)) throw new Error(`not a ${name} account`);
+  return decoder.decode(raw) as AccountOf<K>;
+}
+
 export async function getAccounts(addresses: Address[]): Promise<(Uint8Array | null)[]> {
   if (addresses.length === 0) return [];
   const { value } = await client.rpc.getMultipleAccounts(addresses, { encoding: "base64", commitment: "confirmed" }).send();
   return value.map((v) => (v ? fromBase64((v.data as Base64EncodedDataResponse)[0]) : null));
 }
 
-export async function getAccount<T>(program: keyof typeof coders, name: string, address: Address): Promise<T | null> {
+export async function getAccount<K extends AccountName>(name: K, address: Address): Promise<AccountOf<K> | null> {
   const [raw] = await getAccounts([address]);
-  return raw ? coders[program].decodeAccount<T>(name, raw) : null;
+  return raw ? decodeAccount(name, raw) : null;
 }
 
-/** Bytes of one SkillExtra record (programs/character skill_extras.rs). */
-const SKILL_EXTRA_SIZE = 4 + SKILL_DESCRIPTION_LEN;
-/** Offset of the first record: discriminator, version, bump, character. */
-const SKILL_EXTRAS_START = 8 + 2 + 32;
-
-/** The zero-copy `SkillExtras` account: one record per SkillSet index, raw bytes. */
-export function decodeSkillExtras(raw: Uint8Array, count: number): SkillExtraAcc[] {
-  const text = new TextDecoder();
-  return Array.from({ length: count }, (_, i) => {
-    const at = SKILL_EXTRAS_START + i * SKILL_EXTRA_SIZE;
-    const r = raw.subarray(at, at + SKILL_EXTRA_SIZE);
-    const d = r.subarray(4);
-    const len = d.indexOf(0) === -1 ? d.length : d.indexOf(0);
-    return { range: r[0]!, timing: r[1]!, hpBelowPct: r[2]!, apCost: r[3]!, description: text.decode(d.subarray(0, len)) };
-  });
+/** The `SkillExtras` account: one record per SkillSet index, the first `count`. */
+export function decodeSkillExtras(raw: ReadonlyUint8Array, count: number): SkillExtraAcc[] {
+  return decodeAccount("SkillExtras", raw)
+    .extras.slice(0, count)
+    .map((r) => ({ range: r.range, timing: r.timing, hpBelowPct: r.hpBelowPct, apCost: r.apCost, description: bytesText(r.description.slice(0, SKILL_DESCRIPTION_LEN)) }));
 }
 
 /** A character's `SkillExtras` (the first `count` skills), or null before it exists. */
@@ -308,25 +237,24 @@ export async function skillExtrasOf(character: Address, count: number): Promise<
 }
 
 const addressEncoder = getAddressEncoder();
-/** Accounts of `program` whose data matches the discriminator of `name` and the given memcmp. */
-export async function findAccounts<T>(
-  program: keyof typeof coders,
-  name: string,
+/** Accounts of `name` (by discriminator) that match the given memcmp. */
+export async function findAccounts<K extends AccountName>(
+  name: K,
   memcmp: { offset: number; bytes: Uint8Array }[] = [],
-): Promise<{ address: Address; data: T }[]> {
-  const coder = coders[program];
+): Promise<{ address: Address; data: AccountOf<K> }[]> {
+  const { program, disc } = ACCOUNTS[name];
   const filters = [
-    { memcmp: { offset: 0n, bytes: base64(coder.accountDiscriminator(name)), encoding: "base64" as const } },
+    { memcmp: { offset: 0n, bytes: base64(disc), encoding: "base64" as const } },
     ...memcmp.map((m) => ({ memcmp: { offset: BigInt(m.offset), bytes: base64(m.bytes), encoding: "base64" as const } })),
   ];
   const res = await client.rpc
     .getProgramAccounts(PROGRAMS[program], { encoding: "base64", commitment: "confirmed", filters } as never)
     .send();
   const list = res as unknown as { pubkey: Address; account: { data: Base64EncodedDataResponse } }[];
-  const out: { address: Address; data: T }[] = [];
+  const out: { address: Address; data: AccountOf<K> }[] = [];
   for (const { pubkey, account } of list) {
     try {
-      out.push({ address: pubkey, data: coder.decodeAccount<T>(name, fromBase64(account.data[0])) });
+      out.push({ address: pubkey, data: decodeAccount(name, fromBase64(account.data[0])) });
     } catch {
       // older layout: skip
     }
@@ -334,10 +262,20 @@ export async function findAccounts<T>(
   return out;
 }
 
-function base64(bytes: Uint8Array): string {
+function base64(bytes: ReadonlyUint8Array): string {
   let s = "";
   for (const b of bytes) s += String.fromCharCode(b);
   return btoa(s);
+}
+
+/** An account after the instruction's own list (`ctx.remaining_accounts`). */
+export type RemainingAccount = { address: Address; writable: boolean };
+
+/** `ix` with `remaining` appended to its accounts. */
+export function withRemaining(ix: Instruction, remaining: readonly RemainingAccount[]): Instruction {
+  if (remaining.length === 0) return ix;
+  const extra = remaining.map((r) => ({ address: r.address, role: r.writable ? AccountRole.WRITABLE : AccountRole.READONLY }));
+  return { ...ix, accounts: [...(ix.accounts ?? []), ...extra] };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -356,7 +294,7 @@ export const RACE_PREDISPOSITIONS: Record<Race, Aspect[]> = {
 export type NewCharacter = { name: string; race: Race; class: Class; predisposition: Aspect; stats: number[]; skills?: NamedSkill[] };
 
 export function createProfileIx(owner: TransactionSigner, profile: Address): Instruction {
-  return buildInstruction("character", "create_profile", {}, { owner, profile, systemProgram: SYSTEM_PROGRAM });
+  return getCreateProfileInstruction({ owner, profile, systemProgram: SYSTEM_PROGRAM });
 }
 
 /**
@@ -368,22 +306,11 @@ export async function createCharacterIxs(
   c: NewCharacter,
 ): Promise<{ profileIx: Instruction | null; ix: Instruction; character: Address; asset: KeyPairSigner }> {
   const profile = await profilePda(owner.address);
-  const prof = await getAccount<{ characterCount: number }>("character", "PlayerProfile", profile);
+  const prof = await getAccount("PlayerProfile", profile);
   const index = prof?.characterCount ?? 0;
   const character = await characterPda(owner.address, index);
   const asset = await generateKeyPairSigner();
-  const args = {
-    args: {
-      name: textBytes(c.name, 32),
-      race: RACE_KEYS[c.race],
-      class: CLASS_KEYS[c.class],
-      predisposition: ASPECT_KEYS[c.predisposition],
-      stats: c.stats,
-      appearance: characterAppearance(c.race, c.predisposition),
-      skills: (c.skills ?? SKILL_PRESETS[c.class]).map((s) => ({ blocks: s.blocks, name: textBytes(s.name, SKILL_NAME_LEN), ext: s.ext })),
-    },
-  };
-  const ix = buildInstruction("character", "create_character", args, {
+  const ix = getCreateCharacterInstruction({
     owner,
     profile,
     character,
@@ -394,6 +321,13 @@ export async function createCharacterIxs(
     mplCoreProgram: MPL_CORE_PROGRAM,
     systemProgram: SYSTEM_PROGRAM,
     skillExtras: await skillExtrasPda(character),
+    name: textBytes(c.name, 32),
+    race: c.race,
+    class: c.class,
+    predisposition: c.predisposition,
+    stats: c.stats,
+    appearance: characterAppearance(c.race, c.predisposition),
+    skills: (c.skills ?? SKILL_PRESETS[c.class]).map((s) => ({ blocks: s.blocks, name: textBytes(s.name, SKILL_NAME_LEN), ext: s.ext })),
   });
   return { profileIx: prof ? null : createProfileIx(owner, profile), ix, character, asset };
 }
@@ -412,7 +346,7 @@ export async function skillDescriptionIxs(owner: TransactionSigner, character: A
   const ixs = skills
     .map((s, i) => [s.description, i] as const)
     .filter(([d]) => d.length > 0)
-    .map(([d, i]) => buildInstruction("character", "set_skill_description", { skillIndex: i, description: textBytes(d, SKILL_DESCRIPTION_LEN) }, accounts));
+    .map(([d, i]) => getSetSkillDescriptionInstruction({ ...accounts, skillIndex: i, description: textBytes(d, SKILL_DESCRIPTION_LEN) }));
   const out: Instruction[][] = [];
   for (let i = 0; i < ixs.length; i += perTx) out.push(ixs.slice(i, i + perTx));
   return out;
@@ -420,18 +354,18 @@ export async function skillDescriptionIxs(owner: TransactionSigner, character: A
 
 /** All characters of `owner`, by profile count (indices 0..count). */
 export async function myCharacters(owner: Address): Promise<{ address: Address; data: CharacterAcc }[]> {
-  const prof = await getAccount<{ characterCount: number }>("character", "PlayerProfile", await profilePda(owner));
+  const prof = await getAccount("PlayerProfile", await profilePda(owner));
   const count = prof?.characterCount ?? 0;
   const addrs = await Promise.all(Array.from({ length: count }, (_, i) => characterPda(owner, i)));
   const raws = await getAccounts(addrs);
   return addrs.flatMap((address, i) => {
     const raw = raws[i];
-    return raw ? [{ address, data: coders.character.decodeAccount<CharacterAcc>("Character", raw) }] : [];
+    return raw ? [{ address, data: decodeAccount("Character", raw) }] : [];
   });
 }
 
 export function freezeTombstoneIx(character: Address, asset: Address, payer: TransactionSigner): Instruction {
-  return buildInstruction("character", "freeze_tombstone", {}, { character, asset, payer, mplCoreProgram: MPL_CORE_PROGRAM, systemProgram: SYSTEM_PROGRAM });
+  return getFreezeTombstoneInstruction({ character, asset, payer, mplCoreProgram: MPL_CORE_PROGRAM, systemProgram: SYSTEM_PROGRAM });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -462,23 +396,23 @@ export async function buildMapIxs(dm: TransactionSigner, d: MapDraft): Promise<{
   const exit = findTile(d, Tile.Exit);
   if (!entrance || !exit) throw new Error("the map needs an entrance and an exit");
   const ixs = [
-    buildInstruction("map", "create_map", { index, width: d.width, height: d.height, tier: d.tier }, { ...edit, systemProgram: SYSTEM_PROGRAM }),
-    buildInstruction("map", "write_layout", { offset: 0, tiles: tiles.slice(0, (d.height - 1) * MAP_MAX + d.width) }, edit),
-    buildInstruction("map", "write_spawns", { entrance, exit, spawns: d.spawns }, edit),
+    getCreateMapInstruction({ ...edit, systemProgram: SYSTEM_PROGRAM, index, width: d.width, height: d.height, tier: d.tier }),
+    getWriteLayoutInstruction({ ...edit, offset: 0, tiles: tiles.slice(0, (d.height - 1) * MAP_MAX + d.width) }),
+    getWriteSpawnsInstruction({ ...edit, entrance, exit, spawns: d.spawns }),
     // The builder rules read the registry bestiary and monster skills (roles, pools, slots).
-    buildInstruction("map", "finalize_map", { secretsRoot: new Uint8Array(32) }, { ...edit, bestiary: await bestiaryPda(), monsterSkills: await monsterSkillsPda() }),
+    getFinalizeMapInstruction({ ...edit, bestiary: await bestiaryPda(), monsterSkills: await monsterSkillsPda(), secretsRoot: new Uint8Array(32) }),
   ];
   return { map, layout, index, ixs };
 }
 
 /** Maps of `dm` (memcmp on MapData.dm right after version). */
 export function mapsOf(dm: Address) {
-  return findAccounts<MapAcc>("map", "Map", [{ offset: 9, bytes: addrBytes(dm) }]);
+  return findAccounts("Map", [{ offset: 9, bytes: addrBytes(dm) }]);
 }
 
 export async function mapTiles(layout: Address): Promise<Uint8Array | null> {
-  const l = await getAccount<{ core: { tiles: Uint8Array } }>("map", "MapLayout", layout);
-  return l?.core.tiles ?? null;
+  const l = await getAccount("MapLayout", layout);
+  return l ? Uint8Array.from(l.core.tiles) : null;
 }
 
 function addrBytes(a: Address): Uint8Array {
@@ -507,44 +441,38 @@ async function vrfAccounts() {
 
 export async function openSessionIx(dm: TransactionSigner, map: Address, priceLamports: bigint, dmActor: Address): Promise<Instruction> {
   const acc = await sessionAccounts(map);
-  return buildInstruction(
-    "session",
-    "open_session",
-    { priceLamports, dmActor },
-    {
-      dm,
-      map,
-      layout: await layoutPda(map),
-      ...acc,
-      sessionAuthority: await sessionAuthorityPda(),
-      config: await gameConfigPda(),
-      bestiary: await bestiaryPda(),
-      tileset: await tilesetPda(),
-      mapProgram: PROGRAMS.map,
-      systemProgram: SYSTEM_PROGRAM,
-      aspects: await aspectsPda(),
-      traits: await traitsPda(),
-      resonances: await resonancesPda(),
-      monsterSkills: await monsterSkillsPda(),
-    },
-  );
+  return getOpenSessionInstruction({
+    dm,
+    map,
+    layout: await layoutPda(map),
+    ...acc,
+    sessionAuthority: await sessionAuthorityPda(),
+    config: await gameConfigPda(),
+    bestiary: await bestiaryPda(),
+    tileset: await tilesetPda(),
+    mapProgram: PROGRAMS.map,
+    systemProgram: SYSTEM_PROGRAM,
+    aspects: await aspectsPda(),
+    traits: await traitsPda(),
+    resonances: await resonancesPda(),
+    monsterSkills: await monsterSkillsPda(),
+    priceLamports,
+    dmActor,
+  });
 }
 
 export async function joinSessionIx(player: TransactionSigner, session: Address, character: Address, contribution: bigint, actor: Address): Promise<Instruction> {
-  return buildInstruction(
-    "session",
-    "join_session",
-    { contribution, actor },
-    {
-      player,
-      session,
-      character,
-      participation: await participationPda(session, character),
-      stash: await stashPda(session, character),
-      escrow: await escrowPda(session),
-      systemProgram: SYSTEM_PROGRAM,
-    },
-  );
+  return getJoinSessionInstruction({
+    player,
+    session,
+    character,
+    participation: await participationPda(session, character),
+    stash: await stashPda(session, character),
+    escrow: await escrowPda(session),
+    systemProgram: SYSTEM_PROGRAM,
+    contribution,
+    actor,
+  });
 }
 
 /**
@@ -559,7 +487,7 @@ export async function setReadyIx(
   ready: boolean,
   selection: readonly number[],
 ): Promise<Instruction> {
-  return buildInstruction("session", "set_ready", { ready, selection: Uint8Array.from(selection) }, {
+  return getSetReadyInstruction({
     player,
     session,
     participation: await participationPda(session, character),
@@ -569,31 +497,34 @@ export async function setReadyIx(
     config: await gameConfigPda(),
     characterProgram: PROGRAMS.character,
     skillExtras: await skillExtrasPda(character),
+    ready,
+    selection: Uint8Array.from(selection),
   });
 }
 
 export async function startSessionIx(dm: TransactionSigner, session: Address): Promise<Instruction> {
-  return buildInstruction(
-    "session",
-    "start_session",
-    {},
-    { dm, session, monsters: await monstersPda(session), escrow: await escrowPda(session), ...(await vrfAccounts()) },
-  );
+  return getStartSessionInstruction({ dm, session, monsters: await monstersPda(session), escrow: await escrowPda(session), ...(await vrfAccounts()) });
 }
 
 /** A player's in-session keys: the session key signs, the SessionTokenV2 proves it may. */
 export type Actor = { signer: TransactionSigner; token: Address | null };
 
+/** An optional account: undefined is Anchor's None (the program id). */
+const opt = <T>(v: T | null): T | undefined => v ?? undefined;
+
 export async function moveIx(actor: Actor, session: Address, character: Address, layout: Address, steps: Step[]): Promise<Instruction> {
-  return buildInstruction("session", "move_unit", pathArgs(steps), {
+  const path = pathArgs(steps);
+  return getMoveUnitInstruction({
     signer: actor.signer,
     session,
     participation: await participationPda(session, character),
     monsters: await monstersPda(session),
     layout,
-    sessionToken: actor.token,
+    sessionToken: opt(actor.token),
     // Patch 6: stepping next to a monster can trigger its reactive skill (a VRF roll).
     ...(await vrfAccounts()),
+    steps: Uint8Array.from(path.steps),
+    len: path.len,
   });
 }
 
@@ -611,34 +542,31 @@ export async function actIx(
   targetParticipation: Address | null,
   layout: Address,
 ): Promise<Instruction> {
-  return buildInstruction(
-    "session",
-    "act",
-    { skillSlot, target },
-    {
-      signer: actor.signer,
-      session,
-      participation: await participationPda(session, character),
-      character,
-      skillSet: await skillSetPda(character),
-      bag: await bagPda(character),
-      monsters: await monstersPda(session),
-      sessionToken: actor.token,
-      ...(await vrfAccounts()),
-      targetParticipation,
-      layout,
-    },
-  );
+  return getActInstruction({
+    signer: actor.signer,
+    session,
+    participation: await participationPda(session, character),
+    character,
+    skillSet: await skillSetPda(character),
+    bag: await bagPda(character),
+    monsters: await monstersPda(session),
+    sessionToken: opt(actor.token),
+    ...(await vrfAccounts()),
+    targetParticipation: opt(targetParticipation),
+    layout,
+    skillSlot,
+    target,
+  });
 }
 
 /** `character` null: a monster turn, ended by the DM's actor. */
 export async function endTurnIx(actor: Actor, session: Address, character: Address | null): Promise<Instruction> {
-  return buildInstruction("session", "end_turn", {}, {
+  return getEndTurnInstruction({
     signer: actor.signer,
     session,
     monsters: await monstersPda(session),
-    participation: character ? await participationPda(session, character) : null,
-    sessionToken: actor.token,
+    participation: character ? await participationPda(session, character) : undefined,
+    sessionToken: opt(actor.token),
   });
 }
 
@@ -657,16 +585,15 @@ export async function deathAccountsOf(s: GameSessionAcc): Promise<RemainingAccou
   return out;
 }
 
-/** ComputeBudget program: `SetComputeUnitLimit(units)`. */
-const COMPUTE_BUDGET = "ComputeBudget111111111111111111111111111111" as Address;
 /** Compute limit of a transaction that may finalize deaths (`character.mark_dead` each, about
  * 45k CU; four players at most). */
 export const FINALIZE_CU = 600_000;
+/** ComputeBudget program: `SetComputeUnitLimit(units)`. */
 export function computeLimitIx(units: number): Instruction {
   const data = new Uint8Array(5);
   data[0] = 2;
   new DataView(data.buffer).setUint32(1, units, true);
-  return { programAddress: COMPUTE_BUDGET, data };
+  return { programAddress: COMPUTE_BUDGET_PROGRAM, data };
 }
 /** `ix` with the compute limit in front when it finalizes deaths. */
 export const withDeaths = (deaths: readonly RemainingAccount[], ix: Instruction): Instruction[] => (deaths.length ? [computeLimitIx(FINALIZE_CU), ix] : [ix]);
@@ -682,32 +609,37 @@ export async function startTurnIx(
   payer: TransactionSigner,
   deaths: readonly RemainingAccount[] = [],
 ): Promise<Instruction> {
-  return buildInstruction("session", "start_turn", {}, {
+  const ix = getStartTurnInstruction({
     session,
     monsters: await monstersPda(session),
-    participation: player?.participation ?? null,
-    character: player?.character ?? null,
+    participation: player?.participation,
+    character: player?.character,
     sessionAuthority: await sessionAuthorityPda(),
     config: await gameConfigPda(),
     characterProgram: PROGRAMS.character,
     // Burned if over-time damage kills the player.
-    skillSet: player ? await skillSetPda(player.character) : null,
-    bag: player ? await bagPda(player.character) : null,
+    skillSet: player ? await skillSetPda(player.character) : undefined,
+    bag: player ? await bagPda(player.character) : undefined,
     // Pays the VRF fee when over-time damage triggers a reactive skill (patch 5).
     payer,
     ...(await vrfAccounts()),
-  }, deaths);
+  });
+  return withRemaining(ix, deaths);
 }
 
 export async function monsterMoveIx(dmActor: Actor, session: Address, layout: Address, monster: number, steps: Step[]): Promise<Instruction> {
-  return buildInstruction("session", "monster_move", { monster, ...pathArgs(steps) }, {
+  const path = pathArgs(steps);
+  return getMonsterMoveInstruction({
     signer: dmActor.signer,
     session,
     monsters: await monstersPda(session),
     layout,
-    sessionToken: dmActor.token,
+    sessionToken: opt(dmActor.token),
     // A monster stepping next to a player can trigger its reactive skill (a VRF roll).
     ...(await vrfAccounts()),
+    monster,
+    steps: Uint8Array.from(path.steps),
+    len: path.len,
   });
 }
 
@@ -726,29 +658,27 @@ export async function monsterActIx(
   character: Address,
   layout: Address,
 ): Promise<Instruction> {
-  return buildInstruction(
-    "session",
-    "monster_act",
-    { monster, action, target },
-    {
-      signer: dmActor.signer,
-      session,
-      monsters: await monstersPda(session),
-      participation: await participationPda(session, character),
-      character,
-      skillSet: await skillSetPda(character),
-      bag: await bagPda(character),
-      sessionToken: dmActor.token,
-      ...(await vrfAccounts()),
-      layout,
-    },
-  );
+  return getMonsterActInstruction({
+    signer: dmActor.signer,
+    session,
+    monsters: await monstersPda(session),
+    participation: await participationPda(session, character),
+    character,
+    skillSet: await skillSetPda(character),
+    bag: await bagPda(character),
+    sessionToken: opt(dmActor.token),
+    ...(await vrfAccounts()),
+    layout,
+    monster,
+    action,
+    target,
+  });
 }
 
 /** claim_rewards: only the character's owner, from its main wallet or its session key (+ token).
  * `deaths`: the pending deaths it finalizes first (patch 6). */
 export async function claimRewardsIx(actor: Actor, session: Address, character: Address, deaths: readonly RemainingAccount[] = []): Promise<Instruction> {
-  return buildInstruction("session", "claim_rewards", {}, {
+  const ix = getClaimRewardsInstruction({
     signer: actor.signer,
     session,
     participation: await participationPda(session, character),
@@ -758,13 +688,14 @@ export async function claimRewardsIx(actor: Actor, session: Address, character: 
     sessionAuthority: await sessionAuthorityPda(),
     config: await gameConfigPda(),
     characterProgram: PROGRAMS.character,
-    sessionToken: actor.token,
-  }, deaths);
+    sessionToken: opt(actor.token),
+  });
+  return withRemaining(ix, deaths);
 }
 
 /** claim_escrow: the DM's main wallet. `deaths`: the pending deaths it finalizes first (patch 6). */
 export async function claimEscrowIx(dm: TransactionSigner, session: Address, map: Address, deaths: readonly RemainingAccount[] = []): Promise<Instruction> {
-  return buildInstruction("session", "claim_escrow", {}, {
+  const ix = getClaimEscrowInstruction({
     dm,
     session,
     escrow: await escrowPda(session),
@@ -773,7 +704,8 @@ export async function claimEscrowIx(dm: TransactionSigner, session: Address, map
     config: await gameConfigPda(),
     mapProgram: PROGRAMS.map,
     characterProgram: PROGRAMS.character,
-  }, deaths);
+  });
+  return withRemaining(ix, deaths);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -829,7 +761,7 @@ export async function consumeIx(
   layout: Address,
   party: readonly RemainingAccount[],
 ): Promise<Instruction> {
-  return buildInstruction("session", "consume_randomness", { randomness: seed }, {
+  const ix = getConsumeRandomnessInstruction({
     vrfProgramIdentity: await mockVrfSigner(),
     session,
     monsters: await monstersPda(session),
@@ -841,9 +773,11 @@ export async function consumeIx(
     config: await gameConfigPda(),
     characterProgram: PROGRAMS.character,
     // Since patch 5 an ally comes with the party accounts.
-    targetParticipation: null,
+    targetParticipation: undefined,
     layout,
-  }, party);
+    randomness: seed,
+  });
+  return withRemaining(ix, party);
 }
 
 /** Roll `index` of a VRF value, exactly `deadroll_combat::VrfRoll`: sha256(seed ‖ index u32 LE). */
@@ -904,8 +838,7 @@ export type Party = {
   monsterMods: TimedModAcc[][];
   /** Per monster: its registry defenses (`MonsterState.defense`, copied at open_session). */
   monsterDefense: MonsterDefenseAcc[];
-  /** The resonance tables the session copied (aspects, traits, resonances bodies), or null for a
-   * session opened before patch 4. */
+  /** The resonance tables the session copied (aspects, traits, resonances bodies). */
   resonanceTables: Uint8Array | null;
   /** Cells a resonance set on fire. */
   burningCells: BurningCellAcc[];
@@ -926,27 +859,10 @@ export async function readParty(address: Address, tiles: Uint8Array | null = nul
   const head = [address, await monstersPda(address), await escrowPda(address)];
   const [rawSession, rawMonsters, rawEscrow, ...guessed] = await getAccounts([...head, ...guess]);
   if (!rawSession) return null;
-  const session = coders.session.decodeAccount<GameSessionAcc>("GameSession", rawSession);
-  const monsterState = rawMonsters
-    ? coders.session.decodeAccount<{
-        core: { monsters: MonsterAcc[]; count: number };
-        cooldowns?: Uint8Array[];
-        records?: Uint8Array[];
-        skillTable?: Uint8Array[];
-        skillCount?: number;
-        skills?: Uint8Array[];
-        skillCooldowns?: Uint8Array[];
-        auras?: MonsterAuraAcc[][];
-        mods?: TimedModAcc[][];
-        defense?: MonsterDefenseAcc[];
-        resAspects?: Uint8Array;
-        resTraits?: Uint8Array;
-        resPairs?: Uint8Array;
-        burningCells?: BurningCellAcc[];
-      }>("MonsterState", rawMonsters)
-    : null;
-  const monsters = monsterState?.core ?? { monsters: [], count: 0 };
-  const escrow = rawEscrow ? coders.session.decodeAccount<{ collected: bigint; claimed: boolean }>("Escrow", rawEscrow) : null;
+  const session = decodeAccount("GameSession", rawSession);
+  const monsterState = rawMonsters ? decodeAccount("MonsterState", rawMonsters) : null;
+  const count = monsterState?.core.count ?? 0;
+  const escrow = rawEscrow ? decodeAccount("Escrow", rawEscrow) : null;
   const chars = session.core.players.slice(0, session.core.playerCount);
   const parts = await Promise.all(chars.map((c) => participationPda(address, c)));
   const wanted = [...parts, ...chars, session.core.map, ...(tiles ? [] : [session.layout])];
@@ -955,40 +871,31 @@ export async function readParty(address: Address, tiles: Uint8Array | null = nul
     const p = extra[slot];
     const c = extra[chars.length + slot];
     if (!p || !c) return [];
-    return [
-      {
-        slot,
-        character,
-        participation: parts[slot]!,
-        part: coders.session.decodeAccount<ParticipationAcc>("Participation", p),
-        char: coders.character.decodeAccount<CharacterAcc>("Character", c),
-      },
-    ];
+    return [{ slot, character, participation: parts[slot]!, part: decodeAccount("Participation", p), char: decodeAccount("Character", c) }];
   });
   const rawMap = extra[chars.length * 2];
-  const map = rawMap ? coders.map.decodeAccount<MapAcc>("Map", rawMap) : null;
+  const map = rawMap ? decodeAccount("Map", rawMap) : null;
   if (!tiles) {
     const rawLayout = extra[chars.length * 2 + 1];
-    tiles = rawLayout ? coders.map.decodeAccount<{ core: { tiles: Uint8Array } }>("MapLayout", rawLayout).core.tiles : null;
+    tiles = rawLayout ? Uint8Array.from(decodeAccount("MapLayout", rawLayout).core.tiles) : null;
   }
-  const monsterCooldowns = (monsterState?.skillCooldowns ?? []).slice(0, monsters.count).map((c) => Uint8Array.from(c));
-  const monsterRecords = (monsterState?.records ?? []).slice(0, monsters.count).map((r) => Uint8Array.from(r));
+  const monsterCooldowns = (monsterState?.skillCooldowns ?? []).slice(0, count).map((c) => Uint8Array.from(c));
+  const monsterRecords = (monsterState?.records ?? []).slice(0, count).map((r) => Uint8Array.from(r));
   const table = (monsterState?.skillTable ?? []).slice(0, monsterState?.skillCount ?? 0);
   const monsterSkills = (monsterState?.skills ?? [])
-    .slice(0, monsters.count)
+    .slice(0, count)
     .map((slots) => Array.from(slots).map((t) => (t === 0xff || !table[t] ? null : Uint8Array.from(table[t]!))));
-  const monsterAuras = (monsterState?.auras ?? []).slice(0, monsters.count);
-  const monsterMods = (monsterState?.mods ?? []).slice(0, monsters.count);
-  const monsterDefense = (monsterState?.defense ?? []).slice(0, monsters.count);
-  const resonanceTables =
-    monsterState?.resAspects && monsterState.resTraits && monsterState.resPairs
-      ? concat(Uint8Array.from(monsterState.resAspects), Uint8Array.from(monsterState.resTraits), Uint8Array.from(monsterState.resPairs))
-      : null;
+  const monsterAuras = (monsterState?.auras ?? []).slice(0, count);
+  const monsterMods = (monsterState?.mods ?? []).slice(0, count);
+  const monsterDefense = (monsterState?.defense ?? []).slice(0, count);
+  const resonanceTables = monsterState
+    ? concat(Uint8Array.from(monsterState.resAspects), Uint8Array.from(monsterState.resTraits), Uint8Array.from(monsterState.resPairs))
+    : null;
   const burningCells = (monsterState?.burningCells ?? []).filter((c) => c.power > 0);
   return {
     address,
     session,
-    monsters: monsters.monsters.slice(0, monsters.count),
+    monsters: (monsterState?.core.monsters ?? []).slice(0, count),
     players,
     monsterCooldowns,
     monsterRecords,
@@ -998,7 +905,7 @@ export async function readParty(address: Address, tiles: Uint8Array | null = nul
     monsterDefense,
     resonanceTables,
     burningCells,
-    escrow,
+    escrow: escrow && { collected: escrow.collected, claimed: escrow.claimed },
     map,
     tiles,
   };
@@ -1006,7 +913,7 @@ export async function readParty(address: Address, tiles: Uint8Array | null = nul
 
 /** Parties in the lobby or in play, any DM. */
 export async function openSessions(): Promise<{ address: Address; data: GameSessionAcc }[]> {
-  const all = await findAccounts<GameSessionAcc>("session", "GameSession");
+  const all = await findAccounts("GameSession");
   return all.filter((s) => status(s.data) === "lobby" || status(s.data) === "active");
 }
 
@@ -1020,5 +927,5 @@ export function playerAp(p: ParticipationAcc, s: GameSessionAcc): number {
  * Intelligence, Endurance), all in one transaction. The owner's main wallet only.
  */
 export function spendStatPointsIx(owner: TransactionSigner, character: Address, points: readonly number[]): Instruction {
-  return buildInstruction("character", "spend_stat_points", { points: [...points] }, { owner, character });
+  return getSpendStatPointsInstruction({ owner, character, points: [...points] });
 }

@@ -30,7 +30,7 @@ import {
   type SpawnSkillsRequest,
   type UnitModsRequest,
 } from "./combatWasm";
-import { Tile } from "./types";
+import { Aspect, ModKind, Tile } from "./types";
 
 const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
 
@@ -112,8 +112,8 @@ describe("combat wasm", () => {
   });
 
   it("patch 5: the session's auras and walls as module inputs", () => {
-    const aura = { kind: { protection: {} }, aspect: { cold: {} }, powerBp: 2_500, radius: 2, turns: 255, hostile: false, passive: true, selfOnly: false };
-    const none = { ...aura, kind: { haste: {} }, aspect: { fire: {} }, powerBp: 0, radius: 0, turns: 0, passive: false };
+    const aura = { kind: ModKind.Protection, aspect: Aspect.Cold, powerBp: 2_500, radius: 2, turns: 255, hostile: false, passive: true, selfOnly: false };
+    const none = { ...aura, kind: ModKind.Haste, aspect: Aspect.Fire, powerBp: 0, radius: 0, turns: 0, passive: false };
     const party = partyInputOf({ auras: [[aura, none]], playerPos: [{ x: 3, y: 4 }], aliveMask: 1 });
     expect(party).toEqual({
       auras: [[{ kind: 4, aspect: 1, powerBp: 2_500, radius: 2, turns: 255, hostile: false, passive: true, selfOnly: false }, { kind: 0, aspect: 0, powerBp: 0, radius: 0, turns: 0, hostile: false, passive: false, selfOnly: false }]],

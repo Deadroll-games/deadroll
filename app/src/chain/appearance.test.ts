@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { EquipSource } from "@deadroll/sdk/character";
 import { LAYER, MATERIAL, TOMBSTONE, characterAppearance, isCurrentAppearance } from "./appearance";
 import { EMPTY_ITEM, EQUIP_SLOTS, ITEM_BASES, ITEM_SPRITE_BASE, characterRequest, dressed, starterEquipment } from "./items";
 import type { CharacterAcc } from "./game";
@@ -69,11 +70,11 @@ describe("characterRequest", () => {
     return {
       core: { alive, appearance: characterAppearance(Race.Human, Aspect.Fire) },
       gear: {
-        items: bases.map((b) => ({ base: { [b]: {} }, level: 1 })),
+        items: bases.map((b) => ({ base: base(b), level: 1 })),
         itemCount: bases.length,
         equipped: EQUIP_SLOTS.map((s) => {
           const i = Object.keys(worn).indexOf(s);
-          return i < 0 ? { source: { empty: {} }, index: 0, asset: "" } : { source: { soulbound: {} }, index: i, asset: "" };
+          return i < 0 ? { source: EquipSource.Empty, index: 0, asset: "" } : { source: EquipSource.Soulbound, index: i, asset: "" };
         }),
       },
     } as unknown as CharacterAcc;
