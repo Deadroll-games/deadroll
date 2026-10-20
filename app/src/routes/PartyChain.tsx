@@ -4,9 +4,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { Address, TransactionSigner } from "@solana/kit";
-import { DiceCascade } from "../components/dice/DiceCascade";
-import { EffectCascade } from "../components/dice/EffectCascade";
-import { HitBreakdown } from "../components/dice/HitBreakdown";
+import { HitCard } from "../components/dice/HitCard";
+import { rollKeyOf } from "../chain/rollKey";
 import type { HitItemSides, HitMods } from "../components/dice/types";
 import { StatsPanel } from "../components/stats/StatsPanel";
 import type { StatsUnit } from "../components/stats/types";
@@ -340,7 +339,7 @@ function PartyView({ address }: { address: Address }) {
     const i = lastOf((e) => e.name === "HitResolved" || e.name === "EffectResolved");
     const ev = events[i];
     if (!ev) return;
-    const key = `${ev.signature}:${i}`;
+    const key = rollKeyOf(events, i);
     if (key === lastRollKey.current) return;
     lastRollKey.current = key;
     // Crit chance is not in the events: a player's comes from the combat module (its gear and
@@ -1168,18 +1167,21 @@ function PartyView({ address }: { address: Address }) {
             </div>
           )}
           {roll?.hit && (
-            <>
-              <DiceCascade key={roll.key} hit={roll.hit.result} attackerLabel={roll.hit.attacker} targetLabel={roll.hit.target} critChanceBp={roll.hit.critChanceBp} />
-              <HitBreakdown hit={roll.hit.result} defaultOpen={false} critChanceBp={roll.hit.critChanceBp} mods={roll.hit.mods} items={roll.hit.items} />
-            </>
+            <HitCard
+              key={roll.key}
+              rollKey={roll.key}
+              header={`${roll.hit.attacker} → ${roll.hit.target}`}
+              hit={roll.hit.result}
+              critChanceBp={roll.hit.critChanceBp}
+              breakdown={{ mods: roll.hit.mods, items: roll.hit.items }}
+            />
           )}
           {roll?.effect && (
-            <EffectCascade
+            <HitCard
               key={`${roll.key}:effect`}
+              rollKey={`${roll.key}:effect`}
+              header={roll.effect.effect.rider ? `${roll.effect.skill} effect → ${roll.effect.target}` : `${roll.effect.caster} · ${roll.effect.skill} → ${roll.effect.target}`}
               effect={roll.effect.effect}
-              casterLabel={roll.effect.caster}
-              targetLabel={roll.effect.target}
-              skillLabel={roll.effect.skill}
               critChanceBp={roll.effect.critChanceBp}
             />
           )}

@@ -1,8 +1,7 @@
 import { useMemo, useState } from "react";
 import type { Address } from "@solana/kit";
 import { useConnectedWallet } from "@solana/kit-plugin-wallet/react";
-import { DiceCascade } from "../components/dice/DiceCascade";
-import { HitBreakdown } from "../components/dice/HitBreakdown";
+import { HitCard } from "../components/dice/HitCard";
 import { Grid } from "../components/grid/Grid";
 import { StatsPanel } from "../components/stats/StatsPanel";
 import type { StatsUnit } from "../components/stats/types";
@@ -201,10 +200,13 @@ function MockParty() {
               </button>
             </div>
             {hit && (
-              <>
-                <DiceCascade key={hit.key} hit={hit.result} attackerLabel={hit.attacker} targetLabel={hit.target} />
-                <HitBreakdown hit={hit.result} defaultOpen={false} mods={{ attacker: MOCK_MODS[hit.attackerId] ?? [], target: MOCK_MODS[hit.targetId] ?? [] }} />
-              </>
+              <HitCard
+                key={hit.key}
+                rollKey={String(hit.key)}
+                header={`${hit.attacker} → ${hit.target}`}
+                hit={hit.result}
+                breakdown={{ mods: { attacker: MOCK_MODS[hit.attackerId] ?? [], target: MOCK_MODS[hit.targetId] ?? [] } }}
+              />
             )}
             <StatsPanel units={mockStats(units, active, combat)} />
             {log.length > 0 && (
