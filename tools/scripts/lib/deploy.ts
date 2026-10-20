@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, dirname, join } from "node:path";
+import { delimiter, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   AccountRole,
@@ -361,7 +361,7 @@ async function estimateCost(conn: Rpc, opts: DeployOptions, programIds: Record<s
   const blobs: [string, "rasterizer" | "palette" | "sprite_book", number][] = [
     ["target/render-wasm/deadroll_render.wasm", "rasterizer", opts.rasterizerVersion],
     [`${ASSETS}/palette.bin`, "palette", paletteVersion()],
-    ...bookFiles().map((b): [string, "sprite_book", number] => [b.file, "sprite_book", b.id]),
+    ...bookFiles().map((b): [string, "sprite_book", number] => [relative(ROOT, b.file), "sprite_book", b.id]),
   ];
   for (const [file, kind, id] of blobs) {
     const len = readFileSync(join(ROOT, file)).length;
