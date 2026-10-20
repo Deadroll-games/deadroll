@@ -1,8 +1,8 @@
 // Sprite layers for characters, monsters and tiles from the sprite books (assets/sprites, packed by
 // `art pack`). Ramp and material indices are positions in assets/palette/palette_2.pal (the first
-// 20 ramps and 13 materials are those of palette 1); the character presets mirror
-// tools/art/src/preview.rs `characters()`.
-import { Aspect, Class, LAYERS_MAX, Race, Tile, type LayerRef, type RenderRequest } from "./types";
+// 20 ramps and 13 materials are those of palette 1). A character is drawn as its body, its hair and
+// the items it wears (chain/items.ts `characterRequest`); `Character.appearance` holds the body part.
+import { Aspect, LAYERS_MAX, Race, Tile, type LayerRef, type RenderRequest } from "./types";
 
 /** palette_2.pal `ramp` lines, in order (append only). */
 export const RAMP = {
@@ -55,25 +55,15 @@ function body(race: Race): Entry[] {
   ];
 }
 
-function kit(cls: Class): Entry[] {
-  const G = RAMP.gold;
-  const L = LAYER;
-  switch (cls) {
-    case Class.Mage:
-      return [[L.backItem, 205, MATERIAL.leather, G], [L.pants, 202, MATERIAL.robe, G], [L.boots, 203, MATERIAL.leather, G], [L.armorBody, 201, MATERIAL.robe, G], [L.helmet, 200, MATERIAL.robe, G], [L.mainhand, 204, MATERIAL.leather, G]];
-    case Class.Support:
-      return [[L.backItem, 304, MATERIAL.leather, G], [L.boots, 302, MATERIAL.cloth, G], [L.armorBody, 301, MATERIAL.leather, G], [L.necklace, 305, MATERIAL.leather, G], [L.helmet, 300, MATERIAL.moss, G], [L.mainhand, 303, MATERIAL.leather, G]];
-    default:
-      return [[L.backItem, 100, MATERIAL.cape, G], [L.offhand, 101, MATERIAL.steel, G], [L.pants, 102, MATERIAL.leather, G], [L.boots, 103, MATERIAL.leather, G], [L.armorBody, 104, MATERIAL.steel, G], [L.helmet, 105, MATERIAL.steel, G], [L.mainhand, 106, MATERIAL.steel, G]];
-  }
-}
+export const ELEMENT_RAMP: Record<number, number> = { [Aspect.Fire]: RAMP.fire, [Aspect.Cold]: RAMP.cold, [Aspect.Lightning]: RAMP.gold, [Aspect.Blood]: RAMP.capeRed, [Aspect.Blunt]: RAMP.steel, [Aspect.Piercing]: RAMP.steel };
 
-const ELEMENT_RAMP: Record<number, number> = { [Aspect.Fire]: RAMP.fire, [Aspect.Cold]: RAMP.cold, [Aspect.Lightning]: RAMP.gold, [Aspect.Blood]: RAMP.capeRed, [Aspect.Blunt]: RAMP.steel, [Aspect.Piercing]: RAMP.steel };
-
-/** `Character.appearance` for a new character: shadow, body by race, kit by class. */
-export function characterAppearance(race: Race, cls: Class, predisposition: Aspect): LayerRef[] {
+/**
+ * `Character.appearance` for a new character: the shadow, the body of the race, its hair and the
+ * front fist. No items: what the character wears comes from its gear when it is drawn.
+ */
+export function characterAppearance(race: Race, predisposition: Aspect): LayerRef[] {
   const shadow: Entry = [LAYER.shadow, 1, MATERIAL.stone, RAMP.gold];
-  return layers([shadow, ...body(race), ...kit(cls)], ELEMENT_RAMP[predisposition] ?? RAMP.cold);
+  return layers([shadow, ...body(race)], ELEMENT_RAMP[predisposition] ?? RAMP.cold);
 }
 
 /** A request for the rasterizer. The palette version is filled in at render time from the palette

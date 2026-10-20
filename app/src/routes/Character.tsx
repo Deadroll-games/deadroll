@@ -3,7 +3,8 @@ import { Link } from "react-router-dom";
 import type { Address } from "@solana/kit";
 import { CharacterForm } from "../components/forms/CharacterForm";
 import type { CharacterDraft } from "../components/forms/types";
-import { characterAppearance, isCurrentAppearance, renderRequest, TOMBSTONE } from "../chain/appearance";
+import { characterAppearance, isCurrentAppearance, renderRequest } from "../chain/appearance";
+import { characterRequest, dressed, starterEquipment } from "../chain/items";
 import {
   ASPECT_KEYS,
   CLASS_KEYS,
@@ -40,7 +41,8 @@ export function CharacterPage() {
   });
   const [mockCreated, setMockCreated] = useState<CharacterDraft | null>(null);
   const raster = useRasterizer();
-  const chainPreview = DATA_SOURCE === "chain" ? renderRequest(characterAppearance(draft.race, draft.class, draft.predisposition)) : null;
+  // A new character wears its class starter kit.
+  const chainPreview = DATA_SOURCE === "chain" ? renderRequest(dressed(characterAppearance(draft.race, draft.predisposition), starterEquipment(draft.class))) : null;
   const preview = useRenderImage(chainPreview ?? (raster.status === "ready" ? raster.sample : null));
   const wallet = useAppWallet();
   const { send, busy } = useTx();
@@ -127,7 +129,7 @@ export function CharacterPage() {
 export function CharacterCard({ address, c }: { address: Address; c: CharacterAcc }) {
   const dead = !c.core.alive;
   const current = isCurrentAppearance(c.core.appearance);
-  const req = !current ? null : dead ? TOMBSTONE : renderRequest(c.core.appearance, false);
+  const req = current ? characterRequest(c) : null;
   const img = useRenderImage(req);
   const race = enumIndex(c.core.race, RACE_KEYS) as Race;
   const cls = enumIndex(c.core.class, CLASS_KEYS) as Class;

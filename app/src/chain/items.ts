@@ -5,10 +5,10 @@
 // `cargo run -p deadroll-sim --example export_balance -- config` (a sim test fails when it is
 // stale), so nothing here repeats a rule or a number.
 import type { Address, Instruction, TransactionSigner } from "@solana/kit";
-import { MATERIAL, RAMP, renderRequest } from "./appearance";
+import { LAYER, MATERIAL, RAMP, renderRequest, TOMBSTONE } from "./appearance";
 import balance from "./balance.json";
 import type { Idl } from "./coder";
-import { variantKey, type GearAcc } from "./game";
+import { variantKey, type CharacterAcc, type GearAcc } from "./game";
 import characterIdl from "./idl/deadroll_character.json";
 import { buildInstruction } from "./programs";
 import { Class, LAYERS_MAX, type LayerRef, type RenderRequest } from "./types";
@@ -168,22 +168,83 @@ export function heroDefense(cls: Class, stats: readonly number[], equipment: Arr
 }
 
 // ---------------------------------------------------------------------------------------------
-// icons: the item's own sprite from sprite book 1 (assets/sprites, the class kits)
+// sprites: one per `ItemBase` (assets/sprites/items.dsl), worn on the body or alone as an icon
 
-const ITEM_SPRITES: Record<string, [spriteId: number, material: number]> = {
-  sword: [106, MATERIAL.steel],
-  staff: [204, MATERIAL.leather],
-  wand: [303, MATERIAL.leather],
-  leatherArmor: [104, MATERIAL.leather],
-  robe: [201, MATERIAL.robe],
-  lightLeatherArmor: [301, MATERIAL.leather],
+/** The sprite of item base `i` (`ItemBase` discriminant) is `ITEM_SPRITE_BASE + i`. */
+export const ITEM_SPRITE_BASE = 100;
+/** The material an item without its own is drawn in, by base. */
+const ITEM_MATERIAL: Record<string, number> = {
+  sword: MATERIAL.steel,
+  staff: MATERIAL.leather,
+  wand: MATERIAL.leather,
+  leatherArmor: MATERIAL.leather,
+  robe: MATERIAL.robe,
+  lightLeatherArmor: MATERIAL.leather,
 };
+/** The character layer each equipment slot is drawn in; rings and gloves draw nothing yet. */
+const SLOT_LAYER: Record<string, number> = {
+  mainHand: LAYER.mainhand,
+  offHand: LAYER.offhand,
+  helmet: LAYER.helmet,
+  body: LAYER.armorBody,
+  pants: LAYER.pants,
+  boots: LAYER.boots,
+  necklace: LAYER.necklace,
+  cloak: LAYER.backItem,
+};
+
+function itemLayer(base: string, elementRamp: number): LayerRef | null {
+  const i = ITEM_BASES.indexOf(base);
+  const material = ITEM_MATERIAL[base];
+  if (i < 0 || material === undefined) return null;
+  return { spriteId: ITEM_SPRITE_BASE + i, materialRamp: material, accentRamp: RAMP.gold, elementRamp };
+}
+
+/**
+ * The layers of a character dressed in what it wears: `appearance` (shadow, body, hair, fist) with
+ * each worn item's sprite in its slot's layer. `equipment` is the `ItemBase` byte by `EquipSlot`
+ * (`EMPTY_ITEM` for none), as `equipmentOf` gives it. Item layers take the body's element ramp.
+ */
+export function dressed(appearance: readonly LayerRef[], equipment: ArrayLike<number>): LayerRef[] {
+  const out = Array.from({ length: LAYERS_MAX }, (_, i) => ({ ...(appearance[i] ?? { spriteId: 0, materialRamp: 0, accentRamp: 0, elementRamp: 0 }) }));
+  const element = appearance[LAYER.body]?.elementRamp ?? 0;
+  EQUIP_SLOTS.forEach((slot, i) => {
+    const b = equipment[i];
+    const layer = SLOT_LAYER[slot];
+    if (b === undefined || b === EMPTY_ITEM || layer === undefined) return;
+    const l = itemLayer(ITEM_BASES[b] ?? "", element);
+    if (l) out[layer] = l;
+  });
+  return out;
+}
+
+/** A character's image: its body and hair, dressed in what it wears now; a tombstone once dead. */
+export function characterRequest(c: CharacterAcc): RenderRequest {
+  if (!c.core.alive) return TOMBSTONE;
+  return renderRequest(dressed(c.core.appearance, equipmentOf(c.gear)));
+}
+
+/** `balance.json` keys the starter kits by the Rust class name, in `Class` order. */
+const KIT_CLASS = ["Warrior", "Mage", "Support"] as const;
+
+/** What a new character of `cls` wears: the class starter kit (`Gear::starter`), by slot. */
+export function starterEquipment(cls: Class): number[] {
+  const out: number[] = EQUIP_SLOTS.map(() => EMPTY_ITEM);
+  const kits = balance.items.starter_kits as Record<string, (string | null)[]>;
+  for (const name of kits[KIT_CLASS[cls] ?? ""] ?? []) {
+    if (!name) continue;
+    const base = lowerFirst(name);
+    const i = EQUIP_SLOTS.indexOf(homeSlot(base));
+    if (i >= 0 && out[i] === EMPTY_ITEM) out[i] = ITEM_BASES.indexOf(base);
+  }
+  return out;
+}
 
 /** A render request with only the item's sprite, or null for a base without one. */
 export function itemRequest(base: string): RenderRequest | null {
-  const s = ITEM_SPRITES[base];
-  if (!s) return null;
+  const l = itemLayer(base, RAMP.cold);
+  if (!l) return null;
   const layers: LayerRef[] = Array.from({ length: LAYERS_MAX }, () => ({ spriteId: 0, materialRamp: 0, accentRamp: 0, elementRamp: 0 }));
-  layers[0] = { spriteId: s[0], materialRamp: s[1], accentRamp: RAMP.gold, elementRamp: RAMP.cold };
+  layers[0] = l;
   return renderRequest(layers);
 }

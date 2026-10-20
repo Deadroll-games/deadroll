@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import type { Address } from "@solana/kit";
-import { isCurrentAppearance, renderRequest, TOMBSTONE } from "../chain/appearance";
+import { isCurrentAppearance } from "../chain/appearance";
 import {
   ASPECT_KEYS,
   CLASS_KEYS,
@@ -26,6 +26,7 @@ import {
   equipIx,
   inventory,
   itemLabel,
+  characterRequest,
   itemRequest,
   slotsFor,
   unequipIx,
@@ -227,7 +228,7 @@ export function CharacterDetailView({
 }) {
   const dead = !c.core.alive;
   const current = isCurrentAppearance(c.core.appearance);
-  const img = useRenderImage(!current ? null : dead ? TOMBSTONE : renderRequest(c.core.appearance, false));
+  const img = useRenderImage(current ? characterRequest(c) : null);
   const race = enumIndex(c.core.race, RACE_KEYS) as Race;
   const cls = enumIndex(c.core.class, CLASS_KEYS) as Class;
   const pred = enumIndex(c.core.predisposition, ASPECT_KEYS) as Aspect;

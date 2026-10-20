@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Address } from "@solana/kit";
 import { characterAppearance } from "../chain/appearance";
 import { variantLabel, type CharacterAcc, type GearAcc, type SkillRecordAcc } from "../chain/game";
-import { Aspect, Class, Race } from "../chain/types";
+import { Aspect, Race } from "../chain/types";
 import { CharacterDetailView, EQUIPMENT_SLOTS, inventoryLock, inventoryView, skillAspects, usableInCombat, type PartyInfo } from "./CharacterDetail";
 
 vi.mock("../raster/RasterizerProvider", () => ({ useRenderImage: () => ({ image: null, error: null }) }));
@@ -135,7 +135,7 @@ describe("CharacterDetailView", () => {
     expect(screen.getByRole("note").textContent).toBe("Old character version");
     expect(screen.queryByRole("img", { name: "Aria" })).toBeNull();
     cleanup();
-    const appearance = characterAppearance(Race.ForestElf, Class.Mage, Aspect.Cold);
+    const appearance = characterAppearance(Race.ForestElf, Aspect.Cold);
     view(character({ appearance }), [], null);
     expect(screen.queryByRole("note")).toBeNull();
     expect(screen.getByRole("img", { name: "Aria" })).toBeTruthy();
