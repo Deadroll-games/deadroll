@@ -21,7 +21,7 @@ dither (2.10) and drop overlap shadows (2.11) where you do not.
 2. Write the `.dsl` file. One file holds several sprites. Touch only your own file.
 3. Look at it:
    - `cargo run -p art -- assets/sprites/<name>.dsl --scale 8 --out target/art/<name>` (one PNG per sprite);
-   - `cargo run -p art -- sheet characters` (bare bodies and every kit on both bodies, alive and dead);
+   - `cargo run -p art -- sheet characters` (bare bodies and each class starter kit worn on both bodies, alive and dead);
    - `cargo run -p art -- sheet matrix assets/sprites/<name>.dsl` (each item: 3 materials,
      2 enchantments, 3 runes, empty and filled sockets, a debug slot view, on the body).
    All previews go to `target/`, never to `/tmp` or the disk root.
@@ -136,9 +136,7 @@ Must have `flags no_outline`: `shadow`, `necklace`, `fist_front`, `overlay_eleme
 | Ids | Content |
 |---|---|
 | 1-99 | shadow, race bodies, hair, the front fist |
-| 100-199 | warrior kit |
-| 200-299 | mage kit |
-| 300-399 | support kit |
+| 100-399 | items: one sprite per `ItemBase`, id `100 + ItemBase` (`items.dsl`) |
 | 400-499 | monsters, tombstone |
 | 500-599 | tiles |
 
@@ -209,7 +207,8 @@ SOCKET 44 26
 SHADE 44 10 P 3
 ```
 
-The current bodies and the warrior kit in `assets/sprites/` are the reference (BITMAP at 96 px):
+There are no class outfits: a character is its body, its hair and the items it wears, each item
+one sprite in its slot's layer. The bodies and the items in `assets/sprites/` are the reference (BITMAP at 96 px):
 read `bodies.dsl` before drawing anything worn. `art sheet scene` shows tiles, the probe chest
 (`tools/art/probe/`) and warriors at one pixel scale.
 

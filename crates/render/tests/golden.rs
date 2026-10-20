@@ -10,7 +10,7 @@ use deadroll_render::{
 use sha2::{Digest, Sha256};
 
 /// SHA-256 of the PNG (the canvas enlarged to at most 512 px). Changing it means the rendering rules changed: new rasterizer version.
-const WARRIOR_PNG_SHA256: &str = "ed76d4bf42d112220ad546d2bfa83ac9d8be1bd4a593b502a3cd07d579f7f861";
+const WARRIOR_PNG_SHA256: &str = "fe9085fcf84117d87be2ba520023d09bc7d2947f8214a5f1c9c1ed89f667814b";
 const ASSET: [u8; ASSET_LEN] = [0; ASSET_LEN];
 
 fn root() -> std::path::PathBuf {
@@ -25,15 +25,10 @@ fn palette() -> PaletteSrc {
 /// `(sprite id, layer index, material, accent ramp, element ramp)`.
 const LAYERS: &[(u16, usize, &str, &str, &str)] = &[
     (1, 0, "stone", "gray", "gray"),
-    (100, 1, "cape", "gold", "gray"),
     (10, 2, "human", "eyes", "gray"),
-    (102, 4, "leather", "gold", "gray"),
-    (103, 5, "leather", "gold", "gray"),
-    (104, 6, "steel", "gold", "gray"),
+    (103, 6, "leather", "gold", "gray"),
     (11, 8, "human", "eyes", "gray"),
-    (101, 9, "steel", "gold", "gray"),
-    (105, 10, "steel", "gold", "gray"),
-    (106, 11, "steel", "gold", "gray"),
+    (100, 11, "steel", "gold", "gray"),
     (14, 12, "human", "eyes", "gray"),
 ];
 

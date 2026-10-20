@@ -5,7 +5,7 @@ const OK: &str =
     "sprite 100 warrior_ok\nsize 96 96\nlayer mainhand\nRECT 21 5 4 16 P\nRECT 22 7 1 12 U\n";
 
 fn msgs(text: &str) -> Vec<String> {
-    validate_text("warrior_kit.dsl", text)
+    validate_text("items.dsl", text)
         .1
         .into_iter()
         .map(|i| i.msg)
@@ -147,15 +147,15 @@ fn portrait_with_runes_keeps_the_glow_margin() {
 #[test]
 fn rejects_ids_out_of_range_and_duplicates() {
     rejects(
-        "sprite 250 a\nsize 96 96\nlayer boots\nRECT 2 2 3 3 P\n",
-        "outside the range 100-199",
+        "sprite 450 a\nsize 96 96\nlayer boots\nRECT 2 2 3 3 P\n",
+        "outside the range 100-399",
     );
     rejects(
         "sprite 700 a\nsize 96 96\nlayer boots\nRECT 2 2 3 3 P\n",
         "1..=599",
     );
     let files = vec![
-        ("warrior_kit.dsl".to_string(), OK.to_string()),
+        ("items.dsl".to_string(), OK.to_string()),
         ("other.dsl".to_string(), OK.to_string()),
     ];
     let m: Vec<String> = validate_files(&files)
@@ -237,7 +237,7 @@ fn all_repo_sprites_are_valid_and_render_deterministically() {
 }
 
 #[test]
-fn tiles_use_tile_materials_and_support_kit_materials() {
+fn tiles_use_tile_materials_and_figures_wear_the_starter_kits() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let pal =
         Pal::load(&std::fs::read_to_string(root.join("assets/palette/palette_2.pal")).unwrap())
@@ -256,23 +256,50 @@ fn tiles_use_tile_materials_and_support_kit_materials() {
             "{want} missing in palette"
         );
     }
-    let (_, layers) = preview::characters()
-        .into_iter()
-        .find(|c| c.0 == "human_support")
-        .unwrap();
-    // Leather jerkin, wand, pouch and amulet; the cowl in moss and the boots in cloth.
-    for (ty, id, look) in layers {
-        let want = match id {
-            300 => "moss",
-            302 => "cloth",
-            301 | 303.. => "leather",
-            _ => continue,
-        };
-        assert_eq!(look.material, want, "layer {ty} sprite {id}");
-        assert!(
-            pal.src.material(want).is_some(),
-            "{want} missing in palette"
+    // A figure is its body and hair and the items it wears: the class starter kit of Gear::starter,
+    // one sprite per ItemBase (id 100 + base) in its slot's layer.
+    use deadroll_render::sprite::layer;
+    for (figure, items) in [
+        (
+            "human_warrior",
+            [
+                (layer::ARMOR_BODY, 103, "leather"),
+                (layer::MAINHAND, 100, "steel"),
+            ],
+        ),
+        (
+            "elf_mage",
+            [
+                (layer::ARMOR_BODY, 104, "robe"),
+                (layer::MAINHAND, 101, "leather"),
+            ],
+        ),
+        (
+            "human_support",
+            [
+                (layer::ARMOR_BODY, 105, "leather"),
+                (layer::MAINHAND, 102, "leather"),
+            ],
+        ),
+    ] {
+        let (_, layers) = preview::characters()
+            .into_iter()
+            .find(|c| c.0 == figure)
+            .unwrap();
+        let worn: Vec<(u8, u16, &str)> = layers
+            .iter()
+            .filter(|l| l.1 >= 100)
+            .map(|l| (l.0, l.1, l.2.material))
+            .collect();
+        assert_eq!(worn, items.to_vec(), "{figure}");
+        assert_eq!(
+            layers.len(),
+            6,
+            "{figure}: shadow, body, hair, fist and two items"
         );
+        for (_, _, m) in items {
+            assert!(pal.src.material(m).is_some(), "{m} missing in palette");
+        }
     }
 }
 
@@ -361,7 +388,7 @@ fn pack_splits_books_at_64_kib() {
             text += "\n";
         }
     }
-    let (sprites, issues) = validate_text("warrior_kit.dsl", &text);
+    let (sprites, issues) = validate_text("items.dsl", &text);
     assert!(issues.is_empty(), "{issues:?}");
     let books = preview::pack_books(&sprites).unwrap();
     assert!(books.len() >= 2, "{} books", books.len());

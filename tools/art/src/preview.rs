@@ -12,6 +12,9 @@ use deadroll_render::{
 };
 
 use crate::validate::Compiled;
+use deadroll_rules::config::ItemTuning;
+use deadroll_rules::items::starter_kit;
+use deadroll_types::{Class, EquipSlot, ItemBase};
 
 pub type Rgb = [u8; 3];
 
@@ -69,17 +72,8 @@ pub fn default_look(name: &str, layer_type: u8) -> Look {
         "wolf"
     } else if name.contains("goblin") {
         "goblin"
-    } else if name.contains("cape") {
-        "cape"
-    } else if name.starts_with("mage_") && !name.contains("staff") {
-        "robe"
-    } else if name.starts_with("warrior_") {
-        match name {
-            "warrior_pants" | "warrior_boots" => "leather",
-            _ => "steel",
-        }
-    } else if name.starts_with("support_") {
-        "leather"
+    } else if let Some(base) = ITEM_NAMES.iter().position(|n| *n == name) {
+        ITEM_MATERIALS[base]
     } else if name.starts_with("tile_") {
         match name {
             "tile_wall" => "tile_wall",
@@ -282,45 +276,56 @@ const ELF: [(u8, u16); 3] = [
     (layer::FIST_FRONT, 14),
 ];
 
-/// A kit item: layer type, sprite id, material.
-type KitItem = (u8, u16, &'static str);
+/// Item sprites, one per `ItemBase` in discriminant order: sprite id `ITEM_SPRITE_BASE + base`
+/// (assets/sprites/items.dsl), and the material an item without its own is drawn in.
+pub const ITEM_SPRITE_BASE: u16 = 100;
+pub const ITEM_NAMES: [&str; 6] = [
+    "sword",
+    "staff",
+    "wand",
+    "leather_armor",
+    "robe",
+    "light_leather_armor",
+];
+pub const ITEM_MATERIALS: [&str; 6] = ["steel", "leather", "leather", "leather", "robe", "leather"];
 
-/// Class kits.
-const KITS: [(&str, &[KitItem]); 3] = [
-    (
-        "warrior",
-        &[
-            (layer::BACK_ITEM, 100, "cape"),
-            (layer::OFFHAND, 101, "steel"),
-            (layer::PANTS, 102, "leather"),
-            (layer::BOOTS, 103, "leather"),
-            (layer::ARMOR_BODY, 104, "steel"),
-            (layer::HELMET, 105, "steel"),
-            (layer::MAINHAND, 106, "steel"),
-        ],
-    ),
-    (
-        "mage",
-        &[
-            (layer::BACK_ITEM, 205, "leather"),
-            (layer::PANTS, 202, "robe"),
-            (layer::BOOTS, 203, "leather"),
-            (layer::ARMOR_BODY, 201, "robe"),
-            (layer::HELMET, 200, "robe"),
-            (layer::MAINHAND, 204, "leather"),
-        ],
-    ),
-    (
-        "support",
-        &[
-            (layer::BACK_ITEM, 304, "leather"),
-            (layer::BOOTS, 302, "cloth"),
-            (layer::ARMOR_BODY, 301, "leather"),
-            (layer::NECKLACE, 305, "leather"),
-            (layer::HELMET, 300, "moss"),
-            (layer::MAINHAND, 303, "leather"),
-        ],
-    ),
+/// The character layer an equipment slot is drawn in; slots without one draw nothing yet.
+pub fn slot_layer(slot: EquipSlot) -> Option<u8> {
+    Some(match slot {
+        EquipSlot::MainHand => layer::MAINHAND,
+        EquipSlot::OffHand => layer::OFFHAND,
+        EquipSlot::Helmet => layer::HELMET,
+        EquipSlot::Body => layer::ARMOR_BODY,
+        EquipSlot::Pants => layer::PANTS,
+        EquipSlot::Boots => layer::BOOTS,
+        EquipSlot::Necklace => layer::NECKLACE,
+        EquipSlot::Cloak => layer::BACK_ITEM,
+        EquipSlot::Gloves | EquipSlot::Ring1 | EquipSlot::Ring2 => return None,
+    })
+}
+
+/// The layers of one worn item: its sprite in its slot's layer.
+pub fn worn_item(base: ItemBase) -> Option<Entry> {
+    let slot = ItemTuning::DEFAULT.base(base).slot;
+    let i = base as usize;
+    Some((
+        slot_layer(slot)?,
+        ITEM_SPRITE_BASE + i as u16,
+        lk(ITEM_MATERIALS[i], GOLD),
+    ))
+}
+
+/// A class starter kit, worn: what `Gear::starter` gives a new character.
+fn starter(class: Class) -> Vec<Entry> {
+    starter_kit(class, &ItemTuning::DEFAULT)
+        .filter_map(worn_item)
+        .collect()
+}
+
+const CLASSES: [(&str, Class); 3] = [
+    ("warrior", Class::Warrior),
+    ("mage", Class::Mage),
+    ("support", Class::Support),
 ];
 
 fn body(race: &str) -> Vec<Entry> {
@@ -334,18 +339,19 @@ fn body(race: &str) -> Vec<Entry> {
     v
 }
 
-/// Preview figures: each bare body, then every kit on each body: (title, layers).
+/// Preview figures: each bare body, then each class starter kit worn on each body: (title, layers).
+/// A character is drawn as its body, its hair and the items it wears, nothing else.
 pub fn characters() -> Vec<(String, Vec<Entry>)> {
     let mut out = Vec::new();
     for race in ["human", "elf"] {
         out.push((race.to_string(), body(race)));
     }
-    for (kit, items) in KITS {
+    for (name, class) in CLASSES {
         for race in ["human", "elf"] {
             let mut layers = body(race);
-            layers.extend(items.iter().map(|&(ty, id, m)| (ty, id, lk(m, GOLD))));
+            layers.extend(starter(class));
             layers.sort_by_key(|l| l.0);
-            out.push((format!("{race}_{kit}"), layers));
+            out.push((format!("{race}_{name}"), layers));
         }
     }
     out

@@ -158,10 +158,15 @@ anchors below the neck; races differ in head, ears, hair, face and skin ramp.
 
 | Ids | Content | Ids | Content |
 |---|---|---|---|
-| 0 | empty layer (never a sprite) | 300-399 | support kit |
-| 1-99 | shadow (1), race bodies, hair, the front fist | 400-499 | monsters, tombstone |
-| 100-199 | warrior kit | 500-599 | tiles |
-| 200-299 | mage kit | 600+ | reserved |
+| 0 | empty layer (never a sprite) | 400-499 | monsters, tombstone |
+| 1-99 | shadow (1), race bodies, hair, the front fist | 500-599 | tiles |
+| 100-399 | items: one sprite per `ItemBase`, id `100 + ItemBase` | 600+ | reserved |
+
+There are no class outfits. A character is drawn as its body, its hair and the items it actually
+wears (`Character.gear`): each worn item's sprite goes into the layer of its equipment slot
+(`MainHand` -> `mainhand`, `Body` -> `armor_body`, `OffHand` -> `offhand`, `Helmet` -> `helmet`,
+`Pants` -> `pants`, `Boots` -> `boots`, `Necklace` -> `necklace`, `Cloak` -> `back_item`; gloves and
+rings draw nothing yet). Every item is drawn once, on the shared anchors, and fits any race.
 
 ---
 

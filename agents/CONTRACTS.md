@@ -563,3 +563,11 @@ the stacking order changed. `Character.appearance[i]` is the layer of type `i`
 Body sprites: 1 shadow, 10 human body, 11 human hair, 12 elf body, 13 elf hair, 14 front fist. The
 old body part ids (2-7, 20-25) and the wound overlay are gone: a character created before this
 change fails to render (error 7) until its appearance is rebuilt.
+
+Character image (no class outfits): `Character.appearance` holds only the shadow (index 0), the body
+(2), the hair (8) and the front fist (12). Clients draw a character as that appearance dressed in
+what `Character.gear` has equipped: item sprite `100 + ItemBase` (Sword 100, Staff 101, Wand 102,
+LeatherArmor 103, Robe 104, LightLeatherArmor 105) in the layer of its `EquipSlot` (MainHand ->
+11 mainhand, Body -> 6 armor_body; the other slots map to their layers of the table above, rings and
+gloves draw nothing yet). Equip and unequip change the image. The class kit sprites (helmet,
+shield, cape, pants, boots, hoods, bags, amulet, mace; ids 100-106, 200-205, 300-305) are gone.

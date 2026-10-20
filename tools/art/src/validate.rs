@@ -48,9 +48,7 @@ pub fn file_range(file: &str) -> Option<(u16, u16)> {
     let base = file.rsplit(['/', '\\']).next()?;
     Some(match base.strip_suffix(".dsl")? {
         "bodies" => (1, 99),
-        "warrior_kit" => (100, 199),
-        "mage_kit" => (200, 299),
-        "support_kit" => (300, 399),
+        "items" => (100, 399),
         "monsters" => (400, 499),
         "tiles" => (500, 599),
         _ => return None,
