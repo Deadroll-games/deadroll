@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import type { Address } from "@solana/kit";
 import { CharacterForm } from "../components/forms/CharacterForm";
 import type { CharacterDraft } from "../components/forms/types";
-import { characterAppearance, renderRequest, TOMBSTONE } from "../chain/appearance";
+import { characterAppearance, isCurrentAppearance, renderRequest, TOMBSTONE } from "../chain/appearance";
 import {
   ASPECT_KEYS,
   CLASS_KEYS,
@@ -21,6 +21,7 @@ import { aspectName, className, raceName } from "../chain/names";
 import { Aspect, Class, Race } from "../chain/types";
 import { useTx } from "../chain/useTx";
 import { DATA_SOURCE, DEV_TOOLS } from "../config";
+import { OldCharacterLabel } from "../raster/OldCharacter";
 import { useRasterizer, useRenderImage } from "../raster/RasterizerProvider";
 import { SpriteCanvas } from "../raster/SpriteCanvas";
 import { useAppWallet } from "../wallet/AppWallet";
@@ -125,7 +126,8 @@ export function CharacterPage() {
 
 export function CharacterCard({ address, c }: { address: Address; c: CharacterAcc }) {
   const dead = !c.core.alive;
-  const req = dead ? TOMBSTONE : renderRequest(c.core.appearance, false);
+  const current = isCurrentAppearance(c.core.appearance);
+  const req = !current ? null : dead ? TOMBSTONE : renderRequest(c.core.appearance, false);
   const img = useRenderImage(req);
   const race = enumIndex(c.core.race, RACE_KEYS) as Race;
   const cls = enumIndex(c.core.class, CLASS_KEYS) as Class;
@@ -134,7 +136,7 @@ export function CharacterCard({ address, c }: { address: Address; c: CharacterAc
   return (
     <Link to={`/character/${address}`} className="char-card-link" aria-label={`Open ${bytesText(c.name)}`}>
       <figure className={`panel char-card${dead ? " dead" : ""}`}>
-        <SpriteCanvas image={img.image} scale={1} label={bytesText(c.name)} />
+        {current ? <SpriteCanvas image={img.image} scale={1} label={bytesText(c.name)} /> : <OldCharacterLabel />}
         <figcaption>
           <b>{bytesText(c.name)}</b>
           <span className="muted">
