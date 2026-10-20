@@ -73,9 +73,10 @@ pub mod layer {
     pub const BOOTS: u8 = 5;
     pub const ARMOR_BODY: u8 = 6;
     pub const NECKLACE: u8 = 7;
+    /// Hair under the shield, so long hair falls behind it; helmets cover it.
+    pub const HAIR: u8 = 8;
     /// Shield or second weapon, held in front of the body on the back arm.
-    pub const OFFHAND: u8 = 8;
-    pub const HAIR: u8 = 9;
+    pub const OFFHAND: u8 = 9;
     pub const HELMET: u8 = 10;
     pub const MAINHAND: u8 = 11;
     /// The front fist alone, drawn over the weapon so the fingers wrap the grip.
@@ -102,8 +103,8 @@ pub mod layer {
         "boots",
         "armor_body",
         "necklace",
-        "offhand",
         "hair",
+        "offhand",
         "helmet",
         "mainhand",
         "fist_front",

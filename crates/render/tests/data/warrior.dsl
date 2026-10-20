@@ -316,28 +316,30 @@ BITMAP 34 33 31 34
 SOCKET 44 41
 SOCKET 53 42
 
-# Open helm with a nasal guard and a gold brow band.
+# Open helm centered on HEAD_CENTER (48, 27), following the skull: the gold rim sits on the brow
+# line and stops at the forehead, the back covers the back of the skull in a smooth curve.
 
 sprite 105 warrior_helmet
 size 96 96
 layer helmet
-BITMAP 39 13 20 16
-.....2344444332.....
-...23444555443322...
-..2344555544433322..
-.234455544443333222.
-.234455444433332222.
-23445544444333322221
-23444444443333322221
-23444444433333222221
-23444444333332222221
-hijjjjjjjiiiiiiiiihh
-hiijjjiiiiiiiiiihhhh
-23332.........43....
-2332..........43....
-2332..........32....
-.232..........2.....
-.22.................
+BITMAP 39 14 17 17
+.....23444332....
+...234455443322..
+..23445554443322.
+.2344555444333222
+23445554443333222
+23444544433332221
+23444444433332221
+23444444333322221
+23344443333222211
+hjkkkjjjjiiiiihhh
+hijjjiiiiiiihhhgg
+2344332..........
+234432...........
+23432............
+.2332............
+.232.............
+..21.............
 
 # One-handed sword in the front hand, blade down and forward. The pommel sits above and left of
 # the fist, the grip runs under the fingers (fist_front is drawn over it), the guard right below.

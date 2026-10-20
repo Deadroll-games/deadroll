@@ -122,8 +122,8 @@ layer type.
 
 | Byte | Name | Byte | Name |
 |---|---|---|---|
-| 0 | `shadow` | 8 | `offhand` (shield, second weapon: in front of the body on the back arm) |
-| 1 | `back_item` (cloak, bag) | 9 | `hair` |
+| 0 | `shadow` | 8 | `hair` (under the shield: long hair falls behind it) |
+| 1 | `back_item` (cloak, bag) | 9 | `offhand` (shield, second weapon: in front of the body on the back arm) |
 | 2 | `body` (the whole body of a race) | 10 | `helmet` |
 | 3 | `glove_back` | 11 | `mainhand` |
 | 4 | `pants` | 12 | `fist_front` (the front fist alone, over the weapon) |

@@ -119,13 +119,13 @@ Colors come from the palette at render time. Slot `D` always uses the palette's 
 ## Layer types and sizes
 
 Character layers, bottom to top (the name is what you write after `layer`), all **96x96**:
-`shadow`, `back_item`, `body`, `glove_back`, `pants`, `boots`, `armor_body`, `necklace`, `offhand`,
-`hair`, `helmet`, `mainhand`, `fist_front`, `glove_front`, `overlay_element`.
+`shadow`, `back_item`, `body`, `glove_back`, `pants`, `boots`, `armor_body`, `necklace`, `hair`,
+`offhand`, `helmet`, `mainhand`, `fist_front`, `glove_front`, `overlay_element`.
 The body of a race is ONE sprite (head, torso, arms, legs, briefs): separate body parts would get
 outline seams at the shoulder, elbow, wrist and knee. `fist_front` is the front fist alone, pixel for
 pixel the fist of the body, drawn over the weapon so the fingers wrap the grip (no outline). The
 shield (`offhand`) is held in front of the torso on the back arm, over the armor, its near rim in
-front. No wound overlays and no torn items: only worn items change the image, plus death gray.
+front; long hair falls behind it. No wound overlays and no torn items: only worn items change the image, plus death gray.
 Other: `tile` **64x64** (one map cell), `monster` **96 or 128** square, `icon` **32x32**, `portrait`
 any allowed size (64x64; long items 32x96 or 64x128). Characters and monsters stand bottom-center
 on their cell at the tile's pixel size and overlap the row above. Old 64 px character layers and

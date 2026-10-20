@@ -551,8 +551,8 @@ the stacking order changed. `Character.appearance[i]` is the layer of type `i`
 
 | Index | Layer | Index | Layer |
 |---|---|---|---|
-| 0 | shadow | 8 | offhand (shield, in front of the body) |
-| 1 | back_item | 9 | hair |
+| 0 | shadow | 8 | hair |
+| 1 | back_item | 9 | offhand (shield, in front of the body and the hair) |
 | 2 | body (one sprite per race) | 10 | helmet |
 | 3 | glove_back | 11 | mainhand |
 | 4 | pants | 12 | fist_front (over the weapon) |

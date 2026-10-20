@@ -20,7 +20,7 @@ export const SPRITE = { tombstone: 403 } as const;
 /** Character layer slots: the index in `RenderRequest.layers` (crates/render/FORMAT.md 1.4). */
 export const LAYER = {
   shadow: 0, backItem: 1, body: 2, gloveBack: 3, pants: 4, boots: 5, armorBody: 6, necklace: 7,
-  offhand: 8, hair: 9, helmet: 10, mainhand: 11, fistFront: 12, gloveFront: 13, overlayElement: 14,
+  hair: 8, offhand: 9, helmet: 10, mainhand: 11, fistFront: 12, gloveFront: 13, overlayElement: 14,
 } as const;
 
 type Entry = [layer: number, spriteId: number, material: number, accent: number];
@@ -35,6 +35,15 @@ function layers(entries: Entry[], element: number): LayerRef[] {
 
 /** Body sprites: the whole body of a race, its hair, and the front fist every race shares. */
 const BODY = { human: 10, humanHair: 11, elf: 12, elfHair: 13, fistFront: 14 } as const;
+
+/**
+ * Whether an appearance uses the current graphics (one-piece bodies). Characters created before
+ * patch 7c store old body part sprites and layer slots: the site shows a label, not a portrait.
+ */
+export function isCurrentAppearance(appearance: readonly LayerRef[]): boolean {
+  const id = appearance[LAYER.body]?.spriteId;
+  return id === BODY.human || id === BODY.elf;
+}
 
 function body(race: Race): Entry[] {
   const elf = race === Race.ForestElf;
