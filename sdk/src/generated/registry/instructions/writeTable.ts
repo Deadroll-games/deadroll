@@ -39,14 +39,13 @@ import {
 } from "@solana/kit";
 import {
   getAccountMetaFactory,
-  getNonNullResolvedInstructionInput,
   type InstructionAccountInput,
   type InstructionAccountInputAddress,
   type InstructionSignerInput,
   type ResolvedInstructionAccount,
   type ResolvedInstructionAccountMeta,
 } from "@solana/program-client-core";
-import { findConfigPda, findTablePda } from "../pdas/index.js";
+import { findConfigPda } from "../pdas/index.js";
 import { DEADROLL_REGISTRY_PROGRAM_ADDRESS } from "../programs/index.js";
 import {
   getTableKindDecoder,
@@ -138,7 +137,7 @@ export type WriteTableAsyncInput<
 > = {
   authority: TAccountAuthority;
   config?: TAccountConfig;
-  table?: TAccountTable;
+  table: TAccountTable;
   kind: WriteTableInstructionDataArgs["kind"];
   offset: WriteTableInstructionDataArgs["offset"];
   bytes: WriteTableInstructionDataArgs["bytes"];
@@ -197,12 +196,6 @@ export async function getWriteTableInstructionAsync<
   // Resolve default values.
   if (!accounts.config.value) {
     accounts.config.value = await findConfigPda({ programAddress });
-  }
-  if (!accounts.table.value) {
-    accounts.table.value = await findTablePda(
-      { kind: getNonNullResolvedInstructionInput("kind", args.kind) },
-      { programAddress },
-    );
   }
 
   return Object.freeze({

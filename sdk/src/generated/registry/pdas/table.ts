@@ -8,13 +8,13 @@
 
 import {
   getProgramDerivedAddress,
+  getUtf8Encoder,
   type Address,
   type ProgramDerivedAddress,
 } from "@solana/kit";
-import { getTableKindEncoder, type TableKindArgs } from "../types/index.js";
 
 export type TableSeeds = {
-  kind: TableKindArgs;
+  seed: string;
 };
 
 export async function findTablePda(
@@ -26,6 +26,6 @@ export async function findTablePda(
   } = config;
   return await getProgramDerivedAddress({
     programAddress,
-    seeds: [getTableKindEncoder().encode(seeds.kind)],
+    seeds: [getUtf8Encoder().encode(seeds.seed)],
   });
 }

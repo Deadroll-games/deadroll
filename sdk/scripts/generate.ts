@@ -11,7 +11,15 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { rootNodeFromAnchor, type AnchorIdl } from "@codama/nodes-from-anchor";
 import renderVisitor from "@codama/renderers-js";
-import { createFromRoot } from "codama";
+import {
+  createFromRoot,
+  pdaNode,
+  stringTypeNode,
+  updateInstructionsVisitor,
+  updateProgramsVisitor,
+  variablePdaSeedNode,
+  type Codama,
+} from "codama";
 
 export const SDK = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const IDL_DIR = join(SDK, "idl");
@@ -34,7 +42,24 @@ export function copyIdls(): void {
   for (const file of Object.values(PROGRAM_IDLS)) copyFileSync(join(TARGET_IDL, file), join(IDL_DIR, file));
 }
 
-type IdlErrors = { errors?: { code: number; name: string; msg?: string }[] };
+/**
+ * Where the Anchor IDL cannot describe a seed, the Codama tree is corrected here (never the output).
+ * registry: tables are seeded with `TableKind::seed()`, a utf8 name ("bestiary"), which the IDL
+ * records as "arg kind" (the enum byte). The PDA takes the name; the builders take `table` explicitly.
+ */
+const FIXES: Partial<Record<keyof typeof PROGRAM_IDLS, (codama: Codama) => void>> = {
+  registry: (codama) => {
+    const program = codama.getRoot().program;
+    const table = pdaNode({ name: "table", seeds: [variablePdaSeedNode("seed", stringTypeNode("utf8"))] });
+    codama.update(
+      updateProgramsVisitor({ [program.name]: { pdas: program.pdas.map((p) => (p.name === "table" ? table : p)) } }),
+    );
+    const noDefault = { accounts: { table: { defaultValue: null } } };
+    codama.update(updateInstructionsVisitor({ initTable: noDefault, writeTable: noDefault }));
+  },
+};
+
+type IdlErrors ={ errors?: { code: number; name: string; msg?: string }[] };
 
 /**
  * `errors.ts`: code -> [IDL name, message] per program. Codama keeps only the codes and dev-build
@@ -59,6 +84,7 @@ export async function render(outDir: string): Promise<void> {
   for (const [name, file] of Object.entries(PROGRAM_IDLS)) {
     const idl = JSON.parse(readFileSync(join(IDL_DIR, file), "utf8")) as AnchorIdl;
     const codama = createFromRoot(rootNodeFromAnchor(idl));
+    FIXES[name as keyof typeof PROGRAM_IDLS]?.(codama);
     await codama.accept(
       renderVisitor(outDir, {
         generatedFolder: name,
