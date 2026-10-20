@@ -16,14 +16,26 @@ import {
 } from "@solana/kit";
 
 /** `deadroll_combat::ModKind`. */
-export enum ModKindData {
-  Haste,
-  Slow,
-  Empowerment,
-  Weakening,
-  Protection,
-  Vulnerability,
-}
+export const ModKindData = {
+  0: "Haste",
+  1: "Slow",
+  2: "Empowerment",
+  3: "Weakening",
+  4: "Protection",
+  5: "Vulnerability",
+  Haste: 0,
+  Slow: 1,
+  Empowerment: 2,
+  Weakening: 3,
+  Protection: 4,
+  Vulnerability: 5,
+} as const;
+
+/** `deadroll_combat::ModKind`. */
+export type ModKindData = (typeof ModKindData)[Exclude<
+  keyof typeof ModKindData,
+  number
+>];
 
 export type ModKindDataArgs = ModKindData;
 
@@ -32,7 +44,7 @@ export function getModKindDataEncoder(): FixedSizeEncoder<ModKindDataArgs> {
 }
 
 export function getModKindDataDecoder(): FixedSizeDecoder<ModKindData> {
-  return getEnumDecoder(ModKindData);
+  return getEnumDecoder(ModKindData as Omit<typeof ModKindData, number>);
 }
 
 export function getModKindDataCodec(): FixedSizeCodec<

@@ -15,14 +15,25 @@ import {
   type FixedSizeEncoder,
 } from "@solana/kit";
 
-export enum SessionStatus {
-  Lobby,
-  Active,
-  Victory,
-  Wiped,
-  Fled,
-  Abandoned,
-}
+export const SessionStatus = {
+  0: "Lobby",
+  1: "Active",
+  2: "Victory",
+  3: "Wiped",
+  4: "Fled",
+  5: "Abandoned",
+  Lobby: 0,
+  Active: 1,
+  Victory: 2,
+  Wiped: 3,
+  Fled: 4,
+  Abandoned: 5,
+} as const;
+
+export type SessionStatus = (typeof SessionStatus)[Exclude<
+  keyof typeof SessionStatus,
+  number
+>];
 
 export type SessionStatusArgs = SessionStatus;
 
@@ -31,7 +42,7 @@ export function getSessionStatusEncoder(): FixedSizeEncoder<SessionStatusArgs> {
 }
 
 export function getSessionStatusDecoder(): FixedSizeDecoder<SessionStatus> {
-  return getEnumDecoder(SessionStatus);
+  return getEnumDecoder(SessionStatus as Omit<typeof SessionStatus, number>);
 }
 
 export function getSessionStatusCodec(): FixedSizeCodec<

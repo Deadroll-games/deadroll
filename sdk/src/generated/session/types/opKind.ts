@@ -16,29 +16,53 @@ import {
 } from "@solana/kit";
 
 /** `deadroll_combat::tables::OpKind`. */
-export enum OpKind {
-  None,
-  Multiplier,
-  StateOnCrit,
-  ExtraStateChance,
-  Linked,
-  LinkedChance,
-  LinkedMod,
-  NativeTurns,
-  NativePower,
-  NativeFaster,
-  NativePowerArmor,
-  ThawDamage,
-  RemoveState,
-  Jump,
-  JumpChain,
-  JumpLine,
-  Knockback,
-  IgniteCells,
-  AddPacket,
-  Penetrate,
-  AccuracyBuff,
-}
+export const OpKind = {
+  0: "None",
+  1: "Multiplier",
+  2: "StateOnCrit",
+  3: "ExtraStateChance",
+  4: "Linked",
+  5: "LinkedChance",
+  6: "LinkedMod",
+  7: "NativeTurns",
+  8: "NativePower",
+  9: "NativeFaster",
+  10: "NativePowerArmor",
+  11: "ThawDamage",
+  12: "RemoveState",
+  13: "Jump",
+  14: "JumpChain",
+  15: "JumpLine",
+  16: "Knockback",
+  17: "IgniteCells",
+  18: "AddPacket",
+  19: "Penetrate",
+  20: "AccuracyBuff",
+  None: 0,
+  Multiplier: 1,
+  StateOnCrit: 2,
+  ExtraStateChance: 3,
+  Linked: 4,
+  LinkedChance: 5,
+  LinkedMod: 6,
+  NativeTurns: 7,
+  NativePower: 8,
+  NativeFaster: 9,
+  NativePowerArmor: 10,
+  ThawDamage: 11,
+  RemoveState: 12,
+  Jump: 13,
+  JumpChain: 14,
+  JumpLine: 15,
+  Knockback: 16,
+  IgniteCells: 17,
+  AddPacket: 18,
+  Penetrate: 19,
+  AccuracyBuff: 20,
+} as const;
+
+/** `deadroll_combat::tables::OpKind`. */
+export type OpKind = (typeof OpKind)[Exclude<keyof typeof OpKind, number>];
 
 export type OpKindArgs = OpKind;
 
@@ -47,7 +71,7 @@ export function getOpKindEncoder(): FixedSizeEncoder<OpKindArgs> {
 }
 
 export function getOpKindDecoder(): FixedSizeDecoder<OpKind> {
-  return getEnumDecoder(OpKind);
+  return getEnumDecoder(OpKind as Omit<typeof OpKind, number>);
 }
 
 export function getOpKindCodec(): FixedSizeCodec<OpKindArgs, OpKind> {

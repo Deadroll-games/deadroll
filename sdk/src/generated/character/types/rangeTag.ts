@@ -19,10 +19,21 @@ import {
  * Range axis of a skill or a basic attack (docs/DAMAGE_TYPES_AND_MIXES.md, section 2).
  * Added in patch 5.
  */
-export enum RangeTag {
-  Melee,
-  Ranged,
-}
+export const RangeTag = {
+  0: "Melee",
+  1: "Ranged",
+  Melee: 0,
+  Ranged: 1,
+} as const;
+
+/**
+ * Range axis of a skill or a basic attack (docs/DAMAGE_TYPES_AND_MIXES.md, section 2).
+ * Added in patch 5.
+ */
+export type RangeTag = (typeof RangeTag)[Exclude<
+  keyof typeof RangeTag,
+  number
+>];
 
 export type RangeTagArgs = RangeTag;
 
@@ -31,7 +42,7 @@ export function getRangeTagEncoder(): FixedSizeEncoder<RangeTagArgs> {
 }
 
 export function getRangeTagDecoder(): FixedSizeDecoder<RangeTag> {
-  return getEnumDecoder(RangeTag);
+  return getEnumDecoder(RangeTag as Omit<typeof RangeTag, number>);
 }
 
 export function getRangeTagCodec(): FixedSizeCodec<RangeTagArgs, RangeTag> {

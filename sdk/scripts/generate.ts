@@ -89,6 +89,7 @@ export async function render(outDir: string): Promise<void> {
       renderVisitor(outDir, {
         generatedFolder: name,
         importExtension: "js",
+        erasableSyntax: true,
         syncPackageJson: false,
       }),
     );

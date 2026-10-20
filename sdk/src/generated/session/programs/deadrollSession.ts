@@ -122,13 +122,23 @@ import {
 export const DEADROLL_SESSION_PROGRAM_ADDRESS =
   "3gzfih2WaBgXcYZ57jWokmZM3FDE6QHX5y4R9EvKZoNJ" as Address<"3gzfih2WaBgXcYZ57jWokmZM3FDE6QHX5y4R9EvKZoNJ">;
 
-export enum DeadrollSessionAccount {
-  Escrow,
-  GameSession,
-  MonsterState,
-  Participation,
-  TempStash,
-}
+export const DeadrollSessionAccount = {
+  0: "Escrow",
+  1: "GameSession",
+  2: "MonsterState",
+  3: "Participation",
+  4: "TempStash",
+  Escrow: 0,
+  GameSession: 1,
+  MonsterState: 2,
+  Participation: 3,
+  TempStash: 4,
+} as const;
+
+export type DeadrollSessionAccount = (typeof DeadrollSessionAccount)[Exclude<
+  keyof typeof DeadrollSessionAccount,
+  number
+>];
 
 export function identifyDeadrollSessionAccount(
   account: { data: ReadonlyUint8Array } | ReadonlyUint8Array,
@@ -195,34 +205,65 @@ export function identifyDeadrollSessionAccount(
   );
 }
 
-export enum DeadrollSessionEvent {
-  ActionRequested,
-  AuraChanged,
-  CellBurned,
-  DeathFinalized,
-  EffectResolved,
-  EscrowClaimed,
-  FleeVoted,
-  HitResolved,
-  InitiativeRolled,
-  ModsTicked,
-  MonsterAuraChanged,
-  MonsterKilled,
-  MonsterReactiveTriggered,
-  Moved,
-  PlayerDied,
-  PlayerJoined,
-  PlayerReady,
-  ReactiveTriggered,
-  ResonanceSpread,
-  RewardsClaimed,
-  SessionEnded,
-  SessionOpened,
-  SkillUsed,
-  TurnSkipped,
-  TurnStarted,
-  TurnTicked,
-}
+export const DeadrollSessionEvent = {
+  0: "ActionRequested",
+  1: "AuraChanged",
+  2: "CellBurned",
+  3: "DeathFinalized",
+  4: "EffectResolved",
+  5: "EscrowClaimed",
+  6: "FleeVoted",
+  7: "HitResolved",
+  8: "InitiativeRolled",
+  9: "ModsTicked",
+  10: "MonsterAuraChanged",
+  11: "MonsterKilled",
+  12: "MonsterReactiveTriggered",
+  13: "Moved",
+  14: "PlayerDied",
+  15: "PlayerJoined",
+  16: "PlayerReady",
+  17: "ReactiveTriggered",
+  18: "ResonanceSpread",
+  19: "RewardsClaimed",
+  20: "SessionEnded",
+  21: "SessionOpened",
+  22: "SkillUsed",
+  23: "TurnSkipped",
+  24: "TurnStarted",
+  25: "TurnTicked",
+  ActionRequested: 0,
+  AuraChanged: 1,
+  CellBurned: 2,
+  DeathFinalized: 3,
+  EffectResolved: 4,
+  EscrowClaimed: 5,
+  FleeVoted: 6,
+  HitResolved: 7,
+  InitiativeRolled: 8,
+  ModsTicked: 9,
+  MonsterAuraChanged: 10,
+  MonsterKilled: 11,
+  MonsterReactiveTriggered: 12,
+  Moved: 13,
+  PlayerDied: 14,
+  PlayerJoined: 15,
+  PlayerReady: 16,
+  ReactiveTriggered: 17,
+  ResonanceSpread: 18,
+  RewardsClaimed: 19,
+  SessionEnded: 20,
+  SessionOpened: 21,
+  SkillUsed: 22,
+  TurnSkipped: 23,
+  TurnStarted: 24,
+  TurnTicked: 25,
+} as const;
+
+export type DeadrollSessionEvent = (typeof DeadrollSessionEvent)[Exclude<
+  keyof typeof DeadrollSessionEvent,
+  number
+>];
 
 export function identifyDeadrollSessionEvent(
   event: { data: ReadonlyUint8Array } | ReadonlyUint8Array,
@@ -519,22 +560,42 @@ export function identifyDeadrollSessionEvent(
   );
 }
 
-export enum DeadrollSessionInstruction {
-  Act,
-  ClaimEscrow,
-  ClaimRewards,
-  ConsumeRandomness,
-  EndTurn,
-  Flee,
-  JoinSession,
-  MonsterAct,
-  MonsterMove,
-  MoveUnit,
-  OpenSession,
-  SetReady,
-  StartSession,
-  StartTurn,
-}
+export const DeadrollSessionInstruction = {
+  0: "Act",
+  1: "ClaimEscrow",
+  2: "ClaimRewards",
+  3: "ConsumeRandomness",
+  4: "EndTurn",
+  5: "Flee",
+  6: "JoinSession",
+  7: "MonsterAct",
+  8: "MonsterMove",
+  9: "MoveUnit",
+  10: "OpenSession",
+  11: "SetReady",
+  12: "StartSession",
+  13: "StartTurn",
+  Act: 0,
+  ClaimEscrow: 1,
+  ClaimRewards: 2,
+  ConsumeRandomness: 3,
+  EndTurn: 4,
+  Flee: 5,
+  JoinSession: 6,
+  MonsterAct: 7,
+  MonsterMove: 8,
+  MoveUnit: 9,
+  OpenSession: 10,
+  SetReady: 11,
+  StartSession: 12,
+  StartTurn: 13,
+} as const;
+
+export type DeadrollSessionInstruction =
+  (typeof DeadrollSessionInstruction)[Exclude<
+    keyof typeof DeadrollSessionInstruction,
+    number
+  >];
 
 export function identifyDeadrollSessionInstruction(
   instruction: { data: ReadonlyUint8Array } | ReadonlyUint8Array,
@@ -704,46 +765,46 @@ export type ParsedDeadrollSessionInstruction<
   TProgram extends string = "3gzfih2WaBgXcYZ57jWokmZM3FDE6QHX5y4R9EvKZoNJ",
 > =
   | ({
-      instructionType: DeadrollSessionInstruction.Act;
+      instructionType: typeof DeadrollSessionInstruction.Act;
     } & ParsedActInstruction<TProgram>)
   | ({
-      instructionType: DeadrollSessionInstruction.ClaimEscrow;
+      instructionType: typeof DeadrollSessionInstruction.ClaimEscrow;
     } & ParsedClaimEscrowInstruction<TProgram>)
   | ({
-      instructionType: DeadrollSessionInstruction.ClaimRewards;
+      instructionType: typeof DeadrollSessionInstruction.ClaimRewards;
     } & ParsedClaimRewardsInstruction<TProgram>)
   | ({
-      instructionType: DeadrollSessionInstruction.ConsumeRandomness;
+      instructionType: typeof DeadrollSessionInstruction.ConsumeRandomness;
     } & ParsedConsumeRandomnessInstruction<TProgram>)
   | ({
-      instructionType: DeadrollSessionInstruction.EndTurn;
+      instructionType: typeof DeadrollSessionInstruction.EndTurn;
     } & ParsedEndTurnInstruction<TProgram>)
   | ({
-      instructionType: DeadrollSessionInstruction.Flee;
+      instructionType: typeof DeadrollSessionInstruction.Flee;
     } & ParsedFleeInstruction<TProgram>)
   | ({
-      instructionType: DeadrollSessionInstruction.JoinSession;
+      instructionType: typeof DeadrollSessionInstruction.JoinSession;
     } & ParsedJoinSessionInstruction<TProgram>)
   | ({
-      instructionType: DeadrollSessionInstruction.MonsterAct;
+      instructionType: typeof DeadrollSessionInstruction.MonsterAct;
     } & ParsedMonsterActInstruction<TProgram>)
   | ({
-      instructionType: DeadrollSessionInstruction.MonsterMove;
+      instructionType: typeof DeadrollSessionInstruction.MonsterMove;
     } & ParsedMonsterMoveInstruction<TProgram>)
   | ({
-      instructionType: DeadrollSessionInstruction.MoveUnit;
+      instructionType: typeof DeadrollSessionInstruction.MoveUnit;
     } & ParsedMoveUnitInstruction<TProgram>)
   | ({
-      instructionType: DeadrollSessionInstruction.OpenSession;
+      instructionType: typeof DeadrollSessionInstruction.OpenSession;
     } & ParsedOpenSessionInstruction<TProgram>)
   | ({
-      instructionType: DeadrollSessionInstruction.SetReady;
+      instructionType: typeof DeadrollSessionInstruction.SetReady;
     } & ParsedSetReadyInstruction<TProgram>)
   | ({
-      instructionType: DeadrollSessionInstruction.StartSession;
+      instructionType: typeof DeadrollSessionInstruction.StartSession;
     } & ParsedStartSessionInstruction<TProgram>)
   | ({
-      instructionType: DeadrollSessionInstruction.StartTurn;
+      instructionType: typeof DeadrollSessionInstruction.StartTurn;
     } & ParsedStartTurnInstruction<TProgram>);
 
 export function parseDeadrollSessionInstruction<TProgram extends string>(
@@ -960,7 +1021,7 @@ export function deadrollSessionProgram() {
     client: T,
   ): ExtendedClient<T, { deadrollSession: DeadrollSessionPlugin }> => {
     return extendClient(client, {
-      deadrollSession: <DeadrollSessionPlugin>{
+      deadrollSession: {
         accounts: {
           escrow: addSelfFetchFunctions(client, getEscrowCodec()),
           gameSession: addSelfFetchFunctions(client, getGameSessionCodec()),
@@ -1046,7 +1107,7 @@ export function deadrollSessionProgram() {
         identifyAccount: identifyDeadrollSessionAccount,
         identifyInstruction: identifyDeadrollSessionInstruction,
         parseInstruction: parseDeadrollSessionInstruction,
-      },
+      } as DeadrollSessionPlugin,
     });
   };
 }

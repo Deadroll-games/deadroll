@@ -15,10 +15,14 @@ import {
   type FixedSizeEncoder,
 } from "@solana/kit";
 
-export enum Source {
-  Magical,
-  Combat,
-}
+export const Source = {
+  0: "Magical",
+  1: "Combat",
+  Magical: 0,
+  Combat: 1,
+} as const;
+
+export type Source = (typeof Source)[Exclude<keyof typeof Source, number>];
 
 export type SourceArgs = Source;
 
@@ -27,7 +31,7 @@ export function getSourceEncoder(): FixedSizeEncoder<SourceArgs> {
 }
 
 export function getSourceDecoder(): FixedSizeDecoder<Source> {
-  return getEnumDecoder(Source);
+  return getEnumDecoder(Source as Omit<typeof Source, number>);
 }
 
 export function getSourceCodec(): FixedSizeCodec<SourceArgs, Source> {

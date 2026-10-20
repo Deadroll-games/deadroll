@@ -16,11 +16,20 @@ import {
 } from "@solana/kit";
 
 /** `deadroll_combat::Outcome`. */
-export enum HitOutcome {
-  Miss,
-  Hit,
-  Immune,
-}
+export const HitOutcome = {
+  0: "Miss",
+  1: "Hit",
+  2: "Immune",
+  Miss: 0,
+  Hit: 1,
+  Immune: 2,
+} as const;
+
+/** `deadroll_combat::Outcome`. */
+export type HitOutcome = (typeof HitOutcome)[Exclude<
+  keyof typeof HitOutcome,
+  number
+>];
 
 export type HitOutcomeArgs = HitOutcome;
 
@@ -29,7 +38,7 @@ export function getHitOutcomeEncoder(): FixedSizeEncoder<HitOutcomeArgs> {
 }
 
 export function getHitOutcomeDecoder(): FixedSizeDecoder<HitOutcome> {
-  return getEnumDecoder(HitOutcome);
+  return getEnumDecoder(HitOutcome as Omit<typeof HitOutcome, number>);
 }
 
 export function getHitOutcomeCodec(): FixedSizeCodec<

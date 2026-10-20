@@ -16,11 +16,17 @@ import {
 } from "@solana/kit";
 
 /** `deadroll_combat::Carrier`. */
-export enum Carrier {
-  Race,
-  Class,
-  Item,
-}
+export const Carrier = {
+  0: "Race",
+  1: "Class",
+  2: "Item",
+  Race: 0,
+  Class: 1,
+  Item: 2,
+} as const;
+
+/** `deadroll_combat::Carrier`. */
+export type Carrier = (typeof Carrier)[Exclude<keyof typeof Carrier, number>];
 
 export type CarrierArgs = Carrier;
 
@@ -29,7 +35,7 @@ export function getCarrierEncoder(): FixedSizeEncoder<CarrierArgs> {
 }
 
 export function getCarrierDecoder(): FixedSizeDecoder<Carrier> {
-  return getEnumDecoder(Carrier);
+  return getEnumDecoder(Carrier as Omit<typeof Carrier, number>);
 }
 
 export function getCarrierCodec(): FixedSizeCodec<CarrierArgs, Carrier> {

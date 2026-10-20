@@ -16,15 +16,28 @@ import {
 } from "@solana/kit";
 
 /** Burning, Chill, Freeze, Bleeding, Shock, Stun, then Penetration (patch 3, append only). */
-export enum StateKind {
-  Burning,
-  Chill,
-  Freeze,
-  Bleeding,
-  Shock,
-  Stun,
-  Penetration,
-}
+export const StateKind = {
+  0: "Burning",
+  1: "Chill",
+  2: "Freeze",
+  3: "Bleeding",
+  4: "Shock",
+  5: "Stun",
+  6: "Penetration",
+  Burning: 0,
+  Chill: 1,
+  Freeze: 2,
+  Bleeding: 3,
+  Shock: 4,
+  Stun: 5,
+  Penetration: 6,
+} as const;
+
+/** Burning, Chill, Freeze, Bleeding, Shock, Stun, then Penetration (patch 3, append only). */
+export type StateKind = (typeof StateKind)[Exclude<
+  keyof typeof StateKind,
+  number
+>];
 
 export type StateKindArgs = StateKind;
 
@@ -33,7 +46,7 @@ export function getStateKindEncoder(): FixedSizeEncoder<StateKindArgs> {
 }
 
 export function getStateKindDecoder(): FixedSizeDecoder<StateKind> {
-  return getEnumDecoder(StateKind);
+  return getEnumDecoder(StateKind as Omit<typeof StateKind, number>);
 }
 
 export function getStateKindCodec(): FixedSizeCodec<StateKindArgs, StateKind> {

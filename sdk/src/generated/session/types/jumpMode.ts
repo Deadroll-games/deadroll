@@ -16,11 +16,20 @@ import {
 } from "@solana/kit";
 
 /** `deadroll_combat::JumpMode`. */
-export enum JumpMode {
-  Adjacent,
-  Chain,
-  Line,
-}
+export const JumpMode = {
+  0: "Adjacent",
+  1: "Chain",
+  2: "Line",
+  Adjacent: 0,
+  Chain: 1,
+  Line: 2,
+} as const;
+
+/** `deadroll_combat::JumpMode`. */
+export type JumpMode = (typeof JumpMode)[Exclude<
+  keyof typeof JumpMode,
+  number
+>];
 
 export type JumpModeArgs = JumpMode;
 
@@ -29,7 +38,7 @@ export function getJumpModeEncoder(): FixedSizeEncoder<JumpModeArgs> {
 }
 
 export function getJumpModeDecoder(): FixedSizeDecoder<JumpMode> {
-  return getEnumDecoder(JumpMode);
+  return getEnumDecoder(JumpMode as Omit<typeof JumpMode, number>);
 }
 
 export function getJumpModeCodec(): FixedSizeCodec<JumpModeArgs, JumpMode> {

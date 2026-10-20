@@ -16,15 +16,28 @@ import {
 } from "@solana/kit";
 
 /** Which table an instruction works on. Discriminants are part of the format: append only. */
-export enum TableKind {
-  Aspects,
-  Resonances,
-  Bestiary,
-  Tileset,
-  Prefabs,
-  Traits,
-  MonsterSkills,
-}
+export const TableKind = {
+  0: "Aspects",
+  1: "Resonances",
+  2: "Bestiary",
+  3: "Tileset",
+  4: "Prefabs",
+  5: "Traits",
+  6: "MonsterSkills",
+  Aspects: 0,
+  Resonances: 1,
+  Bestiary: 2,
+  Tileset: 3,
+  Prefabs: 4,
+  Traits: 5,
+  MonsterSkills: 6,
+} as const;
+
+/** Which table an instruction works on. Discriminants are part of the format: append only. */
+export type TableKind = (typeof TableKind)[Exclude<
+  keyof typeof TableKind,
+  number
+>];
 
 export type TableKindArgs = TableKind;
 
@@ -33,7 +46,7 @@ export function getTableKindEncoder(): FixedSizeEncoder<TableKindArgs> {
 }
 
 export function getTableKindDecoder(): FixedSizeDecoder<TableKind> {
-  return getEnumDecoder(TableKind);
+  return getEnumDecoder(TableKind as Omit<typeof TableKind, number>);
 }
 
 export function getTableKindCodec(): FixedSizeCodec<TableKindArgs, TableKind> {

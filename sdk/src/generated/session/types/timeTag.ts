@@ -15,10 +15,9 @@ import {
   type FixedSizeEncoder,
 } from "@solana/kit";
 
-export enum TimeTag {
-  Instant,
-  DoT,
-}
+export const TimeTag = { 0: "Instant", 1: "DoT", Instant: 0, DoT: 1 } as const;
+
+export type TimeTag = (typeof TimeTag)[Exclude<keyof typeof TimeTag, number>];
 
 export type TimeTagArgs = TimeTag;
 
@@ -27,7 +26,7 @@ export function getTimeTagEncoder(): FixedSizeEncoder<TimeTagArgs> {
 }
 
 export function getTimeTagDecoder(): FixedSizeDecoder<TimeTag> {
-  return getEnumDecoder(TimeTag);
+  return getEnumDecoder(TimeTag as Omit<typeof TimeTag, number>);
 }
 
 export function getTimeTagCodec(): FixedSizeCodec<TimeTagArgs, TimeTag> {

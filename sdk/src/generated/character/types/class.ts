@@ -15,11 +15,16 @@ import {
   type FixedSizeEncoder,
 } from "@solana/kit";
 
-export enum Class {
-  Warrior,
-  Mage,
-  Support,
-}
+export const Class = {
+  0: "Warrior",
+  1: "Mage",
+  2: "Support",
+  Warrior: 0,
+  Mage: 1,
+  Support: 2,
+} as const;
+
+export type Class = (typeof Class)[Exclude<keyof typeof Class, number>];
 
 export type ClassArgs = Class;
 
@@ -28,7 +33,7 @@ export function getClassEncoder(): FixedSizeEncoder<ClassArgs> {
 }
 
 export function getClassDecoder(): FixedSizeDecoder<Class> {
-  return getEnumDecoder(Class);
+  return getEnumDecoder(Class as Omit<typeof Class, number>);
 }
 
 export function getClassCodec(): FixedSizeCodec<ClassArgs, Class> {

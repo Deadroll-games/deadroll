@@ -107,13 +107,24 @@ import {
 export const DEADROLL_CHARACTER_PROGRAM_ADDRESS =
   "9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL" as Address<"9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL">;
 
-export enum DeadrollCharacterAccount {
-  Bag,
-  Character,
-  PlayerProfile,
-  SkillExtras,
-  SkillSet,
-}
+export const DeadrollCharacterAccount = {
+  0: "Bag",
+  1: "Character",
+  2: "PlayerProfile",
+  3: "SkillExtras",
+  4: "SkillSet",
+  Bag: 0,
+  Character: 1,
+  PlayerProfile: 2,
+  SkillExtras: 3,
+  SkillSet: 4,
+} as const;
+
+export type DeadrollCharacterAccount =
+  (typeof DeadrollCharacterAccount)[Exclude<
+    keyof typeof DeadrollCharacterAccount,
+    number
+  >];
 
 export function identifyDeadrollCharacterAccount(
   account: { data: ReadonlyUint8Array } | ReadonlyUint8Array,
@@ -180,20 +191,37 @@ export function identifyDeadrollCharacterAccount(
   );
 }
 
-export enum DeadrollCharacterEvent {
-  CharacterCreated,
-  CharacterDied,
-  CharacterLocked,
-  CharacterUnlocked,
-  ItemEquipped,
-  ItemUnequipped,
-  ProfileCreated,
-  RewardsGranted,
-  SkillDescribed,
-  SkillsSelected,
-  StatPointsSpent,
-  TombstoneFrozen,
-}
+export const DeadrollCharacterEvent = {
+  0: "CharacterCreated",
+  1: "CharacterDied",
+  2: "CharacterLocked",
+  3: "CharacterUnlocked",
+  4: "ItemEquipped",
+  5: "ItemUnequipped",
+  6: "ProfileCreated",
+  7: "RewardsGranted",
+  8: "SkillDescribed",
+  9: "SkillsSelected",
+  10: "StatPointsSpent",
+  11: "TombstoneFrozen",
+  CharacterCreated: 0,
+  CharacterDied: 1,
+  CharacterLocked: 2,
+  CharacterUnlocked: 3,
+  ItemEquipped: 4,
+  ItemUnequipped: 5,
+  ProfileCreated: 6,
+  RewardsGranted: 7,
+  SkillDescribed: 8,
+  SkillsSelected: 9,
+  StatPointsSpent: 10,
+  TombstoneFrozen: 11,
+} as const;
+
+export type DeadrollCharacterEvent = (typeof DeadrollCharacterEvent)[Exclude<
+  keyof typeof DeadrollCharacterEvent,
+  number
+>];
 
 export function identifyDeadrollCharacterEvent(
   event: { data: ReadonlyUint8Array } | ReadonlyUint8Array,
@@ -336,19 +364,36 @@ export function identifyDeadrollCharacterEvent(
   );
 }
 
-export enum DeadrollCharacterInstruction {
-  CreateCharacter,
-  CreateProfile,
-  Equip,
-  FreezeTombstone,
-  GrantRewards,
-  LockForSession,
-  MarkDead,
-  SetSkillDescription,
-  SpendStatPoints,
-  Unequip,
-  Unlock,
-}
+export const DeadrollCharacterInstruction = {
+  0: "CreateCharacter",
+  1: "CreateProfile",
+  2: "Equip",
+  3: "FreezeTombstone",
+  4: "GrantRewards",
+  5: "LockForSession",
+  6: "MarkDead",
+  7: "SetSkillDescription",
+  8: "SpendStatPoints",
+  9: "Unequip",
+  10: "Unlock",
+  CreateCharacter: 0,
+  CreateProfile: 1,
+  Equip: 2,
+  FreezeTombstone: 3,
+  GrantRewards: 4,
+  LockForSession: 5,
+  MarkDead: 6,
+  SetSkillDescription: 7,
+  SpendStatPoints: 8,
+  Unequip: 9,
+  Unlock: 10,
+} as const;
+
+export type DeadrollCharacterInstruction =
+  (typeof DeadrollCharacterInstruction)[Exclude<
+    keyof typeof DeadrollCharacterInstruction,
+    number
+  >];
 
 export function identifyDeadrollCharacterInstruction(
   instruction: { data: ReadonlyUint8Array } | ReadonlyUint8Array,
@@ -485,37 +530,37 @@ export type ParsedDeadrollCharacterInstruction<
   TProgram extends string = "9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL",
 > =
   | ({
-      instructionType: DeadrollCharacterInstruction.CreateCharacter;
+      instructionType: typeof DeadrollCharacterInstruction.CreateCharacter;
     } & ParsedCreateCharacterInstruction<TProgram>)
   | ({
-      instructionType: DeadrollCharacterInstruction.CreateProfile;
+      instructionType: typeof DeadrollCharacterInstruction.CreateProfile;
     } & ParsedCreateProfileInstruction<TProgram>)
   | ({
-      instructionType: DeadrollCharacterInstruction.Equip;
+      instructionType: typeof DeadrollCharacterInstruction.Equip;
     } & ParsedEquipInstruction<TProgram>)
   | ({
-      instructionType: DeadrollCharacterInstruction.FreezeTombstone;
+      instructionType: typeof DeadrollCharacterInstruction.FreezeTombstone;
     } & ParsedFreezeTombstoneInstruction<TProgram>)
   | ({
-      instructionType: DeadrollCharacterInstruction.GrantRewards;
+      instructionType: typeof DeadrollCharacterInstruction.GrantRewards;
     } & ParsedGrantRewardsInstruction<TProgram>)
   | ({
-      instructionType: DeadrollCharacterInstruction.LockForSession;
+      instructionType: typeof DeadrollCharacterInstruction.LockForSession;
     } & ParsedLockForSessionInstruction<TProgram>)
   | ({
-      instructionType: DeadrollCharacterInstruction.MarkDead;
+      instructionType: typeof DeadrollCharacterInstruction.MarkDead;
     } & ParsedMarkDeadInstruction<TProgram>)
   | ({
-      instructionType: DeadrollCharacterInstruction.SetSkillDescription;
+      instructionType: typeof DeadrollCharacterInstruction.SetSkillDescription;
     } & ParsedSetSkillDescriptionInstruction<TProgram>)
   | ({
-      instructionType: DeadrollCharacterInstruction.SpendStatPoints;
+      instructionType: typeof DeadrollCharacterInstruction.SpendStatPoints;
     } & ParsedSpendStatPointsInstruction<TProgram>)
   | ({
-      instructionType: DeadrollCharacterInstruction.Unequip;
+      instructionType: typeof DeadrollCharacterInstruction.Unequip;
     } & ParsedUnequipInstruction<TProgram>)
   | ({
-      instructionType: DeadrollCharacterInstruction.Unlock;
+      instructionType: typeof DeadrollCharacterInstruction.Unlock;
     } & ParsedUnlockInstruction<TProgram>);
 
 export function parseDeadrollCharacterInstruction<TProgram extends string>(
@@ -695,7 +740,7 @@ export function deadrollCharacterProgram() {
     client: T,
   ): ExtendedClient<T, { deadrollCharacter: DeadrollCharacterPlugin }> => {
     return extendClient(client, {
-      deadrollCharacter: <DeadrollCharacterPlugin>{
+      deadrollCharacter: {
         accounts: {
           bag: addSelfFetchFunctions(client, getBagCodec()),
           character: addSelfFetchFunctions(client, getCharacterCodec()),
@@ -763,7 +808,7 @@ export function deadrollCharacterProgram() {
         identifyAccount: identifyDeadrollCharacterAccount,
         identifyInstruction: identifyDeadrollCharacterInstruction,
         parseInstruction: parseDeadrollCharacterInstruction,
-      },
+      } as DeadrollCharacterPlugin,
     });
   };
 }

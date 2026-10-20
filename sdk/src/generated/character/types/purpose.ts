@@ -16,11 +16,17 @@ import {
 } from "@solana/kit";
 
 /** Buff targets self or an ally, debuff targets an enemy. */
-export enum Purpose {
-  Damage,
-  Buff,
-  Debuff,
-}
+export const Purpose = {
+  0: "Damage",
+  1: "Buff",
+  2: "Debuff",
+  Damage: 0,
+  Buff: 1,
+  Debuff: 2,
+} as const;
+
+/** Buff targets self or an ally, debuff targets an enemy. */
+export type Purpose = (typeof Purpose)[Exclude<keyof typeof Purpose, number>];
 
 export type PurposeArgs = Purpose;
 
@@ -29,7 +35,7 @@ export function getPurposeEncoder(): FixedSizeEncoder<PurposeArgs> {
 }
 
 export function getPurposeDecoder(): FixedSizeDecoder<Purpose> {
-  return getEnumDecoder(Purpose);
+  return getEnumDecoder(Purpose as Omit<typeof Purpose, number>);
 }
 
 export function getPurposeCodec(): FixedSizeCodec<PurposeArgs, Purpose> {

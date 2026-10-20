@@ -15,10 +15,14 @@ import {
   type FixedSizeEncoder,
 } from "@solana/kit";
 
-export enum Race {
-  Human,
-  ForestElf,
-}
+export const Race = {
+  0: "Human",
+  1: "ForestElf",
+  Human: 0,
+  ForestElf: 1,
+} as const;
+
+export type Race = (typeof Race)[Exclude<keyof typeof Race, number>];
 
 export type RaceArgs = Race;
 
@@ -27,7 +31,7 @@ export function getRaceEncoder(): FixedSizeEncoder<RaceArgs> {
 }
 
 export function getRaceDecoder(): FixedSizeDecoder<Race> {
-  return getEnumDecoder(Race);
+  return getEnumDecoder(Race as Omit<typeof Race, number>);
 }
 
 export function getRaceCodec(): FixedSizeCodec<RaceArgs, Race> {

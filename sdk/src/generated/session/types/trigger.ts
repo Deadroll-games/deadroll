@@ -16,15 +16,25 @@ import {
 } from "@solana/kit";
 
 /** Section 3.2, reactive skills only. */
-export enum Trigger {
-  None,
-  Hit,
-  CritHit,
-  HpBelow,
-  AllyHpBelow,
-  Controlled,
-  EnemyAdjacent,
-}
+export const Trigger = {
+  0: "None",
+  1: "Hit",
+  2: "CritHit",
+  3: "HpBelow",
+  4: "AllyHpBelow",
+  5: "Controlled",
+  6: "EnemyAdjacent",
+  None: 0,
+  Hit: 1,
+  CritHit: 2,
+  HpBelow: 3,
+  AllyHpBelow: 4,
+  Controlled: 5,
+  EnemyAdjacent: 6,
+} as const;
+
+/** Section 3.2, reactive skills only. */
+export type Trigger = (typeof Trigger)[Exclude<keyof typeof Trigger, number>];
 
 export type TriggerArgs = Trigger;
 
@@ -33,7 +43,7 @@ export function getTriggerEncoder(): FixedSizeEncoder<TriggerArgs> {
 }
 
 export function getTriggerDecoder(): FixedSizeDecoder<Trigger> {
-  return getEnumDecoder(Trigger);
+  return getEnumDecoder(Trigger as Omit<typeof Trigger, number>);
 }
 
 export function getTriggerCodec(): FixedSizeCodec<TriggerArgs, Trigger> {

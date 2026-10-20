@@ -15,12 +15,21 @@ import {
   type FixedSizeEncoder,
 } from "@solana/kit";
 
-export enum MapStatus {
-  Draft,
-  Finalized,
-  InSession,
-  Finished,
-}
+export const MapStatus = {
+  0: "Draft",
+  1: "Finalized",
+  2: "InSession",
+  3: "Finished",
+  Draft: 0,
+  Finalized: 1,
+  InSession: 2,
+  Finished: 3,
+} as const;
+
+export type MapStatus = (typeof MapStatus)[Exclude<
+  keyof typeof MapStatus,
+  number
+>];
 
 export type MapStatusArgs = MapStatus;
 
@@ -29,7 +38,7 @@ export function getMapStatusEncoder(): FixedSizeEncoder<MapStatusArgs> {
 }
 
 export function getMapStatusDecoder(): FixedSizeDecoder<MapStatus> {
-  return getEnumDecoder(MapStatus);
+  return getEnumDecoder(MapStatus as Omit<typeof MapStatus, number>);
 }
 
 export function getMapStatusCodec(): FixedSizeCodec<MapStatusArgs, MapStatus> {

@@ -16,11 +16,20 @@ import {
 } from "@solana/kit";
 
 /** Section 3: active (4 slots), reactive (1), passive (1). */
-export enum Category {
-  Active,
-  Reactive,
-  Passive,
-}
+export const Category = {
+  0: "Active",
+  1: "Reactive",
+  2: "Passive",
+  Active: 0,
+  Reactive: 1,
+  Passive: 2,
+} as const;
+
+/** Section 3: active (4 slots), reactive (1), passive (1). */
+export type Category = (typeof Category)[Exclude<
+  keyof typeof Category,
+  number
+>];
 
 export type CategoryArgs = Category;
 
@@ -29,7 +38,7 @@ export function getCategoryEncoder(): FixedSizeEncoder<CategoryArgs> {
 }
 
 export function getCategoryDecoder(): FixedSizeDecoder<Category> {
-  return getEnumDecoder(Category);
+  return getEnumDecoder(Category as Omit<typeof Category, number>);
 }
 
 export function getCategoryCodec(): FixedSizeCodec<CategoryArgs, Category> {

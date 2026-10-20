@@ -68,10 +68,17 @@ import { findLayoutPda, findMapPda } from "../pdas/index.js";
 export const DEADROLL_MAP_PROGRAM_ADDRESS =
   "2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH" as Address<"2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH">;
 
-export enum DeadrollMapAccount {
-  Map,
-  MapLayout,
-}
+export const DeadrollMapAccount = {
+  0: "Map",
+  1: "MapLayout",
+  Map: 0,
+  MapLayout: 1,
+} as const;
+
+export type DeadrollMapAccount = (typeof DeadrollMapAccount)[Exclude<
+  keyof typeof DeadrollMapAccount,
+  number
+>];
 
 export function identifyDeadrollMapAccount(
   account: { data: ReadonlyUint8Array } | ReadonlyUint8Array,
@@ -105,13 +112,23 @@ export function identifyDeadrollMapAccount(
   );
 }
 
-export enum DeadrollMapEvent {
-  LayoutWritten,
-  MapCreated,
-  MapFinalized,
-  MapStatusChanged,
-  SpawnsWritten,
-}
+export const DeadrollMapEvent = {
+  0: "LayoutWritten",
+  1: "MapCreated",
+  2: "MapFinalized",
+  3: "MapStatusChanged",
+  4: "SpawnsWritten",
+  LayoutWritten: 0,
+  MapCreated: 1,
+  MapFinalized: 2,
+  MapStatusChanged: 3,
+  SpawnsWritten: 4,
+} as const;
+
+export type DeadrollMapEvent = (typeof DeadrollMapEvent)[Exclude<
+  keyof typeof DeadrollMapEvent,
+  number
+>];
 
 export function identifyDeadrollMapEvent(
   event: { data: ReadonlyUint8Array } | ReadonlyUint8Array,
@@ -177,13 +194,23 @@ export function identifyDeadrollMapEvent(
   );
 }
 
-export enum DeadrollMapInstruction {
-  CreateMap,
-  FinalizeMap,
-  SetStatus,
-  WriteLayout,
-  WriteSpawns,
-}
+export const DeadrollMapInstruction = {
+  0: "CreateMap",
+  1: "FinalizeMap",
+  2: "SetStatus",
+  3: "WriteLayout",
+  4: "WriteSpawns",
+  CreateMap: 0,
+  FinalizeMap: 1,
+  SetStatus: 2,
+  WriteLayout: 3,
+  WriteSpawns: 4,
+} as const;
+
+export type DeadrollMapInstruction = (typeof DeadrollMapInstruction)[Exclude<
+  keyof typeof DeadrollMapInstruction,
+  number
+>];
 
 export function identifyDeadrollMapInstruction(
   instruction: { data: ReadonlyUint8Array } | ReadonlyUint8Array,
@@ -254,19 +281,19 @@ export type ParsedDeadrollMapInstruction<
   TProgram extends string = "2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH",
 > =
   | ({
-      instructionType: DeadrollMapInstruction.CreateMap;
+      instructionType: typeof DeadrollMapInstruction.CreateMap;
     } & ParsedCreateMapInstruction<TProgram>)
   | ({
-      instructionType: DeadrollMapInstruction.FinalizeMap;
+      instructionType: typeof DeadrollMapInstruction.FinalizeMap;
     } & ParsedFinalizeMapInstruction<TProgram>)
   | ({
-      instructionType: DeadrollMapInstruction.SetStatus;
+      instructionType: typeof DeadrollMapInstruction.SetStatus;
     } & ParsedSetStatusInstruction<TProgram>)
   | ({
-      instructionType: DeadrollMapInstruction.WriteLayout;
+      instructionType: typeof DeadrollMapInstruction.WriteLayout;
     } & ParsedWriteLayoutInstruction<TProgram>)
   | ({
-      instructionType: DeadrollMapInstruction.WriteSpawns;
+      instructionType: typeof DeadrollMapInstruction.WriteSpawns;
     } & ParsedWriteSpawnsInstruction<TProgram>);
 
 export function parseDeadrollMapInstruction<TProgram extends string>(
@@ -374,7 +401,7 @@ export function deadrollMapProgram() {
     client: T,
   ): ExtendedClient<T, { deadrollMap: DeadrollMapPlugin }> => {
     return extendClient(client, {
-      deadrollMap: <DeadrollMapPlugin>{
+      deadrollMap: {
         accounts: {
           map: addSelfFetchFunctions(client, getMapCodec()),
           mapLayout: addSelfFetchFunctions(client, getMapLayoutCodec()),
@@ -410,7 +437,7 @@ export function deadrollMapProgram() {
         identifyAccount: identifyDeadrollMapAccount,
         identifyInstruction: identifyDeadrollMapInstruction,
         parseInstruction: parseDeadrollMapInstruction,
-      },
+      } as DeadrollMapPlugin,
     });
   };
 }

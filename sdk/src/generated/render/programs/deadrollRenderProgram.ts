@@ -88,11 +88,20 @@ import {
 export const DEADROLL_RENDER_PROGRAM_PROGRAM_ADDRESS =
   "DgQCsXAe7Q7h8zdtToiTvk8XqNjjbXuD6xith2BmEiRB" as Address<"DgQCsXAe7Q7h8zdtToiTvk8XqNjjbXuD6xith2BmEiRB">;
 
-export enum DeadrollRenderProgramAccount {
-  Palette,
-  RasterizerCode,
-  SpriteBook,
-}
+export const DeadrollRenderProgramAccount = {
+  0: "Palette",
+  1: "RasterizerCode",
+  2: "SpriteBook",
+  Palette: 0,
+  RasterizerCode: 1,
+  SpriteBook: 2,
+} as const;
+
+export type DeadrollRenderProgramAccount =
+  (typeof DeadrollRenderProgramAccount)[Exclude<
+    keyof typeof DeadrollRenderProgramAccount,
+    number
+  >];
 
 export function identifyDeadrollRenderProgramAccount(
   account: { data: ReadonlyUint8Array } | ReadonlyUint8Array,
@@ -137,12 +146,22 @@ export function identifyDeadrollRenderProgramAccount(
   );
 }
 
-export enum DeadrollRenderProgramEvent {
-  BlobInitialized,
-  PaletteFinalized,
-  RasterizerFinalized,
-  SpriteBookFinalized,
-}
+export const DeadrollRenderProgramEvent = {
+  0: "BlobInitialized",
+  1: "PaletteFinalized",
+  2: "RasterizerFinalized",
+  3: "SpriteBookFinalized",
+  BlobInitialized: 0,
+  PaletteFinalized: 1,
+  RasterizerFinalized: 2,
+  SpriteBookFinalized: 3,
+} as const;
+
+export type DeadrollRenderProgramEvent =
+  (typeof DeadrollRenderProgramEvent)[Exclude<
+    keyof typeof DeadrollRenderProgramEvent,
+    number
+  >];
 
 export function identifyDeadrollRenderProgramEvent(
   event: { data: ReadonlyUint8Array } | ReadonlyUint8Array,
@@ -197,16 +216,30 @@ export function identifyDeadrollRenderProgramEvent(
   );
 }
 
-export enum DeadrollRenderProgramInstruction {
-  Extend,
-  FinalizePalette,
-  FinalizeRasterizer,
-  FinalizeSpriteBook,
-  InitPalette,
-  InitRasterizer,
-  InitSpriteBook,
-  WriteChunk,
-}
+export const DeadrollRenderProgramInstruction = {
+  0: "Extend",
+  1: "FinalizePalette",
+  2: "FinalizeRasterizer",
+  3: "FinalizeSpriteBook",
+  4: "InitPalette",
+  5: "InitRasterizer",
+  6: "InitSpriteBook",
+  7: "WriteChunk",
+  Extend: 0,
+  FinalizePalette: 1,
+  FinalizeRasterizer: 2,
+  FinalizeSpriteBook: 3,
+  InitPalette: 4,
+  InitRasterizer: 5,
+  InitSpriteBook: 6,
+  WriteChunk: 7,
+} as const;
+
+export type DeadrollRenderProgramInstruction =
+  (typeof DeadrollRenderProgramInstruction)[Exclude<
+    keyof typeof DeadrollRenderProgramInstruction,
+    number
+  >];
 
 export function identifyDeadrollRenderProgramInstruction(
   instruction: { data: ReadonlyUint8Array } | ReadonlyUint8Array,
@@ -310,28 +343,28 @@ export type ParsedDeadrollRenderProgramInstruction<
   TProgram extends string = "DgQCsXAe7Q7h8zdtToiTvk8XqNjjbXuD6xith2BmEiRB",
 > =
   | ({
-      instructionType: DeadrollRenderProgramInstruction.Extend;
+      instructionType: typeof DeadrollRenderProgramInstruction.Extend;
     } & ParsedExtendInstruction<TProgram>)
   | ({
-      instructionType: DeadrollRenderProgramInstruction.FinalizePalette;
+      instructionType: typeof DeadrollRenderProgramInstruction.FinalizePalette;
     } & ParsedFinalizePaletteInstruction<TProgram>)
   | ({
-      instructionType: DeadrollRenderProgramInstruction.FinalizeRasterizer;
+      instructionType: typeof DeadrollRenderProgramInstruction.FinalizeRasterizer;
     } & ParsedFinalizeRasterizerInstruction<TProgram>)
   | ({
-      instructionType: DeadrollRenderProgramInstruction.FinalizeSpriteBook;
+      instructionType: typeof DeadrollRenderProgramInstruction.FinalizeSpriteBook;
     } & ParsedFinalizeSpriteBookInstruction<TProgram>)
   | ({
-      instructionType: DeadrollRenderProgramInstruction.InitPalette;
+      instructionType: typeof DeadrollRenderProgramInstruction.InitPalette;
     } & ParsedInitPaletteInstruction<TProgram>)
   | ({
-      instructionType: DeadrollRenderProgramInstruction.InitRasterizer;
+      instructionType: typeof DeadrollRenderProgramInstruction.InitRasterizer;
     } & ParsedInitRasterizerInstruction<TProgram>)
   | ({
-      instructionType: DeadrollRenderProgramInstruction.InitSpriteBook;
+      instructionType: typeof DeadrollRenderProgramInstruction.InitSpriteBook;
     } & ParsedInitSpriteBookInstruction<TProgram>)
   | ({
-      instructionType: DeadrollRenderProgramInstruction.WriteChunk;
+      instructionType: typeof DeadrollRenderProgramInstruction.WriteChunk;
     } & ParsedWriteChunkInstruction<TProgram>);
 
 export function parseDeadrollRenderProgramInstruction<TProgram extends string>(
@@ -478,7 +511,7 @@ export function deadrollRenderProgramProgram() {
     { deadrollRenderProgram: DeadrollRenderProgramPlugin }
   > => {
     return extendClient(client, {
-      deadrollRenderProgram: <DeadrollRenderProgramPlugin>{
+      deadrollRenderProgram: {
         accounts: {
           palette: addSelfFetchFunctions(client, getPaletteCodec()),
           rasterizerCode: addSelfFetchFunctions(
@@ -535,7 +568,7 @@ export function deadrollRenderProgramProgram() {
         identifyAccount: identifyDeadrollRenderProgramAccount,
         identifyInstruction: identifyDeadrollRenderProgramInstruction,
         parseInstruction: parseDeadrollRenderProgramInstruction,
-      },
+      } as DeadrollRenderProgramPlugin,
     });
   };
 }

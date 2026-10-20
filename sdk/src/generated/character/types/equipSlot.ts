@@ -16,19 +16,36 @@ import {
 } from "@solana/kit";
 
 /** Equipment slot (docs/ART_DESCRIPTION.md, section 6.3); rings take two slots. */
-export enum EquipSlot {
-  MainHand,
-  OffHand,
-  Helmet,
-  Body,
-  Pants,
-  Boots,
-  Gloves,
-  Necklace,
-  Cloak,
-  Ring1,
-  Ring2,
-}
+export const EquipSlot = {
+  0: "MainHand",
+  1: "OffHand",
+  2: "Helmet",
+  3: "Body",
+  4: "Pants",
+  5: "Boots",
+  6: "Gloves",
+  7: "Necklace",
+  8: "Cloak",
+  9: "Ring1",
+  10: "Ring2",
+  MainHand: 0,
+  OffHand: 1,
+  Helmet: 2,
+  Body: 3,
+  Pants: 4,
+  Boots: 5,
+  Gloves: 6,
+  Necklace: 7,
+  Cloak: 8,
+  Ring1: 9,
+  Ring2: 10,
+} as const;
+
+/** Equipment slot (docs/ART_DESCRIPTION.md, section 6.3); rings take two slots. */
+export type EquipSlot = (typeof EquipSlot)[Exclude<
+  keyof typeof EquipSlot,
+  number
+>];
 
 export type EquipSlotArgs = EquipSlot;
 
@@ -37,7 +54,7 @@ export function getEquipSlotEncoder(): FixedSizeEncoder<EquipSlotArgs> {
 }
 
 export function getEquipSlotDecoder(): FixedSizeDecoder<EquipSlot> {
-  return getEnumDecoder(EquipSlot);
+  return getEnumDecoder(EquipSlot as Omit<typeof EquipSlot, number>);
 }
 
 export function getEquipSlotCodec(): FixedSizeCodec<EquipSlotArgs, EquipSlot> {

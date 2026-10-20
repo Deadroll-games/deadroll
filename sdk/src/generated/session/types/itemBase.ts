@@ -19,14 +19,29 @@ import {
  * Item base: the type of an item, its slot and base numbers (`deadroll_rules::ItemTuning`).
  * P0 has the class starter bases (docs/ITEMS_AND_CRAFT.md, section 10); recipes append more.
  */
-export enum ItemBase {
-  Sword,
-  Staff,
-  Wand,
-  LeatherArmor,
-  Robe,
-  LightLeatherArmor,
-}
+export const ItemBase = {
+  0: "Sword",
+  1: "Staff",
+  2: "Wand",
+  3: "LeatherArmor",
+  4: "Robe",
+  5: "LightLeatherArmor",
+  Sword: 0,
+  Staff: 1,
+  Wand: 2,
+  LeatherArmor: 3,
+  Robe: 4,
+  LightLeatherArmor: 5,
+} as const;
+
+/**
+ * Item base: the type of an item, its slot and base numbers (`deadroll_rules::ItemTuning`).
+ * P0 has the class starter bases (docs/ITEMS_AND_CRAFT.md, section 10); recipes append more.
+ */
+export type ItemBase = (typeof ItemBase)[Exclude<
+  keyof typeof ItemBase,
+  number
+>];
 
 export type ItemBaseArgs = ItemBase;
 
@@ -35,7 +50,7 @@ export function getItemBaseEncoder(): FixedSizeEncoder<ItemBaseArgs> {
 }
 
 export function getItemBaseDecoder(): FixedSizeDecoder<ItemBase> {
-  return getEnumDecoder(ItemBase);
+  return getEnumDecoder(ItemBase as Omit<typeof ItemBase, number>);
 }
 
 export function getItemBaseCodec(): FixedSizeCodec<ItemBaseArgs, ItemBase> {

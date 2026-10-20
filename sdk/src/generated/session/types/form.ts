@@ -15,10 +15,14 @@ import {
   type FixedSizeEncoder,
 } from "@solana/kit";
 
-export enum Form {
-  Strike,
-  Projectile,
-}
+export const Form = {
+  0: "Strike",
+  1: "Projectile",
+  Strike: 0,
+  Projectile: 1,
+} as const;
+
+export type Form = (typeof Form)[Exclude<keyof typeof Form, number>];
 
 export type FormArgs = Form;
 
@@ -27,7 +31,7 @@ export function getFormEncoder(): FixedSizeEncoder<FormArgs> {
 }
 
 export function getFormDecoder(): FixedSizeDecoder<Form> {
-  return getEnumDecoder(Form);
+  return getEnumDecoder(Form as Omit<typeof Form, number>);
 }
 
 export function getFormCodec(): FixedSizeCodec<FormArgs, Form> {

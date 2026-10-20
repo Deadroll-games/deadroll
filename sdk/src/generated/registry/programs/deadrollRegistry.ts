@@ -88,10 +88,17 @@ import { findConfigPda, findTablePda } from "../pdas/index.js";
 export const DEADROLL_REGISTRY_PROGRAM_ADDRESS =
   "dZ1jraMfS3bAUTkRw2TA1ddg8UDGzgUdFQz5pmBxjoG" as Address<"dZ1jraMfS3bAUTkRw2TA1ddg8UDGzgUdFQz5pmBxjoG">;
 
-export enum DeadrollRegistryAccount {
-  GameConfig,
-  Table,
-}
+export const DeadrollRegistryAccount = {
+  0: "GameConfig",
+  1: "Table",
+  GameConfig: 0,
+  Table: 1,
+} as const;
+
+export type DeadrollRegistryAccount = (typeof DeadrollRegistryAccount)[Exclude<
+  keyof typeof DeadrollRegistryAccount,
+  number
+>];
 
 export function identifyDeadrollRegistryAccount(
   account: { data: ReadonlyUint8Array } | ReadonlyUint8Array,
@@ -125,17 +132,31 @@ export function identifyDeadrollRegistryAccount(
   );
 }
 
-export enum DeadrollRegistryEvent {
-  ConfigInitialized,
-  ConfigResized,
-  PaletteSet,
-  ProgramsSet,
-  RasterizerSet,
-  SpriteBooksSet,
-  TableCreated,
-  TableWritten,
-  UriBaseSet,
-}
+export const DeadrollRegistryEvent = {
+  0: "ConfigInitialized",
+  1: "ConfigResized",
+  2: "PaletteSet",
+  3: "ProgramsSet",
+  4: "RasterizerSet",
+  5: "SpriteBooksSet",
+  6: "TableCreated",
+  7: "TableWritten",
+  8: "UriBaseSet",
+  ConfigInitialized: 0,
+  ConfigResized: 1,
+  PaletteSet: 2,
+  ProgramsSet: 3,
+  RasterizerSet: 4,
+  SpriteBooksSet: 5,
+  TableCreated: 6,
+  TableWritten: 7,
+  UriBaseSet: 8,
+} as const;
+
+export type DeadrollRegistryEvent = (typeof DeadrollRegistryEvent)[Exclude<
+  keyof typeof DeadrollRegistryEvent,
+  number
+>];
 
 export function identifyDeadrollRegistryEvent(
   event: { data: ReadonlyUint8Array } | ReadonlyUint8Array,
@@ -245,18 +266,34 @@ export function identifyDeadrollRegistryEvent(
   );
 }
 
-export enum DeadrollRegistryInstruction {
-  InitConfig,
-  InitTable,
-  ResizeConfig,
-  SetPalette,
-  SetPrograms,
-  SetRasterizer,
-  SetRasterizerFromRender,
-  SetSpriteBooks,
-  SetUriBase,
-  WriteTable,
-}
+export const DeadrollRegistryInstruction = {
+  0: "InitConfig",
+  1: "InitTable",
+  2: "ResizeConfig",
+  3: "SetPalette",
+  4: "SetPrograms",
+  5: "SetRasterizer",
+  6: "SetRasterizerFromRender",
+  7: "SetSpriteBooks",
+  8: "SetUriBase",
+  9: "WriteTable",
+  InitConfig: 0,
+  InitTable: 1,
+  ResizeConfig: 2,
+  SetPalette: 3,
+  SetPrograms: 4,
+  SetRasterizer: 5,
+  SetRasterizerFromRender: 6,
+  SetSpriteBooks: 7,
+  SetUriBase: 8,
+  WriteTable: 9,
+} as const;
+
+export type DeadrollRegistryInstruction =
+  (typeof DeadrollRegistryInstruction)[Exclude<
+    keyof typeof DeadrollRegistryInstruction,
+    number
+  >];
 
 export function identifyDeadrollRegistryInstruction(
   instruction: { data: ReadonlyUint8Array } | ReadonlyUint8Array,
@@ -382,34 +419,34 @@ export type ParsedDeadrollRegistryInstruction<
   TProgram extends string = "dZ1jraMfS3bAUTkRw2TA1ddg8UDGzgUdFQz5pmBxjoG",
 > =
   | ({
-      instructionType: DeadrollRegistryInstruction.InitConfig;
+      instructionType: typeof DeadrollRegistryInstruction.InitConfig;
     } & ParsedInitConfigInstruction<TProgram>)
   | ({
-      instructionType: DeadrollRegistryInstruction.InitTable;
+      instructionType: typeof DeadrollRegistryInstruction.InitTable;
     } & ParsedInitTableInstruction<TProgram>)
   | ({
-      instructionType: DeadrollRegistryInstruction.ResizeConfig;
+      instructionType: typeof DeadrollRegistryInstruction.ResizeConfig;
     } & ParsedResizeConfigInstruction<TProgram>)
   | ({
-      instructionType: DeadrollRegistryInstruction.SetPalette;
+      instructionType: typeof DeadrollRegistryInstruction.SetPalette;
     } & ParsedSetPaletteInstruction<TProgram>)
   | ({
-      instructionType: DeadrollRegistryInstruction.SetPrograms;
+      instructionType: typeof DeadrollRegistryInstruction.SetPrograms;
     } & ParsedSetProgramsInstruction<TProgram>)
   | ({
-      instructionType: DeadrollRegistryInstruction.SetRasterizer;
+      instructionType: typeof DeadrollRegistryInstruction.SetRasterizer;
     } & ParsedSetRasterizerInstruction<TProgram>)
   | ({
-      instructionType: DeadrollRegistryInstruction.SetRasterizerFromRender;
+      instructionType: typeof DeadrollRegistryInstruction.SetRasterizerFromRender;
     } & ParsedSetRasterizerFromRenderInstruction<TProgram>)
   | ({
-      instructionType: DeadrollRegistryInstruction.SetSpriteBooks;
+      instructionType: typeof DeadrollRegistryInstruction.SetSpriteBooks;
     } & ParsedSetSpriteBooksInstruction<TProgram>)
   | ({
-      instructionType: DeadrollRegistryInstruction.SetUriBase;
+      instructionType: typeof DeadrollRegistryInstruction.SetUriBase;
     } & ParsedSetUriBaseInstruction<TProgram>)
   | ({
-      instructionType: DeadrollRegistryInstruction.WriteTable;
+      instructionType: typeof DeadrollRegistryInstruction.WriteTable;
     } & ParsedWriteTableInstruction<TProgram>);
 
 export function parseDeadrollRegistryInstruction<TProgram extends string>(
@@ -573,7 +610,7 @@ export function deadrollRegistryProgram() {
     client: T,
   ): ExtendedClient<T, { deadrollRegistry: DeadrollRegistryPlugin }> => {
     return extendClient(client, {
-      deadrollRegistry: <DeadrollRegistryPlugin>{
+      deadrollRegistry: {
         accounts: {
           gameConfig: addSelfFetchFunctions(client, getGameConfigCodec()),
           table: addSelfFetchFunctions(client, getTableCodec()),
@@ -634,7 +671,7 @@ export function deadrollRegistryProgram() {
         identifyAccount: identifyDeadrollRegistryAccount,
         identifyInstruction: identifyDeadrollRegistryInstruction,
         parseInstruction: parseDeadrollRegistryInstruction,
-      },
+      } as DeadrollRegistryPlugin,
     });
   };
 }

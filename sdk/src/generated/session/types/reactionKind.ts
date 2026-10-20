@@ -16,12 +16,22 @@ import {
 } from "@solana/kit";
 
 /** What a triggered reactive skill did (`deadroll_rules::reactive::Reaction`). */
-export enum ReactionKind {
-  Strike,
-  Debuff,
-  Buff,
-  Aura,
-}
+export const ReactionKind = {
+  0: "Strike",
+  1: "Debuff",
+  2: "Buff",
+  3: "Aura",
+  Strike: 0,
+  Debuff: 1,
+  Buff: 2,
+  Aura: 3,
+} as const;
+
+/** What a triggered reactive skill did (`deadroll_rules::reactive::Reaction`). */
+export type ReactionKind = (typeof ReactionKind)[Exclude<
+  keyof typeof ReactionKind,
+  number
+>];
 
 export type ReactionKindArgs = ReactionKind;
 
@@ -30,7 +40,7 @@ export function getReactionKindEncoder(): FixedSizeEncoder<ReactionKindArgs> {
 }
 
 export function getReactionKindDecoder(): FixedSizeDecoder<ReactionKind> {
-  return getEnumDecoder(ReactionKind);
+  return getEnumDecoder(ReactionKind as Omit<typeof ReactionKind, number>);
 }
 
 export function getReactionKindCodec(): FixedSizeCodec<

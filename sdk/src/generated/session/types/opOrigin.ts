@@ -16,11 +16,20 @@ import {
 } from "@solana/kit";
 
 /** `deadroll_combat::OpOrigin`. */
-export enum OpOrigin {
-  Pair,
-  Template,
-  Trait,
-}
+export const OpOrigin = {
+  0: "Pair",
+  1: "Template",
+  2: "Trait",
+  Pair: 0,
+  Template: 1,
+  Trait: 2,
+} as const;
+
+/** `deadroll_combat::OpOrigin`. */
+export type OpOrigin = (typeof OpOrigin)[Exclude<
+  keyof typeof OpOrigin,
+  number
+>];
 
 export type OpOriginArgs = OpOrigin;
 
@@ -29,7 +38,7 @@ export function getOpOriginEncoder(): FixedSizeEncoder<OpOriginArgs> {
 }
 
 export function getOpOriginDecoder(): FixedSizeDecoder<OpOrigin> {
-  return getEnumDecoder(OpOrigin);
+  return getEnumDecoder(OpOrigin as Omit<typeof OpOrigin, number>);
 }
 
 export function getOpOriginCodec(): FixedSizeCodec<OpOriginArgs, OpOrigin> {

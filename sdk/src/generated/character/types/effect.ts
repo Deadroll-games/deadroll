@@ -19,18 +19,34 @@ import {
  * Section 6. `None` only for pure damage. Debuffs and hard control first, then buffs;
  * `Heal` was appended later (a buff kind: restores HP up to the maximum).
  */
-export enum Effect {
-  None,
-  Weakening,
-  Slow,
-  Vulnerability,
-  Stun,
-  Freeze,
-  Haste,
-  Empowerment,
-  Protection,
-  Heal,
-}
+export const Effect = {
+  0: "None",
+  1: "Weakening",
+  2: "Slow",
+  3: "Vulnerability",
+  4: "Stun",
+  5: "Freeze",
+  6: "Haste",
+  7: "Empowerment",
+  8: "Protection",
+  9: "Heal",
+  None: 0,
+  Weakening: 1,
+  Slow: 2,
+  Vulnerability: 3,
+  Stun: 4,
+  Freeze: 5,
+  Haste: 6,
+  Empowerment: 7,
+  Protection: 8,
+  Heal: 9,
+} as const;
+
+/**
+ * Section 6. `None` only for pure damage. Debuffs and hard control first, then buffs;
+ * `Heal` was appended later (a buff kind: restores HP up to the maximum).
+ */
+export type Effect = (typeof Effect)[Exclude<keyof typeof Effect, number>];
 
 export type EffectArgs = Effect;
 
@@ -39,7 +55,7 @@ export function getEffectEncoder(): FixedSizeEncoder<EffectArgs> {
 }
 
 export function getEffectDecoder(): FixedSizeDecoder<Effect> {
-  return getEnumDecoder(Effect);
+  return getEnumDecoder(Effect as Omit<typeof Effect, number>);
 }
 
 export function getEffectCodec(): FixedSizeCodec<EffectArgs, Effect> {

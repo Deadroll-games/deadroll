@@ -16,10 +16,10 @@ import {
 } from "@solana/kit";
 
 /** Area comes later (append). */
-export enum Target {
-  Single,
-  Line,
-}
+export const Target = { 0: "Single", 1: "Line", Single: 0, Line: 1 } as const;
+
+/** Area comes later (append). */
+export type Target = (typeof Target)[Exclude<keyof typeof Target, number>];
 
 export type TargetArgs = Target;
 
@@ -28,7 +28,7 @@ export function getTargetEncoder(): FixedSizeEncoder<TargetArgs> {
 }
 
 export function getTargetDecoder(): FixedSizeDecoder<Target> {
-  return getEnumDecoder(Target);
+  return getEnumDecoder(Target as Omit<typeof Target, number>);
 }
 
 export function getTargetCodec(): FixedSizeCodec<TargetArgs, Target> {

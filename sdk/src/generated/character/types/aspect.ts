@@ -16,14 +16,23 @@ import {
 } from "@solana/kit";
 
 /** Damage aspect (docs/DAMAGE_TYPES_AND_MIXES.md). */
-export enum Aspect {
-  Fire,
-  Cold,
-  Lightning,
-  Blood,
-  Blunt,
-  Piercing,
-}
+export const Aspect = {
+  0: "Fire",
+  1: "Cold",
+  2: "Lightning",
+  3: "Blood",
+  4: "Blunt",
+  5: "Piercing",
+  Fire: 0,
+  Cold: 1,
+  Lightning: 2,
+  Blood: 3,
+  Blunt: 4,
+  Piercing: 5,
+} as const;
+
+/** Damage aspect (docs/DAMAGE_TYPES_AND_MIXES.md). */
+export type Aspect = (typeof Aspect)[Exclude<keyof typeof Aspect, number>];
 
 export type AspectArgs = Aspect;
 
@@ -32,7 +41,7 @@ export function getAspectEncoder(): FixedSizeEncoder<AspectArgs> {
 }
 
 export function getAspectDecoder(): FixedSizeDecoder<Aspect> {
-  return getEnumDecoder(Aspect);
+  return getEnumDecoder(Aspect as Omit<typeof Aspect, number>);
 }
 
 export function getAspectCodec(): FixedSizeCodec<AspectArgs, Aspect> {

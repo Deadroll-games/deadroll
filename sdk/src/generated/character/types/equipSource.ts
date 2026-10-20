@@ -19,11 +19,23 @@ import {
  * What an equipment slot holds: nothing, a soulbound record of the character, or an item NFT
  * (crafting, later).
  */
-export enum EquipSource {
-  Empty,
-  Soulbound,
-  Asset,
-}
+export const EquipSource = {
+  0: "Empty",
+  1: "Soulbound",
+  2: "Asset",
+  Empty: 0,
+  Soulbound: 1,
+  Asset: 2,
+} as const;
+
+/**
+ * What an equipment slot holds: nothing, a soulbound record of the character, or an item NFT
+ * (crafting, later).
+ */
+export type EquipSource = (typeof EquipSource)[Exclude<
+  keyof typeof EquipSource,
+  number
+>];
 
 export type EquipSourceArgs = EquipSource;
 
@@ -32,7 +44,7 @@ export function getEquipSourceEncoder(): FixedSizeEncoder<EquipSourceArgs> {
 }
 
 export function getEquipSourceDecoder(): FixedSizeDecoder<EquipSource> {
-  return getEnumDecoder(EquipSource);
+  return getEnumDecoder(EquipSource as Omit<typeof EquipSource, number>);
 }
 
 export function getEquipSourceCodec(): FixedSizeCodec<

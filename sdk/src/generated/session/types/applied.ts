@@ -16,12 +16,19 @@ import {
 } from "@solana/kit";
 
 /** `deadroll_combat::Applied`. */
-export enum Applied {
-  None,
-  Added,
-  Refreshed,
-  Froze,
-}
+export const Applied = {
+  0: "None",
+  1: "Added",
+  2: "Refreshed",
+  3: "Froze",
+  None: 0,
+  Added: 1,
+  Refreshed: 2,
+  Froze: 3,
+} as const;
+
+/** `deadroll_combat::Applied`. */
+export type Applied = (typeof Applied)[Exclude<keyof typeof Applied, number>];
 
 export type AppliedArgs = Applied;
 
@@ -30,7 +37,7 @@ export function getAppliedEncoder(): FixedSizeEncoder<AppliedArgs> {
 }
 
 export function getAppliedDecoder(): FixedSizeDecoder<Applied> {
-  return getEnumDecoder(Applied);
+  return getEnumDecoder(Applied as Omit<typeof Applied, number>);
 }
 
 export function getAppliedCodec(): FixedSizeCodec<AppliedArgs, Applied> {
