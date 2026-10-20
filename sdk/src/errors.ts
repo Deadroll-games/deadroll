@@ -17,6 +17,13 @@ export function errorName(program: ProgramName, code: number): string | null {
   return table[code]?.[0] ?? null;
 }
 
+/** The custom error code of the Anchor error `name` (`AlreadyActed`) of `program`, or null. */
+export function errorCode(program: ProgramName, name: string): number | null {
+  const table = PROGRAM_ERRORS[program] as Record<number, readonly [string, string]>;
+  const hit = Object.entries(table).find(([, [n]]) => n === name);
+  return hit ? Number(hit[0]) : null;
+}
+
 /** The `#[msg]` text of a custom error code of `program`, or null. */
 export function errorMessage(program: ProgramName, code: number): string | null {
   const table = PROGRAM_ERRORS[program] as Record<number, readonly [string, string]>;

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { address, getBase64Decoder } from "@solana/kit";
 import { PROGRAM_IDLS } from "../scripts/generate.ts";
-import { decodeEvents, errorName, eventsFromLogs, PROGRAM_CRATES, PROGRAMS, programNameOf, type ProgramName } from "../src/index.ts";
+import { decodeEvents, errorCode, errorName, eventsFromLogs, PROGRAM_CRATES, PROGRAMS, programNameOf, type ProgramName } from "../src/index.ts";
 import { getPlayerDiedEventEncoder } from "../src/session.ts";
 
 const root = new URL("../../", import.meta.url);
@@ -31,6 +31,8 @@ test("errorName follows the IDL errors", () => {
     for (const e of idl(name).errors ?? []) assert.equal(errorName(name, e.code), e.name);
   }
   assert.equal(errorName("session", 1), null);
+  assert.equal(errorCode("session", "AlreadyActed"), 6046);
+  assert.equal(errorCode("session", "NoSuchError"), null);
 });
 
 test("decodeEvents reads events inside the emitting program only", () => {
