@@ -1,0 +1,808 @@
+{
+  "address": "DgQCsXAe7Q7h8zdtToiTvk8XqNjjbXuD6xith2BmEiRB",
+  "metadata": {
+    "name": "deadroll_render_program",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Deadroll render: on-chain rasterizer code, palettes and sprite books."
+  },
+  "instructions": [
+    {
+      "name": "extend",
+      "discriminator": [
+        228,
+        127,
+        0,
+        1,
+        227,
+        154,
+        54,
+        168
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "target",
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "finalize_palette",
+      "discriminator": [
+        34,
+        1,
+        116,
+        15,
+        211,
+        0,
+        165,
+        99
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "palette",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "finalize_rasterizer",
+      "discriminator": [
+        38,
+        128,
+        203,
+        145,
+        85,
+        76,
+        195,
+        30
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "docs": [
+            "The blob authority, and the current `GameConfig.authority` (finalize repoints the game)."
+          ],
+          "signer": true
+        },
+        {
+          "name": "rasterizer",
+          "writable": true
+        },
+        {
+          "name": "config",
+          "docs": [
+            "the registry."
+          ],
+          "writable": true
+        },
+        {
+          "name": "render_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "registry_program",
+          "address": "dZ1jraMfS3bAUTkRw2TA1ddg8UDGzgUdFQz5pmBxjoG"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "finalize_sprite_book",
+      "discriminator": [
+        128,
+        118,
+        29,
+        170,
+        174,
+        60,
+        241,
+        254
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "sprite_book",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "init_palette",
+      "discriminator": [
+        126,
+        208,
+        211,
+        12,
+        182,
+        218,
+        169,
+        34
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "palette",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  108,
+                  101,
+                  116,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "version"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "version",
+          "type": "u16"
+        },
+        {
+          "name": "len",
+          "type": "u32"
+        },
+        {
+          "name": "sha256",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "init_rasterizer",
+      "discriminator": [
+        130,
+        191,
+        242,
+        79,
+        89,
+        123,
+        66,
+        210
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "rasterizer",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  97,
+                  115,
+                  116,
+                  101,
+                  114,
+                  105,
+                  122,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "version"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "version",
+          "type": "u16"
+        },
+        {
+          "name": "len",
+          "type": "u32"
+        },
+        {
+          "name": "sha256",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "init_sprite_book",
+      "discriminator": [
+        47,
+        46,
+        90,
+        201,
+        194,
+        70,
+        123,
+        121
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "sprite_book",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  112,
+                  114,
+                  105,
+                  116,
+                  101,
+                  115
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "book_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "book_id",
+          "type": "u16"
+        },
+        {
+          "name": "len",
+          "type": "u32"
+        },
+        {
+          "name": "sha256",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "write_chunk",
+      "discriminator": [
+        93,
+        141,
+        167,
+        15,
+        209,
+        133,
+        137,
+        51
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "target",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "offset",
+          "type": "u32"
+        },
+        {
+          "name": "bytes",
+          "type": "bytes"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Palette",
+      "discriminator": [
+        5,
+        58,
+        0,
+        178,
+        193,
+        181,
+        156,
+        137
+      ]
+    },
+    {
+      "name": "RasterizerCode",
+      "discriminator": [
+        104,
+        47,
+        18,
+        23,
+        158,
+        214,
+        123,
+        46
+      ]
+    },
+    {
+      "name": "SpriteBook",
+      "discriminator": [
+        221,
+        187,
+        207,
+        182,
+        39,
+        92,
+        188,
+        5
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "BlobInitialized",
+      "discriminator": [
+        37,
+        158,
+        206,
+        25,
+        196,
+        188,
+        43,
+        51
+      ]
+    },
+    {
+      "name": "PaletteFinalized",
+      "discriminator": [
+        91,
+        60,
+        199,
+        136,
+        109,
+        44,
+        36,
+        16
+      ]
+    },
+    {
+      "name": "RasterizerFinalized",
+      "discriminator": [
+        156,
+        5,
+        199,
+        56,
+        254,
+        166,
+        18,
+        122
+      ]
+    },
+    {
+      "name": "SpriteBookFinalized",
+      "discriminator": [
+        103,
+        68,
+        224,
+        187,
+        136,
+        202,
+        19,
+        65
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "Unauthorized",
+      "msg": "Caller is not authorized for this instruction"
+    },
+    {
+      "code": 6001,
+      "name": "InvalidLength",
+      "msg": "Body length is zero or above the limit of this account kind"
+    },
+    {
+      "code": 6002,
+      "name": "AlreadyFinalized",
+      "msg": "The account is finalized and can no longer change"
+    },
+    {
+      "code": 6003,
+      "name": "OutOfBounds",
+      "msg": "Write is outside the body or the allocated part of the account"
+    },
+    {
+      "code": 6004,
+      "name": "NotFullyAllocated",
+      "msg": "The account is not extended to its full size yet"
+    },
+    {
+      "code": 6005,
+      "name": "AlreadyFullyAllocated",
+      "msg": "The account already has its full size"
+    },
+    {
+      "code": 6006,
+      "name": "HashMismatch",
+      "msg": "SHA-256 of the body does not match the expected hash"
+    },
+    {
+      "code": 6007,
+      "name": "InvalidBody",
+      "msg": "Body content is not valid for this account kind"
+    },
+    {
+      "code": 6008,
+      "name": "WrongAccount",
+      "msg": "Not a rasterizer, palette or sprite book account of this program"
+    },
+    {
+      "code": 6009,
+      "name": "WrongConfig",
+      "msg": "Not the registry GameConfig account"
+    }
+  ],
+  "types": [
+    {
+      "name": "BlobHeader",
+      "docs": [
+        "Common header of the three blob accounts. `version` is first after the discriminator.",
+        "",
+        "Byte offsets in the account data: version 8, kind 9, finalized 10, bump 11, len 12..16,",
+        "id 16..18, (pad 18..20), authority 20..52, expected_sha256 52..84, sha256 84..116, body 116."
+      ],
+      "serialization": "bytemuck",
+      "repr": {
+        "kind": "c"
+      },
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "kind",
+            "type": "u8"
+          },
+          {
+            "name": "finalized",
+            "docs": [
+              "1 after `finalize_*`; nothing can write afterwards."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "len",
+            "docs": [
+              "Body length in bytes."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "id",
+            "docs": [
+              "Rasterizer or palette version, or sprite book id (the PDA seed)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "_pad",
+            "type": {
+              "array": [
+                "u8",
+                2
+              ]
+            }
+          },
+          {
+            "name": "authority",
+            "docs": [
+              "`GameConfig.authority` at init; the only signer for extend, write and finalize."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "expected_sha256",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "sha256",
+            "docs": [
+              "SHA-256 of the body, set by `finalize_*`."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "BlobInitialized",
+      "docs": [
+        "A blob account was created (`init_*`)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "address",
+            "type": "pubkey"
+          },
+          {
+            "name": "kind",
+            "type": "u8"
+          },
+          {
+            "name": "id",
+            "type": "u16"
+          },
+          {
+            "name": "len",
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Palette",
+      "docs": [
+        "Master palette (crates/render/FORMAT.md 3.2).",
+        "PDA `[PALETTE, version: u16 LE]`. The body follows the header, see `state/blob.rs`."
+      ],
+      "serialization": "bytemuck",
+      "repr": {
+        "kind": "c"
+      },
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "header",
+            "type": {
+              "defined": {
+                "name": "BlobHeader"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "PaletteFinalized",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "address",
+            "type": "pubkey"
+          },
+          {
+            "name": "version",
+            "type": "u16"
+          },
+          {
+            "name": "sha256",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "RasterizerCode",
+      "docs": [
+        "WASM rasterizer binary, one account per rasterizer version.",
+        "PDA `[RASTERIZER, version: u16 LE]`. The body follows the header, see `state/blob.rs`."
+      ],
+      "serialization": "bytemuck",
+      "repr": {
+        "kind": "c"
+      },
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "header",
+            "type": {
+              "defined": {
+                "name": "BlobHeader"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "RasterizerFinalized",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "address",
+            "type": "pubkey"
+          },
+          {
+            "name": "version",
+            "type": "u16"
+          },
+          {
+            "name": "len",
+            "type": "u32"
+          },
+          {
+            "name": "sha256",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "SpriteBook",
+      "docs": [
+        "Sprite book (crates/render/FORMAT.md 3.3).",
+        "PDA `[SPRITES, book_id: u16 LE]`. The body follows the header, see `state/blob.rs`."
+      ],
+      "serialization": "bytemuck",
+      "repr": {
+        "kind": "c"
+      },
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "header",
+            "type": {
+              "defined": {
+                "name": "BlobHeader"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "SpriteBookFinalized",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "address",
+            "type": "pubkey"
+          },
+          {
+            "name": "book_id",
+            "type": "u16"
+          },
+          {
+            "name": "sha256",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

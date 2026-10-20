@@ -1,0 +1,1125 @@
+{
+  "address": "dZ1jraMfS3bAUTkRw2TA1ddg8UDGzgUdFQz5pmBxjoG",
+  "metadata": {
+    "name": "deadroll_registry",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Deadroll registry: GameConfig, aspect and resonance tables, bestiary, tileset, prefabs."
+  },
+  "instructions": [
+    {
+      "name": "init_config",
+      "docs": [
+        "First caller becomes the game authority. `programs` is in `ProgramIdx` order."
+      ],
+      "discriminator": [
+        23,
+        235,
+        115,
+        232,
+        168,
+        96,
+        1,
+        231
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "docs": [
+            "Becomes `GameConfig.authority`."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "programs",
+          "type": {
+            "array": [
+              "pubkey",
+              7
+            ]
+          }
+        },
+        {
+          "name": "uri_base",
+          "type": {
+            "array": [
+              "u8",
+              64
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "init_table",
+      "docs": [
+        "Authority creates an empty table."
+      ],
+      "discriminator": [
+        236,
+        14,
+        14,
+        155,
+        160,
+        169,
+        133,
+        111
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "table",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "arg",
+                "path": "kind"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "kind",
+          "type": {
+            "defined": {
+              "name": "TableKind"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "resize_config",
+      "docs": [
+        "Authority grows a pre-patch-7 `GameConfig` to the current size (one-time migration)."
+      ],
+      "discriminator": [
+        198,
+        164,
+        124,
+        15,
+        186,
+        11,
+        212,
+        150
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "set_palette",
+      "docs": [
+        "Authority points the config at a finalized `Palette`."
+      ],
+      "discriminator": [
+        193,
+        17,
+        21,
+        52,
+        136,
+        90,
+        209,
+        230
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "blob"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "set_programs",
+      "docs": [
+        "Authority replaces the trusted program list."
+      ],
+      "discriminator": [
+        92,
+        78,
+        9,
+        46,
+        111,
+        204,
+        237,
+        151
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "programs",
+          "type": {
+            "array": [
+              "pubkey",
+              7
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "set_rasterizer",
+      "docs": [
+        "Authority points the config at a finalized `RasterizerCode` (registry pulls, no CPI)."
+      ],
+      "discriminator": [
+        246,
+        129,
+        155,
+        94,
+        98,
+        198,
+        184,
+        14
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "blob"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "set_rasterizer_from_render",
+      "docs": [
+        "Render `finalize_rasterizer` (CPI, render `[\"authority\"]` signer) points the config at",
+        "the rasterizer it just finalized (`docs/STORAGE_AND_DELIVERY.md` 3.2)."
+      ],
+      "discriminator": [
+        99,
+        231,
+        173,
+        53,
+        230,
+        172,
+        197,
+        83
+      ],
+      "accounts": [
+        {
+          "name": "render_authority",
+          "docs": [
+            "The render program's `[\"authority\"]` PDA; checked against `GameConfig.programs[Render]`."
+          ],
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "blob"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "set_sprite_books",
+      "docs": [
+        "Authority sets the sprite books (remaining accounts, 1..=4 finalized, lookup order)."
+      ],
+      "discriminator": [
+        220,
+        27,
+        60,
+        86,
+        181,
+        8,
+        81,
+        171
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "set_uri_base",
+      "docs": [
+        "Authority sets the NFT metadata uri prefix."
+      ],
+      "discriminator": [
+        160,
+        250,
+        204,
+        89,
+        122,
+        8,
+        207,
+        34
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "uri_base",
+          "type": {
+            "array": [
+              "u8",
+              64
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "write_table",
+      "docs": [
+        "Authority writes whole records into a table."
+      ],
+      "discriminator": [
+        176,
+        247,
+        1,
+        154,
+        11,
+        166,
+        53,
+        140
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "table",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "arg",
+                "path": "kind"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "kind",
+          "type": {
+            "defined": {
+              "name": "TableKind"
+            }
+          }
+        },
+        {
+          "name": "offset",
+          "type": "u16"
+        },
+        {
+          "name": "bytes",
+          "type": "bytes"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "GameConfig",
+      "discriminator": [
+        45,
+        146,
+        146,
+        33,
+        170,
+        69,
+        96,
+        133
+      ]
+    },
+    {
+      "name": "Table",
+      "discriminator": [
+        34,
+        100,
+        138,
+        97,
+        236,
+        129,
+        230,
+        112
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "ConfigInitialized",
+      "discriminator": [
+        181,
+        49,
+        200,
+        156,
+        19,
+        167,
+        178,
+        91
+      ]
+    },
+    {
+      "name": "ConfigResized",
+      "discriminator": [
+        56,
+        250,
+        8,
+        107,
+        219,
+        7,
+        184,
+        33
+      ]
+    },
+    {
+      "name": "PaletteSet",
+      "discriminator": [
+        108,
+        211,
+        214,
+        77,
+        171,
+        168,
+        204,
+        209
+      ]
+    },
+    {
+      "name": "ProgramsSet",
+      "discriminator": [
+        126,
+        107,
+        158,
+        35,
+        119,
+        253,
+        63,
+        20
+      ]
+    },
+    {
+      "name": "RasterizerSet",
+      "discriminator": [
+        90,
+        51,
+        35,
+        158,
+        25,
+        176,
+        175,
+        74
+      ]
+    },
+    {
+      "name": "SpriteBooksSet",
+      "discriminator": [
+        122,
+        38,
+        137,
+        241,
+        217,
+        120,
+        151,
+        7
+      ]
+    },
+    {
+      "name": "TableCreated",
+      "discriminator": [
+        164,
+        233,
+        12,
+        97,
+        250,
+        213,
+        187,
+        147
+      ]
+    },
+    {
+      "name": "TableWritten",
+      "discriminator": [
+        0,
+        135,
+        154,
+        120,
+        77,
+        61,
+        159,
+        172
+      ]
+    },
+    {
+      "name": "UriBaseSet",
+      "discriminator": [
+        102,
+        154,
+        152,
+        184,
+        158,
+        225,
+        37,
+        124
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "Unauthorized",
+      "msg": "Caller is not the game authority"
+    },
+    {
+      "code": 6001,
+      "name": "EmptyProgramId",
+      "msg": "A program id in the list is empty"
+    },
+    {
+      "code": 6002,
+      "name": "WrongRegistryId",
+      "msg": "Slot 0 of the program list must be the registry itself"
+    },
+    {
+      "code": 6003,
+      "name": "WrongBlobOwner",
+      "msg": "Blob account is not owned by the render program"
+    },
+    {
+      "code": 6004,
+      "name": "WrongBlobAddress",
+      "msg": "Blob account is not the render PDA for its id"
+    },
+    {
+      "code": 6005,
+      "name": "WrongBlobKind",
+      "msg": "Blob account has the wrong type or layout version"
+    },
+    {
+      "code": 6006,
+      "name": "BlobNotFinalized",
+      "msg": "Blob is not finalized yet"
+    },
+    {
+      "code": 6007,
+      "name": "TableRangeOutOfBounds",
+      "msg": "Write goes past the end of the table"
+    },
+    {
+      "code": 6008,
+      "name": "TableMisaligned",
+      "msg": "Write is not aligned to the record size"
+    },
+    {
+      "code": 6009,
+      "name": "InvalidRecord",
+      "msg": "A record does not pass validation"
+    },
+    {
+      "code": 6010,
+      "name": "UntrustedCaller",
+      "msg": "Caller is not the authority PDA of the trusted render program"
+    },
+    {
+      "code": 6011,
+      "name": "WrongConfigAccount",
+      "msg": "Not the registry GameConfig account"
+    },
+    {
+      "code": 6012,
+      "name": "ConfigAlreadyResized",
+      "msg": "GameConfig already has its current size"
+    },
+    {
+      "code": 6013,
+      "name": "SpriteBookCount",
+      "msg": "Give 1 to 4 sprite books"
+    },
+    {
+      "code": 6014,
+      "name": "DuplicateSpriteBook",
+      "msg": "The same sprite book is given twice"
+    }
+  ],
+  "types": [
+    {
+      "name": "ConfigInitialized",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ConfigResized",
+      "docs": [
+        "A pre-patch-7 `GameConfig` grew to the current size."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "old_len",
+            "type": "u32"
+          },
+          {
+            "name": "new_len",
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GameConfig",
+      "docs": [
+        "`[\"config\"]`. Singleton: trusted program ids, the rasterizer pointer, the NFT uri base.",
+        "The struct name is part of the format: other programs check `account:GameConfig`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "core",
+            "type": {
+              "defined": {
+                "name": "GameConfigData"
+              }
+            }
+          },
+          {
+            "name": "sprite_books",
+            "docs": [
+              "Patch 7: the `SpriteBook`s the website draws from, in lookup order (`crates/render/FORMAT.md` 7).",
+              "`Pubkey::default()` is an empty slot; set slots come first."
+            ],
+            "type": {
+              "array": [
+                "pubkey",
+                4
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "GameConfigData",
+      "docs": [
+        "registry `[\"config\"]`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "programs",
+            "docs": [
+              "Trusted game program ids, indexed by `ProgramIdx`."
+            ],
+            "type": {
+              "array": [
+                "pubkey",
+                7
+              ]
+            }
+          },
+          {
+            "name": "rasterizer_version",
+            "type": "u16"
+          },
+          {
+            "name": "rasterizer",
+            "type": "pubkey"
+          },
+          {
+            "name": "rasterizer_sha256",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "palette",
+            "type": "pubkey"
+          },
+          {
+            "name": "uri_base",
+            "docs": [
+              "NFT metadata uri prefix, zero-padded."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PaletteSet",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "palette",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProgramsSet",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "programs",
+            "type": {
+              "array": [
+                "pubkey",
+                7
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "RasterizerSet",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "rasterizer",
+            "type": "pubkey"
+          },
+          {
+            "name": "version",
+            "type": "u16"
+          },
+          {
+            "name": "sha256",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "SpriteBooksSet",
+      "docs": [
+        "`GameConfig.sprite_books` replaced (empty slots are `Pubkey::default()`)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "sprite_books",
+            "type": {
+              "array": [
+                "pubkey",
+                4
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Table",
+      "docs": [
+        "`[\"aspects\"]`, `[\"resonances\"]`, `[\"bestiary\"]`, `[\"tileset\"]`, `[\"prefabs\"]`.",
+        "Fixed-size body, written in chunks by the authority. Record layouts: `state/records.rs`."
+      ],
+      "serialization": "bytemuck",
+      "repr": {
+        "kind": "c"
+      },
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "kind",
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "_pad",
+            "type": "u8"
+          },
+          {
+            "name": "len",
+            "docs": [
+              "Bytes written so far (highest end offset)."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "body",
+            "type": {
+              "array": [
+                "u8",
+                4096
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "TableCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "kind",
+            "type": {
+              "defined": {
+                "name": "TableKind"
+              }
+            }
+          },
+          {
+            "name": "table",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TableKind",
+      "docs": [
+        "Which table an instruction works on. Discriminants are part of the format: append only."
+      ],
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Aspects"
+          },
+          {
+            "name": "Resonances"
+          },
+          {
+            "name": "Bestiary"
+          },
+          {
+            "name": "Tileset"
+          },
+          {
+            "name": "Prefabs"
+          },
+          {
+            "name": "Traits"
+          },
+          {
+            "name": "MonsterSkills"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TableWritten",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "kind",
+            "type": {
+              "defined": {
+                "name": "TableKind"
+              }
+            }
+          },
+          {
+            "name": "offset",
+            "type": "u16"
+          },
+          {
+            "name": "len",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UriBaseSet",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "uri_base",
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "address": "2Cr5vB5awqDVx6XRcxtFFYQEG6Zy3aSAcKcqzh1xbVjS",
+  "metadata": {
+    "name": "deadroll_city",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Deadroll city: city, buildings, storage."
+  },
+  "instructions": [],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "Unauthorized",
+      "msg": "Caller is not authorized for this instruction"
+    }
+  ]
+}

@@ -1,0 +1,72 @@
+{
+  "address": "48FtbrDegNrAUHFza9HdJzZAvUo3uUNqs1kNnZxFsqJS",
+  "metadata": {
+    "name": "deadroll_items",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Deadroll items: item NFTs, affixes, crafting (later). Starter items and equipment live in deadroll-character."
+  },
+  "instructions": [],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "Unauthorized",
+      "msg": "Caller is not authorized for this instruction"
+    },
+    {
+      "code": 6001,
+      "name": "NotOwner",
+      "msg": "Only the character owner can do this"
+    },
+    {
+      "code": 6002,
+      "name": "CharacterLocked",
+      "msg": "The character is in a session: equipment is locked until it ends"
+    },
+    {
+      "code": 6003,
+      "name": "CharacterDead",
+      "msg": "The character is dead"
+    },
+    {
+      "code": 6004,
+      "name": "InvalidCharacter",
+      "msg": "Not a character account"
+    },
+    {
+      "code": 6005,
+      "name": "NoSuchItem",
+      "msg": "No such item in the loadout"
+    },
+    {
+      "code": 6006,
+      "name": "WrongSlot",
+      "msg": "This item is not worn in that slot"
+    },
+    {
+      "code": 6007,
+      "name": "LevelTooLow",
+      "msg": "Character level too low for this item"
+    },
+    {
+      "code": 6008,
+      "name": "SlotEmpty",
+      "msg": "Nothing is worn in that slot"
+    },
+    {
+      "code": 6009,
+      "name": "SessionTokenMissing",
+      "msg": "A session key needs its session token account"
+    },
+    {
+      "code": 6010,
+      "name": "InvalidSessionToken",
+      "msg": "Session token does not match the signer, the owner or the game"
+    },
+    {
+      "code": 6011,
+      "name": "SessionTokenExpired",
+      "msg": "Session token expired"
+    }
+  ]
+}

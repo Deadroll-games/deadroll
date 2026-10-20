@@ -1,0 +1,1157 @@
+{
+  "address": "2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH",
+  "metadata": {
+    "name": "deadroll_map",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Deadroll map: maps, layouts, validation and finalization."
+  },
+  "instructions": [
+    {
+      "name": "create_map",
+      "docs": [
+        "DM creates an empty draft map and its layout."
+      ],
+      "discriminator": [
+        119,
+        8,
+        165,
+        241,
+        187,
+        193,
+        182,
+        112
+      ],
+      "accounts": [
+        {
+          "name": "dm",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "map",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  112
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "dm"
+              },
+              {
+                "kind": "arg",
+                "path": "index"
+              }
+            ]
+          }
+        },
+        {
+          "name": "layout",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  97,
+                  121,
+                  111,
+                  117,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "map"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "index",
+          "type": "u32"
+        },
+        {
+          "name": "width",
+          "type": "u8"
+        },
+        {
+          "name": "height",
+          "type": "u8"
+        },
+        {
+          "name": "tier",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "finalize_map",
+      "docs": [
+        "DM finalizes a draft: builder rules, layout hash, secrets root. The map is immutable after."
+      ],
+      "discriminator": [
+        151,
+        243,
+        223,
+        118,
+        147,
+        143,
+        236,
+        26
+      ],
+      "accounts": [
+        {
+          "name": "dm",
+          "signer": true
+        },
+        {
+          "name": "map",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  112
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "map.core.dm",
+                "account": "Map"
+              },
+              {
+                "kind": "account",
+                "path": "map.core.index",
+                "account": "Map"
+              }
+            ]
+          }
+        },
+        {
+          "name": "layout",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  97,
+                  121,
+                  111,
+                  117,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "map"
+              }
+            ]
+          }
+        },
+        {
+          "name": "bestiary",
+          "docs": [
+            "spawns, read in place by `deadroll_registry::state::view`."
+          ],
+          "address": "3uJyWiz7NeVekP4w1iZkKxKnJ5pMbxC6ciz7kxN3MZtM"
+        },
+        {
+          "name": "monster_skills",
+          "address": "NQNEuKDUZhACnTJ9sD3dW49BoiPtJPatp6bpY61r81p"
+        }
+      ],
+      "args": [
+        {
+          "name": "secrets_root",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "set_status",
+      "docs": [
+        "Session program only: map enters or leaves a party."
+      ],
+      "discriminator": [
+        181,
+        184,
+        224,
+        203,
+        193,
+        29,
+        177,
+        224
+      ],
+      "accounts": [
+        {
+          "name": "map",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  112
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "map.core.dm",
+                "account": "Map"
+              },
+              {
+                "kind": "account",
+                "path": "map.core.index",
+                "account": "Map"
+              }
+            ]
+          }
+        },
+        {
+          "name": "session_authority",
+          "docs": [
+            "The session program's `[\"authority\"]` PDA, checked against `GameConfig` in the handler."
+          ],
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                9,
+                93,
+                27,
+                37,
+                218,
+                79,
+                221,
+                125,
+                83,
+                7,
+                123,
+                151,
+                252,
+                231,
+                65,
+                177,
+                65,
+                225,
+                242,
+                116,
+                20,
+                215,
+                178,
+                225,
+                173,
+                88,
+                9,
+                192,
+                113,
+                184,
+                209,
+                219
+              ]
+            }
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "status",
+          "type": {
+            "defined": {
+              "name": "MapStatus"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "write_layout",
+      "docs": [
+        "DM writes a chunk of tile bytes into a draft layout."
+      ],
+      "discriminator": [
+        69,
+        156,
+        24,
+        4,
+        127,
+        227,
+        225,
+        238
+      ],
+      "accounts": [
+        {
+          "name": "dm",
+          "signer": true
+        },
+        {
+          "name": "map",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  112
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "map.core.dm",
+                "account": "Map"
+              },
+              {
+                "kind": "account",
+                "path": "map.core.index",
+                "account": "Map"
+              }
+            ]
+          }
+        },
+        {
+          "name": "layout",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  97,
+                  121,
+                  111,
+                  117,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "map"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "offset",
+          "type": "u16"
+        },
+        {
+          "name": "tiles",
+          "type": "bytes"
+        }
+      ]
+    },
+    {
+      "name": "write_spawns",
+      "docs": [
+        "DM replaces the entrance, the exit and the spawn list of a draft layout."
+      ],
+      "discriminator": [
+        114,
+        49,
+        11,
+        50,
+        218,
+        233,
+        204,
+        14
+      ],
+      "accounts": [
+        {
+          "name": "dm",
+          "signer": true
+        },
+        {
+          "name": "map",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  112
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "map.core.dm",
+                "account": "Map"
+              },
+              {
+                "kind": "account",
+                "path": "map.core.index",
+                "account": "Map"
+              }
+            ]
+          }
+        },
+        {
+          "name": "layout",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  97,
+                  121,
+                  111,
+                  117,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "map"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "entrance",
+          "type": {
+            "defined": {
+              "name": "Cell"
+            }
+          }
+        },
+        {
+          "name": "exit",
+          "type": {
+            "defined": {
+              "name": "Cell"
+            }
+          }
+        },
+        {
+          "name": "spawns",
+          "type": {
+            "vec": {
+              "defined": {
+                "name": "Spawn"
+              }
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Map",
+      "discriminator": [
+        182,
+        30,
+        142,
+        151,
+        42,
+        241,
+        180,
+        244
+      ]
+    },
+    {
+      "name": "MapLayout",
+      "discriminator": [
+        142,
+        87,
+        223,
+        244,
+        59,
+        123,
+        62,
+        202
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "LayoutWritten",
+      "discriminator": [
+        20,
+        29,
+        255,
+        123,
+        35,
+        114,
+        153,
+        232
+      ]
+    },
+    {
+      "name": "MapCreated",
+      "discriminator": [
+        181,
+        95,
+        148,
+        189,
+        174,
+        98,
+        130,
+        22
+      ]
+    },
+    {
+      "name": "MapFinalized",
+      "discriminator": [
+        160,
+        31,
+        232,
+        172,
+        54,
+        16,
+        3,
+        149
+      ]
+    },
+    {
+      "name": "MapStatusChanged",
+      "discriminator": [
+        13,
+        243,
+        179,
+        168,
+        40,
+        49,
+        53,
+        2
+      ]
+    },
+    {
+      "name": "SpawnsWritten",
+      "discriminator": [
+        122,
+        132,
+        182,
+        168,
+        6,
+        2,
+        189,
+        173
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "NotDm",
+      "msg": "Only the map's DM can do this"
+    },
+    {
+      "code": 6001,
+      "name": "NotDraft",
+      "msg": "Map is not a draft"
+    },
+    {
+      "code": 6002,
+      "name": "ChunkOutOfRange",
+      "msg": "Chunk goes past the end of the tile grid"
+    },
+    {
+      "code": 6003,
+      "name": "InvalidConfig",
+      "msg": "Account is not the registry GameConfig"
+    },
+    {
+      "code": 6004,
+      "name": "UntrustedCaller",
+      "msg": "Caller is not the trusted game program's authority PDA"
+    },
+    {
+      "code": 6005,
+      "name": "InvalidStatusTransition",
+      "msg": "Map status cannot change this way"
+    },
+    {
+      "code": 6006,
+      "name": "SizeOutOfRange",
+      "msg": "Map side is outside 8..=32"
+    },
+    {
+      "code": 6007,
+      "name": "TierOutOfRange",
+      "msg": "Map tier has no limits"
+    },
+    {
+      "code": 6008,
+      "name": "InvalidTile",
+      "msg": "Byte is not a known tile"
+    },
+    {
+      "code": 6009,
+      "name": "EntranceCount",
+      "msg": "Map needs exactly one entrance tile"
+    },
+    {
+      "code": 6010,
+      "name": "ExitCount",
+      "msg": "Map needs exactly one exit tile"
+    },
+    {
+      "code": 6011,
+      "name": "EntranceMismatch",
+      "msg": "Entrance point is not on the entrance tile"
+    },
+    {
+      "code": 6012,
+      "name": "ExitMismatch",
+      "msg": "Exit point is not on the exit tile"
+    },
+    {
+      "code": 6013,
+      "name": "TooManySpawns",
+      "msg": "Too many spawns"
+    },
+    {
+      "code": 6014,
+      "name": "SpawnOutOfBounds",
+      "msg": "Spawn is outside the map"
+    },
+    {
+      "code": 6015,
+      "name": "SpawnNotPassable",
+      "msg": "Spawn is on an impassable tile"
+    },
+    {
+      "code": 6016,
+      "name": "SpawnOverlap",
+      "msg": "Spawn shares a cell with another spawn, the entrance or the exit"
+    },
+    {
+      "code": 6017,
+      "name": "UnknownMonster",
+      "msg": "Unknown bestiary id"
+    },
+    {
+      "code": 6018,
+      "name": "LevelOutOfTier",
+      "msg": "Monster level is outside the map tier"
+    },
+    {
+      "code": 6019,
+      "name": "BossCount",
+      "msg": "Map needs exactly one boss"
+    },
+    {
+      "code": 6020,
+      "name": "HelperOutsideBossPack",
+      "msg": "Boss helper outside the boss pack"
+    },
+    {
+      "code": 6021,
+      "name": "BossPackMixed",
+      "msg": "Regular monster in the boss pack"
+    },
+    {
+      "code": 6022,
+      "name": "TooManyHelpers",
+      "msg": "Too many boss helpers"
+    },
+    {
+      "code": 6023,
+      "name": "TooManyMonsters",
+      "msg": "Too many monsters for the map tier"
+    },
+    {
+      "code": 6024,
+      "name": "TooManyPacks",
+      "msg": "Too many packs for the map tier"
+    },
+    {
+      "code": 6025,
+      "name": "TwoLoners",
+      "msg": "Two loners in one pack"
+    },
+    {
+      "code": 6026,
+      "name": "PackTooSpread",
+      "msg": "Pack monsters stand too far apart"
+    },
+    {
+      "code": 6027,
+      "name": "ExitUnreachable",
+      "msg": "No path from the entrance to the exit"
+    },
+    {
+      "code": 6028,
+      "name": "SpawnUnreachable",
+      "msg": "A spawn cannot be reached from the entrance"
+    },
+    {
+      "code": 6029,
+      "name": "TierBelowTemplate",
+      "msg": "Map tier is below the monster's minimum tier"
+    },
+    {
+      "code": 6030,
+      "name": "MonsterSkillUnknown",
+      "msg": "A chosen skill is not in the monster's pool"
+    },
+    {
+      "code": 6031,
+      "name": "MonsterSkillCount",
+      "msg": "Choose as many skills of each kind as the monster has slots (all if fewer)"
+    },
+    {
+      "code": 6032,
+      "name": "EliteBoss",
+      "msg": "A boss cannot be elite"
+    },
+    {
+      "code": 6033,
+      "name": "TooManyElites",
+      "msg": "Too many elite monsters for the map tier"
+    },
+    {
+      "code": 6034,
+      "name": "TooManySessionSkills",
+      "msg": "Too many different monster skills for one party"
+    },
+    {
+      "code": 6035,
+      "name": "InvalidRegistryTable",
+      "msg": "Account is not the registry bestiary or monster skills table"
+    }
+  ],
+  "types": [
+    {
+      "name": "Cell",
+      "docs": [
+        "A map cell coordinate."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "x",
+            "type": "u8"
+          },
+          {
+            "name": "y",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LayoutWritten",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "map",
+            "type": "pubkey"
+          },
+          {
+            "name": "offset",
+            "type": "u16"
+          },
+          {
+            "name": "len",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Map",
+      "docs": [
+        "`[\"map\", dm, index: u32 LE]`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "core",
+            "type": {
+              "defined": {
+                "name": "MapData"
+              }
+            }
+          },
+          {
+            "name": "tier",
+            "docs": [
+              "Map tier: monster levels and limits (`deadroll_mapcheck::limits`)."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MapCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "map",
+            "type": "pubkey"
+          },
+          {
+            "name": "dm",
+            "type": "pubkey"
+          },
+          {
+            "name": "index",
+            "type": "u32"
+          },
+          {
+            "name": "width",
+            "type": "u8"
+          },
+          {
+            "name": "height",
+            "type": "u8"
+          },
+          {
+            "name": "tier",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MapData",
+      "docs": [
+        "map `[\"map\", dm, map_index]`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "dm",
+            "type": "pubkey"
+          },
+          {
+            "name": "index",
+            "type": "u32"
+          },
+          {
+            "name": "width",
+            "type": "u8"
+          },
+          {
+            "name": "height",
+            "type": "u8"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "MapStatus"
+              }
+            }
+          },
+          {
+            "name": "layout_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "secrets_root",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MapFinalized",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "map",
+            "type": "pubkey"
+          },
+          {
+            "name": "dm",
+            "type": "pubkey"
+          },
+          {
+            "name": "layout_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "secrets_root",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "MapLayout",
+      "docs": [
+        "`[\"layout\", map]`. `finalize_map` hashes the core bytes into `Map.layout_hash`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "core",
+            "type": {
+              "defined": {
+                "name": "MapLayoutData"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "MapLayoutData",
+      "docs": [
+        "map `[\"layout\", map]`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "map",
+            "type": "pubkey"
+          },
+          {
+            "name": "tiles",
+            "docs": [
+              "Row-major `Tile` bytes, `MAP_MAX` cells per row."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                1024
+              ]
+            }
+          },
+          {
+            "name": "spawns",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "Spawn"
+                  }
+                },
+                24
+              ]
+            }
+          },
+          {
+            "name": "spawn_count",
+            "type": "u8"
+          },
+          {
+            "name": "entrance",
+            "type": {
+              "defined": {
+                "name": "Cell"
+              }
+            }
+          },
+          {
+            "name": "exit",
+            "type": {
+              "defined": {
+                "name": "Cell"
+              }
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MapStatus",
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Draft"
+          },
+          {
+            "name": "Finalized"
+          },
+          {
+            "name": "InSession"
+          },
+          {
+            "name": "Finished"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MapStatusChanged",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "map",
+            "type": "pubkey"
+          },
+          {
+            "name": "from",
+            "type": {
+              "defined": {
+                "name": "MapStatus"
+              }
+            }
+          },
+          {
+            "name": "to",
+            "type": {
+              "defined": {
+                "name": "MapStatus"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Spawn",
+      "docs": [
+        "A monster spawn point in a map layout."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bestiary_id",
+            "type": "u8"
+          },
+          {
+            "name": "x",
+            "type": "u8"
+          },
+          {
+            "name": "y",
+            "type": "u8"
+          },
+          {
+            "name": "level",
+            "type": "u8"
+          },
+          {
+            "name": "skills",
+            "type": "u16"
+          },
+          {
+            "name": "flags",
+            "type": "u8"
+          },
+          {
+            "name": "aspects",
+            "type": "u8"
+          },
+          {
+            "name": "pack",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SpawnsWritten",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "map",
+            "type": "pubkey"
+          },
+          {
+            "name": "spawn_count",
+            "type": "u8"
+          }
+        ]
+      }
+    }
+  ]
+}
