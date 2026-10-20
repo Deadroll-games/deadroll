@@ -7,12 +7,12 @@ The Vite + React + TypeScript website: wallet, session key, rasterizer loader, C
 
 ## Rules for this zone
 - Docs: CLAUDE.md section 8 (demo script), crates/render/FORMAT.md section 7 (WASM ABI), crates/combat/wasm/README.md (HitResult), docs/STORAGE_AND_DELIVERY.md, docs/GAME_COMMISSIONS.md (session keys).
-- `src/chain/` is the thin typed wrapper over the programs until `sdk/` (L8, Codama) lands. Layouts mirror `agents/CONTRACTS.md` 4 and lane fields; discriminators are pinned in `disc.ts` and recomputed in tests. When sdk/ exists, replace the wrapper, keep the names.
+- `src/chain/` is a thin layer over `@deadroll/sdk` (Codama, generated from the IDLs): instructions, accounts, PDAs, errors and events come from it, program addresses too (`config.ts` re-exports them). No layouts or discriminators of our programs here; tests pin bytes against Anchor's sha256 rule and hand-built encodings.
 - The rasterizer is always loaded from chain and checked against `GameConfig.rasterizer_sha256` and the finalized header. No fallback to a bundled WASM. Mock mode builds synthetic accounts and runs the same check.
 - Components in `src/components/*` are pure UI over the props in their `types.ts` (no chain calls). Changing a `types.ts` is the lane owner's call.
 - Pixel art: integer scale, `imageSmoothingEnabled = false`, class `pixel`.
 - After `CharacterDied` the app sends `character.freeze_tombstone` (`src/chain/tombstone.ts`).
-- Instruction builders go through the IDL snapshot in `src/chain/idl/` (`programs.ts` `buildInstruction`); mirror `tests/demo.test.ts` account lists. After an IDL change, copy `target/idl/deadroll_{session,character,items,map}.json` here and run the tests.
+- Instruction builders call the generated `get*Instruction` (remaining accounts through `withRemaining`); mirror `tests/demo.test.ts` account lists. Enums are numbers (`variantKey` for names) and Rust options are kit `Option`s (`optional`). After an IDL change, run `pnpm --filter @deadroll/sdk generate`, then the tests.
 - The mock VRF oracle (`MOCK_VRF`) and the dev wallet (`?dev=1`) are gated on a localhost RPC. Never relax that gate.
 - Forbidden: editing other zones, crates/types, agents/CONTRACTS.md, sdk/ by hand.
 

@@ -1,31 +1,22 @@
 // Items: the character's gear (soulbound starter items and what is worn, by slot, in
 // `Character.gear`), the equip instructions, item icons and what worn items add. Slot and base
-// lists come from the character IDL (the enums' order on chain); item numbers come from
+// lists come from the sdk's generated enums (their order on chain); item numbers come from
 // balance.json, the program defaults exported by
 // `cargo run -p deadroll-sim --example export_balance -- config` (a sim test fails when it is
 // stale), so nothing here repeats a rule or a number.
 import type { Address, Instruction, TransactionSigner } from "@solana/kit";
 import { LAYER, MATERIAL, RAMP, renderRequest, TOMBSTONE } from "./appearance";
 import balance from "./balance.json";
-import type { Idl } from "./coder";
-import { variantKey, type CharacterAcc, type GearAcc } from "./game";
-import characterIdl from "./idl/deadroll_character.json";
-import { buildInstruction } from "./programs";
+import { EquipSlot, EquipSource, getEquipInstruction, getUnequipInstruction, ItemBase } from "@deadroll/sdk/character";
+import { enumKeys, variantKey, type CharacterAcc, type GearAcc } from "./game";
 import { Class, LAYERS_MAX, type LayerRef, type RenderRequest } from "./types";
 
 const lowerFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 
-/** Variant names of an IDL enum in on-chain order, as the coder keys them ("mainHand"). */
-function variants(name: string): string[] {
-  const t = (characterIdl as unknown as Idl).types?.find((x) => x.name === name);
-  if (!t || t.type.kind !== "enum") throw new Error(`character IDL has no enum ${name}`);
-  return t.type.variants.map((v) => lowerFirst(v.name));
-}
-
 /** `EquipSlot` in discriminant order. */
-export const EQUIP_SLOTS: readonly string[] = variants("EquipSlot");
+export const EQUIP_SLOTS: readonly string[] = enumKeys(EquipSlot);
 /** `ItemBase` in discriminant order. */
-export const ITEM_BASES: readonly string[] = variants("ItemBase");
+export const ITEM_BASES: readonly string[] = enumKeys(ItemBase);
 /** An empty slot in a worn-items snapshot (`Participation.equipment`). */
 export const EMPTY_ITEM = 0xff;
 
@@ -45,13 +36,13 @@ export type Inventory = { items: InventoryItem[]; slots: { slot: string; item: I
 export function inventory(g: GearAcc): Inventory {
   const items: InventoryItem[] = g.items.slice(0, g.itemCount).map((r, index) => ({
     index,
-    base: variantKey(r.base),
+    base: variantKey(ItemBase, r.base),
     level: r.level,
     worn: null,
   }));
   const slots = EQUIP_SLOTS.map((slot, i) => {
     const r = g.equipped[i];
-    const item = r && variantKey(r.source) === "soulbound" ? (items[r.index] ?? null) : null;
+    const item = r && r.source === EquipSource.Soulbound ? (items[r.index] ?? null) : null;
     if (item) item.worn = slot;
     return { slot, item };
   });
@@ -72,12 +63,18 @@ export function slotsFor(base: string): string[] {
 // ---------------------------------------------------------------------------------------------
 // instructions (character program: the owner's wallet, or the session key with its token)
 
+function slotIndex(slot: string): EquipSlot {
+  const i = EQUIP_SLOTS.indexOf(slot);
+  if (i < 0) throw new Error(`no equip slot ${slot}`);
+  return i as EquipSlot;
+}
+
 export async function equipIx(signer: TransactionSigner, character: Address, itemIndex: number, slot: string, token: Address | null): Promise<Instruction> {
-  return buildInstruction("character", "equip", { itemIndex, slot }, { signer, character, sessionToken: token });
+  return getEquipInstruction({ signer, character, sessionToken: token ?? undefined, itemIndex, slot: slotIndex(slot) });
 }
 
 export async function unequipIx(signer: TransactionSigner, character: Address, slot: string, token: Address | null): Promise<Instruction> {
-  return buildInstruction("character", "unequip", { slot }, { signer, character, sessionToken: token });
+  return getUnequipInstruction({ signer, character, sessionToken: token ?? undefined, slot: slotIndex(slot) });
 }
 
 // ---------------------------------------------------------------------------------------------

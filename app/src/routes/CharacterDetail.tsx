@@ -4,13 +4,11 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import type { Address } from "@solana/kit";
 import { isCurrentAppearance } from "../chain/appearance";
+import { Category, Effect, Form, Purpose, Source, Target, Trigger } from "@deadroll/sdk/character";
 import {
-  ASPECT_KEYS,
-  CLASS_KEYS,
-  RACE_KEYS,
   bytesText,
-  enumIndex,
   getAccount,
+  optional,
   readParty,
   status,
   variantKey,
@@ -18,7 +16,6 @@ import {
   type CharacterAcc,
   type GearAcc,
   type SkillRecordAcc,
-  type SkillSetAcc,
 } from "../chain/game";
 import {
   EQUIP_SLOTS,
@@ -72,7 +69,7 @@ export function inventoryView(g: GearAcc): InventoryItemView[] {
 export function inventoryLock(c: CharacterAcc, viewer: Address | null): string | null {
   if (!c.core.alive) return "A tombstone: its soulbound items vanished with it.";
   if (viewer !== c.core.owner) return "Only the owner can change the equipment.";
-  if (c.core.inSession) return "In a party: the equipment is locked until it ends.";
+  if (optional(c.core.inSession)) return "In a party: the equipment is locked until it ends.";
   return null;
 }
 
@@ -81,7 +78,7 @@ export function inventoryLock(c: CharacterAcc, viewer: Address | null): string |
 export function spendLock(c: CharacterAcc, viewer: Address | null): string | null {
   if (!c.core.alive) return "A tombstone spends nothing.";
   if (viewer !== c.core.owner) return "Only the owner's wallet can spend them.";
-  if (c.core.inSession) return "In a party: spend them after it ends.";
+  if (optional(c.core.inSession)) return "In a party: spend them after it ends.";
   return null;
 }
 
@@ -99,13 +96,13 @@ const RANGE: Record<string, number> = { strike: 1, projectile: 6 };
 export function skillAspects(s: SkillRecordAcc): string {
   return s.blocks.aspects
     .slice(0, s.blocks.aspectCount)
-    .map((a, i) => `${aspectName(enumIndex(a, ASPECT_KEYS) as Aspect)} ${formatBp(s.sharesBp[i] ?? 0)}`)
+    .map((a, i) => `${aspectName(a as Aspect)} ${formatBp(s.sharesBp[i] ?? 0)}`)
     .join(" · ");
 }
 
 /** The session `act` instruction takes every Active skill (a buff or debuff needs its effect). */
 export const usableInCombat = (s: SkillRecordAcc): boolean =>
-  variantKey(s.blocks.category) === "active" && (variantKey(s.blocks.purpose) === "damage" || variantKey(s.blocks.effect) !== "none");
+  s.blocks.category === Category.Active && (s.blocks.purpose === Purpose.Damage || s.blocks.effect !== Effect.None);
 
 export function CharacterDetailPage() {
   const { address } = useParams<{ address: string }>();
@@ -125,13 +122,13 @@ export function CharacterDetailPage() {
     const addr = address as Address;
     try {
       const [acc, set] = await Promise.all([
-        getAccount<CharacterAcc>("character", "Character", addr),
-        getAccount<SkillSetAcc>("character", "SkillSet", await skillSetPda(addr)),
+        getAccount("Character", addr),
+        getAccount("SkillSet", await skillSetPda(addr)),
       ]);
       setC(acc ?? "missing");
       setPlan([0, 0, 0, 0]);
       setSkills(set ? set.skills.slice(0, set.count) : []);
-      const session = acc?.core.inSession ?? null;
+      const session = acc ? optional(acc.core.inSession) : null;
       if (session) {
         const p = await readParty(session);
         const me = p?.players.find((x) => x.character === addr);
@@ -229,9 +226,10 @@ export function CharacterDetailView({
   const dead = !c.core.alive;
   const current = isCurrentAppearance(c.core.appearance);
   const img = useRenderImage(current ? characterRequest(c) : null);
-  const race = enumIndex(c.core.race, RACE_KEYS) as Race;
-  const cls = enumIndex(c.core.class, CLASS_KEYS) as Class;
-  const pred = enumIndex(c.core.predisposition, ASPECT_KEYS) as Aspect;
+  const race = c.core.race as Race;
+  const cls = c.core.class as Class;
+  const pred = c.core.predisposition as Aspect;
+  const nft = optional(c.core.nft);
   const name = bytesText(c.name);
   const hp = dead ? `0 / ${c.core.hpMax}` : party ? `${party.hp} / ${c.core.hpMax}` : `${c.core.hpMax} (max)`;
 
@@ -257,10 +255,10 @@ export function CharacterDetailView({
             <a href={explorerUrl("address", address)} target="_blank" rel="noreferrer">
               PDA
             </a>
-            {c.core.nft && (
+            {nft && (
               <>
                 {" · "}
-                <a href={explorerUrl("address", c.core.nft)} target="_blank" rel="noreferrer">
+                <a href={explorerUrl("address", nft)} target="_blank" rel="noreferrer">
                   Core NFT
                 </a>
               </>
@@ -292,9 +290,9 @@ export function CharacterDetailView({
           <p>
             {party.status} · slot {party.slot} · HP {party.hp} · <Link to={`/party?s=${party.session}`}>open party</Link>
           </p>
-        ) : c.core.inSession ? (
+        ) : optional(c.core.inSession) ? (
           <p className="muted">
-            In party <span className="mono">{c.core.inSession}</span>, details unavailable.
+            In party <span className="mono">{optional(c.core.inSession)}</span>, details unavailable.
           </p>
         ) : (
           <p className="muted">Not in a party.</p>
@@ -329,19 +327,19 @@ export function CharacterDetailView({
                       {!usableInCombat(s) && <span className="muted"> · not usable in combat</span>}
                     </td>
                     <td>
-                      {variantLabel(s.blocks.category)} {variantLabel(s.blocks.purpose).toLowerCase()} · {variantLabel(s.blocks.source)}
+                      {variantLabel(Category, s.blocks.category)} {variantLabel(Purpose, s.blocks.purpose).toLowerCase()} · {variantLabel(Source, s.blocks.source)}
                     </td>
                     <td>{skillAspects(s)}</td>
                     <td>
-                      {variantLabel(s.blocks.form)} (range {RANGE[variantKey(s.blocks.form)] ?? "?"})
+                      {variantLabel(Form, s.blocks.form)} (range {RANGE[variantKey(Form, s.blocks.form)] ?? "?"})
                     </td>
                     <td>
-                      {variantLabel(s.blocks.target)}
+                      {variantLabel(Target, s.blocks.target)}
                       {s.blocks.auraRadius > 0 ? ` · aura ${s.blocks.auraRadius}` : ""}
                     </td>
                     <td>{formatBp(s.powerBp)}</td>
-                    <td>{variantLabel(s.blocks.effect)}</td>
-                    <td>{variantLabel(s.blocks.trigger)}</td>
+                    <td>{variantLabel(Effect, s.blocks.effect)}</td>
+                    <td>{variantLabel(Trigger, s.blocks.trigger)}</td>
                     <td>{s.cooldown}</td>
                   </tr>
                 ))}

@@ -2,7 +2,8 @@
 // cascade and hit breakdown consume. The IDL keeps fixed arrays plus counts; the app keeps only
 // the used entries.
 import type { Address } from "@solana/kit";
-import { enumIndex, type Enum } from "./game";
+import { ItemBase } from "@deadroll/sdk/session";
+import { optional, variantKey } from "./game";
 import type {
   AccuracyBuff,
   ActiveState,
@@ -23,56 +24,24 @@ import type {
   TintRoll,
 } from "./types";
 
-const ASPECTS = ["fire", "cold", "lightning", "blood", "blunt", "piercing"];
-const STATES = ["burning", "chill", "freeze", "bleeding", "shock", "stun", "penetration"];
-const CARRIERS = ["race", "class", "item"];
-const OUTCOMES = ["miss", "hit", "immune"];
-const APPLIED = ["none", "added", "refreshed", "froze"];
-const OP_KINDS = [
-  "none",
-  "multiplier",
-  "stateOnCrit",
-  "extraStateChance",
-  "linked",
-  "linkedChance",
-  "linkedMod",
-  "nativeTurns",
-  "nativePower",
-  "nativeFaster",
-  "nativePowerArmor",
-  "thawDamage",
-  "removeState",
-  "jump",
-  "jumpChain",
-  "jumpLine",
-  "knockback",
-  "igniteCells",
-  "addPacket",
-  "penetrate",
-  "accuracyBuff",
-];
-const ORIGINS = ["pair", "template", "trait"];
-const JUMP_MODES = ["adjacent", "chain", "line"];
-const MOD_KINDS = ["haste", "slow", "empowerment", "weakening", "protection", "vulnerability"];
-
 function activeState(s: any): ActiveState {
-  return { kind: enumIndex(s.kind, STATES) as StateKind, turns: s.turns, power: s.power, source: s.source };
+  return { kind: s.kind as StateKind, turns: s.turns, power: s.power, source: s.source };
 }
 
 function accuracyBuff(b: any): AccuracyBuff {
   return { aspect: b ? aspect(b.aspect) : (0 as AccuracyBuff["aspect"]), turns: b?.turns ?? 0, bonus: b?.bonus ?? 0 };
 }
 
-const aspect = (e: Enum) => enumIndex(e, ASPECTS) as TintRoll["base"];
+const aspect = (e: number) => e as TintRoll["base"];
 
 function stateRoll(s: any): StateRoll {
   return {
-    kind: enumIndex(s.kind, STATES) as StateRoll["kind"],
+    kind: s.kind as StateRoll["kind"],
     rolled: s.rolled,
     chanceBp: s.chanceBp,
     roll: s.roll,
     success: s.success,
-    applied: enumIndex(s.applied, APPLIED) as StateRoll["applied"],
+    applied: s.applied as StateRoll["applied"],
   };
 }
 
@@ -80,37 +49,39 @@ export function toHitResult(r: any): HitResult {
   const tintRolls: TintRoll[] = (r.tintRolls as any[]).slice(0, r.tintRollCount).map((t) => ({
     base: aspect(t.base),
     tint: aspect(t.tint),
-    carrier: enumIndex(t.carrier, CARRIERS) as TintRoll["carrier"],
+    carrier: t.carrier as TintRoll["carrier"],
     tier: t.tier,
     chanceBp: t.chanceBp,
     roll: t.roll,
     success: t.success,
   }));
-  const resonances: (Resonance | null)[] = (r.resonances as any[]).map((x) =>
-    x
+  const resonances: (Resonance | null)[] = (r.resonances as any[]).map((o) => {
+    const x = optional<any>(o);
+    const secondTint = x ? optional<number>(x.secondTint) : null;
+    return x
       ? {
           base: aspect(x.base),
           tint: aspect(x.tint),
           tier: x.tier,
-          carrier: enumIndex(x.carrier, CARRIERS) as Resonance["carrier"],
+          carrier: x.carrier as Resonance["carrier"],
           id: x.id,
           active: x.active,
-          secondTint: x.secondTint ? aspect(x.secondTint) : null,
+          secondTint: secondTint === null ? null : aspect(secondTint),
           secondTier: x.secondTier ?? 0,
-          secondCarrier: (x.secondCarrier ? enumIndex(x.secondCarrier, CARRIERS) : 0) as Resonance["carrier"],
+          secondCarrier: (x.secondCarrier ? x.secondCarrier : 0) as Resonance["carrier"],
           generated: x.generated ?? false,
         }
-      : null,
-  );
+      : null;
+  });
   const resOps: OpResult[][] = ((r.resOps ?? []) as any[][]).map((slot) =>
     slot
       .map((o) => ({
-        kind: enumIndex(o.kind, OP_KINDS) as OpResult["kind"],
+        kind: o.kind as OpResult["kind"],
         critOnly: o.critOnly,
         arg: o.arg,
-        origin: enumIndex(o.origin, ORIGINS) as OpResult["origin"],
+        origin: o.origin as OpResult["origin"],
         tint: aspect(o.tint),
-        carrier: enumIndex(o.carrier, CARRIERS) as OpResult["carrier"],
+        carrier: o.carrier as OpResult["carrier"],
         tier: o.tier,
         acted: o.acted,
         state: stateRoll(o.state),
@@ -120,14 +91,14 @@ export function toHitResult(r: any): HitResult {
       .filter((o) => o.kind !== 0),
   );
   const jumps: Jump[] = ((r.jumps ?? []) as any[]).slice(0, r.jumpCount ?? 0).map((j) => ({
-    mode: enumIndex(j.mode, JUMP_MODES) as Jump["mode"],
+    mode: j.mode as Jump["mode"],
     state: activeState(j.state),
-    filter: enumIndex(j.filter, STATES) as StateKind,
+    filter: j.filter as StateKind,
     limit: j.limit,
     base: aspect(j.base),
   }));
   const targetMods: TimedMod[] = ((r.targetMods ?? []) as any[]).slice(0, r.targetModCount ?? 0).map((m) => ({
-    kind: enumIndex(m.kind, MOD_KINDS) as TimedMod["kind"],
+    kind: m.kind as TimedMod["kind"],
     aspect: aspect(m.aspect),
     turns: m.turns,
     powerBp: m.powerBp,
@@ -155,12 +126,12 @@ export function toHitResult(r: any): HitResult {
   }));
   const states: ActiveState[] = (r.states as any[]).filter((s) => s.turns > 0).map(activeState);
   return {
-    outcome: enumIndex(r.outcome, OUTCOMES) as HitResult["outcome"],
+    outcome: r.outcome as HitResult["outcome"],
     d20: r.d20,
     attackTotal: r.attackTotal,
     defense: r.defense,
     crit: r.crit,
-    critRoll: r.critRoll,
+    critRoll: optional<number>(r.critRoll),
     tintRolls,
     resonances,
     d100: r.d100,
@@ -190,8 +161,8 @@ export function toResonanceSpread(ev: any): ResonanceSpread {
     target: ev.target,
     hits: (ev.hits as any[]).slice(0, ev.hitCount).map((h) => ({
       monster: h.monster,
-      kind: enumIndex(h.kind, STATES) as StateKind,
-      applied: enumIndex(h.applied, APPLIED) as Applied,
+      kind: h.kind as StateKind,
+      applied: h.applied as Applied,
       states: (h.states as any[]).filter((s) => s.turns > 0).map(activeState),
     })),
     moved: ev.moved ? { from: cell(ev.movedFrom), to: cell(ev.movedTo) } : null,
@@ -202,8 +173,10 @@ export function toResonanceSpread(ev: any): ResonanceSpread {
   };
 }
 
+const weaponKey = (base: number | null): string | null => (base === null ? null : variantKey(ItemBase, base) || null);
+
 const itemSide = (x: any): ItemBonusView => ({
-  weapon: x?.weapon ? (Object.keys(x.weapon)[0] ?? null) : null,
+  weapon: x?.weapon ? weaponKey(optional<number>(x.weapon)) : null,
   armor: x?.armor ?? 0,
   defense: x?.defense ?? 0,
   attack: x?.attack ?? 0,

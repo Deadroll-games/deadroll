@@ -6,15 +6,12 @@ import type { CharacterDraft } from "../components/forms/types";
 import { characterAppearance, isCurrentAppearance, renderRequest } from "../chain/appearance";
 import { characterRequest, dressed, starterEquipment } from "../chain/items";
 import {
-  ASPECT_KEYS,
-  CLASS_KEYS,
-  RACE_KEYS,
   RACE_PREDISPOSITIONS,
   bytesText,
   createCharacterIxs,
+  optional,
   skillDescriptionIxs,
   SKILL_PRESETS,
-  enumIndex,
   myCharacters,
   type CharacterAcc,
 } from "../chain/game";
@@ -131,9 +128,9 @@ export function CharacterCard({ address, c }: { address: Address; c: CharacterAc
   const current = isCurrentAppearance(c.core.appearance);
   const req = current ? characterRequest(c) : null;
   const img = useRenderImage(req);
-  const race = enumIndex(c.core.race, RACE_KEYS) as Race;
-  const cls = enumIndex(c.core.class, CLASS_KEYS) as Class;
-  const pred = enumIndex(c.core.predisposition, ASPECT_KEYS) as Aspect;
+  const race = c.core.race as Race;
+  const cls = c.core.class as Class;
+  const pred = c.core.predisposition as Aspect;
   // The whole card opens the detail view; explorer links (PDA, Core NFT) live there.
   return (
     <Link to={`/character/${address}`} className="char-card-link" aria-label={`Open ${bytesText(c.name)}`}>
@@ -145,7 +142,7 @@ export function CharacterCard({ address, c }: { address: Address; c: CharacterAc
             {raceName(race)} {className(cls)} · {aspectName(pred)} · lvl {c.core.level} · {c.core.xp} xp
           </span>
           <span className={dead ? "error" : "ok"}>
-            {dead ? `Tombstone${c.nftFrozen ? " · NFT frozen" : " · freeze pending"}` : c.core.inSession ? "In a party" : "Alive"}
+            {dead ? `Tombstone${c.nftFrozen ? " · NFT frozen" : " · freeze pending"}` : optional(c.core.inSession) ? "In a party" : "Alive"}
           </span>
           <span className="muted">Details →</span>
         </figcaption>

@@ -2,20 +2,11 @@
 // a skill targets, the EffectResolved / ModsTicked events in app shape, and their log lines.
 // Pure functions over decoded accounts and events.
 import type { Address } from "@solana/kit";
-import { ASPECT_KEYS, MOD_KEYS, bytesText, enumIndex, type Enum, type MapSkillAcc, type SkillRecordAcc, type TimedModAcc } from "./game";
+import { bytesText, optional, type MapSkillAcc, type SkillRecordAcc, type TimedModAcc } from "./game";
 import { ASPECT_NAMES, effectAmount } from "./names";
 import { Effect, Form, Purpose, RangeTag, Target, derive, skillSide, usableInCombat, type Category, type Side, type SkillBlocks } from "./skillcheck";
 import { Applied, HitOutcome, type Aspect, type ModKind, type TimedMod } from "./types";
 
-const EFFECT_KEYS = ["none", "weakening", "slow", "vulnerability", "stun", "freeze", "haste", "empowerment", "protection", "heal"] as const;
-const PURPOSE_KEYS = ["damage", "buff", "debuff"] as const;
-const CATEGORY_KEYS = ["active", "reactive", "passive"] as const;
-const FORM_KEYS = ["strike", "projectile"] as const;
-const RANGE_KEYS = ["melee", "ranged"] as const;
-const TARGET_KEYS = ["single", "line"] as const;
-const TRIGGER_KEYS = ["none", "hit", "critHit", "hpBelow", "allyHpBelow", "controlled", "enemyAdjacent"] as const;
-const OUTCOMES = ["miss", "hit", "immune"];
-const APPLIED = ["none", "added", "refreshed", "froze"];
 export const MOD_NAMES = ["Haste", "Slow", "Empowerment", "Weakening", "Protection", "Vulnerability"] as const;
 /** Haste, Empowerment, Protection help the bearer; the rest hurt. */
 export const modIsBuff = (k: ModKind): boolean => k === 0 || k === 2 || k === 4;
@@ -24,7 +15,7 @@ export const modIsBuff = (k: ModKind): boolean => k === 0 || k === 2 || k === 4;
 export function activeMods(mods: readonly TimedModAcc[] | undefined): TimedMod[] {
   return (mods ?? [])
     .filter((m) => m.turns > 0)
-    .map((m) => ({ kind: enumIndex(m.kind, MOD_KEYS) as ModKind, aspect: enumIndex(m.aspect, ASPECT_KEYS) as Aspect, turns: m.turns, powerBp: m.powerBp, source: m.source }));
+    .map((m) => ({ kind: m.kind as ModKind, aspect: m.aspect as Aspect, turns: m.turns, powerBp: m.powerBp, source: m.source }));
 }
 
 /** Own turns a modifier still covers after the current one (`turns` counts the next start too). */
@@ -94,15 +85,15 @@ export type CombatSkill = {
 export function recordBlocks(k: SkillRecordAcc): SkillBlocks {
   const b = k.blocks;
   return {
-    category: enumIndex(b.category, CATEGORY_KEYS) as Category,
-    purpose: enumIndex(b.purpose, PURPOSE_KEYS) as Purpose,
-    source: (Object.keys(b.source)[0] === "combat" ? 1 : 0) as SkillBlocks["source"],
-    form: enumIndex(b.form, FORM_KEYS) as Form,
-    target: enumIndex(b.target, TARGET_KEYS) as Target,
-    aspects: b.aspects.map((a) => enumIndex(a, ASPECT_KEYS)) as SkillBlocks["aspects"],
+    category: b.category as Category,
+    purpose: b.purpose as Purpose,
+    source: b.source as SkillBlocks["source"],
+    form: b.form as Form,
+    target: b.target as Target,
+    aspects: [...b.aspects] as SkillBlocks["aspects"],
     aspectCount: b.aspectCount,
-    effect: enumIndex(b.effect, EFFECT_KEYS) as Effect,
-    trigger: enumIndex(b.trigger, TRIGGER_KEYS) as SkillBlocks["trigger"],
+    effect: b.effect as Effect,
+    trigger: b.trigger as SkillBlocks["trigger"],
     auraRadius: b.auraRadius,
   };
 }
@@ -112,7 +103,7 @@ export function combatSkill(slot: number, k: SkillRecordAcc, map: MapSkillAcc | 
   const blocks = recordBlocks(k);
   const { purpose, effect, form, category } = blocks;
   const usable = usableInCombat(blocks);
-  const range = map ? (enumIndex(map.ext.range, RANGE_KEYS) as RangeTag) : form === Form.Projectile ? RangeTag.Ranged : RangeTag.Melee;
+  const range = map ? (map.ext.range as RangeTag) : form === Form.Projectile ? RangeTag.Ranged : RangeTag.Melee;
   const apCost = map ? map.apCost : derive(blocks).apCost;
   const line = blocks.target === Target.Line;
   return { slot, name: bytesText(k.name), category, usable, purpose, side: skillSide(purpose), form, effect, range, apCost, line };
@@ -166,22 +157,22 @@ export function toEffectResolved(ev: any): EffectResolved {
     seed: ev.seed,
     actionCounter: ev.actionCounter,
     skillSlot: ev.skillSlot,
-    effect: enumIndex(ev.effect as Enum, EFFECT_KEYS) as Effect,
+    effect: ev.effect as Effect,
     rider: ev.rider,
     roll: {
-      outcome: enumIndex(r.outcome, OUTCOMES) as HitOutcome,
+      outcome: r.outcome as HitOutcome,
       d20: r.d20,
       attackTotal: r.attackTotal,
       defense: r.defense,
       crit: r.crit,
-      critRoll: r.critRoll,
+      critRoll: optional<number>(r.critRoll),
       chanceBp: r.chanceBp,
-      chanceRoll: r.chanceRoll,
+      chanceRoll: optional<number>(r.chanceRoll),
       d100: r.d100,
       amount: r.amount,
       rollsUsed: r.rollsUsed,
     },
-    applied: enumIndex(ev.applied, APPLIED) as Applied,
+    applied: ev.applied as Applied,
     hp: ev.hp,
     mods: activeMods(ev.mods),
   };

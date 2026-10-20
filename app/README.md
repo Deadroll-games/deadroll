@@ -77,8 +77,7 @@ Reads only `app/.env.devnet` (public values). Chain data only: mock data, the `/
 
 | Path | What |
 |---|---|
-| `src/chain/` | types, decoders, PDAs, instruction builders, log/event parsing, tombstone watcher (thin wrapper until `sdk/`) |
-| `src/chain/idl/` | snapshot of `target/idl` for session, character, map; `coder.ts` encodes and decodes with it (Anchor TS conventions) |
+| `src/chain/` | the screens' calls over `@deadroll/sdk` (generated from the IDLs): instruction builders, account reads, PDAs, events, tombstone watcher |
 | `src/chain/game.ts` | the demo calls of `tests/demo.test.ts` as instruction builders and reads; `useParty.ts` live party state + events |
 | `src/raster/` | rasterizer loader (GameConfig -> RasterizerCode -> SHA-256 -> IndexedDB -> WASM), C ABI wrapper, `SpriteCanvas` |
 | `src/session-key/` | MagicBlock Session Keys `create_session_v2`, burner key for the tab |

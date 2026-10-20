@@ -1,6 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Address } from "@solana/kit";
+import { SessionStatus } from "@deadroll/sdk/session";
 import type { Party } from "../chain/game";
 import { Claims } from "./PartyChain";
 
@@ -26,7 +27,7 @@ const player = (slot: number, owner: Address, title: string) => ({
 function party(settledMask = 0): Party {
   return {
     address: "Sess111111111111111111111111111111111111111" as Address,
-    session: { core: { status: { victory: {} }, map: DEFAULT }, xpPool: 120, settledMask, aliveMask: 0b11 },
+    session: { core: { status: SessionStatus.Victory, map: DEFAULT }, xpPool: 120, settledMask, aliveMask: 0b11 },
     players: [player(0, ME, "Bran"), player(1, OTHER, "Mira")],
     escrow: null,
   } as unknown as Party;

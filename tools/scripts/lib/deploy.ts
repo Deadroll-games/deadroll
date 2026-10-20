@@ -15,7 +15,6 @@ import {
   createTransactionMessage,
   getAddressDecoder,
   getAddressEncoder,
-  getProgramDerivedAddress,
   pipe,
   sendAndConfirmTransactionFactory,
   setTransactionMessageFeePayerSigner,
@@ -24,6 +23,20 @@ import {
   type Address,
   type KeyPairSigner,
 } from "@solana/kit";
+import { PROGRAM_CRATES, PROGRAMS as SDK_PROGRAMS, type ProgramName } from "@deadroll/sdk";
+import { MapStatus, findLayoutPda, findMapPda, getCreateMapInstruction, getFinalizeMapInstruction, getMapDecoder, getWriteLayoutInstruction, getWriteSpawnsInstruction } from "@deadroll/sdk/map";
+import {
+  findTablePda,
+  getGameConfigDataDecoder,
+  getGameConfigDecoder,
+  getInitConfigInstruction,
+  getResizeConfigInstruction,
+  getSetPaletteInstruction,
+  getSetProgramsInstruction,
+  getSetRasterizerInstruction,
+  getSetSpriteBooksInstruction,
+  getSetUriBaseInstruction,
+} from "@deadroll/sdk/registry";
 import { GAME_CONFIG, connect, pda as blobPda, parseHeader } from "./render-program.ts";
 import { MAP_STRIDE, layoutBytes, loadMapPreset, type MapPreset } from "./demo-map.ts";
 
@@ -35,23 +48,13 @@ const PROGRAMDATA_HEADER = 45;
 /** Below this a `.so` is a `no-entrypoint` build, not a program (the smallest real one is ~48 KB). */
 const MIN_PROGRAM_SIZE = 16 * 1024;
 
-/** `ProgramIdx` order (crates/types): the order `init_config` expects. */
-export const PROGRAMS = [
-  { key: "registry", name: "deadroll_registry" },
-  { key: "render", name: "deadroll_render_program" },
-  { key: "character", name: "deadroll_character" },
-  { key: "items", name: "deadroll_items" },
-  { key: "map", name: "deadroll_map" },
-  { key: "session", name: "deadroll_session" },
-  { key: "city", name: "deadroll_city" },
-] as const;
+/** `ProgramIdx` order (crates/types): the order `init_config` expects. Ids and crates from the sdk. */
+export const PROGRAMS = (Object.keys(SDK_PROGRAMS) as ProgramName[]).map((key) => ({ key, name: PROGRAM_CRATES[key] }));
 
 /** `programs/session/src/vrf.rs`: only a mock-vrf build references the mock identity. */
 const MOCK_VRF_IDENTITY = "5RotSMue7vx9xBPp3L8iQEKbKSc3ezbY4GqiJxDEe6sN";
 const VRF_IDENTITY = "Bj7XBktwDmAg6J4FohS6oRHbevD6MMd8jnCZKvzKPiKV";
 
-/** `GameConfig` byte offsets (discriminator included), programs/registry README. */
-const CFG = { authority: 9, programs: 41, rasterizerVersion: 265, rasterizer: 267, sha: 299, palette: 331, uri: 363, spriteBooks: 428 };
 /** `GameConfig` account size before patch 7 (discriminator + `GameConfigData`) and now (+ `sprite_books: [Pubkey; 4]`). */
 const CONFIG_LEGACY_LEN = 8 + 420;
 const CONFIG_LEN = CONFIG_LEGACY_LEN + 4 * 32;
@@ -60,9 +63,6 @@ const EMPTY_ADDRESS = "11111111111111111111111111111111";
 /** Rasterizer version of sprite format 2 (crates/render/FORMAT.md); version 1 and book 1 hold format 1. */
 export const RASTERIZER_VERSION = 2;
 const ASSETS = "target/render-assets";
-/** `Map` byte offsets: discriminator, version, dm, index u32, width, height, status. */
-const MAP_STATUS = 8 + 1 + 32 + 4 + 1 + 1;
-const MAP_STATUS_NAMES = ["Draft", "Finalized", "InSession", "Finished"];
 
 export type Cluster = "local" | "devnet";
 export type DeployOptions = {
@@ -86,20 +86,6 @@ export type DeployOptions = {
 const enc = new TextEncoder();
 const sha256 = (bytes: Uint8Array) => new Uint8Array(createHash("sha256").update(bytes).digest());
 const sol = (lamports: bigint | number) => (Number(lamports) / 1e9).toFixed(4);
-
-function cat(...parts: Uint8Array[]): Uint8Array {
-  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
-  let o = 0;
-  for (const p of parts) {
-    out.set(p, o);
-    o += p.length;
-  }
-  return out;
-}
-const u8 = (n: number) => new Uint8Array([n & 0xff]);
-const u16 = (n: number) => new Uint8Array([n & 0xff, (n >>> 8) & 0xff]);
-const u32 = (n: number) => new Uint8Array([n & 0xff, (n >>> 8) & 0xff, (n >>> 16) & 0xff, (n >>> 24) & 0xff]);
-const vec = (bytes: Uint8Array) => cat(u32(bytes.length), bytes);
 
 function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false;
@@ -195,17 +181,6 @@ export async function loadKeypair(path: string): Promise<KeyPairSigner> {
   return createKeyPairSignerFromBytes(Uint8Array.from(parsed as number[]));
 }
 
-/** Program ids from `[programs.<cluster>]` in Anchor.toml. */
-export function anchorIds(cluster: Cluster): Record<string, string> {
-  const toml = readFileSync(join(ROOT, "Anchor.toml"), "utf8");
-  const section = cluster === "local" ? "localnet" : "devnet";
-  const body = toml.split(`[programs.${section}]`)[1]?.split(/^\[/m)[0];
-  if (!body) throw new Error(`Anchor.toml has no [programs.${section}]`);
-  const ids: Record<string, string> = {};
-  for (const m of body.matchAll(/^(\w+)\s*=\s*"(\w+)"/gm)) ids[m[1]] = m[2];
-  return ids;
-}
-
 /**
  * Where deploys come from: each program's `.so` copied right after its own `anchor build -p`.
  * target/deploy itself is not safe: a later `-p` build overwrites the programs it depends on there
@@ -214,48 +189,6 @@ export function anchorIds(cluster: Cluster): Record<string, string> {
 const STAGE = join(ROOT, "target/deploy-stage");
 const soPath = (name: string) => join(STAGE, `${name}.so`);
 const keypairPath = (name: string) => join(ROOT, "target/deploy", `${name}-keypair.json`);
-
-type IdlIx = { name: string; discriminator: number[]; accounts: { name: string; writable?: boolean; signer?: boolean; optional?: boolean; address?: string }[] };
-const idlCache = new Map<string, IdlIx[]>();
-function idlIx(program: string, ix: string): IdlIx {
-  if (!idlCache.has(program)) {
-    const path = join(ROOT, "target/idl", `${program}.json`);
-    if (!existsSync(path)) throw new Error(`${path} missing; build first`);
-    idlCache.set(program, JSON.parse(readFileSync(path, "utf8")).instructions);
-  }
-  const found = idlCache.get(program)!.find((i) => i.name === ix);
-  if (!found) throw new Error(`${program} IDL has no instruction ${ix}`);
-  return found;
-}
-
-/** An instruction from the IDL's account list (names in snake_case) and Borsh-encoded args. */
-function ixFromIdl(
-  programId: string,
-  program: string,
-  name: string,
-  accounts: Record<string, string | KeyPairSigner>,
-  args: Uint8Array = new Uint8Array(),
-) {
-  const ix = idlIx(program, name);
-  return {
-    programAddress: address(programId),
-    accounts: ix.accounts.map((a) => {
-      const given = accounts[a.name] ?? a.address;
-      if (given === undefined) throw new Error(`${name}: account ${a.name} not given`);
-      const signer = typeof given === "string" ? undefined : given;
-      const addr = typeof given === "string" ? address(given) : given.address;
-      const role = a.signer
-        ? a.writable
-          ? AccountRole.WRITABLE_SIGNER
-          : AccountRole.READONLY_SIGNER
-        : a.writable
-          ? AccountRole.WRITABLE
-          : AccountRole.READONLY;
-      return signer ? { address: addr, role, signer } : { address: addr, role };
-    }),
-    data: cat(new Uint8Array(ix.discriminator), args),
-  };
-}
 
 // ---------------------------------------------------------------------------------------------
 // RPC
@@ -361,13 +294,13 @@ async function preflight(conn: Rpc, opts: DeployOptions, wallet: KeyPairSigner, 
   const version = await conn.rpc.getVersion().send().catch(() => null);
   if (!version) throw new Error(`no RPC at ${opts.url}`);
   console.log(`rpc ${opts.url} (solana-core ${version["solana-core"]})`);
-  const ids = anchorIds(opts.cluster);
   const programIds: Record<string, string> = {};
   for (const p of PROGRAMS) {
     if (!existsSync(keypairPath(p.name))) throw new Error(`${keypairPath(p.name)} missing; program keypairs are never generated here`);
     const kp = await loadKeypair(keypairPath(p.name));
-    if (ids[p.name] !== kp.address) {
-      throw new Error(`${p.name}: keypair is ${kp.address} but Anchor.toml says ${ids[p.name]}`);
+    // The sdk ids are the IDL addresses; an sdk test keeps them equal to Anchor.toml.
+    if (SDK_PROGRAMS[p.key] !== kp.address) {
+      throw new Error(`${p.name}: keypair is ${kp.address} but the sdk (Anchor.toml) says ${SDK_PROGRAMS[p.key]}`);
     }
     programIds[p.key] = kp.address;
   }
@@ -422,7 +355,7 @@ async function estimateCost(conn: Rpc, opts: DeployOptions, programIds: Record<s
     add(`GameConfig resize ${cfgNow.length} -> ${CONFIG_LEN} B`, (await rentFor(conn.rpc, CONFIG_LEN)) - (await rentFor(conn.rpc, cfgNow.length)));
   }
   for (const seed of ["aspects", "resonances", "bestiary", "tileset", "prefabs", "traits", "monster_skills"]) {
-    const [table] = await getProgramDerivedAddress({ programAddress: address(programIds.registry), seeds: [enc.encode(seed)] });
+    const [table] = await findTablePda({ seed });
     if (!(await fetchData(conn.rpc, table))) add(`registry table ${seed}`, await rentFor(conn.rpc, 16 + 4096));
   }
   const blobs: [string, "rasterizer" | "palette" | "sprite_book", number][] = [
@@ -479,33 +412,34 @@ function uriBytes(uri: string): Uint8Array {
 
 async function ensureConfig(conn: Rpc, opts: DeployOptions, wallet: KeyPairSigner, programIds: Record<string, string>) {
   step("GameConfig");
-  const list = cat(...PROGRAMS.map((p) => addrBytes(programIds[p.key])));
+  const programs = PROGRAMS.map((p) => address(programIds[p.key]));
+  const accounts = { authority: wallet, config: GAME_CONFIG };
   let cfg = await fetchData(conn.rpc, GAME_CONFIG);
   if (!cfg) {
-    await send(conn, wallet, [
-      ixFromIdl(programIds.registry, "deadroll_registry", "init_config", { authority: wallet, config: GAME_CONFIG }, cat(list, uriBytes(opts.uriBase))),
-    ]);
+    await send(conn, wallet, [getInitConfigInstruction({ ...accounts, systemProgram: SYSTEM_PROGRAM, programs, uriBase: uriBytes(opts.uriBase) })]);
     console.log(`init_config: ${GAME_CONFIG}, authority ${wallet.address}`);
     return;
   }
-  const authority = addrAt(cfg, CFG.authority);
+  // GameConfigData: read alike before patch 7 (no sprite_books) and after.
+  const core = getGameConfigDataDecoder().decode(cfg, 8);
+  const authority = core.authority;
   if (authority !== wallet.address) {
     throw new Error(`GameConfig authority is ${authority}, not this wallet; reset the validator or use that wallet`);
   }
   if (cfg.length < CONFIG_LEN) {
     // Patch 7 appended `sprite_books`: an older account must grow before anything can load it.
-    await send(conn, wallet, [ixFromIdl(programIds.registry, "deadroll_registry", "resize_config", { authority: wallet, config: GAME_CONFIG })]);
+    await send(conn, wallet, [getResizeConfigInstruction({ ...accounts, systemProgram: SYSTEM_PROGRAM })]);
     console.log(`resize_config: ${cfg.length} -> ${CONFIG_LEN} bytes`);
   }
-  if (!sameBytes(cfg.subarray(CFG.programs, CFG.programs + list.length), list)) {
-    await send(conn, wallet, [ixFromIdl(programIds.registry, "deadroll_registry", "set_programs", { authority: wallet, config: GAME_CONFIG }, list)]);
+  if (core.programs.length !== programs.length || core.programs.some((a, i) => a !== programs[i])) {
+    await send(conn, wallet, [getSetProgramsInstruction({ ...accounts, programs })]);
     console.log("set_programs: program list updated");
   } else {
     console.log(`exists: ${GAME_CONFIG}, programs match`);
   }
   cfg = (await fetchData(conn.rpc, GAME_CONFIG))!;
-  if (opts.uriBaseExplicit && !sameBytes(cfg.subarray(CFG.uri, CFG.uri + URI_BASE_LEN), uriBytes(opts.uriBase))) {
-    await send(conn, wallet, [ixFromIdl(programIds.registry, "deadroll_registry", "set_uri_base", { authority: wallet, config: GAME_CONFIG }, uriBytes(opts.uriBase))]);
+  if (opts.uriBaseExplicit && !sameBytes(Uint8Array.from(getGameConfigDataDecoder().decode(cfg, 8).uriBase), uriBytes(opts.uriBase))) {
+    await send(conn, wallet, [getSetUriBaseInstruction({ ...accounts, uriBase: uriBytes(opts.uriBase) })]);
     console.log(`set_uri_base: ${opts.uriBase}`);
   }
 }
@@ -540,7 +474,7 @@ async function uploadRender(conn: Rpc, opts: DeployOptions, wallet: KeyPairSigne
   // resonance tables (aspects, traits, resonances) into the session; finalize_map reads the
   // bestiary and the monster skills (patch 6).
   for (const seed of ["bestiary", "tileset", "aspects", "traits", "resonances", "monster_skills"]) {
-    const [table] = await getProgramDerivedAddress({ programAddress: address(programIds.registry), seeds: [enc.encode(seed)] });
+    const [table] = await findTablePda({ seed });
     const data = await fetchData(conn.rpc, table);
     if (!data || data.subarray(16).every((b) => b === 0)) throw new Error(`registry ${seed} table ${table} is not seeded`);
   }
@@ -562,30 +496,30 @@ async function uploadRender(conn: Rpc, opts: DeployOptions, wallet: KeyPairSigne
   const rasterizer = await blobPda("rasterizer", opts.rasterizerVersion);
   const palette = await blobPda("palette", palVersion);
   const raster = parseHeader((await fetchData(conn.rpc, rasterizer))!);
-  const cfg = (await fetchData(conn.rpc, GAME_CONFIG))!;
+  const cfg = getGameConfigDecoder().decode((await fetchData(conn.rpc, GAME_CONFIG))!);
   const accounts = { authority: wallet, config: GAME_CONFIG };
-  if (addrAt(cfg, CFG.rasterizer) === rasterizer && sameBytes(cfg.subarray(CFG.sha, CFG.sha + 32), raster.sha256)) {
+  if (cfg.core.rasterizer === rasterizer && sameBytes(Uint8Array.from(cfg.core.rasterizerSha256), raster.sha256)) {
     console.log(`rasterizer: already ${rasterizer}`);
   } else {
-    await send(conn, wallet, [ixFromIdl(programIds.registry, "deadroll_registry", "set_rasterizer", { ...accounts, blob: rasterizer })]);
+    await send(conn, wallet, [getSetRasterizerInstruction({ ...accounts, blob: address(rasterizer) })]);
     console.log(`set_rasterizer: ${rasterizer}`);
   }
-  if (addrAt(cfg, CFG.palette) === palette) {
+  if (cfg.core.palette === palette) {
     console.log(`palette: already ${palette}`);
   } else {
-    await send(conn, wallet, [ixFromIdl(programIds.registry, "deadroll_registry", "set_palette", { ...accounts, blob: palette })]);
+    await send(conn, wallet, [getSetPaletteInstruction({ ...accounts, blob: address(palette) })]);
     console.log(`set_palette: ${palette}`);
   }
   const books: string[] = [];
   for (const b of bookFiles()) books.push(await blobPda("sprite_book", b.id));
-  const now = [0, 1, 2, 3].map((i) => addrAt(cfg, CFG.spriteBooks + i * 32));
+  const now: string[] = cfg.spriteBooks;
   const want = [...books, ...Array(4 - books.length).fill(EMPTY_ADDRESS)];
   if (now.every((b, i) => b === want[i])) {
     console.log(`sprite books: already [${books.join(", ")}]`);
   } else {
-    const ix = ixFromIdl(programIds.registry, "deadroll_registry", "set_sprite_books", accounts);
-    for (const b of books) ix.accounts.push({ address: address(b), role: AccountRole.READONLY });
-    await send(conn, wallet, [ix]);
+    // The books ride as remaining accounts, in lookup order.
+    const ix = getSetSpriteBooksInstruction(accounts);
+    await send(conn, wallet, [{ ...ix, accounts: [...ix.accounts, ...books.map((b) => ({ address: address(b), role: AccountRole.READONLY }))] }]);
     console.log(`set_sprite_books: [${books.join(", ")}]`);
   }
   return { rasterizer, palette, paletteVersion: palVersion, books };
@@ -593,49 +527,39 @@ async function uploadRender(conn: Rpc, opts: DeployOptions, wallet: KeyPairSigne
 
 export async function mapAddresses(mapProgram: string, dm: string, index: number) {
   const programAddress = address(mapProgram);
-  const [map] = await getProgramDerivedAddress({ programAddress, seeds: [enc.encode("map"), addrBytes(dm), u32(index)] });
-  const [layout] = await getProgramDerivedAddress({ programAddress, seeds: [enc.encode("layout"), addrBytes(map)] });
+  const [map] = await findMapPda({ dm: address(dm), index }, { programAddress });
+  const [layout] = await findLayoutPda({ map }, { programAddress });
   return { map, layout };
-}
-
-/** `write_spawns(entrance, exit, spawns)` args: Cell, Cell, Vec<Spawn> (9 bytes each). */
-function spawnsArgs(p: MapPreset): Uint8Array {
-  const spawns = p.spawns.map((s) =>
-    cat(u8(s.bestiaryId), u8(s.x), u8(s.y), u8(s.level), u16(s.skills), u8(s.flags), u8(s.aspects), u8(s.pack)),
-  );
-  return cat(u8(p.entrance.x), u8(p.entrance.y), u8(p.exit.x), u8(p.exit.y), u32(spawns.length), ...spawns);
 }
 
 async function ensureDemoMap(conn: Rpc, opts: DeployOptions, wallet: KeyPairSigner, programIds: Record<string, string>) {
   step("demo map");
   const preset = loadMapPreset();
   const { map, layout } = await mapAddresses(programIds.map, wallet.address, opts.mapIndex);
-  const prog = programIds.map;
   const edit = { dm: wallet, map, layout };
   let data = await fetchData(conn.rpc, map);
   if (!data) {
     await send(conn, wallet, [
-      ixFromIdl(prog, "deadroll_map", "create_map", edit, cat(u32(opts.mapIndex), u8(preset.width), u8(preset.height), u8(preset.tier))),
+      getCreateMapInstruction({ ...edit, systemProgram: SYSTEM_PROGRAM, index: opts.mapIndex, width: preset.width, height: preset.height, tier: preset.tier }),
     ]);
     console.log(`create_map: ${map} (index ${opts.mapIndex})`);
     data = (await fetchData(conn.rpc, map))!;
   }
-  const status = data[MAP_STATUS];
-  if (status !== 0) {
-    const name = MAP_STATUS_NAMES[status] ?? String(status);
+  const status = getMapDecoder().decode(data).core.status;
+  if (status !== MapStatus.Draft) {
+    const name = MapStatus[status] ?? String(status);
     if (status === 1) console.log(`${map}: already Finalized`);
     else console.log(`${map}: status ${name}; a session used it. For a fresh demo map pass --map-index ${opts.mapIndex + 1}`);
     return { map, layout, status: name, preset };
   }
   if (MAP_STRIDE !== 32) throw new Error("unexpected stride");
-  await send(conn, wallet, [ixFromIdl(prog, "deadroll_map", "write_layout", edit, cat(u16(0), vec(layoutBytes(preset))))]);
-  await send(conn, wallet, [ixFromIdl(prog, "deadroll_map", "write_spawns", edit, spawnsArgs(preset))]);
+  await send(conn, wallet, [getWriteLayoutInstruction({ ...edit, offset: 0, tiles: layoutBytes(preset) })]);
+  await send(conn, wallet, [getWriteSpawnsInstruction({ ...edit, entrance: preset.entrance, exit: preset.exit, spawns: preset.spawns })]);
   // No secret cells in the demo preset; a fixed root keeps reruns identical. The builder rules
   // read the registry bestiary and monster skills (roles, pools, slots).
-  const table = async (seed: string) =>
-    (await getProgramDerivedAddress({ programAddress: address(programIds.registry), seeds: [enc.encode(seed)] }))[0];
-  const finalize = { ...edit, bestiary: await table("bestiary"), monster_skills: await table("monster_skills") };
-  await send(conn, wallet, [ixFromIdl(prog, "deadroll_map", "finalize_map", finalize, sha256(enc.encode(`deadroll:${preset.name}:no-secrets`)))]);
+  const table = async (seed: string) => (await findTablePda({ seed }))[0];
+  const secretsRoot = sha256(enc.encode(`deadroll:${preset.name}:no-secrets`));
+  await send(conn, wallet, [getFinalizeMapInstruction({ ...edit, bestiary: await table("bestiary"), monsterSkills: await table("monster_skills"), secretsRoot })]);
   console.log(`write_layout, write_spawns, finalize_map: ${map} Finalized`);
   return { map, layout, status: "Finalized", preset };
 }

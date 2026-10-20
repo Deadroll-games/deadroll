@@ -3,7 +3,14 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { AccountRole, getAddressDecoder, type Address } from "@solana/kit";
 import { concat, toHex, u16le, u32le } from "./bytes";
-import { ACCOUNT_DISC, EVENT_DISC, IX_DISC } from "./disc";
+import {
+  CHARACTER_DIED_EVENT_DISCRIMINATOR,
+  CHARACTER_DISCRIMINATOR,
+  FREEZE_TOMBSTONE_DISCRIMINATOR,
+  TOMBSTONE_FROZEN_EVENT_DISCRIMINATOR,
+} from "@deadroll/sdk/character";
+import { GAME_CONFIG_DISCRIMINATOR } from "@deadroll/sdk/registry";
+import { PALETTE_DISCRIMINATOR, RASTERIZER_CODE_DISCRIMINATOR, SPRITE_BOOK_DISCRIMINATOR } from "@deadroll/sdk/render";
 import { encodeBlob, encodeGameConfig } from "./fixtures";
 import { decodeBlob, decodeBlobHeader, decodeCharacter, decodeCharacterDied, decodeGameConfig } from "./layouts";
 import { gameConfigPda, rasterizerPda } from "./pda";
@@ -17,11 +24,21 @@ const A = (n: number) => new Uint8Array(32).fill(n);
 const addrOf = (n: number): Address => getAddressDecoder().decode(A(n));
 const b64 = (b: Uint8Array) => Buffer.from(b).toString("base64");
 
+const ACCOUNT_DISC = {
+  GameConfig: GAME_CONFIG_DISCRIMINATOR,
+  Character: CHARACTER_DISCRIMINATOR,
+  RasterizerCode: RASTERIZER_CODE_DISCRIMINATOR,
+  Palette: PALETTE_DISCRIMINATOR,
+  SpriteBook: SPRITE_BOOK_DISCRIMINATOR,
+};
+const EVENT_DISC = { CharacterDied: CHARACTER_DIED_EVENT_DISCRIMINATOR, TombstoneFrozen: TOMBSTONE_FROZEN_EVENT_DISCRIMINATOR };
+const bytes = (b: ArrayLike<number>) => Uint8Array.from(b);
+
 describe("discriminators", () => {
-  it("match sha256 of the Anchor names", () => {
-    for (const [k, v] of Object.entries(ACCOUNT_DISC)) expect(toHex(v), k).toBe(disc(`account:${k}`));
-    for (const [k, v] of Object.entries(IX_DISC)) expect(toHex(v), k).toBe(disc(`global:${k}`));
-    for (const [k, v] of Object.entries(EVENT_DISC)) expect(toHex(v), k).toBe(disc(`event:${k}`));
+  it("the sdk's match sha256 of the Anchor names", () => {
+    for (const [k, v] of Object.entries(ACCOUNT_DISC)) expect(toHex(bytes(v)), k).toBe(disc(`account:${k}`));
+    expect(toHex(bytes(FREEZE_TOMBSTONE_DISCRIMINATOR))).toBe(disc("global:freeze_tombstone"));
+    for (const [k, v] of Object.entries(EVENT_DISC)) expect(toHex(bytes(v)), k).toBe(disc(`event:${k}`));
   });
 });
 
@@ -60,9 +77,9 @@ describe("GameConfig", () => {
 
   it("rejects a wrong discriminator and short data", () => {
     expect(() => decodeGameConfig(new Uint8Array(428))).toThrow(/not a GameConfig/);
-    expect(() => decodeGameConfig(concat(ACCOUNT_DISC.GameConfig, new Uint8Array(10)))).toThrow(/too short/);
+    expect(() => decodeGameConfig(concat(bytes(ACCOUNT_DISC.GameConfig), new Uint8Array(10)))).toThrow();
     // A pre-patch-7 account (no sprite_books) is not read: the registry resize_config runs first.
-    expect(() => decodeGameConfig(concat(ACCOUNT_DISC.GameConfig, new Uint8Array(420)))).toThrow(/too short/);
+    expect(() => decodeGameConfig(concat(bytes(ACCOUNT_DISC.GameConfig), new Uint8Array(420)))).toThrow();
   });
 });
 
@@ -96,7 +113,7 @@ describe("render blobs", () => {
 function characterBytes(opts: { nft: boolean; alive: boolean; frozen: boolean }): Uint8Array {
   const layer = concat(u16le(101), new Uint8Array([2, 3, 0]));
   return concat(
-    ACCOUNT_DISC.Character,
+    bytes(ACCOUNT_DISC.Character),
     new Uint8Array([1]),
     A(9),
     new Uint8Array([0]),
@@ -114,6 +131,8 @@ function characterBytes(opts: { nft: boolean; alive: boolean; frozen: boolean })
     new Uint8Array([253]),
     concat(new TextEncoder().encode("Aria"), new Uint8Array(28)),
     new Uint8Array([2, opts.frozen ? 1 : 0]),
+    // Gear and class tier, zero: the account is allocated at its full size.
+    new Uint8Array(512),
   );
 }
 
@@ -133,7 +152,7 @@ describe("Character", () => {
 });
 
 function diedEvent(nft: boolean): Uint8Array {
-  return concat(EVENT_DISC.CharacterDied, A(1), A(2), A(3), nft ? concat(new Uint8Array([1]), A(4)) : new Uint8Array([0]), u32le(7));
+  return concat(bytes(EVENT_DISC.CharacterDied), A(1), A(2), A(3), nft ? concat(new Uint8Array([1]), A(4)) : new Uint8Array([0]), u32le(7));
 }
 
 describe("events", () => {
@@ -146,7 +165,7 @@ describe("events", () => {
       stateVersion: 7,
     });
     expect(decodeCharacterDied(diedEvent(false))?.nft).toBeNull();
-    expect(decodeCharacterDied(concat(EVENT_DISC.TombstoneFrozen, A(1), A(2)))).toBeNull();
+    expect(decodeCharacterDied(concat(bytes(EVENT_DISC.TombstoneFrozen), A(1), A(2)))).toBeNull();
   });
 
   it("attributes Program data to the innermost program", () => {

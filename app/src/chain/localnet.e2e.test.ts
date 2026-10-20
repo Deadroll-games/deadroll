@@ -39,9 +39,7 @@ import {
   sessionAccounts,
   getAccount,
   setReadyIx,
-  variantKey,
-  type CharacterAcc,
-  type SkillSetAcc,
+  optional,
   startSessionIx,
   startTurnIx,
   status,
@@ -49,7 +47,6 @@ import {
   type Party,
 } from "./game";
 import { presetToLayout, type MapPresetData } from "./mock";
-import { coders } from "./programs";
 import { equipIx, equipmentOf, inventory, unequipIx } from "./items";
 import { skillSetPda } from "./pda";
 import { affordable, cheb, route } from "./route";
@@ -77,20 +74,18 @@ async function funded(sol = 10): Promise<KeyPairSigner> {
 }
 
 async function gearOf(character: Address) {
-  return (await getAccount<CharacterAcc>("character", "Character", character))!.gear;
+  return (await getAccount("Character", character))!.gear;
 }
 
 /** A full map selection of the character's skills: the first of each kind, in SkillSet order. */
 async function mapSelection(character: Address): Promise<number[]> {
-  const set = (await getAccount<SkillSetAcc>("character", "SkillSet", await skillSetPda(character)))!;
-  const kinds = ["active", "reactive", "passive"];
-  return defaultMapSelection(set.skills.slice(0, set.count).map((k) => kinds.indexOf(variantKey(k.blocks.category)) as Category));
+  const set = (await getAccount("SkillSet", await skillSetPda(character)))!;
+  return defaultMapSelection(set.skills.slice(0, set.count).map((k) => k.blocks.category as Category));
 }
 
-const IDS = { session: PROGRAMS.session, character: PROGRAMS.character, items: PROGRAMS.items, map: PROGRAMS.map };
 async function send(payer: KeyPairSigner, ixs: Parameters<typeof sendTx>[1]): Promise<ChainEvent[]> {
   const { logs } = await sendTx(payer, ixs);
-  return decodeEvents(logs, coders, IDS);
+  return decodeEvents(logs);
 }
 
 type Spec = { cls: Class; race: Race; pred: Aspect; stats: number[]; name: string; skills?: NamedSkill[] };
@@ -110,7 +105,7 @@ async function openParty(specs: Spec[]) {
       if (c.profileIx) await send(wallet, [c.profileIx]);
       const evs = await send(wallet, [c.ix]);
       const created = evs.find((e) => e.name === "CharacterCreated")!.data;
-      expect(created.nft).toBe(c.asset.address);
+      expect(optional(created.nft)).toBe(c.asset.address);
       // The class starter items come with the character, worn; the owner takes one off and back on.
       expect(created.itemCount).toBe(2);
       expect(inventory((await gearOf(c.character))).items.every((i) => i.worn !== null)).toBe(true);
@@ -315,7 +310,7 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
               const fin = await finalize(dmKey);
               expect(fin.some((e) => e.name === "DeathFinalized") && fin.some((e) => e.name === "CharacterDied")).toBe(true);
               // The skills burn (names stay as a memorial), the soulbound items vanish.
-              const burned = (await getAccount<SkillSetAcc>("character", "SkillSet", await skillSetPda(mage.character)))!;
+              const burned = (await getAccount("SkillSet", await skillSetPda(mage.character)))!;
               expect(burned.skills.slice(0, burned.count).every((k) => k.powerBp === 0 && k.name[0] !== 0)).toBe(true);
               expect((await gearOf(mage.character)).itemCount).toBe(0);
               await send(dmKey, [freezeTombstoneIx(mage.character, players[MAGE]!.asset, dmKey)]);

@@ -1,11 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { createNoopSigner } from "@solana/kit";
+import * as render from "@deadroll/sdk/render";
 import {
-  DISC,
   planUpload,
   parseHeader,
-  writeChunkData,
+  writeChunkInstruction,
   setComputeUnitLimitData,
   FINALIZE_CU,
   GAME_CONFIG,
@@ -25,17 +26,18 @@ const EXPECTED: Record<string, string> = {
   finalize_sprite_book: "80761daaae3cf1fe",
 };
 
-test("discriminators match the render program", () => {
+test("the sdk's discriminators match the render program", () => {
   for (const [name, hex] of Object.entries(EXPECTED)) {
-    const bytes = DISC[name as keyof typeof DISC];
+    const bytes = (render as Record<string, unknown>)[`${name.toUpperCase()}_DISCRIMINATOR`] as Uint8Array;
     assert.equal(bytes.length, 8, name);
     assert.equal(Buffer.from(bytes).toString("hex"), hex, name);
   }
 });
 
 test("write_chunk data for offset 900 and three bytes", () => {
-  const data = writeChunkData(900, new Uint8Array([1, 2, 3]));
-  assert.equal(Buffer.from(data).toString("hex"), "5d8da70fd18589338403000003000000010203");
+  const signer = createNoopSigner("11111111111111111111111111111112" as never);
+  const ix = writeChunkInstruction(signer, "11111111111111111111111111111113", 900, new Uint8Array([1, 2, 3]));
+  assert.equal(Buffer.from(ix.data!).toString("hex"), "5d8da70fd18589338403000003000000010203");
 });
 
 test("finalize asks for 400_000 compute units", () => {
@@ -99,7 +101,7 @@ test("parseHeader rejects a short account", () => {
 });
 
 test("finalize_rasterizer carries the GameConfig CPI accounts, the others do not", async () => {
-  const signer = { address: "11111111111111111111111111111112" } as any;
+  const signer = createNoopSigner("11111111111111111111111111111112" as never);
   const target = "11111111111111111111111111111113";
   const r = await finalizeInstruction("rasterizer", signer, target);
   assert.deepEqual(

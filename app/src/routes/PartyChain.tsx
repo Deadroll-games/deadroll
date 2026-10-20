@@ -16,12 +16,13 @@ import { PartyLobby } from "../components/forms/PartyLobby";
 import type { LobbyPlayer } from "../components/forms/types";
 import { isCurrentAppearance, monsterRequest, tileRequest, TOMBSTONE } from "../chain/appearance";
 import { characterRequest } from "../chain/items";
+import { HitOutcome, ModKindData, ReactionKind, SessionStatus, Trigger } from "@deadroll/sdk/session";
 import {
   BASE_ATTACK,
-  CLASS_KEYS,
   MONSTER_BASE,
-  RACE_KEYS,
   actIx,
+  optional,
+  variantKey,
   bytesText,
   claimEscrowIx,
   claimRewardsIx,
@@ -30,9 +31,6 @@ import {
   consumeIx,
   currentUnit,
   endTurnIx,
-  enumIndex,
-  ASPECT_KEYS,
-  type Enum,
   getAccount,
   joinSessionIx,
   mapStatus,
@@ -56,7 +54,6 @@ import {
   type AuraAcc,
   type CharacterAcc,
   type SkillRecordAcc,
-  type SkillSetAcc,
   type GameSessionAcc,
   type MapAcc,
   type Party,
@@ -122,7 +119,7 @@ function PartyPicker({ map }: { map: Address | null }) {
     try {
       setSessions(await openSessions());
       if (wallet.address) setMyMaps((await mapsOf(wallet.address)).filter((m) => mapStatus(m.data) === "finalized"));
-      if (map) setMapAcc((await getAccount<MapAcc>("map", "Map", map)) ?? "missing");
+      if (map) setMapAcc((await getAccount("Map", map)) ?? "missing");
     } catch {
       // lists stay as they are
     }
@@ -309,11 +306,7 @@ function PartyView({ address }: { address: Address }) {
     if (!party) return;
     void Promise.all(
       party.players.map(async (p) => {
-        const set = await getAccount<SkillSetAcc>(
-          "character",
-          "SkillSet",
-          await skillSetPda(p.character),
-        );
+        const set = await getAccount("SkillSet", await skillSetPda(p.character));
         const records = (set?.skills ?? []).slice(0, set?.count ?? 0);
         return [p.character, records] as const;
       }),
@@ -815,13 +808,13 @@ function PartyView({ address }: { address: Address }) {
       slot: p.slot,
       player: p.part.player,
       characterName: bytesText(p.char.name),
-      race: enumIndex(p.char.core.race, RACE_KEYS) as Race,
-      class: enumIndex(p.char.core.class, CLASS_KEYS) as Class,
+      race: p.char.core.race as Race,
+      class: p.char.core.class as Class,
       ready: p.part.core.ready,
       paid: p.part.contribution,
     }));
     const myJoined = mine[mine.length - 1] ?? null;
-    const joinable = myChars.filter((c) => c.data.core.alive && !c.data.core.inSession).map((c) => ({ address: c.address, name: bytesText(c.data.name) }));
+    const joinable = myChars.filter((c) => c.data.core.alive && !optional(c.data.core.inSession)).map((c) => ({ address: c.address, name: bytesText(c.data.name) }));
     const remaining = s.core.priceLamports - (party.escrow?.collected ?? 0n);
     const share = (s.core.priceLamports + 1n) / 2n;
     const contribution = remaining < share ? remaining : share;
@@ -1294,11 +1287,11 @@ const TRIGGER_TEXT: Record<string, string> = {
   controlled: "controlled",
   enemyAdjacent: "an enemy next to it",
 };
-const triggerText = (t: Enum) => TRIGGER_TEXT[Object.keys(t)[0] ?? ""] ?? Object.keys(t)[0] ?? "?";
+const triggerText = (t: number) => TRIGGER_TEXT[variantKey(Trigger, t)] ?? (variantKey(Trigger, t) || "?");
 
 /** "Mage: passive Protection aura 25%, radius 2" (a temporary one with its turns left). */
 function auraText(a: AuraAcc, bearer: string): string {
-  const kind = Object.keys(a.kind)[0] ?? "?";
+  const kind = variantKey(ModKindData, a.kind) || "?";
   const reach = a.selfOnly || a.radius === 0 ? "self" : `radius ${a.radius}`;
   const time = a.passive ? "passive" : `temporary, ${a.turns} turns`;
   return `${bearer}: ${a.hostile ? "hostile " : ""}${kind.charAt(0).toUpperCase()}${kind.slice(1)} aura ${percent(a.powerBp)}, ${reach} (${time})`;
@@ -1340,7 +1333,7 @@ function describe(e: PartyEvent, label: (u: number) => string, skillName: SkillN
       const res = hit.resonances
         .filter((x) => x?.active)
         .map((x) => `${resonanceName(x!.id, x!.secondTint)} (${carrierName(x!.carrier).toLowerCase()})`);
-      return `${label(d.attacker)} -> ${label(d.target)}: d20 ${hit.d20}${hit.crit ? " CRIT" : ""}, ${Object.keys(d.result.outcome)[0]}, ${hit.damage} dmg${res.length ? `, ${res.join(", ")}` : ""}`;
+      return `${label(d.attacker)} -> ${label(d.target)}: d20 ${hit.d20}${hit.crit ? " CRIT" : ""}, ${variantKey(HitOutcome, d.result.outcome)}, ${hit.damage} dmg${res.length ? `, ${res.join(", ")}` : ""}`;
     }
     case "ResonanceSpread":
       return spreadText(toResonanceSpread(d), label);
@@ -1355,7 +1348,7 @@ function describe(e: PartyEvent, label: (u: number) => string, skillName: SkillN
     case "CharacterDied":
       return `character ${shortAddress(d.character)} is a tombstone`;
     case "SessionEnded":
-      return `party ended: ${Object.keys(d.status)[0]}`;
+      return `party ended: ${variantKey(SessionStatus, d.status)}`;
     case "RewardsClaimed":
       return `rewards claimed: ${d.xp} xp`;
     case "EscrowClaimed":
@@ -1363,11 +1356,11 @@ function describe(e: PartyEvent, label: (u: number) => string, skillName: SkillN
     case "FleeVoted":
       return `slot ${d.slot} votes to flee`;
     case "ReactiveTriggered":
-      return `${label(d.bearer)} reacts (${triggerText(d.trigger)}): ${skillName(d.bearer, d.skillSlot)}, ${Object.keys(d.reaction)[0]} on ${label(d.target)}, cooldown ${d.cooldownLeft}`;
+      return `${label(d.bearer)} reacts (${triggerText(d.trigger)}): ${skillName(d.bearer, d.skillSlot)}, ${variantKey(ReactionKind, d.reaction)} on ${label(d.target)}, cooldown ${d.cooldownLeft}`;
     case "AuraChanged":
       return d.aura.turns === 0 ? `${label(d.bearer)}: aura ended` : auraText(d.aura, label(d.bearer));
     case "MonsterReactiveTriggered":
-      return `${label(MONSTER_BASE + d.bearer)} reacts (${triggerText(d.trigger)}): ${skillName(MONSTER_BASE + d.bearer, d.skillSlot)}, ${Object.keys(d.reaction)[0]} on ${label(d.target)}, cooldown ${d.cooldownLeft}`;
+      return `${label(MONSTER_BASE + d.bearer)} reacts (${triggerText(d.trigger)}): ${skillName(MONSTER_BASE + d.bearer, d.skillSlot)}, ${variantKey(ReactionKind, d.reaction)} on ${label(d.target)}, cooldown ${d.cooldownLeft}`;
     case "MonsterAuraChanged":
       return d.aura.turns === 0 ? `${label(MONSTER_BASE + d.bearer)}: aura ended` : `${auraText(d.aura, label(MONSTER_BASE + d.bearer))}${d.kinOnly ? " (its kin)" : ""}`;
     default:
@@ -1392,7 +1385,7 @@ function statsUnits(party: Party, label: (u: number) => string, combat: CombatWa
         hpMax: p.part.hpMax || p.char.core.hpMax,
         apBase: p.part.maxAp,
         apNow: mine ? playerAp(p.part, s) : null,
-        profile: playerDefense(enumIndex(p.char.core.class, CLASS_KEYS) as Class, p.char.core.stats, p.part.equipment),
+        profile: playerDefense(p.char.core.class as Class, p.char.core.stats, p.part.equipment),
         mods: activeMods(p.part.mods),
         states: statesOf(p.part.core.states),
       });
@@ -1453,9 +1446,9 @@ function LiveBadge({ status }: { status: SubStatus }) {
 }
 
 /** The player's resonance accuracy buff (`Participation.accuracy`). */
-function accuracyOf(part: { accuracy?: { aspect: Enum; turns: number; bonus: number } }): AccuracyInput {
+function accuracyOf(part: { accuracy?: { aspect: number; turns: number; bonus: number } }): AccuracyInput {
   const a = part.accuracy;
-  return a && a.turns > 0 ? { aspect: enumIndex(a.aspect, ASPECT_KEYS), turns: a.turns, bonus: a.bonus } : { aspect: 0, turns: 0, bonus: 0 };
+  return a && a.turns > 0 ? { aspect: a.aspect, turns: a.turns, bonus: a.bonus } : { aspect: 0, turns: 0, bonus: 0 };
 }
 
 /** " · Piercing Frost 7%: 5-9 (weapon)" for each tint that can trigger on this target. */

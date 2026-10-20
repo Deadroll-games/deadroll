@@ -21,6 +21,8 @@ Filled at L0 from `anchor keys list` and committed to `Anchor.toml` (keypairs st
 
 Every program exposes `pub const ID` and a `cpi` feature so other programs can depend on it (`features = ["cpi"]`).
 
+TypeScript reads the ids from `@deadroll/sdk` (`PROGRAMS`, generated from the IDL addresses); an sdk test keeps them equal to `Anchor.toml`.
+
 ## 2. PDA seeds
 
 | Account | Program | Seeds |

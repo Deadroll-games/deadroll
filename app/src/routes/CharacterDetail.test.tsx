@@ -1,7 +1,8 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Address } from "@solana/kit";
+import { none, some, type Address } from "@solana/kit";
+import { Aspect as SdkAspect, Category, Class, Effect, EquipSource, Form, ItemBase, Purpose, Source, Target, Trigger } from "@deadroll/sdk/character";
 import { characterAppearance } from "../chain/appearance";
 import { variantLabel, type CharacterAcc, type GearAcc, type SkillRecordAcc } from "../chain/game";
 import { Aspect, Race } from "../chain/types";
@@ -18,20 +19,19 @@ const text = (s: string) => {
   out.set(new TextEncoder().encode(s));
   return out;
 };
-const e = (k: string) => ({ [k]: {} });
 
 function skill(name: string, over: Partial<SkillRecordAcc["blocks"]> = {}, sharesBp = [10_000, 0, 0]): SkillRecordAcc {
   return {
     blocks: {
-      category: e("active"),
-      purpose: e("damage"),
-      source: e("magical"),
-      form: e("projectile"),
-      target: e("single"),
-      aspects: [e("cold"), e("fire"), e("fire")],
+      category: Category.Active,
+      purpose: Purpose.Damage,
+      source: Source.Magical,
+      form: Form.Projectile,
+      target: Target.Single,
+      aspects: [SdkAspect.Cold, SdkAspect.Fire, SdkAspect.Fire],
       aspectCount: 1,
-      effect: e("none"),
-      trigger: e("none"),
+      effect: Effect.None,
+      trigger: Trigger.None,
       auraRadius: 0,
       ...over,
     },
@@ -45,22 +45,25 @@ function skill(name: string, over: Partial<SkillRecordAcc["blocks"]> = {}, share
 
 function character(over: Partial<CharacterAcc["core"]> = {}, frozen = false): CharacterAcc {
   return {
+    discriminator: new Uint8Array(8),
     core: {
+      version: 1,
       owner: ADDR,
       index: 0,
-      nft: null,
-      race: e("forestElf"),
-      class: e("mage"),
+      nft: none(),
+      race: Race.ForestElf,
+      class: Class.Mage,
       level: 2,
       xp: 140,
       stats: [5, 8, 12, 5],
-      predisposition: e("cold"),
+      predisposition: SdkAspect.Cold,
       predispositionTier: 14,
       hpMax: 30,
       alive: true,
-      inSession: null,
+      inSession: none(),
       appearance: [],
       stateVersion: 0,
+      bump: 255,
       ...over,
     },
     name: new TextEncoder().encode("Aria"),
@@ -80,8 +83,8 @@ const view = (c: CharacterAcc, skills: SkillRecordAcc[], party: PartyInfo = null
 
 describe("helpers", () => {
   it("labels enum variants", () => {
-    expect(variantLabel(e("enemyAdjacent"))).toBe("Enemy adjacent");
-    expect(variantLabel(e("active"))).toBe("Active");
+    expect(variantLabel(Trigger, Trigger.EnemyAdjacent)).toBe("Enemy adjacent");
+    expect(variantLabel(Category, Category.Active)).toBe("Active");
   });
 
   it("lists used aspects with their shares", () => {
@@ -91,15 +94,15 @@ describe("helpers", () => {
 
   it("every Active skill with its effect is usable in combat", () => {
     expect(usableInCombat(skill("a"))).toBe(true);
-    expect(usableInCombat(skill("q", { purpose: e("buff"), effect: e("haste") }))).toBe(true);
-    expect(usableInCombat(skill("s", { purpose: e("debuff"), effect: e("weakening") }))).toBe(true);
-    expect(usableInCombat(skill("b", { category: e("passive"), purpose: e("buff") }))).toBe(false);
+    expect(usableInCombat(skill("q", { purpose: Purpose.Buff, effect: Effect.Haste }))).toBe(true);
+    expect(usableInCombat(skill("s", { purpose: Purpose.Debuff, effect: Effect.Weakening }))).toBe(true);
+    expect(usableInCombat(skill("b", { category: Category.Passive, purpose: Purpose.Buff }))).toBe(false);
   });
 });
 
 describe("CharacterDetailView", () => {
   it("shows identity, stats, skills; the inventory once loaded", () => {
-    view(character(), [skill("Frost Bolt"), skill("Cold Mind", { category: e("passive"), purpose: e("buff"), effect: e("empowerment") })]);
+    view(character(), [skill("Frost Bolt"), skill("Cold Mind", { category: Category.Passive, purpose: Purpose.Buff, effect: Effect.Empowerment })]);
     expect(screen.getByRole("heading", { name: "Aria" })).toBeTruthy();
     expect(screen.getByText("Forest elf Mage · Cold predisposition")).toBeTruthy();
     expect(screen.getByText("Level 2 · 140 XP")).toBeTruthy();
@@ -115,7 +118,7 @@ describe("CharacterDetailView", () => {
   });
 
   it("links the current party with live HP", () => {
-    view(character({ inSession: SESSION }), [], { session: SESSION, status: "active", slot: 1, hp: 17 });
+    view(character({ inSession: some(SESSION) }), [], { session: SESSION, status: "active", slot: 1, hp: 17 });
     expect(screen.getByText("HP 17 / 30")).toBeTruthy();
     expect(screen.getByText("Alive · in a party")).toBeTruthy();
     expect(screen.getByRole("link", { name: "open party" }).getAttribute("href")).toBe(`/party?s=${SESSION}`);
@@ -143,16 +146,16 @@ describe("CharacterDetailView", () => {
 });
 
 function gear(): GearAcc {
-  const empty = { source: e("empty"), index: 0, asset: ADDR };
+  const empty = { source: EquipSource.Empty, index: 0, asset: ADDR };
   return {
     items: [
-      { base: e("staff"), level: 1 },
-      { base: e("robe"), level: 1 },
-      { base: e("sword"), level: 0 },
-      { base: e("sword"), level: 0 },
+      { base: ItemBase.Staff, level: 1 },
+      { base: ItemBase.Robe, level: 1 },
+      { base: ItemBase.Sword, level: 0 },
+      { base: ItemBase.Sword, level: 0 },
     ],
     itemCount: 2,
-    equipped: EQUIPMENT_SLOTS.map((s) => (s.key === "mainHand" ? { source: e("soulbound"), index: 0, asset: ADDR } : empty)),
+    equipped: EQUIPMENT_SLOTS.map((s) => (s.key === "mainHand" ? { source: EquipSource.Soulbound, index: 0, asset: ADDR } : empty)),
   };
 }
 
@@ -170,7 +173,7 @@ describe("inventory", () => {
     expect(inventoryLock(character(), ADDR)).toBeNull();
     expect(inventoryLock(character(), OTHER)).toMatch(/Only the owner/);
     expect(inventoryLock(character(), null)).toMatch(/Only the owner/);
-    expect(inventoryLock(character({ inSession: SESSION }), ADDR)).toMatch(/locked until it ends/);
+    expect(inventoryLock(character({ inSession: some(SESSION) }), ADDR)).toMatch(/locked until it ends/);
     expect(inventoryLock(character({ alive: false }), ADDR)).toMatch(/tombstone/);
   });
 

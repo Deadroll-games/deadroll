@@ -3,7 +3,8 @@
 // skill cooldowns counted in own turn starts. Pure functions over decoded accounts and events.
 import type { Address } from "@solana/kit";
 import { ACTIVE_MAX, NO_SKILL } from "./skillcheck";
-import { MONSTER_BASE, currentUnit, status, type GameSessionAcc, type Party, type ParticipationAcc, type PartyPlayer } from "./game";
+import { StateKind } from "@deadroll/sdk/session";
+import { MONSTER_BASE, currentUnit, status, variantKey, type GameSessionAcc, type Party, type ParticipationAcc, type PartyPlayer } from "./game";
 
 /** start_turn ran for the current turn (states ticked, cooldowns counted down, AP granted). */
 export const turnStarted = (s: GameSessionAcc): boolean => s.startedSeq === s.turnSeq;
@@ -65,10 +66,10 @@ export const cooldownLabel = (n: number): string => `ready in ${n} turn${n === 1
 /** StateKind variants in on-chain order; `expired` bit i is `1 << i` (deadroll_combat::states::state_bit). */
 const STATE_KEYS = ["burning", "chill", "freeze", "bleeding", "shock", "stun", "penetration"] as const;
 const DOT_KEYS: readonly string[] = ["burning", "bleeding"];
-const kindOf = (e: unknown): string => Object.keys(e as object)[0] ?? "";
+const kindOf = (e: number): string => variantKey(StateKind, e);
 
 /** TurnTicked as a log line; null when the start changed nothing worth a line (no damage, nothing wore off). */
-export function tickText(d: { dotDamage: number; hp: number; died: boolean; expired: number; states: { kind: unknown; turns: number }[] }, unit: string): string | null {
+export function tickText(d: { dotDamage: number; hp: number; died: boolean; expired: number; states: { kind: number; turns: number }[] }, unit: string): string | null {
   const expired = STATE_KEYS.filter((_, i) => d.expired & (1 << i));
   const parts: string[] = [];
   if (d.dotDamage > 0) {
@@ -81,7 +82,7 @@ export function tickText(d: { dotDamage: number; hp: number; died: boolean; expi
   return parts.length ? parts.join("; ") : null;
 }
 
-export function skipText(d: { state: unknown }, unit: string): string {
+export function skipText(d: { state: number }, unit: string): string {
   return `${unit} is ${kindOf(d.state) === "freeze" ? "frozen" : "stunned"}: turn skipped`;
 }
 

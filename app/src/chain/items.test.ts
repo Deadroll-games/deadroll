@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { AccountRole, generateKeyPairSigner, getAddressDecoder, type Address } from "@solana/kit";
 import { PROGRAMS } from "../config";
 import { concat, toHex } from "./bytes";
-import type { CharacterAcc } from "./game";
+import { decodeAccount } from "./game";
 import {
   EMPTY_ITEM,
   EQUIP_SLOTS,
@@ -23,8 +23,9 @@ import {
   unequipIx,
   weaponText,
 } from "./items";
-import { coders } from "./programs";
-import { Class } from "./types";
+import * as itemsSdk from "@deadroll/sdk/items";
+import { EquipSource, ItemBase, getCharacterEncoder } from "@deadroll/sdk/character";
+import { Aspect, Class, Race } from "./types";
 
 const A = (n: number) => new Uint8Array(32).fill(n);
 const addrOf = (n: number): Address => getAddressDecoder().decode(A(n));
@@ -45,8 +46,8 @@ describe("IDLs", () => {
   });
 
   it("the items program has no instructions yet (gear lives in the character)", () => {
-    expect(coders.items.idl.address).toBe(PROGRAMS.items);
-    expect(coders.items.idl.instructions).toEqual([]);
+    expect(itemsSdk.DEADROLL_ITEMS_PROGRAM_ADDRESS).toBe(PROGRAMS.items);
+    expect(Object.keys(itemsSdk).filter((k) => k.endsWith("Instruction"))).toEqual([]);
   });
 });
 
@@ -72,8 +73,7 @@ describe("instructions", () => {
 
 /** A new warrior as create_character writes it: the class starter kit, worn. */
 function warrior(): Uint8Array {
-  const c = coders.character;
-  const empty = { source: "empty", index: 0, asset: addrOf(0) };
+  const empty = { source: EquipSource.Empty, index: 0, asset: addrOf(0) };
   const layer = { spriteId: 0, materialRamp: 0, accentRamp: 0, elementRamp: 0 };
   const v = {
     core: {
@@ -81,12 +81,12 @@ function warrior(): Uint8Array {
       owner: addrOf(2),
       index: 0,
       nft: addrOf(3),
-      race: "human",
-      class: "warrior",
+      race: Race.Human,
+      class: Class.Warrior,
       level: 1,
       xp: 0,
       stats: [10, 5, 5, 10],
-      predisposition: "piercing",
+      predisposition: Aspect.Piercing,
       predispositionTier: 14,
       hpMax: 60,
       alive: true,
@@ -100,19 +100,17 @@ function warrior(): Uint8Array {
     nftFrozen: false,
     gear: {
       items: [
-        { base: "sword", level: 1 },
-        { base: "leatherArmor", level: 1 },
-        { base: "sword", level: 0 },
-        { base: "sword", level: 0 },
+        { base: ItemBase.Sword, level: 1 },
+        { base: ItemBase.LeatherArmor, level: 1 },
+        { base: ItemBase.Sword, level: 0 },
+        { base: ItemBase.Sword, level: 0 },
       ],
       itemCount: 2,
-      equipped: EQUIP_SLOTS.map((s) => (s === "mainHand" ? { source: "soulbound", index: 0, asset: addrOf(0) } : s === "body" ? { source: "soulbound", index: 1, asset: addrOf(0) } : empty)),
+      equipped: EQUIP_SLOTS.map((s) => (s === "mainHand" ? { source: EquipSource.Soulbound, index: 0, asset: addrOf(0) } : s === "body" ? { source: EquipSource.Soulbound, index: 1, asset: addrOf(0) } : empty)),
     },
     classTier: 11,
   };
-  const out: Uint8Array[] = [c.accountDiscriminator("Character")];
-  c.encode({ defined: { name: "Character" } }, v, out);
-  return concat(...out);
+  return Uint8Array.from(getCharacterEncoder().encode(v));
 }
 
 describe("Character.gear", () => {
@@ -124,7 +122,7 @@ describe("Character.gear", () => {
     expect(Array.from(bytes.subarray(gear, gear + 4))).toEqual([BASE.sword, 1, BASE.leatherArmor, 1]);
     const body = gear + 4 * 2 + 1 + SLOT.body! * 34;
     expect(Array.from(bytes.subarray(body, body + 2))).toEqual([1, 1]);
-    const c = coders.character.decodeAccount<CharacterAcc>("Character", bytes);
+    const c = decodeAccount("Character", bytes);
     expect(c.core.owner).toBe(addrOf(2));
     expect(c.classTier).toBe(11);
     const inv = inventory(c.gear);

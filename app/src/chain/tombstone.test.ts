@@ -1,9 +1,9 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
-import { getAddressDecoder, type Address } from "@solana/kit";
+import { createNoopSigner, getAddressDecoder, type Address } from "@solana/kit";
 import { mapAccountSource } from "./accounts";
 import { concat, u16le, u32le } from "./bytes";
-import { ACCOUNT_DISC } from "./disc";
+import { CHARACTER_DISCRIMINATOR } from "@deadroll/sdk/character";
 import type { CharacterDied } from "./layouts";
 import { NON_OWNER_DELAY_MS, decideFreeze, handleCharacterDied } from "./tombstone";
 
@@ -14,7 +14,7 @@ const addrOf = (n: number): Address => getAddressDecoder().decode(A(n));
 function character(alive: boolean, frozen: boolean): Uint8Array {
   const layer = concat(u16le(0), new Uint8Array(3));
   return concat(
-    ACCOUNT_DISC.Character,
+    Uint8Array.from(CHARACTER_DISCRIMINATOR),
     new Uint8Array([1]),
     A(2),
     new Uint8Array([0, 1]),
@@ -31,11 +31,13 @@ function character(alive: boolean, frozen: boolean): Uint8Array {
     new Uint8Array([255]),
     new Uint8Array(32),
     new Uint8Array([0, frozen ? 1 : 0]),
+    // Gear and class tier: the account is allocated at its full size.
+    new Uint8Array(512),
   );
 }
 
 const ev: CharacterDied = { character: addrOf(1), owner: addrOf(2), session: addrOf(3), nft: addrOf(4), stateVersion: 1 };
-const payer = { address: addrOf(9) } as never;
+const payer = createNoopSigner(addrOf(9));
 
 function run(opts: { me: Address | null; account: Uint8Array | null; nft?: Address | null; sendFails?: string }) {
   const send = vi.fn(async () => {
