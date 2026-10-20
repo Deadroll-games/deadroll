@@ -16,4 +16,6 @@ pnpm --filter @deadroll/sdk generate
 pnpm --filter @deadroll/sdk check
 ```
 
+Generate from a plain build, not after `pnpm deploy:local` (its `mock-vrf` session IDL has the mock VRF identity).
+
 `check` fails when `idl/` differs from `target/idl` or `src/generated/` differs from a fresh render of `idl/`. The generated code is committed, so the website builds without Anchor.

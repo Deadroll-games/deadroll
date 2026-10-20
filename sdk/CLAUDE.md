@@ -13,6 +13,7 @@ Read the root CLAUDE.md first.
 
 ## Rules for this zone
 - After `anchor build` changes an IDL: `pnpm --filter @deadroll/sdk generate`, then commit `idl/` and `src/generated/` with the program change.
+- Generate only from a plain build. `pnpm deploy:local` builds session with `mock-vrf`, whose IDL carries the mock VRF identity; until the next plain `anchor build -p deadroll_session`, `check` reports `idl/deadroll_session.json`.
 - `@codama/renderers-js` is pinned to 2.5.0: newer versions emit code that needs `@solana/kit` 8.5. Bump it together with kit across the workspace.
 - Consumers import `dist/` (built by `pnpm build`, gitignored). app, tests and scripts build it before they run.
 - Hand-written code stays outside `src/generated/` and holds no layouts or discriminators of its own.
