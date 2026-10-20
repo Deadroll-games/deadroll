@@ -36,6 +36,13 @@ pub fn handler(ctx: Context<Equip>, item_index: u8, slot: EquipSlot) -> Result<(
 
     let level = character.core.level;
     let replaced = character.gear.equip(level, item_index, slot)?;
+    // What the character wears is drawn on its NFT: a new image is a new state version
+    // (docs/STORAGE_AND_DELIVERY.md 6.2).
+    character.core.state_version = character
+        .core
+        .state_version
+        .checked_add(1)
+        .ok_or(CharacterError::MathOverflow)?;
     emit!(ItemEquipped {
         character: character.key(),
         slot,

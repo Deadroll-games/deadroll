@@ -34,6 +34,13 @@ pub fn handler(ctx: Context<Unequip>, slot: EquipSlot) -> Result<()> {
     );
 
     let base = character.gear.unequip(slot)?;
+    // What the character wears is drawn on its NFT: a new image is a new state version
+    // (docs/STORAGE_AND_DELIVERY.md 6.2).
+    character.core.state_version = character
+        .core
+        .state_version
+        .checked_add(1)
+        .ok_or(CharacterError::MathOverflow)?;
     emit!(ItemUnequipped {
         character: character.key(),
         slot,

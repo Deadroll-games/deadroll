@@ -266,6 +266,19 @@ describe("equip and unequip", { skip: SKIP }, () => {
     assert.equal(variant(again.replaced), "sword");
   });
 
+  it("every equip and unequip is a new state version of the NFT image; a rejected one is not", async () => {
+    const { owner, character: c } = await newCharacter("warrior");
+    const version = async () => (await fetchCharacter(c)).core.stateVersion;
+    const v0 = await version();
+    await unequip(owner, c, "body");
+    assert.equal(await version(), v0 + 1);
+    await equip(owner, c, 1, "body");
+    assert.equal(await version(), v0 + 2);
+    await rejects(unequip(owner, c, "helmet"), "SlotEmpty");
+    await rejects(equip(owner, c, 0, "body"), "WrongSlot");
+    assert.equal(await version(), v0 + 2);
+  });
+
   it("rejects a slot the item is not made for", async () => {
     const { owner, character: c } = await newCharacter("mage");
     await rejects(equip(owner, c, 0, "body"), "WrongSlot");
