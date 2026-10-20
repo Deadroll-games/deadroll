@@ -64,7 +64,7 @@ export type DeadrollRegistryError =
 
 let deadrollRegistryErrorMessages:
   Record<DeadrollRegistryError, string> | undefined;
-if (process.env["NODE_ENV"] !== "production") {
+if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !== "production") {
   deadrollRegistryErrorMessages = {
     [DEADROLL_REGISTRY_ERROR__BLOB_NOT_FINALIZED]: `Blob is not finalized yet`,
     [DEADROLL_REGISTRY_ERROR__CONFIG_ALREADY_RESIZED]: `GameConfig already has its current size`,
@@ -87,7 +87,7 @@ if (process.env["NODE_ENV"] !== "production") {
 export function getDeadrollRegistryErrorMessage(
   code: DeadrollRegistryError,
 ): string {
-  if (process.env["NODE_ENV"] !== "production") {
+  if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !== "production") {
     return (
       deadrollRegistryErrorMessages as Record<DeadrollRegistryError, string>
     )[code];

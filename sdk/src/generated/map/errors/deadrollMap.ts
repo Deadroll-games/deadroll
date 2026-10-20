@@ -126,7 +126,7 @@ export type DeadrollMapError =
   | typeof DEADROLL_MAP_ERROR__UNTRUSTED_CALLER;
 
 let deadrollMapErrorMessages: Record<DeadrollMapError, string> | undefined;
-if (process.env["NODE_ENV"] !== "production") {
+if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !== "production") {
   deadrollMapErrorMessages = {
     [DEADROLL_MAP_ERROR__BOSS_COUNT]: `Map needs exactly one boss`,
     [DEADROLL_MAP_ERROR__BOSS_PACK_MIXED]: `Regular monster in the boss pack`,
@@ -168,7 +168,7 @@ if (process.env["NODE_ENV"] !== "production") {
 }
 
 export function getDeadrollMapErrorMessage(code: DeadrollMapError): string {
-  if (process.env["NODE_ENV"] !== "production") {
+  if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !== "production") {
     return (deadrollMapErrorMessages as Record<DeadrollMapError, string>)[code];
   }
 

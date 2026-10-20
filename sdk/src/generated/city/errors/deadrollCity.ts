@@ -20,14 +20,14 @@ export const DEADROLL_CITY_ERROR__UNAUTHORIZED = 0x1770; // 6000
 export type DeadrollCityError = typeof DEADROLL_CITY_ERROR__UNAUTHORIZED;
 
 let deadrollCityErrorMessages: Record<DeadrollCityError, string> | undefined;
-if (process.env["NODE_ENV"] !== "production") {
+if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !== "production") {
   deadrollCityErrorMessages = {
     [DEADROLL_CITY_ERROR__UNAUTHORIZED]: `Caller is not authorized for this instruction`,
   };
 }
 
 export function getDeadrollCityErrorMessage(code: DeadrollCityError): string {
-  if (process.env["NODE_ENV"] !== "production") {
+  if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !== "production") {
     return (deadrollCityErrorMessages as Record<DeadrollCityError, string>)[
       code
     ];

@@ -57,6 +57,6 @@
     "generate": "tsx scripts/generate.ts",
     "check": "tsx scripts/check.ts",
     "build": "tsc -p .",
-    "test": "tsx --test test/*.test.ts"
+    "test": "tsc -p . && tsx --test test/*.test.ts"
   }
 }

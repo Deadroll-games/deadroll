@@ -220,7 +220,7 @@ export type DeadrollSessionError =
 
 let deadrollSessionErrorMessages:
   Record<DeadrollSessionError, string> | undefined;
-if (process.env["NODE_ENV"] !== "production") {
+if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !== "production") {
   deadrollSessionErrorMessages = {
     [DEADROLL_SESSION_ERROR__ALLY_ACCOUNT_MISSING]: `A heal or buff on another ally needs that ally's participation`,
     [DEADROLL_SESSION_ERROR__ALREADY_ACTED]: `Only one attack or active skill per turn`,
@@ -295,7 +295,7 @@ if (process.env["NODE_ENV"] !== "production") {
 export function getDeadrollSessionErrorMessage(
   code: DeadrollSessionError,
 ): string {
-  if (process.env["NODE_ENV"] !== "production") {
+  if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !== "production") {
     return (
       deadrollSessionErrorMessages as Record<DeadrollSessionError, string>
     )[code];

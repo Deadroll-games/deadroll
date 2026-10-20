@@ -118,7 +118,7 @@ export type DeadrollCharacterError =
 
 let deadrollCharacterErrorMessages:
   Record<DeadrollCharacterError, string> | undefined;
-if (process.env["NODE_ENV"] !== "production") {
+if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !== "production") {
   deadrollCharacterErrorMessages = {
     [DEADROLL_CHARACTER_ERROR__ALREADY_FROZEN]: `Tombstone NFT is already frozen`,
     [DEADROLL_CHARACTER_ERROR__ALREADY_LOCKED]: `Character is already locked in a session`,
@@ -159,7 +159,7 @@ if (process.env["NODE_ENV"] !== "production") {
 export function getDeadrollCharacterErrorMessage(
   code: DeadrollCharacterError,
 ): string {
-  if (process.env["NODE_ENV"] !== "production") {
+  if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !== "production") {
     return (
       deadrollCharacterErrorMessages as Record<DeadrollCharacterError, string>
     )[code];

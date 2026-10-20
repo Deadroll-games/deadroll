@@ -54,7 +54,7 @@ export type DeadrollItemsError =
   | typeof DEADROLL_ITEMS_ERROR__WRONG_SLOT;
 
 let deadrollItemsErrorMessages: Record<DeadrollItemsError, string> | undefined;
-if (process.env["NODE_ENV"] !== "production") {
+if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !== "production") {
   deadrollItemsErrorMessages = {
     [DEADROLL_ITEMS_ERROR__CHARACTER_DEAD]: `The character is dead`,
     [DEADROLL_ITEMS_ERROR__CHARACTER_LOCKED]: `The character is in a session: equipment is locked until it ends`,
@@ -72,7 +72,7 @@ if (process.env["NODE_ENV"] !== "production") {
 }
 
 export function getDeadrollItemsErrorMessage(code: DeadrollItemsError): string {
-  if (process.env["NODE_ENV"] !== "production") {
+  if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !== "production") {
     return (deadrollItemsErrorMessages as Record<DeadrollItemsError, string>)[
       code
     ];

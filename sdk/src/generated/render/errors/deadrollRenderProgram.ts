@@ -49,7 +49,7 @@ export type DeadrollRenderProgramError =
 
 let deadrollRenderProgramErrorMessages:
   Record<DeadrollRenderProgramError, string> | undefined;
-if (process.env["NODE_ENV"] !== "production") {
+if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !== "production") {
   deadrollRenderProgramErrorMessages = {
     [DEADROLL_RENDER_PROGRAM_ERROR__ALREADY_FINALIZED]: `The account is finalized and can no longer change`,
     [DEADROLL_RENDER_PROGRAM_ERROR__ALREADY_FULLY_ALLOCATED]: `The account already has its full size`,
@@ -67,7 +67,7 @@ if (process.env["NODE_ENV"] !== "production") {
 export function getDeadrollRenderProgramErrorMessage(
   code: DeadrollRenderProgramError,
 ): string {
-  if (process.env["NODE_ENV"] !== "production") {
+  if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !== "production") {
     return (
       deadrollRenderProgramErrorMessages as Record<
         DeadrollRenderProgramError,

@@ -13,7 +13,7 @@
     "preview": "vite preview",
     "preview:devnet": "vite preview --mode devnet",
     "typecheck": "pnpm sdk && tsc -p .",
-    "test": "pnpm sdk && vitest run --passWithNoTests"
+    "test": "pnpm --filter @deadroll/sdk test && vitest run --passWithNoTests"
   },
   "dependencies": {
     "@deadroll/sdk": "workspace:*",
