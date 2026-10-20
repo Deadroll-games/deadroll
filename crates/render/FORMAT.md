@@ -145,9 +145,7 @@ Layers that must carry `flags no_outline`: `shadow`, `necklace`, `fist_front` (t
 already has the outline; its own would draw a seam across the wrist), `overlay_element`, floor tiles.
 
 Sizes per layer type: character layers 0..14 are **96x96**, `tile` is 64x64 (one map cell),
-`icon` is 32x32, `monster` is 96x96 or 128x128, `portrait` any allowed size. The validator still
-accepts 64x64 character layers and monsters drawn before format 2 had 96 px characters, with a note:
-they do not line up with the 96 px bodies until redrawn. Characters and monsters are drawn at the
+`icon` is 32x32, `monster` is 96x96 or 128x128, `portrait` any allowed size. Characters and monsters are drawn at the
 tile pixel size, bottom-center on their map cell, overlapping the row above; the app aligns them,
 the rasterizer does not.
 

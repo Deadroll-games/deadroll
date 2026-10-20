@@ -24,8 +24,7 @@ Preview colors: tiles use the palette materials `tile_wall`, `tile_floor`, `tile
 The validator implements `crates/render/FORMAT.md` section 6.
 
 Canvases are format 2 (`crates/render/FORMAT.md` 1.4): character layers 96x96, tiles 64x64, icons
-32x32, monsters 96 or 128 square. Character layers and monsters still at 64 px pass validation with a
-note until they are redrawn. Sprites are drawn pixel by pixel with `BITMAP` (FORMAT.md 1.2.1) or
+32x32, monsters 96 or 128 square. Sprites are drawn pixel by pixel with `BITMAP` (FORMAT.md 1.2.1) or
 with geometry; `copy <name>` reuses an earlier sprite, and `pack` stores identical sprites once. `upscale` doubles every coordinate (PIXEL becomes a 2x2 RECT, a
 diagonal LINE two parallel lines, a SHADE its 2x2 block) and prints per sprite how many cells
 differ from the old sprite enlarged x2. Previews are RGBA PNGs (sheets can have more than 256

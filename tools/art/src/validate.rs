@@ -146,25 +146,16 @@ fn is_line_slope_ok(x0: u8, y0: u8, x1: u8, y1: u8) -> bool {
 
 /// Canvas of the character layers (`FORMAT.md` 1.4).
 pub const CHARACTER_SIZE: u8 = 96;
-/// Canvas of the character layers and monsters before patch 7c, accepted until they are redrawn.
-pub const LEGACY_SIZE: u8 = 64;
 
 fn size_ok(layer_type: u8, w: u8, h: u8) -> bool {
     match layer_type {
-        0..=layer::CHARACTER_MAX => w == h && (w == CHARACTER_SIZE || w == LEGACY_SIZE),
+        0..=layer::CHARACTER_MAX => (w, h) == (CHARACTER_SIZE, CHARACTER_SIZE),
         layer::TILE => (w, h) == (64, 64),
-        layer::MONSTER => w == h && matches!(w, 64 | 96 | 128),
+        layer::MONSTER => w == h && matches!(w, 96 | 128),
         layer::ICON => (w, h) == (32, 32),
         layer::PORTRAIT => true,
         _ => false,
     }
-}
-
-/// A character layer or monster still on the 64 px canvas: valid, but it does not line up with
-/// the 96 px bodies until it is redrawn.
-pub fn is_legacy_size(c: &Compiled) -> bool {
-    let h = &c.sprite.header;
-    matches!(h.layer_type, 0..=layer::CHARACTER_MAX | layer::MONSTER) && h.width == LEGACY_SIZE
 }
 
 fn must_no_outline(layer_type: u8, name: &str) -> bool {

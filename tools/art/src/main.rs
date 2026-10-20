@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use art::preview::{self, Img, Pal, SHEET_BG};
-use art::validate::{is_legacy_size, validate_files, Compiled, Issue};
+use art::validate::{validate_files, Compiled, Issue};
 use deadroll_render::sprite::{layer, Cmd};
 
 const DEFAULT_PALETTE: &str = "assets/palette/palette_2.pal";
@@ -15,7 +15,7 @@ const USAGE: &str = "usage:
   art sheet characters [figures ...] [--scale 4] [--out FILE.png]   bodies, kits on both bodies, alive and dead
   art sheet contact [files.dsl ...] [--scale 2] [--out FILE.png]
   art sheet matrix [files.dsl ...] [--id N] [--scale 4] [--out FILE.png]   items x materials, enchants, runes, sockets
-  art sheet scene [--scale 4] [--out FILE.png]        tiles, a trap, the probe chest and warriors in one pixel scale
+  art sheet scene [--scale 4] [--out FILE.png]        every tile, the probe chest, monsters and classes at one pixel scale
   art sheet join <a.png> <b.png> ... [--out FILE.png]  PNGs side by side (old and new sprites)
   art pack [--out DIR]                          palette.bin + book_<id>.bin (books 2.., 64 KiB each) for upload
   art upscale [files.dsl ...]                  rewrite format 1 sources (16..64 px) for format 2, in place
@@ -121,7 +121,7 @@ fn cmd_validate(o: &Opts) -> Result<bool, String> {
         .filter(|s| wanted.contains(&s.file))
         .collect();
     let n = mine.len();
-    // Bytes per sprite as stored in a book (FORMAT.md 3.1), and the sprites still at 64 px.
+    // Bytes per sprite as stored in a book (FORMAT.md 3.1).
     let mut total = 0;
     for s in &mine {
         let bitmap = s
@@ -130,18 +130,13 @@ fn cmd_validate(o: &Opts) -> Result<bool, String> {
             .iter()
             .any(|c| matches!(c, Cmd::Bitmap { .. }));
         println!(
-            "{:>5} {:<24} {:>3}x{:<3} {:>6} B{}{}",
+            "{:>5} {:<24} {:>3}x{:<3} {:>6} B{}",
             s.src.id,
             s.src.name,
             s.sprite.header.width,
             s.sprite.header.height,
             s.src.bytes.len(),
             if bitmap { "  bitmap" } else { "" },
-            if is_legacy_size(s) {
-                "  (64 px, redraw at 96)"
-            } else {
-                ""
-            },
         );
         total += s.src.bytes.len();
     }
@@ -252,23 +247,32 @@ fn cmd_sheet(o: &Opts) -> Result<bool, String> {
                 .map(|f| f.1.as_slice())
                 .ok_or(format!("no figure {name}"))
         };
-        let (w, f, t) = (501, 500, 506);
-        let tiles: [&[u16]; 4] = [
-            &[w, w, w, w, w],
-            &[f, f, t, f, f],
-            &[f, f, f, f, f],
-            &[f, f, f, f, f],
+        // wall, floor, water, door, entrance, exit, trap
+        let (w, f, a, d, i, x, t) = (501, 500, 502, 503, 504, 505, 506);
+        let tiles: [&[u16]; 5] = [
+            &[w, w, d, w, w, w, w],
+            &[i, f, f, f, t, f, f],
+            &[a, a, f, f, f, f, f],
+            &[a, a, f, f, f, f, x],
+            &[f, f, f, f, f, f, f],
         ];
         let img = preview::scene(
             &pal,
             &book,
             &sprites,
             &tiles,
-            &[(4, 1, PROBE_CHEST_ID)],
+            &[
+                (6, 1, PROBE_CHEST_ID),
+                (5, 2, 400),
+                (6, 4, 402),
+                (4, 4, 401),
+                (0, 4, 403),
+            ],
             &[
                 (1, 2, fig("human_warrior")?),
-                (3, 2, fig("elf_warrior")?),
-                (2, 3, fig("human")?),
+                (2, 3, fig("elf_mage")?),
+                (3, 2, fig("human_support")?),
+                (2, 4, fig("elf_warrior")?),
             ],
             if o.scale == 0 { 4 } else { o.scale },
         )?;

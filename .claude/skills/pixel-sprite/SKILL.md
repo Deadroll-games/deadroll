@@ -128,8 +128,7 @@ shield (`offhand`) is held in front of the torso on the back arm, over the armor
 front; long hair falls behind it. No wound overlays and no torn items: only worn items change the image, plus death gray.
 Other: `tile` **64x64** (one map cell), `monster` **96 or 128** square, `icon` **32x32**, `portrait`
 any allowed size (64x64; long items 32x96 or 64x128). Characters and monsters stand bottom-center
-on their cell at the tile's pixel size and overlap the row above. Old 64 px character layers and
-monsters still validate (with a note) until they are redrawn.
+on their cell at the tile's pixel size and overlap the row above.
 Must have `flags no_outline`: `shadow`, `necklace`, `fist_front`, `overlay_element`, floor tiles.
 
 ## Sprite id ranges

@@ -2,7 +2,7 @@ use art::preview::{self, Pal};
 use art::validate::{validate_files, validate_text};
 
 const OK: &str =
-    "sprite 100 warrior_ok\nsize 64 64\nlayer mainhand\nRECT 21 5 4 16 P\nRECT 22 7 1 12 U\n";
+    "sprite 100 warrior_ok\nsize 96 96\nlayer mainhand\nRECT 21 5 4 16 P\nRECT 22 7 1 12 U\n";
 
 fn msgs(text: &str) -> Vec<String> {
     validate_text("warrior_kit.dsl", text)
@@ -27,7 +27,7 @@ fn accepts_a_good_sprite() {
 
 #[test]
 fn rejects_too_many_commands() {
-    let mut t = String::from("sprite 100 a\nsize 64 64\nlayer boots\n");
+    let mut t = String::from("sprite 100 a\nsize 96 96\nlayer boots\n");
     for i in 0..49 {
         t += &format!("PIXEL {} 5 P\n", i + 2);
     }
@@ -36,12 +36,12 @@ fn rejects_too_many_commands() {
 
 #[test]
 fn rejects_too_many_shades_and_sockets() {
-    let mut t = String::from("sprite 100 a\nsize 64 64\nlayer boots\nRECT 2 2 20 20 P\n");
+    let mut t = String::from("sprite 100 a\nsize 96 96\nlayer boots\nRECT 2 2 20 20 P\n");
     for i in 0..9 {
         t += &format!("SHADE {} 5 P 1\n", i + 3);
     }
     rejects(&t, "SHADE commands");
-    let mut t = String::from("sprite 100 a\nsize 64 64\nlayer boots\nRECT 2 2 28 28 P\n");
+    let mut t = String::from("sprite 100 a\nsize 96 96\nlayer boots\nRECT 2 2 28 28 P\n");
     for i in 0..5 {
         t += &format!("SOCKET {} 4\n", 2 + i * 5);
     }
@@ -50,26 +50,26 @@ fn rejects_too_many_shades_and_sockets() {
 
 #[test]
 fn rejects_edge_contact_unless_no_outline() {
-    let t = "sprite 100 a\nsize 64 64\nlayer boots\nRECT 0 5 3 3 P\n";
+    let t = "sprite 100 a\nsize 96 96\nlayer boots\nRECT 0 5 3 3 P\n";
     rejects(t, "touches the canvas edge");
-    let t = "sprite 100 a\nsize 64 64\nlayer shadow\nflags no_outline\nRECT 0 5 3 3 P\n";
+    let t = "sprite 100 a\nsize 96 96\nlayer shadow\nflags no_outline\nRECT 0 5 3 3 P\n";
     assert!(!msgs(t).iter().any(|s| s.contains("edge")));
 }
 
 #[test]
 fn rejects_bad_line_slope() {
     rejects(
-        "sprite 100 a\nsize 64 64\nlayer boots\nLINE 3 3 10 6 P\n",
+        "sprite 100 a\nsize 96 96\nlayer boots\nLINE 3 3 10 6 P\n",
         "slope",
     );
-    let t = "sprite 100 a\nsize 64 64\nlayer boots\nLINE 3 3 11 7 P\nLINE 3 10 3 20 P\nLINE 5 10 9 14 P\n";
+    let t = "sprite 100 a\nsize 96 96\nlayer boots\nLINE 3 3 11 7 P\nLINE 3 10 3 20 P\nLINE 5 10 9 14 P\n";
     assert!(!msgs(t).iter().any(|s| s.contains("slope")));
 }
 
 #[test]
 fn rejects_missing_no_outline() {
     rejects(
-        "sprite 100 a\nsize 64 64\nlayer shadow\nRECT 10 63 12 1 P\n",
+        "sprite 100 a\nsize 96 96\nlayer shadow\nRECT 10 63 12 1 P\n",
         "no_outline",
     );
     rejects(
@@ -94,11 +94,11 @@ fn rejects_wrong_size_for_layer() {
 #[test]
 fn rejects_wrong_slot_letters_for_layer_kind() {
     rejects(
-        "sprite 100 a\nsize 64 64\nlayer boots\nRECT 2 2 3 3 K\n",
+        "sprite 100 a\nsize 96 96\nlayer boots\nRECT 2 2 3 3 K\n",
         "not allowed on a item",
     );
     rejects(
-        "sprite 100 a\nsize 64 64\nlayer body\nRECT 2 2 3 3 P\n",
+        "sprite 100 a\nsize 96 96\nlayer body\nRECT 2 2 3 3 P\n",
         "not allowed on a body",
     );
 }
@@ -106,26 +106,26 @@ fn rejects_wrong_slot_letters_for_layer_kind() {
 #[test]
 fn rejects_sockets_outside_p_and_rune_problems() {
     rejects(
-        "sprite 100 a\nsize 64 64\nlayer boots\nRECT 2 2 6 6 S\nSOCKET 3 3\n",
+        "sprite 100 a\nsize 96 96\nlayer boots\nRECT 2 2 6 6 S\nSOCKET 3 3\n",
         "P mask",
     );
     // The socket square is 4x4: 3x3 of it inside P is not enough.
     rejects(
-        "sprite 100 a\nsize 64 64\nlayer boots\nRECT 2 2 4 4 P\nSOCKET 3 3\n",
+        "sprite 100 a\nsize 96 96\nlayer boots\nRECT 2 2 4 4 P\nSOCKET 3 3\n",
         "4x4 square is not inside the P mask",
     );
-    assert!(msgs("sprite 100 a\nsize 64 64\nlayer boots\nRECT 2 2 6 6 P\nSOCKET 3 3\n").is_empty());
+    assert!(msgs("sprite 100 a\nsize 96 96\nlayer boots\nRECT 2 2 6 6 P\nSOCKET 3 3\n").is_empty());
     rejects(
-        "sprite 100 a\nsize 64 64\nlayer boots\nRECT 2 2 10 10 P\nSOCKET 3 3\nSOCKET 6 6\n",
+        "sprite 100 a\nsize 96 96\nlayer boots\nRECT 2 2 10 10 P\nSOCKET 3 3\nSOCKET 6 6\n",
         "overlaps another socket",
     );
     // 11 px of U on a weapon is too short, 12 is enough (OK).
     rejects(
-        "sprite 100 a\nsize 64 64\nlayer mainhand\nRECT 22 5 3 16 P\nRECT 23 7 1 11 U\n",
+        "sprite 100 a\nsize 96 96\nlayer mainhand\nRECT 22 5 3 16 P\nRECT 23 7 1 11 U\n",
         "at least 12",
     );
     rejects(
-        "sprite 100 a\nsize 64 64\nlayer mainhand\nRECT 22 5 4 12 P\nPIXEL 22 5 U\n",
+        "sprite 100 a\nsize 96 96\nlayer mainhand\nRECT 22 5 4 12 P\nPIXEL 22 5 U\n",
         "inside the P mask",
     );
 }
@@ -147,11 +147,11 @@ fn portrait_with_runes_keeps_the_glow_margin() {
 #[test]
 fn rejects_ids_out_of_range_and_duplicates() {
     rejects(
-        "sprite 250 a\nsize 64 64\nlayer boots\nRECT 2 2 3 3 P\n",
+        "sprite 250 a\nsize 96 96\nlayer boots\nRECT 2 2 3 3 P\n",
         "outside the range 100-199",
     );
     rejects(
-        "sprite 700 a\nsize 64 64\nlayer boots\nRECT 2 2 3 3 P\n",
+        "sprite 700 a\nsize 96 96\nlayer boots\nRECT 2 2 3 3 P\n",
         "1..=599",
     );
     let files = vec![
@@ -169,7 +169,7 @@ fn rejects_ids_out_of_range_and_duplicates() {
 
 #[test]
 fn reports_compile_errors_with_a_line() {
-    let (_, i) = validate_text("x.dsl", "sprite 1 a\nsize 64 64\nlayer boots\nBLOB 1\n");
+    let (_, i) = validate_text("x.dsl", "sprite 1 a\nsize 96 96\nlayer boots\nBLOB 1\n");
     assert!(i.iter().any(|i| i.line == 4), "{i:?}");
 }
 
@@ -178,7 +178,7 @@ fn inline_comment_is_not_a_comment() {
     // `#` after a command is a token that is not at line start of a statement: the compiler decides.
     let (_, i) = validate_text(
         "x.dsl",
-        "# whole line comment\nsprite 1 a\nsize 64 64\nlayer boots\nRECT 2 2 3 3 P\n",
+        "# whole line comment\nsprite 1 a\nsize 96 96\nlayer boots\nRECT 2 2 3 3 P\n",
     );
     assert!(i.iter().all(|i| !i.msg.contains("slot")), "{i:?}");
 }
@@ -265,11 +265,14 @@ fn tiles_use_tile_materials_and_support_kit_materials() {
         let want = match id {
             300 => "moss",
             302 => "cloth",
-            300.. => "leather",
+            301 | 303.. => "leather",
             _ => continue,
         };
         assert_eq!(look.material, want, "layer {ty} sprite {id}");
-        assert!(pal.src.material(want).is_some(), "{want} missing in palette");
+        assert!(
+            pal.src.material(want).is_some(),
+            "{want} missing in palette"
+        );
     }
 }
 
@@ -468,4 +471,19 @@ fn front_fist_repeats_the_fist_of_every_body() {
         .1
         .iter()
         .any(|i| i.msg.contains("no_outline")));
+}
+
+#[test]
+fn every_character_layer_and_monster_is_redrawn_at_96() {
+    // The 64 px canvases of format 2 before the 96 px characters are no longer accepted.
+    rejects(
+        "sprite 100 a\nsize 64 64\nlayer boots\nRECT 10 10 4 4 P\n",
+        "size 64x64 not allowed",
+    );
+    rejects(
+        "sprite 400 a\nsize 64 64\nlayer monster\nRECT 10 10 4 4 K\n",
+        "size 64x64 not allowed",
+    );
+    let big = "sprite 400 a\nsize 128 128\nlayer monster\nRECT 10 10 4 4 K\n";
+    assert!(validate_text("monsters.dsl", big).1.is_empty());
 }
