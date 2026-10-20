@@ -237,7 +237,7 @@ fn all_repo_sprites_are_valid_and_render_deterministically() {
 }
 
 #[test]
-fn tiles_use_tile_materials_and_support_is_leather() {
+fn tiles_use_tile_materials_and_support_kit_materials() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let pal =
         Pal::load(&std::fs::read_to_string(root.join("assets/palette/palette_2.pal")).unwrap())
@@ -260,10 +260,16 @@ fn tiles_use_tile_materials_and_support_is_leather() {
         .into_iter()
         .find(|c| c.0 == "human_support")
         .unwrap();
+    // Leather jerkin, wand, pouch and amulet; the cowl in moss and the boots in cloth.
     for (ty, id, look) in layers {
-        if id >= 300 {
-            assert_eq!(look.material, "leather", "layer {ty} sprite {id}");
-        }
+        let want = match id {
+            300 => "moss",
+            302 => "cloth",
+            300.. => "leather",
+            _ => continue,
+        };
+        assert_eq!(look.material, want, "layer {ty} sprite {id}");
+        assert!(pal.src.material(want).is_some(), "{want} missing in palette");
     }
 }
 
