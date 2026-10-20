@@ -21,9 +21,13 @@ export function encodeGameConfig(c: {
   rasterizerSha256: Uint8Array;
   palette: Address;
   uriBase?: string;
+  /** Up to 4; the rest of the slots stay empty (zeros). */
+  spriteBooks?: Address[];
 }): Uint8Array {
   const uri = new Uint8Array(64);
   uri.set(new TextEncoder().encode(c.uriBase ?? "").subarray(0, 64));
+  const books = new Uint8Array(4 * 32);
+  (c.spriteBooks ?? []).forEach((b, i) => books.set(addr(b), i * 32));
   return concat(
     ACCOUNT_DISC.GameConfig,
     new Uint8Array([1]),
@@ -35,6 +39,7 @@ export function encodeGameConfig(c: {
     addr(c.palette),
     uri,
     new Uint8Array([255]),
+    books,
   );
 }
 

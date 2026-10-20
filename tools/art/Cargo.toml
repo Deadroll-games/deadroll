@@ -17,3 +17,5 @@ path = "src/main.rs"
 
 [dependencies]
 deadroll-render = { workspace = true, features = ["text"] }
+# RGBA PNG for preview sheets (more than 256 colors). Host tool only, already in Cargo.lock.
+png = "0.17"

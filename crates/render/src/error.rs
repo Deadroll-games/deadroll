@@ -21,6 +21,8 @@ pub enum Error {
     Palette = 8,
     /// Malformed render request, output mode or scale.
     Request = 9,
+    /// More than 256 colors in the image: an indexed PNG cannot hold it.
+    Colors = 10,
 }
 
 impl Error {

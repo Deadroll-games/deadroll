@@ -4,7 +4,9 @@ use std::collections::BTreeMap;
 
 use deadroll_render::sprite::layer;
 use deadroll_render::text::{compile_palette, PaletteSrc};
-use deadroll_render::{book, encode_input, png, render, LayerRef, RenderRequest, OUT_RGBA};
+use deadroll_render::{
+    book, encode_books, render, scale, Image, LayerRef, OutputMode, RenderRequest, ASSET_LEN,
+};
 
 use crate::validate::Compiled;
 
@@ -122,22 +124,37 @@ fn request(pal: &Pal, layers: &[(usize, u16, Look)]) -> Result<RenderRequest, St
     Ok(req)
 }
 
-/// Sprite books for rendering: one book holding every compiled sprite.
+/// Id of the book `art pack` builds: book 2 holds sprite format 2 (book 1, format 1, is frozen on-chain).
+pub const BOOK_ID: u16 = 2;
+
+/// Sprite books for rendering and upload: one book holding every compiled sprite.
 pub fn pack_book(sprites: &[Compiled]) -> Result<Vec<u8>, String> {
     let items: Vec<(u16, &[u8])> = sprites
         .iter()
         .map(|c| (c.src.id, c.src.bytes.as_slice()))
         .collect();
-    book::pack(1, &items).map_err(|e| format!("book: {e:?}"))
+    book::pack(BOOK_ID, &items).map_err(|e| format!("book: {e:?}"))
 }
 
-fn run(pal: &Pal, book_bytes: &[u8], req: &RenderRequest, scale: u32) -> Result<Img, String> {
-    let input = encode_input(&req.encode(), &[0u8; 32], &pal.src.bytes, &[book_bytes]);
-    let out = render(&input, OUT_RGBA, scale).map_err(|e| format!("render: {e:?}"))?;
-    Ok(Img {
-        w: out.width as usize,
-        h: out.height as usize,
+fn run(pal: &Pal, book_bytes: &[u8], req: &RenderRequest, k: u32) -> Result<Img, String> {
+    let out = render(
+        &encode_books(&[book_bytes]),
+        &pal.src.bytes,
+        &req.encode(),
+        &[0u8; ASSET_LEN],
+        OutputMode::RawRgba,
+    )
+    .map_err(|e| format!("render: {e:?}"))?;
+    let img = Image {
+        width: out.width as usize,
+        height: out.height as usize,
         rgba: out.bytes,
+    };
+    let big = scale(&img, k).map_err(|e| format!("scale {k}: {e:?}"))?;
+    Ok(Img {
+        w: big.width,
+        h: big.height,
+        rgba: big.rgba,
     })
 }
 
@@ -278,8 +295,17 @@ pub fn grid(images: &[Img], cols: usize, gap: usize, bg: Rgb) -> Img {
     Img { w, h, rgba }
 }
 
+/// RGBA PNG for previews. Sheets can hold more than the 256 colors of the on-chain indexed
+/// encoder, so previews use the `png` crate.
 pub fn to_png(img: &Img) -> Vec<u8> {
-    png::encode(img.w, img.h, &img.rgba)
+    let mut out = Vec::new();
+    let mut enc = png::Encoder::new(&mut out, img.w as u32, img.h as u32);
+    enc.set_color(png::ColorType::Rgba);
+    enc.set_depth(png::BitDepth::Eight);
+    let mut w = enc.write_header().expect("png header");
+    w.write_image_data(&img.rgba).expect("png data");
+    drop(w);
+    out
 }
 
 /// Parses `#rrggbb`.

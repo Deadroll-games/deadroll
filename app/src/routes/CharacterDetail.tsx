@@ -86,7 +86,7 @@ export function spendLock(c: CharacterAcc, viewer: Address | null): string | nul
 /** An item's own sprite from the on-chain sprite book. */
 function ItemIcon({ base }: { base: string }) {
   const img = useRenderImage(itemRequest(base));
-  return <SpriteCanvas image={img.image} scale={2} label={itemLabel(base)} />;
+  return <SpriteCanvas image={img.image} scale={1} label={itemLabel(base)} />;
 }
 const itemIcon = (base: string): ReactNode => <ItemIcon base={base} />;
 
@@ -235,7 +235,7 @@ export function CharacterDetailView({
   return (
     <div className="char-detail">
       <header className={`panel char-detail-head${dead ? " dead" : ""}`}>
-        <SpriteCanvas image={img.image} scale={8} label={name} />
+        <SpriteCanvas image={img.image} scale={4} label={name} />
         <div>
           <h1>{name}</h1>
           <p>

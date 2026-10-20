@@ -14,7 +14,7 @@ pnpm --filter @deadroll/app dev
 `VITE_DATA=mock` needs no validator. The dev server serves local build outputs under `/dev-assets/`, and the app wraps them in synthetic `GameConfig`, `RasterizerCode`, `Palette` and `SpriteBook` accounts, so the loader runs its real decode and SHA-256 checks. Build them first:
 
 ```
-cargo test -p deadroll-render --test golden      # target/render-golden/{input,palette,book}.bin
+cargo test -p deadroll-render --test golden      # target/render-golden/{state,sprites,palette,book}.bin
 bash crates/render/wasm/build.sh                 # target/render-wasm/deadroll_render.wasm
 ```
 
@@ -39,7 +39,6 @@ bash crates/combat/wasm/build.sh                 # CI runs it with --check and f
 VITE_DATA=chain
 VITE_RPC_URL=http://127.0.0.1:8899      # or a devnet RPC
 VITE_CHAIN=solana:localnet              # Wallet Standard chain id
-VITE_SPRITE_BOOKS=1                     # sprite book ids to load
 ```
 This needs the registry `GameConfig` and the finalized render blobs (`tools/scripts/upload-rasterizer.ts`, `upload-sprites.ts`).
 
@@ -93,7 +92,8 @@ Reads only `app/.env.devnet` (public values). Chain data only: mock data, the `/
 2. Check `GameConfig.rasterizer` is the `["rasterizer", version]` PDA.
 3. IndexedDB hit by hash: re-hash, use if equal.
 4. Otherwise fetch `RasterizerCode`, check discriminator, kind, id, `finalized`, exact length; SHA-256 the body with WebCrypto; it must equal both `GameConfig.rasterizer_sha256` and the finalized header hash. Cache it.
-5. `WebAssembly.instantiate`, then render with `Rasterizer.render(request, palette, books)`.
+5. Load `GameConfig.palette` and every `GameConfig.sprite_books` entry (each must be the `["sprites", id]` PDA of its header id), in that lookup order.
+6. `WebAssembly.instantiate`, then render with `Rasterizer.render(request, palette, books)`: `render(sprites, palette, state, asset, mode)` of `ART_DESCRIPTION.md` 2.2. RGBA is the canvas 1:1 (64 px characters, `SpriteCanvas` and `Grid` scale it); PNG is 512 px.
 
 `src/raster/raster.test.ts` renders the reference warrior through this path and compares the PNG SHA-256 with the native renderer.
 

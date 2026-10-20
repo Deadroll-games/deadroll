@@ -26,6 +26,8 @@ anchor-lang.workspace = true
 deadroll-types = { workspace = true, features = ["anchor"] }
 # Content checks at finalize (palette and sprite book parse). No dependencies of its own.
 deadroll-render.workspace = true
+# `finalize_rasterizer` writes GameConfig through `registry::set_rasterizer_from_render` (CPI).
+deadroll-registry.workspace = true
 bytemuck = { version = "1", features = ["derive"] }
 solana-sha256-hasher = "3.1"
 

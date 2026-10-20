@@ -22,7 +22,13 @@ export type GameConfig = {
   palette: Address;
   uriBase: string;
   bump: number;
+  /** Patch 7 registry field: the sprite books to draw from, in lookup order (empty slots dropped). */
+  spriteBooks: Address[];
 };
+
+/** `GameConfig.sprite_books` slots (programs/registry `SPRITE_BOOKS_MAX`); `Pubkey::default()` = empty. */
+export const SPRITE_BOOKS_MAX = 4;
+const EMPTY_ADDRESS = "11111111111111111111111111111111";
 
 /** Byte offsets after the discriminator are fixed: rasterizer_version at 265, sha256 at 299. */
 export function decodeGameConfig(data: Uint8Array): GameConfig {
@@ -39,7 +45,9 @@ export function decodeGameConfig(data: Uint8Array): GameConfig {
   const end = uriRaw.indexOf(0);
   const uriBase = new TextDecoder().decode(end < 0 ? uriRaw : uriRaw.subarray(0, end));
   const bump = r.u8();
-  return { version, authority, programs, rasterizerVersion, rasterizer, rasterizerSha256, palette, uriBase, bump };
+  const slots = Array.from({ length: SPRITE_BOOKS_MAX }, () => r.address());
+  const spriteBooks = slots.filter((a) => a !== EMPTY_ADDRESS);
+  return { version, authority, programs, rasterizerVersion, rasterizer, rasterizerSha256, palette, uriBase, bump, spriteBooks };
 }
 
 // ---- Render blobs (RasterizerCode, Palette, SpriteBook) ----

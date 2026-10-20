@@ -1,4 +1,5 @@
-//! Reading render blobs (`RasterizerCode`, `Palette`) for `set_rasterizer` / `set_palette`.
+//! Reading render blobs (`RasterizerCode`, `Palette`, `SpriteBook`) for `set_rasterizer`,
+//! `set_palette` and `set_sprite_books`.
 //!
 //! The registry pulls: no CPI from render (`programs/render/README.md`). Offsets of the blob
 //! header in the account data are fixed there and mirrored here.
@@ -11,9 +12,12 @@ use crate::errors::RegistryError;
 pub const RASTERIZER_DISCRIMINATOR: [u8; 8] = [0x68, 0x2f, 0x12, 0x17, 0x9e, 0xd6, 0x7b, 0x2e];
 /// `sha256("account:Palette")[..8]`.
 pub const PALETTE_DISCRIMINATOR: [u8; 8] = [0x05, 0x3a, 0x00, 0xb2, 0xc1, 0xb5, 0x9c, 0x89];
+/// `sha256("account:SpriteBook")[..8]`.
+pub const SPRITE_BOOK_DISCRIMINATOR: [u8; 8] = [0xdd, 0xbb, 0xcf, 0xb6, 0x27, 0x5c, 0xbc, 0x05];
 
 pub const KIND_RASTERIZER: u8 = 1;
 pub const KIND_PALETTE: u8 = 2;
+pub const KIND_SPRITE_BOOK: u8 = 3;
 /// Blob header layout version this code understands.
 const BLOB_VERSION: u8 = 1;
 
@@ -27,7 +31,7 @@ const BODY_OFFSET: usize = 116;
 /// What the registry copies from a finalized blob.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Blob {
-    /// Rasterizer or palette version (the PDA seed).
+    /// Rasterizer or palette version, or sprite book id (the PDA seed).
     pub id: u16,
     pub sha256: [u8; 32],
 }
@@ -96,6 +100,7 @@ mod tests {
         let h = |n: &[u8]| solana_sha256_hasher::hash(n).to_bytes();
         assert_eq!(RASTERIZER_DISCRIMINATOR, h(b"account:RasterizerCode")[..8]);
         assert_eq!(PALETTE_DISCRIMINATOR, h(b"account:Palette")[..8]);
+        assert_eq!(SPRITE_BOOK_DISCRIMINATOR, h(b"account:SpriteBook")[..8]);
     }
 
     #[test]

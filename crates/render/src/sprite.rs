@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 
 use crate::error::{Error, Result};
 
-pub const FORMAT_VERSION: u8 = 1;
+pub const FORMAT_VERSION: u8 = 2;
 pub const HEADER_LEN: usize = 6;
 pub const FLAG_NO_OUTLINE: u8 = 1;
 pub const POLY_MIN: u8 = 3;
@@ -181,8 +181,9 @@ pub struct Sprite {
     pub cmds: Vec<Cmd>,
 }
 
+/// Allowed canvas sides (`FORMAT.md` 1.1). Format 2 doubled the format 1 sizes.
 pub const fn valid_size(v: u8) -> bool {
-    matches!(v, 16 | 32 | 48 | 64)
+    matches!(v, 32 | 64 | 96 | 128)
 }
 
 struct Reader<'a> {
@@ -368,7 +369,7 @@ mod tests {
     use alloc::vec;
 
     fn sprite(cmds: &[u8], count: u8) -> Vec<u8> {
-        let mut v = vec![1, 32, 32, 16, 0, count];
+        let mut v = vec![FORMAT_VERSION, 32, 32, 16, 0, count];
         v.extend_from_slice(cmds);
         v
     }
@@ -410,17 +411,27 @@ mod tests {
         let ok = sprite(&[0x12, 0, 0, 1, 1], 1);
         assert!(decode(&ok).is_ok());
         // truncated header, truncated command, trailing byte
-        assert_eq!(decode(&[1, 32, 32]), Err(Error::Truncated));
+        assert_eq!(decode(&[FORMAT_VERSION, 32, 32]), Err(Error::Truncated));
         assert_eq!(decode(&ok[..ok.len() - 1]), Err(Error::Truncated));
         let mut trailing = ok.clone();
         trailing.push(0);
         assert_eq!(decode(&trailing), Err(Error::Truncated));
-        // version
-        let mut v = ok.clone();
-        v[0] = 2;
-        assert_eq!(decode(&v), Err(Error::Version));
-        // size, layer type, flags
-        for (i, b) in [(1, 33u8), (2, 0), (3, 24), (4, 2)] {
+        // version: format 1 sprites belong to rasterizer version 1
+        for version in [1, 3] {
+            let mut v = ok.clone();
+            v[0] = version;
+            assert_eq!(decode(&v), Err(Error::Version), "version {version}");
+        }
+        // size (format 1 sizes 16 and 48 too), layer type, flags
+        for (i, b) in [
+            (1, 33u8),
+            (1, 16),
+            (2, 48),
+            (1, 129),
+            (2, 0),
+            (3, 24),
+            (4, 2),
+        ] {
             let mut v = ok.clone();
             v[i] = b;
             assert_eq!(decode(&v), Err(Error::Header), "byte {i}");
@@ -452,6 +463,19 @@ mod tests {
         ] {
             assert_eq!(decode(&sprite(cmd, 1)), Err(Error::Arg), "{cmd:?}");
         }
+    }
+
+    #[test]
+    fn largest_canvas() {
+        // 128x128: coordinates up to 127, a rect to the edge, the widest mirror axis.
+        let mut v = vec![FORMAT_VERSION, 128, 128, 21, 0, 4];
+        v.extend_from_slice(&[
+            0x12, 0, 0, 128, 128, 0x22, 127, 127, 0x70, 255, 0xA0, 126, 126,
+        ]);
+        assert_eq!(decode(&v).unwrap().cmds.len(), 4);
+        v.extend_from_slice(&[0x12, 1, 0, 128, 1]);
+        v[5] = 5;
+        assert_eq!(decode(&v), Err(Error::Arg), "past the right edge");
     }
 
     #[test]

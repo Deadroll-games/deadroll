@@ -51,8 +51,15 @@ const MOCK_VRF_IDENTITY = "5RotSMue7vx9xBPp3L8iQEKbKSc3ezbY4GqiJxDEe6sN";
 const VRF_IDENTITY = "Bj7XBktwDmAg6J4FohS6oRHbevD6MMd8jnCZKvzKPiKV";
 
 /** `GameConfig` byte offsets (discriminator included), programs/registry README. */
-const CFG = { authority: 9, programs: 41, rasterizerVersion: 265, rasterizer: 267, sha: 299, palette: 331, uri: 363 };
+const CFG = { authority: 9, programs: 41, rasterizerVersion: 265, rasterizer: 267, sha: 299, palette: 331, uri: 363, spriteBooks: 428 };
+/** `GameConfig` account size before patch 7 (discriminator + `GameConfigData`) and now (+ `sprite_books: [Pubkey; 4]`). */
+const CONFIG_LEGACY_LEN = 8 + 420;
+const CONFIG_LEN = CONFIG_LEGACY_LEN + 4 * 32;
 const URI_BASE_LEN = 64;
+const EMPTY_ADDRESS = "11111111111111111111111111111111";
+/** Rasterizer version and sprite book id of sprite format 2 (crates/render/FORMAT.md); version 1 and book 1 hold format 1. */
+export const RASTERIZER_VERSION = 2;
+export const BOOK_ID = 2;
 /** `Map` byte offsets: discriminator, version, dm, index u32, width, height, status. */
 const MAP_STATUS = 8 + 1 + 32 + 4 + 1 + 1;
 const MAP_STATUS_NAMES = ["Draft", "Finalized", "InSession", "Finished"];
@@ -409,7 +416,11 @@ async function estimateCost(conn: Rpc, opts: DeployOptions, programIds: Record<s
       add(`${p.name}: buffer during deploy (refunded)`, buffer);
     }
   }
-  if (!(await fetchData(conn.rpc, GAME_CONFIG))) add("GameConfig", await rentFor(conn.rpc, 8 + 420));
+  const cfgNow = await fetchData(conn.rpc, GAME_CONFIG);
+  if (!cfgNow) add("GameConfig", await rentFor(conn.rpc, CONFIG_LEN));
+  else if (cfgNow.length < CONFIG_LEN) {
+    add(`GameConfig resize ${cfgNow.length} -> ${CONFIG_LEN} B`, (await rentFor(conn.rpc, CONFIG_LEN)) - (await rentFor(conn.rpc, cfgNow.length)));
+  }
   for (const seed of ["aspects", "resonances", "bestiary", "tileset", "prefabs", "traits", "monster_skills"]) {
     const [table] = await getProgramDerivedAddress({ programAddress: address(programIds.registry), seeds: [enc.encode(seed)] });
     if (!(await fetchData(conn.rpc, table))) add(`registry table ${seed}`, await rentFor(conn.rpc, 16 + 4096));
@@ -481,6 +492,11 @@ async function ensureConfig(conn: Rpc, opts: DeployOptions, wallet: KeyPairSigne
   if (authority !== wallet.address) {
     throw new Error(`GameConfig authority is ${authority}, not this wallet; reset the validator or use that wallet`);
   }
+  if (cfg.length < CONFIG_LEN) {
+    // Patch 7 appended `sprite_books`: an older account must grow before anything can load it.
+    await send(conn, wallet, [ixFromIdl(programIds.registry, "deadroll_registry", "resize_config", { authority: wallet, config: GAME_CONFIG })]);
+    console.log(`resize_config: ${cfg.length} -> ${CONFIG_LEN} bytes`);
+  }
   if (!sameBytes(cfg.subarray(CFG.programs, CFG.programs + list.length), list)) {
     await send(conn, wallet, [ixFromIdl(programIds.registry, "deadroll_registry", "set_programs", { authority: wallet, config: GAME_CONFIG }, list)]);
     console.log("set_programs: program list updated");
@@ -517,7 +533,7 @@ async function uploadRender(conn: Rpc, opts: DeployOptions, wallet: KeyPairSigne
 
   step("render blobs");
   const palVersion = paletteVersion();
-  script("upload-rasterizer.ts", ["--version", String(opts.rasterizerVersion), "--wasm", join(ROOT, "target/render-wasm/deadroll_render.wasm")], opts);
+  // Books first: finalize_rasterizer points GameConfig at the new rasterizer right away.
   script(
     "upload-sprites.ts",
     [
@@ -526,6 +542,7 @@ async function uploadRender(conn: Rpc, opts: DeployOptions, wallet: KeyPairSigne
     ],
     opts,
   );
+  script("upload-rasterizer.ts", ["--version", String(opts.rasterizerVersion), "--wasm", join(ROOT, "target/render-wasm/deadroll_render.wasm")], opts);
 
   step("GameConfig pointers");
   const rasterizer = await blobPda("rasterizer", opts.rasterizerVersion);
@@ -545,7 +562,17 @@ async function uploadRender(conn: Rpc, opts: DeployOptions, wallet: KeyPairSigne
     await send(conn, wallet, [ixFromIdl(programIds.registry, "deadroll_registry", "set_palette", { ...accounts, blob: palette })]);
     console.log(`set_palette: ${palette}`);
   }
-  return { rasterizer, palette, paletteVersion: palVersion, book: await blobPda("sprite_book", opts.bookId) };
+  const book = await blobPda("sprite_book", opts.bookId);
+  const books = [0, 1, 2, 3].map((i) => addrAt(cfg, CFG.spriteBooks + i * 32));
+  if (books[0] === book && books.slice(1).every((b) => b === EMPTY_ADDRESS)) {
+    console.log(`sprite books: already [${book}]`);
+  } else {
+    const ix = ixFromIdl(programIds.registry, "deadroll_registry", "set_sprite_books", accounts);
+    ix.accounts.push({ address: address(book), role: AccountRole.READONLY });
+    await send(conn, wallet, [ix]);
+    console.log(`set_sprite_books: [${book}]`);
+  }
+  return { rasterizer, palette, paletteVersion: palVersion, book };
 }
 
 export async function mapAddresses(mapProgram: string, dm: string, index: number) {
@@ -628,7 +655,7 @@ export async function deploy(opts: DeployOptions): Promise<void> {
   console.log(`GameConfig ${GAME_CONFIG} (authority ${wallet.address})`);
   console.log(`rasterizer ${render.rasterizer} (version ${opts.rasterizerVersion})`);
   console.log(`palette    ${render.palette} (version ${render.paletteVersion})`);
-  console.log(`book       ${render.book} (id ${opts.bookId}; app: VITE_SPRITE_BOOKS=${opts.bookId})`);
+  console.log(`book       ${render.book} (id ${opts.bookId}, GameConfig.sprite_books[0])`);
   console.log(`demo map   ${demo.map} (DM ${wallet.address}, index ${opts.mapIndex}, ${demo.status})`);
   console.log(`layout     ${demo.layout}`);
   const after = (await conn.rpc.getBalance(wallet.address).send()).value;

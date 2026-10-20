@@ -41,6 +41,9 @@ describe("Grid", () => {
     const canvas = screen.getByRole("img", { name: "Battle map, 4 by 3 cells" });
     expect(canvas.tagName).toBe("CANVAS");
     expect(canvas.className).toContain("pixel");
+    // 64 canvas pixels per cell (format 2 sprites 1:1), shown at the default 48 CSS px.
+    expect((canvas as HTMLCanvasElement).width).toBe(4 * 64);
+    expect(canvas.style.width).toBe(`${4 * 48}px`);
   });
 
   it("clicks an empty cell, a live unit, and a dead unit cell as a move", () => {
@@ -112,5 +115,15 @@ describe("Grid", () => {
     fireEvent.mouseLeave(canvas);
 
     expect(onCellHover.mock.calls).toEqual([[{ x: 0, y: 0 }], [{ x: 1, y: 0 }], [null]]);
+  });
+});
+
+describe("backingCell", () => {
+  it("draws at least one 64 px sprite per cell and keeps larger cells", async () => {
+    const { backingCell } = await import("./Grid");
+    expect(backingCell(12)).toBe(64);
+    expect(backingCell(32)).toBe(64);
+    expect(backingCell(48)).toBe(64);
+    expect(backingCell(96)).toBe(96);
   });
 });

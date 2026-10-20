@@ -4,7 +4,7 @@ use deadroll_types::{seeds, GameConfigData, ProgramIdx, PROGRAMS_COUNT, URI_BASE
 use crate::{
     errors::RegistryError,
     events::ConfigInitialized,
-    state::{GameConfig, ACCOUNT_VERSION},
+    state::{GameConfig, ACCOUNT_VERSION, SPRITE_BOOKS_MAX},
 };
 
 #[derive(Accounts)]
@@ -54,6 +54,7 @@ pub fn handler(
         uri_base,
         bump: ctx.bumps.config,
     };
+    ctx.accounts.config.sprite_books = [Pubkey::default(); SPRITE_BOOKS_MAX];
     emit!(ConfigInitialized {
         authority: ctx.accounts.authority.key()
     });

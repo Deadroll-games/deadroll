@@ -12,10 +12,11 @@ const BOOK_MAX: usize = 64 * 1024;
 
 const USAGE: &str = "usage:
   art validate [files.dsl ...]                 default: every file in assets/sprites
-  art <file.dsl> [--id N] [--scale 8] [--out DIR|FILE.png] [--material NAME] [--bg #rrggbb]
-  art sheet characters [--scale 8] [--out FILE.png]
-  art sheet contact [files.dsl ...] [--scale 4] [--out FILE.png]
-  art pack [--out DIR]                          palette.bin + book.bin (book 1, every sprite) for upload
+  art <file.dsl> [--id N] [--scale 4] [--out DIR|FILE.png] [--material NAME] [--bg #rrggbb]
+  art sheet characters [--scale 4] [--out FILE.png]
+  art sheet contact [files.dsl ...] [--scale 2] [--out FILE.png]
+  art pack [--out DIR]                          palette.bin + book.bin (book 2, every sprite) for upload
+  art upscale [files.dsl ...]                  rewrite format 1 sources (16..64 px) for format 2, in place
 options: --palette FILE.pal (default assets/palette/palette_1.pal)";
 
 struct Opts {
@@ -155,7 +156,7 @@ fn cmd_render(o: &Opts) -> Result<bool, String> {
     }
     let pal = load_pal(o)?;
     let book = preview::pack_book(&sprites)?;
-    let scale = if o.scale == 0 { 8 } else { o.scale };
+    let scale = if o.scale == 0 { 4 } else { o.scale };
     let pick: Vec<&&Compiled> = own
         .iter()
         .filter(|c| o.id.is_none_or(|id| c.src.id == id))
@@ -194,8 +195,8 @@ fn cmd_sheet(o: &Opts) -> Result<bool, String> {
     let book = preview::pack_book(&sprites)?;
     let bg = o.bg.unwrap_or(SHEET_BG);
     let (default_scale, default_out) = match kind {
-        "characters" => (8, "target/art/characters.png"),
-        "contact" => (4, "target/art/contact.png"),
+        "characters" => (4, "target/art/characters.png"),
+        "contact" => (2, "target/art/contact.png"),
         _ => return Err("sheet kind: characters | contact".into()),
     };
     let scale = if o.scale == 0 { default_scale } else { o.scale };
@@ -253,6 +254,39 @@ fn cmd_pack(o: &Opts) -> Result<bool, String> {
     Ok(true)
 }
 
+/// Rewrites format 1 sources for format 2 and prints, per sprite, how many cells differ from the
+/// old slot grid enlarged x2 (0 = the same pixels).
+fn cmd_upscale(o: &Opts) -> Result<bool, String> {
+    let files: Vec<PathBuf> = if o.pos.is_empty() {
+        repo_files()
+    } else {
+        o.pos.iter().map(PathBuf::from).collect()
+    };
+    for p in &files {
+        let old = read(p)?;
+        let new = art::upscale::upscale_text(&old).map_err(|e| format!("{}: {e}", p.display()))?;
+        let diff =
+            art::upscale::compare(&old, &new).map_err(|e| format!("{}: {e}", p.display()))?;
+        write(p, new.as_bytes())?;
+        let changed: Vec<String> = diff
+            .iter()
+            .filter(|(_, n)| *n > 0)
+            .map(|(name, n)| format!("{name} {n}"))
+            .collect();
+        println!(
+            "{}: {} sprites, cells differing from x2: {}",
+            norm(p),
+            diff.len(),
+            if changed.is_empty() {
+                "none".to_string()
+            } else {
+                changed.join(", ")
+            }
+        );
+    }
+    Ok(true)
+}
+
 fn run() -> Result<bool, String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.is_empty() || args[0] == "-h" || args[0] == "--help" {
@@ -267,6 +301,10 @@ fn run() -> Result<bool, String> {
         }),
         Some("sheet") => cmd_sheet(&o),
         Some("pack") => cmd_pack(&o),
+        Some("upscale") => cmd_upscale(&Opts {
+            pos: o.pos[1..].to_vec(),
+            ..o
+        }),
         Some(_) => cmd_render(&o),
         None => Err(USAGE.into()),
     }

@@ -1,7 +1,8 @@
 //! Deadroll render: on-chain rasterizer code, palettes and sprite books.
 //!
 //! Each blob is created by `init_*`, grown by `extend`, filled by `write_chunk` and frozen by
-//! `finalize_*` (SHA-256 checked). The registry reads finalized accounts itself (no CPI).
+//! `finalize_*` (SHA-256 checked). `finalize_rasterizer` also points `GameConfig` at the new
+//! rasterizer (CPI into the registry); palettes and sprite books are pulled by the registry.
 use anchor_lang::prelude::*;
 
 pub mod config;

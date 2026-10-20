@@ -9,7 +9,7 @@ import { PROGRAMS } from "../config";
 import { RENDER_REQUEST_LEN, decodeRenderRequest } from "./rasterizer";
 import type { RenderRequest } from "../chain/types";
 
-export const MOCK_RASTERIZER_VERSION = 1;
+export const MOCK_RASTERIZER_VERSION = 2;
 
 async function fetchBytes(path: string): Promise<Uint8Array> {
   const res = await fetch(path);
@@ -19,16 +19,16 @@ async function fetchBytes(path: string): Promise<Uint8Array> {
 
 export async function mockRenderSource(base = "/dev-assets"): Promise<{
   source: AccountSource;
-  bookIds: number[];
   sample: RenderRequest;
 }> {
-  const [wasm, palette, book, golden] = (await Promise.all(
-    ["rasterizer.wasm", "palette.bin", "book.bin", "golden-input.bin"].map((f) => fetchBytes(`${base}/${f}`)),
+  const [wasm, palette, book, state] = (await Promise.all(
+    ["rasterizer.wasm", "palette.bin", "book.bin", "golden-state.bin"].map((f) => fetchBytes(`${base}/${f}`)),
   )) as [Uint8Array, Uint8Array, Uint8Array, Uint8Array];
   const paletteVersion = palette[1]! | (palette[2]! << 8);
   const bookId = book[1]! | (book[2]! << 8);
   const rasterizer = await rasterizerPda(MOCK_RASTERIZER_VERSION);
   const paletteAddr = await palettePda(paletteVersion);
+  const bookAddr = await spriteBookPda(bookId);
   const wasmSha = await sha256(wasm);
   const accounts = new Map<string, Uint8Array>([
     [
@@ -40,13 +40,14 @@ export async function mockRenderSource(base = "/dev-assets"): Promise<{
         rasterizer,
         rasterizerSha256: wasmSha,
         palette: paletteAddr,
+        spriteBooks: [bookAddr],
       }),
     ],
     [rasterizer, encodeBlob("rasterizer", MOCK_RASTERIZER_VERSION, wasm, wasmSha)],
     [paletteAddr, encodeBlob("palette", paletteVersion, palette, await sha256(palette))],
-    [await spriteBookPda(bookId), encodeBlob("sprite_book", bookId, book, await sha256(book))],
+    [bookAddr, encodeBlob("sprite_book", bookId, book, await sha256(book))],
   ]);
-  // golden-input.bin starts with u32 len + the reference warrior RenderRequest.
-  const sample = decodeRenderRequest(golden.subarray(4, 4 + RENDER_REQUEST_LEN));
-  return { source: mapAccountSource(accounts), bookIds: [bookId], sample };
+  // golden-state.bin is the reference warrior RenderRequest.
+  const sample = decodeRenderRequest(state.subarray(0, RENDER_REQUEST_LEN));
+  return { source: mapAccountSource(accounts), sample };
 }

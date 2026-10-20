@@ -5,12 +5,14 @@
 // Before `anchor test --skip-local-validator --skip-deploy`:
 //   anchor deploy -p deadroll_render_program --provider.cluster localnet
 //   bash crates/render/wasm/build.sh               (target/render-wasm/deadroll_render.wasm)
-//   cargo test -p deadroll-render --test golden    (target/render-golden: palette, book, expected hash)
+//   cargo test -p deadroll-render --test golden    (target/render-golden: state, palette, book, expected hash)
+// Every finalize_rasterizer points GameConfig at the uploaded rasterizer (CPI into the registry), so
+// the test puts the rasterizer it found back with registry set_rasterizer when it ends.
 // Fresh random keypairs and random blob ids every run. `init_*` needs the signer to be
 // `GameConfig.authority`: the upload flows run only when the registry GameConfig exists and its
 // authority is the provider wallet; otherwise they are skipped with the reason (registry L4.1).
 // Instructions are encoded by hand until the Codama sdk exists (L8.1).
-import { test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -40,6 +42,9 @@ const read = (p: string) => readFileSync(new URL(p, root));
 const PROGRAM = address("DgQCsXAe7Q7h8zdtToiTvk8XqNjjbXuD6xith2BmEiRB");
 const SYSTEM = address("11111111111111111111111111111111");
 const CONFIG = address("HYGYnuyssMfrHr2gT3AC3hkQpD6xt37a5hrCc2Z97JHN");
+const REGISTRY = address("dZ1jraMfS3bAUTkRw2TA1ddg8UDGzgUdFQz5pmBxjoG");
+/** `GameConfig` offsets (discriminator included): rasterizer_version, rasterizer, rasterizer_sha256. */
+const CFG = { rasterizerVersion: 265, rasterizer: 267, sha: 299 };
 const BODY_OFFSET = 116;
 const GROW_STEP = 10 * 1024;
 const CHUNK = 900;
@@ -143,7 +148,7 @@ const writable = (a: string) => ({ address: address(a), role: AccountRole.WRITAB
 const readonly = (a: string) => ({ address: address(a), role: AccountRole.READONLY });
 
 const ix = {
-  init: async (kind: Kind, s: Signer, id: number, len: number, hash: Uint8Array, config = CONFIG) => ({
+  init: async (kind: Kind, s: Signer, id: number, len: number, hash: Uint8Array, config: string = CONFIG) => ({
     programAddress: PROGRAM,
     accounts: [signerMeta(s, true), readonly(config), writable(await pda(kind, id)), readonly(SYSTEM)],
     data: cat(disc(`init_${kind}`), u16(id), u32(len), hash),
@@ -158,12 +163,27 @@ const ix = {
     accounts: [signerMeta(s, false), writable(target)],
     data: cat(disc("write_chunk"), u32(offset), u32(bytes.length), bytes),
   }),
-  finalize: (kind: Kind, s: Signer, target: string) => ({
+  // finalize_rasterizer also takes GameConfig, the render ["authority"] PDA and the registry.
+  finalize: async (kind: Kind, s: Signer, target: string, config: string = CONFIG) => ({
     programAddress: PROGRAM,
-    accounts: [signerMeta(s, false), writable(target)],
+    accounts:
+      kind === "rasterizer"
+        ? [signerMeta(s, false), writable(target), writable(config), readonly(await renderAuthority()), readonly(REGISTRY)]
+        : [signerMeta(s, false), writable(target)],
     data: disc(`finalize_${kind}`),
   }),
+  /** registry set_rasterizer: authority points GameConfig at a finalized rasterizer. */
+  setRasterizer: (s: Signer, blob: string) => ({
+    programAddress: REGISTRY,
+    accounts: [signerMeta(s, false), writable(CONFIG), readonly(blob)],
+    data: disc("set_rasterizer"),
+  }),
 };
+
+async function renderAuthority() {
+  const [a] = await getProgramDerivedAddress({ programAddress: PROGRAM, seeds: [new TextEncoder().encode("authority")] });
+  return a;
+}
 
 async function send(payer: Signer, ...instructions: any[]) {
   const { value: blockhash } = await rpc.getLatestBlockhash().send();
@@ -236,32 +256,36 @@ async function upload(kind: Kind, id: number, body: Uint8Array) {
   const target = await init(kind, id, body);
   await grow(target, body.length);
   await writeAll(target, body);
-  await send(authority, ix.finalize(kind, authority, target));
+  await send(authority, await ix.finalize(kind, authority, target));
   return target;
 }
 
-/** Splits target/render-golden/input.bin (FORMAT.md 7) into its parts. */
+/** The golden warrior of crates/render/tests/golden.rs. */
 function goldenInput() {
-  const b = read("target/render-golden/input.bin");
-  let o = 0;
-  const take = () => {
-    const n = b.readUInt32LE(o);
-    const part = new Uint8Array(b.subarray(o + 4, o + 4 + n));
-    o += 4 + n;
-    return part;
+  const bin = (f: string) => new Uint8Array(read(`target/render-golden/${f}`));
+  return {
+    request: bin("state.bin"),
+    palette: bin("palette.bin"),
+    book: bin("book.bin"),
+    expected: read("target/render-golden/expected.sha256").toString().trim(),
   };
-  const request = take();
-  o += 32;
-  const palette = take();
-  const book = take();
-  return { request, palette, book, expected: read("target/render-golden/expected.sha256").toString().trim() };
 }
 
-function renderWithWasm(wasm: Uint8Array, input: Uint8Array) {
-  const { exports: x } = new WebAssembly.Instance(new WebAssembly.Module(wasm), {}) as any;
-  const ptr = x.alloc(input.length);
-  new Uint8Array(x.memory.buffer, ptr, input.length).set(input);
-  const out = x.render(ptr, input.length, 1, 8);
+/** render(sprites, palette, state, asset, mode = PNG), FORMAT.md 7. */
+function renderWithWasm(wasm: Uint8Array, books: Uint8Array[], palette: Uint8Array, state: Uint8Array) {
+  const { exports: x } = new WebAssembly.Instance(new WebAssembly.Module(wasm as BufferSource), {}) as any;
+  const sprites = cat(...books.flatMap((b) => [u32(b.length), b]));
+  const parts = [sprites, palette, state, new Uint8Array(32)];
+  const total = parts.reduce((n, p) => n + p.length, 0);
+  const base = x.alloc(total);
+  const ptrs: number[] = [];
+  let at = base;
+  for (const p of parts) {
+    new Uint8Array(x.memory.buffer, at, p.length).set(p);
+    ptrs.push(at);
+    at += p.length;
+  }
+  const out = x.render(ptrs[0], sprites.length, ptrs[1], palette.length, ptrs[2], state.length, ptrs[3], 1);
   assert.notEqual(out, 0, `render error ${x.last_error()}`);
   return new Uint8Array(x.memory.buffer, out, x.result_len()).slice();
 }
@@ -280,6 +304,16 @@ function withId(body: Uint8Array, id: number) {
 const uploads = { skip: skipUploads };
 if (skipUploads) console.log(`# render upload flows skipped: ${skipUploads}`);
 
+// Put back the rasterizer GameConfig pointed at before the uploads repointed it.
+const before = skipUploads ? null : await data(CONFIG);
+const configRasterizer = (d: Uint8Array) => getAddressDecoder().decode(d.subarray(CFG.rasterizer, CFG.rasterizer + 32));
+after(async () => {
+  if (!before) return;
+  const original = configRasterizer(before);
+  const { value } = await rpc.getAccountInfo(address(original), { encoding: "base64", dataSlice: { offset: 0, length: 0 }, commitment: "confirmed" }).send();
+  if (value && configRasterizer(await data(CONFIG)) !== original) await send(authority, ix.setRasterizer(authority, original));
+});
+
 test("demo step 1: rasterizer, palette and sprite book from chain render the golden PNG", uploads, async () => {
   const [rv, pv, bid] = [await freshId("rasterizer"), await freshId("palette"), await freshId("sprite_book")];
   const r = await upload("rasterizer", rv, wasm);
@@ -296,9 +330,14 @@ test("demo step 1: rasterizer, palette and sprite book from chain render the gol
   const book = (await data(b)).subarray(BODY_OFFSET);
   const request = golden.request.slice();
   request.set(u16(pv), 0); // RenderRequest.palette_version
-  const input = cat(u32(request.length), request, new Uint8Array(32), u32(pal.length), pal, u32(book.length), book);
-  const png = renderWithWasm(chainWasm, input);
+  const png = renderWithWasm(chainWasm, [book], pal, request);
   assert.equal(Buffer.from(sha256(png)).toString("hex"), golden.expected);
+
+  // finalize_rasterizer wrote its version, address and hash to GameConfig (STORAGE_AND_DELIVERY 3.2).
+  const cfg = await data(CONFIG);
+  assert.equal(cfg[CFG.rasterizerVersion] | (cfg[CFG.rasterizerVersion + 1] << 8), rv);
+  assert.equal(configRasterizer(cfg), r);
+  assert.deepEqual(cfg.subarray(CFG.sha, CFG.sha + 32), sha256(wasm));
 });
 
 test("rejections that need no GameConfig", async () => {
@@ -347,7 +386,7 @@ test("extend and write rejections", uploads, async () => {
   assert.equal(await fails(send(authority, ix.write(authority, CONFIG, 0, new Uint8Array([1])))), E.WrongAccount);
   // After finalize nothing writes or grows.
   await writeAll(t, wasm);
-  await send(authority, ix.finalize("rasterizer", authority, t));
+  await send(authority, await ix.finalize("rasterizer", authority, t));
   assert.equal(await fails(send(authority, ix.write(authority, t, 0, new Uint8Array([1])))), E.AlreadyFinalized);
   assert.equal(await fails(send(authority, ix.extend(authority, t))), E.AlreadyFinalized);
 });
@@ -355,32 +394,35 @@ test("extend and write rejections", uploads, async () => {
 test("finalize rejections", uploads, async () => {
   const stranger = await funded();
   const r = await init("rasterizer", await freshId("rasterizer"), wasm);
-  assert.equal(await fails(send(authority, ix.finalize("rasterizer", authority, r))), E.NotFullyAllocated);
+  assert.equal(await fails(send(authority, await ix.finalize("rasterizer", authority, r))), E.NotFullyAllocated);
   await grow(r, wasm.length);
-  assert.equal(await fails(send(authority, ix.finalize("rasterizer", authority, r))), E.HashMismatch);
+  assert.equal(await fails(send(authority, await ix.finalize("rasterizer", authority, r))), E.HashMismatch);
   await writeAll(r, wasm);
-  assert.equal(await fails(send(stranger, ix.finalize("rasterizer", stranger, r))), E.Unauthorized);
+  assert.equal(await fails(send(stranger, await ix.finalize("rasterizer", stranger, r))), E.Unauthorized);
   // Wrong account type for the instruction: Anchor's discriminator check (not a RenderError).
-  const wrongType = await fails(send(authority, ix.finalize("palette", authority, r)));
+  const wrongType = await fails(send(authority, await ix.finalize("palette", authority, r)));
   assert.ok(wrongType !== undefined && wrongType < 6000, `anchor error, got ${wrongType}`);
-  await send(authority, ix.finalize("rasterizer", authority, r));
-  assert.equal(await fails(send(authority, ix.finalize("rasterizer", authority, r))), E.AlreadyFinalized);
+  // GameConfig is written by the CPI: another account in its place is refused.
+  const notConfig = await init("palette", await freshId("palette"), new Uint8Array(10).fill(2));
+  assert.equal(await fails(send(authority, await ix.finalize("rasterizer", authority, r, notConfig))), E.WrongConfig);
+  await send(authority, await ix.finalize("rasterizer", authority, r));
+  assert.equal(await fails(send(authority, await ix.finalize("rasterizer", authority, r))), E.AlreadyFinalized);
 
   // Hash matches, content is wrong for the kind.
   const notWasm = new Uint8Array(64).fill(9);
   const t = await init("rasterizer", await freshId("rasterizer"), notWasm);
   await writeAll(t, notWasm);
-  assert.equal(await fails(send(authority, ix.finalize("rasterizer", authority, t))), E.InvalidBody);
+  assert.equal(await fails(send(authority, await ix.finalize("rasterizer", authority, t))), E.InvalidBody);
   // Palette body whose version differs from its PDA version.
   const pv = await freshId("palette");
   const pal = withId(golden.palette, pv === 65535 ? 1 : pv + 1);
   const p = await init("palette", pv, pal);
   await writeAll(p, pal);
-  assert.equal(await fails(send(authority, ix.finalize("palette", authority, p))), E.InvalidBody);
+  assert.equal(await fails(send(authority, await ix.finalize("palette", authority, p))), E.InvalidBody);
   // Sprite book whose id differs from its PDA id.
   const bid = await freshId("sprite_book");
   const book = withId(golden.book, bid === 65535 ? 1 : bid + 1);
   const b = await init("sprite_book", bid, book);
   await writeAll(b, book);
-  assert.equal(await fails(send(authority, ix.finalize("sprite_book", authority, b))), E.InvalidBody);
+  assert.equal(await fails(send(authority, await ix.finalize("sprite_book", authority, b))), E.InvalidBody);
 });

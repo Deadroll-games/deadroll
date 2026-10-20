@@ -24,11 +24,6 @@ export const RPC_URL: string = custom?.url ?? env.VITE_RPC_URL ?? (HOSTED ? PUBL
 export const RPC_WS_URL: string | undefined = custom ? custom.ws : (env.VITE_RPC_WS_URL ?? (HOSTED ? PUBLIC_DEVNET_WS : undefined));
 /** Wallet Standard chain id. */
 export const CHAIN = (env.VITE_CHAIN ?? (LOCALNET_MODE ? "solana:localnet" : "solana:devnet")) as `${string}:${string}`;
-/** Sprite book ids to load, comma separated (FORMAT.md 3.3). */
-export const SPRITE_BOOK_IDS: number[] = (env.VITE_SPRITE_BOOKS ?? "1")
-  .split(",")
-  .map((s: string) => Number(s.trim()))
-  .filter((n: number) => Number.isInteger(n) && n >= 0 && n <= 0xffff);
 /** Palette version the characters are drawn with (`palette 1` in assets/palette). */
 export const PALETTE_VERSION = Number(env.VITE_PALETTE_VERSION ?? "1");
 

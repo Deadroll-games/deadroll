@@ -22,4 +22,14 @@ pub enum RegistryError {
     TableMisaligned,
     #[msg("A record does not pass validation")]
     InvalidRecord,
+    #[msg("Caller is not the authority PDA of the trusted render program")]
+    UntrustedCaller,
+    #[msg("Not the registry GameConfig account")]
+    WrongConfigAccount,
+    #[msg("GameConfig already has its current size")]
+    ConfigAlreadyResized,
+    #[msg("Give 1 to 4 sprite books")]
+    SpriteBookCount,
+    #[msg("The same sprite book is given twice")]
+    DuplicateSpriteBook,
 }

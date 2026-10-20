@@ -15,7 +15,8 @@ export const RENDER_ERRORS: Record<number, string> = {
   6: "argument out of range",
   7: "sprite id not found or bad book index",
   8: "bad palette",
-  9: "bad render request, output mode or scale",
+  9: "bad render request, output mode or no sprite book",
+  10: "more than 256 colors for an indexed PNG",
 };
 
 export class RenderError extends Error {
@@ -33,7 +34,16 @@ type Exports = {
   memory: WebAssembly.Memory;
   alloc(len: number): number;
   dealloc(ptr: number, len: number): void;
-  render(ptr: number, len: number, mode: number, scale: number): number;
+  render(
+    spritesPtr: number,
+    spritesLen: number,
+    palettePtr: number,
+    paletteLen: number,
+    statePtr: number,
+    stateLen: number,
+    assetPtr: number,
+    mode: number,
+  ): number;
   result_len(): number;
   result_width(): number;
   result_height(): number;
@@ -69,17 +79,13 @@ export function decodeRenderRequest(bytes: Uint8Array): RenderRequest {
   };
 }
 
-/** Input layout of FORMAT.md section 7. The 32-byte asset address is zeros in format 1. */
-export function buildRenderInput(req: RenderRequest, palette: Uint8Array, books: Uint8Array[]): Uint8Array {
-  return concat(
-    u32le(RENDER_REQUEST_LEN),
-    encodeRenderRequest(req),
-    new Uint8Array(32),
-    u32le(palette.length),
-    palette,
-    ...books.flatMap((b) => [u32le(b.length), b]),
-  );
+/** The `sprites` argument (FORMAT.md section 7): each sprite book as `u32 len + body`, in lookup order. */
+export function encodeBooks(books: Uint8Array[]): Uint8Array {
+  return concat(...books.flatMap((b) => [u32le(b.length), b]));
 }
+
+/** Asset address bytes; unused by format 2 (zeros). */
+export const ASSET_LEN = 32;
 
 export class Rasterizer {
   private constructor(private readonly x: Exports) {}
@@ -93,14 +99,26 @@ export class Rasterizer {
     return new Rasterizer(x);
   }
 
-  /** Raw call; `input` from buildRenderInput. Output is copied out of WASM memory. */
-  renderRaw(input: Uint8Array, mode: OutMode, scale: number): RenderOutput {
+  /**
+   * `render(sprites, palette, state, asset, mode)` of ART_DESCRIPTION.md 2.2 on raw bytes. The four
+   * arguments go into one WASM allocation. Output is copied out of WASM memory.
+   */
+  renderRaw(sprites: Uint8Array, palette: Uint8Array, state: Uint8Array, mode: OutMode, asset = new Uint8Array(ASSET_LEN)): RenderOutput {
     const { x } = this;
-    const ptr = x.alloc(input.length);
-    if (ptr === 0 && input.length > 0) throw new Error("rasterizer alloc failed");
-    new Uint8Array(x.memory.buffer, ptr, input.length).set(input);
-    const out = x.render(ptr, input.length, mode, scale);
-    x.dealloc(ptr, input.length);
+    if (asset.length !== ASSET_LEN) throw new Error(`asset must be ${ASSET_LEN} bytes`);
+    const parts = [sprites, palette, state, asset];
+    const total = parts.reduce((n, p) => n + p.length, 0);
+    const base = x.alloc(total);
+    if (base === 0) throw new Error("rasterizer alloc failed");
+    const ptrs: number[] = [];
+    let at = base;
+    for (const p of parts) {
+      new Uint8Array(x.memory.buffer, at, p.length).set(p);
+      ptrs.push(at);
+      at += p.length;
+    }
+    const out = x.render(ptrs[0]!, sprites.length, ptrs[1]!, palette.length, ptrs[2]!, state.length, ptrs[3]!, mode);
+    x.dealloc(base, total);
     if (out === 0) throw new RenderError(x.last_error());
     return {
       bytes: new Uint8Array(x.memory.buffer, out, x.result_len()).slice(),
@@ -109,7 +127,8 @@ export class Rasterizer {
     };
   }
 
-  render(req: RenderRequest, palette: Uint8Array, books: Uint8Array[], mode: OutMode = OutMode.RGBA, scale = 1): RenderOutput {
-    return this.renderRaw(buildRenderInput(req, palette, books), mode, scale);
+  /** RGBA: the canvas 1:1 (64 px characters). PNG: enlarged to 512 px on the longer side. */
+  render(req: RenderRequest, palette: Uint8Array, books: Uint8Array[], mode: OutMode = OutMode.RGBA): RenderOutput {
+    return this.renderRaw(encodeBooks(books), palette, encodeRenderRequest(req), mode);
   }
 }

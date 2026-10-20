@@ -26,13 +26,33 @@ pub use error::{Error, Result};
 pub use palette::Palette;
 pub use request::{LayerRef, RenderRequest, FLAG_GRAY, LAYERS_MAX};
 
-/// `out_mode` of [`render`].
-pub const OUT_RGBA: u32 = 0;
-pub const OUT_PNG: u32 = 1;
-/// Asset address bytes in the render input (PRNG seed for effects).
+/// Asset address bytes (PRNG seed for effects, `ART_DESCRIPTION.md` 10).
 pub const ASSET_LEN: usize = 32;
+/// A `Png` output is enlarged by nearest neighbor up to this many pixels on the longer side.
+pub const PNG_SIDE: usize = 512;
 
-/// Result of [`render`]: RGBA pixels or a PNG file, and the scaled size.
+/// Output of [`render`] (`ART_DESCRIPTION.md` 2.2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u32)]
+pub enum OutputMode {
+    /// Canvas pixels as is, row-major RGBA, for a canvas on the website.
+    RawRgba = 0,
+    /// A finished indexed PNG enlarged to [`PNG_SIDE`] on the longer side, for wallets.
+    Png = 1,
+}
+
+impl OutputMode {
+    /// The WASM `mode` argument.
+    pub const fn from_u32(v: u32) -> Result<Self> {
+        match v {
+            0 => Ok(Self::RawRgba),
+            1 => Ok(Self::Png),
+            _ => Err(Error::Request),
+        }
+    }
+}
+
+/// Result of [`render`]: RGBA pixels or a PNG file, and its size in pixels.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Output {
     pub bytes: Vec<u8>,
@@ -40,91 +60,83 @@ pub struct Output {
     pub height: u32,
 }
 
-/// Parsed render input (`FORMAT.md` 7).
-pub struct Input<'a> {
-    pub request: &'a [u8],
-    pub asset: &'a [u8],
-    pub palette: &'a [u8],
-    pub books: Vec<&'a [u8]>,
-}
-
-fn take<'a>(b: &mut &'a [u8], n: usize) -> Result<&'a [u8]> {
-    if b.len() < n {
-        return Err(Error::Truncated);
+/// Integer nearest-neighbor scale of a `Png` output: the longer side up to [`PNG_SIDE`]
+/// (64 -> x8, 96 -> x5, 128 -> x4).
+pub const fn png_scale(width: usize, height: usize) -> u32 {
+    let side = if width > height { width } else { height };
+    if side == 0 || side >= PNG_SIDE {
+        1
+    } else {
+        (PNG_SIDE / side) as u32
     }
-    let (head, tail) = b.split_at(n);
-    *b = tail;
-    Ok(head)
 }
 
-fn take_prefixed<'a>(b: &mut &'a [u8]) -> Result<&'a [u8]> {
-    let len = take(b, 4)?;
-    let len = u32::from_le_bytes([len[0], len[1], len[2], len[3]]) as usize;
-    take(b, len)
-}
-
-/// Splits the input layout of `FORMAT.md` 7.
-pub fn parse_input(mut b: &[u8]) -> Result<Input<'_>> {
-    let request = take_prefixed(&mut b)?;
-    let asset = take(&mut b, ASSET_LEN)?;
-    let palette = take_prefixed(&mut b)?;
+/// Splits the `sprites` argument of [`render`]: one or more `u32 len + sprite book` (`FORMAT.md` 7).
+pub fn parse_books(mut b: &[u8]) -> Result<Vec<&[u8]>> {
     let mut books = Vec::new();
     while !b.is_empty() {
-        books.push(take_prefixed(&mut b)?);
+        if b.len() < 4 {
+            return Err(Error::Truncated);
+        }
+        let len = u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize;
+        let rest = &b[4..];
+        if rest.len() < len {
+            return Err(Error::Truncated);
+        }
+        books.push(&rest[..len]);
+        b = &rest[len..];
     }
     if books.is_empty() {
         return Err(Error::Request);
     }
-    Ok(Input {
-        request,
-        asset,
-        palette,
-        books,
-    })
+    Ok(books)
 }
 
-/// Builds the input layout of `FORMAT.md` 7.
-pub fn encode_input(
-    request: &[u8],
-    asset: &[u8; ASSET_LEN],
-    palette: &[u8],
-    books: &[&[u8]],
-) -> Vec<u8> {
+/// Builds the `sprites` argument of [`render`] from sprite book bodies.
+pub fn encode_books(books: &[&[u8]]) -> Vec<u8> {
     let mut v = Vec::new();
-    let put = |v: &mut Vec<u8>, part: &[u8]| {
-        v.extend_from_slice(&(part.len() as u32).to_le_bytes());
-        v.extend_from_slice(part);
-    };
-    put(&mut v, request);
-    v.extend_from_slice(asset);
-    put(&mut v, palette);
     for b in books {
-        put(&mut v, b);
+        v.extend_from_slice(&(b.len() as u32).to_le_bytes());
+        v.extend_from_slice(b);
     }
     v
 }
 
-/// The whole pipeline: input bytes -> RGBA or PNG. The WASM `render` export calls this.
-pub fn render(input: &[u8], out_mode: u32, scale_by: u32) -> Result<Output> {
-    if out_mode > OUT_PNG {
-        return Err(Error::Request);
-    }
-    let input = parse_input(input)?;
-    let request = RenderRequest::decode(input.request)?;
-    let palette = Palette::parse(input.palette)?;
-    let mut books = Vec::with_capacity(input.books.len());
-    for b in &input.books {
+/// The rasterizer (`ART_DESCRIPTION.md` 2.2). The WASM `render` export calls this.
+///
+/// - `sprites`: the sprite books holding the needed layers, each as `u32 len + book` (`FORMAT.md` 3.3);
+///   a sprite id is looked up in the books in the order given;
+/// - `palette`: the master palette and material table (`FORMAT.md` 3.2);
+/// - `state`: the character or item state, a Borsh `RenderRequest` (`FORMAT.md` 3.4);
+/// - `asset`: the asset address, the PRNG seed of procedural effects (unused in format 2).
+pub fn render(
+    sprites: &[u8],
+    palette: &[u8],
+    state: &[u8],
+    asset: &[u8; ASSET_LEN],
+    mode: OutputMode,
+) -> Result<Output> {
+    let _ = asset;
+    let request = RenderRequest::decode(state)?;
+    let palette = Palette::parse(palette)?;
+    let mut books = Vec::new();
+    for b in parse_books(sprites)? {
         books.push(Book::parse(b)?);
     }
-    let img = scale(&compose(&request, &palette, &books)?, scale_by)?;
-    let bytes = if out_mode == OUT_PNG {
-        png::encode(img.width, img.height, &img.rgba)
-    } else {
-        img.rgba
-    };
-    Ok(Output {
-        bytes,
-        width: img.width as u32,
-        height: img.height as u32,
+    let img = compose(&request, &palette, &books)?;
+    Ok(match mode {
+        OutputMode::RawRgba => Output {
+            width: img.width as u32,
+            height: img.height as u32,
+            bytes: img.rgba,
+        },
+        OutputMode::Png => {
+            let k = png_scale(img.width, img.height);
+            Output {
+                bytes: png::encode(&img, k)?,
+                width: img.width as u32 * k,
+                height: img.height as u32 * k,
+            }
+        }
     })
 }

@@ -414,6 +414,7 @@ name = "art"
 version = "0.1.0"
 dependencies = [
  "deadroll-render",
+ "png 0.17.16",
 ]
 
 [[package]]
@@ -1366,6 +1367,7 @@ version = "0.1.0"
 dependencies = [
  "anchor-lang",
  "bytemuck",
+ "deadroll-registry",
  "deadroll-render",
  "deadroll-types",
  "solana-sha256-hasher",
