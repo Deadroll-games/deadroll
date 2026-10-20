@@ -518,3 +518,56 @@ tiles 64x64, icons 32x32, monsters 64/96/128). Rasterizer version 2 and sprite b
 version 1 and book 1 stay for format 1 images. Sprite ids, `LayerRef` and `RenderRequest` are unchanged.
 The rasterizer interface is `render(sprites, palette, state, asset, mode)` (`ART_DESCRIPTION.md` 2.2):
 RAW_RGBA is the canvas 1:1, PNG is an indexed PNG of 512 px on the longer side.
+
+## 15. Patch 7c: BITMAP sprites, palette format 2, 96 px characters
+
+Additions only. `crates/types` is unchanged (`RenderRequest` stays 106 bytes, the WASM ABI is the same).
+
+`RenderRequest.flags` (`crates/render/FORMAT.md` 3.4), new bits in the existing `u32`:
+
+| Bit | Name | Meaning |
+|---|---|---|
+| 0 | `GRAY` | dead character, gray ramps (unchanged) |
+| 1 | `CURSE` | every ramp blended half way to the palette curse ramp, curse outline |
+| 2 | `COLD` | cold outline (`CURSE` wins when both are set) |
+
+Bits 3..31 stay reserved (error 9).
+
+Palette body format 2 (`FORMAT.md` 3.2): header `format = 2, palette_version, outline rgb,
+dark_ramp, curse_ramp, cold_ramp, ramp_count`, ramps of 6 colors (18 bytes), materials of 3 bytes
+(`primary, secondary, flags`, bit 0 = dither). Palette 2 keeps every ramp and material index of
+palette 1 and only appends, so `Character.appearance` of existing characters draws unchanged in the
+new style. Palette 1 (format 1) stays for rasterizer version 1.
+
+Sprites: new command `BITMAP` (opcode 0xB, run-length coded pixels, each a slot and an optional ramp
+color). Character layers are 96x96, tiles 64x64, monsters 96 or 128. Sprite ids are unchanged. `art pack`
+writes `book_<id>.bin` books of at most 64 KiB (ids 2, 3, ..., at most 4); identical sprites share
+bytes inside a book. Deploy scripts upload every book and pass all of them to `set_sprite_books` in
+id order. The app takes the palette version from the palette `GameConfig.palette` points at.
+
+Character layers (sprite format 2, before it reaches devnet): the body of a race is one sprite and
+the stacking order changed. `Character.appearance[i]` is the layer of type `i`
+(`crates/render/FORMAT.md` 1.4):
+
+| Index | Layer | Index | Layer |
+|---|---|---|---|
+| 0 | shadow | 8 | hair |
+| 1 | back_item | 9 | offhand (shield, in front of the body and the hair) |
+| 2 | body (one sprite per race) | 10 | helmet |
+| 3 | glove_back | 11 | mainhand |
+| 4 | pants | 12 | fist_front (over the weapon) |
+| 5 | boots | 13 | glove_front |
+| 6 | armor_body | 14 | overlay_element |
+| 7 | necklace | 15..19 | not used |
+
+Body sprites: 1 shadow, 10 human body, 11 human hair, 12 elf body, 13 elf hair, 14 front fist. The
+old body part ids (2-7, 20-25) and the wound overlay are gone: a character created before this
+change fails to render (error 7) until its appearance is rebuilt.
+
+Character image (no class outfits): `Character.appearance` holds only the shadow (index 0), the body
+(2), the hair (8) and the front fist (12). Clients draw a character as that appearance dressed in
+what `Character.gear` has equipped: item sprite `100 + ItemBase` (Sword 100, Staff 101, Wand 102,
+LeatherArmor 103, Robe 104, LightLeatherArmor 105) in the layer of its `EquipSlot` (MainHand ->
+11 mainhand, Body -> 6 armor_body; the other slots map to their layers of the table above, rings and
+gloves draw nothing yet). Equip and unequip change the image. The class kit sprites (helmet,
+shield, cape, pants, boots, hoods, bags, amulet, mace; ids 100-106, 200-205, 300-305) are gone.

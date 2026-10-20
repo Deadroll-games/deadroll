@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import type { Address } from "@solana/kit";
-import { renderRequest, TOMBSTONE } from "../chain/appearance";
+import { isCurrentAppearance } from "../chain/appearance";
 import {
   ASPECT_KEYS,
   CLASS_KEYS,
@@ -26,6 +26,7 @@ import {
   equipIx,
   inventory,
   itemLabel,
+  characterRequest,
   itemRequest,
   slotsFor,
   unequipIx,
@@ -44,6 +45,7 @@ import { aspectName, className, formatBp, raceName, STAT_NAMES } from "../chain/
 import { skillSetPda } from "../chain/pda";
 import { Aspect, Class, Race } from "../chain/types";
 import { DATA_SOURCE, explorerUrl } from "../config";
+import { OldCharacterLabel } from "../raster/OldCharacter";
 import { useRenderImage } from "../raster/RasterizerProvider";
 import { SpriteCanvas } from "../raster/SpriteCanvas";
 
@@ -225,7 +227,8 @@ export function CharacterDetailView({
   sheet?: HeroSheetPanelProps | null;
 }) {
   const dead = !c.core.alive;
-  const img = useRenderImage(dead ? TOMBSTONE : renderRequest(c.core.appearance, false));
+  const current = isCurrentAppearance(c.core.appearance);
+  const img = useRenderImage(current ? characterRequest(c) : null);
   const race = enumIndex(c.core.race, RACE_KEYS) as Race;
   const cls = enumIndex(c.core.class, CLASS_KEYS) as Class;
   const pred = enumIndex(c.core.predisposition, ASPECT_KEYS) as Aspect;
@@ -235,7 +238,7 @@ export function CharacterDetailView({
   return (
     <div className="char-detail">
       <header className={`panel char-detail-head${dead ? " dead" : ""}`}>
-        <SpriteCanvas image={img.image} scale={4} label={name} />
+        {current ? <SpriteCanvas image={img.image} scale={2.5} label={name} /> : <OldCharacterLabel />}
         <div>
           <h1>{name}</h1>
           <p>

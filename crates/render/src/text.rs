@@ -5,7 +5,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use crate::palette;
-use crate::sprite::{self, layer, op, FLAG_NO_OUTLINE, POLY_MAX, POLY_MIN};
+use crate::sprite::{self, bitmap, layer, op, FLAG_NO_OUTLINE, POLY_MAX, POLY_MIN, RAMP_COLORS};
 
 /// A compile error with a 1-based line number.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -51,6 +51,26 @@ pub fn slot_value(s: &str) -> Option<u8> {
         "E" | "D" => 5,
         "U" | "R" => 6,
         _ => return None,
+    })
+}
+
+/// `BITMAP` row character -> pixel value (`FORMAT.md` 1.2). `.` draws nothing, `_` erases,
+/// a slot letter is auto shaded, and a digit or lowercase letter is a slot with an explicit
+/// ramp color: `0-5` slot 2 (`P`/`K`), `a-f` 3 (`S`/`H`), `g-l` 4 (`A`/`Y`),
+/// `m-r` 5 (`E`/`D`), `s-x` 6 (`U`/`R`).
+pub fn bitmap_char(c: char) -> Option<u8> {
+    let n = RAMP_COLORS;
+    Some(match c {
+        '.' => bitmap::value(bitmap::SKIP, 0),
+        '0'..='5' => bitmap::value(2, 1 + (c as u8 - b'0')),
+        'a'..='x' => {
+            let i = c as u8 - b'a';
+            bitmap::value(3 + i / n, 1 + i % n)
+        }
+        _ => {
+            let mut buf = [0u8; 4];
+            bitmap::value(slot_value(c.encode_utf8(&mut buf))?, 0)
+        }
     })
 }
 
@@ -102,10 +122,15 @@ struct Builder {
     flags: u8,
     count: usize,
     cmds: Vec<u8>,
+    /// A `BITMAP` waiting for its rows: `(x, y, w, h, pixels so far)`.
+    bitmap: Option<(u8, u8, u8, u8, Vec<u8>)>,
 }
 
 impl Builder {
     fn finish(self, end_line: usize) -> TResult<SpriteSrc> {
+        if self.bitmap.is_some() {
+            return err(end_line, "`BITMAP` is missing rows");
+        }
         let (Some(width), Some(layer_type)) = (self.width, self.layer_type) else {
             return err(self.line, "sprite needs `size` and `layer`");
         };
@@ -176,12 +201,31 @@ pub fn compile_sprites(src: &str) -> TResult<Vec<SpriteSrc>> {
                 flags: 0,
                 count: 0,
                 cmds: Vec::new(),
+                bitmap: None,
             });
             continue;
         }
         let Some(b) = cur.as_mut() else {
             return err(ln, "expected `sprite` first");
         };
+        if let Some((x, y, w, h, px)) = b.bitmap.as_mut() {
+            if t.len() != 1 || t[0].chars().count() != *w as usize {
+                return err(ln, format!("a `BITMAP` row is {w} characters, no spaces"));
+            }
+            for c in t[0].chars() {
+                let Some(v) = bitmap_char(c) else {
+                    return err(ln, format!("unknown `BITMAP` character `{c}`"));
+                };
+                px.push(v);
+            }
+            if px.len() == *w as usize * *h as usize {
+                b.cmds.extend_from_slice(&[op::BITMAP << 4, *x, *y, *w, *h]);
+                b.cmds.extend(bitmap::encode(px));
+                b.count += 1;
+                b.bitmap = None;
+            }
+            continue;
+        }
         match t[0] {
             "size" => {
                 argc(2)?;
@@ -214,6 +258,32 @@ pub fn compile_sprites(src: &str) -> TResult<Vec<SpriteSrc>> {
                     return err(ln, "only `flags no_outline` exists");
                 }
                 b.flags |= FLAG_NO_OUTLINE;
+            }
+            "copy" => {
+                argc(1)?;
+                if b.layer_type.is_none() {
+                    return err(ln, "`copy` must come after `size` and `layer`");
+                }
+                let Some(src) = out.iter().find(|s| s.name == t[1]) else {
+                    return err(
+                        ln,
+                        format!("`copy`: no earlier sprite `{}` in this file", t[1]),
+                    );
+                };
+                b.cmds.extend_from_slice(&src.bytes[sprite::HEADER_LEN..]);
+                b.count += src.bytes[sprite::HEADER_LEN - 1] as usize;
+            }
+            "BITMAP" => {
+                argc(4)?;
+                if b.layer_type.is_none() {
+                    return err(ln, "commands must come after `size` and `layer`");
+                }
+                let (x, y) = (num(ln, t[1])?, num(ln, t[2])?);
+                let (w, h) = (num(ln, t[3])?, num(ln, t[4])?);
+                if w == 0 || h == 0 {
+                    return err(ln, "`BITMAP` needs a width and a height of at least 1");
+                }
+                b.bitmap = Some((x, y, w, h, Vec::new()));
             }
             cmd => {
                 if b.layer_type.is_none() {
@@ -339,8 +409,10 @@ pub fn compile_palette(src: &str) -> TResult<PaletteSrc> {
     let mut version = None;
     let mut outline = None;
     let mut dark: Option<(usize, String)> = None;
-    let mut ramps: Vec<(String, [[u8; 3]; 4])> = Vec::new();
-    let mut materials: Vec<(usize, String, String, String)> = Vec::new();
+    let mut curse: Option<(usize, String)> = None;
+    let mut cold: Option<(usize, String)> = None;
+    let mut ramps: Vec<(String, Vec<[u8; 3]>)> = Vec::new();
+    let mut materials: Vec<(usize, String, String, String, u8)> = Vec::new();
     for (ln, t) in lines(src) {
         let argc = |n: usize| {
             if t.len() == n + 1 {
@@ -361,37 +433,45 @@ pub fn compile_palette(src: &str) -> TResult<PaletteSrc> {
                 argc(1)?;
                 outline = Some(hex(ln, t[1])?);
             }
-            "dark" => {
+            "dark" | "curse" | "cold" => {
                 argc(1)?;
-                dark = Some((ln, t[1].to_string()));
+                let v = Some((ln, t[1].to_string()));
+                match t[0] {
+                    "dark" => dark = v,
+                    "curse" => curse = v,
+                    _ => cold = v,
+                }
             }
             "ramp" => {
-                argc(5)?;
+                argc(1 + RAMP_COLORS as usize)?;
                 if !valid_name(t[1]) || ramps.iter().any(|r| r.0 == t[1]) {
                     return err(ln, "ramp name must be unique [a-z0-9_]{1,32}");
                 }
-                ramps.push((
-                    t[1].to_string(),
-                    [
-                        hex(ln, t[2])?,
-                        hex(ln, t[3])?,
-                        hex(ln, t[4])?,
-                        hex(ln, t[5])?,
-                    ],
-                ));
+                let colors = t[2..].iter().map(|c| hex(ln, c)).collect::<TResult<_>>()?;
+                ramps.push((t[1].to_string(), colors));
             }
             "material" => {
-                argc(3)?;
+                let flags = match t.len() {
+                    4 => 0,
+                    5 if t[4] == "dither" => palette::MATERIAL_DITHER,
+                    _ => return err(ln, "`material <name> <primary> <secondary> [dither]`"),
+                };
                 if !valid_name(t[1]) || materials.iter().any(|m| m.1 == t[1]) {
                     return err(ln, "material name must be unique [a-z0-9_]{1,32}");
                 }
-                materials.push((ln, t[1].to_string(), t[2].to_string(), t[3].to_string()));
+                let (name, p, s) = (t[1].to_string(), t[2].to_string(), t[3].to_string());
+                materials.push((ln, name, p, s, flags));
             }
             other => return err(ln, format!("unknown statement `{other}`")),
         }
     }
-    let (Some(version), Some(outline), Some((dark_ln, dark))) = (version, outline, dark) else {
-        return err(0, "palette needs `palette`, `outline` and `dark`");
+    let (Some(version), Some(outline), Some(dark), Some(curse), Some(cold)) =
+        (version, outline, dark, curse, cold)
+    else {
+        return err(
+            0,
+            "palette needs `palette`, `outline`, `dark`, `curse` and `cold`",
+        );
     };
     if ramps.is_empty() || ramps.len() > 255 || materials.is_empty() || materials.len() > 255 {
         return err(0, "palette needs 1..255 ramps and 1..255 materials");
@@ -403,7 +483,9 @@ pub fn compile_palette(src: &str) -> TResult<PaletteSrc> {
     let mut bytes = alloc::vec![palette::FORMAT_VERSION];
     bytes.extend_from_slice(&version.to_le_bytes());
     bytes.extend_from_slice(&outline);
-    bytes.push(ramp_ix(dark_ln, &dark)?);
+    for (ln, name) in [&dark, &curse, &cold] {
+        bytes.push(ramp_ix(*ln, name)?);
+    }
     bytes.push(ramps.len() as u8);
     for (_, colors) in &ramps {
         for c in colors {
@@ -411,9 +493,8 @@ pub fn compile_palette(src: &str) -> TResult<PaletteSrc> {
         }
     }
     bytes.push(materials.len() as u8);
-    for (ln, _, p, s) in &materials {
-        bytes.push(ramp_ix(*ln, p)?);
-        bytes.push(ramp_ix(*ln, s)?);
+    for (ln, _, p, s, flags) in &materials {
+        bytes.extend_from_slice(&[ramp_ix(*ln, p)?, ramp_ix(*ln, s)?, *flags]);
     }
     if palette::Palette::parse(&bytes).is_err() {
         return err(0, "compiled palette rejected by the decoder");
@@ -438,20 +519,57 @@ mod tests {
         let s = compile_sprites(src).unwrap();
         assert_eq!(s.len(), 1);
         assert_eq!(s[0].id, 199);
-        assert_eq!(&s[0].bytes[..6], &[2, 32, 32, 16, 0, 7]);
+        assert_eq!(&s[0].bytes[..6], &[2, 32, 32, 11, 0, 7]);
         assert_eq!(&s[0].bytes[6..11], &[0x12, 22, 5, 2, 12]);
         assert_eq!(&s[0].bytes[s[0].bytes.len() - 4..], &[0x92, 22, 5, 3]);
     }
 
     #[test]
+    fn bitmap_rows_legend_and_copy() {
+        let src = "sprite 1 a\nsize 32 32\nlayer body\nRECT 1 1 2 2 K\n\
+                   BITMAP 2 3 4 2\n.K_O\n5ajx\n\
+                   sprite 2 b\nsize 32 32\nlayer body\ncopy a\nPIXEL 9 9 H\n";
+        let s = compile_sprites(src).unwrap();
+        assert_eq!(s[0].bytes[5], 2, "RECT + BITMAP");
+        let d = sprite::decode(&s[0].bytes).unwrap();
+        let v = bitmap::value;
+        assert_eq!(
+            d.bitmaps[0],
+            [
+                v(7, 0),
+                v(2, 0),
+                v(0, 0),
+                v(1, 0),
+                v(2, 6),
+                v(3, 1),
+                v(4, 4),
+                v(6, 6)
+            ]
+        );
+        // `copy` takes the commands of `a`, then its own.
+        let c = sprite::decode(&s[1].bytes).unwrap();
+        assert_eq!(c.cmds.len(), 3);
+        assert_eq!(c.bitmaps, d.bitmaps);
+        let want = [&s[0].bytes[6..], &[0x23, 9, 9][..]].concat();
+        assert_eq!(&s[1].bytes[6..], &want[..]);
+        // Every legend character maps to a value the decoder accepts.
+        for c in ".PSAEUOKHYDR_012345abcdefghijklmnopqrstuvwx".chars() {
+            assert!(bitmap_char(c).is_some(), "{c}");
+        }
+        for c in ['6', 'y', 'z', '#', 'B'] {
+            assert!(bitmap_char(c).is_none(), "{c}");
+        }
+    }
+
+    #[test]
     fn all_commands_and_aliases() {
-        let src = "sprite 1 a\nsize 32 32\nlayer head\nflags no_outline\n\
+        let src = "sprite 1 a\nsize 32 32\nlayer body\nflags no_outline\n\
                    POLY K 1 1 5 1 3 4\nMIRROR_X 16\nMIRROR_Y 16\nELLIPSE 1 1 4 4 H\nRING 1 1 4 4 Y\n\
                    PIXEL 2 2 D\nPIXEL 3 3 R\nPIXEL 4 4 O\nPIXEL 5 5 _\n\
                    sprite 2 b\nsize 32 32\nlayer tile\nRECT 0 0 32 32 E\n";
         let s = compile_sprites(src).unwrap();
         assert_eq!(s.len(), 2);
-        assert_eq!(&s[0].bytes[..6], &[2, 32, 32, 11, 1, 9]);
+        assert_eq!(&s[0].bytes[..6], &[2, 32, 32, 2, 1, 9]);
         assert_eq!(&s[0].bytes[6..14], &[0x62, 3, 1, 1, 5, 1, 3, 4]);
         assert_eq!(s[1].bytes[6], 0x15);
     }
@@ -460,23 +578,29 @@ mod tests {
     fn errors_with_lines() {
         let cases = [
             ("RECT 1 1 1 1 P", 1),                                     // no sprite
-            ("sprite 0 a\nsize 32 32\nlayer head", 1),                 // id 0
-            ("sprite 1 A\nsize 32 32\nlayer head", 1),                 // name
-            ("sprite 1 a\nsize 20 16\nlayer head", 2),                 // size
+            ("sprite 0 a\nsize 32 32\nlayer body", 1),                 // id 0
+            ("sprite 1 A\nsize 32 32\nlayer body", 1),                 // name
+            ("sprite 1 a\nsize 20 16\nlayer body", 2),                 // size
             ("sprite 1 a\nsize 32 32\nlayer hat", 3),                  // layer name
-            ("sprite 1 a\nlayer head", 2),                             // layer before size
+            ("sprite 1 a\nlayer body", 2),                             // layer before size
             ("sprite 1 a\nsize 32 32\nRECT 1 1 1 1 P", 3),             // command before layer
-            ("sprite 1 a\nsize 32 32\nlayer head\nRECT 1 1 1 P", 4),   // argc
-            ("sprite 1 a\nsize 32 32\nlayer head\nRECT 1 1 1 1 Q", 4), // slot
-            ("sprite 1 a\nsize 32 32\nlayer head\nRECT 1 1 1 999 P", 4),
-            ("sprite 1 a\nsize 32 32\nlayer head\nPOLY P 1 1 2 2", 4), // 2 vertices
-            ("sprite 1 a\nsize 32 32\nlayer head\nBOX 1 1", 4),        // unknown
-            ("sprite 1 a\nsize 32 32\nlayer head\nRECT 30 1 10 1 P", 4), // decoder: past edge
+            ("sprite 1 a\nsize 32 32\nlayer body\nRECT 1 1 1 P", 4),   // argc
+            ("sprite 1 a\nsize 32 32\nlayer body\nRECT 1 1 1 1 Q", 4), // slot
+            ("sprite 1 a\nsize 32 32\nlayer body\nRECT 1 1 1 999 P", 4),
+            ("sprite 1 a\nsize 32 32\nlayer body\nPOLY P 1 1 2 2", 4), // 2 vertices
+            ("sprite 1 a\nsize 32 32\nlayer body\nBOX 1 1", 4),        // unknown
+            ("sprite 1 a\nsize 32 32\nlayer body\nRECT 30 1 10 1 P", 4), // decoder: past edge
             (
-                "sprite 1 a\nsize 32 32\nlayer head\nsprite 1 b\nsize 32 32\nlayer head",
+                "sprite 1 a\nsize 32 32\nlayer body\nsprite 1 b\nsize 32 32\nlayer body",
                 4,
             ), // dup id
-            ("sprite 1 a\nsize 32 32\nlayer head\nflags shiny", 4),
+            ("sprite 1 a\nsize 32 32\nlayer body\nflags shiny", 4),
+            ("sprite 1 a\nsize 32 32\nlayer body\nBITMAP 0 0 2 1\nK", 5), // row width
+            ("sprite 1 a\nsize 32 32\nlayer body\nBITMAP 0 0 2 1\nKz", 5), // character
+            ("sprite 1 a\nsize 32 32\nlayer body\nBITMAP 0 0 2 2\nKK", 5), // missing row
+            ("sprite 1 a\nsize 32 32\nlayer body\nBITMAP 31 0 2 1\nKK", 5), // past edge
+            ("sprite 1 a\nsize 32 32\nlayer body\nBITMAP 0 0 0 1", 4),    // zero width
+            ("sprite 1 a\nsize 32 32\nlayer body\ncopy b", 4),            // no such sprite
         ];
         for (src, line) in cases {
             let e = compile_sprites(src).unwrap_err();
@@ -488,19 +612,32 @@ mod tests {
 
     #[test]
     fn palette_text() {
-        let src = "palette 3\noutline #120c16\n\
-                   ramp gray #101010 #404040 #808080 #c0c0c0 # neutral\n#\n\
-                   ramp steel #3a4250 #5c6676 #8a94a4 #c8d0dc\n\
-                   ramp leather #3a2416 #5e3c24 #86583a #a8764e\n\
-                   dark gray\nmaterial sword steel leather\n";
-        let p = compile_palette(src).unwrap();
+        let six = "#101010 #202020 #404040 #808080 #c0c0c0 #f0f0f0";
+        let src = format!(
+            "palette 3\noutline #120c16\n\
+             ramp gray {six} # neutral\n#\n\
+             ramp steel #3a4250 #5c6676 #8a94a4 #c8d0dc #d8e0e8 #f0f4f8\n\
+             ramp leather {six}\n\
+             dark gray\ncurse steel\ncold leather\n\
+             material sword steel leather\nmaterial cloth leather leather dither\n"
+        );
+        let p = compile_palette(&src).unwrap();
         assert_eq!(p.palette_version, 3);
         assert_eq!(p.ramp("leather"), Some(2));
-        assert_eq!(p.material("sword"), Some(0));
+        assert_eq!(p.material("cloth"), Some(1));
         let parsed = palette::Palette::parse(&p.bytes).unwrap();
         assert_eq!(parsed.material(0), (1, 2));
-        assert_eq!(parsed.color(1, 0), [0x3a, 0x42, 0x50]);
-        assert!(compile_palette("palette 1\noutline #000000\ndark x\nramp g #000000 #000000 #000000 #000000\nmaterial m g g").is_err());
+        assert_eq!((parsed.dithers(0), parsed.dithers(1)), (false, true));
+        assert_eq!((parsed.curse_ramp, parsed.cold_ramp), (1, 2));
+        assert_eq!(parsed.color(1, 5), [0xf0, 0xf4, 0xf8]);
+        // 4-color ramps (palette format 1), a missing curse line, an unknown material flag.
+        let four = "#000000 #000000 #000000 #000000";
+        let base = "palette 1\noutline #000000\ndark g\ncurse g\ncold g\n";
+        assert!(compile_palette(&format!("{base}ramp g {four}\nmaterial m g g")).is_err());
+        assert!(compile_palette(&format!("{base}ramp g {six}\nmaterial m g g")).is_ok());
+        assert!(compile_palette(&format!("{base}ramp g {six}\nmaterial m g g shiny")).is_err());
+        let no_curse = "palette 1\noutline #000000\ndark g\ncold g\n";
+        assert!(compile_palette(&format!("{no_curse}ramp g {six}\nmaterial m g g")).is_err());
         assert!(compile_palette("palette 1\noutline #0000\n").is_err());
     }
 }

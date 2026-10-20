@@ -57,9 +57,9 @@ const CONFIG_LEGACY_LEN = 8 + 420;
 const CONFIG_LEN = CONFIG_LEGACY_LEN + 4 * 32;
 const URI_BASE_LEN = 64;
 const EMPTY_ADDRESS = "11111111111111111111111111111111";
-/** Rasterizer version and sprite book id of sprite format 2 (crates/render/FORMAT.md); version 1 and book 1 hold format 1. */
+/** Rasterizer version of sprite format 2 (crates/render/FORMAT.md); version 1 and book 1 hold format 1. */
 export const RASTERIZER_VERSION = 2;
-export const BOOK_ID = 2;
+const ASSETS = "target/render-assets";
 /** `Map` byte offsets: discriminator, version, dm, index u32, width, height, status. */
 const MAP_STATUS = 8 + 1 + 32 + 4 + 1 + 1;
 const MAP_STATUS_NAMES = ["Draft", "Finalized", "InSession", "Finished"];
@@ -74,7 +74,6 @@ export type DeployOptions = {
   uriBase: string;
   uriBaseExplicit: boolean;
   rasterizerVersion: number;
-  bookId: number;
   mapIndex: number;
   computeUnitPrice?: number;
   /** Called with the cost table before anything is sent; return false to stop. */
@@ -351,9 +350,10 @@ function checkArtifacts(opts: DeployOptions): void {
   if (!opts.mockVrf && mode !== "real") {
     throw new Error(`refusing: target/deploy/deadroll_session.so is a "${mode}" VRF build, not the real-oracle build`);
   }
-  for (const f of ["target/render-wasm/deadroll_render.wasm", "target/render-assets/palette.bin", "target/render-assets/book.bin"]) {
+  for (const f of ["target/render-wasm/deadroll_render.wasm", `${ASSETS}/palette.bin`]) {
     if (!existsSync(join(ROOT, f))) throw new Error(`${f} missing; run without --skip-build`);
   }
+  if (bookFiles().length === 0) throw new Error(`${ASSETS}/book_<id>.bin missing; run without --skip-build`);
 }
 
 async function preflight(conn: Rpc, opts: DeployOptions, wallet: KeyPairSigner, bins: ReturnType<typeof resolveBins>) {
@@ -427,8 +427,8 @@ async function estimateCost(conn: Rpc, opts: DeployOptions, programIds: Record<s
   }
   const blobs: [string, "rasterizer" | "palette" | "sprite_book", number][] = [
     ["target/render-wasm/deadroll_render.wasm", "rasterizer", opts.rasterizerVersion],
-    ["target/render-assets/palette.bin", "palette", paletteVersion()],
-    ["target/render-assets/book.bin", "sprite_book", opts.bookId],
+    [`${ASSETS}/palette.bin`, "palette", paletteVersion()],
+    ...bookFiles().map((b): [string, "sprite_book", number] => [b.file, "sprite_book", b.id]),
   ];
   for (const [file, kind, id] of blobs) {
     const len = readFileSync(join(ROOT, file)).length;
@@ -515,8 +515,22 @@ function script(name: string, args: string[], opts: DeployOptions) {
 }
 
 function paletteVersion(): number {
-  const pal = readFileSync(join(ROOT, "target/render-assets/palette.bin"));
+  const pal = readFileSync(join(ROOT, `${ASSETS}/palette.bin`));
   return pal[1] | (pal[2] << 8);
+}
+
+/** The books `art pack` wrote (`book_<id>.bin`, at most 4), in id order: the GameConfig lookup order. */
+export function bookFiles(dir = join(ROOT, ASSETS)): { file: string; id: number }[] {
+  if (!existsSync(dir)) return [];
+  const books = readdirSync(dir)
+    .filter((n) => /^book_\d+\.bin$/.test(n))
+    .map((n) => {
+      const body = readFileSync(join(dir, n));
+      return { file: join(dir, n), id: body[1] | (body[2] << 8) };
+    })
+    .sort((a, b) => a.id - b.id);
+  if (books.length > 4) throw new Error(`${books.length} sprite books, GameConfig.sprite_books holds 4`);
+  return books;
 }
 
 async function uploadRender(conn: Rpc, opts: DeployOptions, wallet: KeyPairSigner, programIds: Record<string, string>) {
@@ -537,8 +551,8 @@ async function uploadRender(conn: Rpc, opts: DeployOptions, wallet: KeyPairSigne
   script(
     "upload-sprites.ts",
     [
-      "--palette", join(ROOT, "target/render-assets/palette.bin"), "--palette-version", String(palVersion),
-      "--book", join(ROOT, "target/render-assets/book.bin"), "--book-id", String(opts.bookId),
+      "--palette", join(ROOT, `${ASSETS}/palette.bin`), "--palette-version", String(palVersion),
+      ...bookFiles().flatMap((b) => ["--book", b.file, "--book-id", String(b.id)]),
     ],
     opts,
   );
@@ -562,17 +576,19 @@ async function uploadRender(conn: Rpc, opts: DeployOptions, wallet: KeyPairSigne
     await send(conn, wallet, [ixFromIdl(programIds.registry, "deadroll_registry", "set_palette", { ...accounts, blob: palette })]);
     console.log(`set_palette: ${palette}`);
   }
-  const book = await blobPda("sprite_book", opts.bookId);
-  const books = [0, 1, 2, 3].map((i) => addrAt(cfg, CFG.spriteBooks + i * 32));
-  if (books[0] === book && books.slice(1).every((b) => b === EMPTY_ADDRESS)) {
-    console.log(`sprite books: already [${book}]`);
+  const books: string[] = [];
+  for (const b of bookFiles()) books.push(await blobPda("sprite_book", b.id));
+  const now = [0, 1, 2, 3].map((i) => addrAt(cfg, CFG.spriteBooks + i * 32));
+  const want = [...books, ...Array(4 - books.length).fill(EMPTY_ADDRESS)];
+  if (now.every((b, i) => b === want[i])) {
+    console.log(`sprite books: already [${books.join(", ")}]`);
   } else {
     const ix = ixFromIdl(programIds.registry, "deadroll_registry", "set_sprite_books", accounts);
-    ix.accounts.push({ address: address(book), role: AccountRole.READONLY });
+    for (const b of books) ix.accounts.push({ address: address(b), role: AccountRole.READONLY });
     await send(conn, wallet, [ix]);
-    console.log(`set_sprite_books: [${book}]`);
+    console.log(`set_sprite_books: [${books.join(", ")}]`);
   }
-  return { rasterizer, palette, paletteVersion: palVersion, book };
+  return { rasterizer, palette, paletteVersion: palVersion, books };
 }
 
 export async function mapAddresses(mapProgram: string, dm: string, index: number) {
@@ -655,7 +671,7 @@ export async function deploy(opts: DeployOptions): Promise<void> {
   console.log(`GameConfig ${GAME_CONFIG} (authority ${wallet.address})`);
   console.log(`rasterizer ${render.rasterizer} (version ${opts.rasterizerVersion})`);
   console.log(`palette    ${render.palette} (version ${render.paletteVersion})`);
-  console.log(`book       ${render.book} (id ${opts.bookId}, GameConfig.sprite_books[0])`);
+  bookFiles().forEach((b, i) => console.log(`book       ${render.books[i]} (id ${b.id}, GameConfig.sprite_books[${i}])`));
   console.log(`demo map   ${demo.map} (DM ${wallet.address}, index ${opts.mapIndex}, ${demo.status})`);
   console.log(`layout     ${demo.layout}`);
   const after = (await conn.rpc.getBalance(wallet.address).send()).value;

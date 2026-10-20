@@ -4,20 +4,22 @@ use std::process::ExitCode;
 
 use art::preview::{self, Img, Pal, SHEET_BG};
 use art::validate::{validate_files, Compiled, Issue};
+use deadroll_render::sprite::{layer, Cmd};
 
-const DEFAULT_PALETTE: &str = "assets/palette/palette_1.pal";
+const DEFAULT_PALETTE: &str = "assets/palette/palette_2.pal";
 const SPRITES_DIR: &str = "assets/sprites";
-/// `SpriteBook` body limit in programs/render.
-const BOOK_MAX: usize = 64 * 1024;
 
 const USAGE: &str = "usage:
   art validate [files.dsl ...]                 default: every file in assets/sprites
   art <file.dsl> [--id N] [--scale 4] [--out DIR|FILE.png] [--material NAME] [--bg #rrggbb]
-  art sheet characters [--scale 4] [--out FILE.png]
+  art sheet characters [figures ...] [--scale 4] [--out FILE.png]   bodies, kits on both bodies, alive and dead
   art sheet contact [files.dsl ...] [--scale 2] [--out FILE.png]
-  art pack [--out DIR]                          palette.bin + book.bin (book 2, every sprite) for upload
+  art sheet matrix [files.dsl ...] [--id N] [--scale 4] [--out FILE.png]   items x materials, enchants, runes, sockets
+  art sheet scene [--scale 4] [--out FILE.png]        every tile, the probe chest, monsters and classes at one pixel scale
+  art sheet join <a.png> <b.png> ... [--out FILE.png]  PNGs side by side (old and new sprites)
+  art pack [--out DIR]                          palette.bin + book_<id>.bin (books 2.., 64 KiB each) for upload
   art upscale [files.dsl ...]                  rewrite format 1 sources (16..64 px) for format 2, in place
-options: --palette FILE.pal (default assets/palette/palette_1.pal)";
+options: --palette FILE.pal (default assets/palette/palette_2.pal)";
 
 struct Opts {
     pos: Vec<String>,
@@ -114,7 +116,31 @@ fn cmd_validate(o: &Opts) -> Result<bool, String> {
     for i in &shown {
         eprintln!("{i}");
     }
-    let n = sprites.iter().filter(|s| wanted.contains(&s.file)).count();
+    let mine: Vec<_> = sprites
+        .iter()
+        .filter(|s| wanted.contains(&s.file))
+        .collect();
+    let n = mine.len();
+    // Bytes per sprite as stored in a book (FORMAT.md 3.1).
+    let mut total = 0;
+    for s in &mine {
+        let bitmap = s
+            .sprite
+            .cmds
+            .iter()
+            .any(|c| matches!(c, Cmd::Bitmap { .. }));
+        println!(
+            "{:>5} {:<24} {:>3}x{:<3} {:>6} B{}",
+            s.src.id,
+            s.src.name,
+            s.sprite.header.width,
+            s.sprite.header.height,
+            s.src.bytes.len(),
+            if bitmap { "  bitmap" } else { "" },
+        );
+        total += s.src.bytes.len();
+    }
+    println!("{total} bytes in {n} sprites");
     if shown.is_empty() {
         println!("ok: {n} sprites in {} files", files.len());
         Ok(true)
@@ -183,9 +209,83 @@ fn cmd_render(o: &Opts) -> Result<bool, String> {
     Ok(true)
 }
 
+/// Probe sprites outside the books (`tools/art/probe`), for the scene sheet.
+const PROBE_CHEST: &str = "tools/art/probe/chest.dsl";
+const PROBE_CHEST_ID: u16 = 590;
+
 fn cmd_sheet(o: &Opts) -> Result<bool, String> {
     let kind = o.pos.get(1).map(String::as_str).unwrap_or("");
-    let files: Vec<PathBuf> = if o.pos.len() > 2 {
+    let bg = o.bg.unwrap_or(SHEET_BG);
+    if kind == "join" {
+        let mut images = Vec::new();
+        for f in &o.pos[2..] {
+            let bytes = fs::read(f).map_err(|e| format!("{f}: {e}"))?;
+            let mut img = preview::from_png(&bytes)?;
+            preview::flatten(&mut img, bg);
+            images.push(img);
+        }
+        let sheet = preview::grid(&images, images.len(), 16, bg);
+        let path = o
+            .out
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("target/art/join.png"));
+        write(&path, &preview::to_png(&sheet))?;
+        println!("{} ({} images)", path.display(), images.len());
+        return Ok(true);
+    }
+    if kind == "scene" {
+        let mut files = repo_files();
+        files.push(PathBuf::from(PROBE_CHEST));
+        let (sprites, _) = load_all(&files)?;
+        let pal = load_pal(o)?;
+        let book = preview::pack_book(&sprites)?;
+        let figures = preview::characters();
+        let fig = |name: &str| {
+            figures
+                .iter()
+                .find(|f| f.0 == name)
+                .map(|f| f.1.as_slice())
+                .ok_or(format!("no figure {name}"))
+        };
+        // wall, floor, water, door, entrance, exit, trap
+        let (w, f, a, d, i, x, t) = (501, 500, 502, 503, 504, 505, 506);
+        let tiles: [&[u16]; 5] = [
+            &[w, w, d, w, w, w, w],
+            &[i, f, f, f, t, f, f],
+            &[a, a, f, f, f, f, f],
+            &[a, a, f, f, f, f, x],
+            &[f, f, f, f, f, f, f],
+        ];
+        let img = preview::scene(
+            &pal,
+            &book,
+            &sprites,
+            &tiles,
+            &[
+                (6, 1, PROBE_CHEST_ID),
+                (5, 2, 400),
+                (6, 4, 402),
+                (4, 4, 401),
+                (0, 4, 403),
+            ],
+            &[
+                (1, 2, fig("human_warrior")?),
+                (2, 3, fig("elf_mage")?),
+                (3, 2, fig("human_support")?),
+                (2, 4, fig("elf_warrior")?),
+            ],
+            if o.scale == 0 { 4 } else { o.scale },
+        )?;
+        let path = o
+            .out
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("target/art/scene.png"));
+        write(&path, &finish(img, Some(bg)))?;
+        println!("{}", path.display());
+        return Ok(true);
+    }
+    // `sheet characters` takes figure names (human, elf_mage, ...), the other kinds take files.
+    let files: Vec<PathBuf> = if o.pos.len() > 2 && kind != "characters" {
         o.pos[2..].iter().map(PathBuf::from).collect()
     } else {
         repo_files()
@@ -193,30 +293,74 @@ fn cmd_sheet(o: &Opts) -> Result<bool, String> {
     let (sprites, _) = load_all(&files)?;
     let pal = load_pal(o)?;
     let book = preview::pack_book(&sprites)?;
-    let bg = o.bg.unwrap_or(SHEET_BG);
     let (default_scale, default_out) = match kind {
         "characters" => (4, "target/art/characters.png"),
         "contact" => (2, "target/art/contact.png"),
-        _ => return Err("sheet kind: characters | contact".into()),
+        "matrix" => (4, "target/art/matrix.png"),
+        _ => return Err("sheet kind: characters | contact | matrix | scene | join".into()),
     };
     let scale = if o.scale == 0 { default_scale } else { o.scale };
+    let named: Vec<String> = files.iter().map(|p| norm(p)).collect();
+    let only = o.pos.len() > 2;
+    let picked = sprites
+        .iter()
+        .filter(|c| !only || named.contains(&c.file))
+        .filter(|c| o.id.is_none_or(|id| c.src.id == id));
     let mut images = Vec::new();
-    if kind == "characters" {
-        for (_, layers) in preview::characters() {
-            let mut img = preview::render_character(&pal, &book, &layers, scale)?;
-            preview::flatten(&mut img, bg);
-            images.push(img);
+    let mut cols = 8;
+    match kind {
+        "characters" => {
+            let figures: Vec<_> = preview::characters()
+                .into_iter()
+                .filter(|f| o.pos.len() <= 2 || o.pos[2..].contains(&f.0))
+                .collect();
+            if figures.is_empty() {
+                return Err("no figure matches".into());
+            }
+            cols = figures.len();
+            for dead in [false, true] {
+                for (_, layers) in &figures {
+                    let mut img = preview::render_character(&pal, &book, layers, scale, dead)?;
+                    preview::flatten(&mut img, bg);
+                    images.push(img);
+                }
+            }
+            let titles: Vec<&str> = figures.iter().map(|f| f.0.as_str()).collect();
+            println!("columns: {}; row 1 alive, row 2 dead", titles.join(", "));
         }
-    } else {
-        let named: Vec<String> = files.iter().map(|p| norm(p)).collect();
-        let only = o.pos.len() > 2;
-        for c in sprites.iter().filter(|c| !only || named.contains(&c.file)) {
-            let mut img = preview::render_sprite(&pal, &book, c, scale, None)?;
-            preview::flatten(&mut img, bg);
-            images.push(img);
+        "matrix" => {
+            cols = preview::MATRIX_COLUMNS.len();
+            let items = picked.filter(|c| {
+                let lt = c.sprite.header.layer_type;
+                !layer::is_body(lt) && lt != layer::TILE && lt != layer::MONSTER
+            });
+            for c in items {
+                let row = preview::craft_row(&pal, &book, c, scale)?;
+                let n = row.len();
+                for mut img in row {
+                    preview::flatten(&mut img, bg);
+                    images.push(img);
+                }
+                // Pad short rows (no body column) so every sprite starts a new row.
+                for _ in n..cols {
+                    images.push(Img {
+                        w: 1,
+                        h: 1,
+                        rgba: [bg[0], bg[1], bg[2], 255].to_vec(),
+                    });
+                }
+                println!("row: {} {}", c.src.id, c.src.name);
+            }
+            println!("columns: {}", preview::MATRIX_COLUMNS.join(" | "));
+        }
+        _ => {
+            for c in picked {
+                let mut img = preview::render_sprite(&pal, &book, c, scale, None)?;
+                preview::flatten(&mut img, bg);
+                images.push(img);
+            }
         }
     }
-    let cols = if kind == "characters" { 3 } else { 8 };
     let sheet = preview::grid(&images, cols, 4 * scale as usize, bg);
     let path = o.out.clone().unwrap_or_else(|| PathBuf::from(default_out));
     write(&path, &preview::to_png(&sheet))?;
@@ -224,7 +368,8 @@ fn cmd_sheet(o: &Opts) -> Result<bool, String> {
     Ok(true)
 }
 
-/// Writes the upload inputs: the compiled palette and one sprite book (id 1) with every repo sprite.
+/// Writes the upload inputs: the compiled palette and the sprite books (ids 2..) with every repo
+/// sprite, each at most `BOOK_MAX` bytes: `palette.bin`, `book_<id>.bin`.
 fn cmd_pack(o: &Opts) -> Result<bool, String> {
     let (sprites, issues) = load_all(&repo_files())?;
     if !issues.is_empty() {
@@ -234,21 +379,32 @@ fn cmd_pack(o: &Opts) -> Result<bool, String> {
         return Err(format!("{} problems, run `art validate`", issues.len()));
     }
     let pal = load_pal(o)?;
-    let book = preview::pack_book(&sprites)?;
-    if book.len() > BOOK_MAX {
-        return Err(format!("book is {} bytes, over {BOOK_MAX}", book.len()));
-    }
+    let books = preview::pack_books(&sprites)?;
     let dir = o
         .out
         .clone()
         .unwrap_or_else(|| PathBuf::from("target/render-assets"));
+    // Books of an earlier pack that this one no longer writes would be uploaded too.
+    if let Ok(entries) = fs::read_dir(&dir) {
+        for e in entries.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            if name.starts_with("book") && name.ends_with(".bin") {
+                fs::remove_file(e.path()).map_err(|err| format!("{name}: {err}"))?;
+            }
+        }
+    }
     write(&dir.join("palette.bin"), &pal.src.bytes)?;
-    write(&dir.join("book.bin"), &book)?;
+    let mut sizes = Vec::new();
+    for (i, book) in books.iter().enumerate() {
+        let id = preview::BOOK_ID + i as u16;
+        write(&dir.join(format!("book_{id}.bin")), book)?;
+        sizes.push(format!("book {id} {} bytes", book.len()));
+    }
     println!(
-        "{}: palette {} bytes, book {} bytes ({} sprites)",
+        "{}: palette {} bytes, {} ({} sprites)",
         dir.display(),
         pal.src.bytes.len(),
-        book.len(),
+        sizes.join(", "),
         sprites.len()
     );
     Ok(true)

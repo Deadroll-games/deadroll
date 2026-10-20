@@ -1,0 +1,59 @@
+# Palette 2, format 2 (crates/render/FORMAT.md 3.2.1): ramps of 6 colors, dark -> light.
+# Color 0 is the outline shade of the ramp, 1-4 are auto shading, 5 is the highlight.
+# Shadows lean cold (blue, violet), lights lean warm (yellow, orange).
+# Ramps 0-19 and materials 0-12 keep the names and indices of palette 1: devnet characters store
+# these indices. Append only.
+palette 2
+outline #120c16
+
+ramp gray      #141219 #2b2a33 #47464f #6b6a70 #9a978f #cfcbbf
+ramp steel     #10121b #252b3a #3d4757 #5e6a79 #8e98a0 #cdd2cc
+ramp skin      #1e0d10 #4a2423 #7a4233 #a8664b #d0926c #eec59d
+ramp skin_elf  #21141a #523a3a #84604f #b08a6d #d5b693 #f2dec2
+ramp hair      #0e090d #211519 #3a2520 #57392a #7a5436 #9e7546
+ramp hair_elf  #1c130e #4a3419 #7d6225 #ad903a #d5ba5e #f3e4a2
+ramp robe      #0c0919 #1c1638 #2c2457 #41377c #5c50a4 #847bc8
+ramp green     #08130f #133022 #1f4a2f #2f6a3a #4f8c46 #88b85e
+ramp leather   #130a0b #2e1915 #4b2b1f #6d4229 #925f3a #b98756
+ramp gold      #190e07 #4a2a0d #7a4f13 #b0801f #dbb24b #f7e49c
+ramp cold      #060e21 #12284a #1f4875 #3672a4 #6aa6cf #c6ecff
+ramp fire      #190605 #4f0f09 #8f2a0d #d0581b #f0a03b #ffe692
+ramp dark      #0a0509 #1a0d14 #2b1520 #3e202c #57303b #75454e
+ramp eyes      #06060c #141a30 #24345e #3c5c9c #6e90cc #c4ddff
+ramp cape_red  #110407 #2f0a10 #551419 #7d2021 #a5372f #c9614b
+ramp fur       #121011 #2b2624 #463d37 #66584c #8b7a66 #b4a38b
+ramp stone     #0e1015 #20242e #363d4b #525b6b #7a8494 #abb4bf
+ramp floor     #121117 #26242c #3b3843 #55525d #78747d #a39ea2
+ramp water     #040c1c #0c2547 #164075 #2766a4 #4f94c8 #a8d7f0
+ramp wood      #120a07 #2b190f #46291b #643c23 #865531 #aa7747
+# appended in palette 2
+ramp cloth     #08080e #15161f #22242f #343744 #4b4f5c #6b6f7b
+ramp moss      #060f0b #102419 #1b3a24 #2b5530 #46733a #70944a
+ramp bone      #15120e #3a332a #5f5546 #8a7e66 #b5a98c #dfd4b6
+ramp blood     #120305 #33070c #5c0f14 #8a1a1d #b5302b #d95b47
+ramp curse     #0a0612 #1e1030 #3a1f50 #5a3470 #7e5a8c #a988a9
+ramp dirt      #120d0a #2a1f19 #45342a #64503f #8a7258 #ae9777
+
+dark dark
+curse curse
+cold cold
+
+# materials: primary ramp, secondary ramp, `dither` for cloth, leather, stone, plants
+material steel      steel    leather
+material human      skin     hair
+material elf        skin_elf hair_elf
+material robe       robe     leather  dither
+material leather    leather  leather  dither
+material cape       cape_red leather  dither
+material wolf       fur      fur      dither
+material goblin     green    leather
+material stone      gray     gray     dither
+material tile_wall   stone  gray      dither
+material tile_floor  floor  stone     dither
+material tile_water  water  cold
+material tile_door   wood   leather   dither
+# appended in palette 2
+material cloth      cloth    leather  dither
+material moss       moss     dirt     dither
+material bone       bone     wood
+material chest      wood     steel    dither

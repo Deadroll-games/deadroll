@@ -24,8 +24,6 @@ export const RPC_URL: string = custom?.url ?? env.VITE_RPC_URL ?? (HOSTED ? PUBL
 export const RPC_WS_URL: string | undefined = custom ? custom.ws : (env.VITE_RPC_WS_URL ?? (HOSTED ? PUBLIC_DEVNET_WS : undefined));
 /** Wallet Standard chain id. */
 export const CHAIN = (env.VITE_CHAIN ?? (LOCALNET_MODE ? "solana:localnet" : "solana:devnet")) as `${string}:${string}`;
-/** Palette version the characters are drawn with (`palette 1` in assets/palette). */
-export const PALETTE_VERSION = Number(env.VITE_PALETTE_VERSION ?? "1");
 
 /** The RPC is a validator on this machine (airdrops, the mock VRF oracle). */
 export const IS_LOCALNET = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?\/?$/.test(RPC_URL);

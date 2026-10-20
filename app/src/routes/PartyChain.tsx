@@ -14,7 +14,8 @@ import { Grid } from "../components/grid/Grid";
 import type { GridAura, GridUnit } from "../components/grid/types";
 import { PartyLobby } from "../components/forms/PartyLobby";
 import type { LobbyPlayer } from "../components/forms/types";
-import { monsterRequest, renderRequest, tileRequest, TOMBSTONE } from "../chain/appearance";
+import { isCurrentAppearance, monsterRequest, tileRequest, TOMBSTONE } from "../chain/appearance";
+import { characterRequest } from "../chain/items";
 import {
   BASE_ATTACK,
   CLASS_KEYS,
@@ -787,8 +788,9 @@ function PartyView({ address }: { address: Address }) {
   const unitSprite = (u: GridUnit) => {
     if (u.kind === "player") {
       const p = party.players.find((x) => x.slot === u.id);
-      if (!p) return null;
-      return u.alive ? draw(`c:${p.character}`, renderRequest(p.char.core.appearance)) : draw("tomb", TOMBSTONE);
+      // A character from before the current graphics is not drawn: the grid shows its marker.
+      if (!p || !isCurrentAppearance(p.char.core.appearance)) return null;
+      return u.alive ? draw(`c:${p.character}`, characterRequest(p.char)) : draw("tomb", TOMBSTONE);
     }
     const m = party.monsters[u.id - MONSTER_BASE];
     return m ? draw(`m:${m.bestiaryId}:${m.alive}`, monsterRequest(m.bestiaryId, !m.alive)) : null;

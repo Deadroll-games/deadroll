@@ -10,6 +10,12 @@ use crate::error::{Error, Result};
 pub const LAYERS_MAX: usize = 20;
 /// `RenderRequest.flags` bit 0: dead character, all colors gray.
 pub const FLAG_GRAY: u32 = 1;
+/// Bit 1: cursed character, every ramp cast toward the palette curse ramp, curse outline.
+pub const FLAG_CURSE: u32 = 2;
+/// Bit 2: chilled or frozen character, cold outline.
+pub const FLAG_COLD: u32 = 4;
+/// Every defined flag bit; the others are reserved and must be 0.
+pub const FLAGS_ALL: u32 = FLAG_GRAY | FLAG_CURSE | FLAG_COLD;
 
 /// One sprite layer. `sprite_id == 0` means an empty layer.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

@@ -379,7 +379,7 @@ export async function createCharacterIxs(
       class: CLASS_KEYS[c.class],
       predisposition: ASPECT_KEYS[c.predisposition],
       stats: c.stats,
-      appearance: characterAppearance(c.race, c.class, c.predisposition),
+      appearance: characterAppearance(c.race, c.predisposition),
       skills: (c.skills ?? SKILL_PRESETS[c.class]).map((s) => ({ blocks: s.blocks, name: textBytes(s.name, SKILL_NAME_LEN), ext: s.ext })),
     },
   };

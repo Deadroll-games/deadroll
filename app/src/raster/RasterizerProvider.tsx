@@ -7,6 +7,7 @@ import { idbWasmCache } from "./idb";
 import { loadRender, type LoadedRender } from "./loader";
 import { mockRenderSource } from "./mockSource";
 import { characterAppearance, renderRequest } from "../chain/appearance";
+import { dressed, starterEquipment } from "../chain/items";
 import { Aspect, Class, Race } from "../chain/types";
 
 export type RasterizerState =
@@ -22,8 +23,8 @@ async function load(): Promise<{ render: LoadedRender; sample: RenderRequest | n
     return { render: await loadRender(source, { cache: idbWasmCache }), sample };
   }
   const render = await loadRender(rpcAccountSource(client.rpc), { cache: idbWasmCache });
-  // The demo warrior from sprite book 1, as tools/art draws it.
-  return { render, sample: renderRequest(characterAppearance(Race.Human, Class.Warrior, Aspect.Piercing)) };
+  // The demo: a new human warrior in the starter kit, as tools/art draws it.
+  return { render, sample: renderRequest(dressed(characterAppearance(Race.Human, Aspect.Piercing), starterEquipment(Class.Warrior))) };
 }
 
 export function RasterizerProvider({ children }: { children: ReactNode }) {

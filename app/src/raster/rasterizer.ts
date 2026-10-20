@@ -50,6 +50,12 @@ type Exports = {
   last_error(): number;
 };
 
+/** Palette version from a palette body header (crates/render/FORMAT.md 3.2: format, u16 version). */
+export function paletteVersionOf(palette: Uint8Array): number {
+  if (palette.length < 3) throw new Error("palette body is shorter than its header");
+  return palette[1]! | (palette[2]! << 8);
+}
+
 export function encodeRenderRequest(req: RenderRequest): Uint8Array {
   if (req.layers.length !== LAYERS_MAX) throw new Error(`RenderRequest needs ${LAYERS_MAX} layers`);
   const out = new Uint8Array(RENDER_REQUEST_LEN);
@@ -127,8 +133,12 @@ export class Rasterizer {
     };
   }
 
-  /** RGBA: the canvas 1:1 (64 px characters). PNG: enlarged to 512 px on the longer side. */
+  /**
+   * RGBA: the canvas 1:1 (96 px characters). PNG: enlarged by the integer scale that fits 512 px.
+   * The request's palette version is taken from the palette body, the one GameConfig points at.
+   */
   render(req: RenderRequest, palette: Uint8Array, books: Uint8Array[], mode: OutMode = OutMode.RGBA): RenderOutput {
-    return this.renderRaw(encodeBooks(books), palette, encodeRenderRequest(req), mode);
+    const state = encodeRenderRequest({ ...req, paletteVersion: paletteVersionOf(palette) });
+    return this.renderRaw(encodeBooks(books), palette, state, mode);
   }
 }

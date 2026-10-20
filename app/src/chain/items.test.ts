@@ -163,7 +163,7 @@ describe("item numbers (balance.json = deadroll_rules defaults)", () => {
 
   it("an item icon is its own sprite on layer 0", () => {
     const req = itemRequest("sword")!;
-    expect(req.layers[0]!.spriteId).toBe(106);
+    expect(req.layers[0]!.spriteId).toBe(100);
     expect(req.layers.slice(1).every((l) => l.spriteId === 0)).toBe(true);
     for (const b of ITEM_BASES) expect(itemRequest(b), b).not.toBeNull();
   });
