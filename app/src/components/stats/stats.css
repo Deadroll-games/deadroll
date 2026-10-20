@@ -86,3 +86,21 @@
 .hero-sheet .good {
   color: var(--good);
 }
+
+/* Derived stats: the general block, then attack and defense side by side. */
+.hero-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.hero-cols h4 {
+  margin: 0 0 4px;
+}
+
+@media (max-width: 700px) {
+  .hero-cols {
+    grid-template-columns: 1fr;
+  }
+}

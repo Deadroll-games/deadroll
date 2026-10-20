@@ -287,3 +287,33 @@
   margin-top: 4px;
   max-width: 320px;
 }
+
+/* Compact hit card: one roll at a time, small type. */
+.hit-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.hit-card-head {
+  margin: 0;
+  color: var(--muted);
+}
+
+.hit-card-step {
+  margin: 0;
+  min-height: 2.6em;
+}
+
+.hit-card .btn.small {
+  align-self: flex-start;
+  line-height: 20px;
+  font-size: 12px;
+}
+
+.hit-card-list {
+  margin: 0;
+  padding-left: 18px;
+}

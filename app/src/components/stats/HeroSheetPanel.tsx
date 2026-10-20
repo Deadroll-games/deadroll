@@ -4,25 +4,48 @@ import { formatBp, STAT_NAMES } from "../../chain/names";
 import type { HeroSheetPanelProps, HeroSheetView } from "./types";
 import "./stats.css";
 
-type Row = { label: string; value: (s: HeroSheetView) => string; hint: string };
+type Row = { label: string; value: (s: HeroSheetView) => string; hint: string; group: "general" | "attack" | "defense" };
 
 /** What each derived stat is and where it comes from (docs/CHARACTER.md 2-3). */
 const ROWS: Row[] = [
-  { label: "HP", value: (s) => String(s.hpMax), hint: "class base, Endurance, level, items" },
-  { label: "Accuracy", value: (s) => `+${s.accuracy}`, hint: "d20 bonus: Dexterity, items" },
-  { label: "Evasion", value: (s) => String(s.evasion), hint: "the hit threshold: Dexterity, items" },
-  { label: "Armor", value: (s) => String(s.armor), hint: "class, items" },
-  { label: "Crit chance", value: (s) => formatBp(s.critBp), hint: "besides a natural 20: items" },
-  { label: "Action points", value: (s) => String(s.actionPoints), hint: "speed: race, class, Dexterity, items" },
-  { label: "Initiative", value: (s) => String(s.initiative), hint: "Intelligence, items" },
-  { label: "Martial strike damage", value: (s) => `+${formatBp(s.martialStrikeBp)}`, hint: "Strength" },
-  { label: "Martial projectile damage", value: (s) => `+${formatBp(s.martialProjectileBp)}`, hint: "Dexterity" },
-  { label: "Magical damage", value: (s) => `+${formatBp(s.magicalBp)}`, hint: "Intelligence" },
-  { label: "Martial state chance", value: (s) => `+${formatBp(s.martialStateBp)}`, hint: "states and debuffs of martial skills: Strength" },
-  { label: "Magical state chance", value: (s) => `+${formatBp(s.magicalStateBp)}`, hint: "states and debuffs of magical skills: Intelligence" },
-  { label: "Tempo effect chance", value: (s) => `+${formatBp(s.tempoStateBp)}`, hint: "Haste, Slow: Dexterity" },
-  { label: "Own buffs on self", value: (s) => `+${s.selfBuffTurns} turns`, hint: "Endurance" },
+  { label: "HP", value: (s) => String(s.hpMax), hint: "class base, Endurance, level, items", group: "defense" },
+  { label: "Accuracy", value: (s) => `+${s.accuracy}`, hint: "d20 bonus: Dexterity, items", group: "attack" },
+  { label: "Evasion", value: (s) => String(s.evasion), hint: "the hit threshold: Dexterity, items", group: "defense" },
+  { label: "Armor", value: (s) => String(s.armor), hint: "class, items", group: "defense" },
+  { label: "Crit chance", value: (s) => formatBp(s.critBp), hint: "besides a natural 20: items", group: "attack" },
+  { label: "Action points", value: (s) => String(s.actionPoints), hint: "speed: race, class, Dexterity, items", group: "general" },
+  { label: "Initiative", value: (s) => String(s.initiative), hint: "Intelligence, items", group: "general" },
+  { label: "Martial strike damage", value: (s) => `+${formatBp(s.martialStrikeBp)}`, hint: "Strength", group: "attack" },
+  { label: "Martial projectile damage", value: (s) => `+${formatBp(s.martialProjectileBp)}`, hint: "Dexterity", group: "attack" },
+  { label: "Magical damage", value: (s) => `+${formatBp(s.magicalBp)}`, hint: "Intelligence", group: "attack" },
+  { label: "Martial state chance", value: (s) => `+${formatBp(s.martialStateBp)}`, hint: "states and debuffs of martial skills: Strength", group: "attack" },
+  { label: "Magical state chance", value: (s) => `+${formatBp(s.magicalStateBp)}`, hint: "states and debuffs of magical skills: Intelligence", group: "attack" },
+  { label: "Tempo effect chance", value: (s) => `+${formatBp(s.tempoStateBp)}`, hint: "Haste, Slow: Dexterity", group: "attack" },
+  { label: "Own buffs on self", value: (s) => `+${s.selfBuffTurns} turns`, hint: "Endurance", group: "general" },
 ];
+
+function SheetTable({ rows, sheet, planned, spent }: { rows: Row[]; sheet: HeroSheetView; planned: HeroSheetView | null; spent: number }) {
+  return (
+    <table className="stats-table hero-sheet-table">
+      <tbody>
+        {rows.map((r) => {
+          const now = r.value(sheet);
+          const next = planned && spent > 0 ? r.value(planned) : now;
+          return (
+            <tr key={r.label}>
+              <th scope="row">{r.label}</th>
+              <td>
+                {now}
+                {next !== now && <span className="good"> → {next}</span>}
+              </td>
+              <td className="muted">{r.hint}</td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
 
 export function HeroSheetPanel({ stats, plan, unspent, sheet, planned, locked, busy, onPlan, onReset, onSave }: HeroSheetPanelProps) {
   const spent = plan.reduce((a, b) => a + b, 0);
@@ -81,24 +104,19 @@ export function HeroSheetPanel({ stats, plan, unspent, sheet, planned, locked, b
 
       <h3>Derived stats</h3>
       {sheet ? (
-        <table className="stats-table hero-sheet-table">
-          <tbody>
-            {ROWS.map((r) => {
-              const now = r.value(sheet);
-              const next = planned && spent > 0 ? r.value(planned) : now;
-              return (
-                <tr key={r.label}>
-                  <th scope="row">{r.label}</th>
-                  <td>
-                    {now}
-                    {next !== now && <span className="good"> → {next}</span>}
-                  </td>
-                  <td className="muted">{r.hint}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <>
+          <SheetTable rows={ROWS.filter((r) => r.group === "general")} sheet={sheet} planned={planned} spent={spent} />
+          <div className="hero-cols">
+            <div>
+              <h4>Attack</h4>
+              <SheetTable rows={ROWS.filter((r) => r.group === "attack")} sheet={sheet} planned={planned} spent={spent} />
+            </div>
+            <div>
+              <h4>Defense</h4>
+              <SheetTable rows={ROWS.filter((r) => r.group === "defense")} sheet={sheet} planned={planned} spent={spent} />
+            </div>
+          </div>
+        </>
       ) : (
         <p className="muted">Loading the combat module…</p>
       )}

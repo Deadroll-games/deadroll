@@ -267,7 +267,7 @@ export function CharacterDetailView({
         </div>
       </header>
 
-      <section className="panel">
+      <section className="panel char-detail-stats">
         <h2>Stats</h2>
         <p className="muted">HP {hp}</p>
         {sheet ? (
@@ -284,7 +284,7 @@ export function CharacterDetailView({
         )}
       </section>
 
-      <section className="panel">
+      <section className="panel char-detail-party">
         <h2>Current party</h2>
         {party ? (
           <p>
