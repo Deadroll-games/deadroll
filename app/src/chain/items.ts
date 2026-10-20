@@ -173,7 +173,7 @@ export function heroDefense(cls: Class, stats: readonly number[], equipment: Arr
 const ITEM_SPRITES: Record<string, [spriteId: number, material: number]> = {
   sword: [106, MATERIAL.steel],
   staff: [204, MATERIAL.leather],
-  wand: [303, MATERIAL.leather], // the support kit weapon sprite (a dedicated wand sprite is art for later)
+  wand: [303, MATERIAL.leather],
   leatherArmor: [104, MATERIAL.leather],
   robe: [201, MATERIAL.robe],
   lightLeatherArmor: [301, MATERIAL.leather],

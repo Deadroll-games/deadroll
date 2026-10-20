@@ -12,7 +12,7 @@ export const RAMP = {
 /** palette_2.pal `material` lines, in order (append only). */
 export const MATERIAL = {
   steel: 0, human: 1, elf: 2, robe: 3, leather: 4, cape: 5, wolf: 6, goblin: 7, stone: 8,
-  tileWall: 9, tileFloor: 10, tileWater: 11, tileDoor: 12,
+  tileWall: 9, tileFloor: 10, tileWater: 11, tileDoor: 12, cloth: 13, moss: 14, bone: 15, chest: 16,
 } as const;
 
 export const SPRITE = { tombstone: 403 } as const;
@@ -62,7 +62,7 @@ function kit(cls: Class): Entry[] {
     case Class.Mage:
       return [[L.backItem, 205, MATERIAL.leather, G], [L.pants, 202, MATERIAL.robe, G], [L.boots, 203, MATERIAL.leather, G], [L.armorBody, 201, MATERIAL.robe, G], [L.helmet, 200, MATERIAL.robe, G], [L.mainhand, 204, MATERIAL.leather, G]];
     case Class.Support:
-      return [[L.backItem, 304, MATERIAL.leather, G], [L.boots, 302, MATERIAL.leather, G], [L.armorBody, 301, MATERIAL.leather, G], [L.necklace, 305, MATERIAL.leather, G], [L.helmet, 300, MATERIAL.leather, G], [L.mainhand, 303, MATERIAL.leather, G]];
+      return [[L.backItem, 304, MATERIAL.leather, G], [L.boots, 302, MATERIAL.cloth, G], [L.armorBody, 301, MATERIAL.leather, G], [L.necklace, 305, MATERIAL.leather, G], [L.helmet, 300, MATERIAL.moss, G], [L.mainhand, 303, MATERIAL.leather, G]];
     default:
       return [[L.backItem, 100, MATERIAL.cape, G], [L.offhand, 101, MATERIAL.steel, G], [L.pants, 102, MATERIAL.leather, G], [L.boots, 103, MATERIAL.leather, G], [L.armorBody, 104, MATERIAL.steel, G], [L.helmet, 105, MATERIAL.steel, G], [L.mainhand, 106, MATERIAL.steel, G]];
   }

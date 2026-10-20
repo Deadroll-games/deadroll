@@ -1,65 +1,183 @@
-# Support kit for the reference human body. 3/4 view facing right.
-# Feet on y=61. Anchors: main hand (42,38), neck (30,30), back (24,30), waist (30,44).
+# Support kit, 96x96, on the shared body anchors (bodies.dsl). Pixel by pixel:
+# digits 0-5 primary P, a-f secondary S, g-l accent A, m-r element core E, s-x rune zone U.
 
+# Cloth cowl with a short capelet and a gold circlet across the forehead; the face stays open.
 sprite 300 support_cowl
-size 64 64
+size 96 96
 layer helmet
-# cloth cowl over the hair, circlet band, face open
-RECT 26 4 12 4 P
-RECT 24 8 16 4 P
-RECT 24 12 16 4 A
-RECT 20 16 4 12 P
-RECT 36 26 6 4 P
-RECT 20 24 6 8 P
+BITMAP 34 14 23 25
+.........234444332.....
+.......2344554443322...
+......234455544443322..
+.....23445554444333222.
+....234444544443333222.
+...2344444444433332221.
+..23444444444433332221.
+.234444444hijjjjjjjiih.
+23444444443hiiiiiihh...
+2344444443.............
+2344444443.............
+2344444443.............
+2344444443.............
+2344444443.............
+2344444443.............
+2344444443.............
+2344444443.............
+234444443..............
+23444443...............
+.2344443...............
+..234444444333332......
+..23444444444333322....
+.234444444444433332222.
+23444444444444443333222
+22222222222222222222221
 
+# Light leather jerkin to the knees: short sleeves, a darker tabard panel down the front, a belt
+# with a gold buckle, the skirt split at both sides.
 sprite 301 support_tabard
-size 64 64
+size 96 96
 layer armor_body
-# light tabard, split hem, sash in A at the waist
-RECT 24 28 14 4 P
-RECT 22 32 18 12 P
-RECT 24 44 6 10 P
-RECT 32 44 6 10 P
-RECT 24 42 14 4 A
-RECT 26 32 4 10 S
+BITMAP 33 34 32 39
+...........2344432..............
+........234444443332............
+.....2344444444433333222........
+...234444444444443333332222.....
+.2344444444444444433333332222...
+23444444444444444443333333322221
+34443244444ccddddcc33332.3444332
+34443244444ccddddcc33332.3444332
+34443244444ccddddcc33332.3444332
+34443244444ccddddcc33332.3444332
+34443244444ccddddcc33332.3444332
+34443244444ccddddcc33332.3444332
+hiiiih44444ccddddcc33332.hiiiiih
+......44444ccddddcc33332........
+......44444ccddddcc33332........
+......44444ccddddcc33332........
+......44444ccddddcc33332........
+......44444ccddddcc33332........
+......44444ccddddcc33332........
+......44444ccddddcc33332........
+......44444ccddddcc33332........
+......cdddddddhjjhdddcbbb.......
+......bcccccchjljhcccbbaa.......
+......2444444333344444331.......
+......2444444333344444331.......
+......2444444333344444331.......
+......2444444333344444331.......
+......2444444333344444331.......
+......2444444333344444331.......
+.....244444433334444433331......
+......4444443333444443333.......
+......4444443333444443333.......
+......4444443333444443333.......
+.......44444333344444333........
+.......44444333344444333........
+......4444433334444433333.......
+.......44443333444443333........
+.......44443333444443333........
+.......44443333444443333........
+SOCKET 40 41
+SOCKET 52 41
 
+# Tall soft boots with a folded cuff; toes point right.
 sprite 302 support_boots
-size 64 64
+size 96 96
 layer boots
-# soft boots, soles on y=61, cuff in S
-RECT 24 54 6 8 P
-RECT 32 54 6 8 P
-RECT 38 58 4 4 P
-RECT 24 54 6 4 S
-RECT 32 54 6 4 S
+BITMAP 41 72 20 20
+bcccccb.bccccccb....
+cdeeedc.cdeeeedc....
+bcccccb.bccccccb....
+344432..3444432.....
+344432..3444432.....
+344432..3444432.....
+344432..3444432.....
+344432..3444432.....
+344432..3444432.....
+344432..3444432.....
+344432..3444432.....
+344432..3444432.....
+344432..3444432.....
+344432..3444432.....
+344432..3444432.....
+2344332.34444332....
+23444332344444332...
+234444333444444332..
+2344444334444444332.
+11111111111111111111
 
-sprite 303 support_mace
-size 64 64
+# Short wand in the front hand (the fist is drawn over the grip): a gem in a gold cup on top,
+# a ferrule with a socket, a rune strip down the shaft.
+sprite 303 support_wand
+size 96 96
 layer mainhand
-# mace in the front hand, 6x6 element core on top
-RECT 42 12 6 6 E
-RECT 42 18 6 4 P
-RECT 44 22 4 16 S
-RECT 42 38 8 4 A
-RECT 44 42 4 4 S
-RECT 44 46 4 4 P
+BITMAP 59 40 8 30
+..2mm2..
+.2mqqn2.
+.mqrrqn.
+.mpqqpn.
+.2nppn2.
+hi2nn2ih
+hijjjjih
+.hiiiih.
+.234432.
+.345543.
+.344432.
+.234321.
+..3v42..
+..3v42..
+..3v42..
+..3v42..
+..3v42..
+..3v42..
+..3v42..
+..3v42..
+..3v42..
+..3v42..
+..3v42..
+..3v42..
+..3442..
+..3442..
+..3442..
+..3442..
+.hijjih.
+..hhhh..
+SOCKET 61 48
 
+# Small pouch on the back hip with a flap and a gold stud.
 sprite 304 support_bag
-size 64 64
+size 96 96
 layer back_item
-# small shoulder bag, strap runs diagonally over the back
-LINE 24 32 16 40 S
-LINE 24 33 16 41 S
-RECT 12 42 10 10 P
-RECT 12 42 10 4 S
-RECT 16 48 4 2 A
+BITMAP 26 52 14 15
+.bccccccccb...
+bcdeedddddcb..
+bcdddddhdddcb.
+bbccccjlcccbb.
+23444444443322
+23444444433322
+23444444433322
+23444444433322
+23444444433322
+23444444433322
+23444444433322
+23444444433322
+23444444433322
+.233333333222.
+..2222222221..
 
+# A cord around the neck and a gold pendant with a gem.
 sprite 305 support_amulet
-size 64 64
+size 96 96
 layer necklace
 flags no_outline
-# small accent pendant at the neck
-RECT 28 28 6 4 A
-RECT 30 32 4 4 A
-RECT 30 32 2 2 A
-SHADE 30 32 A 5
+BITMAP 44 35 9 9
+b.......b
+.b.....b.
+..b...b..
+...bhb...
+...hjh...
+..hjmjh..
+..hiqih..
+...hih...
+....h....
+

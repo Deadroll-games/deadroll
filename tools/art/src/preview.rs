@@ -312,10 +312,10 @@ const KITS: [(&str, &[KitItem]); 3] = [
         "support",
         &[
             (layer::BACK_ITEM, 304, "leather"),
-            (layer::BOOTS, 302, "leather"),
+            (layer::BOOTS, 302, "cloth"),
             (layer::ARMOR_BODY, 301, "leather"),
             (layer::NECKLACE, 305, "leather"),
-            (layer::HELMET, 300, "leather"),
+            (layer::HELMET, 300, "moss"),
             (layer::MAINHAND, 303, "leather"),
         ],
     ),
