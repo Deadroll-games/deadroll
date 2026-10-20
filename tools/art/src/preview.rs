@@ -98,7 +98,9 @@ pub fn default_look(name: &str, layer_type: u8) -> Look {
     };
     Look {
         material,
-        accent: if layer::is_body(layer_type) {
+        accent: if layer_type == layer::MONSTER {
+            GOLD
+        } else if layer::is_body(layer_type) {
             EYES
         } else if name == "tile_water" {
             COLD

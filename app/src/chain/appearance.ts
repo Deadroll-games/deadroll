@@ -95,7 +95,7 @@ const MONSTER_SPRITES: Record<number, [number, number]> = {
 
 export function monsterRequest(bestiaryId: number, dead: boolean): RenderRequest {
   const [id, mat] = MONSTER_SPRITES[bestiaryId] ?? [401, MATERIAL.goblin];
-  return renderRequest(layers([[0, id, mat, RAMP.leather]], RAMP.cold), dead);
+  return renderRequest(layers([[0, id, mat, RAMP.gold]], RAMP.cold), dead);
 }
 
 const TILE_SPRITES: Record<number, [number, number]> = {
