@@ -37,7 +37,8 @@ Related documents:
 8. End: victory, peaceful exit, escape, defeat
 9. The DM's final audit: reveal of all declared secrets
 10. Issuing rewards from temporary caches, paying the DM,
-    refunding the remaining prepayment, closing session keys
+    refunding the remaining prepayment, closing session keys.
+    For now each player claims their own reward and experience (the owner or the owner's session key). The DM-signed issue is the target design and returns together with loot.
 
 ### 2.1 Party launch
 
@@ -117,6 +118,8 @@ At the start of its turn a character receives **action points (AP)** according t
 
 Unspent AP are lost at the end of the turn.
 
+Haste changes the AP of a turn, not the order of turns.
+
 ### 5.2 In exploration
 
 The same AP apply, but without damage skills: steps, interactions, searching, buffs.
@@ -169,6 +172,8 @@ Mage: low speed, high initiative (Intelligence). Acts often, but does not go far
 | **Death**            | HP = 0                                                             |                 |                                          | tombstone, items burn                          |
 
 The party ends when there are no living characters left on the map (all died, escaped or exited) or the boss is killed.
+
+A character at 0 HP leaves the fight at once: they do not take turns, cannot be targeted and do not act. The tombstone is made out by the next `start_turn` or by the rewards; until then nothing else happens in the party.
 
 ### 7.2 Peaceful exit
 

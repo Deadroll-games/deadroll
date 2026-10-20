@@ -98,9 +98,9 @@ The variant (bits 2-0) is what the DM chooses deliberately: a floor with a drain
 
 ## 5. Tileset
 
-- A tile is drawn on a **32×32** canvas, like a character layer, so that a character stands on a cell 1:1.
+- A tile is drawn on a **64×64** canvas, with the same pixel size as characters and monsters, so that a character stands on a cell 1:1 (a character layer is 96×96 and stands on the bottom and the center of its cell).
 - The same geometry commands, slots, shading, and palette as in `ART_DESCRIPTION.md`.
-- **Seamlessness:** the edges of floor tiles must not give away the seam. The outline of floor tiles is disabled (`no_outline`), and shapes at the edges either end flat or continue symmetrically.
+- **Seamlessness:** the edges of floor tiles must not give away the seam. The outline of floor tiles is disabled (`no_outline`), and shapes at the edges either end flat or continue symmetrically. Seams are 1 px along the edge (2 px where two tiles meet).
 - **Walls** are drawn in 16 autotiling variants. For the MVP, 6 is acceptable (straight horizontal, straight vertical, 4 corners), the rest map to the nearest one.
 - Walls in the 3/4 view have a visible "front" face at the bottom, so that the map reads the same way as the characters.
 
@@ -168,7 +168,7 @@ Variety without storage: the rasterizer slightly varies a prefab by PRNG (seed =
 
 - `bestiary_id`: a template from the Bestiary (`BESTIARY.md`).
 - `level`: the monster's level, within the map tier and not below the template's minimum tier.
-- `skills`: a bitmask of the skills the DM chose from the template's pool; the number chosen is set by slots (`BESTIARY.md`, section 3.2).
+- `skills`: a bitmask of the skills the DM chose from the template's pool; the number chosen is exactly min(slots, skills of that category in the pool) (`BESTIARY.md`, section 3.2).
 - `flags`: the elite version (`BESTIARY.md`, section 5) and other flags.
 - `aspects`: the chosen elemental aspects for templates where the DM chooses them (Wood Fairy, Wood Fairy King).
 - `pack`: the pack number. Monsters with the same number enter combat together (`BESTIARY.md`, section 2.1).
@@ -304,7 +304,7 @@ Rendering order:
 4. Effects (rune glow, particles).
 5. Darkening: cells outside the `viewer`'s vision darken, unexplored ones are almost black.
 
-Image size: 32 px per cell. An S map = 512×512, L = 1024×1024. For the NFT card of a map (phase 3), a reduced version or nearest-neighbor upscaling is used, by the same rules as for characters.
+Image size: 64 px per cell. An S map = 1024×1024, L = 2048×2048. Units reach up above their cell. For the NFT card of a map (phase 3), a reduced version or nearest-neighbor upscaling is used, by the same rules as for characters.
 
 ---
 

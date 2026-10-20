@@ -105,14 +105,16 @@ deadroll/
 │   ├── combat/
 │   ├── skillcheck/
 │   ├── mapcheck/
-│   └── render/
+│   ├── render/
+│   ├── rules/
+│   └── sim/
 │
 ├── sdk/                      TypeScript client generated from the program IDLs
 ├── app/                      game website (section 6)
 ├── worker/                   worker for wallets (later, STORAGE_AND_DELIVERY.md)
 ├── tests/                    integration tests across programs (section 8)
 ├── tools/
-│   ├── sim/                  combat and balance simulator
+│   ├── balance/              balance bench (egui) and JSON presets, runs `crates/sim`
 │   ├── art/                  validator and sprite preview for the AI artist
 │   └── scripts/              deploy, rasterizer upload, registry population
 └── assets/
@@ -161,10 +163,12 @@ programs/session/
 │   ├── lib.rs                list of instructions
 │   ├── state/                accounts: game_session.rs, participation.rs...
 │   ├── instructions/         one instruction = one file
-│   ├── cpi/                  wrappers for calls into other game programs
+│   ├── cpi_out/              wrappers for calls into other game programs
 │   └── errors.rs
 └── tests/
 ```
+
+The folder is `cpi_out`, not `cpi`: `#[program]` generates a crate-level `cpi` module, and the Anchor IDL build does not follow `#[path]`.
 
 ### 3.3 All of combat in one program
 
@@ -178,13 +182,15 @@ Turns, hits, resonances, fusions, collisions, reactions and the VRF callback liv
 
 | Caller  | Callee         | When                                                                                                                                                      |
 | ------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| session | character      | joining a party (check the character and skills, freeze the bag), party end (experience, move the temporary cache into the bag), death (tombstone, burn the bag) |
+| session | character      | joining a party (check the character and skills), `set_ready(true)` (check the character and skills, lock the character and its gear), `set_ready(false)` (unlock), party end (experience, move the temporary cache into the bag), death (tombstone, burn the bag) |
 | session | items          | death (burn the items from the bag through the burn delegate)                                                                                             |
 | session | map            | party opening (map → `in_session`), closing (`finished`)                                                                                                  |
 | session | MagicBlock VRF | request randomness, receive the callback                                                                                                                  |
 | session | Session Keys   | check the session token                                                                                                                                   |
 | items   | character      | crafting: deduct the player's resources, profession experience for the artisan                                                                            |
 | city    | character      | check access conditions (achievements), grant achievements when a secret is opened                                                                        |
+
+`equip` and `unequip` live in the `character` program and work outside a party only.
 
 ### 4.2 Reads without CPI
 
@@ -211,6 +217,8 @@ CPI depth on Solana is limited. Call chains are built so as not to exceed **two 
 | `skillcheck` | the checks of `SKILL_BUILDER.md`                                                           | character, website (skill builder)                                         |
 | `mapcheck`   | the checks of `MAP_DESCRIPTION.md`, pathfinding                                            | map, website (builder)                                                     |
 | `render`     | the rasterizer of `ART_DESCRIPTION.md`, PNG encoder                                        | website, worker, tools/art; built to WASM and uploaded to the on-chain `render` |
+| `rules`      | game rules that are not hit math (player stats, state scaling, creation rules, `BalanceConfig`) | programs, `sim`, `tools/balance` |
+| `sim`        | the balance simulator (section 5.1); calls `combat` and `rules` directly                   | `tools/balance`, tests (parity test)                                       |
 
 Crate rules:
 
@@ -221,7 +229,7 @@ Crate rules:
 
 ## 5.1 Balance simulator
 
-The main advantage of this architecture: the combat logic is written in Rust and extracted into the `combat` crate **with no dependency on Anchor**. So the very same code that computes hits on-chain in the `session` program can be run off-chain in `tools/sim` by the Monte Carlo method over millions of combats, **before deploy**.
+The main advantage of this architecture: the combat logic is written in Rust and extracted into the `combat` crate **with no dependency on Anchor**. So the very same code that computes hits on-chain in the `session` program can be run off-chain in `crates/sim` (bench UI in `tools/balance`) by the Monte Carlo method over millions of combats, **before deploy**.
 
 What the simulator shows:
 
@@ -246,6 +254,7 @@ Rules:
 - Wallet through Solana Wallet Adapter, session keys through the MagicBlock SDK.
 - Program clients from `sdk/`.
 - The `combat`, `skillcheck`, `mapcheck`, `render` crates are included as WASM.
+- `combat.wasm` is committed in the app. CI checks that it matches a build from the sources. The hit preview is computed by it.
 - Sections: city, character and skill builder, Artisans' Guild, Tavern and quests, map builder (DM), party (map, combat, roll log).
 - Deploy: static hosting (for example, Cloudflare Pages).
 
@@ -266,7 +275,7 @@ Rules:
 | **Unit**        | `crates/*/tests`, `crates/*/src` | logic without the chain: hit calculation, skill and map checks, rasterization                             | `cargo test -p <crate>` |
 | **Program**     | `programs/*/tests`               | instructions of a single program                                                                          | program tests           |
 | **Integration** | `tests/`                         | scenarios across several programs: create a character → map → party → combat → death or victory → rewards | `anchor test`           |
-| **Simulation**  | `tools/sim`                      | balance: millions of combats, combat length, dangerous builds                                             | `cargo run -p sim`      |
+| **Simulation**  | `crates/sim`, `tools/balance`    | balance: millions of combats, combat length, dangerous builds                                             | `cargo run -p balance --release` |
 | **Devnet**      | `tools/scripts`                  | the full scenario on devnet before a demo                                                                 | script                  |
 
 The mandatory security tests are listed in the checklists of the design documents (for example, a stolen session key cannot withdraw SOL).
@@ -290,7 +299,7 @@ A separate workflow per zone, with a path filter, so that a front-end edit does 
 
 | Environment  | Purpose                                                                         |
 | ------------ | ------------------------------------------------------------------------------- |
-| **localnet** | development and tests; clones the MagicBlock programs (Session Keys, VRF) from devnet |
+| **localnet** | development and tests; clones the Session Keys program from devnet; `session` is built with the `mock-vrf` feature and the oracle role is played by the website or a test |
 | **devnet**   | hackathon demo, testing with players                                            |
 | **mainnet**  | phase 4                                                                         |
 

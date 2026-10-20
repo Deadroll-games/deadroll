@@ -18,14 +18,16 @@ How the geometry, the rasterizer and the output PNG work is described in `ART_DE
 
 | Account                                | What it stores                                                                                                                   | Approximate size     |
 | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
-| `GameConfig`                           | rasterizer version, address of the account with the WASM, SHA-256 of the WASM, addresses of `Palette` and `SpriteBook`, base URL for `uri` | ~150 bytes           |
+| `GameConfig`                           | rasterizer version, address of the account with the WASM, SHA-256 of the WASM, addresses of `Palette` and of 4 sprite book slots, base URL for `uri` | ~560 bytes           |
 | `RasterizerCode` (one per version)     | the WASM binary of the rasterizer                                                                                                | 30-60 KB             |
 | `Palette`                              | master palette (ramps) and the table of materials and aspects                                                                    | ~600-800 bytes       |
 | `SpriteBook` (one or several)          | sprite index + geometry of all sprites                                                                                           | 20-80 bytes per sprite |
 | Character PDA                          | sprite ids by layer, race ramps, injury flags, equipment, `state_version`                                                        | tens of bytes        |
 | Item PDA                               | sprite ids (in hand, portrait, icon), materials, aspect, sharpening, `state_version`                                             | tens of bytes        |
 
-`state_version` increases on every change that affects the image. It is needed for immutable URLs (section 6).
+Injury flags do not affect the image.
+
+`state_version` increases on every change that affects the image, including `equip` and `unequip` (the image depends on what is worn). It is needed for immutable URLs (section 6).
 
 ---
 
@@ -48,6 +50,7 @@ Reference for a rasterizer with its own PNG encoder: 30-60 KB, that is **~0.2-0.
 - A transaction is limited to 1232 bytes, so the binary is written in chunks of ~900-1000 bytes. For 50 KB that is about 55 transactions, with fees totaling less than 0.001 SOL.
 - Order: create an account of the required size → write the chunks → the `finalize` instruction, which computes the SHA-256 of the contents, compares it with the expected one, and writes the hash and the address to `GameConfig`.
 - After `finalize` the account is immutable.
+- The rasterizer `finalize` writes into `GameConfig`. The palette and the sprite books are set in `GameConfig` by separate instructions.
 
 ### 3.3 Versions
 
@@ -63,7 +66,7 @@ Reference for a rasterizer with its own PNG encoder: 30-60 KB, that is **~0.2-0.
 | Rasterizer                       | 30-60 KB        | ~0.2-0.4 SOL          |
 | Library of 200 sprites           | ~10 KB          | ~0.07 SOL             |
 | Palette                          | ~0.6-0.8 KB     | ~0.005 SOL            |
-| `GameConfig`                     | ~150 bytes      | ~0.002 SOL            |
+| `GameConfig`                     | ~560 bytes      | ~0.005 SOL            |
 | Character or item state          | tens of bytes   | included in their PDA |
 
 Total art infrastructure for the whole game: **less than 0.5 SOL** in deposits.

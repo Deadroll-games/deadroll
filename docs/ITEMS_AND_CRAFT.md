@@ -124,6 +124,8 @@ What the character carries:
 | Resources    | 40 slots; one kind of resource per slot, up to 10 units per slot |
 | Skills       | 50, a separate limit (`SKILL_BUILDER.md`, section 11)           |
 
+Worn items sit in 11 equipment slots: MainHand, OffHand, Helmet, Body, Pants, Boots, Gloves, Necklace, Cloak and two ring slots (Ring1, Ring2).
+
 There is no weight, only slots.
 
 ### 6.2 Storage in the city
@@ -266,6 +268,8 @@ Intermediate products (handle, ingot) are **resources**, not NFTs. An NFT appear
 | **Warrior**   | sword  | leather armor        |
 | **Mage**      | staff  | robe                 |
 | **Support**   | wand   | light leather armor  |
+
+Starter weapon aspects: the sword is Piercing, the staff is Blunt, the wand is Lightning, each at `aspect_tier` 14.
 
 - Stored in the character PDA, not NFTs.
 - Cannot be sold, transferred, put into storage or dismantled.
