@@ -150,16 +150,17 @@ pub fn pack_book(sprites: &[Compiled]) -> Result<Vec<u8>, String> {
     pack_items(BOOK_ID, &items(&sprites.iter().collect::<Vec<_>>()))
 }
 
-/// Books for upload: sprites in id order, a new book (id + 1) whenever the next sprite would push
-/// the body past `BOOK_MAX`. At most `BOOKS_MAX` books (the `GameConfig` slots).
-pub fn pack_books(sprites: &[Compiled]) -> Result<Vec<Vec<u8>>, String> {
+/// Books for upload: sprites in id order, the first book id `first`, a new book (id + 1) whenever
+/// the next sprite would push the body past `BOOK_MAX`. At most `BOOKS_MAX` books (the `GameConfig`
+/// slots). A book frozen on a chain never changes, so changed sprites go to books with new ids.
+pub fn pack_books(sprites: &[Compiled], first: u16) -> Result<Vec<Vec<u8>>, String> {
     let mut sorted: Vec<&Compiled> = sprites.iter().collect();
     sorted.sort_by_key(|c| c.src.id);
     let mut books = Vec::new();
     let mut cur: Vec<(u16, Vec<u8>)> = Vec::new();
     for c in sorted {
         cur.push((c.src.id, c.src.bytes.clone()));
-        let id = BOOK_ID + books.len() as u16;
+        let id = first + books.len() as u16;
         if pack_items(id, &cur)?.len() > BOOK_MAX {
             let last = cur.pop().expect("just pushed");
             if cur.is_empty() {
@@ -170,7 +171,7 @@ pub fn pack_books(sprites: &[Compiled]) -> Result<Vec<Vec<u8>>, String> {
         }
     }
     if !cur.is_empty() {
-        books.push(pack_items(BOOK_ID + books.len() as u16, &cur)?);
+        books.push(pack_items(first + books.len() as u16, &cur)?);
     }
     if books.len() > BOOKS_MAX {
         return Err(format!(

@@ -390,7 +390,7 @@ fn pack_splits_books_at_64_kib() {
     }
     let (sprites, issues) = validate_text("items.dsl", &text);
     assert!(issues.is_empty(), "{issues:?}");
-    let books = preview::pack_books(&sprites).unwrap();
+    let books = preview::pack_books(&sprites, preview::BOOK_ID).unwrap();
     assert!(books.len() >= 2, "{} books", books.len());
     for (i, b) in books.iter().enumerate() {
         assert!(b.len() <= preview::BOOK_MAX);
@@ -402,6 +402,15 @@ fn pack_splits_books_at_64_kib() {
         .map(|b| deadroll_render::Book::parse(b).unwrap().len())
         .sum();
     assert_eq!(total, 9);
+    // A later first id (a new book after a frozen one) numbers the same split from there.
+    let later = preview::pack_books(&sprites, 5).unwrap();
+    assert_eq!(later.len(), books.len());
+    for (i, b) in later.iter().enumerate() {
+        assert_eq!(
+            deadroll_render::Book::parse(b).unwrap().book_id,
+            5 + i as u16
+        );
+    }
 }
 
 #[test]

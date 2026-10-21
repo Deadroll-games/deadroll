@@ -17,7 +17,7 @@ const USAGE: &str = "usage:
   art sheet matrix [files.dsl ...] [--id N] [--scale 4] [--out FILE.png]   items x materials, enchants, runes, sockets
   art sheet scene [--scale 4] [--out FILE.png]        every tile, the probe chest, monsters and classes at one pixel scale
   art sheet join <a.png> <b.png> ... [--out FILE.png]  PNGs side by side (old and new sprites)
-  art pack [--out DIR]                          palette.bin + book_<id>.bin (books 2.., 64 KiB each) for upload
+  art pack [--out DIR] [--first-book N]         palette.bin + book_<id>.bin (books N.., default 2, 64 KiB each) for upload
   art upscale [files.dsl ...]                  rewrite format 1 sources (16..64 px) for format 2, in place
 options: --palette FILE.pal (default assets/palette/palette_2.pal)";
 
@@ -29,6 +29,7 @@ struct Opts {
     material: Option<String>,
     bg: Option<[u8; 3]>,
     palette: PathBuf,
+    first_book: u16,
 }
 
 fn parse(args: &[String]) -> Result<Opts, String> {
@@ -40,6 +41,7 @@ fn parse(args: &[String]) -> Result<Opts, String> {
         material: None,
         bg: None,
         palette: PathBuf::from(DEFAULT_PALETTE),
+        first_book: preview::BOOK_ID,
     };
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -53,6 +55,13 @@ fn parse(args: &[String]) -> Result<Opts, String> {
                 o.bg = Some(preview::parse_hex(&val("--bg")?).ok_or("bad --bg, use #rrggbb")?)
             }
             "--palette" => o.palette = PathBuf::from(val("--palette")?),
+            "--first-book" => {
+                o.first_book = val("--first-book")?
+                    .parse()
+                    .ok()
+                    .filter(|&n| n >= preview::BOOK_ID)
+                    .ok_or("bad --first-book, use 2..65535")?
+            }
             s if s.starts_with("--") => return Err(format!("unknown option {s}")),
             _ => o.pos.push(a.clone()),
         }
@@ -368,7 +377,7 @@ fn cmd_sheet(o: &Opts) -> Result<bool, String> {
     Ok(true)
 }
 
-/// Writes the upload inputs: the compiled palette and the sprite books (ids 2..) with every repo
+/// Writes the upload inputs: the compiled palette and the sprite books (ids `--first-book`..) with every repo
 /// sprite, each at most `BOOK_MAX` bytes: `palette.bin`, `book_<id>.bin`.
 fn cmd_pack(o: &Opts) -> Result<bool, String> {
     let (sprites, issues) = load_all(&repo_files())?;
@@ -379,7 +388,7 @@ fn cmd_pack(o: &Opts) -> Result<bool, String> {
         return Err(format!("{} problems, run `art validate`", issues.len()));
     }
     let pal = load_pal(o)?;
-    let books = preview::pack_books(&sprites)?;
+    let books = preview::pack_books(&sprites, o.first_book)?;
     let dir = o
         .out
         .clone()
@@ -396,7 +405,7 @@ fn cmd_pack(o: &Opts) -> Result<bool, String> {
     write(&dir.join("palette.bin"), &pal.src.bytes)?;
     let mut sizes = Vec::new();
     for (i, book) in books.iter().enumerate() {
-        let id = preview::BOOK_ID + i as u16;
+        let id = o.first_book + i as u16;
         write(&dir.join(format!("book_{id}.bin")), book)?;
         sizes.push(format!("book {id} {} bytes", book.len()));
     }

@@ -315,6 +315,21 @@ function differingOffsets(data: Uint8Array, body: Uint8Array): number[] {
 }
 
 /**
+ * Whether `body` can go to the blob account holding `data` (null: no account yet) under the same
+ * rules as `uploadBlob`: a missing account, the same body finalized, or an unfinished upload of
+ * the same body. A finalized account with another body needs a new id.
+ */
+export function blobFits(kind: Kind, id: number, body: Uint8Array, data: Uint8Array | null): boolean {
+  requireKind(kind);
+  if (!data) return true;
+  const header = parseHeader(data);
+  if (header.kind !== KIND_BYTE[kind] || header.id !== id) return false;
+  const hash = sha256(body);
+  if (header.finalized !== 0) return sameBytes(header.sha256, hash);
+  return header.len === body.length && sameBytes(header.expectedSha256, hash);
+}
+
+/**
  * Create, grow, write and finalize one blob. Safe to run again: a matching finalized
  * account returns, a different body throws, and chunks already on-chain are skipped.
  */

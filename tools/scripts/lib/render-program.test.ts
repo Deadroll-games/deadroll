@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { createNoopSigner } from "@solana/kit";
 import * as render from "@deadroll/sdk/render";
 import {
+  blobFits,
   planUpload,
   parseHeader,
   writeChunkInstruction,
@@ -98,6 +99,37 @@ test("parseHeader reads the documented offsets", () => {
 
 test("parseHeader rejects a short account", () => {
   assert.throws(() => parseHeader(new Uint8Array(115)), /header needs 116/);
+});
+
+/** A sprite book account header (kind 3) for `blobFits`. */
+function bookAccount(id: number, finalized: boolean, len: number, expected: Uint8Array, hash: Uint8Array): Uint8Array {
+  const data = new Uint8Array(116);
+  data[8] = 1;
+  data[9] = 3;
+  data[10] = finalized ? 1 : 0;
+  new DataView(data.buffer).setUint32(12, len, true);
+  new DataView(data.buffer).setUint16(16, id, true);
+  data.set(expected, 52);
+  data.set(hash, 84);
+  return data;
+}
+
+test("blobFits: a missing account, the same body finalized or half written", () => {
+  const body = new Uint8Array([1, 2, 3, 4]);
+  const hash = new Uint8Array(createHash("sha256").update(body).digest());
+  assert.equal(blobFits("sprite_book", 2, body, null), true);
+  assert.equal(blobFits("sprite_book", 2, body, bookAccount(2, true, 4, hash, hash)), true);
+  assert.equal(blobFits("sprite_book", 2, body, bookAccount(2, false, 4, hash, new Uint8Array(32))), true);
+});
+
+test("blobFits: a frozen book with other sprites, another id or another unfinished body needs a new id", () => {
+  const body = new Uint8Array([1, 2, 3, 4]);
+  const hash = new Uint8Array(createHash("sha256").update(body).digest());
+  const other = new Uint8Array(32).fill(7);
+  assert.equal(blobFits("sprite_book", 2, body, bookAccount(2, true, 4, other, other)), false);
+  assert.equal(blobFits("sprite_book", 2, body, bookAccount(3, true, 4, hash, hash)), false);
+  assert.equal(blobFits("sprite_book", 2, body, bookAccount(2, false, 4, other, new Uint8Array(32))), false);
+  assert.equal(blobFits("sprite_book", 2, body, bookAccount(2, false, 5, hash, new Uint8Array(32))), false);
 });
 
 test("finalize_rasterizer carries the GameConfig CPI accounts, the others do not", async () => {
