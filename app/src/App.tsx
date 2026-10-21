@@ -4,7 +4,6 @@ import { DATA_SOURCE, DEV_TOOLS } from "./config";
 import { NetworkBusy } from "./components/NetworkBusy";
 import { RpcSettings } from "./components/RpcSettings";
 import { ConnectButton } from "./wallet/ConnectButton";
-import { SessionKeyButton } from "./session-key/SessionKeyProvider";
 import { Home } from "./routes/Home";
 import { CharacterPage } from "./routes/Character";
 import { CharacterDetailPage } from "./routes/CharacterDetail";
@@ -32,7 +31,6 @@ export function App() {
         <span className={`badge ${DATA_SOURCE}`}>{DATA_SOURCE === "mock" ? "mock data" : "chain"}</span>
         <RpcSettings />
         <NetworkBusy />
-        <SessionKeyButton />
         <ConnectButton />
       </header>
       <main>

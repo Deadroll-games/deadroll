@@ -17,7 +17,6 @@ import type { TombstoneLog } from "../chain/tombstone";
 import { monsterDefense, playerDefense, unitStats } from "../chain/stats";
 import { Aspect, Class, ModKind, PARTY_MAX, type HitResult, type TimedMod } from "../chain/types";
 import { DATA_SOURCE } from "../config";
-import { useSessionKey } from "../session-key/SessionKeyProvider";
 import { client } from "../wallet/client";
 import { PartyChain } from "./PartyChain";
 
@@ -73,8 +72,7 @@ export function PartyPage() {
 /** Mock mode (VITE_DATA=mock): the lobby and battle on synthetic data. */
 function MockParty() {
   const connected = useConnectedWallet(client);
-  const sessionKey = useSessionKey();
-  const payer = sessionKey.signer ?? connected?.signer ?? null;
+  const payer = connected?.signer ?? null;
   const chainLog = useAutoFreezeTombstone(payer, (connected?.account.address as Address | undefined) ?? null);
   const [mockLog, setMockLog] = useState<TombstoneLog[]>([]);
   const combat = useCombat();

@@ -1,119 +1,56 @@
-// MagicBlock Session Keys (crate session-keys 3.1.1, `create_session_v2`). The player signs once;
-// afterwards a burner key signs game moves and the session program checks the SessionTokenV2
-// (programs/session/src/auth.rs). The burner seed lives in sessionStorage: one tab, one party.
-import {
-  AccountRole,
-  createKeyPairSignerFromPrivateKeyBytes,
-  type AccountMeta,
-  type AccountSignerMeta,
-  type Address,
-  type Instruction,
-  type KeyPairSigner,
-  type TransactionSigner,
-} from "@solana/kit";
-import { SYSTEM_PROGRAM } from "../config";
-import { concat } from "../chain/bytes";
-import { SESSION_KEYS_PROGRAM, sessionTokenPda } from "../chain/pda";
+// The temporary key of one party (docs/GAME_COMMISSIONS.md, 3-8). The main wallet signs once to
+// create its MagicBlock token and prepayment (magicblock.ts) together with join_session or
+// open_session; afterwards the key signs game moves and the session program checks the token and
+// that the key is the one bound to this party. The key lives in this browser's local storage, one
+// per (wallet, party), so a closed tab gets it back; another browser replaces it.
+import { createKeyPairSignerFromPrivateKeyBytes, type Address, type KeyPairSigner } from "@solana/kit";
+import balance from "../chain/balance.json";
 
-/** session-keys `create_session_v2` discriminator: an external program, not in the sdk. game.test.ts
- * recomputes it from Anchor's sha256 rule. */
-export const CREATE_SESSION_V2_DISC = Uint8Array.of(0xdf, 0xe9, 0x6c, 0x07, 0x41, 0xc2, 0xeb, 0x26);
+/** `deadroll_rules::FeeTuning` (BalanceConfig.fees), lamports and seconds. */
+export const FEES = {
+  prepay: BigInt(balance.fees.prepay_lamports),
+  lowBalance: BigInt(balance.fees.low_balance_lamports),
+  maxBalance: BigInt(balance.fees.max_key_lamports),
+  validitySecs: balance.fees.key_validity_secs,
+};
 
-/** The program caps validity at one week; the demo needs a few hours. */
-export const SESSION_VALIDITY_SECS = 3 * 60 * 60;
-/** Lamports moved to the burner key for fees (program default is 0.01 SOL). */
-export const SESSION_TOP_UP_LAMPORTS = 20_000_000n;
+export type StoredSessionKey = { seed: Uint8Array; token: Address; validUntil: number };
 
-const STORAGE_KEY = "deadroll.sessionKey.v1";
-
-function i64le(v: bigint): Uint8Array {
-  const out = new Uint8Array(8);
-  new DataView(out.buffer).setBigInt64(0, v, true);
-  return out;
-}
-function u64le(v: bigint): Uint8Array {
-  const out = new Uint8Array(8);
-  new DataView(out.buffer).setBigUint64(0, v, true);
-  return out;
-}
-
-/** Borsh args: top_up Option<bool>, valid_until Option<i64>, lamports Option<u64>. */
-export function createSessionV2Data(validUntil: bigint, topUpLamports: bigint): Uint8Array {
-  return concat(
-    CREATE_SESSION_V2_DISC,
-    new Uint8Array([1, 1]),
-    new Uint8Array([1]),
-    i64le(validUntil),
-    new Uint8Array([1]),
-    u64le(topUpLamports),
-  );
-}
-
-export async function createSessionV2Instruction(args: {
-  authority: TransactionSigner;
-  sessionSigner: TransactionSigner;
-  targetProgram: Address;
-  validUntil: bigint;
-  topUpLamports?: bigint;
-}): Promise<{ instruction: Instruction; sessionToken: Address }> {
-  const sessionToken = await sessionTokenPda(args.targetProgram, args.sessionSigner.address, args.authority.address);
-  // Accounts in the order of CreateSessionTokenV2: token, session_signer, fee_payer, authority, target, system.
-  // The authority pays (fee_payer == authority), so it appears once with the strongest role.
-  const accounts: (AccountMeta | AccountSignerMeta)[] = [
-    { address: sessionToken, role: AccountRole.WRITABLE },
-    { address: args.sessionSigner.address, role: AccountRole.WRITABLE_SIGNER, signer: args.sessionSigner },
-    { address: args.authority.address, role: AccountRole.WRITABLE_SIGNER, signer: args.authority },
-    { address: args.authority.address, role: AccountRole.WRITABLE_SIGNER, signer: args.authority },
-    { address: args.targetProgram, role: AccountRole.READONLY },
-    { address: SYSTEM_PROGRAM, role: AccountRole.READONLY },
-  ];
-  return {
-    instruction: {
-      programAddress: SESSION_KEYS_PROGRAM,
-      accounts,
-      data: createSessionV2Data(args.validUntil, args.topUpLamports ?? SESSION_TOP_UP_LAMPORTS),
-    },
-    sessionToken,
-  };
-}
-
-export type StoredSessionKey = { seed: Uint8Array; authority: string; validUntil: number; token: string | null };
+const PREFIX = "deadroll.sessionKey.v2";
+const storageKey = (authority: Address, party: Address) => `${PREFIX}:${authority}:${party}`;
 
 function store(): Storage | null {
   try {
-    return window.sessionStorage;
+    return window.localStorage;
   } catch {
     return null;
   }
 }
 
-export function saveSessionKey(k: StoredSessionKey): void {
+export function saveSessionKey(authority: Address, party: Address, k: StoredSessionKey): void {
   try {
-    store()?.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ seed: Array.from(k.seed), authority: k.authority, validUntil: k.validUntil, token: k.token }),
-    );
+    store()?.setItem(storageKey(authority, party), JSON.stringify({ seed: Array.from(k.seed), token: k.token, validUntil: k.validUntil }));
   } catch {
     // storage blocked: the key lives only in memory for this page
   }
 }
 
-export function loadSessionKey(): StoredSessionKey | null {
+/** The key saved for this wallet and party, expired or not (an expired token is still revoked). */
+export function loadSessionKey(authority: Address, party: Address): StoredSessionKey | null {
   try {
-    const raw = store()?.getItem(STORAGE_KEY);
+    const raw = store()?.getItem(storageKey(authority, party));
     if (!raw) return null;
-    const v = JSON.parse(raw) as { seed: number[]; authority: string; validUntil: number; token: string | null };
-    if (!Array.isArray(v.seed) || v.seed.length !== 32) return null;
-    if (v.validUntil * 1000 <= Date.now()) return null;
-    return { seed: Uint8Array.from(v.seed), authority: v.authority, validUntil: v.validUntil, token: v.token };
+    const v = JSON.parse(raw) as { seed: number[]; token: string; validUntil: number };
+    if (!Array.isArray(v.seed) || v.seed.length !== 32 || typeof v.token !== "string") return null;
+    return { seed: Uint8Array.from(v.seed), token: v.token as Address, validUntil: v.validUntil };
   } catch {
     return null;
   }
 }
 
-export function clearSessionKey(): void {
+export function clearSessionKey(authority: Address, party: Address): void {
   try {
-    store()?.removeItem(STORAGE_KEY);
+    store()?.removeItem(storageKey(authority, party));
   } catch {
     // ignore
   }
@@ -126,3 +63,11 @@ export function newSeed(): Uint8Array {
 export function signerFromSeed(seed: Uint8Array): Promise<KeyPairSigner> {
   return createKeyPairSignerFromPrivateKeyBytes(seed);
 }
+
+/** `valid_until` of a token created now. */
+export const validUntilFromNow = (nowMs = Date.now()): number => Math.floor(nowMs / 1000) + FEES.validitySecs;
+
+/** How much a top-up may add without passing the key's maximum balance (0 = none). */
+export const topUpRoom = (balanceLamports: bigint): bigint => (balanceLamports >= FEES.maxBalance ? 0n : FEES.maxBalance - balanceLamports);
+
+export const isLowBalance = (balanceLamports: bigint): boolean => balanceLamports < FEES.lowBalance;
