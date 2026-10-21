@@ -41,12 +41,12 @@ import {
   getOpResultDataEncoder,
   getPacketResultDataDecoder,
   getPacketResultDataEncoder,
+  getResistModDataDecoder,
+  getResistModDataEncoder,
   getResonanceDataDecoder,
   getResonanceDataEncoder,
   getStateRollDataDecoder,
   getStateRollDataEncoder,
-  getTimedModDataDecoder,
-  getTimedModDataEncoder,
   getTintRollDataDecoder,
   getTintRollDataEncoder,
   type AccuracyBuffData,
@@ -61,12 +61,12 @@ import {
   type OpResultDataArgs,
   type PacketResultData,
   type PacketResultDataArgs,
+  type ResistModData,
+  type ResistModDataArgs,
   type ResonanceData,
   type ResonanceDataArgs,
   type StateRollData,
   type StateRollDataArgs,
-  type TimedModData,
-  type TimedModDataArgs,
   type TintRollData,
   type TintRollDataArgs,
 } from "./index.js";
@@ -98,8 +98,11 @@ export type HitResultData = {
   jumpCount: number;
   knockback: number;
   ignitePower: number;
-  /** Timed modifiers on the target (`target_mods[..target_mod_count]`). */
-  targetMods: Array<TimedModData>;
+  /**
+   * Timed modifiers on the target (`target_mods[..target_mod_count]`), with the weights a
+   * `deadroll_combat::TimedMod` carries since patch 9 (zero unless a Resistance).
+   */
+  targetMods: Array<ResistModData>;
   targetModCount: number;
   accuracyBuff: AccuracyBuffData;
   /** `state_bit`s of the states that landed on the target. */
@@ -129,8 +132,11 @@ export type HitResultDataArgs = {
   jumpCount: number;
   knockback: number;
   ignitePower: number;
-  /** Timed modifiers on the target (`target_mods[..target_mod_count]`). */
-  targetMods: Array<TimedModDataArgs>;
+  /**
+   * Timed modifiers on the target (`target_mods[..target_mod_count]`), with the weights a
+   * `deadroll_combat::TimedMod` carries since patch 9 (zero unless a Resistance).
+   */
+  targetMods: Array<ResistModDataArgs>;
   targetModCount: number;
   accuracyBuff: AccuracyBuffDataArgs;
   /** `state_bit`s of the states that landed on the target. */
@@ -171,7 +177,7 @@ export function getHitResultDataEncoder(): Encoder<HitResultDataArgs> {
     ["jumpCount", getU8Encoder()],
     ["knockback", getU8Encoder()],
     ["ignitePower", getU32Encoder()],
-    ["targetMods", getArrayEncoder(getTimedModDataEncoder(), { size: 3 })],
+    ["targetMods", getArrayEncoder(getResistModDataEncoder(), { size: 3 })],
     ["targetModCount", getU8Encoder()],
     ["accuracyBuff", getAccuracyBuffDataEncoder()],
     ["landed", getU8Encoder()],
@@ -212,7 +218,7 @@ export function getHitResultDataDecoder(): Decoder<HitResultData> {
     ["jumpCount", getU8Decoder()],
     ["knockback", getU8Decoder()],
     ["ignitePower", getU32Decoder()],
-    ["targetMods", getArrayDecoder(getTimedModDataDecoder(), { size: 3 })],
+    ["targetMods", getArrayDecoder(getResistModDataDecoder(), { size: 3 })],
     ["targetModCount", getU8Decoder()],
     ["accuracyBuff", getAccuracyBuffDataDecoder()],
     ["landed", getU8Decoder()],

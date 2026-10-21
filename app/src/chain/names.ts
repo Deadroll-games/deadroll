@@ -172,8 +172,17 @@ export function rollTitle(raw: number, chancePct: number | null): string {
 export const effectName = (e: Effect): string => EFFECT_NAMES[e] ?? `effect ${e}`;
 
 /** What one effect roll did, e.g. "+7 hp", "Weakening 18%", "Freeze", "missed". */
+/** Defense tags (patch 9, deadroll_combat `TAGS`): the power sources, then the forms. */
+export const TAG_NAMES = ["Magical", "Combat", "Strike", "Projectile"] as const;
+
+/** The names of the set bits of `mask` (bit i = `names[i]`). */
+export function maskNames(mask: number, names: readonly string[]): string[] {
+  return names.filter((_, i) => (mask & (1 << i)) !== 0);
+}
+
 export function effectAmount(e: Pick<EffectResolved, "effect" | "roll">): string {
   if (e.roll.outcome === HitOutcome.Miss) return "missed";
+  if (e.roll.outcome === HitOutcome.Immune) return "immune";
   if (e.effect === Effect.Heal) return `+${e.roll.amount} hp`;
   if (e.effect === Effect.Stun || e.effect === Effect.Freeze) return effectName(e.effect);
   return `${effectName(e.effect)} ${Math.round(e.roll.amount / 100)}%`;

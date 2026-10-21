@@ -284,8 +284,16 @@ export type HitResolved = {
 // ---- buffs and debuffs (deadroll_combat::support, session TimedModData) ----
 
 /** ModKindData; `ModsTicked.expired` bit i is `1 << i`. */
-export const ModKind = { Haste: 0, Slow: 1, Empowerment: 2, Weakening: 3, Protection: 4, Vulnerability: 5 } as const;
+export const ModKind = { Haste: 0, Slow: 1, Empowerment: 2, Weakening: 3, Protection: 4, Vulnerability: 5, Resistance: 6 } as const;
 export type ModKind = (typeof ModKind)[keyof typeof ModKind];
 
 /** One active buff or debuff: `turns` own turn starts of the bearer until it ends. */
-export type TimedMod = { kind: ModKind; aspect: Aspect; turns: number; powerBp: number; source: number };
+export type TimedMod = {
+  kind: ModKind;
+  aspect: Aspect;
+  turns: number;
+  powerBp: number;
+  source: number;
+  /** Patch 9, a Resistance: the share of `powerBp` each aspect gets, percent, by `Aspect`. */
+  weightsPct?: readonly number[];
+};

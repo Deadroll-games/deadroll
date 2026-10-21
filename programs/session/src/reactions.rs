@@ -253,6 +253,7 @@ impl<'a, 'info> Cb<'a, 'info> {
         states: &States,
         mods: &TimedMods,
     ) {
+        let (stored, resist_mod) = from_combat(mods);
         emit!(EffectResolved {
             session: self.session_key,
             caster,
@@ -266,7 +267,8 @@ impl<'a, 'info> Cb<'a, 'info> {
             applied: applied.into(),
             hp,
             states: *states,
-            mods: from_combat(mods),
+            mods: stored,
+            resist_mod,
         });
     }
 
@@ -894,7 +896,7 @@ impl<'a, 'info> Cb<'a, 'info> {
         let unit = Unit::Player(bearer).id();
         let applied = match aura {
             Some(a) => {
-                session.auras[bearer as usize][REACTIVE_AURA] = a.into();
+                session.set_aura(bearer, REACTIVE_AURA, a);
                 emit!(AuraChanged {
                     session: self.session_key,
                     bearer,

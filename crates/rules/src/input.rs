@@ -1,5 +1,5 @@
 //! Builds `deadroll_combat` hit and effect inputs from heroes, skills and monsters. Pure.
-use deadroll_combat::modifiers::more;
+use deadroll_combat::modifiers::ratio;
 use deadroll_combat::DamageRange;
 use deadroll_combat::{
     apply_mod, apply_state, apply_to_attacker, apply_to_defender, mod_range, mod_turns,
@@ -21,9 +21,10 @@ use crate::{
     },
     monster::MonsterProfile,
     player::{
-        class_increase, class_source, effect_stat, heal_range, heal_scale, hp_max, player_accuracy,
-        player_defense, player_initiative, player_speed, predisposition_added, self_buff_turns,
-        source_stat, speed_to_ap, stat_damage_increases, state_chance_bonus, support_increase,
+        class_increase, class_source, effect_stat, endurance_state_resist, heal_range, heal_scale,
+        hp_max, player_accuracy, player_defense, player_initiative, player_speed,
+        predisposition_added, self_buff_turns, source_stat, speed_to_ap, stat_damage_increases,
+        state_chance_bonus, support_increase,
     },
 };
 
@@ -119,6 +120,18 @@ pub mod hero {
     /// Increase on state and effect chances from `stat`, bp.
     pub fn state_chance(cfg: &BalanceConfig, c: &HeroStats, stat: Stat) -> u32 {
         state_chance_bonus(&stats(cfg, c), stat, &cfg.players)
+    }
+
+    /// Resistance per aspect, bp (patch 9): worn items. The race gives none by itself, only
+    /// through a Resistance skill (it adds the predisposition, [`resistance_weights`]).
+    pub fn resist(cfg: &BalanceConfig, c: &HeroStats) -> [u32; Aspect::COUNT] {
+        item_bonus(&c.equipment, &cfg.items).resist_bp
+    }
+
+    /// State resistance, bp (patch 9): Endurance, items included, plus the items' own.
+    pub fn state_resist(cfg: &BalanceConfig, c: &HeroStats) -> u32 {
+        let items = item_bonus(&c.equipment, &cfg.items);
+        endurance_state_resist(&stats(cfg, c), &cfg.players).saturating_add(items.state_resist_bp)
     }
 
     /// Extra turns of the hero's own buffs on itself (Endurance).
@@ -246,7 +259,54 @@ pub fn effect_action(effect: Effect) -> Option<EffectAction> {
         Effect::Empowerment => EffectAction::Mod(ModKind::Empowerment),
         Effect::Protection => EffectAction::Mod(ModKind::Protection),
         Effect::Heal => EffectAction::Heal,
+        Effect::Resistance => EffectAction::Mod(ModKind::Resistance),
     })
+}
+
+/// The aspect weights of a Resistance cast with `skill` by a bearer with `predisposition`
+/// (patch 9): each aspect of the skill by its share, the predisposition at the base aspect's
+/// share. Zero for any other effect.
+pub fn resistance_weights(
+    skill: &SkillStats,
+    predisposition: Option<Aspect>,
+) -> [u8; Aspect::COUNT] {
+    let mut out = [0u8; Aspect::COUNT];
+    if skill.blocks.effect != Effect::Resistance {
+        return out;
+    }
+    let pct = |share_bp: u32| (share_bp / 100).min(100) as u8;
+    let count = (skill.blocks.aspect_count as usize).min(SKILL_ASPECTS_MAX);
+    for (aspect, share) in skill.blocks.aspects[..count].iter().zip(skill.shares_bp) {
+        let w = &mut out[*aspect as usize];
+        *w = (*w).max(pct(share));
+    }
+    if let Some(p) = predisposition {
+        let w = &mut out[p as usize];
+        *w = (*w).max(pct(skill.shares_bp[0]));
+    }
+    out
+}
+
+/// A Stun or Freeze effect on a target immune to that state: no roll is made (COMBAT_MATH 5).
+pub fn effect_immune(action: EffectAction, immune_states: u8) -> bool {
+    let kind = match action {
+        EffectAction::Stun => StateKind::Stun,
+        EffectAction::Freeze => StateKind::Freeze,
+        EffectAction::Heal | EffectAction::Mod(_) => return false,
+    };
+    immune_states & (1 << kind as u8) != 0
+}
+
+/// The target's state resistance against `action`'s chance: the state's own for hard control,
+/// the strongest one for a modifier.
+pub fn effect_resist(defender: &Defender, action: EffectAction) -> u32 {
+    match action {
+        EffectAction::Stun => defender.state_resist_bp[StateKind::Stun as usize],
+        EffectAction::Freeze => defender.state_resist_bp[StateKind::Freeze as usize],
+        EffectAction::Heal | EffectAction::Mod(_) => {
+            defender.state_resist_bp.iter().copied().max().unwrap_or(0)
+        }
+    }
 }
 
 /// Form of a player attack: the skill's, or the weapon's basic attack's.
@@ -340,6 +400,8 @@ pub fn player_defender(
     let mut defender = Defender {
         defense,
         armor,
+        resist_bp: hero::resist(cfg, c),
+        state_resist_bp: [hero::state_resist(cfg, c); StateKind::COUNT],
         states: *states,
         ..Defender::default()
     };
@@ -388,6 +450,8 @@ pub fn monster_defender(p: &MonsterProfile, states: &States, mods: &TimedMods) -
         resist_bp: p.resist_bp,
         immune_aspects: p.immune_aspects,
         immune_states: p.immune_states,
+        tag_resist_bp: p.tag_resist_bp,
+        immune_tags: p.immune_tags,
         states: *states,
         ..Defender::default()
     };
@@ -477,16 +541,24 @@ pub fn monster_support_input(
 }
 
 /// Chance of a damage skill's effect on a hit (the rider): the native chance, increased by the
-/// stat of the effect (Dexterity for tempo, else the skill's source).
-pub fn effect_chance(cfg: &BalanceConfig, c: &HeroStats, skill: &SkillStats) -> u32 {
-    let base = cfg.support.rider_chance_pct;
-    match effect_stat(skill.blocks.effect, skill.blocks.source) {
-        Some(stat) => {
-            let bonus = hero::state_chance(cfg, c, stat);
-            more(base as u64, bonus).min(u32::MAX as u64) as u32
-        }
-        None => base,
-    }
+/// stat of the effect (Dexterity for tempo, else the skill's source), against the target's state
+/// resistance `resist_bp` (CHARACTER 2.1).
+pub fn effect_chance(
+    cfg: &BalanceConfig,
+    c: &HeroStats,
+    skill: &SkillStats,
+    resist_bp: u32,
+) -> u32 {
+    let bonus = match effect_stat(skill.blocks.effect, skill.blocks.source) {
+        Some(stat) => hero::state_chance(cfg, c, stat),
+        None => 0,
+    };
+    ratio(cfg.support.rider_chance_pct as u64, bonus, resist_bp).min(u32::MAX as u64) as u32
+}
+
+/// A monster's rider chance (no stats) against the target's state resistance.
+pub fn monster_effect_chance(cfg: &BalanceConfig, resist_bp: u32) -> u32 {
+    ratio(cfg.support.rider_chance_pct as u64, 0, resist_bp).min(u32::MAX as u64) as u32
 }
 
 /// Extra turns of a modifier `c` lands: Endurance lengthens its own buffs on itself
@@ -505,13 +577,15 @@ pub fn buff_extra_turns(
 
 /// Lands `action` (not a heal) of strength `amount` on a unit: a modifier for its duration plus
 /// `extra_turns` ([`buff_extra_turns`]), or the existing Stun / Freeze state. `aspect`: the
-/// skill's; `source`: the caster's turn-order id.
+/// skill's; `weights_pct`: a Resistance's ([`resistance_weights`]); `source`: the caster's
+/// turn-order id.
 #[allow(clippy::too_many_arguments)]
 pub fn land_effect(
     cfg: &BalanceConfig,
     action: EffectAction,
     amount: u32,
     aspect: Aspect,
+    weights_pct: [u8; Aspect::COUNT],
     source: u8,
     extra_turns: u8,
     states: &mut States,
@@ -526,6 +600,7 @@ pub fn land_effect(
                 turns: mod_turns(cfg.support.duration(kind).saturating_add(extra_turns)),
                 power_bp: amount,
                 source,
+                weights_pct,
             },
         ),
         EffectAction::Stun => apply_state(

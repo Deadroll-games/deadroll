@@ -233,6 +233,8 @@ fn arb_defender() -> impl Strategy<Value = Defender> {
         any::<u8>(),
         any::<[u32; StateKind::COUNT]>(),
         arb_states(),
+        any::<[u32; TAGS]>(),
+        any::<u8>(),
     )
         .prop_map(
             |(
@@ -244,6 +246,8 @@ fn arb_defender() -> impl Strategy<Value = Defender> {
                 immune_states,
                 state_resist_bp,
                 states,
+                tag_resist_bp,
+                immune_tags,
             )| Defender {
                 defense,
                 armor,
@@ -253,6 +257,8 @@ fn arb_defender() -> impl Strategy<Value = Defender> {
                 immune_states,
                 state_resist_bp,
                 states,
+                tag_resist_bp,
+                immune_tags,
             },
         )
 }

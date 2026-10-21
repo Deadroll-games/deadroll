@@ -74,7 +74,9 @@ Op (6 B): `[0] kind` (`deadroll_combat::tables::OpKind`, 0..=20; bit 7 = only on
 | 39 | skill pool start, index into MonsterSkills | u8 |
 | 40 | skill pool length (<= 16, the bits of `Spawn.skills`) | u8 |
 | 41 | kin, `0xFF` = none (0 Wolf, 1 Goblin, 2 Bear, 3 Treant, 4 Fairy, 5 Troll; names in `crates/rules/src/registry.rs`) | u8 |
-| 42..48 | reserved | |
+| 42 | resisted tags (patch 9), bit 0 Magical, 1 Combat (power sources), 2 Strike, 3 Projectile (forms) | u8 |
+| 43 | immune tags, the same bits | u8 |
+| 44..48 | reserved | |
 
 The registry is the only source of monster numbers: the session copies the record at `open_session`, the simulator and the website decode the same bytes (`deadroll_rules::MonsterTemplate::from_record`).
 

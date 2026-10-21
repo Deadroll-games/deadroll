@@ -32,8 +32,12 @@ import {
   type ReadonlyUint8Array,
 } from "@solana/kit";
 import {
+  getResistModDataDecoder,
+  getResistModDataEncoder,
   getTimedModDataDecoder,
   getTimedModDataEncoder,
+  type ResistModData,
+  type ResistModDataArgs,
   type TimedModData,
   type TimedModDataArgs,
 } from "../types/index.js";
@@ -58,6 +62,8 @@ export type ModsTickedEvent = {
   mods: Array<TimedModData>;
   /** Action points of this turn: speed with Haste and Slow. */
   actionPoints: number;
+  /** Patch 9: the unit's Resistance after the tick. */
+  resistMod: ResistModData;
 };
 
 export type ModsTickedEventArgs = {
@@ -71,6 +77,8 @@ export type ModsTickedEventArgs = {
   mods: Array<TimedModDataArgs>;
   /** Action points of this turn: speed with Haste and Slow. */
   actionPoints: number;
+  /** Patch 9: the unit's Resistance after the tick. */
+  resistMod: ResistModDataArgs;
 };
 
 /** Gets the encoder for {@link ModsTickedEventArgs} event data. */
@@ -83,6 +91,7 @@ export function getModsTickedEventEncoder(): FixedSizeEncoder<ModsTickedEventArg
       ["expired", getU8Encoder()],
       ["mods", getArrayEncoder(getTimedModDataEncoder(), { size: 6 })],
       ["actionPoints", getU8Encoder()],
+      ["resistMod", getResistModDataEncoder()],
     ]),
     [getConstantEncoder(MODS_TICKED_EVENT_DISCRIMINATOR)],
   );
@@ -98,6 +107,7 @@ export function getModsTickedEventDecoder(): FixedSizeDecoder<ModsTickedEvent> {
       ["expired", getU8Decoder()],
       ["mods", getArrayDecoder(getTimedModDataDecoder(), { size: 6 })],
       ["actionPoints", getU8Decoder()],
+      ["resistMod", getResistModDataDecoder()],
     ]),
     [getConstantDecoder(MODS_TICKED_EVENT_DISCRIMINATOR)],
   );

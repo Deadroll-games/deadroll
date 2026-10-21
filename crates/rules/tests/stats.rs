@@ -27,6 +27,7 @@ const NONE: TimedMods = [TimedMod {
     turns: 0,
     power_bp: 0,
     source: 0,
+    weights_pct: [0; Aspect::COUNT],
 }; MODS_MAX];
 
 fn hero(class: Class, stats: [u16; 4]) -> HeroStats {
@@ -217,7 +218,7 @@ fn effect_chance_by_effect_stat() {
             Effect::Slow,
         );
         assert_eq!(
-            effect_chance(&CFG, &h, &slow),
+            effect_chance(&CFG, &h, &slow, 0),
             scaled(20, t.dex_state_chance_bp)
         );
     }
@@ -230,7 +231,7 @@ fn effect_chance_by_effect_stat() {
         Effect::Stun,
     );
     assert_eq!(
-        effect_chance(&CFG, &h, &stun),
+        effect_chance(&CFG, &h, &stun, 0),
         scaled(10, t.str_state_chance_bp)
     );
     let freeze = skill(
@@ -241,7 +242,7 @@ fn effect_chance_by_effect_stat() {
         Effect::Freeze,
     );
     assert_eq!(
-        effect_chance(&CFG, &h, &freeze),
+        effect_chance(&CFG, &h, &freeze, 0),
         scaled(30, t.int_state_chance_bp)
     );
     let weaken = skill(
@@ -252,7 +253,7 @@ fn effect_chance_by_effect_stat() {
         Effect::Weakening,
     );
     assert_eq!(
-        effect_chance(&CFG, &h, &weaken),
+        effect_chance(&CFG, &h, &weaken, 0),
         scaled(10, t.str_state_chance_bp)
     );
     let expose = skill(
@@ -263,7 +264,7 @@ fn effect_chance_by_effect_stat() {
         Effect::Vulnerability,
     );
     assert_eq!(
-        effect_chance(&CFG, &h, &expose),
+        effect_chance(&CFG, &h, &expose, 0),
         scaled(30, t.int_state_chance_bp)
     );
     // Effects that never roll a chance have no stat.
@@ -306,6 +307,7 @@ fn endurance_lengthens_own_buffs_on_self_only() {
         haste,
         3_000,
         Aspect::Blood,
+        [0; Aspect::COUNT],
         0,
         extra,
         &mut states,

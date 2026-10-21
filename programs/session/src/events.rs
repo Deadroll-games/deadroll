@@ -3,14 +3,14 @@
 //! are session-local.
 use anchor_lang::prelude::*;
 use deadroll_character::state::{MAP_SKILLS, SKILLS_MAX};
-use deadroll_combat::MODS_MAX;
+
 use deadroll_types::{ActiveState, Cell, SessionStatus, StateKind, STATES_MAX, TURN_ORDER_MAX};
 
 use deadroll_skillcheck::{Effect, Trigger};
 
 use crate::{
     hit_event::{Applied, EffectRollData, HitItemsData, HitResultData},
-    state::{AccuracyBuffData, AuraData, TimedModData},
+    state::{AccuracyBuffData, AuraData, ResistModData, TimedModData, STORED_MODS},
 };
 
 #[event]
@@ -89,9 +89,11 @@ pub struct ModsTicked {
     /// `deadroll_combat::support::mod_bit` of every buff or debuff that ended now.
     pub expired: u8,
     /// The unit's buffs and debuffs after the tick (`turns`: own turn starts left).
-    pub mods: [TimedModData; MODS_MAX],
+    pub mods: [TimedModData; STORED_MODS],
     /// Action points of this turn: speed with Haste and Slow.
     pub action_points: u8,
+    /// Patch 9: the unit's Resistance after the tick.
+    pub resist_mod: ResistModData,
 }
 
 /// Hard control took the unit's turn: `start_turn` ended it on its own.
@@ -184,7 +186,9 @@ pub struct EffectResolved {
     pub hp: u32,
     /// The target's states and buffs / debuffs after.
     pub states: [ActiveState; STATES_MAX],
-    pub mods: [TimedModData; MODS_MAX],
+    pub mods: [TimedModData; STORED_MODS],
+    /// Patch 9: the target's Resistance after.
+    pub resist_mod: ResistModData,
 }
 
 /// The turn order, rolled once from the VRF value of `start_session`: per unit `d20 +

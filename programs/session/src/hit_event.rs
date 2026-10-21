@@ -16,7 +16,7 @@ use deadroll_types::{ActiveState, Aspect, ItemBase, StateKind, STATES_MAX};
 
 use crate::{
     events::HitResolved,
-    state::{AccuracyBuffData, TimedModData},
+    state::{AccuracyBuffData, ResistModData},
 };
 
 /// `deadroll_combat::Outcome`.
@@ -206,8 +206,9 @@ pub struct HitResultData {
     pub jump_count: u8,
     pub knockback: u8,
     pub ignite_power: u32,
-    /// Timed modifiers on the target (`target_mods[..target_mod_count]`).
-    pub target_mods: [TimedModData; TARGET_MODS_MAX],
+    /// Timed modifiers on the target (`target_mods[..target_mod_count]`), with the weights a
+    /// `deadroll_combat::TimedMod` carries since patch 9 (zero unless a Resistance).
+    pub target_mods: [ResistModData; TARGET_MODS_MAX],
     pub target_mod_count: u8,
     pub accuracy_buff: AccuracyBuffData,
     /// `state_bit`s of the states that landed on the target.

@@ -23,12 +23,14 @@ export const ModKindData = {
   3: "Weakening",
   4: "Protection",
   5: "Vulnerability",
+  6: "Resistance",
   Haste: 0,
   Slow: 1,
   Empowerment: 2,
   Weakening: 3,
   Protection: 4,
   Vulnerability: 5,
+  Resistance: 6,
 } as const;
 
 /** `deadroll_combat::ModKind`. */

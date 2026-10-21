@@ -13,7 +13,7 @@ pub(crate) mod test_support;
 
 pub use escrow::*;
 pub use game_session::*;
-pub use mods::{ModKindData, ModsData, TimedModData};
+pub use mods::{ModKindData, ModsData, ResistModData, TimedModData, STORED_MODS};
 pub use monster_state::*;
 pub use participation::*;
 pub use skills::*;

@@ -19,6 +19,7 @@ const NONE: TimedMods = [TimedMod {
     turns: 0,
     power_bp: 0,
     source: 0,
+    weights_pct: [0; Aspect::COUNT],
 }; MODS_MAX];
 
 fn hero_of(class: Class, equipment: Equipment) -> HeroStats {

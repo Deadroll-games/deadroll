@@ -133,6 +133,7 @@ fn validate_monster(r: &[u8]) -> bool {
     let predisposition_ok = r[9] == NO_ASPECT || is::<Aspect>(r[9]);
     let aspect_mask = (1u8 << Aspect::COUNT) - 1;
     let state_mask = ((1u16 << StateKind::COUNT) - 1) as u8;
+    let tag_mask = ((1u16 << (Source::COUNT + Form::COUNT)) - 1) as u8;
     r[0] == 1
         && role < ROLES
         && biome < BIOMES
@@ -149,7 +150,10 @@ fn validate_monster(r: &[u8]) -> bool {
         // Patch 6: [39] pool start, [40] pool length (a run of the monster skills table), [41] kin.
         && r[40] as usize <= monster::POOL_MAX
         && r[39] as usize + r[40] as usize <= MONSTER_SKILLS_MAX
-        && r[42..].iter().all(|&b| b == 0)
+        // Patch 9: [42] resisted tags, [43] immune tags (sources, then forms).
+        && r[42] & !tag_mask == 0
+        && r[43] & !tag_mask == 0
+        && r[44..].iter().all(|&b| b == 0)
         && u16_at(r, 30) <= u16_at(r, 32)
 }
 
@@ -372,7 +376,11 @@ mod tests {
             "pool past the table"
         );
         assert!(mutate(|r| r[41] = 1), "kin");
-        assert!(!mutate(|r| r[42] = 1), "reserved byte");
+        assert!(mutate(|r| r[42] = 0b1), "resists the magical tag");
+        assert!(mutate(|r| r[43] = 0b1000), "immune to projectiles");
+        assert!(!mutate(|r| r[42] = 0b1_0000), "tag bit past the forms");
+        assert!(!mutate(|r| r[43] = 0b1_0000), "tag bit past the forms");
+        assert!(!mutate(|r| r[44] = 1), "reserved byte");
         assert!(!mutate(|r| r[30] = 9), "damage min above max");
     }
 

@@ -60,6 +60,9 @@ export const FAMILY: Record<string, number> = {
 };
 export const SOURCE: Record<string, number> = { Magical: 0, Combat: 1 };
 export const FORM: Record<string, number> = { Strike: 0, Projectile: 1 };
+/** Defense tags (patch 9, deadroll_combat source_bit / form_bit): the sources, then the forms. */
+export const TAG: Record<string, number> = { Magical: 1 << 0, Combat: 1 << 1, Strike: 1 << 2, Projectile: 1 << 3 };
+const TAG_BITS = 0b1111;
 export const STATE_KIND: Record<string, number> = {
   Burning: 0,
   Chill: 1,
@@ -191,6 +194,7 @@ export const EFFECT: Record<string, number> = {
   Empowerment: 7,
   Protection: 8,
   Heal: 9,
+  Resistance: 10,
 };
 export const TRIGGER: Record<string, number> = { None: 0, Hit: 1, CritHit: 2, HpBelow: 3, AllyHpBelow: 4, Controlled: 5, EnemyAdjacent: 6 };
 export const RANGE: Record<string, number> = { Melee: 0, Ranged: 1 };
@@ -327,7 +331,10 @@ export function validate_monster(r: Uint8Array): boolean {
     // Patch 6: [39] pool start, [40] pool length, [41] kin, then reserved.
     r[40] <= POOL_MAX &&
     r[39] + r[40] <= MONSTER_SKILLS_MAX &&
-    r.subarray(42).every((b) => b === 0) &&
+    // Patch 9: [42] resisted tags, [43] immune tags (sources, then forms).
+    (r[42] & ~TAG_BITS) === 0 &&
+    (r[43] & ~TAG_BITS) === 0 &&
+    r.subarray(44).every((b) => b === 0) &&
     u16At(r, 30) <= u16At(r, 32)
   );
 }
@@ -580,6 +587,11 @@ export function encodeResonances(json: unknown): Uint8Array {
   return out;
 }
 
+function tagMask(names: unknown, label: string): number {
+  if (!Array.isArray(names)) fail(`${label} must be an array of tag names`);
+  return names.reduce((m: number, n: unknown) => m | lookup(TAG, n, "tag"), 0);
+}
+
 export function encodeMonster(json: unknown): Uint8Array {
   const rec = asObject(json, "monster");
   const out = new Uint8Array(MONSTER_SIZE);
@@ -604,6 +616,8 @@ export function encodeMonster(json: unknown): Uint8Array {
   const states = rec.state_immunity ?? [];
   if (!Array.isArray(states)) fail("state_immunity must be an array of state names");
   out[38] = states.reduce((m: number, n: unknown) => m | (1 << lookup(STATE_KIND, n, "state")), 0);
+  out[42] = tagMask(rec.tag_resistance ?? [], "tag_resistance");
+  out[43] = tagMask(rec.tag_immunity ?? [], "tag_immunity");
   putU16(out, 12, traitBits(rec.traits ?? []));
   putU16(out, 14, requireInt(rec.armor, "armor", 0, 0xffff));
   putU16(out, 16, requireInt(rec.evasion, "evasion", 0, 0xffff));

@@ -366,9 +366,19 @@ function PartyView({ address }: { address: Address }) {
       const player = events.find((e) => e.name === "ReactiveTriggered" && e.data.actionCounter === counter && e.data.bearer === attacker);
       return player ? `reaction: ${skillName(attacker, player.data.skillSlot)}` : null;
     };
+    // A player's state resistance (Endurance and items, patch 9), from the same combat module.
+    const stateResistOf = (u: number) => {
+      const p = u < MONSTER_BASE ? party?.players.find((x) => x.slot === u) : undefined;
+      if (!p || !combat) return 0;
+      return combat.heroSheet(heroInputOf(p.char, p.part.equipment, p.char.core.stats, p.part.classTier)).stateResistBp;
+    };
     const hitView = (data: unknown, at: number): Hit => {
       const h = toHitResolved(data);
-      const mods = { attacker: modsAt(events, at, h.attacker, modsNow(h.attacker)), target: modsAt(events, at, h.target, modsNow(h.target)) };
+      const mods = {
+        attacker: modsAt(events, at, h.attacker, modsNow(h.attacker)),
+        target: modsAt(events, at, h.target, modsNow(h.target)),
+        targetStateResistBp: stateResistOf(h.target),
+      };
       // Items only for player sides: a monster wears nothing.
       const items = { attacker: h.attacker < MONSTER_BASE ? h.items.attacker : null, target: h.target < MONSTER_BASE ? h.items.defender : null };
       const action = actionOf(h.actionCounter, h.attacker);

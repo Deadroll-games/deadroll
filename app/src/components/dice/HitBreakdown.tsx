@@ -1,6 +1,6 @@
 import { Applied, HitOutcome, ModKind, type HitResult, type PacketResult, type StateRoll, type TimedMod } from "../../chain/types";
 import { aspectName, carrierName, formatBp, formatScaled, opText, resonanceName, stateName, traitName } from "../../chain/names";
-import { MOD_NAMES, modEffectText } from "../../chain/support";
+import { MOD_NAMES, modEffectText, resistanceShare } from "../../chain/support";
 import { itemLabel, UNARMED, weaponText } from "../../chain/items";
 import { chanceView, tintLabel, tintView, type ChanceView } from "./cascade";
 import { RollBar } from "./RollBar";
@@ -57,12 +57,25 @@ export function modLines(hit: HitResult, mods: HitMods): ModLine[] {
     let text: string;
     let applied = false;
     if (m.kind === ModKind.Protection) [text, applied] = ["in Resist of every packet", any];
-    else if (m.kind === ModKind.Vulnerability) {
+    else if (m.kind === ModKind.Resistance) {
+      const covered = hits.filter((p) => resistanceShare(m, p.aspect) > 0).map((p) => aspectName(p.aspect));
+      applied = covered.length > 0;
+      text = applied ? `in Resist of the ${covered.join(", ")} packet${covered.length > 1 ? "s" : ""}` : "no packet of its aspects in this hit, does nothing";
+    } else if (m.kind === ModKind.Vulnerability) {
       applied = hits.some((p) => p.aspect === m.aspect);
       text = applied ? `in Vulnerability of the ${aspect} packet` : `no ${aspect} packet in this hit, does nothing`;
     } else if (m.kind === ModKind.Haste || m.kind === ModKind.Slow) text = "action points only, not damage";
     else text = "the target's own attacks, not this hit";
     out.push({ side: "Target", text: `${named(m)}: ${text}`, applied });
+  }
+  const stateResist = mods.targetStateResistBp ?? 0;
+  if (stateResist > 0) {
+    const rolled = hit.packets.some((p) => p.state.rolled) || hit.resOps.flat().some((o) => o.state.rolled);
+    out.push({
+      side: "Target",
+      text: `State resist ${formatBp(stateResist)} (Endurance, items): ${rolled ? "divides the chance of the states rolled here" : "no state rolled in this hit"}`,
+      applied: rolled,
+    });
   }
   return out;
 }
@@ -99,8 +112,14 @@ function note(mods: HitMods | undefined, row: "increased" | "weaken" | "resist" 
     : row === "weaken" ? find(mods?.attacker, ModKind.Weakening)
     : row === "resist" ? find(mods?.target, ModKind.Protection)
     : find(mods?.target, ModKind.Vulnerability);
-  if (!m || p.immune || (row === "vuln" && m.aspect !== p.aspect)) return "";
-  return ` (incl. ${MOD_NAMES[m.kind]} ${formatBp(m.powerBp)})`;
+  // A Resistance adds its share of this packet's aspect to the Resist row.
+  const ward = row === "resist" ? find(mods?.target, ModKind.Resistance) : undefined;
+  const share = ward && !p.immune ? resistanceShare(ward, p.aspect) : 0;
+  const parts = [
+    ...(m && !p.immune && !(row === "vuln" && m.aspect !== p.aspect) ? [`${MOD_NAMES[m.kind]} ${formatBp(m.powerBp)}`] : []),
+    ...(share > 0 ? [`Resistance ${formatBp(share)}`] : []),
+  ];
+  return parts.length ? ` (incl. ${parts.join(", ")})` : "";
 }
 
 export function HitBreakdown({ hit, defaultOpen = true, critChanceBp, mods, items }: HitBreakdownProps) {

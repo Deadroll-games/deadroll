@@ -20,7 +20,7 @@ use std::path::PathBuf;
 use deadroll_skillcheck::{
     check_loadout, check_map_selection, derive, presets, validate, validate_skill,
     validate_starting, Category, Effect, MapSelection, Purpose, SkillBlocks, SkillError, SkillExt,
-    Target, Trigger, NO_SKILL, SELECTION_SLOTS, SKILL_ASPECTS_MAX, STARTING_MAX,
+    Target, Trigger, AURA_RADIUS_MAX, NO_SKILL, SELECTION_SLOTS, SKILL_ASPECTS_MAX, STARTING_MAX,
 };
 use deadroll_types::{Aspect, Class, Form, RangeTag, Source, TimeTag};
 
@@ -207,6 +207,30 @@ fn build() -> (String, Vec<String>) {
     for _ in 0..RANDOM_SKILLS {
         let s = random_blocks(&mut rng);
         let e = random_ext(&mut rng, &s);
+        note(validate(&s));
+        note(validate_skill(&s, &e));
+        for c in Class::ALL {
+            note(validate_starting(&s, &e, *c));
+        }
+        lines.push(skill_line(&s, &e));
+    }
+    // Fixed cases the seeded ones can miss: a passive Resistance aura (patch 9), and the same
+    // aura one cell past the radius limit.
+    let ward = SkillBlocks {
+        category: Category::Passive,
+        purpose: Purpose::Buff,
+        aspects: [Aspect::Piercing, Aspect::default(), Aspect::default()],
+        aspect_count: 1,
+        effect: Effect::Resistance,
+        aura_radius: AURA_RADIUS_MAX,
+        ..SkillBlocks::default()
+    };
+    let wide = SkillBlocks {
+        aura_radius: AURA_RADIUS_MAX + 1,
+        ..ward
+    };
+    for s in [ward, wide] {
+        let e = SkillExt::MELEE;
         note(validate(&s));
         note(validate_skill(&s, &e));
         for c in Class::ALL {

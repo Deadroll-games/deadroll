@@ -7,7 +7,7 @@
 //! buildup in bp for Chill, vulnerability bp for Shock, armor counterweight bp for Penetration,
 //! unused (0) for Freeze and Stun.
 
-use deadroll_types::{ActiveState, Aspect, StateKind, BP, STATES_MAX};
+use deadroll_types::{ActiveState, Aspect, Form, Source, StateKind, BP, STATES_MAX};
 
 use crate::balance::Balance;
 
@@ -22,6 +22,20 @@ pub const fn state_bit(kind: StateKind) -> u8 {
 /// Bit of an aspect in an immunity mask.
 pub const fn aspect_bit(aspect: Aspect) -> u8 {
     1 << aspect as u8
+}
+
+/// Defense tags (docs/DAMAGE_TYPES_AND_MIXES.md 2 and 9: "immunity to magical"): the power
+/// sources, then the forms. Indexes `Defender::tag_resist_bp` and the bits of a tag mask.
+pub const TAGS: usize = Source::COUNT + Form::COUNT;
+
+/// Bit of a power source in a tag mask.
+pub const fn source_bit(source: Source) -> u8 {
+    1 << source as u8
+}
+
+/// Bit of a form in a tag mask.
+pub const fn form_bit(form: Form) -> u8 {
+    1 << (Source::COUNT + form as usize)
 }
 
 pub fn find(states: &States, kind: StateKind) -> Option<usize> {
@@ -85,13 +99,21 @@ pub fn apply_state(states: &mut States, new: ActiveState) -> Applied {
 }
 
 /// Adds Chill buildup (docs/COMBAT_MATH.md, section 7.3). Buildup accumulates; when it reaches
-/// the threshold the target is frozen and the buildup resets.
-pub fn apply_chill(states: &mut States, buildup_bp: u32, source: u8, balance: &Balance) -> Applied {
+/// the threshold the target is frozen and the buildup resets. `can_freeze == false` (the target
+/// is immune to Freeze, docs/BESTIARY.md 7.4): the buildup stays, nothing freezes.
+pub fn apply_chill(
+    states: &mut States,
+    buildup_bp: u32,
+    source: u8,
+    can_freeze: bool,
+    balance: &Balance,
+) -> Applied {
     apply_chill_for(
         states,
         buildup_bp,
         balance.turns(StateKind::Chill),
         source,
+        can_freeze,
         balance,
     )
 }
@@ -102,6 +124,7 @@ pub fn apply_chill_for(
     buildup_bp: u32,
     turns: u8,
     source: u8,
+    can_freeze: bool,
     balance: &Balance,
 ) -> Applied {
     if turns == 0 {
@@ -128,7 +151,7 @@ pub fn apply_chill_for(
             (buildup_bp, applied)
         }
     };
-    if applied != Applied::None && total >= balance.freeze_threshold_bp {
+    if can_freeze && applied != Applied::None && total >= balance.freeze_threshold_bp {
         return freeze(states, source, balance);
     }
     applied
@@ -287,22 +310,26 @@ mod tests {
     #[test]
     fn chill_builds_up_to_freeze() {
         let mut s = States::default();
-        assert_eq!(apply_chill(&mut s, 5_000, 2, &B), Applied::Added);
+        assert_eq!(apply_chill(&mut s, 5_000, 2, true, &B), Applied::Added);
         assert_eq!(chill_slow_bp(&s, &B), 5_000);
-        assert_eq!(apply_chill(&mut s, 5_000, 2, &B), Applied::Froze);
+        assert_eq!(apply_chill(&mut s, 5_000, 2, true, &B), Applied::Froze);
         assert!(!has(&s, StateKind::Chill));
         let i = find(&s, StateKind::Freeze).unwrap();
         assert_eq!(s[i].turns, B.turns(StateKind::Freeze));
         assert_eq!(chill_slow_bp(&s, &B), 0);
         // Buildup restarts from zero after a freeze.
-        assert_eq!(apply_chill(&mut s, 5_000, 2, &B), Applied::Added);
+        assert_eq!(apply_chill(&mut s, 5_000, 2, true, &B), Applied::Added);
         assert!(has(&s, StateKind::Freeze) && has(&s, StateKind::Chill));
     }
 
     #[test]
     fn big_single_buildup_freezes_at_once() {
         let mut s = States::default();
-        assert_eq!(apply_chill(&mut s, 12_000, 0, &B), Applied::Froze);
+        assert_eq!(apply_chill(&mut s, 12_000, 0, true, &B), Applied::Froze);
+        // Immune to Freeze: the buildup passes the threshold and stays Chill.
+        let mut t = States::default();
+        assert_eq!(apply_chill(&mut t, 12_000, 0, false, &B), Applied::Added);
+        assert!(has(&t, StateKind::Chill) && !has(&t, StateKind::Freeze));
     }
 
     #[test]

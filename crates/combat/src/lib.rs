@@ -34,11 +34,12 @@ pub use packet::{build_packets, DamageRange, Packet, Packets, Skill};
 pub use resonance::{resonance_id, Carrier, Resonance, ResonanceCondition, Tint, TintRoll};
 pub use rng::{chance, d100, d20, RollSource, ScriptedRoll, SeededRoll, VrfRoll};
 pub use states::{
-    apply_chill, apply_state, chill_slow_bp, power_of, tick_turn_start, Applied, States, Tick,
+    apply_chill, apply_state, chill_slow_bp, form_bit, power_of, source_bit, tick_turn_start,
+    Applied, States, Tick, TAGS,
 };
 pub use support::{
-    apply_mod, apply_to_attacker, apply_to_defender, mod_range, mod_turns, resolve_rider,
-    resolve_support, speed_ap, tick_mods, AccuracyBuff, EffectRoll, ModKind, SupportBalance,
-    SupportInput, TimedMod, TimedMods, MODS_MAX,
+    apply_mod, apply_to_attacker, apply_to_defender, free_slot, mod_range, mod_turns,
+    resistance_share, resolve_rider, resolve_support, speed_ap, tick_mods, AccuracyBuff,
+    EffectRoll, ModKind, SupportBalance, SupportInput, TimedMod, TimedMods, MODS_MAX,
 };
 pub use tables::{Op, OpKind, ResonanceTables, TableError};

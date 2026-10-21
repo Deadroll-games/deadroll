@@ -339,6 +339,8 @@ impl Battle<'_> {
                     ModKind::Haste => self.best_damage(a) * avg / BP as u64 * turns / 4,
                     ModKind::Empowerment => self.best_damage(a) * avg / BP as u64 * turns,
                     ModKind::Protection => self.threat_on(a) * avg / (BP as u64 + avg) * turns,
+                    // Only its own aspects: about half of what comes at the ally.
+                    ModKind::Resistance => self.threat_on(a) * avg / (BP as u64 + avg) * turns / 2,
                     ModKind::Slow | ModKind::Weakening | ModKind::Vulnerability => 0,
                 }
             }
@@ -384,7 +386,10 @@ impl Battle<'_> {
                             .sum();
                         party * avg / BP as u64 * turns
                     }
-                    ModKind::Haste | ModKind::Empowerment | ModKind::Protection => 0,
+                    ModKind::Haste
+                    | ModKind::Empowerment
+                    | ModKind::Protection
+                    | ModKind::Resistance => 0,
                 }
             }
             EffectAction::Heal => 0,

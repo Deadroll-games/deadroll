@@ -150,6 +150,9 @@ pub struct ItemBonus {
     pub speed: u16,
     pub speed_counter_bp: u32,
     pub initiative: u16,
+    /// Patch 9. Resistance per aspect and state resistance, bp (summed counterweights).
+    pub resist_bp: [u32; Aspect::COUNT],
+    pub state_resist_bp: u32,
 }
 
 pub fn item_bonus(eq: &Equipment, t: &ItemTuning) -> ItemBonus {
@@ -169,7 +172,11 @@ pub fn item_bonus(eq: &Equipment, t: &ItemTuning) -> ItemBonus {
         out.speed = out.speed.saturating_add(b.speed);
         out.speed_counter_bp = out.speed_counter_bp.saturating_add(b.speed_counter_bp);
         out.initiative = out.initiative.saturating_add(b.initiative);
+        out.state_resist_bp = out.state_resist_bp.saturating_add(b.state_resist_bp);
         for (sum, add) in out.stats.iter_mut().zip(b.stats) {
+            *sum = sum.saturating_add(add);
+        }
+        for (sum, add) in out.resist_bp.iter_mut().zip(b.resist_bp) {
             *sum = sum.saturating_add(add);
         }
     }

@@ -424,18 +424,59 @@ fn penetration_lowers_armor_on_the_next_physical_hit() {
 }
 
 #[test]
-fn aspect_resistance_lowers_chill_chance_and_buildup() {
+fn aspect_resistance_cuts_damage_not_the_chill_chance_or_buildup() {
     let mut input = basic(Aspect::Cold, 10, 10, 50);
+    let plain = resolve_hit(&input, &B, &T, &mut ScriptedRoll::new([14, 0, 0]));
     input.defender.resist_bp[Aspect::Cold as usize] = BP;
     let r = resolve_hit(&input, &B, &T, &mut ScriptedRoll::new([14, 0, 0]));
+    assert!(r.damage < plain.damage);
     assert_eq!(
         (
             r.packets()[0].state.chance_pct,
             r.packets()[0].state.success
         ),
-        (25, true)
+        (50, true)
     );
-    assert_eq!(find(&r.states, StateKind::Chill).power, 2_500);
+    assert_eq!(
+        find(&r.states, StateKind::Chill).power,
+        find(&plain.states, StateKind::Chill).power
+    );
+    // State resistance is the counterweight of the chance.
+    input.defender.state_resist_bp[StateKind::Chill as usize] = BP;
+    let r = resolve_hit(&input, &B, &T, &mut ScriptedRoll::new([14, 0, 0]));
+    assert_eq!(r.packets()[0].state.chance_pct, 25);
+}
+
+#[test]
+fn tag_immunity_and_tag_resistance() {
+    let input = basic(Aspect::Fire, 10, 10, 0);
+    let plain = resolve_hit(&input, &B, &T, &mut ScriptedRoll::new([14, 0, 0]));
+    // Immune to the hit's source: every packet, no rolls.
+    let mut immune = input;
+    immune.defender.immune_tags = source_bit(input.attacker.skill.source);
+    let r = resolve_hit(&immune, &B, &T, &mut ScriptedRoll::new([14, 0, 0]));
+    assert_eq!((r.outcome, r.damage, r.rolls_used), (Outcome::Immune, 0, 0));
+    assert_eq!(preview_range(&immune, &B), (0, 0));
+    // Immune to the other form: nothing changes.
+    let other = match input.attacker.skill.form {
+        Form::Strike => Form::Projectile,
+        Form::Projectile => Form::Strike,
+    };
+    let mut miss = input;
+    miss.defender.immune_tags = form_bit(other);
+    assert_eq!(
+        resolve_hit(&miss, &B, &T, &mut ScriptedRoll::new([14, 0, 0])).damage,
+        plain.damage
+    );
+    // Resistance by the hit's form sums with the aspect's, then the cap.
+    let mut res = input;
+    res.defender.resist_bp[Aspect::Fire as usize] = 2_000;
+    res.defender.tag_resist_bp[Source::COUNT + input.attacker.skill.form as usize] = 3_000;
+    let r = resolve_hit(&res, &B, &T, &mut ScriptedRoll::new([14, 0, 0]));
+    assert_eq!(r.packets()[0].resist_bp, 5_000);
+    res.defender.tag_resist_bp[input.attacker.skill.source as usize] = u32::MAX;
+    let r = resolve_hit(&res, &B, &T, &mut ScriptedRoll::new([14, 0, 0]));
+    assert_eq!(r.packets()[0].resist_bp, B.resist_cap_bp);
 }
 
 #[test]

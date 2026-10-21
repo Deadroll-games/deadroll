@@ -105,14 +105,19 @@ fn step(from: Cell, dx: i8, dy: i8) -> Option<Cell> {
     })
 }
 
-/// Lands `state` on a unit's `states`: Chill adds its buildup, Freeze clears it.
+/// Lands `state` on a unit's `states`: Chill adds its buildup (a unit immune to Freeze,
+/// `immune_states`, never freezes from it), Freeze clears it.
 pub fn land_state(
     states: &mut [ActiveState; deadroll_types::STATES_MAX],
     state: ActiveState,
+    immune_states: u8,
     cfg: &BalanceConfig,
 ) -> Applied {
     match state.kind {
-        StateKind::Chill => apply_chill(states, state.power, state.source, &cfg.combat),
+        StateKind::Chill => {
+            let can_freeze = immune_states & (1 << StateKind::Freeze as u8) == 0;
+            apply_chill(states, state.power, state.source, can_freeze, &cfg.combat)
+        }
         StateKind::Freeze => freeze_for(states, state.turns, state.source),
         _ => apply_state(states, state),
     }
@@ -172,7 +177,8 @@ pub fn spread(
             let Some(i) = next else {
                 break;
             };
-            let applied = land_state(&mut monsters[i].states, jump.state, cfg);
+            let immune = defense.get(i).map_or(0, |d| d.immune_states);
+            let applied = land_state(&mut monsters[i].states, jump.state, immune, cfg);
             if (out.hit_count as usize) < SPREAD_HITS_MAX {
                 out.hits[out.hit_count as usize] = SpreadHit {
                     monster: i as u8,

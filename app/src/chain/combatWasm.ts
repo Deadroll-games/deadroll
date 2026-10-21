@@ -17,13 +17,17 @@ import type { ActiveStateAcc, AuraAcc, CharacterAcc, MonsterAcc, SkillRecordAcc 
 import type { ActiveState, Cell, TimedMod } from "./types";
 
 /** `ABI_VERSION` of the module this wrapper speaks. */
-export const COMBAT_ABI = 6;
+export const COMBAT_ABI = 7;
 /** Bytes of the resonance tables: the registry `aspects`, `traits` and `resonances` bodies. */
 export const COMBAT_TABLES_LEN = 48 + 192 + 576;
 export const COMBAT_STATS = 4;
 export const COMBAT_EQUIP_SLOTS = 11;
 export const COMBAT_STATES = 6;
-export const COMBAT_MODS = 6;
+/** Modifier slots, one per kind (patch 9 added Resistance). */
+export const COMBAT_MODS = 7;
+export const COMBAT_ASPECTS = 6;
+/** Defense tags: Magical, Combat, Strike, Projectile (deadroll_combat `TAGS`). */
+export const COMBAT_TAGS = 4;
 export const COMBAT_PARTY = 4;
 /** Auras per player: the passive one, then the temporary one from a reactive skill. */
 export const COMBAT_AURAS = 2;
@@ -111,6 +115,11 @@ export type MonsterSheet = {
   kin: number;
   /** Skill slots by category: active, reactive, passive. */
   slots: number[];
+  // ABI 7
+  /** Resistance per defense tag (Magical, Combat, Strike, Projectile), bp before the cap. */
+  tagResistBp: number[];
+  /** Immune tags: bit 0 Magical, 1 Combat, 2 Strike, 3 Projectile. */
+  immuneTags: number;
 };
 
 /** A monster skill (`monster_skill`): its blocks (`SkillBlocks` field order), `[range, timing,
@@ -144,6 +153,8 @@ export type AuraInput = {
   hostile: boolean;
   passive: boolean;
   selfOnly: boolean;
+  /** ABI 7: a Resistance aura's aspect weights, percent by aspect. */
+  weightsPct?: ArrayLike<number>;
 };
 export const NO_AURA: AuraInput = { kind: 0, aspect: 0, powerBp: 0, radius: 0, turns: 0, hostile: false, passive: false, selfOnly: false };
 
@@ -238,6 +249,11 @@ export type HeroSheet = {
   selfBuffTurns: number;
   /** The chance the crit roll uses on a hit that is not a natural 20, 0 = no crit roll. */
   critRollBp: number;
+  // ABI 7
+  /** Resistance per aspect (items), bp before the cap. */
+  resistBp: number[];
+  /** State resistance (Endurance and items): the counterweight on every state and effect chance. */
+  stateResistBp: number;
 };
 
 /** One tint candidate of an attack: its chance, and the damage if it triggers alone. */
@@ -290,11 +306,12 @@ export function encodeHero(h: HeroInput): Uint8Array {
 const NO_MOD: TimedMod = { kind: 0, aspect: 0, turns: 0, powerBp: 0, source: 0 } as TimedMod;
 const NO_STATE: ActiveState = { kind: 0, turns: 0, power: 0, source: 0 } as ActiveState;
 
+/** The modifiers in list order (the rules find them by kind), each with its weights (ABI 7). */
 function encodeMods(mods: readonly TimedMod[]): Uint8Array {
   return concat(
     ...Array.from({ length: COMBAT_MODS }, (_, i) => {
       const m = mods[i] ?? NO_MOD;
-      return concat(u8(m.kind), u8(m.aspect), u8(m.turns), u32le(m.powerBp), u8(m.source));
+      return concat(u8(m.kind), u8(m.aspect), u8(m.turns), u32le(m.powerBp), u8(m.source), fixed(m.weightsPct ?? [], COMBAT_ASPECTS, u8));
     }),
   );
 }
@@ -402,7 +419,17 @@ export function decodeMonsterSkill(bytes: Uint8Array): MonsterSkillSheet {
 const encodeCell = (c: WasmCell | undefined) => concat(u8(c?.[0] ?? 0), u8(c?.[1] ?? 0));
 
 function encodeAura(a: AuraInput): Uint8Array {
-  return concat(u8(a.kind), u8(a.aspect), u32le(a.powerBp), u8(a.radius), u8(a.turns), u8(a.hostile ? 1 : 0), u8(a.passive ? 1 : 0), u8(a.selfOnly ? 1 : 0));
+  return concat(
+    u8(a.kind),
+    u8(a.aspect),
+    u32le(a.powerBp),
+    u8(a.radius),
+    u8(a.turns),
+    u8(a.hostile ? 1 : 0),
+    u8(a.passive ? 1 : 0),
+    u8(a.selfOnly ? 1 : 0),
+    fixed(a.weightsPct ?? [], COMBAT_ASPECTS, u8),
+  );
 }
 
 const NO_BEARER: BearerInput = { index: 0, cell: [0, 0], kin: 0, auras: [] };
@@ -440,7 +467,18 @@ export function encodeLine(r: LineRequest): Uint8Array {
 
 export function decodeMods(bytes: Uint8Array): TimedMod[] {
   const r = new Reader(bytes);
-  return Array.from({ length: COMBAT_MODS }, () => ({ kind: r.u8(), aspect: r.u8(), turns: r.u8(), powerBp: r.u32(), source: r.u8() }) as TimedMod);
+  return Array.from(
+    { length: COMBAT_MODS },
+    () =>
+      ({
+        kind: r.u8(),
+        aspect: r.u8(),
+        turns: r.u8(),
+        powerBp: r.u32(),
+        source: r.u8(),
+        weightsPct: Array.from({ length: COMBAT_ASPECTS }, () => r.u8()),
+      }) as TimedMod,
+  );
 }
 
 export function decodeLine(bytes: Uint8Array): WasmCell[] {
@@ -480,6 +518,8 @@ export function decodeMonsterSheet(bytes: Uint8Array): MonsterSheet {
     poolLen: r.u8(),
     kin: r.u8(),
     slots: [r.u8(), r.u8(), r.u8()],
+    tagResistBp: Array.from({ length: COMBAT_TAGS }, () => r.u32()),
+    immuneTags: r.u8(),
   };
 }
 
@@ -504,6 +544,8 @@ export function decodeSheet(bytes: Uint8Array): HeroSheet {
     tempoStateBp: r.u32(),
     selfBuffTurns: r.u8(),
     critRollBp: r.u32(),
+    resistBp: Array.from({ length: COMBAT_ASPECTS }, () => r.u32()),
+    stateResistBp: r.u32(),
   };
 }
 
@@ -727,6 +769,7 @@ export function auraInputOf(a: AuraAcc): AuraInput {
     hostile: a.hostile,
     passive: a.passive,
     selfOnly: a.selfOnly,
+    weightsPct: a.weightsPct,
   };
 }
 

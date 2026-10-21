@@ -629,6 +629,12 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                                 dp.self_buff_turns_max,
                                 0..=10,
                             );
+                            bp_row(
+                                ui,
+                                "Endurance: state resistance / point",
+                                &mut p.end_state_resist_bp,
+                                dp.end_state_resist_bp,
+                            );
                             int_row(
                                 ui,
                                 "HP per Endurance",

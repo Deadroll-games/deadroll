@@ -106,6 +106,9 @@ pub struct PlayerTuning {
     /// more (CHARACTER 2).
     pub self_buff_end_div: u16,
     pub self_buff_turns_max: u8,
+    /// Patch 9. State resistance per point of Endurance, bp: the counterweight on the chance of
+    /// every state and effect landing on the hero (CHARACTER 2-3, COMBAT_MATH 3).
+    pub end_state_resist_bp: u32,
     /// Base armor by class; worn items add theirs.
     pub armor: [u32; Class::COUNT],
     /// HP = base + Endurance x per point + (level - 1) x per level, by class.
@@ -183,6 +186,8 @@ impl PlayerTuning {
         dex_state_chance_bp: 300,
         self_buff_end_div: 5,
         self_buff_turns_max: 2,
+        // Mirrors the stat bonus on the chance: one point of Endurance holds one of Strength.
+        end_state_resist_bp: 300,
         // With the starter armor (10, 2, 5) the totals stay 30, 5, 5.
         armor: [20, 3, 0],
         hp_base: [30, 18, 22],
@@ -298,6 +303,13 @@ pub struct ItemBaseStats {
     pub basic_range: RangeTag,
     #[cfg_attr(feature = "serde", serde(default, with = "names::variant"))]
     pub basic_form: Form,
+    /// Patch 9. Resistance per aspect, bp: a counterweight on the damage of that aspect
+    /// (CHARACTER 3: items are a source of resistances).
+    #[cfg_attr(feature = "serde", serde(default, with = "names::by_aspect"))]
+    pub resist_bp: [u32; Aspect::COUNT],
+    /// Patch 9. State resistance, bp: the counterweight on the chance of every state and effect.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub state_resist_bp: u32,
 }
 
 /// Items (docs/ITEMS_AND_CRAFT.md): every base's numbers and the class starter kits.
@@ -356,6 +368,8 @@ const fn base(slot: EquipSlot, damage: [u32; 2], armor: u32) -> ItemBaseStats {
         initiative: 0,
         basic_range: RangeTag::Melee,
         basic_form: Form::Strike,
+        resist_bp: [0; Aspect::COUNT],
+        state_resist_bp: 0,
     }
 }
 
@@ -500,6 +514,21 @@ pub mod names {
             d: D,
         ) -> Result<[u16; STATS_COUNT], D::Error> {
             de_keyed::<Stat, _, STATS_COUNT, _>(d)
+        }
+    }
+
+    /// `[u32; Aspect::COUNT]` keyed by `Aspect`.
+    pub mod by_aspect {
+        use super::*;
+
+        pub fn serialize<S: Serializer>(v: &[u32; Aspect::COUNT], s: S) -> Result<S::Ok, S::Error> {
+            ser_keyed::<Aspect, _, _>(v, s)
+        }
+
+        pub fn deserialize<'de, D: Deserializer<'de>>(
+            d: D,
+        ) -> Result<[u32; Aspect::COUNT], D::Error> {
+            de_keyed::<Aspect, _, { Aspect::COUNT }, _>(d)
         }
     }
 

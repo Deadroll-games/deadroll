@@ -85,6 +85,18 @@ test("speed 0 throws", () => {
   assert.throws(() => encodeMonster(json.records[0]), /speed 0/);
 });
 
+test("monster defenses by tag (patch 9)", () => {
+  const json = load("bestiary.json") as { records: Record<string, unknown>[] };
+  const wolf = { ...json.records[0], tag_resistance: ["Magical"], tag_immunity: ["Projectile"] };
+  const r = encodeMonster(wolf);
+  assert.equal(r[42], 0b0001);
+  assert.equal(r[43], 0b1000);
+  assert.ok(validate_record(TableKind.Bestiary, 0, r));
+  r[43] = 0b1_0000;
+  assert.ok(!validate_record(TableKind.Bestiary, 0, r));
+  assert.throws(() => encodeMonster({ ...wolf, tag_immunity: ["Fire"] }), /tag/);
+});
+
 test("passable tile with cost 0 throws", () => {
   const json = load("tileset.json") as { records: Array<Record<string, unknown>> };
   json.records[0].cost = 0;

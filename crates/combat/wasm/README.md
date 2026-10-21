@@ -25,7 +25,7 @@ There are no imports. The module exports `memory` plus the functions below. Bala
 | Export | Signature | What it does |
 |---|---|---|
 | `abi_version` | `() -> u32` | `6`; bumped on any change of exports or layouts |
-| `buffer_len` | `() -> u32` | size of the input and output buffers (4096) |
+| `buffer_len` | `() -> u32` | size of the input and output buffers (8192 since ABI 7) |
 | `input_ptr` | `() -> *mut u8` | where to write the borsh input |
 | `seed_ptr` | `() -> *mut u8` | where to write the 32-byte VRF seed |
 | `output_ptr` | `() -> *const u8` | where results are read from |
@@ -40,7 +40,7 @@ There are no imports. The module exports `memory` plus the functions below. Bala
 | `spawn_skills` | `(input_len: u32) -> i32` | `SpawnSkillsRequest` in: the map builder's check of a spawn's skills (`check_monster_selection`, as `finalize_map`), writes a `SpawnSkillsResult` |
 | `preview_monster_attack` | `(input_len: u32) -> i32` | `MonsterAttackRequest` in: a monster's natural attack or skill on a player before the dice, auras included, writes a `HitPreview` |
 | `monster_plan` | `(input_len: u32) -> i32` | `MonsterPlanRequest` in: the monster AI's choice (`deadroll_rules::monster_ai::plan`, the simulator's), writes a `MonsterPlan` |
-| `unit_mods` | `(input_len: u32) -> i32` | `UnitModsRequest` in: a unit's own buffs and debuffs with the auras over it (`deadroll_rules::aura::AuraField`), writes `[TimedMod; 6]` |
+| `unit_mods` | `(input_len: u32) -> i32` | `UnitModsRequest` in: a unit's own buffs and debuffs with the auras over it (`deadroll_rules::aura::AuraField`), writes `[TimedMod; 7]` |
 | `line` | `(input_len: u32) -> i32` | `LineRequest` in: the cells of a line target, nearest first (`deadroll_rules::line::line_cells`), writes a `LineOutput` |
 | `roll_u64` | `(index: u32) -> u64` (BigInt) | roll number `index` of the seed: first 8 bytes LE of `sha256(seed ‖ index u32 LE)` |
 
@@ -92,6 +92,7 @@ Defender {
   immune_aspects: u8, immune_states: u8,                        // bit 1 << Aspect / 1 << StateKind
   state_resist_bp: [u32; 7],                                    // indexed by StateKind (Penetration is 6)
   states: [ActiveState; 6],
+  tag_resist_bp: [u32; 4], immune_tags: u8,                     // ABI 7: Magical, Combat, Strike, Projectile
 }
 ActiveState { kind: StateKind, turns: u8, power: u32, source: u8 }   // turns == 0: empty slot
 ```
@@ -133,6 +134,7 @@ HeroSheet {
   martial_state_bp: u32, magical_state_bp: u32, tempo_state_bp: u32,      // state chance increase
   self_buff_turns: u8,
   crit_roll_bp: u32,                                            // d100 crit chance in percent, 0 = none
+  resist_bp: [u32; 6], state_resist_bp: u32,                    // ABI 7: items; Endurance and items
 }
 ```
 
@@ -141,7 +143,7 @@ HeroSheet {
 ```
 AttackRequest {
   hero: HeroInput,
-  hero_mods: [TimedMod; 6],                                     // the attacker's buffs and debuffs
+  hero_mods: [TimedMod; 7],                                     // the attacker's buffs and debuffs
   skill: Option<SkillInput>,                                    // None = the weapon's basic attack
   target: TargetInput,
   accuracy: AccuracyBuff,                                       // Participation.accuracy
@@ -154,15 +156,16 @@ Cell { x: u8, y: u8 }
 PartyInput { auras: [[AuraInput; 2]; 4], cells: [Cell; 4], alive: u8,     // GameSession.auras, player_pos, alive_mask
              bearers: [BearerInput; 24], bearer_count: u8 }             // ABI 6: living monsters with an aura
 BearerInput { index: u8, cell: Cell, kin: u8, auras: [(AuraInput, bool); 2] }   // MonsterState.auras, bool = kin only
-AuraInput { kind: ModKind, aspect: Aspect, power_bp: u32, radius: u8, turns: u8, hostile: bool, passive: bool, self_only: bool }  // turns == 0: none
-UnitModsRequest { party: PartyInput, mods: [TimedMod; 6], monster: bool, slot: u8, at: Cell, basic_attack: bool, kin: u8 }
+AuraInput { kind: ModKind, aspect: Aspect, power_bp: u32, radius: u8, turns: u8, hostile: bool, passive: bool, self_only: bool,
+            weights_pct: [u8; 6] }                              // turns == 0: none; ABI 7: a Resistance's weights
+UnitModsRequest { party: PartyInput, mods: [TimedMod; 7], monster: bool, slot: u8, at: Cell, basic_attack: bool, kin: u8 }
 LineRequest { from: Cell, through: Cell, reach: u8, width: u8, height: u8, blocked: [u8; 128] }  // bit y * 32 + x: impassable
 LineOutput { len: u8, cells: [Cell; 32] }
 AccuracyBuff { aspect: Aspect, turns: u8, bonus: u32 }          // turns == 0: none
 SkillInput { blocks: SkillBlocks, shares_bp: [u32; 3], power_bp: u32 }  // SkillRecord without the name
 RecordInput = [u8; 48]                                          // a bestiary record (programs/registry/README.md)
 SkillCopy = [u8; 16]                                            // a monster skill record's bytes 1..17
-TargetInput { record: RecordInput, level: u8, states: [ActiveState; 6], mods: [TimedMod; 6] }
+TargetInput { record: RecordInput, level: u8, states: [ActiveState; 6], mods: [TimedMod; 7] }
 MonsterInput { record: RecordInput, level: u8, flags: u8 }      // flags: Spawn.flags (bit 0 elite)
 MonsterSheet {
   weapon: DamageRange, attack_bonus: u32, evasion: u32, armor: u32,
@@ -170,6 +173,7 @@ MonsterSheet {
   hp_max: u32, xp: u32, boss: bool, role: u8, size: u8, min_tier: u8, speed: u8,   // ABI 6
   initiative: u16, source: Source, form: Form, range: RangeTag,
   pool_start: u8, pool_len: u8, kin: u8, slots: [u8; 3],        // slots by category at this rank
+  tag_resist_bp: [u32; 4], immune_tags: u8,                     // ABI 7: defenses by tag
 }
 MonsterSkillSheet { blocks: SkillBlocks, ext: SkillExt, kin_only: bool, shares_bp: [u32; 3], power_bp: u32, cooldown: u8, ap_cost: u8 }
 SpawnSkillsRequest { record: RecordInput, flags: u8, categories: [u8; 16], mask: u16 }   // Category of each pool skill
@@ -177,10 +181,10 @@ SpawnSkillsResult { error: u8, slots: [u8; 3], default_mask: u16 }   // error: S
 MonsterAttackRequest {
   monster: TargetInput, index: u8, at: Cell,
   skill: Option<SkillCopy>,                                     // None = the natural attack
-  hero: HeroInput, hero_states: [ActiveState; 6], hero_mods: [TimedMod; 6],
+  hero: HeroInput, hero_states: [ActiveState; 6], hero_mods: [TimedMod; 7],
   slot: u8, party: PartyInput,
 }
-AiUnitInput { cell: Cell, hp: u32, hp_max: u32, alive: bool, states: [ActiveState; 6], mods: [TimedMod; 6], kin: u8 }
+AiUnitInput { cell: Cell, hp: u32, hp_max: u32, alive: bool, states: [ActiveState; 6], mods: [TimedMod; 7], kin: u8 }
 MonsterPlanRequest {
   record: RecordInput, level: u8, index: u8, ap: u8,
   skills: [Option<SkillCopy>; 7], cooldowns: [u8; 7],           // by monster slot
@@ -188,7 +192,9 @@ MonsterPlanRequest {
 }
 MonsterPlan { found: bool, slot: Option<u8>, ally: bool, target: u8, range: RangeTag, ap: u8 }   // slot None = natural attack
 SkillExt { range: RangeTag, timing: u8, hp_below_pct: u8 }
-TimedMod { kind: ModKind, aspect: Aspect, turns: u8, power_bp: u32, source: u8 }   // turns == 0: empty
+TimedMod { kind: ModKind, aspect: Aspect, turns: u8, power_bp: u32, source: u8,
+           weights_pct: [u8; 6] }                               // turns == 0: empty; ABI 7: a Resistance's weights
+ModKind = 0 Haste | 1 Slow | 2 Empowerment | 3 Weakening | 4 Protection | 5 Vulnerability | 6 Resistance
 SkillBlocks {
   category: u8, purpose: u8, source: Source, form: Form, target: u8,
   aspects: [Aspect; 3], aspect_count: u8, effect: u8, trigger: u8, aura_radius: u8,

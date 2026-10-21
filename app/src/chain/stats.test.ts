@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { beforeAll } from "vitest";
+import balance from "./balance.json";
 import fixtures from "./__fixtures__/combat-wasm.json";
 import { CombatWasm } from "./combatWasm";
 import { RESIST_CAP_BP, deltaText, monsterBaseAp, monsterDefense, playerDefense, speedAp, unitStats, type DefenseProfile } from "./stats";
@@ -41,12 +42,28 @@ describe("stats", () => {
   it("player defenses", () => {
     // rules.rs test: warrior with Dex 10 has defense 12, armor 30.
     // Class armor, then the starter kit on top (sword + leather armor 10, staff + robe 2).
-    expect(playerDefense(Class.Warrior, [10, 10, 10, 10])).toEqual({ defense: 12, armor: 20, resist: NONE });
+    const stateResist = 10 * balance.players.end_state_resist_bp;
+    expect(playerDefense(Class.Warrior, [10, 10, 10, 10])).toEqual({ defense: 12, armor: 20, resist: NONE, stateResist });
     const kit = (weapon: number, body: number) => [weapon, 0xff, 0xff, body, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
-    expect(playerDefense(Class.Warrior, [10, 10, 10, 10], kit(0, 3))).toEqual({ defense: 12, armor: 30, resist: NONE });
+    expect(playerDefense(Class.Warrior, [10, 10, 10, 10], kit(0, 3))).toEqual({ defense: 12, armor: 30, resist: NONE, stateResist });
     expect(playerDefense(Class.Mage, [5, 7, 13, 5], kit(1, 4)).armor).toBe(5);
     expect(playerDefense(Class.Support, [5, 8, 12, 5], kit(2, 5)).armor).toBe(5);
     expect([monsterBaseAp(0), monsterBaseAp(6), monsterBaseAp(200)]).toEqual([1, 6, 12]);
+  });
+
+  it("player resistances match the combat module's hero sheet (patch 9)", () => {
+    for (const f of fixtures.sheets) {
+      const d = playerDefense(f.input.class as Class, f.input.stats, f.input.equipment);
+      expect([d.resist, d.stateResist]).toEqual([f.sheet.resistBp, f.sheet.stateResistBp]);
+    }
+  });
+
+  it("a Resistance adds its weighted share to its aspects, capped", () => {
+    const ward = { kind: ModKind.Resistance, aspect: Aspect.Piercing, turns: 2, powerBp: 4_000, source: 1, weightsPct: [0, 0, 0, 65, 0, 100] } as TimedMod;
+    const s = unitStats({ hp: 9, hpMax: 9, apBase: 4, apNow: null, profile: { defense: 10, armor: 0, resist: [0, 0, 0, 0, 0, 29_000] }, mods: [ward] });
+    expect(s.resist[Aspect.Blood]).toMatchObject({ base: 0, final: 2_600, by: ["Resistance"] });
+    expect(s.resist[Aspect.Piercing]).toMatchObject({ final: RESIST_CAP_BP, by: ["Resistance"] });
+    expect(s.resist[Aspect.Fire]).toMatchObject({ final: 0, by: [] });
   });
 
   it("speedAp: Haste and Slow are an opposing pair (support.rs tests)", () => {

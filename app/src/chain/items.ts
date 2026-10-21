@@ -90,6 +90,9 @@ type BaseStats = {
   attack: number;
   stats: Record<string, number>;
   hp: number;
+  /** Patch 9: resistance per aspect (keyed by aspect name) and state resistance, bp. */
+  resist_bp: Record<string, number>;
+  state_resist_bp: number;
 };
 const BASES: Record<string, BaseStats> = balance.items.bases;
 /** balance.json keys bases by the Rust variant name ("LeatherArmor"). */
@@ -104,13 +107,18 @@ export type ItemBonus = {
   /** By `Stat` order: Strength, Dexterity, Intelligence, Endurance. */
   stats: [number, number, number, number];
   hp: number;
+  /** Patch 9: resistance per aspect (by `Aspect`) and state resistance, bp. */
+  resist: number[];
+  stateResist: number;
 };
 
 const STAT_KEYS = ["Strength", "Dexterity", "Intelligence", "Endurance"] as const;
+/** `Aspect` order, as balance.json keys the item resistances. */
+const ASPECT_KEYS = ["Fire", "Cold", "Lightning", "Blood", "Blunt", "Piercing"] as const;
 
 /** `deadroll_rules::items::item_bonus` over a worn-items snapshot (`ItemBase` bytes by slot). */
 export function itemBonus(equipment: ArrayLike<number>): ItemBonus {
-  const out: ItemBonus = { weapon: null, armor: 0, defense: 0, attack: 0, stats: [0, 0, 0, 0], hp: 0 };
+  const out: ItemBonus = { weapon: null, armor: 0, defense: 0, attack: 0, stats: [0, 0, 0, 0], hp: 0, resist: ASPECT_KEYS.map(() => 0), stateResist: 0 };
   for (let slot = 0; slot < equipment.length; slot++) {
     const key = ITEM_BASES[equipment[slot] ?? EMPTY_ITEM];
     const b = key ? baseStats(key) : undefined;
@@ -121,6 +129,8 @@ export function itemBonus(equipment: ArrayLike<number>): ItemBonus {
     out.attack += b.attack;
     out.hp += b.hp;
     STAT_KEYS.forEach((s, i) => (out.stats[i] = (out.stats[i] ?? 0) + (b.stats[s] ?? 0)));
+    ASPECT_KEYS.forEach((a, i) => (out.resist[i] = (out.resist[i] ?? 0) + (b.resist_bp?.[a] ?? 0)));
+    out.stateResist += b.state_resist_bp ?? 0;
   }
   return out;
 }
@@ -155,12 +165,23 @@ export const DEFENSE_DEX_DIV: number = balance.players.defense_dex_div;
 export const UNARMED: readonly number[] = balance.items.unarmed;
 
 /** `deadroll_rules::input::hero::defense`: defense threshold and armor with the worn items. */
-export function heroDefense(cls: Class, stats: readonly number[], equipment: ArrayLike<number>): { defense: number; armor: number } {
+/** Patch 9: state resistance per point of Endurance (`PlayerTuning::end_state_resist_bp`). */
+export const END_STATE_RESIST_BP: number = balance.players.end_state_resist_bp;
+
+export function heroDefense(
+  cls: Class,
+  stats: readonly number[],
+  equipment: ArrayLike<number>,
+): { defense: number; armor: number; resist: number[]; stateResist: number } {
   const items = itemBonus(equipment);
   const dex = (stats[1] ?? 0) + items.stats[1];
+  const end = (stats[3] ?? 0) + items.stats[3];
   return {
     defense: DEFENSE_BASE + Math.floor(dex / Math.max(1, DEFENSE_DEX_DIV)) + items.defense,
     armor: (PLAYER_ARMOR[cls] ?? 0) + items.armor,
+    // deadroll_rules hero::resist and hero::state_resist: items, and Endurance for states.
+    resist: items.resist,
+    stateResist: end * END_STATE_RESIST_BP + items.stateResist,
   };
 }
 

@@ -15,10 +15,10 @@ use crate::{
     aura::{aura_kind, reactive_aura, Aura},
     config::BalanceConfig,
     input::{
-        buff_extra_turns, effect_action, effect_chance, effect_range, heal, land_effect,
-        monster_attacker, monster_defender, monster_effect_range, monster_support_input,
-        player_attacker, player_defender, support_input, take_damage, EffectAction, HeroStats,
-        SkillStats,
+        buff_extra_turns, effect_action, effect_chance, effect_immune, effect_range, effect_resist,
+        heal, land_effect, monster_attacker, monster_defender, monster_effect_chance,
+        monster_effect_range, monster_support_input, player_attacker, player_defender,
+        resistance_weights, support_input, take_damage, EffectAction, HeroStats, SkillStats,
     },
     monster::{MonsterProfile, MonsterSkillStats},
 };
@@ -28,6 +28,26 @@ use crate::{
 pub struct RiderOutcome {
     pub roll: EffectRoll,
     pub applied: Applied,
+}
+
+impl RiderOutcome {
+    /// The target is immune to the effect's state: nothing is rolled (COMBAT_MATH 5).
+    pub const IMMUNE: RiderOutcome = RiderOutcome {
+        roll: EffectRoll {
+            outcome: Outcome::Immune,
+            d20: 0,
+            attack_total: 0,
+            defense: 0,
+            crit: false,
+            crit_roll: None,
+            chance_pct: 0,
+            chance_roll: None,
+            d100: 0,
+            amount: 0,
+            rolls_used: 0,
+        },
+        applied: Applied::None,
+    };
 }
 
 /// What an attack did besides the `HitResult` (a player's on a monster, a monster's on a player).
@@ -82,9 +102,16 @@ pub fn attack_monster(
     if let Some(skill) = skill {
         if let Some(effect) = effect_action(skill.blocks.effect) {
             if result.outcome == Outcome::Hit && monster.alive {
+                if effect_immune(effect, input.defender.immune_states) {
+                    return AttackOutcome {
+                        died,
+                        rider: Some(RiderOutcome::IMMUNE),
+                    };
+                }
                 let (min, max) = effect_range(cfg, hero, skill.power_bp, effect);
+                let resist = effect_resist(&input.defender, effect);
                 let roll = resolve_rider(
-                    effect_chance(cfg, hero, skill),
+                    effect_chance(cfg, hero, skill, resist),
                     result.crit,
                     min,
                     max,
@@ -97,6 +124,7 @@ pub fn attack_monster(
                         effect,
                         roll.amount,
                         skill.blocks.aspects[0],
+                        resistance_weights(skill, Some(hero.predisposition)),
                         attacker,
                         0,
                         &mut monster.states,
@@ -125,6 +153,9 @@ pub fn debuff_monster(
     monster_mods: &mut TimedMods,
     src: &mut impl RollSource,
 ) -> RiderOutcome {
+    if effect_immune(effect, profile.immune_states) {
+        return RiderOutcome::IMMUNE;
+    }
     let defense = monster_defender(profile, &monster.states, monster_mods).defense;
     let input = support_input(cfg, hero, skill, effect, Some(defense));
     let roll = resolve_support(&input, &cfg.combat, src);
@@ -134,6 +165,7 @@ pub fn debuff_monster(
             effect,
             roll.amount,
             skill.blocks.aspects[0],
+            resistance_weights(skill, Some(hero.predisposition)),
             caster,
             0,
             &mut monster.states,
@@ -175,6 +207,7 @@ pub fn support_ally(
             effect,
             roll.amount,
             skill.blocks.aspects[0],
+            resistance_weights(skill, Some(hero.predisposition)),
             caster,
             buff_extra_turns(cfg, hero, on_self, effect),
             states,
@@ -198,7 +231,10 @@ pub fn start_aura(
     };
     let input = support_input(cfg, hero, skill, EffectAction::Mod(kind), None);
     let roll = resolve_support(&input, &cfg.combat, src);
-    (roll, reactive_aura(cfg, skill, roll.amount))
+    (
+        roll,
+        reactive_aura(cfg, skill, roll.amount, Some(hero.predisposition)),
+    )
 }
 
 /// A monster's natural attack (`skill = None`) or damage skill on a player, then that skill's
@@ -234,9 +270,16 @@ pub fn monster_attack(
     if let Some(skill) = skill {
         if let Some(effect) = effect_action(skill.blocks.effect) {
             if result.outcome == Outcome::Hit && *hp > 0 {
+                if effect_immune(effect, input.defender.immune_states) {
+                    return AttackOutcome {
+                        died,
+                        rider: Some(RiderOutcome::IMMUNE),
+                    };
+                }
                 let (min, max) = monster_effect_range(cfg, profile, skill.power_bp, effect);
+                let resist = effect_resist(&input.defender, effect);
                 let roll = resolve_rider(
-                    cfg.support.rider_chance_pct,
+                    monster_effect_chance(cfg, resist),
                     result.crit,
                     min,
                     max,
@@ -249,6 +292,7 @@ pub fn monster_attack(
                         effect,
                         roll.amount,
                         skill.blocks.aspects[0],
+                        resistance_weights(skill, profile.predisposition),
                         attacker,
                         0,
                         states,
@@ -280,8 +324,11 @@ pub fn monster_debuff_player(
     hero_view: &TimedMods,
     src: &mut impl RollSource,
 ) -> RiderOutcome {
-    let defense = player_defender(cfg, hero, states, hero_view).defense;
-    let input = monster_support_input(cfg, profile, skill, effect, Some(defense));
+    let target = player_defender(cfg, hero, states, hero_view);
+    if effect_immune(effect, target.immune_states) {
+        return RiderOutcome::IMMUNE;
+    }
+    let input = monster_support_input(cfg, profile, skill, effect, Some(target.defense));
     let roll = resolve_support(&input, &cfg.combat, src);
     let applied = if roll.outcome == Outcome::Hit && hp > 0 {
         land_effect(
@@ -289,6 +336,7 @@ pub fn monster_debuff_player(
             effect,
             roll.amount,
             skill.blocks.aspects[0],
+            resistance_weights(skill, profile.predisposition),
             caster,
             0,
             states,
@@ -327,6 +375,7 @@ pub fn monster_support(
             effect,
             roll.amount,
             skill.blocks.aspects[0],
+            resistance_weights(skill, profile.predisposition),
             caster,
             0,
             &mut target.states,
@@ -349,9 +398,10 @@ pub fn monster_start_aura(
     };
     let input = monster_support_input(cfg, profile, &skill.stats, EffectAction::Mod(kind), None);
     let roll = resolve_support(&input, &cfg.combat, src);
-    let aura = reactive_aura(cfg, &skill.stats, roll.amount).map(|a| Aura {
-        kin_only: skill.kin_only,
-        ..a
-    });
+    let aura =
+        reactive_aura(cfg, &skill.stats, roll.amount, profile.predisposition).map(|a| Aura {
+            kin_only: skill.kin_only,
+            ..a
+        });
     (roll, aura)
 }

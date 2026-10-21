@@ -10,6 +10,7 @@
 //! | Weakening     | counterweight  | summed into `Attacker.weaken_bp`              |
 //! | Protection    | counterweight  | added to every `Defender.resist_bp` (capped)  |
 //! | Vulnerability | multiplier     | `Defender.vuln_bp` of the modifier's aspect   |
+//! | Resistance    | counterweight  | `Defender.resist_bp` by its aspect weights    |
 //! | Haste / Slow  | opposing pair  | action points: `ap * (BP + haste) / (BP + slow)` |
 //!
 //! Roll order of one support action (the website replays it from the VRF seed, keep it stable):
@@ -45,10 +46,13 @@ pub enum ModKind {
     Weakening,
     Protection,
     Vulnerability,
+    /// Patch 9: resistance to the aspects of its skill and its bearer's predisposition, each by
+    /// its weight (`TimedMod::weights_pct`).
+    Resistance,
 }
 
 impl ModKind {
-    pub const COUNT: usize = 6;
+    pub const COUNT: usize = 7;
     pub const ALL: [ModKind; Self::COUNT] = [
         ModKind::Haste,
         ModKind::Slow,
@@ -56,6 +60,7 @@ impl ModKind {
         ModKind::Weakening,
         ModKind::Protection,
         ModKind::Vulnerability,
+        ModKind::Resistance,
     ];
 
     /// Slow, Weakening, Vulnerability: harmful, applied to enemies.
@@ -67,7 +72,8 @@ impl ModKind {
     }
 }
 
-/// Modifier slots on one unit: one instance per kind.
+/// Modifier slots on one unit: one instance per kind, each in the slot of its kind
+/// (`kind as usize`), so the stored layout is the same everywhere.
 pub const MODS_MAX: usize = ModKind::COUNT;
 
 /// A buff or debuff on a unit. `turns == 0` marks an empty slot.
@@ -83,6 +89,9 @@ pub struct TimedMod {
     pub power_bp: u32,
     /// Turn-order id of the unit that applied it.
     pub source: u8,
+    /// Patch 9, Resistance only: the share of `power_bp` each aspect gets, percent (`0..=100`,
+    /// by `Aspect`). Zero for every other kind.
+    pub weights_pct: [u8; Aspect::COUNT],
 }
 
 impl TimedMod {
@@ -118,7 +127,7 @@ pub fn mod_power(mods: &TimedMods, kind: ModKind) -> u32 {
 }
 
 /// One instance per kind, like states: the stronger power (with its aspect and source) stays,
-/// the duration is refreshed to the longer one.
+/// the duration is refreshed to the longer one. A new kind goes into its own slot.
 pub fn apply_mod(mods: &mut TimedMods, new: TimedMod) -> Applied {
     if new.turns == 0 {
         return Applied::None;
@@ -129,16 +138,28 @@ pub fn apply_mod(mods: &mut TimedMods, new: TimedMod) -> Applied {
             old.power_bp = new.power_bp;
             old.aspect = new.aspect;
             old.source = new.source;
+            old.weights_pct = new.weights_pct;
         }
         old.turns = old.turns.max(new.turns);
         return Applied::Refreshed;
     }
-    match mods.iter().position(|m| m.turns == 0) {
+    match free_slot(mods, new.kind) {
         Some(i) => {
             mods[i] = new;
             Applied::Added
         }
         None => Applied::None,
+    }
+}
+
+/// The slot a new modifier of `kind` takes: its own, else (data written before patch 9, which
+/// filled the first free slot) the first free one.
+pub fn free_slot(mods: &TimedMods, kind: ModKind) -> Option<usize> {
+    let own = kind as usize;
+    if mods[own].is_empty() {
+        Some(own)
+    } else {
+        mods.iter().position(|m| m.is_empty())
     }
 }
 
@@ -176,7 +197,7 @@ pub fn apply_to_attacker(attacker: &mut Attacker, mods: &TimedMods) {
 }
 
 /// Protection is a counterweight on every aspect (through resistance, so the cap still holds);
-/// Vulnerability multiplies the damage of its aspect.
+/// Resistance on the aspects it weighs; Vulnerability multiplies the damage of its aspect.
 pub fn apply_to_defender(defender: &mut Defender, mods: &TimedMods) {
     let protection = mod_power(mods, ModKind::Protection);
     if protection > 0 {
@@ -184,10 +205,22 @@ pub fn apply_to_defender(defender: &mut Defender, mods: &TimedMods) {
             *r = r.saturating_add(protection);
         }
     }
+    if let Some(i) = find_mod(mods, ModKind::Resistance) {
+        let m = &mods[i];
+        for (r, w) in defender.resist_bp.iter_mut().zip(m.weights_pct) {
+            *r = r.saturating_add(resistance_share(m.power_bp, w));
+        }
+    }
     if let Some(i) = find_mod(mods, ModKind::Vulnerability) {
         let v = &mut defender.vuln_bp[mods[i].aspect as usize];
         *v = v.saturating_add(mods[i].power_bp);
     }
+}
+
+/// The part of a Resistance of `power_bp` that an aspect of weight `weight_pct` gets.
+pub const fn resistance_share(power_bp: u32, weight_pct: u8) -> u32 {
+    let w = if weight_pct > 100 { 100 } else { weight_pct };
+    (power_bp as u64 * w as u64 / 100) as u32
 }
 
 /// Action points of a turn: Haste multiplies, Slow and `slow_extra_bp` (Chill) divide as one
@@ -282,10 +315,10 @@ pub struct SupportBalance {
 
 impl SupportBalance {
     pub const DEFAULT: SupportBalance = SupportBalance {
-        // Haste, Slow, Empowerment, Weakening, Protection, Vulnerability
-        mod_min_bp: [2_500, 2_500, 2_000, 2_500, 2_000, 2_000],
-        mod_max_bp: [5_000, 5_000, 4_000, 5_000, 4_000, 4_000],
-        mod_duration: [2, 2, 2, 2, 2, 2],
+        // Haste, Slow, Empowerment, Weakening, Protection, Vulnerability, Resistance
+        mod_min_bp: [2_500, 2_500, 2_000, 2_500, 2_000, 2_000, 2_000],
+        mod_max_bp: [5_000, 5_000, 4_000, 5_000, 4_000, 4_000, 4_000],
+        mod_duration: [2, 2, 2, 2, 2, 2, 2],
         rider_chance_pct: 30,
         passive_point_bp: 5_000,
     };
@@ -491,6 +524,7 @@ mod tests {
             turns,
             power_bp,
             source: 1,
+            weights_pct: [0; Aspect::COUNT],
         }
     }
 
@@ -500,6 +534,39 @@ mod tests {
             apply_mod(&mut out, x);
         }
         out
+    }
+
+    #[test]
+    fn resistance_weighs_its_aspects_and_the_stronger_one_stays() {
+        let mut w = [0; Aspect::COUNT];
+        w[Aspect::Piercing as usize] = 65;
+        w[Aspect::Blood as usize] = 35;
+        let piercing = TimedMod {
+            weights_pct: w,
+            ..m(ModKind::Resistance, 3, 4_000)
+        };
+        let mut d = Defender::default();
+        d.resist_bp[Aspect::Blood as usize] = 1_000;
+        apply_to_defender(&mut d, &with(&[piercing]));
+        assert_eq!(d.resist_bp[Aspect::Piercing as usize], 2_600);
+        assert_eq!(d.resist_bp[Aspect::Blood as usize], 1_000 + 1_400);
+        assert_eq!(d.resist_bp[Aspect::Fire as usize], 0);
+        // One instance: a stronger Resistance replaces the weights too.
+        let mut fire = [0; Aspect::COUNT];
+        fire[Aspect::Fire as usize] = 100;
+        let mut mods = with(&[piercing]);
+        apply_mod(
+            &mut mods,
+            TimedMod {
+                weights_pct: fire,
+                ..m(ModKind::Resistance, 1, 5_000)
+            },
+        );
+        let mut d = Defender::default();
+        apply_to_defender(&mut d, &mods);
+        assert_eq!(d.resist_bp[Aspect::Fire as usize], 5_000);
+        assert_eq!(d.resist_bp[Aspect::Piercing as usize], 0);
+        assert_eq!(resistance_share(1_000, 250), 1_000);
     }
 
     #[test]

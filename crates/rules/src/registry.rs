@@ -287,6 +287,12 @@ pub struct MonsterJson {
     pub immunity: Vec<String>,
     #[serde(default)]
     pub state_immunity: Vec<String>,
+    /// Patch 9: defenses by tag, power sources (`Magical`, `Combat`) and forms (`Strike`,
+    /// `Projectile`): "immunity to magical" (docs/DAMAGE_TYPES_AND_MIXES.md 9).
+    #[serde(default)]
+    pub tag_resistance: Vec<String>,
+    #[serde(default)]
+    pub tag_immunity: Vec<String>,
     #[serde(default)]
     pub traits: Vec<String>,
     pub armor: u16,
@@ -544,6 +550,25 @@ fn mask<T: Copy + core::fmt::Debug + Into<u8>>(
     })
 }
 
+/// A defense tag mask (`deadroll_combat::source_bit` / `form_bit`) from source and form names.
+fn tag_mask(names: &[String]) -> Result<u8, String> {
+    names.iter().try_fold(0u8, |m, n| {
+        let source = deadroll_types::Source::ALL
+            .iter()
+            .find(|s| format!("{s:?}") == *n);
+        let form = deadroll_types::Form::ALL
+            .iter()
+            .find(|f| format!("{f:?}") == *n);
+        match (source, form) {
+            (Some(s), _) => Ok(m | deadroll_combat::source_bit(*s)),
+            (_, Some(f)) => Ok(m | deadroll_combat::form_bit(*f)),
+            _ => Err(format!(
+                "unknown tag `{n}`, expected one of: Magical, Combat, Strike, Projectile"
+            )),
+        }
+    })
+}
+
 /// `bestiary.json` as the `bestiary` table body (programs/registry README byte table).
 pub fn encode_bestiary(json: &str) -> Result<Vec<u8>, String> {
     let list: Vec<MonsterJson> = records(json, "bestiary")?;
@@ -595,6 +620,8 @@ pub fn encode_bestiary(json: &str) -> Result<Vec<u8>, String> {
         r[32..34].copy_from_slice(&m.damage_max.to_le_bytes());
         r[34..38].copy_from_slice(&m.xp.to_le_bytes());
         r[record::IMMUNE_STATES] = mask(&m.state_immunity, StateKind::ALL, "state")?;
+        r[record::RESIST_TAGS] = tag_mask(&m.tag_resistance)?;
+        r[record::IMMUNE_TAGS] = tag_mask(&m.tag_immunity)?;
         r[record::POOL_START] = m.pool_start;
         r[record::POOL_LEN] = m.pool_len;
         r[record::KIN] = match m.kin.as_deref() {

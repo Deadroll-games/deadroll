@@ -173,6 +173,11 @@ export type GameSession = {
    * While it is not empty no turn starts and no action is taken.
    */
   pendingDeaths: number;
+  /**
+   * Each player's auras' aspect weights (a Resistance, `deadroll_rules::aura::Aura::weights_pct`),
+   * by aura slot like `auras`.
+   */
+  auraWeights: Array<Array<ReadonlyUint8Array>>;
 };
 
 export type GameSessionArgs = {
@@ -262,6 +267,11 @@ export type GameSessionArgs = {
    * While it is not empty no turn starts and no action is taken.
    */
   pendingDeaths: number;
+  /**
+   * Each player's auras' aspect weights (a Resistance, `deadroll_rules::aura::Aura::weights_pct`),
+   * by aura slot like `auras`.
+   */
+  auraWeights: Array<Array<ReadonlyUint8Array>>;
 };
 
 /** Gets the encoder for {@link GameSessionArgs} account data. */
@@ -304,6 +314,13 @@ export function getGameSessionEncoder(): FixedSizeEncoder<GameSessionArgs> {
       ["pendingReactive", getPendingReactiveDataEncoder()],
       ["pendingMonsterReactive", getPendingMonsterReactiveDataEncoder()],
       ["pendingDeaths", getU8Encoder()],
+      [
+        "auraWeights",
+        getArrayEncoder(
+          getArrayEncoder(fixEncoderSize(getBytesEncoder(), 6), { size: 2 }),
+          { size: 4 },
+        ),
+      ],
     ]),
     (value) => ({ ...value, discriminator: GAME_SESSION_DISCRIMINATOR }),
   );
@@ -348,6 +365,13 @@ export function getGameSessionDecoder(): FixedSizeDecoder<GameSession> {
     ["pendingReactive", getPendingReactiveDataDecoder()],
     ["pendingMonsterReactive", getPendingMonsterReactiveDataDecoder()],
     ["pendingDeaths", getU8Decoder()],
+    [
+      "auraWeights",
+      getArrayDecoder(
+        getArrayDecoder(fixDecoderSize(getBytesDecoder(), 6), { size: 2 }),
+        { size: 4 },
+      ),
+    ],
   ]);
 }
 
@@ -413,5 +437,5 @@ export async function fetchAllMaybeGameSession(
 }
 
 export function getGameSessionSize(): number {
-  return 963;
+  return 1011;
 }

@@ -6,7 +6,13 @@ import type { HitResult, ItemBonusView, TimedMod } from "../../chain/types";
 export type HitItemSides = { attacker: ItemBonusView | null; target: ItemBonusView | null };
 
 /** Buffs and debuffs on both sides when the hit rolled (not in HitResolved: the app snapshots them). */
-export type HitMods = { attacker: TimedMod[]; target: TimedMod[] };
+export type HitMods = {
+  attacker: TimedMod[];
+  target: TimedMod[];
+  /** Patch 9: a player target's state resistance (Endurance and items), the counterweight on the
+   * chances of the states this hit rolls. */
+  targetStateResistBp?: number;
+};
 
 export type DiceCascadeProps = {
   hit: HitResult;

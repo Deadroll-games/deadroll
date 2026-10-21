@@ -44,6 +44,8 @@ import {
   getEffectEncoder,
   getEffectRollDataDecoder,
   getEffectRollDataEncoder,
+  getResistModDataDecoder,
+  getResistModDataEncoder,
   getTimedModDataDecoder,
   getTimedModDataEncoder,
   type ActiveState,
@@ -54,6 +56,8 @@ import {
   type EffectArgs,
   type EffectRollData,
   type EffectRollDataArgs,
+  type ResistModData,
+  type ResistModDataArgs,
   type TimedModData,
   type TimedModDataArgs,
 } from "../types/index.js";
@@ -92,6 +96,8 @@ export type EffectResolvedEvent = {
   /** The target's states and buffs / debuffs after. */
   states: Array<ActiveState>;
   mods: Array<TimedModData>;
+  /** Patch 9: the target's Resistance after. */
+  resistMod: ResistModData;
 };
 
 export type EffectResolvedEventArgs = {
@@ -119,6 +125,8 @@ export type EffectResolvedEventArgs = {
   /** The target's states and buffs / debuffs after. */
   states: Array<ActiveStateArgs>;
   mods: Array<TimedModDataArgs>;
+  /** Patch 9: the target's Resistance after. */
+  resistMod: ResistModDataArgs;
 };
 
 /** Gets the encoder for {@link EffectResolvedEventArgs} event data. */
@@ -138,6 +146,7 @@ export function getEffectResolvedEventEncoder(): Encoder<EffectResolvedEventArgs
       ["hp", getU32Encoder()],
       ["states", getArrayEncoder(getActiveStateEncoder(), { size: 6 })],
       ["mods", getArrayEncoder(getTimedModDataEncoder(), { size: 6 })],
+      ["resistMod", getResistModDataEncoder()],
     ]),
     [getConstantEncoder(EFFECT_RESOLVED_EVENT_DISCRIMINATOR)],
   );
@@ -160,6 +169,7 @@ export function getEffectResolvedEventDecoder(): Decoder<EffectResolvedEvent> {
       ["hp", getU32Decoder()],
       ["states", getArrayDecoder(getActiveStateDecoder(), { size: 6 })],
       ["mods", getArrayDecoder(getTimedModDataDecoder(), { size: 6 })],
+      ["resistMod", getResistModDataDecoder()],
     ]),
     [getConstantDecoder(EFFECT_RESOLVED_EVENT_DISCRIMINATOR)],
   );

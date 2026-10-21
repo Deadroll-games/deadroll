@@ -45,6 +45,8 @@ import {
   getMonsterDefenseDataEncoder,
   getMonsterStateDataDecoder,
   getMonsterStateDataEncoder,
+  getResistModDataDecoder,
+  getResistModDataEncoder,
   getTimedModDataDecoder,
   getTimedModDataEncoder,
   type BurningCellData,
@@ -55,6 +57,8 @@ import {
   type MonsterDefenseDataArgs,
   type MonsterStateData,
   type MonsterStateDataArgs,
+  type ResistModData,
+  type ResistModDataArgs,
   type TimedModData,
   type TimedModDataArgs,
 } from "../types/index.js";
@@ -75,7 +79,10 @@ export type MonsterState = {
   core: MonsterStateData;
   /** Not used since patch 6 (`skill_cooldowns` holds every monster slot). Kept for the layout. */
   cooldowns: Array<ReadonlyUint8Array>;
-  /** Per monster: buffs and debuffs (`deadroll_combat::support`), like `Participation.mods`. */
+  /**
+   * Per monster: buffs and debuffs (`deadroll_combat::support`), like `Participation.mods`
+   * (the Resistance is in `resist_mods`).
+   */
   mods: Array<Array<TimedModData>>;
   /** Per monster: the defenses of its bestiary record. */
   defense: Array<MonsterDefenseData>;
@@ -108,6 +115,10 @@ export type MonsterState = {
   skillCooldowns: Array<ReadonlyUint8Array>;
   /** Per monster: its passive skill's aura (from `open_session`), then its reactive skill's. */
   auras: Array<Array<MonsterAuraData>>;
+  /** Per monster: its Resistance with the aspect weights, like `Participation.resist_mod`. */
+  resistMods: Array<ResistModData>;
+  /** Per monster, per aura slot: a Resistance aura's aspect weights. */
+  auraWeights: Array<Array<ReadonlyUint8Array>>;
 };
 
 export type MonsterStateArgs = {
@@ -115,7 +126,10 @@ export type MonsterStateArgs = {
   core: MonsterStateDataArgs;
   /** Not used since patch 6 (`skill_cooldowns` holds every monster slot). Kept for the layout. */
   cooldowns: Array<ReadonlyUint8Array>;
-  /** Per monster: buffs and debuffs (`deadroll_combat::support`), like `Participation.mods`. */
+  /**
+   * Per monster: buffs and debuffs (`deadroll_combat::support`), like `Participation.mods`
+   * (the Resistance is in `resist_mods`).
+   */
   mods: Array<Array<TimedModDataArgs>>;
   /** Per monster: the defenses of its bestiary record. */
   defense: Array<MonsterDefenseDataArgs>;
@@ -148,6 +162,10 @@ export type MonsterStateArgs = {
   skillCooldowns: Array<ReadonlyUint8Array>;
   /** Per monster: its passive skill's aura (from `open_session`), then its reactive skill's. */
   auras: Array<Array<MonsterAuraDataArgs>>;
+  /** Per monster: its Resistance with the aspect weights, like `Participation.resist_mod`. */
+  resistMods: Array<ResistModDataArgs>;
+  /** Per monster, per aura slot: a Resistance aura's aspect weights. */
+  auraWeights: Array<Array<ReadonlyUint8Array>>;
 };
 
 /** Gets the encoder for {@link MonsterStateArgs} account data. */
@@ -202,6 +220,14 @@ export function getMonsterStateEncoder(): FixedSizeEncoder<MonsterStateArgs> {
           { size: 24 },
         ),
       ],
+      ["resistMods", getArrayEncoder(getResistModDataEncoder(), { size: 24 })],
+      [
+        "auraWeights",
+        getArrayEncoder(
+          getArrayEncoder(fixEncoderSize(getBytesEncoder(), 6), { size: 2 }),
+          { size: 24 },
+        ),
+      ],
     ]),
     (value) => ({ ...value, discriminator: MONSTER_STATE_DISCRIMINATOR }),
   );
@@ -251,6 +277,14 @@ export function getMonsterStateDecoder(): FixedSizeDecoder<MonsterState> {
       "auras",
       getArrayDecoder(
         getArrayDecoder(getMonsterAuraDataDecoder(), { size: 2 }),
+        { size: 24 },
+      ),
+    ],
+    ["resistMods", getArrayDecoder(getResistModDataDecoder(), { size: 24 })],
+    [
+      "auraWeights",
+      getArrayDecoder(
+        getArrayDecoder(fixDecoderSize(getBytesDecoder(), 6), { size: 2 }),
         { size: 24 },
       ),
     ],
@@ -319,5 +353,5 @@ export async function fetchAllMaybeMonsterState(
 }
 
 export function getMonsterStateSize(): number {
-  return 6292;
+  return 6916;
 }

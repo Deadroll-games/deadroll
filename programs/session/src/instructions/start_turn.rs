@@ -17,7 +17,7 @@ use crate::{
     reactions::{fires_for, request_reactive_roll},
     rules::{monster_ap, Unit, BALANCE},
     state::{
-        mods::from_combat, pending_kind, player_auras, GameSession, Monsters, Participation,
+        mods::from_combat, pending_kind, GameSession, Monsters, Participation,
         PendingMonsterReactiveData, PendingReactiveData,
     },
     turns::{self, TurnStart},
@@ -168,9 +168,9 @@ pub fn handler<'info>(ctx: Context<'info, StartTurn<'info>>) -> Result<()> {
             // own turn (docs/SKILL_BUILDER.md 3.2, 3.5).
             let reactive = &mut session.reactives[slot as usize];
             reactive.cooldown_left = reactive.cooldown_left.saturating_sub(1);
-            let mut auras = player_auras(&session.auras[slot as usize]);
+            let mut auras = session.player_auras(slot);
             let ended = tick_auras(&mut auras);
-            session.auras[slot as usize] = auras.map(Into::into);
+            session.set_player_auras(slot, &auras);
             for i in 0..AURAS_PER_PLAYER {
                 if ended & (1 << i) != 0 {
                     emit!(AuraChanged {
@@ -321,13 +321,15 @@ pub fn handler<'info>(ctx: Context<'info, StartTurn<'info>>) -> Result<()> {
         cooldowns,
         thaw_damage: start.thaw_damage,
     });
+    let (stored, resist_mod) = from_combat(&mods);
     emit!(ModsTicked {
         session: session_key,
         unit,
         turn_seq,
         expired: start.expired_mods,
-        mods: from_combat(&mods),
+        mods: stored,
         action_points,
+        resist_mod,
     });
     if outcomes::emit_if_ended(session, session_key) {
         return Ok(());
