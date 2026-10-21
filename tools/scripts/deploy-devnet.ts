@@ -12,7 +12,7 @@ import {
   sessionVrfMode, RASTERIZER_VERSION } from "./lib/deploy.ts";
 
 const USAGE = `usage: deploy-devnet.ts [--url <rpc>] [--wallet <keypair.json>] [--skip-build] [--map-index <u32>]
-                        [--uri-base <text>] [--rasterizer-version <u16>]
+                        [--uri-base <text>] [--rasterizer-version <u16>] [--book-id <u16>]
                         [--compute-unit-price <micro-lamports>] [--yes] [--check-build]
 
 --url defaults to https://api.devnet.solana.com, --wallet to ~/.config/solana/id.json.
@@ -29,6 +29,7 @@ const f = parseFlags(
     "--map-index": "value",
     "--uri-base": "value",
     "--rasterizer-version": "value",
+    "--book-id": "value",
     "--compute-unit-price": "value",
     "--yes": "flag",
     "--check-build": "flag",
@@ -82,6 +83,7 @@ async function main() {
     uriBase: (f["--uri-base"] as string) ?? "https://deadroll.invalid/nft",
     uriBaseExplicit: f["--uri-base"] !== undefined,
     rasterizerVersion: intFlag(f["--rasterizer-version"], RASTERIZER_VERSION, 0xffff, "--rasterizer-version"),
+    bookId: f["--book-id"] === undefined ? undefined : intFlag(f["--book-id"], 0, 0xffff, "--book-id"),
     mapIndex: intFlag(f["--map-index"], 0, 0xffffffff, "--map-index"),
     computeUnitPrice: f["--compute-unit-price"] === undefined ? undefined : intFlag(f["--compute-unit-price"], 0, 10_000_000, "--compute-unit-price"),
     confirmCost,

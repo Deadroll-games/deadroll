@@ -22,26 +22,32 @@ Steps (each one skips itself when done):
 1. preflight: RPC, wallet, `target/deploy/*-keypair.json` match the ids in `@deadroll/sdk` (= `Anchor.toml`; keypairs are never generated);
 2. build: `cargo build-sbf --tools-version v1.54 --arch v3` in `programs/<program>` for each program (local:
    session with `--features mock-vrf`), `crates/render/wasm/build.sh`, `cargo run -p art -- pack` (palette +
-   sprite book 1 from `assets/`). This is what `anchor build -p` runs, without the IDL, in a cargo cache of its own,
+   sprite books 2.. from `assets/`). This is what `anchor build -p` runs, without the IDL, in a cargo cache of its own,
    `target/sbf-deploy/` (about 200 MB, only these scripts write it). anchor is not used because on Windows it starts
    cargo in a `\\?\D:\...` folder, which rebuilds the shared crates on every run and gives other `.so` bytes for the
    same code; a cache shared with `anchor build` would pass those bytes on (a deploy would upgrade programs that did
    not change);
-3. `solana program deploy` for the 7 programs whose on-chain bytes differ from the build. Each program is
+3. sprite books: `art pack --first-book <n>` from n = 2 up to the first id whose `SpriteBook` accounts are
+   missing, finalized with the same bytes, or an unfinished upload of the same bytes (`blobFits` in
+   `lib/render-program.ts`). A book finalized with other sprites never changes, so after a sprite change the
+   books move to the next free ids and `set_sprite_books` points `GameConfig` at them; a rerun finds the same
+   ids. Runs with `--skip-build` too;
+4. `solana program deploy` for the 7 programs whose on-chain bytes differ from the build. Each program is
    copied to `target/deploy-stage/` right after its own build; the mock-vrf session is moved
    there, so `target/deploy/` never keeps it. The build cache is never cleaned by hand: switching the session
    between mock-vrf and plain bumps the mtime of `programs/session/src/lib.rs`, and cargo rebuilds that crate;
-4. `init_config` (first caller becomes the authority), `resize_config` for a pre-patch-7 `GameConfig`, or
+5. `init_config` (first caller becomes the authority), `resize_config` for a pre-patch-7 `GameConfig`, or
    `set_programs` if the list changed;
-5. `seed-registry.ts`, `upload-sprites.ts` (palette, book), `upload-rasterizer.ts` (its finalize points
+6. `seed-registry.ts`, `upload-sprites.ts` (palette, book), `upload-rasterizer.ts` (its finalize points
    `GameConfig` at the rasterizer), then `set_palette` / `set_sprite_books` (and `set_rasterizer` only if
    the config points elsewhere);
-6. demo map from `assets/registry/maps/demo_16x16.json`, DM = the wallet, `["map", wallet, --map-index]`;
-7. summary: program ids, GameConfig, blobs, map and layout addresses.
+7. demo map from `assets/registry/maps/demo_16x16.json`, DM = the wallet, `["map", wallet, --map-index]`;
+8. summary: program ids, GameConfig, blobs, map and layout addresses.
 
 Flags: `--url`, `--wallet`, `--skip-build`, `--map-index <n>` (a map used by a session cannot be reused:
-pass the next index for a fresh one), `--uri-base` (NFT uri prefix), `--rasterizer-version`, `--book-id` (both default to 2: sprite format 2;
-version 1 and book 1 hold format 1 and are frozen).
+pass the next index for a fresh one), `--uri-base` (NFT uri prefix), `--rasterizer-version` (default 2: sprite format 2;
+version 1 and book 1 hold format 1 and are frozen), `--book-id <n>` (first sprite book id, 2 or more; fails
+if book n.. holds other sprites; without it step 3 picks the id).
 Devnet only: `--compute-unit-price`, `--yes` (no prompt), `--check-build` (build and check the VRF mode, no network).
 
 The devnet script refuses a session `.so` built with `mock-vrf` (it looks for the mock VRF identity in the

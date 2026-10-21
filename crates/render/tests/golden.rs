@@ -10,7 +10,7 @@ use deadroll_render::{
 use sha2::{Digest, Sha256};
 
 /// SHA-256 of the PNG (the canvas enlarged to at most 512 px). Changing it means the rendering rules changed: new rasterizer version.
-const WARRIOR_PNG_SHA256: &str = "fe9085fcf84117d87be2ba520023d09bc7d2947f8214a5f1c9c1ed89f667814b";
+const WARRIOR_PNG_SHA256: &str = "548983a751bcb466f9dee513a6adffc539ecf0ac3c6fedd1875f0ab85fe33cc3";
 const ASSET: [u8; ASSET_LEN] = [0; ASSET_LEN];
 
 fn root() -> std::path::PathBuf {

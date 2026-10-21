@@ -44,7 +44,7 @@ import { Aspect, Class, Race } from "../chain/types";
 import { DATA_SOURCE, explorerUrl } from "../config";
 import { OldCharacterLabel } from "../raster/OldCharacter";
 import { useRenderImage } from "../raster/RasterizerProvider";
-import { SpriteCanvas } from "../raster/SpriteCanvas";
+import { PREVIEW_SCALE, SpriteCanvas, usePreviewFit } from "../raster/SpriteCanvas";
 
 /** Where this character is right now, read from the party it is in. */
 export type PartyInfo = { session: Address; status: string; slot: number; hp: number } | null;
@@ -226,6 +226,7 @@ export function CharacterDetailView({
   const dead = !c.core.alive;
   const current = isCurrentAppearance(c.core.appearance);
   const img = useRenderImage(current ? characterRequest(c) : null);
+  const previewFit = usePreviewFit();
   const race = c.core.race as Race;
   const cls = c.core.class as Class;
   const pred = c.core.predisposition as Aspect;
@@ -236,7 +237,7 @@ export function CharacterDetailView({
   return (
     <div className="char-detail">
       <header className={`panel char-detail-head${dead ? " dead" : ""}`}>
-        {current ? <SpriteCanvas image={img.image} scale={2} label={name} /> : <OldCharacterLabel />}
+        {current ? <SpriteCanvas image={img.image} scale={PREVIEW_SCALE} fit={previewFit} label={name} /> : <OldCharacterLabel />}
         <div>
           <h1>{name}</h1>
           <p>

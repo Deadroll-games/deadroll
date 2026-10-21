@@ -37,7 +37,7 @@ import {
   getSetSpriteBooksInstruction,
   getSetUriBaseInstruction,
 } from "@deadroll/sdk/registry";
-import { GAME_CONFIG, connect, pda as blobPda, parseHeader } from "./render-program.ts";
+import { GAME_CONFIG, blobFits, connect, pda as blobPda, parseHeader } from "./render-program.ts";
 import { MAP_STRIDE, layoutBytes, loadMapPreset, type MapPreset } from "./demo-map.ts";
 
 export const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
@@ -62,6 +62,8 @@ const URI_BASE_LEN = 64;
 const EMPTY_ADDRESS = "11111111111111111111111111111111";
 /** Rasterizer version of sprite format 2 (crates/render/FORMAT.md); version 1 and book 1 hold format 1. */
 export const RASTERIZER_VERSION = 2;
+/** First sprite book id of sprite format 2; book 1 holds format 1. */
+export const FIRST_BOOK_ID = 2;
 const ASSETS = "target/render-assets";
 
 export type Cluster = "local" | "devnet";
@@ -74,6 +76,8 @@ export type DeployOptions = {
   uriBase: string;
   uriBaseExplicit: boolean;
   rasterizerVersion: number;
+  /** First sprite book id; omitted: the first id whose accounts take the packed books. */
+  bookId?: number;
   mapIndex: number;
   computeUnitPrice?: number;
   /** Called with the cost table before anything is sent; return false to stop. */
@@ -491,6 +495,34 @@ export function bookFiles(dir = join(ROOT, ASSETS)): { file: string; id: number 
   return books;
 }
 
+/**
+ * Packs the sprite books (`art pack --first-book`) from the first id whose accounts take them
+ * (`blobFits`). A book finalized with other sprites never changes, so after a sprite change the
+ * books move to the next free ids; a rerun finds the same ids. `--book-id` fixes the first id.
+ */
+async function packSpriteBooks(conn: Rpc, opts: DeployOptions, bins: ReturnType<typeof resolveBins>): Promise<void> {
+  let first = opts.bookId ?? FIRST_BOOK_ID;
+  if (first < FIRST_BOOK_ID) throw new Error(`--book-id must be ${FIRST_BOOK_ID} or more: book 1 holds sprite format 1`);
+  for (;;) {
+    run(bins.cargo, ["run", "-q", "-p", "art", "--", "pack", "--out", ASSETS, "--first-book", String(first)]);
+    let taken: number | null = null;
+    for (const b of bookFiles()) {
+      const onChain = await fetchData(conn.rpc, await blobPda("sprite_book", b.id));
+      if (!blobFits("sprite_book", b.id, readFileSync(b.file), onChain)) {
+        taken = b.id;
+        break;
+      }
+    }
+    if (taken === null) {
+      console.log(`sprite books from id ${first}`);
+      return;
+    }
+    if (opts.bookId !== undefined) throw new Error(`sprite book ${taken} already holds other sprites; pass a free --book-id or leave it out`);
+    first = taken + 1;
+    if (first + 4 > 0xffff) throw new Error("no free sprite book id");
+  }
+}
+
 async function uploadRender(conn: Rpc, opts: DeployOptions, wallet: KeyPairSigner, programIds: Record<string, string>) {
   step("registry tables");
   script("seed-registry.ts", [], opts);
@@ -597,6 +629,8 @@ export async function deploy(opts: DeployOptions): Promise<void> {
   const { programIds, balance } = await preflight(conn, opts, wallet, bins);
 
   if (!opts.skipBuild) build(bins, opts.mockVrf);
+  step("sprite books");
+  await packSpriteBooks(conn, opts, bins);
   checkArtifacts(opts);
   console.log(`session VRF: ${opts.mockVrf ? "mock-vrf (localnet only)" : "real MagicBlock oracle"}`);
 
