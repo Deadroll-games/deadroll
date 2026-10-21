@@ -48,8 +48,9 @@ export type GridProps = {
   /** Patch 5: the cells of a line target under the pointer, tinted. */
   line?: Cell[];
   /**
-   * CSS pixel size of one cell on screen. Default 48. The canvas draws at least 64 canvas pixels per
-   * cell (one format 2 sprite 1:1); sprites scale by integers, never smoothed.
+   * CSS pixel size of one cell on screen. Default 48. With sprites it is rounded down to a whole
+   * multiple of the 64 px tile (minimum 64), so the canvas is never resized by CSS and sprites scale
+   * by integers, never smoothed. A grid without sprites is shown at exactly this size.
    */
   cellPx?: number;
   /**

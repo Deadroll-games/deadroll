@@ -128,6 +128,17 @@ describe("backingCell", () => {
   });
 });
 
+describe("integerCell", () => {
+  it("is a whole multiple of the 64 px tile, never below one tile", async () => {
+    const { integerCell } = await import("./Grid");
+    expect(integerCell(12)).toBe(64);
+    expect(integerCell(48)).toBe(64);
+    expect(integerCell(96)).toBe(64);
+    expect(integerCell(128)).toBe(128);
+    expect(integerCell(200)).toBe(192);
+  });
+});
+
 describe("unitDest", () => {
   it("draws units at the tile pixel scale, bigger than the cell", async () => {
     const { unitDest } = await import("./Grid");

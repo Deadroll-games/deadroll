@@ -40,6 +40,7 @@ main { padding: 20px; max-width: 1200px; margin: 0 auto; }
 .wallet-list li + li { margin-top: 4px; }
 .wallet-list .btn { width: 100%; text-align: left; display: flex; gap: 8px; align-items: center; }
 canvas.pixel { image-rendering: pixelated; }
+canvas.sprite-canvas { flex: none; max-width: none; }
 
 /* L9.6 chain screens */
 .char-list { display: flex; flex-wrap: wrap; gap: 12px; }
