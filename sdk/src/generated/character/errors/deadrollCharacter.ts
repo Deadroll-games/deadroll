@@ -80,6 +80,8 @@ export const DEADROLL_CHARACTER_ERROR__NO_SUCH_SKILL = 0x178e; // 6030
 export const DEADROLL_CHARACTER_ERROR__INVALID_DESCRIPTION = 0x178f; // 6031
 /** DescriptionAlreadySet: This skill already has its description */
 export const DEADROLL_CHARACTER_ERROR__DESCRIPTION_ALREADY_SET = 0x1790; // 6032
+/** InvalidToken: Session token is not valid for this signer and owner, or it has expired */
+export const DEADROLL_CHARACTER_ERROR__INVALID_TOKEN = 0x1791; // 6033
 
 export type DeadrollCharacterError =
   | typeof DEADROLL_CHARACTER_ERROR__ALREADY_FROZEN
@@ -94,6 +96,7 @@ export type DeadrollCharacterError =
   | typeof DEADROLL_CHARACTER_ERROR__INVALID_SKILL
   | typeof DEADROLL_CHARACTER_ERROR__INVALID_SKILL_SELECTION
   | typeof DEADROLL_CHARACTER_ERROR__INVALID_STATS
+  | typeof DEADROLL_CHARACTER_ERROR__INVALID_TOKEN
   | typeof DEADROLL_CHARACTER_ERROR__LEVEL_TOO_LOW
   | typeof DEADROLL_CHARACTER_ERROR__MATH_OVERFLOW
   | typeof DEADROLL_CHARACTER_ERROR__NFT_ACCOUNTS_MISSING
@@ -132,6 +135,7 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_CHARACTER_ERROR__INVALID_SKILL]: `Skill rejected by the builder rules`,
     [DEADROLL_CHARACTER_ERROR__INVALID_SKILL_SELECTION]: `Map skill selection rejected: 4 active, 1 reactive, 1 passive of the character's own`,
     [DEADROLL_CHARACTER_ERROR__INVALID_STATS]: `Stats must start at the base and spend exactly the starting points`,
+    [DEADROLL_CHARACTER_ERROR__INVALID_TOKEN]: `Session token is not valid for this signer and owner, or it has expired`,
     [DEADROLL_CHARACTER_ERROR__LEVEL_TOO_LOW]: `Character level too low for this item`,
     [DEADROLL_CHARACTER_ERROR__MATH_OVERFLOW]: `Arithmetic overflow`,
     [DEADROLL_CHARACTER_ERROR__NFT_ACCOUNTS_MISSING]: `NFT accounts missing: asset and mpl-core program are required`,

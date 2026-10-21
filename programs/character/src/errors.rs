@@ -68,4 +68,8 @@ pub enum CharacterError {
     InvalidDescription,
     #[msg("This skill already has its description")]
     DescriptionAlreadySet,
+    /// Patch 10: named by `#[session_auth_or]` (`session-keys`): the token is not the game's
+    /// for this signer and owner, or it expired.
+    #[msg("Session token is not valid for this signer and owner, or it has expired")]
+    InvalidToken,
 }

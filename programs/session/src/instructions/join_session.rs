@@ -57,14 +57,16 @@ pub struct JoinSession<'info> {
 }
 
 /// `contribution` is the player's share of the party price; only what is still missing is taken.
-/// `actor` is the session key that will act for this character (`Pubkey::default()` = none).
+/// `actor` is the temporary key that will act for this character in this party, written to
+/// `Participation.session_key` (`Pubkey::default()` = none). The site creates its MagicBlock
+/// `SessionTokenV2` and the fee prepayment in the same transaction (docs/GAME_COMMISSIONS.md, 3).
 ///
 /// Joining takes a place and pays; the character is not locked yet. `set_ready(true)` takes the
 /// skills onto the map, locks the character (its bag and gear freeze) and copies its stats
 /// (docs/PARTY_AND_TURNS.md, 2.1).
 pub fn handler(ctx: Context<JoinSession>, contribution: u64, actor: Pubkey) -> Result<()> {
     let accounts = ctx.accounts;
-    let session_key = accounts.session.key();
+    let game_session = accounts.session.key();
     let character_key = accounts.character.key();
     let character = read_character(&accounts.character)?;
     require_keys_eq!(
@@ -116,9 +118,9 @@ pub fn handler(ctx: Context<JoinSession>, contribution: u64, actor: Pubkey) -> R
     let participation = &mut accounts.participation;
     participation.core = ParticipationData {
         version: ACCOUNT_VERSION,
-        session: session_key,
+        game_session,
         character: character_key,
-        actor,
+        session_key: actor,
         slot,
         x: session.entrance.x,
         y: session.entrance.y,
@@ -138,14 +140,14 @@ pub fn handler(ctx: Context<JoinSession>, contribution: u64, actor: Pubkey) -> R
 
     let stash = &mut accounts.stash;
     stash.version = ACCOUNT_VERSION;
-    stash.session = session_key;
+    stash.session = game_session;
     stash.character = character_key;
     stash.xp = 0;
     stash.resources = [0; STASH_RESOURCES];
     stash.bump = ctx.bumps.stash;
 
     emit!(PlayerJoined {
-        session: session_key,
+        session: game_session,
         character: character_key,
         player: accounts.player.key(),
         slot,

@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
 use deadroll_rules::reactive::{entered_next_to, Event};
 use deadroll_types::{seeds, Cell, SessionStatus};
+use session_keys::{session_auth_or, Session, SessionTokenV2};
 
 use crate::{
     auth,
@@ -13,7 +14,7 @@ use crate::{
     vrf::{self, RequestAccounts},
 };
 
-#[derive(Accounts)]
+#[derive(Accounts, Session)]
 pub struct MonsterMove<'info> {
     /// DM main wallet or the DM's session key; pays the VRF fee when the move triggers a
     /// reactive skill.
@@ -32,8 +33,9 @@ pub struct MonsterMove<'info> {
     /// CHECK: the session's `MapLayout`, address pinned at `open_session`.
     #[account(address = session.layout @ SessionError::InvalidLayout)]
     pub layout: UncheckedAccount<'info>,
-    /// CHECK: MagicBlock `SessionTokenV2`, checked in `auth::check_actor`.
-    pub session_token: Option<UncheckedAccount<'info>>,
+    /// MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs.
+    #[session(signer = signer, authority = session.core.dm)]
+    pub session_token: Option<Account<'info, SessionTokenV2>>,
     // Patch 5: a roll for the reactive skills an entering monster triggers.
     /// CHECK: our `["identity"]` PDA, signs the VRF request.
     #[account(seeds = [vrf::PROGRAM_IDENTITY_SEED], bump)]
@@ -54,6 +56,10 @@ pub struct MonsterMove<'info> {
 /// triggers that player's `EnemyAdjacent` reactive skill (docs/SKILL_BUILDER.md 3.2): the
 /// monster stops on that cell (the rest of the path is not walked, its action points stay) and
 /// the move requests a VRF value for the reactions.
+#[session_auth_or(
+    ctx.accounts.signer.key() == ctx.accounts.session.core.dm,
+    SessionError::Unauthorized
+)]
 pub fn handler(
     ctx: Context<MonsterMove>,
     monster: u8,
@@ -62,12 +68,7 @@ pub fn handler(
 ) -> Result<()> {
     let accounts = ctx.accounts;
     let session = &mut accounts.session;
-    auth::check_actor(
-        &accounts.signer,
-        &session.core.dm,
-        &session.dm_actor,
-        accounts.session_token.as_ref(),
-    )?;
+    auth::check_bound(accounts.signer.key, &session.core.dm, &session.dm_actor)?;
     require!(
         session.core.status == SessionStatus::Active,
         SessionError::NotActive

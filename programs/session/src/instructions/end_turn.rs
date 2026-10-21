@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 use deadroll_types::{seeds, SessionStatus};
+use session_keys::{session_auth_or, Session, SessionTokenV2};
 
 use crate::{
     auth,
@@ -9,7 +10,7 @@ use crate::{
     turns,
 };
 
-#[derive(Accounts)]
+#[derive(Accounts, Session)]
 pub struct EndTurn<'info> {
     /// On a player's turn: their main wallet or session key. On a monster's turn: the DM's.
     pub signer: Signer<'info>,
@@ -33,10 +34,30 @@ pub struct EndTurn<'info> {
         bump = participation.core.bump,
     )]
     pub participation: Option<Box<Account<'info, Participation>>>,
-    /// CHECK: MagicBlock `SessionTokenV2`, checked in `auth::check_actor`.
-    pub session_token: Option<UncheckedAccount<'info>>,
+    /// MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs.
+    #[session(signer = signer, authority = turn_keys().0)]
+    pub session_token: Option<Account<'info, SessionTokenV2>>,
 }
 
+impl EndTurn<'_> {
+    /// Whose turn it is: (main wallet, session key bound to this party). The player's on a
+    /// player's turn (default keys when `participation` is missing or not theirs, so every check
+    /// fails), the DM's on a monster's.
+    fn turn_keys(&self) -> (Pubkey, Pubkey) {
+        match self.session.current_unit() {
+            Some(Unit::Player(slot)) => match &self.participation {
+                Some(p) if p.core.slot == slot => (p.player, p.core.session_key),
+                _ => (Pubkey::default(), Pubkey::default()),
+            },
+            _ => (self.session.core.dm, self.session.dm_actor),
+        }
+    }
+}
+
+#[session_auth_or(
+    ctx.accounts.signer.key() == ctx.accounts.turn_keys().0,
+    SessionError::Unauthorized
+)]
 pub fn handler(ctx: Context<EndTurn>) -> Result<()> {
     let accounts = ctx.accounts;
     let session = &mut accounts.session;
@@ -48,7 +69,6 @@ pub fn handler(ctx: Context<EndTurn>) -> Result<()> {
     // Patch 6: a player down in the last callback is finalized first (`start_turn`).
     require!(session.pending_deaths == 0, SessionError::DeathsPending);
     let current = session.current_unit().ok_or(SessionError::NotActive)?;
-    let token = accounts.session_token.as_ref();
     match current {
         Unit::Player(slot) => {
             let participation = accounts
@@ -56,17 +76,16 @@ pub fn handler(ctx: Context<EndTurn>) -> Result<()> {
                 .as_ref()
                 .ok_or(SessionError::ParticipationMissing)?;
             require!(participation.core.slot == slot, SessionError::NotYourTurn);
-            auth::check_actor(
-                &accounts.signer,
+            auth::check_bound(
+                accounts.signer.key,
                 &participation.player,
-                &participation.core.actor,
-                token,
+                &participation.core.session_key,
             )?;
             // Any other action on a player's turn resets every escape intent (PARTY_AND_TURNS 7.3).
             session.flee_mask = 0;
         }
         Unit::Monster(_) => {
-            auth::check_actor(&accounts.signer, &session.core.dm, &session.dm_actor, token)?;
+            auth::check_bound(accounts.signer.key, &session.core.dm, &session.dm_actor)?;
         }
     }
 

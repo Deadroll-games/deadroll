@@ -124,6 +124,7 @@ export type EndTurnInput<
   monsters: TAccountMonsters;
   /** Required on a player's turn: the participation whose turn it is. */
   participation?: TAccountParticipation;
+  /** MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs. */
   sessionToken?: TAccountSessionToken;
 };
 
@@ -250,6 +251,7 @@ export type ParsedEndTurnInstruction<
     monsters: TAccountMetas[2];
     /** Required on a player's turn: the participation whose turn it is. */
     participation?: TAccountMetas[3] | undefined;
+    /** MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs. */
     sessionToken?: TAccountMetas[4] | undefined;
   };
   data: EndTurnInstructionData;

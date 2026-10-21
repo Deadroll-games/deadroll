@@ -27,6 +27,7 @@ export * from "./reactiveTriggered.js";
 export * from "./resonanceSpread.js";
 export * from "./rewardsClaimed.js";
 export * from "./sessionEnded.js";
+export * from "./sessionKeyChanged.js";
 export * from "./sessionOpened.js";
 export * from "./skillUsed.js";
 export * from "./turnSkipped.js";

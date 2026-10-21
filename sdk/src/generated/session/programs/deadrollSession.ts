@@ -64,6 +64,7 @@ import {
   getMoveUnitInstructionAsync,
   getOpenSessionInstructionAsync,
   getSetReadyInstructionAsync,
+  getSetSessionKeyInstruction,
   getStartSessionInstructionAsync,
   getStartTurnInstructionAsync,
   parseActInstruction,
@@ -78,6 +79,7 @@ import {
   parseMoveUnitInstruction,
   parseOpenSessionInstruction,
   parseSetReadyInstruction,
+  parseSetSessionKeyInstruction,
   parseStartSessionInstruction,
   parseStartTurnInstruction,
   type ActAsyncInput,
@@ -103,9 +105,11 @@ import {
   type ParsedMoveUnitInstruction,
   type ParsedOpenSessionInstruction,
   type ParsedSetReadyInstruction,
+  type ParsedSetSessionKeyInstruction,
   type ParsedStartSessionInstruction,
   type ParsedStartTurnInstruction,
   type SetReadyAsyncInput,
+  type SetSessionKeyInput,
   type StartSessionAsyncInput,
   type StartTurnAsyncInput,
 } from "../instructions/index.js";
@@ -227,11 +231,12 @@ export const DeadrollSessionEvent = {
   18: "ResonanceSpread",
   19: "RewardsClaimed",
   20: "SessionEnded",
-  21: "SessionOpened",
-  22: "SkillUsed",
-  23: "TurnSkipped",
-  24: "TurnStarted",
-  25: "TurnTicked",
+  21: "SessionKeyChanged",
+  22: "SessionOpened",
+  23: "SkillUsed",
+  24: "TurnSkipped",
+  25: "TurnStarted",
+  26: "TurnTicked",
   ActionRequested: 0,
   AuraChanged: 1,
   CellBurned: 2,
@@ -253,11 +258,12 @@ export const DeadrollSessionEvent = {
   ResonanceSpread: 18,
   RewardsClaimed: 19,
   SessionEnded: 20,
-  SessionOpened: 21,
-  SkillUsed: 22,
-  TurnSkipped: 23,
-  TurnStarted: 24,
-  TurnTicked: 25,
+  SessionKeyChanged: 21,
+  SessionOpened: 22,
+  SkillUsed: 23,
+  TurnSkipped: 24,
+  TurnStarted: 25,
+  TurnTicked: 26,
 } as const;
 
 export type DeadrollSessionEvent = (typeof DeadrollSessionEvent)[Exclude<
@@ -504,6 +510,17 @@ export function identifyDeadrollSessionEvent(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([150, 154, 37, 80, 94, 124, 129, 144]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionEvent.SessionKeyChanged;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([34, 79, 77, 95, 195, 207, 104, 223]),
       ),
       0,
@@ -573,8 +590,9 @@ export const DeadrollSessionInstruction = {
   9: "MoveUnit",
   10: "OpenSession",
   11: "SetReady",
-  12: "StartSession",
-  13: "StartTurn",
+  12: "SetSessionKey",
+  13: "StartSession",
+  14: "StartTurn",
   Act: 0,
   ClaimEscrow: 1,
   ClaimRewards: 2,
@@ -587,8 +605,9 @@ export const DeadrollSessionInstruction = {
   MoveUnit: 9,
   OpenSession: 10,
   SetReady: 11,
-  StartSession: 12,
-  StartTurn: 13,
+  SetSessionKey: 12,
+  StartSession: 13,
+  StartTurn: 14,
 } as const;
 
 export type DeadrollSessionInstruction =
@@ -737,6 +756,17 @@ export function identifyDeadrollSessionInstruction(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([13, 147, 179, 38, 67, 1, 69, 132]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionInstruction.SetSessionKey;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([23, 227, 111, 142, 212, 230, 3, 175]),
       ),
       0,
@@ -800,6 +830,9 @@ export type ParsedDeadrollSessionInstruction<
   | ({
       instructionType: typeof DeadrollSessionInstruction.SetReady;
     } & ParsedSetReadyInstruction<TProgram>)
+  | ({
+      instructionType: typeof DeadrollSessionInstruction.SetSessionKey;
+    } & ParsedSetSessionKeyInstruction<TProgram>)
   | ({
       instructionType: typeof DeadrollSessionInstruction.StartSession;
     } & ParsedStartSessionInstruction<TProgram>)
@@ -896,6 +929,13 @@ export function parseDeadrollSessionInstruction<TProgram extends string>(
         ...parseSetReadyInstruction(instruction),
       };
     }
+    case DeadrollSessionInstruction.SetSessionKey: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: DeadrollSessionInstruction.SetSessionKey,
+        ...parseSetSessionKeyInstruction(instruction),
+      };
+    }
     case DeadrollSessionInstruction.StartSession: {
       assertIsInstructionWithAccounts(instruction);
       return {
@@ -989,6 +1029,10 @@ export type DeadrollSessionPluginInstructions = {
     input: SetReadyAsyncInput,
   ) => ReturnType<typeof getSetReadyInstructionAsync> &
     SelfPlanAndSendFunctions;
+  setSessionKey: (
+    input: SetSessionKeyInput,
+  ) => ReturnType<typeof getSetSessionKeyInstruction> &
+    SelfPlanAndSendFunctions;
   startSession: (
     input: StartSessionAsyncInput,
   ) => ReturnType<typeof getStartSessionInstructionAsync> &
@@ -1080,6 +1124,11 @@ export function deadrollSessionProgram() {
             addSelfPlanAndSendFunctions(
               client,
               getSetReadyInstructionAsync(input),
+            ),
+          setSessionKey: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getSetSessionKeyInstruction(input),
             ),
           startSession: (input) =>
             addSelfPlanAndSendFunctions(

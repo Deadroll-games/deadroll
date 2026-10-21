@@ -629,3 +629,45 @@ Rules: `ItemBaseStats.state_kind_resist_bp: [u32; 7]` (by `StateKind`, on top of
 `state_resist_bp`); `hero::state_resists` gives `Defender.state_resist_bp`.
 
 Session events: `StateRollData` and `EffectRollData` append `resist_bp: u32`. No account changes.
+
+## 18. Patch 10: a session key for one party (MagicBlock Session Keys)
+
+`crates/types` `ParticipationData`: two fields take the names of docs/GAME_COMMISSIONS.md 5. Same
+position and type, so the bytes and every open party stay as they are; only the IDL, the sdk and
+the Rust and TS field names change:
+
+```
+ParticipationData { version, game_session (was session), character, session_key (was actor), slot, ... }
+```
+
+`join_session(contribution, actor)` keeps its signature (section 8); `actor` is written to
+`Participation.session_key`. The site sends it in one main wallet transaction after the key's
+`session_keys::create_session_v2` (token + prepayment); `open_session(price, dm_actor)` the same.
+
+Session program, instruction added:
+
+```
+set_session_key(session_key: Pubkey)   main wallet only; accounts signer, session (w), participation (w, optional)
+    with participation: its player; writes Participation.session_key
+    without:            the DM; writes GameSession.dm_actor
+    Lobby or Active only (PartyEnded otherwise); Pubkey::default() unbinds. Creates no account.
+```
+
+Event `SessionKeyChanged { session, character: Option<Pubkey> (None = DM), session_key }`.
+Errors appended to `SessionError`: `InvalidToken`, `PartyEnded`. Appended to `CharacterError`:
+`InvalidToken`. The old `SessionTokenMissing`, `InvalidSessionToken`, `SessionTokenExpired` stay,
+unused.
+
+Game instructions (`act`, `move_unit`, `end_turn`, `flee`, `claim_rewards`, `monster_act`,
+`monster_move`) and `character::equip` / `unequip`: `session_token` is
+`Option<Account<SessionTokenV2>>` (same position), checked by the `session-keys` macros
+(`#[derive(Session)]`, `#[session_auth_or]`; the character program implements `SessionV2` with the
+session program as the target). A signer that is not the main wallet must also be the key bound to
+the party: `Participation.session_key`, or `GameSession.dm_actor` for monster actions.
+Without a token a session key fails with `Unauthorized`; a token of another wallet, key or program,
+or an expired one, with `InvalidToken`; a live token for a key the party does not have, with
+`Unauthorized`.
+
+`deadroll_rules::BalanceConfig.fees: FeeTuning { prepay_lamports, low_balance_lamports,
+max_key_lamports, key_validity_secs }` (appended; defaults 0.01 SOL, 0.002 SOL, 0.05 SOL, 3 h), read
+by the website from `balance.json`. No program reads it.

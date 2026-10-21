@@ -6,6 +6,7 @@ use deadroll_rules::{
 };
 use deadroll_skillcheck::Target;
 use deadroll_types::{seeds, Cell, SessionStatus, MONSTER_SLOTS};
+use session_keys::{session_auth_or, Session, SessionTokenV2};
 
 use crate::{
     auth,
@@ -18,7 +19,7 @@ use crate::{
     vrf::{self, CallbackAccounts, RequestAccounts},
 };
 
-#[derive(Accounts)]
+#[derive(Accounts, Session)]
 pub struct MonsterAct<'info> {
     /// DM main wallet or the DM's session key; pays the VRF fee.
     #[account(mut)]
@@ -60,8 +61,9 @@ pub struct MonsterAct<'info> {
         seeds::program = deadroll_character::ID,
     )]
     pub bag: UncheckedAccount<'info>,
-    /// CHECK: MagicBlock `SessionTokenV2`, checked in `auth::check_actor`.
-    pub session_token: Option<UncheckedAccount<'info>>,
+    /// MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs.
+    #[session(signer = signer, authority = session.core.dm)]
+    pub session_token: Option<Account<'info, SessionTokenV2>>,
     /// CHECK: our `["identity"]` PDA, signs the VRF request.
     #[account(seeds = [vrf::PROGRAM_IDENTITY_SEED], bump)]
     pub program_identity: UncheckedAccount<'info>,
@@ -85,15 +87,14 @@ pub struct MonsterAct<'info> {
 /// that monster slot (docs/BESTIARY.md 3.2; patch 6). `target`, by the skill's side: a player slot
 /// for the natural attack, damage and debuff skills; a monster index (itself included) for heal
 /// and buff skills, of its own kin for a kin-only skill.
+#[session_auth_or(
+    ctx.accounts.signer.key() == ctx.accounts.session.core.dm,
+    SessionError::Unauthorized
+)]
 pub fn handler(ctx: Context<MonsterAct>, monster: u8, action: u8, target: u8) -> Result<()> {
     let accounts = ctx.accounts;
     let session = &mut accounts.session;
-    auth::check_actor(
-        &accounts.signer,
-        &session.core.dm,
-        &session.dm_actor,
-        accounts.session_token.as_ref(),
-    )?;
+    auth::check_bound(accounts.signer.key, &session.core.dm, &session.dm_actor)?;
     require!(
         session.core.status == SessionStatus::Active,
         SessionError::NotActive

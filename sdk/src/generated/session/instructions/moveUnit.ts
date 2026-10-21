@@ -179,6 +179,7 @@ export type MoveUnitAsyncInput<
   /** Read-only, never Borsh-decoded: owner and discriminator checked here, session in `Monsters`. */
   monsters: TAccountMonsters;
   layout: TAccountLayout;
+  /** MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs. */
   sessionToken?: TAccountSessionToken;
   programIdentity?: TAccountProgramIdentity;
   oracleQueue?: TAccountOracleQueue;
@@ -448,6 +449,7 @@ export type MoveUnitInput<
   /** Read-only, never Borsh-decoded: owner and discriminator checked here, session in `Monsters`. */
   monsters: TAccountMonsters;
   layout: TAccountLayout;
+  /** MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs. */
   sessionToken?: TAccountSessionToken;
   programIdentity: TAccountProgramIdentity;
   oracleQueue?: TAccountOracleQueue;
@@ -699,6 +701,7 @@ export type ParsedMoveUnitInstruction<
     /** Read-only, never Borsh-decoded: owner and discriminator checked here, session in `Monsters`. */
     monsters: TAccountMetas[3];
     layout: TAccountMetas[4];
+    /** MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs. */
     sessionToken?: TAccountMetas[5] | undefined;
     programIdentity: TAccountMetas[6];
     oracleQueue: TAccountMetas[7];

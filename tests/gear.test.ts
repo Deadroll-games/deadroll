@@ -323,19 +323,19 @@ describe("equip and unequip: the session key", { skip: SKIP }, () => {
 
   it("rejects anyone else without a token", async () => {
     const { character: c } = await newCharacter("warrior");
-    await rejects(unequip(await funded(1), c, "body"), "SessionTokenMissing");
+    await rejects(unequip(await funded(1), c, "body"), "Unauthorized");
   });
 
   it("rejects a token of another wallet, for another program, or for another key", async () => {
     const { owner, character: c } = await newCharacter("warrior");
     const key = await funded(1);
     const stranger = await funded(1);
-    await rejects(unequip(key, c, "body", await issueToken(key, stranger)), "InvalidSessionToken");
-    await rejects(unequip(key, c, "body", await issueToken(key, owner, { target: ITEMS })), "InvalidSessionToken");
+    await rejects(unequip(key, c, "body", await issueToken(key, stranger)), "InvalidToken");
+    await rejects(unequip(key, c, "body", await issueToken(key, owner, { target: ITEMS })), "InvalidToken");
     const other = await funded(1);
-    await rejects(unequip(key, c, "body", await issueToken(other, owner)), "InvalidSessionToken");
-    // An account that is not a session token at all.
-    await rejects(unequip(key, c, "body", c), "InvalidSessionToken");
+    await rejects(unequip(key, c, "body", await issueToken(other, owner)), "InvalidToken");
+    // An account that is not a session token at all (Anchor checks its owner).
+    await rejects(unequip(key, c, "body", c), "AccountOwnedByWrongProgram");
   });
 
   it("rejects an expired token", async () => {
@@ -343,6 +343,6 @@ describe("equip and unequip: the session key", { skip: SKIP }, () => {
     const key = await funded(1);
     const now = (await connection.getBlockTime(await connection.getSlot())) ?? Math.floor(Date.now() / 1000);
     const token = await issueToken(key, owner, { validUntil: now - 60 });
-    await rejects(unequip(key, c, "body", token), "SessionTokenExpired");
+    await rejects(unequip(key, c, "body", token), "InvalidToken");
   });
 });

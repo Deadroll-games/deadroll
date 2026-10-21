@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
 use deadroll_rules::reactive::{entered_next_to, Event};
 use deadroll_types::{seeds, Cell, SessionStatus};
+use session_keys::{session_auth_or, Session, SessionTokenV2};
 
 use crate::{
     auth,
@@ -16,7 +17,7 @@ use crate::{
     vrf::{self, RequestAccounts},
 };
 
-#[derive(Accounts)]
+#[derive(Accounts, Session)]
 pub struct MoveUnit<'info> {
     /// Main wallet or the participation's session key; pays the VRF fee when the move triggers a
     /// monster's reactive skill (patch 6).
@@ -43,8 +44,9 @@ pub struct MoveUnit<'info> {
     /// CHECK: the session's `MapLayout`, address pinned at `open_session`.
     #[account(address = session.layout @ SessionError::InvalidLayout)]
     pub layout: UncheckedAccount<'info>,
-    /// CHECK: MagicBlock `SessionTokenV2`, checked in `auth::check_actor`.
-    pub session_token: Option<UncheckedAccount<'info>>,
+    /// MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs.
+    #[session(signer = signer, authority = participation.player)]
+    pub session_token: Option<Account<'info, SessionTokenV2>>,
     // Patch 6: a roll for the monster reactive skills an entering player triggers.
     /// CHECK: our `["identity"]` PDA, signs the VRF request.
     #[account(seeds = [vrf::PROGRAM_IDENTITY_SEED], bump)]
@@ -65,15 +67,18 @@ pub struct MoveUnit<'info> {
 /// `EnemyAdjacent` reactive skill answers (docs/SKILL_BUILDER.md 3.2, docs/BESTIARY.md 3.2): the
 /// player stops on that cell (the rest of the path is not walked, its action points stay) and the
 /// move requests a VRF value for the monsters' reactions, like `monster_move` for the players'.
+#[session_auth_or(
+    ctx.accounts.signer.key() == ctx.accounts.participation.player,
+    SessionError::Unauthorized
+)]
 pub fn handler(ctx: Context<MoveUnit>, steps: [u8; MAX_PATH], len: u8) -> Result<()> {
     let accounts = ctx.accounts;
     let session = &mut accounts.session;
     let participation = &mut accounts.participation;
-    auth::check_actor(
-        &accounts.signer,
+    auth::check_bound(
+        accounts.signer.key,
         &participation.player,
-        &participation.core.actor,
-        accounts.session_token.as_ref(),
+        &participation.core.session_key,
     )?;
     require!(
         session.core.status == SessionStatus::Active,

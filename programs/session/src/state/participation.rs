@@ -149,9 +149,9 @@ mod tests {
         let mut p = Participation {
             core: ParticipationData {
                 version: 1,
-                session: Pubkey::default(),
+                game_session: Pubkey::default(),
                 character: Pubkey::default(),
-                actor: Pubkey::default(),
+                session_key: Pubkey::default(),
                 slot: 0,
                 x: 0,
                 y: 0,

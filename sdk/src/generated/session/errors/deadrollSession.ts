@@ -148,6 +148,10 @@ export const DEADROLL_SESSION_ERROR__INVALID_MONSTER_SKILLS = 0x17b0; // 6064
 export const DEADROLL_SESSION_ERROR__DEATHS_PENDING = 0x17b1; // 6065
 /** InvalidDeathAccounts: The remaining accounts are not the character, skill set and bag of each pending death, in slot order */
 export const DEADROLL_SESSION_ERROR__INVALID_DEATH_ACCOUNTS = 0x17b2; // 6066
+/** InvalidToken: Session token is not valid for this signer and wallet, or it has expired */
+export const DEADROLL_SESSION_ERROR__INVALID_TOKEN = 0x17b3; // 6067
+/** PartyEnded: The party is over: its session key can no longer be set */
+export const DEADROLL_SESSION_ERROR__PARTY_ENDED = 0x17b4; // 6068
 
 export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__ALLY_ACCOUNT_MISSING
@@ -180,6 +184,7 @@ export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__INVALID_SKILL_SET
   | typeof DEADROLL_SESSION_ERROR__INVALID_TARGET
   | typeof DEADROLL_SESSION_ERROR__INVALID_TILE
+  | typeof DEADROLL_SESSION_ERROR__INVALID_TOKEN
   | typeof DEADROLL_SESSION_ERROR__LINE_BLOCKED
   | typeof DEADROLL_SESSION_ERROR__MAP_NOT_FINALIZED
   | typeof DEADROLL_SESSION_ERROR__MONSTER_SKILL_MISSING
@@ -200,6 +205,7 @@ export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__OUT_OF_RANGE
   | typeof DEADROLL_SESSION_ERROR__OVERFLOW
   | typeof DEADROLL_SESSION_ERROR__PARTICIPATION_MISSING
+  | typeof DEADROLL_SESSION_ERROR__PARTY_ENDED
   | typeof DEADROLL_SESSION_ERROR__PARTY_FULL
   | typeof DEADROLL_SESSION_ERROR__PRICE_NOT_COLLECTED
   | typeof DEADROLL_SESSION_ERROR__PRICE_TOO_LOW
@@ -252,6 +258,7 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__INVALID_SKILL_SET]: `Account is not the skill set of this character`,
     [DEADROLL_SESSION_ERROR__INVALID_TARGET]: `Target is not a living enemy`,
     [DEADROLL_SESSION_ERROR__INVALID_TILE]: `Unknown tile in the layout`,
+    [DEADROLL_SESSION_ERROR__INVALID_TOKEN]: `Session token is not valid for this signer and wallet, or it has expired`,
     [DEADROLL_SESSION_ERROR__LINE_BLOCKED]: `A wall cuts the line before the target`,
     [DEADROLL_SESSION_ERROR__MAP_NOT_FINALIZED]: `Map is not finalized`,
     [DEADROLL_SESSION_ERROR__MONSTER_SKILL_MISSING]: `This monster has no active skill in that slot`,
@@ -272,6 +279,7 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__OUT_OF_RANGE]: `Target is out of range`,
     [DEADROLL_SESSION_ERROR__OVERFLOW]: `Arithmetic overflow`,
     [DEADROLL_SESSION_ERROR__PARTICIPATION_MISSING]: `Participation account is required on a player's turn`,
+    [DEADROLL_SESSION_ERROR__PARTY_ENDED]: `The party is over: its session key can no longer be set`,
     [DEADROLL_SESSION_ERROR__PARTY_FULL]: `Party is full`,
     [DEADROLL_SESSION_ERROR__PRICE_NOT_COLLECTED]: `Party price is not collected yet`,
     [DEADROLL_SESSION_ERROR__PRICE_TOO_LOW]: `Party price is below the minimum`,

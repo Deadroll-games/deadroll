@@ -64,6 +64,7 @@ export const PROGRAM_ERRORS = {
     6030: ["NoSuchSkill", "The character has no skill at this index"],
     6031: ["InvalidDescription", "Description must be printable ASCII, not empty, zero-padded, at most 200 bytes"],
     6032: ["DescriptionAlreadySet", "This skill already has its description"],
+    6033: ["InvalidToken", "Session token is not valid for this signer and owner, or it has expired"],
   },
   items: {
     6000: ["Unauthorized", "Caller is not authorized for this instruction"],
@@ -185,6 +186,8 @@ export const PROGRAM_ERRORS = {
     6064: ["InvalidMonsterSkills", "Account is not the registry monster skills table, or a pool skill is missing"],
     6065: ["DeathsPending", "A death is waiting to be finalized: start_turn (or a claim) first"],
     6066: ["InvalidDeathAccounts", "The remaining accounts are not the character, skill set and bag of each pending death, in slot order"],
+    6067: ["InvalidToken", "Session token is not valid for this signer and wallet, or it has expired"],
+    6068: ["PartyEnded", "The party is over: its session key can no longer be set"],
   },
   city: {
     6000: ["Unauthorized", "Caller is not authorized for this instruction"],
