@@ -88,6 +88,7 @@ Item level is determined at crafting:
 
 - The set of possible affixes is defined by the item's **base**.
 - Materials and artisan perks shift which affixes drop more often (an elemental stone pulls toward elemental affixes).
+- Among the affixes are resistances to an aspect, a general state resistance and a resistance to one separate state. The last one adds to the general state resistance (`CHARACTER.md`, section 3).
 - **The tier of each affix is rolled at crafting** via VRF, within the cap set by the item level.
 - This is the only place in the game where tiers are random (`CHARACTER.md`, section 6.3).
 

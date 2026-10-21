@@ -433,8 +433,12 @@ Each monster in the bestiary (and characters through items) has, for each aspect
 | Level      | Damage  | Native state        | Resonances with this base            |
 | ---------- | ------- | ------------------- | ------------------------------------ |
 | normal     | full    | applied             | work                                 |
-| resistance | reduced | lower chance and strength | work if the condition is met   |
+| resistance | reduced | chance lowered by the rule below; strength unchanged | work if the condition is met   |
 | immunity   | none    | not applied         | **no dice are rolled**               |
+
+**Chance of a state.** The chance is divided by the sum of two counterweights: the target's resistance to that state, and a share (`aspect_state_resist_share_bp`, now 25%) of the target's resistance to the aspect whose native state it is. Example: a wolf with Cold resistance 50% gets a 12.5% counterweight against Chill. This works for the native state of a packet, for the states of resonances and for Stun (Blunt). Freeze has no aspect of its own, so only resistance to Freeze lowers it. The strength of a state does not depend on resistance, except damage over time, which falls together with the damage.
+
+**Tag defenses.** A target can also resist or be immune by the tags of a hit: the source of power (magical, martial) and the form (strike, projectile). Resistance to a tag adds to the resistance to the packet's aspect as one counterweight. Immunity to a tag of the hit means immunity to all its packets.
 
 Separately, a resonance may fail because of its own condition: for example, "Cleaving Ice" requires the target to be frozen **already**.
 

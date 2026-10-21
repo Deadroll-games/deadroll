@@ -218,7 +218,7 @@ This limit applies only to the builder. The same states can arise in other ways:
 
 ### 6.2 Buffs at the start
 
-Haste, Empowerment, Protection. The buff's aspect determines the recipient's reaction.
+Haste, Empowerment, Protection, Resistance. The buff's aspect determines the recipient's reaction. Resistance gives resistance to the skill's aspects by their shares, plus the bearer's predispositions, each with the share of its base aspect.
 
 **Heal** is open to monsters only: as an active or reactive skill on a single target (not a passive, not an aura). A kin-only skill heals and buffs only the monster's own kin (`BESTIARY.md`, section 2). Players cannot take Heal.
 

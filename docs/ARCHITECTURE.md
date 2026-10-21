@@ -159,6 +159,8 @@ programs/session/
 ├── Cargo.toml
 ├── README.md
 ├── CLAUDE.md
+├── lib/
+│   └── Cargo.toml            the same program as an rlib, for other crates
 ├── src/
 │   ├── lib.rs                list of instructions
 │   ├── state/                accounts: game_session.rs, participation.rs...
@@ -169,6 +171,8 @@ programs/session/
 ```
 
 The folder is `cpi_out`, not `cpi`: `#[program]` generates a crate-level `cpi` module, and the Anchor IDL build does not follow `#[path]`.
+
+A program that other crates use (for CPI or for its account types) has a second package in lib/. It compiles the same src/ (path = "../src/lib.rs") as an rlib, with the same features and dependencies, and [workspace.dependencies] points to it. Other crates never depend on the program package itself. The reason: a program is a cdylib, and cargo leaves the hash out of a cdylib's file names. So the build of the program and its cpi build for another program would write the same files in target/ and take each other's output: random E0463 and E0308 errors, or an empty cpi binary in target/deploy/. registry, map, character and session have a lib/. A program that becomes a dependency gets one first.
 
 ### 3.3 All of combat in one program
 

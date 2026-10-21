@@ -72,15 +72,16 @@ Rules:
 | **Armor**              | reduces physical damage with diminishing returns                                         | items, class, traits                                                        |
 | **Evasion**            | lowers the chance to hit the character; the threshold of the hit roll                    | Dexterity, items, traits                                                    |
 | **Accuracy**           | raises the chance to hit; the bonus added to the d20 of the hit roll                     | Dexterity, items, traits                                                    |
-| **Resistances**        | per elemental aspect: Fire, Cold, Lightning                                              | items, race, traits                                                         |
+| **Resistances**        | per aspect, physical ones included (Piercing, Blood, Blunt); lowers damage of the aspect | items, Resistance effect                                                    |
 | **State resistance**   | lowers the chance of states being applied                                                | Endurance, items                                                            |
+| **Resistance to a state** | lowers the chance of one state; adds to the general state resistance                  | items                                                                       |
 | **State chance**       | raises the chance to apply states and debuffs (section 2.1)                              | Strength or Intelligence by the skill's source, Dexterity for tempo effects |
 | **Speed**              | how many action points the character gets per turn                                       | race, class, Dexterity, items, effects (section 3.1)                        |
 | **Action Points (AP)** | spent on steps, skills, the basic attack, interactions (`PARTY_AND_TURNS.md`, section 5) | computed from speed                                                         |
 | **Initiative**         | how often the character's turn comes in combat (`PARTY_AND_TURNS.md`, section 6)         | Intelligence, items, effects (for example, Cold Mind)                       |
 | **Crit chance**        | in addition to a natural 20 on the d20                                                   | items, traits, skills                                                       |
 
-Resistances in the first version are **elemental** only. Physical damage is cut by **armor**. Resistances to future families (mental, sacred) will be added together with them.
+Resistances exist for every aspect, physical ones included. Physical damage is cut by **armor** first and then by the resistance to its aspect (`COMBAT_MATH.md`, section 6.5). Race gives a resistance only through the passive Resistance skill, which adds its own predisposition (`SKILL_BUILDER.md`, section 6.2). Resistances to future families (mental, sacred) will be added together with them.
 
 Accuracy and evasion are an opposing pair (`COMBAT_MATH.md`, section 3). Level and the damage stats (Strength, Intelligence) do not add accuracy.
 

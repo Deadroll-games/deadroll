@@ -147,10 +147,10 @@ Every attack is calculated strictly step by step. The order is fixed and the sam
 
 ### 6.5 Target defense
 
-Defense is calculated **separately for each packet**: physical packets are cut by armor, elemental packets are cut by resistance to their own aspect.
+Defense is calculated **separately for each packet**: physical packets are cut by armor and then by resistance, elemental packets are cut by resistance only.
 
-14. **Target armor** (for physical packets), reduced by the attacker's **penetration**. Armor lowers damage with diminishing returns: the more armor, the smaller the gain in defense from each new unit, and armor never gives 100% defense.
-15. **Target resistance to the packet's aspect** as a counterweight.
+14. **Target armor** (for physical packets only), reduced by the attacker's **penetration**. Armor lowers damage with diminishing returns: the more armor, the smaller the gain in defense from each new unit, and armor never gives 100% defense.
+15. **Target resistance to the packet's aspect** as a counterweight, for every packet, physical ones included. The resistance to the hit's tags (source of power, form) is summed with it into one counterweight, limited by the cap (section 10).
 16. **Target Vulnerabilities** as multipliers: Shock, Soaked, Brittleness, reactions.
 
 ### 6.6 Result
@@ -161,7 +161,7 @@ Defense is calculated **separately for each packet**: physical packets are cut b
 
 ### 6.7 Consequences
 
-20. **Application of native states** of each packet: the chance (from the skill, tier, increase) against the target's resistance, a separate d100 for each packet.
+20. **Application of native states** of each packet: the chance (from the skill, tier, increase) against the target's resistance to that state plus the share of its resistance to the state's aspect (`DAMAGE_TYPES_AND_MIXES.md`, section 9), a separate d100 for each packet.
 21. **Application of resonance states**, if the resonances grant them.
 22. **State collisions** (`DAMAGE_TYPES_AND_MIXES.md`, section 8): for each packet with each state that was on the target **before** the attack. Collision damage is calculated as a separate instance: only target defense, without repeated multipliers of the attacker.
 23. **Reactions** on the target, if the attack applies effects to a character with a predisposition.
