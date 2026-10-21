@@ -378,6 +378,9 @@ pub struct EffectRoll {
     pub amount: u32,
     /// Dice used from the roll source.
     pub rolls_used: u32,
+    /// Patch 9b: the target's counterweight the effect chance met, bp (set by the caller, which
+    /// built the chance; 0 for support actions).
+    pub resist_bp: u32,
 }
 
 /// The `d100` point in `min..=max`, raised by the crit multiplier on a crit.

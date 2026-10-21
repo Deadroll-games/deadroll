@@ -3,7 +3,7 @@
 //! presets are `ItemTuning` JSON files in `presets/items/`.
 use deadroll_rules::{items::KIT_MAX, ItemBaseStats, ItemTuning};
 use deadroll_sim::{config_io, named::Named};
-use deadroll_types::{Aspect, Class, ItemBase, Stat};
+use deadroll_types::{Aspect, Class, ItemBase, Stat, StateKind};
 use eframe::egui::{self, Ui};
 
 use crate::{app::BalanceApp, widgets};
@@ -52,6 +52,10 @@ fn base_row(ui: &mut Ui, base: ItemBase, b: &mut ItemBaseStats, d: &ItemBaseStat
         widgets::bp(ui, &mut b.resist_bp[aspect as usize]);
     }
     widgets::bp(ui, &mut b.state_resist_bp);
+    // Patch 9b: resistance to one state, on top of the general one.
+    for &kind in StateKind::all() {
+        widgets::bp(ui, &mut b.state_kind_resist_bp[kind as usize]);
+    }
     ui.end_row();
 }
 
@@ -133,6 +137,9 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                         ui.strong(format!("resist {}", aspect.name()));
                     }
                     ui.strong("state resist");
+                    for &kind in StateKind::all() {
+                        ui.strong(format!("resist {}", kind.name()));
+                    }
                     ui.end_row();
                     for &base in ItemBase::all() {
                         let i = base as usize;

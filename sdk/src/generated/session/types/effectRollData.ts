@@ -51,6 +51,8 @@ export type EffectRollData = {
   /** HP for a heal, bp for a buff or debuff, 0 for Stun / Freeze or a miss. */
   amount: number;
   rollsUsed: number;
+  /** Patch 9b: the target's counterweight the effect chance met, bp. */
+  resistBp: number;
 };
 
 export type EffectRollDataArgs = {
@@ -70,6 +72,8 @@ export type EffectRollDataArgs = {
   /** HP for a heal, bp for a buff or debuff, 0 for Stun / Freeze or a miss. */
   amount: number;
   rollsUsed: number;
+  /** Patch 9b: the target's counterweight the effect chance met, bp. */
+  resistBp: number;
 };
 
 export function getEffectRollDataEncoder(): Encoder<EffectRollDataArgs> {
@@ -85,6 +89,7 @@ export function getEffectRollDataEncoder(): Encoder<EffectRollDataArgs> {
     ["d100", getU8Encoder()],
     ["amount", getU32Encoder()],
     ["rollsUsed", getU32Encoder()],
+    ["resistBp", getU32Encoder()],
   ]);
 }
 
@@ -101,6 +106,7 @@ export function getEffectRollDataDecoder(): Decoder<EffectRollData> {
     ["d100", getU8Decoder()],
     ["amount", getU32Decoder()],
     ["rollsUsed", getU32Decoder()],
+    ["resistBp", getU32Decoder()],
   ]);
 }
 

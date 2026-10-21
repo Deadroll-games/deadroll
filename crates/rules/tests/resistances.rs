@@ -179,14 +179,47 @@ fn state_resistance_divides_effect_chances() {
     );
 
     // Hard control meets the resistance to its own state, a modifier the strongest one.
+    let tables = Registry::shipped().unwrap().tables;
     let mut d = player_defender(&CFG, &h, &no_states(), &TimedMods::default());
     d.state_resist_bp[StateKind::Stun as usize] = 9_000;
-    assert_eq!(effect_resist(&d, EffectAction::Stun), 9_000);
-    assert_eq!(effect_resist(&d, EffectAction::Mod(ModKind::Slow)), 9_000);
+    assert_eq!(effect_resist(&CFG, &tables, &d, EffectAction::Stun), 9_000);
     assert_eq!(
-        effect_resist(&d, EffectAction::Freeze),
+        effect_resist(&CFG, &tables, &d, EffectAction::Mod(ModKind::Slow)),
+        9_000
+    );
+    assert_eq!(
+        effect_resist(&CFG, &tables, &d, EffectAction::Freeze),
         d.state_resist_bp[StateKind::Freeze as usize]
     );
+    // Patch 9b: a share of the resistance to Blunt (Stun is its native state) adds to the Stun
+    // counterweight; Freeze is no aspect's native state.
+    d.resist_bp[Aspect::Blunt as usize] = 8_000;
+    d.resist_bp[Aspect::Cold as usize] = 8_000;
+    let share = 8_000 * CFG.combat.aspect_state_resist_share_bp / 10_000;
+    assert_eq!(
+        effect_resist(&CFG, &tables, &d, EffectAction::Stun),
+        9_000 + share
+    );
+    assert_eq!(
+        effect_resist(&CFG, &tables, &d, EffectAction::Freeze),
+        d.state_resist_bp[StateKind::Freeze as usize]
+    );
+}
+
+#[test]
+fn an_item_resists_one_state_on_top_of_the_general_one() {
+    let h = hero_with(10, Aspect::Fire);
+    let mut cfg = CFG;
+    let armor = &mut cfg.items.bases[ItemBase::LeatherArmor as usize];
+    armor.state_resist_bp = 500;
+    armor.state_kind_resist_bp[StateKind::Bleeding as usize] = 2_000;
+    let general = hero::state_resist(&cfg, &h);
+    assert_eq!(general, 10 * CFG.players.end_state_resist_bp + 500);
+    let each = hero::state_resists(&cfg, &h);
+    assert_eq!(each[StateKind::Bleeding as usize], general + 2_000);
+    assert_eq!(each[StateKind::Burning as usize], general);
+    let d = player_defender(&cfg, &h, &no_states(), &TimedMods::default());
+    assert_eq!(d.state_resist_bp, each);
 }
 
 #[test]
@@ -225,6 +258,7 @@ fn a_monster_rider_meets_the_player_state_resistance() {
         if let Some(rider) = out.rider {
             if !rider.roll.crit {
                 assert_eq!(rider.roll.chance_pct, expected);
+                assert_eq!(rider.roll.resist_bp, resist);
                 seen = true;
             }
         }

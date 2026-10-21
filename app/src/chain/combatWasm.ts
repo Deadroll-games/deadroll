@@ -17,7 +17,7 @@ import type { ActiveStateAcc, AuraAcc, CharacterAcc, MonsterAcc, SkillRecordAcc 
 import type { ActiveState, Cell, TimedMod } from "./types";
 
 /** `ABI_VERSION` of the module this wrapper speaks. */
-export const COMBAT_ABI = 7;
+export const COMBAT_ABI = 8;
 /** Bytes of the resonance tables: the registry `aspects`, `traits` and `resonances` bodies. */
 export const COMBAT_TABLES_LEN = 48 + 192 + 576;
 export const COMBAT_STATS = 4;
@@ -26,6 +26,8 @@ export const COMBAT_STATES = 6;
 /** Modifier slots, one per kind (patch 9 added Resistance). */
 export const COMBAT_MODS = 7;
 export const COMBAT_ASPECTS = 6;
+/** State kinds, Penetration (6) included. */
+export const COMBAT_STATE_KINDS = 7;
 /** Defense tags: Magical, Combat, Strike, Projectile (deadroll_combat `TAGS`). */
 export const COMBAT_TAGS = 4;
 export const COMBAT_PARTY = 4;
@@ -254,6 +256,9 @@ export type HeroSheet = {
   resistBp: number[];
   /** State resistance (Endurance and items): the counterweight on every state and effect chance. */
   stateResistBp: number;
+  // ABI 8
+  /** Resistance to each state, by `StateKind`: `stateResistBp` plus the items' per state. */
+  stateResistByKindBp: number[];
 };
 
 /** One tint candidate of an attack: its chance, and the damage if it triggers alone. */
@@ -546,6 +551,7 @@ export function decodeSheet(bytes: Uint8Array): HeroSheet {
     critRollBp: r.u32(),
     resistBp: Array.from({ length: COMBAT_ASPECTS }, () => r.u32()),
     stateResistBp: r.u32(),
+    stateResistByKindBp: Array.from({ length: COMBAT_STATE_KINDS }, () => r.u32()),
   };
 }
 

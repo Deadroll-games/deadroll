@@ -6,7 +6,9 @@
 
 use deadroll_combat::{Balance, SupportBalance};
 use deadroll_skillcheck::SkillTuning;
-use deadroll_types::{Aspect, Class, EquipSlot, Form, ItemBase, Race, RangeTag, STATS_COUNT};
+use deadroll_types::{
+    Aspect, Class, EquipSlot, Form, ItemBase, Race, RangeTag, StateKind, STATS_COUNT,
+};
 
 use crate::items::KIT_MAX;
 
@@ -310,6 +312,10 @@ pub struct ItemBaseStats {
     /// Patch 9. State resistance, bp: the counterweight on the chance of every state and effect.
     #[cfg_attr(feature = "serde", serde(default))]
     pub state_resist_bp: u32,
+    /// Patch 9b. Resistance to one state, bp, by `StateKind`: adds to `state_resist_bp` for
+    /// that state only.
+    #[cfg_attr(feature = "serde", serde(default, with = "names::by_state"))]
+    pub state_kind_resist_bp: [u32; StateKind::COUNT],
 }
 
 /// Items (docs/ITEMS_AND_CRAFT.md): every base's numbers and the class starter kits.
@@ -370,6 +376,7 @@ const fn base(slot: EquipSlot, damage: [u32; 2], armor: u32) -> ItemBaseStats {
         basic_form: Form::Strike,
         resist_bp: [0; Aspect::COUNT],
         state_resist_bp: 0,
+        state_kind_resist_bp: [0; StateKind::COUNT],
     }
 }
 
@@ -421,7 +428,9 @@ impl Default for ItemTuning {
 pub mod names {
     use std::{collections::BTreeMap, fmt::Debug, format, string::String, vec::Vec};
 
-    use deadroll_types::{Aspect, Class, EquipSlot, Form, ItemBase, RangeTag, Stat, STATS_COUNT};
+    use deadroll_types::{
+        Aspect, Class, EquipSlot, Form, ItemBase, RangeTag, Stat, StateKind, STATS_COUNT,
+    };
     use serde::{de::Error as _, ser::SerializeMap, Deserialize, Deserializer, Serializer};
 
     use super::{ItemBaseStats, KIT_MAX};
@@ -451,7 +460,7 @@ pub mod names {
             }
         )*};
     }
-    variant!(Aspect, Class, EquipSlot, Form, ItemBase, RangeTag, Stat);
+    variant!(Aspect, Class, EquipSlot, Form, ItemBase, RangeTag, Stat, StateKind);
 
     fn parse<'de, E: Variant, D: Deserializer<'de>>(text: &str) -> Result<E, D::Error> {
         E::parse(text).ok_or_else(|| {
@@ -529,6 +538,24 @@ pub mod names {
             d: D,
         ) -> Result<[u32; Aspect::COUNT], D::Error> {
             de_keyed::<Aspect, _, { Aspect::COUNT }, _>(d)
+        }
+    }
+
+    /// `[u32; StateKind::COUNT]` keyed by `StateKind`.
+    pub mod by_state {
+        use super::*;
+
+        pub fn serialize<S: Serializer>(
+            v: &[u32; StateKind::COUNT],
+            s: S,
+        ) -> Result<S::Ok, S::Error> {
+            ser_keyed::<StateKind, _, _>(v, s)
+        }
+
+        pub fn deserialize<'de, D: Deserializer<'de>>(
+            d: D,
+        ) -> Result<[u32; StateKind::COUNT], D::Error> {
+            de_keyed::<StateKind, _, { StateKind::COUNT }, _>(d)
         }
     }
 
@@ -625,6 +652,7 @@ mod remote {
         pub res_accuracy: [u32; 14],
         pub res_accuracy_turns: u8,
         pub burning_cell_rounds: u8,
+        pub aspect_state_resist_share_bp: u32,
     }
 
     #[derive(Serialize, Deserialize)]

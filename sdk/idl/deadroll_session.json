@@ -3932,6 +3932,13 @@
           {
             "name": "rolls_used",
             "type": "u32"
+          },
+          {
+            "name": "resist_bp",
+            "docs": [
+              "Patch 9b: the target's counterweight the effect chance met, bp."
+            ],
+            "type": "u32"
           }
         ]
       }
@@ -7298,6 +7305,13 @@
                 "name": "Applied"
               }
             }
+          },
+          {
+            "name": "resist_bp",
+            "docs": [
+              "Patch 9b: the counterweight the chance met, bp; 0 when no die was rolled."
+            ],
+            "type": "u32"
           }
         ]
       }

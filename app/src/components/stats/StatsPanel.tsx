@@ -1,5 +1,5 @@
 import { ASPECT_NAMES, STATE_NAMES, TAG_NAMES, formatBp, maskNames, stateName } from "../../chain/names";
-import { deltaText, type AspectStat, type UnitStats } from "../../chain/stats";
+import { ASPECT_STATE_SHARE_BP, deltaText, type AspectStat, type UnitStats } from "../../chain/stats";
 import { modIsBuff, modLabel } from "../../chain/support";
 import type { StatsPanelProps, StatsUnit } from "./types";
 import "./stats.css";
@@ -27,6 +27,8 @@ function UnitRow({ u }: { u: StatsUnit }) {
   const ap = deltaText("AP", s.ap);
   const resist = resistLines(s);
   const vuln = s.vuln.filter((v) => v.final > 0);
+  // Patch 9b: states resisted above the general state resistance.
+  const stateExtra = s.stateResistByKind.flatMap((bp, k) => (bp > s.stateResist ? [`${STATE_NAMES[k] ?? "?"} ${pct(bp)}`] : []));
   const tags = s.tagResist.flatMap((bp, i) => (bp > 0 ? [`${TAG_NAMES[i] ?? "?"} ${pct(bp)}`] : []));
   const immune = [...maskNames(s.immuneAspects, ASPECT_NAMES), ...maskNames(s.immuneStates, STATE_NAMES), ...maskNames(s.immuneTags, TAG_NAMES)];
   return (
@@ -59,6 +61,7 @@ function UnitRow({ u }: { u: StatsUnit }) {
         ))}
         {tags.length > 0 && <div>Resist {tags.join(", ")}</div>}
         {s.stateResist > 0 && <div>State resist {pct(s.stateResist)}</div>}
+        {stateExtra.length > 0 && <div>State resist {stateExtra.join(", ")}</div>}
         {immune.length > 0 && <div className="good">Immune {immune.join(", ")}</div>}
       </td>
       <td>
@@ -116,7 +119,8 @@ export function StatsPanel({ units }: StatsPanelProps) {
       </div>
       <p className="muted">
         Resist divides the damage of its aspect, Vuln multiplies it; Vulnerability counts only for its own aspect. State resist divides the
-        chance of states and effects. Immune: no damage of that aspect or tag, that state never lands. (n): own turns left after the current
+        chance of states and effects; {pct(ASPECT_STATE_SHARE_BP)} of an aspect's resist also
+        divides the chance of that aspect's own state. Immune: no damage of that aspect or tag, that state never lands. (n): own turns left after the current
         one.
       </p>
     </div>

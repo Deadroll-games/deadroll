@@ -3,7 +3,7 @@
 // Pure functions over decoded accounts and events.
 import type { Address } from "@solana/kit";
 import { bytesText, optional, withResist, type MapSkillAcc, type SkillRecordAcc, type TimedModAcc } from "./game";
-import { ASPECT_NAMES, effectAmount } from "./names";
+import { ASPECT_NAMES, effectAmount, formatBp } from "./names";
 import { Effect, Form, Purpose, RangeTag, Target, derive, skillSide, usableInCombat, type Category, type Side, type SkillBlocks } from "./skillcheck";
 import { Applied, HitOutcome, type Aspect, type ModKind, type TimedMod } from "./types";
 
@@ -147,6 +147,8 @@ export type EffectRoll = {
   /** HP for a heal, bp for a buff or debuff, 0 for Stun / Freeze or a miss. */
   amount: number;
   rollsUsed: number;
+  /** Patch 9b: the target's counterweight the effect chance met, bp. */
+  resistBp?: number;
 };
 
 export type EffectResolved = {
@@ -190,6 +192,7 @@ export function toEffectResolved(ev: any): EffectResolved {
       d100: r.d100,
       amount: r.amount,
       rollsUsed: r.rollsUsed,
+      resistBp: r.resistBp,
     },
     applied: ev.applied as Applied,
     hp: ev.hp,
@@ -204,7 +207,7 @@ export function effectText(e: EffectResolved, caster: string, target: string, sk
   const head = e.rider ? `${skill} effect on ${target}` : e.caster === e.target ? `${caster} uses ${skill} on self` : `${caster} uses ${skill} on ${target}`;
   const dice: string[] = [];
   if (e.roll.d20 > 0) dice.push(`d20 ${e.roll.d20} (${e.roll.attackTotal} vs ${e.roll.defense})`);
-  if (e.roll.chanceRoll !== null) dice.push(`chance ${e.roll.chanceBp}%`);
+  if (e.roll.chanceRoll !== null) dice.push(`chance ${e.roll.chanceBp}%${e.roll.resistBp ? ` (vs resist ${formatBp(e.roll.resistBp)})` : ""}`);
   if (e.roll.d100 > 0) dice.push(`d100 ${e.roll.d100}`);
   const crit = e.roll.crit ? " CRIT" : "";
   const word = APPLIED_WORDS[e.applied] ?? "";

@@ -65,6 +65,9 @@ pub struct Balance {
     pub res_accuracy_turns: u8,
     /// Rounds a cell set on fire by a resonance keeps burning.
     pub burning_cell_rounds: u8,
+    /// Patch 9b: the share of a target's resistance to an aspect that also counters the chance
+    /// of that aspect's native state, bp (the state resistance counters it in full).
+    pub aspect_state_resist_share_bp: u32,
 }
 
 impl Balance {
@@ -131,6 +134,7 @@ impl Balance {
         res_accuracy: [4, 4, 3, 3, 3, 3, 2, 2, 2, 2, 1, 1, 1, 1],
         res_accuracy_turns: 2,
         burning_cell_rounds: 2,
+        aspect_state_resist_share_bp: 2_500,
     };
 
     pub const fn tint_chance(&self, tier: Tier) -> u32 {

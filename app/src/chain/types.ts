@@ -171,6 +171,9 @@ export type StateRoll = {
   roll: number;
   success: boolean;
   applied: Applied;
+  /** Patch 9b: the counterweight the chance met, bp (state resistance plus a share of the
+   * resistance to the state's aspect); 0 when no die was rolled. */
+  resistBp?: number;
 };
 
 export type PacketResult = {

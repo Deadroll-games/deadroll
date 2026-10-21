@@ -31,7 +31,9 @@ function RollLine({ label, view, suffix = "" }: { label: string; view: ChanceVie
 }
 
 function StateRollLine({ roll }: { roll: StateRoll }) {
-  return <RollLine label={stateName(roll.kind)} view={chanceView(roll.roll, roll.chanceBp, roll.success)} suffix={`, ${appliedLabel(roll.applied)}`} />;
+  // Patch 9b: the counterweight the chance met (state resistance and a share of the aspect's).
+  const resist = roll.resistBp ? `, vs resist ${formatBp(roll.resistBp)}` : "";
+  return <RollLine label={stateName(roll.kind)} view={chanceView(roll.roll, roll.chanceBp, roll.success)} suffix={`${resist}, ${appliedLabel(roll.applied)}`} />;
 }
 
 const find = (mods: TimedMod[] | undefined, kind: ModKind) => mods?.find((m) => m.turns > 0 && m.kind === kind);

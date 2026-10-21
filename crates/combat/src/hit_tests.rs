@@ -424,27 +424,40 @@ fn penetration_lowers_armor_on_the_next_physical_hit() {
 }
 
 #[test]
-fn aspect_resistance_cuts_damage_not_the_chill_chance_or_buildup() {
+fn aspect_resistance_cuts_damage_and_a_share_of_the_chill_chance_not_the_buildup() {
     let mut input = basic(Aspect::Cold, 10, 10, 50);
     let plain = resolve_hit(&input, &B, &T, &mut ScriptedRoll::new([14, 0, 0]));
     input.defender.resist_bp[Aspect::Cold as usize] = BP;
     let r = resolve_hit(&input, &B, &T, &mut ScriptedRoll::new([14, 0, 0]));
     assert!(r.damage < plain.damage);
+    // 100% Cold resistance counters its native Chill by a quarter (patch 9b): 50% / 1.25.
+    assert_eq!(B.aspect_state_resist_share_bp, 2_500);
     assert_eq!(
         (
             r.packets()[0].state.chance_pct,
             r.packets()[0].state.success
         ),
-        (50, true)
+        (40, true)
+    );
+    assert_eq!(
+        r.packets()[0].state.resist_bp,
+        2_500,
+        "the counterweight is recorded"
     );
     assert_eq!(
         find(&r.states, StateKind::Chill).power,
         find(&plain.states, StateKind::Chill).power
     );
-    // State resistance is the counterweight of the chance.
+    // The state resistance counters in full and sums with the aspect's share: 50% / 2.25.
     input.defender.state_resist_bp[StateKind::Chill as usize] = BP;
     let r = resolve_hit(&input, &B, &T, &mut ScriptedRoll::new([14, 0, 0]));
-    assert_eq!(r.packets()[0].state.chance_pct, 25);
+    assert_eq!(r.packets()[0].state.chance_pct, 22);
+    assert_eq!(r.packets()[0].state.resist_bp, BP + 2_500);
+    // Resistance to another aspect does nothing to Chill.
+    let mut fire = basic(Aspect::Cold, 10, 10, 50);
+    fire.defender.resist_bp[Aspect::Fire as usize] = BP;
+    let r = resolve_hit(&fire, &B, &T, &mut ScriptedRoll::new([14, 0, 0]));
+    assert_eq!(r.packets()[0].state.chance_pct, 50);
 }
 
 #[test]

@@ -107,6 +107,26 @@ pub struct Defender {
 }
 
 impl Defender {
+    /// The counterweight on the chance of `kind` landing (patch 9b): the state resistance in
+    /// full, plus `Balance::aspect_state_resist_share_bp` of the resistance (capped like a hit)
+    /// to the aspect whose native state `kind` is. Freeze is no aspect's native state.
+    pub fn state_counter(
+        &self,
+        kind: StateKind,
+        tables: &ResonanceTables,
+        balance: &Balance,
+    ) -> u32 {
+        let aspect = Aspect::ALL
+            .iter()
+            .filter(|a| tables.native(**a) == Some(kind))
+            .map(|a| self.resist_bp[*a as usize].min(balance.resist_cap_bp))
+            .max()
+            .unwrap_or(0);
+        let share = (aspect as u64 * balance.aspect_state_resist_share_bp as u64 / BP as u64)
+            .min(u32::MAX as u64) as u32;
+        self.state_resist_bp[kind as usize].saturating_add(share)
+    }
+
     /// Aspects a hit with `source` and `form` cannot touch: the aspect immunities, or every
     /// aspect when the target is immune to one of the hit's tags (step 3).
     pub fn immune_mask(&self, source: Source, form: Form) -> u8 {
@@ -156,6 +176,9 @@ pub struct StateRoll {
     pub roll: u16,
     pub success: bool,
     pub applied: Applied,
+    /// Patch 9b: the counterweight the chance met (`Defender::state_counter`), bp; 0 when no
+    /// die was rolled.
+    pub resist_bp: u32,
 }
 
 /// One packet after every step. Values scaled by `BP` unless named otherwise.
@@ -709,8 +732,8 @@ pub fn resolve_hit_into(
         };
         let stat_bonus = state_stat_bonus(kind, a);
         let increase = stat_bonus.saturating_add(pure);
-        // Aspect resistance cuts only the damage; the chance meets the state resistance.
-        let resist = d.state_resist_bp[kind as usize];
+        // The state resistance, and a share of the resistance to the state's aspect.
+        let resist = d.state_counter(kind, tables, balance);
         let raw = ratio(a.skill.state_chance_pct as u64, increase, resist);
         let chance_pct = balance.clamp_chance(raw.min(u32::MAX as u64) as u32);
         let (success, roll) = chance(&mut src, chance_pct);
@@ -721,6 +744,7 @@ pub fn resolve_hit_into(
             roll,
             success,
             applied: Applied::None,
+            resist_bp: resist,
         };
         if success {
             roll_result.applied = lands.apply(
@@ -800,6 +824,7 @@ pub fn resolve_hit_into(
                         roll: 0,
                         success: true,
                         applied,
+                        resist_bp: 0,
                     };
                 }
                 OpKind::Linked => {
@@ -819,6 +844,7 @@ pub fn resolve_hit_into(
                         roll: 0,
                         success: true,
                         applied,
+                        resist_bp: 0,
                     };
                 }
                 OpKind::ExtraStateChance | OpKind::LinkedChance => {
@@ -827,7 +853,7 @@ pub fn resolve_hit_into(
                         continue;
                     };
                     let stat_bonus = state_stat_bonus(kind, a);
-                    let resist = d.state_resist_bp[kind as usize];
+                    let resist = d.state_counter(kind, tables, balance);
                     let base = scale(balance.extra_state_chance_pct, p.op.value);
                     let raw = ratio(base as u64, stat_bonus, resist);
                     let chance_pct = balance.clamp_chance(raw.min(u32::MAX as u64) as u32);
@@ -845,6 +871,7 @@ pub fn resolve_hit_into(
                         roll,
                         success,
                         applied,
+                        resist_bp: resist,
                     };
                 }
                 OpKind::LinkedMod => {

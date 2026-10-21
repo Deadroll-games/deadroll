@@ -285,7 +285,7 @@ fn golden_mage_vs_goblin() {
     assert_eq!(r.damage, 13);
     // Chill: 40% x (1 + pure pair tier 8 = 38%) = 55%, roll 40 succeeds.
     // Buildup 5000 x 1.38 = 6900. Lightning is a pure pair too, so Shock rolls:
-    // 40% x 1.29 = 51% (the 10% Lightning resist cuts only damage), roll 40 succeeds.
+    // 40% x 1.29 / 1.025 (a quarter of the 10% Lightning resist) = 50%, roll 40 succeeds.
     // Shock strength 2000 x 1.29 = 2580.
     let s = r.packets()[0].state;
     assert_eq!(
@@ -302,7 +302,7 @@ fn golden_mage_vs_goblin() {
             shock.success,
             shock.applied
         ),
-        (StateKind::Shock, true, 51, 40, true, Applied::Added)
+        (StateKind::Shock, true, 50, 40, true, Applied::Added)
     );
     assert_eq!(
         active(&r),
@@ -427,7 +427,7 @@ fn golden_mage_double_resonance() {
     let shock = r.packets()[1].state;
     assert_eq!(
         (shock.chance_pct, shock.roll, shock.applied),
-        (51, 13, Applied::Added)
+        (50, 13, Applied::Added)
     );
     // Ringing Ice (slot 0) waits for a Freeze that has not landed yet: no jump.
     let ringing: Vec<_> = r.ops(0).map(|o| (o.kind, o.acted)).collect();

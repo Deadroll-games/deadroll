@@ -608,3 +608,24 @@ ModKindData: 6 Resistance
 
 Events: `ModsTicked` and `EffectResolved` append `resist_mod: ResistModData` (their `mods` are
 the 6 stored slots); `HitResultData.target_mods` is `[ResistModData; 3]`.
+
+## 17. Patch 9b: aspect resistance against its state, resistance to each state
+
+Combat (`deadroll_combat`), appended:
+
+```
+Balance:    ... burning_cell_rounds, aspect_state_resist_share_bp: u32   (default 2_500)
+StateRoll:  ... applied, resist_bp: u32       the counterweight the chance met, 0 when not rolled
+EffectRoll: ... rolls_used, resist_bp: u32    the target's counterweight of an effect chance
+Defender::state_counter(kind, tables, balance) = state_resist_bp[kind]
+    + aspect_state_resist_share_bp x resist_bp[the aspect whose native state is kind] (capped)
+```
+
+Every chance of a state (native, resonance, a skill's Stun or Freeze effect) meets
+`state_counter`; Freeze is no aspect's native state. A modifier effect meets the strongest state
+resistance.
+
+Rules: `ItemBaseStats.state_kind_resist_bp: [u32; 7]` (by `StateKind`, on top of
+`state_resist_bp`); `hero::state_resists` gives `Defender.state_resist_bp`.
+
+Session events: `StateRollData` and `EffectRollData` append `resist_bp: u32`. No account changes.
