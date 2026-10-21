@@ -1,0 +1,47 @@
+# The character program as a library for other crates (`[workspace.dependencies] deadroll-character`).
+# Same source as the program (../src), rlib only: a cdylib output has no hash in its file name, so
+# the program build and its `cpi` build would share one file in target/ (root Cargo.toml).
+# Keep [features] and [dependencies] in sync with ../Cargo.toml.
+[package]
+name = "deadroll-character-lib"
+description = "Deadroll character as an rlib for other crates (CPI, account layouts)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "deadroll_character"
+path = "../src/lib.rs"
+crate-type = ["rlib"]
+test = false
+doctest = false
+
+[features]
+default = ["nft"]
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-log-ix-name = []
+idl-build = [
+    "anchor-lang/idl-build",
+    "deadroll-types/idl-build",
+    "deadroll-skillcheck/idl-build",
+    "session-keys/idl-build",
+]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+nft = ["dep:mpl-core"]
+
+[dependencies]
+anchor-lang.workspace = true
+deadroll-types = { workspace = true, features = ["anchor"] }
+deadroll-skillcheck = { workspace = true, features = ["anchor"] }
+deadroll-rules.workspace = true
+mpl-core = { workspace = true, optional = true }
+session-keys.workspace = true
+bytemuck = { version = "1", features = ["derive", "min_const_generics"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

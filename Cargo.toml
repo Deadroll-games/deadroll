@@ -1,5 +1,5 @@
 [workspace]
-members = ["programs/*", "crates/*", "crates/combat/wasm", "crates/render/wasm", "tools/art", "tools/balance"]
+members = ["programs/*", "programs/*/lib", "crates/*", "crates/combat/wasm", "crates/render/wasm", "tools/art", "tools/balance"]
 resolver = "2"
 
 [workspace.package]
@@ -31,13 +31,16 @@ deadroll-render = { path = "crates/render" }
 deadroll-rules = { path = "crates/rules" }
 deadroll-sim = { path = "crates/sim" }
 
-deadroll-registry = { path = "programs/registry", features = ["cpi"] }
-deadroll-render-program = { path = "programs/render", features = ["cpi"] }
-deadroll-character = { path = "programs/character", features = ["cpi"] }
-deadroll-items = { path = "programs/items", features = ["cpi"] }
-deadroll-map = { path = "programs/map", features = ["cpi"] }
-deadroll-session = { path = "programs/session", features = ["cpi"] }
-deadroll-city = { path = "programs/city", features = ["cpi"] }
+# Programs as dependencies come from their `lib/` package (same source, rlib only), never from the
+# program package itself. A program is `crate-type = ["cdylib", "lib"]`, and cargo leaves the hash out
+# of a cdylib's file names, so the program build and its `cpi` build (another program's dependency)
+# would write the same target/sbpfv3-solana-solana/release/deps/libdeadroll_<p>.rlib and each one
+# would take the other's file for its own (E0463, E0308, a no-entrypoint .so in target/deploy).
+# To depend on another program, add a `programs/<p>/lib/Cargo.toml` like these.
+deadroll-registry = { path = "programs/registry/lib", package = "deadroll-registry-lib", features = ["cpi"] }
+deadroll-character = { path = "programs/character/lib", package = "deadroll-character-lib", features = ["cpi"] }
+deadroll-map = { path = "programs/map/lib", package = "deadroll-map-lib", features = ["cpi"] }
+deadroll-session = { path = "programs/session/lib", package = "deadroll-session-lib", features = ["cpi"] }
 
 [profile.release]
 overflow-checks = true

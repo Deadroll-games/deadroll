@@ -7,6 +7,7 @@ Owner lane: L4. Read the root CLAUDE.md first.
 
 ## Rules for this zone
 - Docs: docs/ARCHITECTURE.md (4.2, 4.3), docs/BESTIARY.md (2, 7, 12), docs/STORAGE_AND_DELIVERY.md.
+- `lib/Cargo.toml` is this program as a dependency of other crates (same `src/`, rlib): a dependency or feature added to `Cargo.toml` goes there too.
 - `GameConfig { core: GameConfigData }` and the struct name are part of the format: `map` and `render` read it by discriminator and offset. Never reorder or insert before the core; append only.
 - Table record layouts are in README.md and `src/state/records.rs`; they are consumed by `session` (monster hp, speed, tile cost), the seed script and the app. Append fields only inside the reserved bytes.
 - Render blob offsets come from `programs/render/README.md`; if that header changes, update `src/state/pull.rs` and its tests.

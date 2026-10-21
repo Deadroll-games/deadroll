@@ -1,0 +1,51 @@
+# The session program as a library for other crates (`[workspace.dependencies] deadroll-session`,
+# used by crates/sim). Same source as the program (../src), rlib only: a cdylib output has no hash in
+# its file name, so the program build and its `cpi` build would share one file in target/ (root
+# Cargo.toml). Keep [features] and [dependencies] in sync with ../Cargo.toml.
+[package]
+name = "deadroll-session-lib"
+description = "Deadroll session as an rlib for other crates (simulator, account layouts)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "deadroll_session"
+path = "../src/lib.rs"
+crate-type = ["rlib"]
+test = false
+doctest = false
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-log-ix-name = []
+idl-build = [
+    "anchor-lang/idl-build",
+    "deadroll-types/idl-build",
+    "deadroll-skillcheck/idl-build",
+    "session-keys/idl-build",
+]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+mock-vrf = []
+
+[dependencies]
+anchor-lang = { workspace = true, features = ["lazy-account", "allow-missing-optionals"] }
+deadroll-types = { workspace = true, features = ["anchor"] }
+session-keys.workspace = true
+deadroll-character.workspace = true
+deadroll-map.workspace = true
+deadroll-registry.workspace = true
+deadroll-combat = { workspace = true, features = ["borsh"] }
+deadroll-rules.workspace = true
+deadroll-skillcheck = { workspace = true, features = ["anchor"] }
+ephemeral-vrf-sdk.workspace = true
+solana-sha256-hasher = { version = "3.1", features = ["sha2"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

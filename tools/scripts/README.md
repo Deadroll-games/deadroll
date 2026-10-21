@@ -20,11 +20,17 @@ pnpm --filter @deadroll/scripts run deploy:devnet           # https://api.devnet
 
 Steps (each one skips itself when done):
 1. preflight: RPC, wallet, `target/deploy/*-keypair.json` match the ids in `@deadroll/sdk` (= `Anchor.toml`; keypairs are never generated);
-2. build: `anchor build --tools-version v1.54 -p <program>` for each program (local: session with `--features mock-vrf`),
-   `crates/render/wasm/build.sh`, `cargo run -p art -- pack` (palette + sprite book 1 from `assets/`);
+2. build: `cargo build-sbf --tools-version v1.54 --arch v3` in `programs/<program>` for each program (local:
+   session with `--features mock-vrf`), `crates/render/wasm/build.sh`, `cargo run -p art -- pack` (palette +
+   sprite book 1 from `assets/`). This is what `anchor build -p` runs, without the IDL, in a cargo cache of its own,
+   `target/sbf-deploy/` (about 200 MB, only these scripts write it). anchor is not used because on Windows it starts
+   cargo in a `\\?\D:\...` folder, which rebuilds the shared crates on every run and gives other `.so` bytes for the
+   same code; a cache shared with `anchor build` would pass those bytes on (a deploy would upgrade programs that did
+   not change);
 3. `solana program deploy` for the 7 programs whose on-chain bytes differ from the build. Each program is
-   copied to `target/deploy-stage/` right after its own `anchor build -p`: a later `-p` build overwrites the
-   programs it depends on in `target/deploy/` with their `cpi` builds (no entrypoint);
+   copied to `target/deploy-stage/` right after its own build; the mock-vrf session is moved
+   there, so `target/deploy/` never keeps it. The build cache is never cleaned by hand: switching the session
+   between mock-vrf and plain bumps the mtime of `programs/session/src/lib.rs`, and cargo rebuilds that crate;
 4. `init_config` (first caller becomes the authority), `resize_config` for a pre-patch-7 `GameConfig`, or
    `set_programs` if the list changed;
 5. `seed-registry.ts`, `upload-sprites.ts` (palette, book), `upload-rasterizer.ts` (its finalize points
@@ -41,5 +47,5 @@ Devnet only: `--compute-unit-price`, `--yes` (no prompt), `--check-build` (build
 The devnet script refuses a session `.so` built with `mock-vrf` (it looks for the mock VRF identity in the
 binary) and refuses when `mock-vrf` appears in its arguments or environment.
 
-CLIs are found through `SOLANA_BIN`, `ANCHOR_BIN`, `BASH_BIN` (Git Bash on Windows), `CARGO_BIN`, then PATH,
+CLIs are found through `SOLANA_BIN`, `BASH_BIN` (Git Bash on Windows), `CARGO_BIN`, then PATH,
 then the default install folders. Neither script starts, stops or resets a validator.

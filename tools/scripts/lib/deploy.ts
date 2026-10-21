@@ -3,7 +3,7 @@
 // already on chain and finishes what is not.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, utimesSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -123,7 +123,7 @@ function onPath(exe: string): string | undefined {
   return undefined;
 }
 
-/** `SOLANA_BIN` / `ANCHOR_BIN` / `BASH_BIN`, then PATH, then the usual install folders. */
+/** `SOLANA_BIN` / `BASH_BIN` / `CARGO_BIN`, then PATH, then the usual install folders. */
 export function resolveBins() {
   const home = homedir();
   const exe = process.platform === "win32" ? ".exe" : "";
@@ -135,10 +135,6 @@ export function resolveBins() {
     process.env.SOLANA_BIN ??
     onPath("solana") ??
     firstExisting([join(home, `.local/share/solana/install/active_release/bin/solana${exe}`), ...releaseBins]);
-  const anchor =
-    process.env.ANCHOR_BIN ??
-    onPath("anchor") ??
-    firstExisting([join(home, `.local/bin/anchor${exe}`), join(home, `.avm/bin/anchor${exe}`), join(home, `.cargo/bin/anchor${exe}`)]);
   // On Windows a bare `bash` can be WSL's; the wasm build wants Git Bash next to this Node.
   const bash =
     process.env.BASH_BIN ??
@@ -147,19 +143,18 @@ export function resolveBins() {
       : "bash");
   const cargo = process.env.CARGO_BIN ?? onPath("cargo") ?? firstExisting([join(home, `.cargo/bin/cargo${exe}`)]);
   if (!solana) throw new Error("solana CLI not found; set SOLANA_BIN");
-  if (!anchor) throw new Error("anchor CLI not found; set ANCHOR_BIN");
   if (!bash) throw new Error("bash not found; set BASH_BIN");
   if (!cargo) throw new Error("cargo not found; set CARGO_BIN");
-  // anchor build runs `cargo build-sbf`, which lives next to the solana CLI.
+  // `cargo build-sbf` lives next to the solana CLI.
   const pathKey = Object.keys(process.env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
-  process.env[pathKey] = [dirname(solana), dirname(anchor), dirname(cargo), process.env[pathKey]].join(delimiter);
-  return { solana, anchor, bash, cargo };
+  process.env[pathKey] = [dirname(solana), dirname(cargo), process.env[pathKey]].join(delimiter);
+  return { solana, bash, cargo };
 }
 
-function run(cmd: string, args: string[], opts: { env?: Record<string, string> } = {}): void {
+function run(cmd: string, args: string[], opts: { env?: Record<string, string>; cwd?: string } = {}): void {
   console.log(`$ ${[cmd, ...args].join(" ")}`);
   const res = spawnSync(cmd, args, {
-    cwd: ROOT,
+    cwd: opts.cwd ?? ROOT,
     stdio: "inherit",
     env: { ...process.env, ...opts.env },
   });
@@ -182,13 +177,21 @@ export async function loadKeypair(path: string): Promise<KeyPairSigner> {
 }
 
 /**
- * Where deploys come from: each program's `.so` copied right after its own `anchor build -p`.
- * target/deploy itself is not safe: a later `-p` build overwrites the programs it depends on there
- * with their `cpi` (no entrypoint) builds.
+ * Where deploys come from: each program's `.so` copied right after its own build, so a
+ * mock-vrf session never has to stay in target/deploy.
  */
 const STAGE = join(ROOT, "target/deploy-stage");
 const soPath = (name: string) => join(STAGE, `${name}.so`);
 const keypairPath = (name: string) => join(ROOT, "target/deploy", `${name}-keypair.json`);
+const SESSION_SRC = join(ROOT, "programs/session/src/lib.rs");
+/** cargo target dir of the deploy builds (see build). */
+const DEPLOY_CACHE = join(ROOT, "target/sbf-deploy");
+
+/** Sets the file's mtime to now (contents unchanged), so cargo sees the crate as changed. */
+function touch(path: string): void {
+  const now = new Date();
+  utimesSync(path, now, now);
+}
 
 // ---------------------------------------------------------------------------------------------
 // RPC
@@ -229,13 +232,34 @@ async function rentFor(rpc: any, bytes: number): Promise<bigint> {
 
 export function build(bins: ReturnType<typeof resolveBins>, mockVrf: boolean): void {
   step("build");
-  // One `-p` build per program, staged at once (see STAGE): a dependent program's build replaces
-  // its dependencies in target/deploy with their `cpi` builds (no entrypoint, a few hundred bytes).
   mkdirSync(STAGE, { recursive: true });
   for (const p of PROGRAMS) {
-    const features = p.key === "session" && mockVrf ? ["--", "--features", "mock-vrf"] : [];
-    run(bins.anchor, ["build", "--tools-version", "v1.54", "-p", p.name, ...features]);
-    copyFileSync(join(ROOT, "target/deploy", `${p.name}.so`), soPath(p.name));
+    const mock = p.key === "session" && mockVrf;
+    // The mock-vrf and the plain session builds share one output file (a cdylib has no hash in its
+    // name), and cargo would take either for fresh. A newer source makes it rebuild the session crate
+    // only, before this build and after a mock one (so the next plain build is real again).
+    if (p.key === "session") touch(SESSION_SRC);
+    // cargo-build-sbf strips into target/deploy only when the file there is older than its build, so
+    // a newer one from `anchor build` would stay and be staged instead of this build.
+    const built = join(ROOT, "target/deploy", `${p.name}.so`);
+    rmSync(built, { force: true });
+    // What `anchor build -p` runs, minus its IDL step (the IDL comes from @deadroll/sdk), in a cache of
+    // its own. Not through anchor: on Windows it starts cargo in a canonicalized `\\?\D:\...` folder,
+    // and cargo then mixes `\\?\` and plain source paths, rebuilds the shared crates every time and
+    // puts other panic paths into the .so (same code, other bytes, a needless upgrade on devnet). Only
+    // this function writes DEPLOY_CACHE, so the bytes depend on the code alone.
+    run(bins.cargo, ["build-sbf", "--tools-version", "v1.54", "--arch", "v3", ...(mock ? ["--features", "mock-vrf"] : [])], {
+      cwd: join(ROOT, "programs", p.key),
+      env: { CARGO_TARGET_DIR: DEPLOY_CACHE, SBF_OUT_PATH: join(ROOT, "target/deploy") },
+    });
+    if (mock) {
+      // Moved, not copied: a mock .so left in target/deploy would survive the next plain anchor build
+      // (see above).
+      renameSync(built, soPath(p.name));
+      touch(SESSION_SRC);
+    } else {
+      copyFileSync(built, soPath(p.name));
+    }
   }
   run(bins.bash, ["crates/render/wasm/build.sh"]);
   run(bins.cargo, ["run", "-q", "-p", "art", "--", "pack", "--out", "target/render-assets"]);
@@ -275,7 +299,7 @@ function checkArtifacts(opts: DeployOptions): void {
     if (!existsSync(soPath(p.name))) throw new Error(`${soPath(p.name)} missing; run without --skip-build`);
     const size = readFileSync(soPath(p.name)).length;
     if (size < MIN_PROGRAM_SIZE) {
-      throw new Error(`${p.name}.so is ${size} bytes, a no-entrypoint (cpi) build; rebuild with anchor build -p ${p.name}`);
+      throw new Error(`${p.name}.so is ${size} bytes, a no-entrypoint (cpi) build; run without --skip-build`);
     }
   }
   const mode = sessionVrfMode();
@@ -306,7 +330,7 @@ async function preflight(conn: Rpc, opts: DeployOptions, wallet: KeyPairSigner, 
   }
   const balance = (await conn.rpc.getBalance(wallet.address).send()).value;
   console.log(`wallet ${wallet.address}, ${sol(balance)} SOL`);
-  console.log(`solana ${bins.solana}\nanchor ${bins.anchor}`);
+  console.log(`solana ${bins.solana}\ncargo ${bins.cargo}`);
   return { programIds, balance: BigInt(balance) };
 }
 
