@@ -14,7 +14,7 @@ description: Use when adding or changing an instruction in any Deadroll Anchor p
 5. Errors in `src/errors.rs`, one variant per distinct failure, clear message.
 6. `emit!` an event for every state change (names from `CONTRACTS.md` section 7).
 7. Tests: happy path + one per rejection. LiteSVM for single-program tests; cross-program flows go to `tests/`.
-8. `anchor build --tools-version v1.54 -p <program>` and tests until green (always pass the flag, see root `CLAUDE.md`, section 2). If the IDL changed, regenerate `sdk/`.
+8. `anchor build --tools-version v1.54 -p <program>` and tests until green (always pass the flag, see root `CLAUDE.md`, section 2). If the IDL changed, regenerate `sdk/`. Programs for deploy are built only by the deploy scripts (`tools/scripts`), never taken from `anchor build`.
 
 ## Accounts
 
@@ -40,6 +40,7 @@ pub config: Account<'info, GameConfig>, // read from registry, no CPI needed
 
 The caller signs with `CpiContext::new_with_signer(..., &[&[b"authority", &[bump]]])`.
 CPI only through the callee crate with `features = ["cpi"]`, only the instructions in `CONTRACTS.md` section 5. Max depth: user -> program -> program.
+Depend on another program only through its `programs/<p>/lib/` package (the `deadroll-<p>` entry of `[workspace.dependencies]`), never on the program crate itself: a program is a `cdylib`, cargo writes its files without a hash, and its own build and the `cpi` build would overwrite each other in `target/` (E0463, E0308). If the callee has no `lib/` yet (render, items, city), create it first like `programs/registry/lib/Cargo.toml` (`path = "../src/lib.rs"`, `crate-type = ["rlib"]`, the same features and dependencies), add the workspace entry, and keep both manifests in sync.
 Wrappers for outgoing CPI live in `src/cpi_out/` (not `src/cpi/`: `#[program]` generates a crate-level `cpi` module, and Anchor's IDL build does not follow `#[path]`).
 
 Reading another program's account needs no CPI: deserialize with the owner check (`Account<'info, T>` from the other crate, or `AccountLoader` + `owner = other::ID`).
