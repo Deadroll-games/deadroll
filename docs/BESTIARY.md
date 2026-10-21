@@ -273,6 +273,7 @@ Bosses must be valuable. From a boss, in addition to the party's regular reward 
 - Defense levels by aspect: **normal, resistance, immunity** (`DAMAGE_TYPES_AND_MIXES.md`, section 9).
 - Resistances, immunities and all combat numbers of monsters are taken from `assets/registry/bestiary.json` (the registry). The scale is tuned for players (patch 6). The Goblin Shaman has no resistances, and its attack is Lightning.
 - Immunities to states and to specific kinds of magic are set separately (for example, future ghosts are insensitive to Blood magic and curses).
+- Immunity to Freeze also protects from freezing by accumulated Chill.
 - Traits such as "dry wood" or "regeneration that fire stops" are **trait rules**, not defense levels.
 
 ---
