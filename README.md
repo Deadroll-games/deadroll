@@ -1,42 +1,51 @@
 # Deadroll
 
-Deadroll is a fully on-chain tabletop RPG on Solana. Real Dungeon Masters run live sessions, and everything that matters happens on-chain: characters, skills, maps, turn-based combat, dice, deaths, and even the sprite renderer that draws the pixel art. Every dice roll is public. Every death leaves a mark.
+Deadroll is a tabletop RPG where the dice, the dungeon and the dead all live on Solana. A player runs the dungeon as the Dungeon Master, the others bring heroes built from modular skill parts, and a hero that dies is gone for good. Characters, maps, combat, dice, deaths and even the renderer that draws the pixel art are stored and run on-chain.
 
-- Video: TODO
-- Website: TODO
+- Website: https://deadroll-theta.vercel.app/ (plays on Solana devnet)
 
 ## The game today
 
-- **Modular skill builder.** At character creation a player builds up to 6 skills block by block: category, purpose, source, form, target, 1 to 3 aspects, effect, trigger and aura. Class presets are one click away. The character program checks every skill with `crates/skillcheck`. The website runs a TypeScript copy of the same rules, tested against fixtures generated from the Rust crate. It shows the first broken rule as you edit, along with power, cooldown and range.
-- **Turns.** Every turn opens with a permissionless `start_turn`, which the app sends on its own. A unit gets one attack or active skill per turn and can still move with the action points it has left. Skills have cooldowns ("ready in N turns"). The battle log shows ticks, skips and skill use.
-- **Support and control.** The game has:
-  - Heal and buffs on allies: Empowerment, Protection, Haste.
-  - Debuffs on enemies: Weakening, Vulnerability, Slow.
-  - Freeze and Stun, which skip the target's turn.
-  - Burning and Bleeding, which tick at the start of a turn.
-
-  A damage skill can also carry an effect that rolls after the hit. Debuffs never subtract: they divide, as counterweights.
-- **All dice through VRF.** Each action asks MagicBlock VRF for one random value. Every roll of that action (hit, crit, resonance, effect chance, heal amount) is derived from that value as `hash(seed || roll_index)`. The website replays each roll as a dice cascade with the full hit breakdown, and every event links to its transaction.
-- **Player economy.** The DM builds a map, opens a party and sets its price. Players pay into an on-chain escrow when they join. At the end the surviving players get XP and loot, and the DM claims the escrow.
-- **Permadeath.** A character that dies becomes a tombstone: its sprite changes and its Metaplex Core NFT is frozen.
-- **On-chain art.** The rasterizer WASM, the palette and the sprite books are stored on-chain. The website loads the rasterizer from the chain and checks its SHA-256 against `GameConfig` before it draws anything.
-- **No wallet popups in play.** Players start a MagicBlock session key once per party.
+- **Heroes with stats.** Strength, Dexterity, Intelligence and Endurance shape what a hero is good at. Strength powers martial strikes and their states, Dexterity gives accuracy, evasion and speed, Intelligence powers magic and initiative, Endurance gives HP and resistance to states. Level-ups give points that the player spends in one transaction. Race and class add traits that grow by tier.
+- **Chances on a d100.** Hit, crit, status effects and resonances are rolled as percentages. The site previews your chance to hit and to crit and the damage range before you commit to an attack.
+- **Aspects, resonances and tints.** Skills carry up to three aspects (Fire, Frost, Lightning and others). Mixing aspects can trigger resonances, and the race, class or weapon aspect gives a tint trait on top: Fury, Composure, Swiftness, Wasting, Crushing, Keenness. States spread between units, burning cells stay on the map, Frost can thaw into damage.
+- **Resistances.** Armor and aspect resistance cut damage, state resistance cuts the chance of Stun, Freeze and the rest, and some monsters are immune to whole aspects or tags.
+- **A modular skill builder.** Players build skills block by block: purpose, source, form, target, aspects, effect, trigger and aura. Before a fight they pick 4 active, 1 reactive and 1 passive skill.
+  - Active skills cost action points and have cooldowns and a melee or ranged reach.
+  - Reactive skills fire on a trigger: being hit, a crit, low HP, a hurt ally, being controlled, an enemy stepping adjacent.
+  - Passive skills are always on. Auras reach everyone within a radius.
+  - Line skills pass through the target and hit every unit behind it, one roll each.
+  - Buffs and debuffs never subtract, they divide, as counterweights. Players have no heal skills for now.
+- **Monsters from the registry.** The bestiary lives on-chain with stats, natural attacks, skills, packs of kin and elite versions. The DM places them on a map and moves them, or lets them play on their own.
+- **Gear in the character.** A class starter kit and equipped items sit inside the character account. Equipping happens outside a party, and Ready locks the character and its gear for the session.
+- **Turns.** One action per turn, automatic turn start, Freeze and Stun skip a turn, Burning and Bleeding tick.
+- **Dice you can check.** Each action asks MagicBlock VRF for one random value, and every roll of that action is derived from it. The site replays the rolls as a dice cascade with the full hit breakdown, and every event links to its transaction.
+- **Permadeath.** Deaths are finalized by the programs. A dead hero loses its skill mechanics, its bag and its starter items, and keeps only the skill names on the tombstone.
+- **On-chain art.** The rasterizer, the palette (palette 2) and the sprite books are stored on-chain, and the site checks the rasterizer's SHA-256 against `GameConfig` before it draws. Sprites are pixel by pixel, each pixel a role slot that the renderer colors, shades and outlines. A character is its body plus the items it wears, so equipping changes the picture.
+- **Party economy.** The DM builds a map, opens a party and sets its price. Players pay into an on-chain escrow, survivors get XP, and the DM claims the escrow.
+- **Session keys.** A MagicBlock session key keeps wallet popups out of play.
 
 ### Status
 
+Devnet runs the same code as `main` (last upgrade 20.10).
+
 | Area | State |
 |---|---|
-| Shared crates (`types`, `combat`, `render`, `mapcheck`, `skillcheck`) | merged |
-| `registry`, `render`, `character`, `map` programs | merged |
-| `session`: lobby, escrow, VRF combat, death, victory, flee, payout | merged |
-| `session`: turn rules (one action per turn, cooldowns, `start_turn`) | merged (#23), app #24 |
-| `session`: heals, buffs, debuffs, skill effects | merged (#25), app #26 |
-| App: full game on the local validator (DM and two players in one browser) | merged |
-| Devnet | deployed, but runs older builds (see [Devnet](#devnet)) |
-| TypeScript SDK (Codama), hosted website, CI for `app/` | next |
-| `items`, `city`, worker for wallets, balance simulator | skeletons |
+| Stats, d100 chances, states, resonances and tints | working |
+| Active, reactive and passive skills, auras, line skills | working |
+| Resistances (aspect, state, tag, Resistance effect) | working |
+| Registry monsters with skills, kin and elites | working |
+| Gear in the character, equip and unequip | working |
+| On-chain art, palette 2, characters drawn from body and gear | working |
+| Party, escrow, VRF combat, death, victory, payout | working |
+| TypeScript SDK (Codama), hosted website | working |
+| Balance bench (`tools/balance`) | working |
+| Session key set up in a single transaction | next |
+| Loot from monsters | next |
+| Crafting and item NFTs (`items`) | next |
+| City and buildings (`city`) | next |
 
-The task board, including what comes next, is [agents/TASKS.md](agents/TASKS.md).
+The task board is [agents/TASKS.md](agents/TASKS.md).
 
 ## Devnet
 
@@ -54,8 +63,6 @@ These program ids are the same on every cluster (see `app/src/config.ts`):
 
 `GameConfig` on devnet: `HYGYnuyssMfrHr2gT3AC3hkQpD6xt37a5hrCc2Z97JHN`.
 
-**Devnet is behind `main`.** It still runs the `session` and `character` builds from before #23 and #25. Turn rules, cooldowns, heals, buffs and debuffs work only on the local validator for now. Upgrading devnet is the first "Next" item on the task board.
-
 ## Architecture
 
 ```mermaid
@@ -71,8 +78,7 @@ flowchart LR
     end
     subgraph Offchain["Off-chain"]
         app["app (website)"]
-        worker["worker (for wallets, later)"]
-        tools["tools (simulator, art, scripts)"]
+        tools["tools (balance bench, art, scripts)"]
     end
     VRF["MagicBlock VRF"]
     SK["Session Keys (MagicBlock)"]
@@ -91,8 +97,6 @@ flowchart LR
     session --> SK
     items --> character
     city --> character
-    worker -. reads .-> render
-    worker -. reads .-> character
 ```
 
 There are seven Anchor programs, split by domain so that each part can change on its own:
@@ -100,19 +104,21 @@ There are seven Anchor programs, split by domain so that each part can change on
 | Program | Owns |
 |---|---|
 | `registry` | `GameConfig`, aspects, resonance and bestiary tables, tileset, prefabs |
-| `character` | profile, character, skills, bag, Core NFT mint and freeze |
-| `items` | item state, affixes, crafting (post-demo) |
+| `character` | profile, character, skills, bag, gear, Core NFT mint |
+| `items` | item state, affixes, crafting (not built yet) |
 | `map` | maps, validation, finalization, layout |
-| `session` | party, turns, combat, buffs and debuffs, VRF callback, party price escrow |
-| `city` | city and buildings (post-demo) |
+| `session` | party, turns, combat, states, skills, auras, VRF callback, party price escrow |
+| `city` | city and buildings (not built yet) |
 | `render` | the rasterizer WASM, palette and sprite books, stored on-chain |
 
-Shared logic lives in pure Rust crates with no Anchor dependency. The programs, the website (through WASM or a fixture-tested mirror) and the simulator all run the same rules:
+Shared logic lives in pure Rust crates with no Anchor dependency. The programs, the website (through WASM or a fixture-tested mirror) and the balance bench all run the same rules:
 
 | Crate | Purpose |
 |---|---|
-| `types` | shared types, frozen interfaces |
-| `combat` | integer-only hit, heal, buff and debuff resolution; all dice go through `RollSource` |
+| `types` | shared types, interfaces between programs (only ever extended) |
+| `combat` | integer-only hit, state, buff, debuff and resonance resolution; all dice go through `RollSource` |
+| `rules` | balance numbers (`BalanceConfig`), derived stats, registry tables, item rules, shared by programs and the bench |
+| `sim` | battle simulator and AI, the engine of the balance bench |
 | `skillcheck` | skill and loadout validation, derived power, cooldown and range |
 | `mapcheck` | map validation (bounds, spawns, path from entrance to exit) |
 | `render` | sprite DSL decoder, shading, outline, PNG encoder; builds to WASM |
@@ -130,7 +136,7 @@ Details are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - **Programs:** Anchor 1.2.1, Solana CLI 4.1.2 (Agave), Rust 1.92.0, platform tools v1.54
 - **On-chain services:** MagicBlock VRF (`ephemeral-vrf-sdk`) and Session Keys (`session-keys`), Metaplex Core (`mpl-core`)
 - **Client:** Vite 8, React 19, TypeScript, `@solana/kit` 8 with the Wallet Standard plugin
-- **Tooling:** Node 22 or newer, pnpm 10, Surfpool or a local validator
+- **Tooling:** Node 22 or newer, pnpm 10, a local `solana-test-validator`, Codama for the SDK, egui for the balance bench
 
 ## Quick start
 
@@ -176,7 +182,7 @@ Open `http://localhost:5173/?dev=1` in three tabs or windows: DM, warrior, mage.
 1. **Character:** each player creates a character and builds skills or takes the class presets. This mints a Core NFT.
 2. **Map builder:** the DM validates and finalizes a map, then opens a party on it with a price.
 3. **Party:** players join (they pay into escrow and bind a session key) and press Ready. The DM starts the session.
-4. **Battle:** click a cell to move, a monster to attack, or an ally to heal or buff, then press End turn. The DM moves the monsters or lets them play on their own.
+4. **Battle:** click a cell to move, a monster to attack, or an ally to buff, then press End turn. The DM moves the monsters or lets them play on their own.
 5. **End:** claim the rewards. The DM then claims the escrow.
 
 [tools/scripts/README.md](tools/scripts/README.md) describes the script arguments and environment. [app/README.md](app/README.md) has the full play flow.
@@ -192,31 +198,32 @@ Devnet mode reads its non-secret values from `app/.env.devnet`. Set the RPC in o
 - **Custom RPC** in the app header: an RPC URL and an optional WebSocket URL. They stay in your browser's localStorage and are never bundled.
 - `VITE_RPC_URL` in an untracked `app/.env.devnet.local`.
 
-If neither is set, a hosted build uses the public devnet RPC. `vite build` refuses any `VITE_RPC_URL` other than the public devnet RPC or localhost, so no provider key ends up in the bundle. Devnet still runs the older builds (see [Devnet](#devnet)).
+If neither is set, a hosted build uses the public devnet RPC. `vite build` refuses any `VITE_RPC_URL` other than the public devnet RPC or localhost, so no provider key ends up in the bundle.
 
 ### Tests
 
 ```
 cargo test -p deadroll-combat                    # one crate; same for the others
+cargo run -p balance --release                   # balance bench (egui)
 pnpm --filter @deadroll/app test
 DEADROLL_LOCALNET=1 pnpm --filter @deadroll/app exec vitest run src/chain/localnet.e2e.test.ts
 cd tests && ANCHOR_PROVIDER_URL=http://127.0.0.1:8899 ANCHOR_WALLET=<funded keypair json> \
   node --import tsx --test --test-concurrency=1 session.test.ts
 ```
 
-Always pass `--tools-version v1.54` to `anchor build`. The default platform tools make `cargo-build-sbf` panic on Windows, and using one version everywhere keeps the builds identical.
+Programs for deploy are always built by the deploy scripts, never taken from `anchor build`. For checks, pass `--tools-version v1.54` to `anchor build`. The default platform tools make `cargo-build-sbf` panic on Windows, and using one version everywhere keeps the builds identical.
 
 ## Repository layout
 
 ```
 programs/   registry, character, items, map, session, city, render   (Anchor)
-crates/     types, combat, skillcheck, mapcheck, render               (pure Rust, no Anchor)
-sdk/        TypeScript client generated by Codama from the IDLs (not generated yet)
+crates/     types, combat, skillcheck, mapcheck, render, rules, sim   (pure Rust, no Anchor)
+sdk/        TypeScript client generated by Codama from sdk/idl (committed, `pnpm --filter @deadroll/sdk check` fails if stale)
 app/        Vite + React + TypeScript website
 tests/      cross-program integration tests, devnet VRF smoke test
-tools/      art/ (sprite preview and validator), scripts/ (deploy, uploads, registry seeding)
+tools/      balance/ (egui balance bench, JSON presets), art/ (sprite preview and validator), scripts/ (deploy, uploads, registry seeding)
 assets/     sprites/ (geometry DSL sources), registry/ (aspects, tables, bestiary, presets as JSON)
-agents/     task board, frozen interfaces, agent guides
+agents/     task board, interfaces between programs, agent guides
 docs/       design documents
 ```
 

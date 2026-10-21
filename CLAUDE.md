@@ -155,19 +155,20 @@ Keep command output short, it fills the context:
 
 ## 8. What is live
 
-On devnet and on the public site:
+Devnet matches `main` (upgrade 20.10). On devnet and on the public site:
 
-- rasterizer, palette and sprites loaded from the chain;
-- character creation with the skill builder, Core NFT, class starter kit (soulbound items in the character account);
-- equip and unequip in `programs/character`, outside a party;
+- rasterizer, palette 2 and sprites loaded from the chain; characters drawn as body plus equipped gear;
+- character creation with the skill builder, Core NFT, class starter kit, gear in the character account, equip and unequip outside a party;
+- stats and scaling, d100 chances, states, resonances and tint traits, resistances;
+- active, reactive and passive skills, auras, line target; heal only for monsters;
+- monsters from the registry with skills, kin and elites;
 - map builder, party with price and escrow, session keys;
-- Ready: 4 active + 1 reactive + 1 passive skill selection, locks the character and its gear;
-- turns: one action per turn, cooldowns, automatic `start_turn`, Freeze and Stun skip a turn, Burning and Bleeding tick;
-- damage, buff and debuff skills, all rolled through VRF;
-- death: skill mechanics, bag and starter items burn, skill names stay on the tombstone;
+- Ready: 4 active + 1 reactive + 1 passive selection, locks the character and its gear;
+- turns: one action per turn, cooldowns, automatic `start_turn`, Freeze and Stun skip a turn, Burning and Bleeding tick, all dice through VRF;
+- death finalized by the programs: skill mechanics, bag and starter items burn, skill names stay on the tombstone (no NFT freeze yet);
 - victory, XP, DM claims the escrow.
 
-Patches 2-6 (stats, dice and states, resonances, skills, monsters) are on stacked branches and not on devnet yet.
+Next: session key in one transaction, loot, craft, city.
 
 ## 9. How to work
 
