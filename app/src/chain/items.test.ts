@@ -150,12 +150,12 @@ describe("item numbers (balance.json = deadroll_rules defaults)", () => {
 
   it("item_bonus and hero defense of the starter kits", () => {
     const kit = worn({ mainHand: "sword", body: "leatherArmor" });
-    expect(itemBonus(kit)).toEqual({ weapon: "sword", armor: 10, defense: 0, attack: 0, stats: [0, 0, 0, 0], hp: 0, resist: [0, 0, 0, 0, 0, 0], stateResist: 0 });
+    expect(itemBonus(kit)).toEqual({ weapon: "sword", armor: 10, defense: 0, attack: 0, stats: [0, 0, 0, 0], hp: 0, resist: [0, 0, 0, 0, 0, 0], stateResist: 0, stateKindResist: [0, 0, 0, 0, 0, 0, 0] });
     expect(itemBonus(worn({ body: "robe" })).weapon).toBeNull();
-    expect(itemBonus(worn({}))).toEqual({ weapon: null, armor: 0, defense: 0, attack: 0, stats: [0, 0, 0, 0], hp: 0, resist: [0, 0, 0, 0, 0, 0], stateResist: 0 });
+    expect(itemBonus(worn({}))).toEqual({ weapon: null, armor: 0, defense: 0, attack: 0, stats: [0, 0, 0, 0], hp: 0, resist: [0, 0, 0, 0, 0, 0], stateResist: 0, stateKindResist: [0, 0, 0, 0, 0, 0, 0] });
     // 10 + Dexterity 7 / 5; class armor 20 + leather 10 = the old 30. Patch 9: no item resists in
     // the starter kits; Endurance 8 gives the state resistance.
-    expect(heroDefense(Class.Warrior, [10, 7, 5, 8], kit)).toEqual({ defense: 11, armor: 30, resist: [0, 0, 0, 0, 0, 0], stateResist: 8 * END_STATE_RESIST_BP });
+    expect(heroDefense(Class.Warrior, [10, 7, 5, 8], kit)).toEqual({ defense: 11, armor: 30, resist: [0, 0, 0, 0, 0, 0], stateResist: 8 * END_STATE_RESIST_BP, stateResistByKind: Array(7).fill(8 * END_STATE_RESIST_BP) });
     expect(heroDefense(Class.Warrior, [10, 7, 5, 8], worn({ mainHand: "sword" })).armor).toBe(20);
     expect(heroDefense(Class.Mage, [5, 7, 13, 5], worn({ mainHand: "staff", body: "robe" })).armor).toBe(5);
     expect(heroDefense(Class.Support, [5, 8, 12, 5], worn({ mainHand: "wand", body: "lightLeatherArmor" })).armor).toBe(5);

@@ -15,6 +15,9 @@ export type LiveState = { kind: StateKind; turns: number; power: number };
 export const BP = 10_000;
 /** crates/combat Balance::resist_cap_bp: a hit never uses more resistance than this. */
 export const RESIST_CAP_BP: number = balance.combat.resist_cap_bp;
+/** crates/combat Balance::aspect_state_resist_share_bp (patch 9b): the share of an aspect's
+ * resistance that also divides the chance of that aspect's native state. */
+export const ASPECT_STATE_SHARE_BP: number = balance.combat.aspect_state_resist_share_bp;
 const ASPECT_COUNT = 6;
 
 /** Evasion, armor and resistance per aspect (bp, before the cap); since patch 9 the state
@@ -24,6 +27,8 @@ export type DefenseProfile = {
   armor: number;
   resist: readonly number[];
   stateResist?: number;
+  /** Patch 9b: resistance to each state (the general one included), by `StateKind`. */
+  stateResistByKind?: readonly number[];
   immuneAspects?: number;
   immuneStates?: number;
   /** By tag: Magical, Combat, Strike, Projectile. */
@@ -100,6 +105,8 @@ export type UnitStats = {
   /** Patch 9: state resistance (counterweight on state and effect chances, bp), the immunities
    * and the resistance by tag (Magical, Combat, Strike, Projectile). */
   stateResist: number;
+  /** Patch 9b: resistance to each state, by `StateKind` (equals `stateResist` without per-state items). */
+  stateResistByKind: readonly number[];
   immuneAspects: number;
   immuneStates: number;
   tagResist: readonly number[];
@@ -157,6 +164,7 @@ export function unitStats({ hp, hpMax, apBase, apNow, profile, mods, states = []
     armor: profile.armor,
     resist,
     stateResist: profile.stateResist ?? 0,
+    stateResistByKind: profile.stateResistByKind ?? [],
     immuneAspects: profile.immuneAspects ?? 0,
     immuneStates: profile.immuneStates ?? 0,
     tagResist: profile.tagResist ?? [],

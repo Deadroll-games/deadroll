@@ -135,6 +135,7 @@ HeroSheet {
   self_buff_turns: u8,
   crit_roll_bp: u32,                                            // d100 crit chance in percent, 0 = none
   resist_bp: [u32; 6], state_resist_bp: u32,                    // ABI 7: items; Endurance and items
+  state_resist_by_kind_bp: [u32; 7],                            // ABI 8: plus the items' per state
 }
 ```
 
@@ -244,7 +245,8 @@ PacketResult {
   state: StateRoll,
   pen_attacker_bp: u32, pen_state_bp: u32, vuln_shock_bp: u32,
 }
-StateRoll { kind: StateKind, rolled: bool, chance_pct: u32, roll: u16, success: bool, applied: Applied }
+StateRoll { kind: StateKind, rolled: bool, chance_pct: u32, roll: u16, success: bool, applied: Applied,
+            resist_bp: u32 }                                    // ABI 8: the counterweight the chance met
 Applied = 0 None | 1 Added | 2 Refreshed | 3 Froze
 ```
 

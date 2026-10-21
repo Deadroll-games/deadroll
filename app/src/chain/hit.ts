@@ -42,6 +42,7 @@ function stateRoll(s: any): StateRoll {
     roll: s.roll,
     success: s.success,
     applied: s.applied as StateRoll["applied"],
+    resistBp: s.resistBp,
   };
 }
 

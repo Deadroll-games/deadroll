@@ -123,6 +123,12 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                                 &mut c.combat.resist_cap_bp,
                                 d.combat.resist_cap_bp,
                             );
+                            bp_row(
+                                ui,
+                                "Aspect resistance against its state's chance (share)",
+                                &mut c.combat.aspect_state_resist_share_bp,
+                                d.combat.aspect_state_resist_share_bp,
+                            );
                             int_row(
                                 ui,
                                 "Chance floor, percent",

@@ -4,7 +4,7 @@ use deadroll_combat::DamageRange;
 use deadroll_combat::{
     apply_mod, apply_state, apply_to_attacker, apply_to_defender, mod_range, mod_turns,
     states::freeze, AccuracyBuff, Applied, Attacker, Carrier, Defender, Mod, ModFilter, ModKind,
-    Skill, States, SupportInput, TimedMod, TimedMods, Tint,
+    ResonanceTables, Skill, States, SupportInput, TimedMod, TimedMods, Tint,
 };
 use deadroll_skillcheck::{
     derive_with, Category, Effect, Purpose, SkillBlocks, SkillExt, SkillTuning, SKILL_ASPECTS_MAX,
@@ -132,6 +132,15 @@ pub mod hero {
     pub fn state_resist(cfg: &BalanceConfig, c: &HeroStats) -> u32 {
         let items = item_bonus(&c.equipment, &cfg.items);
         endurance_state_resist(&stats(cfg, c), &cfg.players).saturating_add(items.state_resist_bp)
+    }
+
+    /// Resistance to each state, bp (patch 9b): [`state_resist`] plus the items' resistance to
+    /// that state.
+    pub fn state_resists(cfg: &BalanceConfig, c: &HeroStats) -> [u32; StateKind::COUNT] {
+        let general = state_resist(cfg, c);
+        item_bonus(&c.equipment, &cfg.items)
+            .state_kind_resist_bp
+            .map(|r| r.saturating_add(general))
     }
 
     /// Extra turns of the hero's own buffs on itself (Endurance).
@@ -297,12 +306,18 @@ pub fn effect_immune(action: EffectAction, immune_states: u8) -> bool {
     immune_states & (1 << kind as u8) != 0
 }
 
-/// The target's state resistance against `action`'s chance: the state's own for hard control,
-/// the strongest one for a modifier.
-pub fn effect_resist(defender: &Defender, action: EffectAction) -> u32 {
+/// The target's counterweight on `action`'s chance: for hard control its resistance to that
+/// state with a share of the resistance to the state's aspect (`Defender::state_counter`), for
+/// a modifier (no state, no aspect of its own) the strongest state resistance.
+pub fn effect_resist(
+    cfg: &BalanceConfig,
+    tables: &ResonanceTables,
+    defender: &Defender,
+    action: EffectAction,
+) -> u32 {
     match action {
-        EffectAction::Stun => defender.state_resist_bp[StateKind::Stun as usize],
-        EffectAction::Freeze => defender.state_resist_bp[StateKind::Freeze as usize],
+        EffectAction::Stun => defender.state_counter(StateKind::Stun, tables, &cfg.combat),
+        EffectAction::Freeze => defender.state_counter(StateKind::Freeze, tables, &cfg.combat),
         EffectAction::Heal | EffectAction::Mod(_) => {
             defender.state_resist_bp.iter().copied().max().unwrap_or(0)
         }
@@ -401,7 +416,7 @@ pub fn player_defender(
         defense,
         armor,
         resist_bp: hero::resist(cfg, c),
-        state_resist_bp: [hero::state_resist(cfg, c); StateKind::COUNT],
+        state_resist_bp: hero::state_resists(cfg, c),
         states: *states,
         ..Defender::default()
     };

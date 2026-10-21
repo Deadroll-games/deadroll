@@ -211,7 +211,8 @@
       1
     ],
     "res_accuracy_turns": 2,
-    "burning_cell_rounds": 2
+    "burning_cell_rounds": 2,
+    "aspect_state_resist_share_bp": 2500
   },
   "support": {
     "mod_min_bp": [
@@ -561,7 +562,16 @@
           "Blunt": 0,
           "Piercing": 0
         },
-        "state_resist_bp": 0
+        "state_resist_bp": 0,
+        "state_kind_resist_bp": {
+          "Burning": 0,
+          "Chill": 0,
+          "Freeze": 0,
+          "Bleeding": 0,
+          "Shock": 0,
+          "Stun": 0,
+          "Penetration": 0
+        }
       },
       "Staff": {
         "slot": "MainHand",
@@ -596,7 +606,16 @@
           "Blunt": 0,
           "Piercing": 0
         },
-        "state_resist_bp": 0
+        "state_resist_bp": 0,
+        "state_kind_resist_bp": {
+          "Burning": 0,
+          "Chill": 0,
+          "Freeze": 0,
+          "Bleeding": 0,
+          "Shock": 0,
+          "Stun": 0,
+          "Penetration": 0
+        }
       },
       "Wand": {
         "slot": "MainHand",
@@ -631,7 +650,16 @@
           "Blunt": 0,
           "Piercing": 0
         },
-        "state_resist_bp": 0
+        "state_resist_bp": 0,
+        "state_kind_resist_bp": {
+          "Burning": 0,
+          "Chill": 0,
+          "Freeze": 0,
+          "Bleeding": 0,
+          "Shock": 0,
+          "Stun": 0,
+          "Penetration": 0
+        }
       },
       "LeatherArmor": {
         "slot": "Body",
@@ -666,7 +694,16 @@
           "Blunt": 0,
           "Piercing": 0
         },
-        "state_resist_bp": 0
+        "state_resist_bp": 0,
+        "state_kind_resist_bp": {
+          "Burning": 0,
+          "Chill": 0,
+          "Freeze": 0,
+          "Bleeding": 0,
+          "Shock": 0,
+          "Stun": 0,
+          "Penetration": 0
+        }
       },
       "Robe": {
         "slot": "Body",
@@ -701,7 +738,16 @@
           "Blunt": 0,
           "Piercing": 0
         },
-        "state_resist_bp": 0
+        "state_resist_bp": 0,
+        "state_kind_resist_bp": {
+          "Burning": 0,
+          "Chill": 0,
+          "Freeze": 0,
+          "Bleeding": 0,
+          "Shock": 0,
+          "Stun": 0,
+          "Penetration": 0
+        }
       },
       "LightLeatherArmor": {
         "slot": "Body",
@@ -736,7 +782,16 @@
           "Blunt": 0,
           "Piercing": 0
         },
-        "state_resist_bp": 0
+        "state_resist_bp": 0,
+        "state_kind_resist_bp": {
+          "Burning": 0,
+          "Chill": 0,
+          "Freeze": 0,
+          "Bleeding": 0,
+          "Shock": 0,
+          "Stun": 0,
+          "Penetration": 0
+        }
       }
     },
     "starter_kits": {

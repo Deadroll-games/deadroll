@@ -152,6 +152,8 @@ pub struct StateRollData {
     pub roll: u16,
     pub success: bool,
     pub applied: Applied,
+    /// Patch 9b: the counterweight the chance met, bp; 0 when no die was rolled.
+    pub resist_bp: u32,
 }
 
 /// `deadroll_combat::PacketResult`. Damage values are scaled x10_000.
@@ -265,6 +267,8 @@ pub struct EffectRollData {
     /// HP for a heal, bp for a buff or debuff, 0 for Stun / Freeze or a miss.
     pub amount: u32,
     pub rolls_used: u32,
+    /// Patch 9b: the target's counterweight the effect chance met, bp.
+    pub resist_bp: u32,
 }
 
 impl From<Outcome> for HitOutcome {
@@ -302,6 +306,7 @@ impl From<&EffectRoll> for EffectRollData {
             d100: r.d100,
             amount: r.amount,
             rolls_used: r.rolls_used,
+            resist_bp: r.resist_bp,
         }
     }
 }

@@ -22,6 +22,9 @@
 //! resistance, the monster sheet the defenses by tag. The buffers grew to 8 KB (a monster plan
 //! with 28 units and their modifiers passes 4 KB).
 //!
+//! Patch 9b (ABI 8): the hero sheet gives the resistance to each state; a state roll and an effect
+//! roll record the counterweight their chance met.
+//!
 //! Built with `std`: `deadroll-types` pulls `solana-pubkey`, whose `atomic` feature links `std`
 //! (`parking_lot`) on non-SBF targets, so `no_std` is not possible here. std on wasm32 aborts on
 //! panic and brings its own allocator.
@@ -50,12 +53,12 @@ use deadroll_skillcheck::{
     Category, SkillBlocks, SkillExt, SKILL_ASPECTS_MAX,
 };
 use deadroll_types::{
-    ActiveState, Aspect, Cell, Class, Race, RangeTag, Stat, EQUIP_SLOTS, MAP_CELLS, MAP_MAX,
-    MONSTERS_MAX, MONSTER_SLOTS, PARTY_MAX, STATES_MAX, STATS_COUNT,
+    ActiveState, Aspect, Cell, Class, Race, RangeTag, Stat, StateKind, EQUIP_SLOTS, MAP_CELLS,
+    MAP_MAX, MONSTERS_MAX, MONSTER_SLOTS, PARTY_MAX, STATES_MAX, STATS_COUNT,
 };
 
 /// Bumped on any change of the exports or the byte layouts.
-pub const ABI_VERSION: u32 = 7;
+pub const ABI_VERSION: u32 = 8;
 /// Size of the input and output buffers.
 pub const BUFFER_LEN: usize = 8192;
 
@@ -663,6 +666,10 @@ pub struct HeroSheet {
     /// items), the counterweight on every state and effect chance against the hero.
     pub resist_bp: [u32; Aspect::COUNT],
     pub state_resist_bp: u32,
+    // ABI 8.
+    /// Resistance to each state, bp by `StateKind`: `state_resist_bp` plus the items'
+    /// resistance to that state.
+    pub state_resist_by_kind_bp: [u32; StateKind::COUNT],
 }
 
 pub fn hero_sheet(h: &HeroStats) -> HeroSheet {
@@ -690,6 +697,7 @@ pub fn hero_sheet(h: &HeroStats) -> HeroSheet {
         },
         resist_bp: hero::resist(CFG, h),
         state_resist_bp: hero::state_resist(CFG, h),
+        state_resist_by_kind_bp: hero::state_resists(CFG, h),
     }
 }
 

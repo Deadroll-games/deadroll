@@ -45,6 +45,7 @@ impl RiderOutcome {
             d100: 0,
             amount: 0,
             rolls_used: 0,
+            resist_bp: 0,
         },
         applied: Applied::None,
     };
@@ -109,15 +110,18 @@ pub fn attack_monster(
                     };
                 }
                 let (min, max) = effect_range(cfg, hero, skill.power_bp, effect);
-                let resist = effect_resist(&input.defender, effect);
-                let roll = resolve_rider(
-                    effect_chance(cfg, hero, skill, resist),
-                    result.crit,
-                    min,
-                    max,
-                    &cfg.combat,
-                    src,
-                );
+                let resist = effect_resist(cfg, tables, &input.defender, effect);
+                let roll = EffectRoll {
+                    resist_bp: resist,
+                    ..resolve_rider(
+                        effect_chance(cfg, hero, skill, resist),
+                        result.crit,
+                        min,
+                        max,
+                        &cfg.combat,
+                        src,
+                    )
+                };
                 let applied = if roll.outcome == Outcome::Hit {
                     land_effect(
                         cfg,
@@ -277,15 +281,18 @@ pub fn monster_attack(
                     };
                 }
                 let (min, max) = monster_effect_range(cfg, profile, skill.power_bp, effect);
-                let resist = effect_resist(&input.defender, effect);
-                let roll = resolve_rider(
-                    monster_effect_chance(cfg, resist),
-                    result.crit,
-                    min,
-                    max,
-                    &cfg.combat,
-                    src,
-                );
+                let resist = effect_resist(cfg, tables, &input.defender, effect);
+                let roll = EffectRoll {
+                    resist_bp: resist,
+                    ..resolve_rider(
+                        monster_effect_chance(cfg, resist),
+                        result.crit,
+                        min,
+                        max,
+                        &cfg.combat,
+                        src,
+                    )
+                };
                 let applied = if roll.outcome == Outcome::Hit {
                     land_effect(
                         cfg,

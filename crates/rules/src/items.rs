@@ -3,8 +3,8 @@
 //! the session program and the simulator all read them through this module.
 use deadroll_combat::{Carrier, DamageRange, Tint};
 use deadroll_types::{
-    Aspect, Class, EquipSlot, Form, ItemBase, RangeTag, EMPTY_ITEM, EQUIP_SLOTS, SOULBOUND_MAX,
-    STATS_COUNT,
+    Aspect, Class, EquipSlot, Form, ItemBase, RangeTag, StateKind, EMPTY_ITEM, EQUIP_SLOTS,
+    SOULBOUND_MAX, STATS_COUNT,
 };
 
 use crate::config::{ItemBaseStats, ItemTuning};
@@ -153,6 +153,8 @@ pub struct ItemBonus {
     /// Patch 9. Resistance per aspect and state resistance, bp (summed counterweights).
     pub resist_bp: [u32; Aspect::COUNT],
     pub state_resist_bp: u32,
+    /// Patch 9b. Resistance to each state on top of `state_resist_bp`, by `StateKind`.
+    pub state_kind_resist_bp: [u32; StateKind::COUNT],
 }
 
 pub fn item_bonus(eq: &Equipment, t: &ItemTuning) -> ItemBonus {
@@ -177,6 +179,13 @@ pub fn item_bonus(eq: &Equipment, t: &ItemTuning) -> ItemBonus {
             *sum = sum.saturating_add(add);
         }
         for (sum, add) in out.resist_bp.iter_mut().zip(b.resist_bp) {
+            *sum = sum.saturating_add(add);
+        }
+        for (sum, add) in out
+            .state_kind_resist_bp
+            .iter_mut()
+            .zip(b.state_kind_resist_bp)
+        {
             *sum = sum.saturating_add(add);
         }
     }

@@ -39,6 +39,8 @@ export type StateRollData = {
   roll: number;
   success: boolean;
   applied: Applied;
+  /** Patch 9b: the counterweight the chance met, bp; 0 when no die was rolled. */
+  resistBp: number;
 };
 
 export type StateRollDataArgs = {
@@ -48,6 +50,8 @@ export type StateRollDataArgs = {
   roll: number;
   success: boolean;
   applied: AppliedArgs;
+  /** Patch 9b: the counterweight the chance met, bp; 0 when no die was rolled. */
+  resistBp: number;
 };
 
 export function getStateRollDataEncoder(): FixedSizeEncoder<StateRollDataArgs> {
@@ -58,6 +62,7 @@ export function getStateRollDataEncoder(): FixedSizeEncoder<StateRollDataArgs> {
     ["roll", getU16Encoder()],
     ["success", getBooleanEncoder()],
     ["applied", getAppliedEncoder()],
+    ["resistBp", getU32Encoder()],
   ]);
 }
 
@@ -69,6 +74,7 @@ export function getStateRollDataDecoder(): FixedSizeDecoder<StateRollData> {
     ["roll", getU16Decoder()],
     ["success", getBooleanDecoder()],
     ["applied", getAppliedDecoder()],
+    ["resistBp", getU32Decoder()],
   ]);
 }
 

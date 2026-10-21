@@ -114,6 +114,7 @@ fn sheet_json(s: &HeroSheet) -> Value {
         "critRollBp": s.crit_roll_bp,
         "resistBp": s.resist_bp,
         "stateResistBp": s.state_resist_bp,
+        "stateResistByKindBp": s.state_resist_by_kind_bp,
     })
 }
 
