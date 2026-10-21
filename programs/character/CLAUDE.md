@@ -11,6 +11,7 @@ from `crates/skillcheck`, item rules from `crates/rules` (`items`, `BalanceConfi
 ## Rules for this zone
 - Docs: `docs/CHARACTER.md`, `docs/SKILL_BUILDER.md` sections 3.4 and 10-13,
   `docs/ITEMS_AND_CRAFT.md` 2, 6 and 10, `docs/STORAGE_AND_DELIVERY.md` 6.2.
+- `lib/Cargo.toml` is this program as a dependency of other crates (same `src/`, rlib): a dependency or feature added to `Cargo.toml` goes there too.
 - Accounts owned here: `PlayerProfile`, `Character`, `SkillSet`, `Bag` (seeds in CONTRACTS.md 2).
   `Character.core` is the frozen `CharacterData`; only append fields after it (`class_tier` is last now).
 - Gear changes only outside a session: `in_session` freezes the bag and the gear. Keep the gear logic

@@ -64,6 +64,10 @@ pnpm --filter @deadroll/sdk generate                     # target/idl -> sdk/idl
 pnpm --filter @deadroll/sdk check                        # fails if sdk/idl or sdk/src/generated is stale
 ```
 
+The build cache is never cleaned by hand. On Windows `anchor build` starts cargo in a `\\?\D:\...` folder: it rebuilds the shared crates on every run and its `.so` bytes vary, so programs for deploy are built by the deploy scripts (`cargo build-sbf` in the program folder, cache `target/sbf-deploy/`), never taken from `anchor build`.
+
+A new dependency on a program (CPI, account types) goes only through its `programs/<p>/lib/` package, never the program crate; if it has none yet (render, items, city), create it first (root `Cargo.toml`, `anchor-instruction` skill).
+
 Local validator (the user runs it in WSL, one shared instance; agents never start or reset it):
 
 ```

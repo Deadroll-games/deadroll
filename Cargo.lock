@@ -1283,6 +1283,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "deadroll-character-lib"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "bytemuck",
+ "deadroll-rules",
+ "deadroll-skillcheck",
+ "deadroll-types",
+ "mpl-core",
+ "session-keys",
+]
+
+[[package]]
 name = "deadroll-city"
 version = "0.1.0"
 dependencies = [
@@ -1325,7 +1338,20 @@ version = "0.1.0"
 dependencies = [
  "anchor-lang",
  "deadroll-mapcheck",
- "deadroll-registry",
+ "deadroll-registry-lib",
+ "deadroll-rules",
+ "deadroll-skillcheck",
+ "deadroll-types",
+ "solana-sha256-hasher",
+]
+
+[[package]]
+name = "deadroll-map-lib"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "deadroll-mapcheck",
+ "deadroll-registry-lib",
  "deadroll-rules",
  "deadroll-skillcheck",
  "deadroll-types",
@@ -1353,6 +1379,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "deadroll-registry-lib"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "bytemuck",
+ "deadroll-combat",
+ "deadroll-skillcheck",
+ "deadroll-types",
+]
+
+[[package]]
 name = "deadroll-render"
 version = "0.1.0"
 dependencies = [
@@ -1369,7 +1406,7 @@ version = "0.1.0"
 dependencies = [
  "anchor-lang",
  "bytemuck",
- "deadroll-registry",
+ "deadroll-registry-lib",
  "deadroll-render",
  "deadroll-types",
  "solana-sha256-hasher",
@@ -1400,10 +1437,27 @@ name = "deadroll-session"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
- "deadroll-character",
+ "deadroll-character-lib",
  "deadroll-combat",
- "deadroll-map",
- "deadroll-registry",
+ "deadroll-map-lib",
+ "deadroll-registry-lib",
+ "deadroll-rules",
+ "deadroll-skillcheck",
+ "deadroll-types",
+ "ephemeral-vrf-sdk",
+ "session-keys",
+ "solana-sha256-hasher",
+]
+
+[[package]]
+name = "deadroll-session-lib"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "deadroll-character-lib",
+ "deadroll-combat",
+ "deadroll-map-lib",
+ "deadroll-registry-lib",
  "deadroll-rules",
  "deadroll-skillcheck",
  "deadroll-types",
@@ -1416,11 +1470,11 @@ dependencies = [
 name = "deadroll-sim"
 version = "0.1.0"
 dependencies = [
- "deadroll-character",
+ "deadroll-character-lib",
  "deadroll-combat",
- "deadroll-registry",
+ "deadroll-registry-lib",
  "deadroll-rules",
- "deadroll-session",
+ "deadroll-session-lib",
  "deadroll-skillcheck",
  "deadroll-types",
  "rayon",

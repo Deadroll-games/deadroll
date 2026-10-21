@@ -7,6 +7,7 @@ Maps, their validation and finalization, the secrets root and the `layout` PDA (
 
 ## Rules for this zone
 - Docs: docs/MAP_DESCRIPTION.md (sections 2-4, 7, 10, 13), docs/BESTIARY.md (2.1, 6).
+- `lib/Cargo.toml` is this program as a dependency of other crates (same `src/`, rlib): a dependency or feature added to `Cargo.toml` goes there too.
 - Accounts owned here: `Map { core: MapData, tier }` `["map", dm, index u32 LE]`, `MapLayout { core: MapLayoutData }` `["layout", map]`. The struct names are part of the format: `programs/session` checks `account:Map` / `account:MapLayout` discriminators and reads the core at fixed offsets. Append fields only.
 - `layout_hash` = SHA-256 of the layout account bytes `[8 .. 8 + MapLayoutData::SIZE]`.
 - CPI out: none. CPI in: `set_status(status)` from session only, accounts `[map (mut), session_authority (signer), config]`, trust checked in `src/trust.rs` against registry `GameConfig.programs[Session]`.
