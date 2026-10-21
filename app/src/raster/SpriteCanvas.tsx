@@ -1,9 +1,29 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /** Character canvas side (crates/render/FORMAT.md 1.4): every character layer is 96x96. */
 export const SPRITE_PX = 96;
 /** Map tile side: one cell. Characters and monsters stand bottom-center on it at the same pixel size. */
 export const TILE_PX = 64;
+/** Scale of the large character preview (character page, character creation): 96 px -> 288 px. */
+export const PREVIEW_SCALE = 3;
+/** Horizontal space around the preview: `main` padding (2 x 20) and `.panel` padding and border (2 x 17). */
+const PREVIEW_CHROME_PX = 74;
+
+/** The box the large preview may fill at a viewport width; a phone too narrow for 3x gets 2x. */
+export function previewFit(viewportWidth: number): { w: number; h: number } {
+  return { w: Math.max(0, viewportWidth - PREVIEW_CHROME_PX), h: Number.MAX_SAFE_INTEGER };
+}
+
+/** `previewFit` for the current window, updated on resize. */
+export function usePreviewFit(): { w: number; h: number } {
+  const [width, setWidth] = useState(() => (typeof window === "undefined" ? Infinity : window.innerWidth));
+  useEffect(() => {
+    const onResize = () => setWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  return previewFit(width);
+}
 
 /**
  * Integer scale for a sprite: the requested scale rounded down, at least 1. With `fit` (the box in

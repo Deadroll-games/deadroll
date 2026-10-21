@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { SpriteCanvas, integerScale } from "./SpriteCanvas";
+import { PREVIEW_SCALE, SpriteCanvas, integerScale, previewFit } from "./SpriteCanvas";
 
 describe("integerScale", () => {
   it("never returns a fractional scale or less than 1", () => {
@@ -18,6 +18,16 @@ describe("integerScale", () => {
     expect(integerScale(10, size, { w: 400, h: 200 })).toBe(2);
     expect(integerScale(2, size, { w: 1000, h: 1000 })).toBe(2);
     expect(integerScale(3, size, { w: 50, h: 50 })).toBe(1);
+  });
+});
+
+describe("previewFit", () => {
+  it("keeps the preview at 3x on a desktop and drops to 2x on a narrow phone", () => {
+    const size = { w: 96, h: 96 };
+    expect(integerScale(PREVIEW_SCALE, size, previewFit(1280))).toBe(3);
+    expect(integerScale(PREVIEW_SCALE, size, previewFit(390))).toBe(3);
+    expect(integerScale(PREVIEW_SCALE, size, previewFit(360))).toBe(2);
+    expect(integerScale(PREVIEW_SCALE, size, previewFit(0))).toBe(1);
   });
 });
 

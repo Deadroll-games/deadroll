@@ -21,7 +21,7 @@ import { useTx } from "../chain/useTx";
 import { DATA_SOURCE, DEV_TOOLS } from "../config";
 import { OldCharacterLabel } from "../raster/OldCharacter";
 import { useRasterizer, useRenderImage } from "../raster/RasterizerProvider";
-import { SpriteCanvas } from "../raster/SpriteCanvas";
+import { PREVIEW_SCALE, SpriteCanvas, usePreviewFit } from "../raster/SpriteCanvas";
 import { useAppWallet } from "../wallet/AppWallet";
 
 /** programs/character rules.rs: STAT_BASE and STAT_POINTS_START. */
@@ -41,6 +41,7 @@ export function CharacterPage() {
   // A new character wears its class starter kit.
   const chainPreview = DATA_SOURCE === "chain" ? renderRequest(dressed(characterAppearance(draft.race, draft.predisposition), starterEquipment(draft.class))) : null;
   const preview = useRenderImage(chainPreview ?? (raster.status === "ready" ? raster.sample : null));
+  const previewFit = usePreviewFit();
   const wallet = useAppWallet();
   const { send, busy } = useTx();
   const [mine, setMine] = useState<{ address: Address; data: CharacterAcc }[]>([]);
@@ -100,7 +101,7 @@ export function CharacterPage() {
         statMin={STAT_MIN}
         allowedPredispositions={allowed}
         busy={busy !== null}
-        preview={<SpriteCanvas image={preview.image} scale={2} label="character preview" />}
+        preview={<SpriteCanvas image={preview.image} scale={PREVIEW_SCALE} fit={previewFit} label="character preview" />}
       />
       {mockCreated && (
         <p className="ok">

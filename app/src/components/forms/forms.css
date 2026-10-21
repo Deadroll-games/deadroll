@@ -15,7 +15,7 @@
 
 .forms-split {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 200px;
+  grid-template-columns: minmax(0, 1fr) 322px;
   gap: 16px;
   align-items: start;
 }
@@ -69,7 +69,7 @@
 }
 
 .forms-frame {
-  min-height: 180px;
+  min-height: 322px;
   display: grid;
   place-items: center;
   background: var(--panel-2);

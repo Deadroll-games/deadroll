@@ -70,7 +70,7 @@ canvas.sprite-canvas { flex: none; max-width: none; }
 /* Character detail */
 .char-detail { display: grid; grid-template-columns: 1fr; gap: 12px; align-items: start; }
 @media (min-width: 900px) {
-  .char-detail { grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); }
+  .char-detail { grid-template-columns: minmax(322px, 400px) minmax(0, 1fr); }
   .char-detail-head { grid-column: 1; }
   .char-detail-stats { grid-column: 2; grid-row: 1 / span 2; }
   .char-detail-party { grid-column: 1; }
