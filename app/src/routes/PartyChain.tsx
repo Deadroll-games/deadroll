@@ -93,7 +93,7 @@ import { useSessionKey } from "../session-key/SessionKeyProvider";
 import { useAppWallet } from "../wallet/AppWallet";
 import { formatSol, shortAddress } from "../wallet/ConnectButton";
 
-const CELL_PX = 32;
+const CELL_PX = 64; // sprites: one whole 64 px tile per cell (grid integerCell)
 
 export function PartyChain() {
   const [params] = useSearchParams();

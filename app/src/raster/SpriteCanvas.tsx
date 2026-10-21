@@ -6,14 +6,39 @@ export const SPRITE_PX = 96;
 export const TILE_PX = 64;
 
 /**
- * Draws RGBA ImageData with nearest-neighbor scaling (never smoothed). `scale` may be a half step
- * (1.5 shows a 96 px sprite at 144 px): the canvas is drawn at the next integer scale and sized
- * down by CSS, so pixels stay square on high-density screens.
+ * Integer scale for a sprite: the requested scale rounded down, at least 1. With `fit` (the box in
+ * screen px) it is the largest integer scale whose image still fits; if even 1x does not fit the
+ * result is 1 and the box has to grow, a sprite is never drawn below 1x.
  */
-export function SpriteCanvas({ image, scale = 2, label }: { image: ImageData | null; scale?: number; label?: string }) {
+export function integerScale(
+  scale: number,
+  size: { w: number; h: number } = { w: SPRITE_PX, h: SPRITE_PX },
+  fit?: { w: number; h: number },
+): number {
+  const wanted = Number.isFinite(scale) ? Math.floor(scale) : 1;
+  const fitted = fit ? Math.min(Math.floor(fit.w / size.w), Math.floor(fit.h / size.h)) : wanted;
+  return Math.max(1, Math.min(wanted, fitted));
+}
+
+/**
+ * Draws RGBA ImageData with nearest-neighbor scaling (never smoothed). The scale is always an
+ * integer and the canvas is as large on screen as its pixels, so CSS never resizes it.
+ */
+export function SpriteCanvas({
+  image,
+  scale = 2,
+  fit,
+  label,
+}: {
+  image: ImageData | null;
+  scale?: number;
+  fit?: { w: number; h: number };
+  label?: string;
+}) {
   const ref = useRef<HTMLCanvasElement>(null);
-  const shown = Math.max(0.5, Math.round(scale * 2) / 2);
-  const k = Math.max(1, Math.ceil(shown));
+  const w = image?.width ?? SPRITE_PX;
+  const h = image?.height ?? SPRITE_PX;
+  const k = integerScale(scale, { w, h }, fit);
   useEffect(() => {
     const canvas = ref.current;
     const ctx = canvas?.getContext("2d");
@@ -26,15 +51,13 @@ export function SpriteCanvas({ image, scale = 2, label }: { image: ImageData | n
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(src, 0, 0, image.width * k, image.height * k);
   }, [image, k]);
-  const w = image?.width ?? SPRITE_PX;
-  const h = image?.height ?? SPRITE_PX;
   return (
     <canvas
       ref={ref}
-      className="pixel"
+      className="pixel sprite-canvas"
       width={w * k}
       height={h * k}
-      style={{ width: w * shown, height: h * shown }}
+      style={{ width: w * k, height: h * k }}
       role="img"
       aria-label={label ?? "sprite"}
     />

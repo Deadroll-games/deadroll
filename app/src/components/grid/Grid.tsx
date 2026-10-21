@@ -34,10 +34,14 @@ const LETTER = "#f4efe6";
 type Rect = { left: number; top: number; width: number; height: number };
 
 /**
- * Canvas pixels per cell: at least one tile (64 px, drawn 1:1), more when the cell is shown larger.
- * The CSS size stays `cellPx`, so a smaller cell shows the sprite scaled down by the browser and
- * stays sharp on high-density screens.
+ * Canvas pixels per cell: with sprites a whole multiple of the 64 px tile (minimum one tile), so every
+ * sprite pixel is an integer number of screen pixels and the canvas is never resized by CSS.
  */
+export function integerCell(cellPx: number): number {
+  return TILE_PX * Math.max(1, Math.floor(cellPx / TILE_PX));
+}
+
+/** Backing cell for a flat-color grid (no sprites): follows `cellPx`, at least one tile. */
 export function backingCell(cellPx: number): number {
   return Math.max(TILE_PX, Math.round(cellPx));
 }
@@ -358,7 +362,11 @@ function cellKey(cell: Cell | null): string | null {
 
 export function Grid(props: GridProps) {
   const { width, height, cellPx = 48, onCellClick, onUnitClick, onCellHover } = props;
-  const cell = backingCell(cellPx);
+  // Sprites are pixel art: whole tile multiples, CSS size equal to the backing size. A flat-color
+  // grid (no sprites) has no pixels to keep square and may be shown at any cellPx.
+  const pixelArt = Boolean(props.tileSprite || props.unitSprite);
+  const cell = pixelArt ? integerCell(cellPx) : backingCell(cellPx);
+  const shownCell = pixelArt ? cell : cellPx;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const hoverKey = useRef<string | null>(null);
 
@@ -397,7 +405,7 @@ export function Grid(props: GridProps) {
       className="pixel grid-canvas"
       width={width * cell}
       height={height * cell}
-      style={{ width: width * cellPx, height: height * cellPx }}
+      style={{ width: width * shownCell, height: height * shownCell }}
       role="img"
       aria-label={`Battle map, ${width} by ${height} cells`}
       onClick={handleClick}
