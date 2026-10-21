@@ -41,6 +41,7 @@ const NO_MODS: TimedMods = [TimedMod {
     turns: 0,
     power_bp: 0,
     source: 0,
+    weights_pct: [0; Aspect::COUNT],
 }; MODS_MAX];
 
 fn hex(bytes: &[u8]) -> String {
@@ -69,6 +70,7 @@ fn mods_json(m: &TimedMods) -> Value {
                 "turns": t.turns,
                 "powerBp": t.power_bp,
                 "source": t.source,
+                "weightsPct": t.weights_pct,
             })
         })
         .collect()
@@ -110,6 +112,8 @@ fn sheet_json(s: &HeroSheet) -> Value {
         "tempoStateBp": s.tempo_state_bp,
         "selfBuffTurns": s.self_buff_turns,
         "critRollBp": s.crit_roll_bp,
+        "resistBp": s.resist_bp,
+        "stateResistBp": s.state_resist_bp,
     })
 }
 
@@ -177,6 +181,7 @@ fn aura_json(a: &AuraInput) -> Value {
         "hostile": a.hostile,
         "passive": a.passive,
         "selfOnly": a.self_only,
+        "weightsPct": a.weights_pct,
     })
 }
 
@@ -259,6 +264,7 @@ fn aura_in(
         hostile,
         passive,
         self_only: false,
+        weights_pct: [0; Aspect::COUNT],
     }
 }
 
@@ -273,6 +279,7 @@ fn unit_mods_cases() -> Vec<UnitModsRequest> {
         turns: 2,
         power_bp: 1_000,
         source: 1,
+        weights_pct: [0; Aspect::COUNT],
     };
     let protect = party_of(
         0,
@@ -291,6 +298,22 @@ fn unit_mods_cases() -> Vec<UnitModsRequest> {
     );
     let mut self_only = protect;
     self_only.auras[0][0].self_only = true;
+    // Patch 9: a passive Resistance aura over Piercing (65) and Cold (35), the bearer's Blood
+    // predisposition at the base share; an own Resistance it outweighs.
+    let mut ward = aura_in(ModKind::Resistance, Aspect::Piercing, 3_000, false, true);
+    ward.weights_pct[Aspect::Piercing as usize] = 65;
+    ward.weights_pct[Aspect::Cold as usize] = 35;
+    ward.weights_pct[Aspect::Blood as usize] = 65;
+    let resist = party_of(0, at, ward);
+    let mut own_resist = NO_MODS;
+    own_resist[ModKind::Resistance as usize] = TimedMod {
+        kind: ModKind::Resistance,
+        aspect: Aspect::Fire,
+        turns: 2,
+        power_bp: 1_000,
+        source: 1,
+        weights_pct: [0, 100, 0, 0, 0, 0],
+    };
     // Patch 6: a goblin chieftain's Leader (kin-only Empowerment) over two monsters, a monster's
     // Slow aura over a player.
     let leader = with_bearer(
@@ -327,6 +350,8 @@ fn unit_mods_cases() -> Vec<UnitModsRequest> {
         req(empower, NO_MODS, false, 0, Cell { x: 4, y: 5 }, false, 0),
         req(empower, NO_MODS, false, 0, Cell { x: 4, y: 5 }, true, 0),
         req(self_only, NO_MODS, false, 1, at, false, 0),
+        req(resist, NO_MODS, false, 1, Cell { x: 5, y: 5 }, false, 0),
+        req(resist, own_resist, false, 1, Cell { x: 5, y: 5 }, false, 0),
         req(leader, NO_MODS, true, 1, Cell { x: 5, y: 4 }, false, 1),
         req(leader, NO_MODS, true, 1, Cell { x: 5, y: 4 }, true, 1),
         req(leader, NO_MODS, true, 2, Cell { x: 5, y: 4 }, false, 0),
@@ -410,6 +435,7 @@ fn requests(heroes: &[HeroInput], registry: &Registry) -> Vec<AttackRequest> {
         turns: 2,
         power_bp: 3_000,
         source: 0,
+        weights_pct: [0; Aspect::COUNT],
     };
     let mut protected = NO_MODS;
     protected[0] = TimedMod {
@@ -418,6 +444,7 @@ fn requests(heroes: &[HeroInput], registry: &Registry) -> Vec<AttackRequest> {
         turns: 2,
         power_bp: 2_500,
         source: 5,
+        weights_pct: [0; Aspect::COUNT],
     };
     let mut out = Vec::new();
     for (n, h) in heroes.iter().enumerate() {
@@ -591,6 +618,8 @@ fn build() -> Value {
                     "poolLen": m.pool_len,
                     "kin": m.kin,
                     "slots": m.slots,
+                    "tagResistBp": m.tag_resist_bp,
+                    "immuneTags": m.immune_tags,
                 },
             })
         })

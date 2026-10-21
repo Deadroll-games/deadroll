@@ -17,7 +17,7 @@
 //! damage act in steps 9-14, ops on the native state in step 20, the rest in step 21. What
 //! needs the map (jumps to other units, knockback, burning cells) is returned for the caller.
 
-use deadroll_types::{ActiveState, Aspect, StateKind, Tier, BP, STATES_MAX};
+use deadroll_types::{ActiveState, Aspect, Form, Source, StateKind, Tier, BP, STATES_MAX};
 
 use crate::balance::Balance;
 use crate::modifiers::{
@@ -32,8 +32,8 @@ use crate::resonance::{
 };
 use crate::rng::{chance, d100, d20, RollSource};
 use crate::states::{
-    apply_chill_for, apply_state, aspect_bit, find, freeze_for, power_of, remove, state_bit,
-    Applied, States,
+    apply_chill_for, apply_state, aspect_bit, find, form_bit, freeze_for, power_of, remove,
+    source_bit, state_bit, Applied, States, TAGS,
 };
 use crate::support::{mod_turns, AccuracyBuff, ModKind, TimedMod};
 use crate::tables::{Op, OpKind, ResonanceTables, ANY_STATE, PAIR_OPS, TEMPLATE_OPS};
@@ -98,6 +98,32 @@ pub struct Defender {
     pub state_resist_bp: [u32; StateKind::COUNT],
     /// States before the hit.
     pub states: States,
+    /// Patch 9. Resistance per defense tag (counterweight, summed with the packet's aspect
+    /// resistance before the cap), by [`TAGS`] index.
+    pub tag_resist_bp: [u32; TAGS],
+    /// Immunity per defense tag, bits [`source_bit`] / [`form_bit`]: every packet of a skill
+    /// with that source or form is immune.
+    pub immune_tags: u8,
+}
+
+impl Defender {
+    /// Aspects a hit with `source` and `form` cannot touch: the aspect immunities, or every
+    /// aspect when the target is immune to one of the hit's tags (step 3).
+    pub fn immune_mask(&self, source: Source, form: Form) -> u8 {
+        if self.immune_tags & (source_bit(source) | form_bit(form)) != 0 {
+            u8::MAX
+        } else {
+            self.immune_aspects
+        }
+    }
+
+    /// Resistance to a packet of `aspect` from a hit with `source` and `form`, before the cap:
+    /// its aspect plus the hit's tags, one summed counterweight (step 15).
+    pub fn resist_for(&self, aspect: Aspect, source: Source, form: Form) -> u32 {
+        self.resist_bp[aspect as usize]
+            .saturating_add(self.tag_resist_bp[source as usize])
+            .saturating_add(self.tag_resist_bp[Source::COUNT + form as usize])
+    }
 }
 
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
@@ -457,11 +483,13 @@ pub fn resolve_hit_into(
     let d = &input.defender;
     out.defense = d.defense;
     out.states = d.states;
-    let immune = |aspect: Aspect| d.immune_aspects & aspect_bit(aspect) != 0;
+    let (source, form) = (a.skill.source, a.skill.form);
+    let immune_mask = d.immune_mask(source, form);
+    let immune = |aspect: Aspect| immune_mask & aspect_bit(aspect) != 0;
 
-    // Step 3: immunity to every packet.
+    // Step 3: immunity to every packet (by aspect, or by the hit's tags).
     let mut packets = build_packets(a.weapon, &a.skill, &a.added);
-    fill_packets(out, &packets, d.immune_aspects);
+    fill_packets(out, &packets, immune_mask);
     if packets.as_slice().iter().all(|p| immune(p.aspect)) {
         out.outcome = Outcome::Immune;
         return;
@@ -500,7 +528,7 @@ pub fn resolve_hit_into(
     let tints = roll_tints(
         bases,
         &a.tints,
-        d.immune_aspects,
+        immune_mask,
         &view,
         balance,
         tables,
@@ -550,10 +578,9 @@ pub fn resolve_hit_into(
             (o.acted, o.amount, o.amount_max) = (true, min, max.max(min));
         }
     }
-    fill_packets(out, &packets, d.immune_aspects);
+    fill_packets(out, &packets, immune_mask);
 
     // Steps 10-12: attacker modifiers, per packet. A resonance's multiplier is on its base.
-    let (source, form) = (a.skill.source, a.skill.form);
     let mut res_more = [BP as u64; SKILL_ASPECTS_MAX];
     for (slot, plan) in plans.iter().enumerate() {
         for (k, p) in plan.as_slice().iter().enumerate() {
@@ -635,7 +662,9 @@ pub fn resolve_hit_into(
             r.pen_state_bp = pen_state;
             v = armor_cut(v, d.armor, pen, balance.armor_k);
         }
-        r.resist_bp = d.resist_bp[r.aspect as usize].min(balance.resist_cap_bp);
+        r.resist_bp = d
+            .resist_for(r.aspect, source, form)
+            .min(balance.resist_cap_bp);
         v = resist_cut(v, r.resist_bp, balance.resist_cap_bp);
         r.vuln_bp = d.vuln_bp[r.aspect as usize];
         r.vuln_shock_bp = shock;
@@ -650,6 +679,7 @@ pub fn resolve_hit_into(
     out.damage = damage.max(balance.min_damage);
 
     let mut lands = Landing {
+        can_freeze: d.immune_states & state_bit(StateKind::Freeze) == 0,
         states: d.states,
         landed: 0,
         now: [ActiveState::default(); StateKind::COUNT],
@@ -679,8 +709,8 @@ pub fn resolve_hit_into(
         };
         let stat_bonus = state_stat_bonus(kind, a);
         let increase = stat_bonus.saturating_add(pure);
-        let aspect_resist = d.resist_bp[r.aspect as usize].min(balance.resist_cap_bp);
-        let resist = d.state_resist_bp[kind as usize].saturating_add(aspect_resist);
+        // Aspect resistance cuts only the damage; the chance meets the state resistance.
+        let resist = d.state_resist_bp[kind as usize];
         let raw = ratio(a.skill.state_chance_pct as u64, increase, resist);
         let chance_pct = balance.clamp_chance(raw.min(u32::MAX as u64) as u32);
         let (success, roll) = chance(&mut src, chance_pct);
@@ -699,7 +729,6 @@ pub fn resolve_hit_into(
                     packet_damage: r.after_defense,
                     stat_bonus_bp: stat_bonus,
                     pure_bp: pure,
-                    aspect_resist_bp: aspect_resist,
                     source: a.slot,
                     extra_turns: mods.extra_turns,
                     power_bp: mods.power_bp,
@@ -739,7 +768,6 @@ pub fn resolve_hit_into(
             .unwrap_or(0);
         let native = tables.native(res.base);
         let native_landed = native.is_some_and(|k| lands.landed & state_bit(k) != 0);
-        let aspect_resist = d.resist_bp[res.base as usize].min(balance.resist_cap_bp);
         let mut removals: [Option<(usize, StateKind)>; RES_OPS_MAX] = [None; RES_OPS_MAX];
         for (k, p) in plans[slot].as_slice().iter().enumerate() {
             if !acts(&p.op) {
@@ -753,7 +781,6 @@ pub fn resolve_hit_into(
                 packet_damage: damage,
                 stat_bonus_bp: state_stat_bonus(kind, a),
                 pure_bp: balance.res_power(tier),
-                aspect_resist_bp: aspect_resist,
                 source: a.slot,
                 extra_turns: 0,
                 power_bp: 0,
@@ -800,7 +827,7 @@ pub fn resolve_hit_into(
                         continue;
                     };
                     let stat_bonus = state_stat_bonus(kind, a);
-                    let resist = d.state_resist_bp[kind as usize].saturating_add(aspect_resist);
+                    let resist = d.state_resist_bp[kind as usize];
                     let base = scale(balance.extra_state_chance_pct, p.op.value);
                     let raw = ratio(base as u64, stat_bonus, resist);
                     let chance_pct = balance.clamp_chance(raw.min(u32::MAX as u64) as u32);
@@ -831,17 +858,15 @@ pub fn resolve_hit_into(
                         ModKind::Haste | ModKind::Slow => a.tempo_bonus_bp,
                         _ => a.state_chance_bonus_bp,
                     };
-                    let power = counter(
-                        more(scale(balance.res_mod(tier), p.op.value) as u64, stat),
-                        aspect_resist,
-                    )
-                    .clamp(1, u32::MAX as u64) as u32;
+                    let power = more(scale(balance.res_mod(tier), p.op.value) as u64, stat)
+                        .clamp(1, u32::MAX as u64) as u32;
                     out.target_mods[out.target_mod_count as usize] = TimedMod {
                         kind,
                         aspect: res.base,
                         turns: mod_turns(balance.res_mod_turns),
                         power_bp: power,
                         source: a.slot,
+                        ..TimedMod::default()
                     };
                     out.target_mod_count += 1;
                     (o.acted, o.amount) = (true, power);
@@ -979,7 +1004,6 @@ struct StateApply {
     stat_bonus_bp: u32,
     /// Pure pair, or the tint tier's power for a resonance's own state.
     pure_bp: u32,
-    aspect_resist_bp: u32,
     source: u8,
     /// From the resonance on the base: more turns, more power, faster ticks.
     extra_turns: u8,
@@ -989,6 +1013,8 @@ struct StateApply {
 
 /// The target's states during step 20-21 and what landed on them.
 struct Landing {
+    /// The target is not immune to Freeze: Chill buildup may freeze it.
+    can_freeze: bool,
     states: States,
     /// `state_bit`s.
     landed: u8,
@@ -998,7 +1024,7 @@ struct Landing {
 
 impl Landing {
     fn apply(&mut self, kind: StateKind, s: StateApply, balance: &Balance) -> Applied {
-        let (applied, inst) = apply_kind(&mut self.states, kind, s, balance);
+        let (applied, inst) = apply_kind(&mut self.states, kind, s, self.can_freeze, balance);
         if applied == Applied::None {
             return applied;
         }
@@ -1015,20 +1041,20 @@ impl Landing {
 }
 
 /// Applies a state of `kind` and returns what it put on (before merging with an existing
-/// instance). Over-time strength is a share of the packet damage (section 7.1). Chill, Shock
-/// and Penetration scale with the stat bonus and the pure pair, then the aspect resistance
-/// divides them (DAMAGE_TYPES §9).
+/// instance). Over-time strength is a share of the packet damage (section 7.1), so the aspect
+/// resistance weakens it through the damage only. Chill, Shock and Penetration scale with the
+/// stat bonus and the pure pair.
 fn apply_kind(
     states: &mut [ActiveState; STATES_MAX],
     kind: StateKind,
     apply: StateApply,
+    can_freeze: bool,
     balance: &Balance,
 ) -> (Applied, ActiveState) {
     let StateApply {
         packet_damage,
         stat_bonus_bp,
         pure_bp,
-        aspect_resist_bp,
         source,
         extra_turns,
         power_bp,
@@ -1042,7 +1068,7 @@ fn apply_kind(
         let increase = stat_bonus_bp
             .saturating_add(pure_bp)
             .saturating_add(power_bp);
-        counter(more(base as u64, increase), aspect_resist_bp).min(u32::MAX as u64) as u32
+        more(base as u64, increase).min(u32::MAX as u64) as u32
     };
     let inst = |power: u32, turns: u8| ActiveState {
         kind,
@@ -1053,7 +1079,10 @@ fn apply_kind(
     match kind {
         StateKind::Chill => {
             let s = inst(scaled(balance.chill_buildup_bp), turns);
-            (apply_chill_for(states, s.power, turns, source, balance), s)
+            (
+                apply_chill_for(states, s.power, turns, source, can_freeze, balance),
+                s,
+            )
         }
         StateKind::Freeze => (freeze_for(states, turns, source), inst(0, turns)),
         StateKind::Burning | StateKind::Bleeding => {
@@ -1137,10 +1166,11 @@ pub fn preview_hit(input: &HitInput, balance: &Balance, tables: &ResonanceTables
     let a = &input.attacker;
     let d = &input.defender;
     let packets = build_packets(a.weapon, &a.skill, &a.added);
+    let immune_mask = d.immune_mask(a.skill.source, a.skill.form);
     if packets
         .as_slice()
         .iter()
-        .all(|p| d.immune_aspects & aspect_bit(p.aspect) != 0)
+        .all(|p| immune_mask & aspect_bit(p.aspect) != 0)
     {
         return HitPreview {
             immune: true,
@@ -1175,7 +1205,7 @@ pub fn preview_hit(input: &HitInput, balance: &Balance, tables: &ResonanceTables
     };
     let (bases, base_count) = a.skill.bases(a.weapon.aspect);
     for (i, &base) in bases[..base_count].iter().enumerate() {
-        if d.immune_aspects & aspect_bit(base) != 0 || bases[..i].contains(&base) {
+        if immune_mask & aspect_bit(base) != 0 || bases[..i].contains(&base) {
             continue;
         }
         for t in a.tints.iter() {
@@ -1286,9 +1316,10 @@ fn damage_range(input: &HitInput, balance: &Balance, crit: bool, extra: &Extra) 
         .saturating_add(extra.pen_bp)
         .saturating_add(power_of(&d.states, StateKind::Penetration));
     let shock = power_of(&d.states, StateKind::Shock);
+    let immune_mask = d.immune_mask(a.skill.source, a.skill.form);
     let (mut lo, mut hi) = (0u128, 0u128);
     for p in packets.as_slice() {
-        if d.immune_aspects & aspect_bit(p.aspect) != 0 {
+        if immune_mask & aspect_bit(p.aspect) != 0 {
             continue;
         }
         let incr = sum_matching(&a.increased, p.aspect, a.skill.source, a.skill.form);
@@ -1308,7 +1339,8 @@ fn damage_range(input: &HitInput, balance: &Balance, crit: bool, extra: &Extra) 
             if is_physical(p.aspect) {
                 v = armor_cut(v, d.armor, pen, balance.armor_k);
             }
-            v = resist_cut(v, d.resist_bp[p.aspect as usize], balance.resist_cap_bp);
+            let resist = d.resist_for(p.aspect, a.skill.source, a.skill.form);
+            v = resist_cut(v, resist, balance.resist_cap_bp);
             let v = more(v, d.vuln_bp[p.aspect as usize]);
             more(v, shock) as u128
         };

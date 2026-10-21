@@ -117,12 +117,14 @@ pub fn support_input(
 }
 
 /// Lands `action` (not a heal) of strength `amount` on a unit: a modifier for its duration plus
-/// `extra_turns`, or the existing Stun / Freeze state. `aspect`: the skill's; `source`: the
-/// caster's turn-order id.
+/// `extra_turns`, or the existing Stun / Freeze state. `aspect`: the skill's; `weights_pct`: a
+/// Resistance's; `source`: the caster's turn-order id.
+#[allow(clippy::too_many_arguments)]
 pub fn land_effect(
     action: EffectAction,
     amount: u32,
     aspect: Aspect,
+    weights_pct: [u8; Aspect::COUNT],
     source: u8,
     extra_turns: u8,
     states: &mut States,
@@ -133,6 +135,7 @@ pub fn land_effect(
         action,
         amount,
         aspect,
+        weights_pct,
         source,
         extra_turns,
         states,
@@ -161,6 +164,7 @@ pub(crate) mod tests {
         turns: 0,
         power_bp: 0,
         source: 0,
+        weights_pct: [0; Aspect::COUNT],
     }; deadroll_combat::MODS_MAX];
 
     fn character(race: Race, class: Class, predisposition: Aspect) -> CharacterData {
@@ -404,6 +408,7 @@ pub(crate) mod tests {
             turns: mod_turns(2),
             power_bp,
             source: 1,
+            weights_pct: [0; deadroll_types::Aspect::COUNT],
         };
         let mut mods = NONE;
         apply_mod(&mut mods, timed(ModKind::Empowerment, 3_000));
@@ -537,37 +542,58 @@ pub(crate) mod tests {
     #[test]
     fn effects_land_as_modifiers_or_states() {
         use deadroll_combat::states::has;
+        const NO_WEIGHTS: [u8; Aspect::COUNT] = [0; Aspect::COUNT];
+        let slow_slot = ModKind::Slow as usize;
         let mut states = [ActiveState::default(); STATES_MAX];
         let mut mods = NONE;
         let slow = EffectAction::Mod(ModKind::Slow);
         assert_eq!(
-            land_effect(slow, 3_000, Aspect::Cold, 2, 0, &mut states, &mut mods),
+            land_effect(
+                slow,
+                3_000,
+                Aspect::Cold,
+                NO_WEIGHTS,
+                2,
+                0,
+                &mut states,
+                &mut mods
+            ),
             Applied::Added
         );
         assert_eq!(
             (
-                mods[0].kind,
-                mods[0].power_bp,
-                mods[0].aspect,
-                mods[0].source
+                mods[slow_slot].kind,
+                mods[slow_slot].power_bp,
+                mods[slow_slot].aspect,
+                mods[slow_slot].source
             ),
             (ModKind::Slow, 3_000, Aspect::Cold, 2)
         );
         assert_eq!(
-            mods[0].turns,
+            mods[slow_slot].turns,
             mod_turns(SupportBalance::DEFAULT.duration(ModKind::Slow))
         );
         assert_eq!(
-            land_effect(slow, 1_000, Aspect::Fire, 3, 0, &mut states, &mut mods),
+            land_effect(
+                slow,
+                1_000,
+                Aspect::Fire,
+                NO_WEIGHTS,
+                3,
+                0,
+                &mut states,
+                &mut mods
+            ),
             Applied::Refreshed
         );
-        assert_eq!(mods[0].power_bp, 3_000);
+        assert_eq!(mods[slow_slot].power_bp, 3_000);
 
         assert_eq!(
             land_effect(
                 EffectAction::Stun,
                 0,
                 Aspect::Blunt,
+                NO_WEIGHTS,
                 2,
                 0,
                 &mut states,
@@ -581,6 +607,7 @@ pub(crate) mod tests {
                 EffectAction::Freeze,
                 0,
                 Aspect::Cold,
+                NO_WEIGHTS,
                 2,
                 0,
                 &mut states,
@@ -594,6 +621,7 @@ pub(crate) mod tests {
                 EffectAction::Heal,
                 9,
                 Aspect::Cold,
+                NO_WEIGHTS,
                 2,
                 0,
                 &mut states,

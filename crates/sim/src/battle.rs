@@ -194,6 +194,7 @@ const NO_MODS: TimedMods = [deadroll_combat::TimedMod {
     turns: 0,
     power_bp: 0,
     source: 0,
+    weights_pct: [0; deadroll_types::Aspect::COUNT],
 }; deadroll_combat::MODS_MAX];
 
 /// Every unit's auras as the rules see them (`AuraField` borrows it).
@@ -1709,6 +1710,7 @@ mod tests {
             turns: 2,
             power_bp: 3_000,
             source: 0,
+            weights_pct: [0; Aspect::COUNT],
         };
         assert!(matches!(
             plan(&b, 0),

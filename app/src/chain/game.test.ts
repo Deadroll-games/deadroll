@@ -365,7 +365,13 @@ describe("decoders", () => {
       v.auras[1][1].turns = 3;
       v.pendingReactive.kind = 2;
       v.pendingDeaths = 0b101;
+      v.auraWeights[1][1] = Uint8Array.of(0, 100, 0, 65, 0, 0);
     });
+    // Patch 9 appends aura_weights (4 x 2 x 6); the offsets below count from before them.
+    const p9 = 4 * 2 * 6;
+    expect(Array.from(s.bytes.subarray(-p9 + 18, -p9 + 24))).toEqual([0, 100, 0, 65, 0, 0]);
+    expect(Array.from(s.back.auraWeights[1][1])).toEqual([0, 100, 0, 65, 0, 0]);
+    s.bytes = s.bytes.subarray(0, -p9);
     expect(s.bytes[s.bytes.length - 1]).toBe(0b101);
     expect(s.back.pendingDeaths).toBe(0b101);
     // Patch 5 appends participations (4 x 32), reactives (4), auras (4 x 2) and pending_reactive;
@@ -389,12 +395,17 @@ describe("decoders", () => {
       v.classTier = 9;
       v.accuracy = { aspect: Aspect.Fire, turns: 3, bonus: 4 };
       v.mapSkills[5].apCost = 3;
+      v.resistMod = { data: { kind: ModKind.Resistance, aspect: Aspect.Piercing, turns: 2, powerBp: 3_000, source: 1 }, weightsPct: Uint8Array.of(0, 0, 0, 100, 0, 100) };
     });
-    // Patch 5 appends map_skills (6 x MapSkillData); the offsets below count from before them.
+    // Patch 9 appends resist_mod (TimedModData + 6 weights), patch 5 map_skills (6 x
+    // MapSkillData) before it; the offsets below count from before them.
+    expect(Array.from(p.bytes.subarray(-14, -11))).toEqual([ModKind.Resistance, Aspect.Piercing, 2]);
+    expect(Array.from(p.bytes.subarray(-6))).toEqual([0, 0, 0, 100, 0, 100]);
+    expect(p.back.resistMod.data.powerBp).toBe(3_000);
     const mapSkill = getMapSkillDataEncoder().fixedSize;
     expect(p.back.mapSkills).toHaveLength(6);
     expect(p.back.mapSkills[5].apCost).toBe(3);
-    p.bytes = p.bytes.subarray(0, -6 * mapSkill);
+    p.bytes = p.bytes.subarray(0, -6 * mapSkill - 14);
     expect(p.back.cooldowns).toHaveLength(16);
     // cooldowns (16), hp_max (4), mods (6 x 8 bytes), equipment (11), skills (6), class_tier (1),
     // then accuracy (aspect, turns, bonus u32 = 6, patch 4).
@@ -424,7 +435,16 @@ describe("decoders", () => {
       v.skillCooldowns[1] = Uint8Array.of(2, 0, 0, 0, 0, 0, 0);
       v.auras[1][0].aura.turns = 255;
       v.auras[1][0].kinOnly = true;
+      v.resistMods[3] = { data: { kind: ModKind.Resistance, aspect: Aspect.Cold, turns: 1, powerBp: 2_000, source: 7 }, weightsPct: Uint8Array.of(0, 100, 0, 0, 0, 0) };
+      v.auraWeights[1][0] = Uint8Array.of(100, 0, 0, 0, 0, 0);
     });
+    // Patch 9 appends resist_mods (24 x 14) and aura_weights (24 x 2 x 6).
+    const p9m = 24 * 14 + 24 * 2 * 6;
+    expect(m.bytes[m.bytes.length - p9m + 3 * 14]).toBe(ModKind.Resistance);
+    expect(m.bytes[m.bytes.length - 24 * 2 * 6 + 12]).toBe(100);
+    expect(Array.from(m.back.resistMods[3].weightsPct)).toEqual([0, 100, 0, 0, 0, 0]);
+    expect(Array.from(m.back.auraWeights[1][0])).toEqual([100, 0, 0, 0, 0, 0]);
+    m.bytes = m.bytes.subarray(0, -p9m);
     // Patch 6 appends records (24 x 48), skill_table (32 x 16), skill_count, skills and
     // skill_cooldowns (24 x 7 each), auras (24 x 2).
     const p6m = 24 * 48 + 32 * 16 + 1 + 2 * 24 * 7 + 48 * getMonsterAuraDataEncoder().fixedSize;

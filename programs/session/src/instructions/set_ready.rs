@@ -146,9 +146,9 @@ pub fn handler(ctx: Context<SetReady>, ready: bool, selection: [u8; MAP_SKILLS])
         let passive = (selection[PASSIVE_SLOT] != NO_SKILL)
             .then(|| passive_aura(BALANCE, &hero, &SkillStats::from(&skills[PASSIVE_SLOT])))
             .flatten();
-        session.auras[slot as usize] = Default::default();
+        session.set_player_auras(slot, &Default::default());
         if let Some(aura) = passive {
-            session.auras[slot as usize][PASSIVE_AURA] = aura.into();
+            session.set_aura(slot, PASSIVE_AURA, aura);
             emit!(AuraChanged {
                 session: session_key,
                 bearer: slot,
@@ -161,7 +161,7 @@ pub fn handler(ctx: Context<SetReady>, ready: bool, selection: [u8; MAP_SKILLS])
         participation.skills = [NO_SKILL; MAP_SKILLS];
         participation.map_skills = Default::default();
         session.reactives[slot as usize] = ReactiveData::default();
-        session.auras[slot as usize] = Default::default();
+        session.set_player_auras(slot, &Default::default());
         session.ready_mask &= !(1 << slot);
     }
     participation.core.ready = ready;

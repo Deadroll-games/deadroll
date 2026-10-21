@@ -20,14 +20,16 @@
 //!
 //! The merged modifiers are a view for one calculation (a hit, the action points of a turn);
 //! the stored ones never take the auras in.
-use deadroll_combat::{mod_turns, support::find_mod, ModKind, TimedMod, TimedMods};
+use deadroll_combat::{free_slot, mod_turns, support::find_mod, ModKind, TimedMod, TimedMods};
+
 use deadroll_skillcheck::{Category, Purpose};
 use deadroll_types::{Aspect, Cell, PARTY_MAX};
 
 use crate::{
     config::BalanceConfig,
     input::{
-        effect_action, effect_range, monster_effect_range, EffectAction, HeroStats, SkillStats,
+        effect_action, effect_range, monster_effect_range, resistance_weights, EffectAction,
+        HeroStats, SkillStats,
     },
     monster::{kin_reaches, MonsterProfile, MonsterSkillStats},
     units::{chebyshev, MONSTER_UNIT_BASE},
@@ -59,6 +61,8 @@ pub struct Aura {
     pub self_only: bool,
     /// Patch 6, monster bearers: a friendly aura on allies of the bearer's kin only.
     pub kin_only: bool,
+    /// Patch 9, a Resistance: its aspect weights (`TimedMod::weights_pct`).
+    pub weights_pct: [u8; Aspect::COUNT],
 }
 
 impl Aura {
@@ -216,6 +220,7 @@ fn merge(mods: &mut TimedMods, a: &Aura, bearer: u8) {
         turns: 1,
         power_bp: a.power_bp,
         source: bearer,
+        weights_pct: a.weights_pct,
     };
     match find_mod(mods, a.kind) {
         Some(i) if mods[i].power_bp >= a.power_bp => {}
@@ -226,8 +231,8 @@ fn merge(mods: &mut TimedMods, a: &Aura, bearer: u8) {
             }
         }
         None => {
-            if let Some(free) = mods.iter_mut().find(|m| m.is_empty()) {
-                *free = view;
+            if let Some(free) = free_slot(mods, a.kind) {
+                mods[free] = view;
             }
         }
     }
@@ -241,8 +246,15 @@ pub fn aura_kind(skill: &SkillStats) -> Option<ModKind> {
     }
 }
 
-/// The aura of `skill` with strength `power_bp` lasting `turns`.
-fn aura_of(skill: &SkillStats, kind: ModKind, power_bp: u32, turns: u8) -> Aura {
+/// The aura of `skill` with strength `power_bp` lasting `turns`, borne by a unit with
+/// `predisposition` (a Resistance adds it, [`resistance_weights`]).
+fn aura_of(
+    skill: &SkillStats,
+    kind: ModKind,
+    power_bp: u32,
+    turns: u8,
+    predisposition: Option<Aspect>,
+) -> Aura {
     let b = &skill.blocks;
     Aura {
         kind,
@@ -254,6 +266,7 @@ fn aura_of(skill: &SkillStats, kind: ModKind, power_bp: u32, turns: u8) -> Aura 
         passive: b.category == Category::Passive,
         self_only: !b.is_aura(),
         kin_only: false,
+        weights_pct: resistance_weights(skill, predisposition),
     }
 }
 
@@ -266,7 +279,13 @@ pub fn passive_aura(cfg: &BalanceConfig, hero: &HeroStats, skill: &SkillStats) -
     let kind = aura_kind(skill)?;
     let (min, max) = effect_range(cfg, hero, skill.power_bp, EffectAction::Mod(kind));
     let power = cfg.support.passive_point(min, max);
-    Some(aura_of(skill, kind, power, PERMANENT))
+    Some(aura_of(
+        skill,
+        kind,
+        power,
+        PERMANENT,
+        Some(hero.predisposition),
+    ))
 }
 
 /// A monster's passive skill as it works in the fight: like [`passive_aura`] with the monster's
@@ -285,13 +304,18 @@ pub fn monster_passive_aura(
     let power = cfg.support.passive_point(min, max);
     Some(Aura {
         kin_only: skill.kin_only,
-        ..aura_of(s, kind, power, PERMANENT)
+        ..aura_of(s, kind, power, PERMANENT, profile.predisposition)
     })
 }
 
-/// A reactive skill's temporary aura of the rolled strength `amount`, for its effect's duration.
-/// `None` when the skill is not an aura.
-pub fn reactive_aura(cfg: &BalanceConfig, skill: &SkillStats, amount: u32) -> Option<Aura> {
+/// A reactive skill's temporary aura of the rolled strength `amount`, for its effect's duration,
+/// borne by a unit with `predisposition`. `None` when the skill is not an aura.
+pub fn reactive_aura(
+    cfg: &BalanceConfig,
+    skill: &SkillStats,
+    amount: u32,
+    predisposition: Option<Aspect>,
+) -> Option<Aura> {
     if !skill.blocks.is_aura() || skill.blocks.category != Category::Reactive {
         return None;
     }
@@ -301,6 +325,7 @@ pub fn reactive_aura(cfg: &BalanceConfig, skill: &SkillStats, amount: u32) -> Op
         kind,
         amount,
         mod_turns(cfg.support.duration(kind)),
+        predisposition,
     ))
 }
 

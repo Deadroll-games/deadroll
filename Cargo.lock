@@ -1387,6 +1387,7 @@ dependencies = [
  "deadroll-combat",
  "deadroll-skillcheck",
  "deadroll-types",
+ "solana-sha256-hasher",
 ]
 
 [[package]]

@@ -145,7 +145,11 @@ pub const fn effect_stat(effect: Effect, source: Source) -> Option<Stat> {
         Effect::Weakening | Effect::Vulnerability | Effect::Stun | Effect::Freeze => {
             Some(source_stat(source))
         }
-        Effect::None | Effect::Empowerment | Effect::Protection | Effect::Heal => None,
+        Effect::None
+        | Effect::Empowerment
+        | Effect::Protection
+        | Effect::Heal
+        | Effect::Resistance => None,
     }
 }
 
@@ -158,6 +162,12 @@ pub fn state_chance_bonus(stats: &[u16; STATS_COUNT], stat: Stat, t: &PlayerTuni
         Stat::Endurance => 0,
     };
     (stats[stat as usize] as u32).saturating_mul(per)
+}
+
+/// State resistance from Endurance, bp (CHARACTER 2-3): the counterweight on every state and
+/// effect chance against the player.
+pub fn endurance_state_resist(stats: &[u16; STATS_COUNT], t: &PlayerTuning) -> u32 {
+    u32::from(stats[Stat::Endurance as usize]).saturating_mul(t.end_state_resist_bp)
 }
 
 /// Extra turns of the player's own buffs on themselves, from Endurance (CHARACTER 2).

@@ -24,7 +24,16 @@
       "speed_counter_bp": 0,
       "initiative": 0,
       "basic_range": "Melee",
-      "basic_form": "Strike"
+      "basic_form": "Strike",
+      "resist_bp": {
+        "Fire": 0,
+        "Cold": 0,
+        "Lightning": 0,
+        "Blood": 0,
+        "Blunt": 0,
+        "Piercing": 0
+      },
+      "state_resist_bp": 0
     },
     "Staff": {
       "slot": "MainHand",
@@ -50,7 +59,16 @@
       "speed_counter_bp": 0,
       "initiative": 0,
       "basic_range": "Ranged",
-      "basic_form": "Projectile"
+      "basic_form": "Projectile",
+      "resist_bp": {
+        "Fire": 0,
+        "Cold": 0,
+        "Lightning": 0,
+        "Blood": 0,
+        "Blunt": 0,
+        "Piercing": 0
+      },
+      "state_resist_bp": 0
     },
     "Wand": {
       "slot": "MainHand",
@@ -76,7 +94,16 @@
       "speed_counter_bp": 0,
       "initiative": 0,
       "basic_range": "Ranged",
-      "basic_form": "Projectile"
+      "basic_form": "Projectile",
+      "resist_bp": {
+        "Fire": 0,
+        "Cold": 0,
+        "Lightning": 0,
+        "Blood": 0,
+        "Blunt": 0,
+        "Piercing": 0
+      },
+      "state_resist_bp": 0
     },
     "LeatherArmor": {
       "slot": "Body",
@@ -102,7 +129,16 @@
       "speed_counter_bp": 0,
       "initiative": 0,
       "basic_range": "Melee",
-      "basic_form": "Strike"
+      "basic_form": "Strike",
+      "resist_bp": {
+        "Fire": 0,
+        "Cold": 0,
+        "Lightning": 0,
+        "Blood": 0,
+        "Blunt": 0,
+        "Piercing": 0
+      },
+      "state_resist_bp": 0
     },
     "Robe": {
       "slot": "Body",
@@ -128,7 +164,16 @@
       "speed_counter_bp": 0,
       "initiative": 0,
       "basic_range": "Melee",
-      "basic_form": "Strike"
+      "basic_form": "Strike",
+      "resist_bp": {
+        "Fire": 0,
+        "Cold": 0,
+        "Lightning": 0,
+        "Blood": 0,
+        "Blunt": 0,
+        "Piercing": 0
+      },
+      "state_resist_bp": 0
     },
     "LightLeatherArmor": {
       "slot": "Body",
@@ -154,7 +199,16 @@
       "speed_counter_bp": 0,
       "initiative": 0,
       "basic_range": "Melee",
-      "basic_form": "Strike"
+      "basic_form": "Strike",
+      "resist_bp": {
+        "Fire": 0,
+        "Cold": 0,
+        "Lightning": 0,
+        "Blood": 0,
+        "Blunt": 0,
+        "Piercing": 0
+      },
+      "state_resist_bp": 0
     }
   },
   "starter_kits": {

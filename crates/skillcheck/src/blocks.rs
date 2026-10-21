@@ -16,8 +16,9 @@ u8_enum!(
 );
 u8_enum!(
     /// Section 6. `None` only for pure damage. Debuffs and hard control first, then buffs;
-    /// `Heal` was appended later (a buff kind: restores HP up to the maximum).
-    Effect { None, Weakening, Slow, Vulnerability, Stun, Freeze, Haste, Empowerment, Protection, Heal }
+    /// `Heal` was appended later (a buff kind: restores HP up to the maximum), then `Resistance`
+    /// (patch 9: resistance to the skill's aspects and the bearer's predisposition).
+    Effect { None, Weakening, Slow, Vulnerability, Stun, Freeze, Haste, Empowerment, Protection, Heal, Resistance }
 );
 u8_enum!(
     /// Section 3.2, reactive skills only.
@@ -44,11 +45,15 @@ impl Effect {
         )
     }
 
-    /// Haste, Empowerment, Protection (section 6.2) and Heal.
+    /// Haste, Empowerment, Protection (section 6.2), Heal and Resistance.
     pub const fn is_buff(self) -> bool {
         matches!(
             self,
-            Effect::Haste | Effect::Empowerment | Effect::Protection | Effect::Heal
+            Effect::Haste
+                | Effect::Empowerment
+                | Effect::Protection
+                | Effect::Heal
+                | Effect::Resistance
         )
     }
 

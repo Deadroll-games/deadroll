@@ -240,7 +240,8 @@ impl Op {
             ArgKind::State => arg == NATIVE || state(arg),
             ArgKind::StateOnly => state(arg),
             ArgKind::StateOrAny => arg == ANY_STATE || state(arg),
-            ArgKind::Mod => (arg as usize) < ModKind::COUNT,
+            // A resonance has no aspect weights to give a Resistance.
+            ArgKind::Mod => (arg as usize) < ModKind::COUNT && arg != ModKind::Resistance as u8,
             ArgKind::Aspect => (arg as usize) < Aspect::COUNT,
         };
         if !arg_ok {

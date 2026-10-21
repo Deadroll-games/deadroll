@@ -1,12 +1,12 @@
 use anchor_lang::prelude::*;
 use deadroll_character::state::{MAP_SKILLS, SKILLS_MAX};
-use deadroll_combat::{chill_slow_bp, speed_ap, AccuracyBuff, TimedMods, MODS_MAX};
+use deadroll_combat::{chill_slow_bp, speed_ap, AccuracyBuff, TimedMods};
 use deadroll_rules::{aura::AuraField, input::SkillStats, items::Equipment, HeroStats};
 use deadroll_skillcheck::{ACTIVE_MAX, NO_SKILL};
 use deadroll_types::Aspect;
 use deadroll_types::{Cell, CharacterData, ParticipationData, EQUIP_SLOTS};
 
-use super::mods::{self, TimedModData};
+use super::mods::{self, ResistModData, TimedModData, STORED_MODS};
 use super::MapSkillData;
 
 /// A character with its class trait tier and an equipment snapshot (`Participation.class_tier`,
@@ -34,9 +34,9 @@ pub struct Participation {
     pub cooldowns: [u8; SKILLS_MAX],
     /// The character's maximum HP with its gear, copied at `set_ready(true)` (heals stop here).
     pub hp_max: u32,
-    /// Buffs and debuffs on this player (`deadroll_combat::support`), one slot per kind;
-    /// `start_turn` counts them down.
-    pub mods: [TimedModData; MODS_MAX],
+    /// Buffs and debuffs on this player (`deadroll_combat::support`), one slot per kind (the
+    /// Resistance is `resist_mod`); `start_turn` counts them down.
+    pub mods: [TimedModData; STORED_MODS],
     /// What the character wears, `ItemBase` bytes by `EquipSlot` (`EMPTY_ITEM` = none), copied
     /// from `Character.gear` at `set_ready(true)`. The character program refuses gear changes
     /// while the character is locked into a session, so the copy stays exact.
@@ -53,6 +53,8 @@ pub struct Participation {
     /// Patch 5: the skills of `skills`, slot by slot, as the rules see them (the character's
     /// `SkillSet` record with its `SkillExtras` part), copied at `set_ready(true)`.
     pub map_skills: [MapSkillData; MAP_SKILLS],
+    /// Patch 9: the Resistance on this player with its aspect weights (`mods` has the others).
+    pub resist_mod: ResistModData,
 }
 
 /// `deadroll_combat::AccuracyBuff`.
@@ -130,11 +132,11 @@ impl Participation {
     }
 
     pub fn combat_mods(&self) -> TimedMods {
-        mods::to_combat(&self.mods)
+        mods::to_combat(&self.mods, &self.resist_mod)
     }
 
     pub fn set_combat_mods(&mut self, m: &TimedMods) {
-        self.mods = mods::from_combat(m);
+        (self.mods, self.resist_mod) = mods::from_combat(m);
     }
 }
 
@@ -172,6 +174,7 @@ mod tests {
             class_tier: 14,
             accuracy: Default::default(),
             map_skills: Default::default(),
+            resist_mod: Default::default(),
         };
         for s in [0, 2, 5] {
             assert!(p.active_selected(s), "{s}");

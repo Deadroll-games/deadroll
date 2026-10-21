@@ -49,6 +49,8 @@ import {
   getMapSkillDataEncoder,
   getParticipationDataDecoder,
   getParticipationDataEncoder,
+  getResistModDataDecoder,
+  getResistModDataEncoder,
   getTimedModDataDecoder,
   getTimedModDataEncoder,
   type AccuracyBuffData,
@@ -57,6 +59,8 @@ import {
   type MapSkillDataArgs,
   type ParticipationData,
   type ParticipationDataArgs,
+  type ResistModData,
+  type ResistModDataArgs,
   type TimedModData,
   type TimedModDataArgs,
 } from "../types/index.js";
@@ -91,8 +95,8 @@ export type Participation = {
   /** The character's maximum HP with its gear, copied at `set_ready(true)` (heals stop here). */
   hpMax: number;
   /**
-   * Buffs and debuffs on this player (`deadroll_combat::support`), one slot per kind;
-   * `start_turn` counts them down.
+   * Buffs and debuffs on this player (`deadroll_combat::support`), one slot per kind (the
+   * Resistance is `resist_mod`); `start_turn` counts them down.
    */
   mods: Array<TimedModData>;
   /**
@@ -119,6 +123,8 @@ export type Participation = {
    * `SkillSet` record with its `SkillExtras` part), copied at `set_ready(true)`.
    */
   mapSkills: Array<MapSkillData>;
+  /** Patch 9: the Resistance on this player with its aspect weights (`mods` has the others). */
+  resistMod: ResistModData;
 };
 
 export type ParticipationArgs = {
@@ -140,8 +146,8 @@ export type ParticipationArgs = {
   /** The character's maximum HP with its gear, copied at `set_ready(true)` (heals stop here). */
   hpMax: number;
   /**
-   * Buffs and debuffs on this player (`deadroll_combat::support`), one slot per kind;
-   * `start_turn` counts them down.
+   * Buffs and debuffs on this player (`deadroll_combat::support`), one slot per kind (the
+   * Resistance is `resist_mod`); `start_turn` counts them down.
    */
   mods: Array<TimedModDataArgs>;
   /**
@@ -168,6 +174,8 @@ export type ParticipationArgs = {
    * `SkillSet` record with its `SkillExtras` part), copied at `set_ready(true)`.
    */
   mapSkills: Array<MapSkillDataArgs>;
+  /** Patch 9: the Resistance on this player with its aspect weights (`mods` has the others). */
+  resistMod: ResistModDataArgs;
 };
 
 /** Gets the encoder for {@link ParticipationArgs} account data. */
@@ -188,6 +196,7 @@ export function getParticipationEncoder(): FixedSizeEncoder<ParticipationArgs> {
       ["classTier", getU8Encoder()],
       ["accuracy", getAccuracyBuffDataEncoder()],
       ["mapSkills", getArrayEncoder(getMapSkillDataEncoder(), { size: 6 })],
+      ["resistMod", getResistModDataEncoder()],
     ]),
     (value) => ({ ...value, discriminator: PARTICIPATION_DISCRIMINATOR }),
   );
@@ -210,6 +219,7 @@ export function getParticipationDecoder(): FixedSizeDecoder<Participation> {
     ["classTier", getU8Decoder()],
     ["accuracy", getAccuracyBuffDataDecoder()],
     ["mapSkills", getArrayDecoder(getMapSkillDataDecoder(), { size: 6 })],
+    ["resistMod", getResistModDataDecoder()],
   ]);
 }
 
@@ -279,5 +289,5 @@ export async function fetchAllMaybeParticipation(
 }
 
 export function getParticipationSize(): number {
-  return 492;
+  return 506;
 }

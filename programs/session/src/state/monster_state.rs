@@ -4,7 +4,7 @@ use anchor_lang::{
         allocate, assign, create_account, transfer, Allocate, Assign, CreateAccount, Transfer,
     },
 };
-use deadroll_combat::{ResonanceTables, TimedMods, MODS_MAX};
+use deadroll_combat::{ResonanceTables, TimedMods};
 use deadroll_rules::{
     aura::{Aura, MonsterAuraField, MonsterAuras, MonsterBearer, AURAS_PER_PLAYER},
     monster::{record, NO_SKILL},
@@ -13,14 +13,17 @@ use deadroll_rules::{
 };
 use deadroll_skillcheck::monster::{MonsterSkill, SESSION_SIZE};
 use deadroll_types::{
-    seeds, Cell, Monster, MonsterStateData, MONSTERS_MAX, MONSTER_SLOTS, SESSION_SKILLS_MAX,
+    seeds, Aspect, Cell, Monster, MonsterStateData, MONSTERS_MAX, MONSTER_SLOTS, SESSION_SKILLS_MAX,
 };
 
 use crate::{
     errors::SessionError,
     rules::BALANCE,
     state::{
-        mods::{self, ModsData, TimedModData, TIMED_MOD_SIZE},
+        mods::{
+            self, ModsData, ResistModData, TimedModData, RESIST_MOD_SIZE, STORED_MODS,
+            TIMED_MOD_SIZE,
+        },
         AuraData, ACCOUNT_VERSION,
     },
 };
@@ -40,8 +43,9 @@ pub struct MonsterState {
     pub core: MonsterStateData,
     /// Not used since patch 6 (`skill_cooldowns` holds every monster slot). Kept for the layout.
     pub cooldowns: [[u8; MONSTER_SKILLS_MAX]; MONSTERS_MAX],
-    /// Per monster: buffs and debuffs (`deadroll_combat::support`), like `Participation.mods`.
-    pub mods: [[TimedModData; MODS_MAX]; MONSTERS_MAX],
+    /// Per monster: buffs and debuffs (`deadroll_combat::support`), like `Participation.mods`
+    /// (the Resistance is in `resist_mods`).
+    pub mods: [[TimedModData; STORED_MODS]; MONSTERS_MAX],
     // Patch 4. Registry rules copied at `open_session`, fixed for the party
     // (docs/DAMAGE_TYPES_AND_MIXES.md 9 and 10.1), then the map state resonances make.
     /// Per monster: the defenses of its bestiary record.
@@ -69,6 +73,11 @@ pub struct MonsterState {
     pub skill_cooldowns: [[u8; MONSTER_SLOTS]; MONSTERS_MAX],
     /// Per monster: its passive skill's aura (from `open_session`), then its reactive skill's.
     pub auras: [[MonsterAuraData; AURAS_PER_PLAYER]; MONSTERS_MAX],
+    // Patch 9: resistances (docs/DAMAGE_TYPES_AND_MIXES.md 9).
+    /// Per monster: its Resistance with the aspect weights, like `Participation.resist_mod`.
+    pub resist_mods: [ResistModData; MONSTERS_MAX],
+    /// Per monster, per aura slot: a Resistance aura's aspect weights.
+    pub aura_weights: [[[u8; Aspect::COUNT]; AURAS_PER_PLAYER]; MONSTERS_MAX],
 }
 
 /// `deadroll_rules::aura::Aura` of a monster: an aura plus its kin-only flag.
@@ -214,12 +223,15 @@ mod off {
     pub const SKILLS: usize = SKILL_COUNT + 1;
     pub const SKILL_COOLDOWNS: usize = SKILLS + MONSTERS_MAX * MONSTER_SLOTS;
     pub const AURAS: usize = SKILL_COOLDOWNS + MONSTERS_MAX * MONSTER_SLOTS;
+    pub const RESIST_MODS: usize =
+        AURAS + MONSTERS_MAX * AURAS_PER_PLAYER * super::MONSTER_AURA_SIZE;
+    pub const AURA_WEIGHTS: usize = RESIST_MODS + MONSTERS_MAX * super::RESIST_MOD_SIZE;
     #[cfg(test)]
-    pub const END: usize = AURAS + MONSTERS_MAX * AURAS_PER_PLAYER * super::MONSTER_AURA_SIZE;
+    pub const END: usize = AURA_WEIGHTS + MONSTERS_MAX * AURAS_PER_PLAYER * Aspect::COUNT;
 }
 
 /// Bytes of one monster's `mods`.
-const MODS_LEN: usize = MODS_MAX * TIMED_MOD_SIZE;
+const MODS_LEN: usize = STORED_MODS * TIMED_MOD_SIZE;
 
 /// In-place access to a `MonsterState` account.
 pub struct Monsters<'a, 'info> {
@@ -341,31 +353,42 @@ impl<'a, 'info> Monsters<'a, 'info> {
             .map_err(|_| error!(SessionError::InvalidMonsterState))
     }
 
-    /// Buffs and debuffs of monster `index`.
+    /// Buffs and debuffs of monster `index` (its Resistance included).
     pub fn mods(&self, index: u8) -> Result<TimedMods> {
         let start = Self::mods_slot(index)?;
+        let r = off::RESIST_MODS + index as usize * RESIST_MOD_SIZE;
         let data = self.info.try_borrow_data()?;
         let m = ModsData::deserialize(&mut &data[start..start + MODS_LEN])
             .map_err(|_| error!(SessionError::InvalidMonsterState))?;
-        Ok(mods::to_combat(&m))
+        let resist = ResistModData::deserialize(&mut &data[r..r + RESIST_MOD_SIZE])
+            .map_err(|_| error!(SessionError::InvalidMonsterState))?;
+        Ok(mods::to_combat(&m, &resist))
     }
 
     pub fn set_mods(&self, index: u8, m: &TimedMods) -> Result<()> {
         let start = Self::mods_slot(index)?;
+        let r = off::RESIST_MODS + index as usize * RESIST_MOD_SIZE;
         let mut data = self.info.try_borrow_mut_data()?;
-        mods::from_combat(m)
+        let (stored, resist) = mods::from_combat(m);
+        stored
             .serialize(&mut &mut data[start..start + MODS_LEN])
+            .map_err(|_| error!(SessionError::InvalidMonsterState))?;
+        resist
+            .serialize(&mut &mut data[r..r + RESIST_MOD_SIZE])
             .map_err(|_| error!(SessionError::InvalidMonsterState))
     }
 
-    /// The registry defenses of monster `index`.
+    /// The registry defenses of monster `index` (the tags from its copied record, patch 9).
     pub fn defense(&self, index: u8) -> Result<MonsterDefense> {
         let start = Self::defense_slot(index)?;
+        let rec = off::RECORDS + index as usize * MONSTER_RECORD_LEN;
         let data = self.info.try_borrow_data()?;
         Ok(MonsterDefense {
             resist: data[start],
             immune_aspects: data[start + 1],
             immune_states: data[start + 2],
+            resist_tags: data[rec + record::RESIST_TAGS],
+            immune_tags: data[rec + record::IMMUNE_TAGS],
         })
     }
 
@@ -539,24 +562,30 @@ impl<'a, 'info> Monsters<'a, 'info> {
     pub fn auras(&self, index: u8) -> Result<MonsterAuras> {
         let at = off::AURAS + Self::monster(index)? * AURAS_PER_PLAYER * MONSTER_AURA_SIZE;
         let data = self.info.try_borrow_data()?;
+        let w = off::AURA_WEIGHTS + index as usize * AURAS_PER_PLAYER * Aspect::COUNT;
         let mut out = [Aura::default(); AURAS_PER_PLAYER];
         for (i, a) in out.iter_mut().enumerate() {
             let r = at + i * MONSTER_AURA_SIZE;
             *a = MonsterAuraData::deserialize(&mut &data[r..r + MONSTER_AURA_SIZE])
                 .map_err(|_| error!(SessionError::InvalidMonsterState))?
                 .into();
+            let k = w + i * Aspect::COUNT;
+            a.weights_pct.copy_from_slice(&data[k..k + Aspect::COUNT]);
         }
         Ok(out)
     }
 
     pub fn set_auras(&self, index: u8, auras: &MonsterAuras) -> Result<()> {
         let at = off::AURAS + Self::monster(index)? * AURAS_PER_PLAYER * MONSTER_AURA_SIZE;
+        let w = off::AURA_WEIGHTS + index as usize * AURAS_PER_PLAYER * Aspect::COUNT;
         let mut data = self.info.try_borrow_mut_data()?;
         for (i, a) in auras.iter().enumerate() {
             let r = at + i * MONSTER_AURA_SIZE;
             MonsterAuraData::from(*a)
                 .serialize(&mut &mut data[r..r + MONSTER_AURA_SIZE])
                 .map_err(|_| error!(SessionError::InvalidMonsterState))?;
+            let k = w + i * Aspect::COUNT;
+            data[k..k + Aspect::COUNT].copy_from_slice(&a.weights_pct);
         }
         Ok(())
     }
@@ -666,12 +695,22 @@ mod tests {
         let session = Pubkey::new_unique();
         let mut account = monsters_account(session, &[monster(5, 5), monster(6, 5)]);
         let mut slowed = TimedMods::default();
-        slowed[0] = deadroll_combat::TimedMod {
+        slowed[deadroll_combat::ModKind::Slow as usize] = deadroll_combat::TimedMod {
             kind: deadroll_combat::ModKind::Slow,
             aspect: deadroll_types::Aspect::Cold,
             turns: 3,
             power_bp: 4_321,
             source: 1,
+            weights_pct: [0; deadroll_types::Aspect::COUNT],
+        };
+        // Patch 9: the Resistance goes to the appended slot with its weights.
+        slowed[deadroll_combat::ModKind::Resistance as usize] = deadroll_combat::TimedMod {
+            kind: deadroll_combat::ModKind::Resistance,
+            aspect: deadroll_types::Aspect::Piercing,
+            turns: 2,
+            power_bp: 3_000,
+            source: 2,
+            weights_pct: [0, 0, 0, 65, 35, 65],
         };
         {
             let info = account.info();
@@ -708,9 +747,20 @@ mod tests {
         assert_eq!(state.skill_cooldowns[2], [1, 0, 3, 0, 0, 2, 0]);
         assert_eq!(state.skill_cooldowns[MONSTERS_MAX - 1], [9; MONSTER_SLOTS]);
         assert_eq!(state.skill_cooldowns[0], [0; MONSTER_SLOTS]);
-        assert_eq!(mods::to_combat(&state.mods[2]), slowed);
-        assert_eq!(mods::to_combat(&state.mods[MONSTERS_MAX - 1]), slowed);
+        assert_eq!(
+            mods::to_combat(&state.mods[2], &state.resist_mods[2]),
+            slowed
+        );
+        assert_eq!(
+            mods::to_combat(
+                &state.mods[MONSTERS_MAX - 1],
+                &state.resist_mods[MONSTERS_MAX - 1]
+            ),
+            slowed
+        );
         assert_eq!(state.mods[1], ModsData::default());
+        assert_eq!(state.resist_mods[2].weights_pct, [0, 0, 0, 65, 35, 65]);
+        assert_eq!(state.resist_mods[1], ResistModData::default());
         // The cooldowns of the last monster were not touched by its mods.
         assert_eq!(state.skill_cooldowns[MONSTERS_MAX - 1], [9; MONSTER_SLOTS]);
     }
@@ -723,6 +773,8 @@ mod tests {
             resist: 0b10,
             immune_aspects: 0b1,
             immune_states: 0b100,
+            resist_tags: 0,
+            immune_tags: 0,
         };
         let mut cells = [BurningCell::default(); BURNING_CELLS_MAX];
         cells[3] = BurningCell {
@@ -813,10 +865,12 @@ mod tests {
             radius: 2,
             turns: 3,
             kin_only: true,
+            weights_pct: [100, 0, 0, 0, 0, 55],
             ..Aura::default()
         };
         view.set_auras(1, &auras).unwrap();
         assert_eq!(view.auras(1).unwrap(), auras);
+        assert_eq!(view.auras(0).unwrap()[REACTIVE_AURA].weights_pct, [0; 6]);
         let bearers = view.bearers().unwrap();
         assert_eq!(bearers.len, 1);
         assert_eq!(bearers.list[0].index, 1);

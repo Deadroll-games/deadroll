@@ -143,6 +143,7 @@ mod tests {
         turns: 0,
         power_bp: 0,
         source: 0,
+        weights_pct: [0; deadroll_types::Aspect::COUNT],
     }; deadroll_combat::MODS_MAX];
 
     fn with(states: &[(StateKind, u8, u32, u8)]) -> States {
@@ -253,6 +254,7 @@ mod tests {
             turns: mod_turns(1),
             power_bp: 5_000,
             source: 1,
+            weights_pct: [0; deadroll_types::Aspect::COUNT],
         };
         mods[1] = TimedMod {
             kind: ModKind::Slow,

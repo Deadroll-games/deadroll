@@ -35,5 +35,9 @@ deadroll-combat.workspace = true
 deadroll-skillcheck.workspace = true
 bytemuck = { version = "1", features = ["derive"] }
 
+[dev-dependencies]
+# The discriminator test in ../src/state/pull.rs (the same as ../Cargo.toml).
+solana-sha256-hasher = "3.1"
+
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

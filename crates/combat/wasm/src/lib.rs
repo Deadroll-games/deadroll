@@ -17,6 +17,11 @@
 //! `spawn_skills`), a monster's attack on a player (`preview_monster_attack`), the monsters'
 //! auras in every aura view, and the monster AI of the auto mode (`monster_plan`).
 //!
+//! Patch 9 (ABI 7): resistances. A `TimedMod` carries its aspect weights and there are seven
+//! (Resistance), an aura its weights too; the hero sheet gives the resistances and the state
+//! resistance, the monster sheet the defenses by tag. The buffers grew to 8 KB (a monster plan
+//! with 28 units and their modifiers passes 4 KB).
+//!
 //! Built with `std`: `deadroll-types` pulls `solana-pubkey`, whose `atomic` feature links `std`
 //! (`parking_lot`) on non-SBF targets, so `no_std` is not possible here. std on wasm32 aborts on
 //! panic and brings its own allocator.
@@ -24,7 +29,7 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use deadroll_combat::{
     preview_hit, preview_range, resolve_hit, AccuracyBuff, Attacker, DamageRange, Defender,
-    HitInput, ModKind, ResonanceTables, TimedMods, VrfRoll,
+    HitInput, ModKind, ResonanceTables, TimedMods, VrfRoll, TAGS,
 };
 use deadroll_rules::{
     aura::{Aura, AuraField, MonsterAuraField, MonsterBearer, PartyAuras, AURAS_PER_PLAYER},
@@ -50,9 +55,9 @@ use deadroll_types::{
 };
 
 /// Bumped on any change of the exports or the byte layouts.
-pub const ABI_VERSION: u32 = 6;
+pub const ABI_VERSION: u32 = 7;
 /// Size of the input and output buffers.
-pub const BUFFER_LEN: usize = 4096;
+pub const BUFFER_LEN: usize = 8192;
 
 const CFG: &BalanceConfig = &BalanceConfig::DEFAULT;
 
@@ -201,6 +206,11 @@ pub struct MonsterSheet {
     pub kin: u8,
     /// Skill slots by `Category` (active, reactive, passive) for these flags.
     pub slots: [u8; Category::COUNT],
+    // ABI 7.
+    /// Resistance per defense tag (`deadroll_combat::TAGS`: Magical, Combat, Strike,
+    /// Projectile), bp before the cap, and the immune tags (`source_bit` / `form_bit`).
+    pub tag_resist_bp: [u32; TAGS],
+    pub immune_tags: u8,
 }
 
 pub fn monster_sheet(m: &MonsterInput) -> Result<MonsterSheet, Error> {
@@ -230,6 +240,8 @@ pub fn monster_sheet(m: &MonsterInput) -> Result<MonsterSheet, Error> {
         pool_len: t.pool_len,
         kin: t.kin,
         slots: t.slots(m.flags, &CFG.monsters),
+        tag_resist_bp: p.tag_resist_bp,
+        immune_tags: p.immune_tags,
     })
 }
 
@@ -320,6 +332,9 @@ pub struct AuraInput {
     pub hostile: bool,
     pub passive: bool,
     pub self_only: bool,
+    /// ABI 7: a Resistance aura's aspect weights (`GameSession.aura_weights`,
+    /// `MonsterState.aura_weights`).
+    pub weights_pct: [u8; Aspect::COUNT],
 }
 
 impl From<AuraInput> for Aura {
@@ -334,6 +349,7 @@ impl From<AuraInput> for Aura {
             passive: a.passive,
             self_only: a.self_only,
             kin_only: false,
+            weights_pct: a.weights_pct,
         }
     }
 }
@@ -642,6 +658,11 @@ pub struct HeroSheet {
     /// The chance the crit roll uses on a hit that is not a natural 20 (`crit_bp` clamped into the
     /// chance limits), 0 when there is no crit roll.
     pub crit_roll_bp: u32,
+    // ABI 7.
+    /// Resistance per aspect (items), bp before the cap, and the state resistance (Endurance and
+    /// items), the counterweight on every state and effect chance against the hero.
+    pub resist_bp: [u32; Aspect::COUNT],
+    pub state_resist_bp: u32,
 }
 
 pub fn hero_sheet(h: &HeroStats) -> HeroSheet {
@@ -667,6 +688,8 @@ pub fn hero_sheet(h: &HeroStats) -> HeroSheet {
             0 => 0,
             pct => CFG.combat.clamp_chance(pct),
         },
+        resist_bp: hero::resist(CFG, h),
+        state_resist_bp: hero::state_resist(CFG, h),
     }
 }
 
@@ -1048,6 +1071,7 @@ mod tests {
         turns: 0,
         power_bp: 0,
         source: 0,
+        weights_pct: [0; Aspect::COUNT],
     }; deadroll_combat::MODS_MAX];
 
     fn warrior() -> HeroInput {
@@ -1482,6 +1506,7 @@ mod tests {
             hostile,
             passive: true,
             self_only: false,
+            weights_pct: [0; Aspect::COUNT],
         }
     }
 

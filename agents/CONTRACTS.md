@@ -573,3 +573,38 @@ LeatherArmor 103, Robe 104, LightLeatherArmor 105) in the layer of its `EquipSlo
 11 mainhand, Body -> 6 armor_body; the other slots map to their layers of the table above, rings and
 gloves draw nothing yet). Equip and unequip change the image. The class kit sprites (helmet,
 shield, cape, pants, boots, hoods, bags, amulet, mace; ids 100-106, 200-205, 300-305) are gone.
+
+## 16. Patch 9: resistances
+
+Combat (`deadroll_combat`), appended:
+
+```
+ModKind:   6 Resistance (after Vulnerability); MODS_MAX = 7, each kind in the slot `kind as usize`
+TimedMod:  ... source, weights_pct: [u8; 6]       share of power_bp per Aspect, percent (Resistance only)
+Defender:  ... states, tag_resist_bp: [u32; 4], immune_tags: u8
+           tags (TAGS = 4): bit 0 Magical, 1 Combat (Source), 2 Strike, 3 Projectile (Form)
+Effect:    10 Resistance (deadroll_skillcheck, a buff like Protection)
+```
+
+Aspect resistance cuts only the damage of its packet; the chance of a state (native, resonance,
+a skill's effect) meets only the state resistance. A Stun or Freeze effect on a target immune to
+that state rolls nothing (`EffectRoll.outcome = Immune`). Chill buildup never freezes a target
+immune to Freeze.
+
+Bestiary record: byte 42 resisted tags, byte 43 immune tags (bits as above), 44..48 zero.
+`bestiary.json`: `tag_resistance`, `tag_immunity` (names Magical, Combat, Strike, Projectile).
+
+Session program, accounts (fields appended at the end; `mods` keeps its 6 slots, the kinds before
+Resistance by `ModKind`):
+
+```
+Participation: ... map_skills, resist_mod: ResistModData
+MonsterState:  ... auras, resist_mods: [ResistModData; 24], aura_weights: [[[u8; 6]; 2]; 24]
+GameSession:   ... pending_deaths, aura_weights: [[[u8; 6]; 2]; 4]
+  ResistModData { data: TimedModData, weights_pct: [u8; 6] }   Borsh-identical to a combat TimedMod
+  aura_weights[i][slot]  the weights of auras[i][slot] (a Resistance aura)
+ModKindData: 6 Resistance
+```
+
+Events: `ModsTicked` and `EffectResolved` append `resist_mod: ResistModData` (their `mods` are
+the 6 stored slots); `HitResultData.target_mods` is `[ResistModData; 3]`.

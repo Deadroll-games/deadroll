@@ -21,6 +21,7 @@ const NONE: TimedMods = [TimedMod {
     turns: 0,
     power_bp: 0,
     source: 0,
+    weights_pct: [0; Aspect::COUNT],
 }; deadroll_combat::MODS_MAX];
 
 #[cfg(feature = "serde")]
@@ -215,18 +216,23 @@ fn effects_map_to_actions_and_sides() {
         EffectAction::Mod(ModKind::Slow),
         3_000,
         Aspect::Cold,
+        [0; Aspect::COUNT],
         1,
         0,
         &mut states,
         &mut mods,
     );
-    assert_eq!(mods[0].turns, deadroll_combat::mod_turns(4));
+    assert_eq!(
+        mods[ModKind::Slow as usize].turns,
+        deadroll_combat::mod_turns(4)
+    );
     long.combat.state_turns[StateKind::Stun as usize] = 3;
     land_effect(
         &long,
         EffectAction::Stun,
         0,
         Aspect::Blunt,
+        [0; Aspect::COUNT],
         1,
         0,
         &mut states,

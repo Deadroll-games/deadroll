@@ -105,6 +105,9 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                         m.resistance, m.immunity, m.state_immunity
                     ));
                     ui.end_row();
+                    ui.label("Tags: resists / immune");
+                    ui.label(format!("{:?} / {:?}", m.tag_resistance, m.tag_immunity));
+                    ui.end_row();
                     ui.label("Skill pool (monster_skills.json)");
                     ui.horizontal(|ui| {
                         ui.label("start");

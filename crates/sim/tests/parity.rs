@@ -55,6 +55,7 @@ const NONE: TimedMods = [TimedMod {
     turns: 0,
     power_bp: 0,
     source: 0,
+    weights_pct: [0; Aspect::COUNT],
 }; deadroll_combat::MODS_MAX];
 
 const SEEDS: u8 = 64;

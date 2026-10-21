@@ -126,6 +126,8 @@ pub fn monsters_account(session: Pubkey, monsters: &[Monster]) -> TestAccount {
         skills: [[deadroll_rules::monster::NO_SKILL; deadroll_types::MONSTER_SLOTS]; MONSTERS_MAX],
         skill_cooldowns: [[0; deadroll_types::MONSTER_SLOTS]; MONSTERS_MAX],
         auras: [Default::default(); MONSTERS_MAX],
+        resist_mods: Default::default(),
+        aura_weights: Default::default(),
     };
     let mut data = Vec::new();
     state.try_serialize(&mut data).unwrap();
@@ -182,6 +184,7 @@ pub fn session(players: &[Cell]) -> GameSession {
         pending_reactive: Default::default(),
         pending_monster_reactive: Default::default(),
         pending_deaths: 0,
+        aura_weights: Default::default(),
     }
 }
 

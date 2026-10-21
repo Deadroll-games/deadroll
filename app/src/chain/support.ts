@@ -2,20 +2,37 @@
 // a skill targets, the EffectResolved / ModsTicked events in app shape, and their log lines.
 // Pure functions over decoded accounts and events.
 import type { Address } from "@solana/kit";
-import { bytesText, optional, type MapSkillAcc, type SkillRecordAcc, type TimedModAcc } from "./game";
+import { bytesText, optional, withResist, type MapSkillAcc, type SkillRecordAcc, type TimedModAcc } from "./game";
 import { ASPECT_NAMES, effectAmount } from "./names";
 import { Effect, Form, Purpose, RangeTag, Target, derive, skillSide, usableInCombat, type Category, type Side, type SkillBlocks } from "./skillcheck";
 import { Applied, HitOutcome, type Aspect, type ModKind, type TimedMod } from "./types";
 
-export const MOD_NAMES = ["Haste", "Slow", "Empowerment", "Weakening", "Protection", "Vulnerability"] as const;
-/** Haste, Empowerment, Protection help the bearer; the rest hurt. */
-export const modIsBuff = (k: ModKind): boolean => k === 0 || k === 2 || k === 4;
+export const MOD_NAMES = ["Haste", "Slow", "Empowerment", "Weakening", "Protection", "Vulnerability", "Resistance"] as const;
+/** Haste, Empowerment, Protection, Resistance help the bearer; the rest hurt. */
+export const modIsBuff = (k: ModKind): boolean => k === 0 || k === 2 || k === 4 || k === 6;
 
 /** Active slots only (`turns > 0`), in kind order. */
 export function activeMods(mods: readonly TimedModAcc[] | undefined): TimedMod[] {
   return (mods ?? [])
     .filter((m) => m.turns > 0)
-    .map((m) => ({ kind: m.kind as ModKind, aspect: m.aspect as Aspect, turns: m.turns, powerBp: m.powerBp, source: m.source }));
+    .map((m) => ({
+      kind: m.kind as ModKind,
+      aspect: m.aspect as Aspect,
+      turns: m.turns,
+      powerBp: m.powerBp,
+      source: m.source,
+      ...(m.weightsPct ? { weightsPct: Array.from(m.weightsPct) } : {}),
+    }));
+}
+
+/** The resistance a Resistance gives to `aspect` (deadroll_combat::support::resistance_share). */
+export const resistanceShare = (m: TimedMod, aspect: number): number =>
+  Math.floor((m.powerBp * Math.min(100, m.weightsPct?.[aspect] ?? 0)) / 100);
+
+/** The aspects a Resistance covers, with their part: "Piercing 30%, Blood 30%". */
+export function resistanceText(m: TimedMod): string {
+  const parts = (m.weightsPct ?? []).flatMap((w, a) => (w > 0 ? [`${ASPECT_NAMES[a] ?? "?"} ${Math.round(resistanceShare(m, a) / 100)}%`] : []));
+  return parts.length ? parts.join(", ") : "nothing";
 }
 
 /** Own turns a modifier still covers after the current one (`turns` counts the next start too). */
@@ -39,6 +56,8 @@ export function modEffectText(m: TimedMod): string {
       return `-${pct} damage`;
     case 4:
       return `+${pct} resist`;
+    case 6:
+      return `resist ${resistanceText(m)}`;
     default:
       return `+${pct} ${ASPECT_NAMES[m.aspect] ?? "?"} damage taken`;
   }
@@ -57,8 +76,8 @@ export function modLabel(m: TimedMod): string {
 export function modsAt(events: readonly { name: string; data: any }[], index: number, unit: number, fallback: TimedMod[]): TimedMod[] {
   for (let j = Math.min(index, events.length) - 1; j >= 0; j--) {
     const e = events[j]!;
-    if (e.name === "ModsTicked" && e.data.unit === unit) return activeMods(e.data.mods);
-    if (e.name === "EffectResolved" && e.data.target === unit) return activeMods(e.data.mods);
+    if (e.name === "ModsTicked" && e.data.unit === unit) return activeMods(withResist(e.data.mods, e.data.resistMod));
+    if (e.name === "EffectResolved" && e.data.target === unit) return activeMods(withResist(e.data.mods, e.data.resistMod));
   }
   return fallback;
 }
@@ -174,7 +193,7 @@ export function toEffectResolved(ev: any): EffectResolved {
     },
     applied: ev.applied as Applied,
     hp: ev.hp,
-    mods: activeMods(ev.mods),
+    mods: activeMods(withResist(ev.mods, ev.resistMod)),
   };
 }
 

@@ -7,7 +7,7 @@
 import balance from "./balance.json";
 import type { Bytes, CombatWasm } from "./combatWasm";
 import { heroDefense } from "./items";
-import { MOD_NAMES } from "./support";
+import { MOD_NAMES, resistanceShare } from "./support";
 import { Aspect, Class, ModKind, StateKind, type TimedMod } from "./types";
 
 export type LiveState = { kind: StateKind; turns: number; power: number };
@@ -16,15 +16,26 @@ export const BP = 10_000;
 /** crates/combat Balance::resist_cap_bp: a hit never uses more resistance than this. */
 export const RESIST_CAP_BP: number = balance.combat.resist_cap_bp;
 const ASPECT_COUNT = 6;
-const NO_RESIST: readonly number[] = Array.from({ length: ASPECT_COUNT }, () => 0);
 
-/** Evasion, armor and resistance per aspect (bp, before the cap). */
-export type DefenseProfile = { defense: number; armor: number; resist: readonly number[] };
+/** Evasion, armor and resistance per aspect (bp, before the cap); since patch 9 the state
+ * resistance, the immunities (bits by aspect, state and tag) and the resistance by tag. */
+export type DefenseProfile = {
+  defense: number;
+  armor: number;
+  resist: readonly number[];
+  stateResist?: number;
+  immuneAspects?: number;
+  immuneStates?: number;
+  /** By tag: Magical, Combat, Strike, Projectile. */
+  tagResist?: readonly number[];
+  immuneTags?: number;
+};
 
-/** deadroll_rules hero::defense: base + Dexterity / div, class armor, plus what `equipment` (the
+/** deadroll_rules hero::defense, hero::resist and hero::state_resist: base + Dexterity / div, class
+ * armor, items' resistances, Endurance and items for states, plus what `equipment` (the
  * Participation snapshot, ItemBase bytes by slot) adds. Without it: no items. */
 export function playerDefense(cls: Class, stats: readonly number[], equipment: ArrayLike<number> = []): DefenseProfile {
-  return { ...heroDefense(cls, stats, equipment), resist: NO_RESIST };
+  return heroDefense(cls, stats, equipment);
 }
 
 /** A monster at `level` from its bestiary record (`MonsterState.records`), by the combat module;
@@ -32,7 +43,16 @@ export function playerDefense(cls: Class, stats: readonly number[], equipment: A
 export function monsterDefense(combat: CombatWasm, record: Bytes, level: number, flags = 0): DefenseProfile | null {
   try {
     const m = combat.monsterSheet({ record, level, flags });
-    return { defense: m.evasion, armor: m.armor, resist: m.resistBp };
+    return {
+      defense: m.evasion,
+      armor: m.armor,
+      resist: m.resistBp,
+      stateResist: 0,
+      immuneAspects: m.immuneAspects,
+      immuneStates: m.immuneStates,
+      tagResist: m.tagResistBp,
+      immuneTags: m.immuneTags,
+    };
   } catch {
     return null;
   }
@@ -77,6 +97,13 @@ export type UnitStats = {
   armor: number;
   /** Resistance per aspect (counterweight, bp), capped at RESIST_CAP_BP like the hit. */
   resist: AspectStat[];
+  /** Patch 9: state resistance (counterweight on state and effect chances, bp), the immunities
+   * and the resistance by tag (Magical, Combat, Strike, Projectile). */
+  stateResist: number;
+  immuneAspects: number;
+  immuneStates: number;
+  tagResist: readonly number[];
+  immuneTags: number;
   /** Vulnerability per aspect (multiplier, bp). */
   vuln: AspectStat[];
   /** Outgoing damage: Empowerment (increase, bp) and Weakening (counterweight, bp). */
@@ -108,13 +135,17 @@ export function unitStats({ hp, hpMax, apBase, apNow, profile, mods, states = []
   const chill = chillSlowBp(liveStates);
   const apBy = [...(haste ? [name(ModKind.Haste)] : []), ...(slow ? [name(ModKind.Slow)] : []), ...(chill ? ["Chill"] : [])];
   const protection = modPower(live, ModKind.Protection);
+  const resistMod = live.find((m) => m.kind === ModKind.Resistance);
   const vulnMod = live.find((m) => m.kind === ModKind.Vulnerability);
   const resist: AspectStat[] = [];
   const vuln: AspectStat[] = [];
   for (let a = 0; a < ASPECT_COUNT; a++) {
     const aspect = a as Aspect;
     const base = profile.resist[a] ?? 0;
-    resist.push({ aspect, base, final: Math.min(RESIST_CAP_BP, base + protection), by: protection ? [name(ModKind.Protection)] : [] });
+    // support.rs apply_to_defender: Protection on every aspect, a Resistance on its weights.
+    const share = resistMod ? resistanceShare(resistMod, a) : 0;
+    const by = [...(protection ? [name(ModKind.Protection)] : []), ...(share ? [name(ModKind.Resistance)] : [])];
+    resist.push({ aspect, base, final: Math.min(RESIST_CAP_BP, base + protection + share), by });
     const v = vulnMod && vulnMod.aspect === aspect ? vulnMod.powerBp : 0;
     vuln.push({ aspect, base: 0, final: v, by: v ? [name(ModKind.Vulnerability)] : [] });
   }
@@ -125,6 +156,11 @@ export function unitStats({ hp, hpMax, apBase, apNow, profile, mods, states = []
     defense: profile.defense,
     armor: profile.armor,
     resist,
+    stateResist: profile.stateResist ?? 0,
+    immuneAspects: profile.immuneAspects ?? 0,
+    immuneStates: profile.immuneStates ?? 0,
+    tagResist: profile.tagResist ?? [],
+    immuneTags: profile.immuneTags ?? 0,
     vuln,
     increasedBp: modPower(live, ModKind.Empowerment),
     weakenBp: modPower(live, ModKind.Weakening),

@@ -4,7 +4,7 @@
 //! Every monster number is registry data (`assets/registry/bestiary.json`, uploaded by
 //! `tools/scripts/seed-registry.ts`, copied into `MonsterState` at `open_session`); how a
 //! template grows with its level and what an elite gets is `MonsterScaling`.
-use deadroll_combat::{modifiers::more, DamageRange};
+use deadroll_combat::{modifiers::more, DamageRange, TAGS};
 use deadroll_mapcheck::roster::{Role, SpawnRules};
 use deadroll_skillcheck::{monster::MonsterSkill, Category};
 use deadroll_types::{Aspect, Form, Source, StateKind, BP, MONSTER_SLOTS, SPAWN_ELITE};
@@ -42,8 +42,12 @@ pub mod record {
     pub const POOL_START: usize = 39;
     pub const POOL_LEN: usize = 40;
     pub const KIN: usize = 41;
-    /// `[42..48]` reserved (zero).
-    pub const RESERVED: usize = 42;
+    /// Patch 9: defense tag masks (`deadroll_combat::source_bit` / `form_bit`), resisted and
+    /// immune (docs/DAMAGE_TYPES_AND_MIXES.md 9: "immunity to magical").
+    pub const RESIST_TAGS: usize = 42;
+    pub const IMMUNE_TAGS: usize = 43;
+    /// `[44..48]` reserved (zero).
+    pub const RESERVED: usize = 44;
     /// Predisposition / kin byte for "none".
     pub const NONE: u8 = 0xFF;
 }
@@ -63,7 +67,8 @@ pub const ROLES: [Role; 6] = [
 
 /// A monster's defenses from its registry bestiary record (docs/BESTIARY.md 10,
 /// DAMAGE_TYPES_AND_MIXES.md 9): which aspects it resists, which it is immune to, and the states
-/// it never gets. The level of "resistance" is one number, `MonsterScaling::resist_bp`.
+/// it never gets, and since patch 9 the tags (power source, form) it resists or is immune to.
+/// The level of "resistance" is one number, `MonsterScaling::resist_bp`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct MonsterDefense {
     /// Bit `1 << aspect`.
@@ -71,6 +76,9 @@ pub struct MonsterDefense {
     pub immune_aspects: u8,
     /// Bit `1 << state`.
     pub immune_states: u8,
+    /// Bits `deadroll_combat::source_bit` / `form_bit`.
+    pub resist_tags: u8,
+    pub immune_tags: u8,
 }
 
 impl MonsterDefense {
@@ -78,6 +86,8 @@ impl MonsterDefense {
         resist: 0,
         immune_aspects: 0,
         immune_states: 0,
+        resist_tags: 0,
+        immune_tags: 0,
     };
 
     /// From a bestiary record; `None` for an empty slot or bits past the known aspects / states.
@@ -90,6 +100,17 @@ impl MonsterDefense {
         let mut out = [0; Aspect::COUNT];
         for (i, r) in out.iter_mut().enumerate() {
             if self.resist & (1 << i) != 0 {
+                *r = s.resist_bp;
+            }
+        }
+        out
+    }
+
+    /// Resistance per defense tag at the scaling's level.
+    pub fn tag_resist_bp(&self, s: &MonsterScaling) -> [u32; TAGS] {
+        let mut out = [0; TAGS];
+        for (i, r) in out.iter_mut().enumerate() {
+            if self.resist_tags & (1 << i) != 0 {
                 *r = s.resist_bp;
             }
         }
@@ -158,6 +179,11 @@ pub struct MonsterProfile {
     /// Immunity per aspect and per state, bit `1 << aspect` / `1 << state`.
     pub immune_aspects: u8,
     pub immune_states: u8,
+    /// Patch 9: resistance per defense tag and the immune tags.
+    pub tag_resist_bp: [u32; TAGS],
+    pub immune_tags: u8,
+    /// Patch 9: the template's predisposition, added to its Resistance skills.
+    pub predisposition: Option<Aspect>,
     /// Experience for killing it.
     pub xp: u32,
     /// Killing it wins the party (docs/PARTY_AND_TURNS.md, 7.1).
@@ -184,14 +210,19 @@ impl MonsterTemplate {
         let aspects = (1u16 << Aspect::COUNT) - 1;
         let states = (1u16 << StateKind::COUNT) - 1;
         let fits = |v: u8, mask: u16| u16::from(v) & !mask == 0;
+        let tags = (1u16 << TAGS) - 1;
         let defense = MonsterDefense {
             resist: r[RESIST],
             immune_aspects: r[IMMUNE],
             immune_states: r[IMMUNE_STATES],
+            resist_tags: r[RESIST_TAGS],
+            immune_tags: r[IMMUNE_TAGS],
         };
         if !(fits(defense.resist, aspects)
             && fits(defense.immune_aspects, aspects)
-            && fits(defense.immune_states, states))
+            && fits(defense.immune_states, states)
+            && fits(defense.resist_tags, tags)
+            && fits(defense.immune_tags, tags))
         {
             return None;
         }
@@ -269,6 +300,9 @@ impl MonsterTemplate {
             resist_bp: self.defense.resist_bp(s),
             immune_aspects: self.defense.immune_aspects,
             immune_states: self.defense.immune_states,
+            tag_resist_bp: self.defense.tag_resist_bp(s),
+            immune_tags: self.defense.immune_tags,
+            predisposition: self.predisposition,
             xp: self.xp.saturating_mul(l.max(1)),
             boss: self.is_boss(),
             kin: self.kin,

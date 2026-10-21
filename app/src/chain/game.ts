@@ -79,6 +79,7 @@ import {
   type MonsterDefenseData,
   type Participation,
   type ReactiveData,
+  type ResistModData,
   type TimedModData,
 } from "@deadroll/sdk/session";
 import { COMPUTE_BUDGET_PROGRAM } from "@deadroll/sdk";
@@ -117,8 +118,19 @@ import { Aspect, Class, MAP_CELLS, MAP_MAX, Race, Tile, type Cell, type Spawn } 
 // decoded account shapes: the generated sdk types (numbers for enums, `Option` for Rust options)
 
 export type ActiveStateAcc = ActiveState;
-/** A buff or debuff slot (session TimedModData): active while `turns > 0`. One per kind, in the first free slot: find by `kind`. */
-export type TimedModAcc = TimedModData;
+/** A buff or debuff slot (session TimedModData): active while `turns > 0`. One per kind: find by
+ * `kind`. A Resistance (patch 9) carries its aspect weights, merged in by [`withResist`]. */
+export type TimedModAcc = TimedModData & { weightsPct?: ArrayLike<number> };
+/** session ResistModData (patch 9): the Resistance slot and its aspect weights. */
+export type ResistModAcc = ResistModData;
+
+/** A unit's stored mods and its Resistance slot (`Participation.resist_mod`,
+ * `MonsterState.resist_mods`, the `resistMod` of the events) as one list. */
+export function withResist(mods: readonly TimedModAcc[] | undefined, resist: ResistModAcc | undefined): TimedModAcc[] {
+  const out = [...(mods ?? [])];
+  if (resist && resist.data.turns > 0) out.push({ ...resist.data, weightsPct: Array.from(resist.weightsPct) });
+  return out;
+}
 export type MonsterAcc = Monster;
 /** `MonsterState.defense`: bits by aspect / state. */
 export type MonsterDefenseAcc = MonsterDefenseData;
@@ -130,8 +142,9 @@ export type GameSessionAcc = GameSession;
 export type ParticipationAcc = Participation;
 /** session MapSkillData: a skill taken onto the map (blocks, derived values, the patch 5 ext). */
 export type MapSkillAcc = MapSkillData;
-/** session AuraData (docs/SKILL_BUILDER.md 3.5): `turns` 255 = permanent (a passive), 0 = none. */
-export type AuraAcc = AuraData;
+/** session AuraData (docs/SKILL_BUILDER.md 3.5): `turns` 255 = permanent (a passive), 0 = none. A
+ * Resistance aura carries its aspect weights (`GameSession.aura_weights`, merged in by `readParty`). */
+export type AuraAcc = AuraData & { weightsPct?: ArrayLike<number> };
 /** session ReactiveData: a player's reactive skill on the map, `skillSlot` 0xFF = none. */
 export type ReactiveAcc = ReactiveData;
 /** programs/character SkillExtras: the patch 5 part of every skill, by SkillSet index. */
@@ -859,7 +872,9 @@ export async function readParty(address: Address, tiles: Uint8Array | null = nul
   const head = [address, await monstersPda(address), await escrowPda(address)];
   const [rawSession, rawMonsters, rawEscrow, ...guessed] = await getAccounts([...head, ...guess]);
   if (!rawSession) return null;
-  const session = decodeAccount("GameSession", rawSession);
+  const decoded = decodeAccount("GameSession", rawSession);
+  // Patch 9: the aura weights travel with their auras.
+  const session = { ...decoded, auras: decoded.auras.map((p, i) => p.map((a, j): AuraAcc => ({ ...a, weightsPct: decoded.auraWeights[i]?.[j] }))) };
   const monsterState = rawMonsters ? decodeAccount("MonsterState", rawMonsters) : null;
   const count = monsterState?.core.count ?? 0;
   const escrow = rawEscrow ? decodeAccount("Escrow", rawEscrow) : null;
@@ -871,7 +886,8 @@ export async function readParty(address: Address, tiles: Uint8Array | null = nul
     const p = extra[slot];
     const c = extra[chars.length + slot];
     if (!p || !c) return [];
-    return [{ slot, character, participation: parts[slot]!, part: decodeAccount("Participation", p), char: decodeAccount("Character", c) }];
+    const part = decodeAccount("Participation", p);
+    return [{ slot, character, participation: parts[slot]!, part: { ...part, mods: withResist(part.mods, part.resistMod) }, char: decodeAccount("Character", c) }];
   });
   const rawMap = extra[chars.length * 2];
   const map = rawMap ? decodeAccount("Map", rawMap) : null;
@@ -885,8 +901,10 @@ export async function readParty(address: Address, tiles: Uint8Array | null = nul
   const monsterSkills = (monsterState?.skills ?? [])
     .slice(0, count)
     .map((slots) => Array.from(slots).map((t) => (t === 0xff || !table[t] ? null : Uint8Array.from(table[t]!))));
-  const monsterAuras = (monsterState?.auras ?? []).slice(0, count);
-  const monsterMods = (monsterState?.mods ?? []).slice(0, count);
+  const monsterAuras = (monsterState?.auras ?? [])
+    .slice(0, count)
+    .map((p, i) => p.map((a, j) => ({ ...a, aura: { ...a.aura, weightsPct: monsterState?.auraWeights[i]?.[j] } as AuraAcc })));
+  const monsterMods = (monsterState?.mods ?? []).slice(0, count).map((m, i) => withResist(m, monsterState?.resistMods[i]));
   const monsterDefense = (monsterState?.defense ?? []).slice(0, count);
   const resonanceTables = monsterState
     ? concat(Uint8Array.from(monsterState.resAspects), Uint8Array.from(monsterState.resTraits), Uint8Array.from(monsterState.resPairs))

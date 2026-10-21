@@ -90,6 +90,7 @@ fn aura(kind: ModKind, power_bp: u32, radius: u8) -> Aura {
         passive: true,
         self_only: false,
         kin_only: false,
+        weights_pct: [0; Aspect::COUNT],
     }
 }
 
@@ -182,6 +183,7 @@ fn identical_auras_do_not_stack_the_strongest_acts() {
         turns: 2,
         power_bp: 6_000,
         source: 3,
+        weights_pct: [0; Aspect::COUNT],
     };
     assert_eq!(
         power(
@@ -308,7 +310,7 @@ fn a_debuff_aura_works_on_the_enemies_around() {
 #[test]
 fn a_temporary_aura_lasts_its_effect_duration() {
     let stand = stats(&presets::SUPPORT[4]); // Last Stand: reactive Protection aura
-    let a = reactive_aura(&CFG, &stand, 2_000).unwrap();
+    let a = reactive_aura(&CFG, &stand, 2_000, None).unwrap();
     let duration = CFG.support.duration(ModKind::Protection);
     assert_eq!(a.turns, mod_turns(duration));
     assert!(!a.passive && !a.hostile && a.radius == 2);
@@ -328,7 +330,10 @@ fn a_temporary_aura_lasts_its_effect_duration() {
     for _ in 0..300 {
         assert_eq!(tick_auras(&mut perm), 0);
     }
-    assert_eq!(reactive_aura(&CFG, &stats(&presets::WARRIOR[4]), 1), None);
+    assert_eq!(
+        reactive_aura(&CFG, &stats(&presets::WARRIOR[4]), 1, None),
+        None
+    );
 }
 
 #[test]

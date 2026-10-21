@@ -1,4 +1,4 @@
-import { ASPECT_NAMES, formatBp, stateName } from "../../chain/names";
+import { ASPECT_NAMES, STATE_NAMES, TAG_NAMES, formatBp, maskNames, stateName } from "../../chain/names";
 import { deltaText, type AspectStat, type UnitStats } from "../../chain/stats";
 import { modIsBuff, modLabel } from "../../chain/support";
 import type { StatsPanelProps, StatsUnit } from "./types";
@@ -6,11 +6,13 @@ import "./stats.css";
 
 const pct = (bp: number) => formatBp(bp);
 
-/** Resistances: the special ones by name; a flat Protection on the rest collapses into one line. */
+/** Resistances: the special ones (its own, or a Resistance on that aspect) by name; a flat
+ * Protection on the rest collapses into one line. */
 function resistLines(s: UnitStats): { text: string; tone: "good" | "" }[] {
   const moved = (r: AspectStat) => r.final !== r.base;
-  const special = s.resist.filter((r) => r.base > 0);
-  const rest = s.resist.filter((r) => r.base === 0);
+  const own = (r: AspectStat) => r.base > 0 || r.by.includes("Resistance");
+  const special = s.resist.filter(own);
+  const rest = s.resist.filter((r) => !own(r));
   const lines = special.map((r) => ({ text: deltaText(ASPECT_NAMES[r.aspect], r, pct), tone: moved(r) ? ("good" as const) : ("" as const) }));
   const flat = rest[0];
   if (flat && flat.final > 0) {
@@ -25,6 +27,8 @@ function UnitRow({ u }: { u: StatsUnit }) {
   const ap = deltaText("AP", s.ap);
   const resist = resistLines(s);
   const vuln = s.vuln.filter((v) => v.final > 0);
+  const tags = s.tagResist.flatMap((bp, i) => (bp > 0 ? [`${TAG_NAMES[i] ?? "?"} ${pct(bp)}`] : []));
+  const immune = [...maskNames(s.immuneAspects, ASPECT_NAMES), ...maskNames(s.immuneStates, STATE_NAMES), ...maskNames(s.immuneTags, TAG_NAMES)];
   return (
     <tr className={`stats-row ${u.kind}${u.current ? " current" : ""}`} data-testid="stats-row">
       <th scope="row">{u.label}</th>
@@ -53,6 +57,9 @@ function UnitRow({ u }: { u: StatsUnit }) {
             Vuln {deltaText(ASPECT_NAMES[v.aspect], v, pct)}
           </div>
         ))}
+        {tags.length > 0 && <div>Resist {tags.join(", ")}</div>}
+        {s.stateResist > 0 && <div>State resist {pct(s.stateResist)}</div>}
+        {immune.length > 0 && <div className="good">Immune {immune.join(", ")}</div>}
       </td>
       <td>
         {s.increasedBp > 0 && <div className="good">Damage +{pct(s.increasedBp)} (Empowerment)</div>}
@@ -108,8 +115,9 @@ export function StatsPanel({ units }: StatsPanelProps) {
         </table>
       </div>
       <p className="muted">
-        Resist divides the damage of its aspect, Vuln multiplies it; Vulnerability counts only for its own aspect. (n): own turns left after the
-        current one.
+        Resist divides the damage of its aspect, Vuln multiplies it; Vulnerability counts only for its own aspect. State resist divides the
+        chance of states and effects. Immune: no damage of that aspect or tag, that state never lands. (n): own turns left after the current
+        one.
       </p>
     </div>
   );

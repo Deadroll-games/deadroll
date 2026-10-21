@@ -112,6 +112,8 @@ impl From<AuraData> for Aura {
             passive: a.passive,
             self_only: a.self_only,
             kin_only: false,
+            // Stored apart (`GameSession.aura_weights`, `MonsterState.aura_weights`).
+            weights_pct: [0; Aspect::COUNT],
         }
     }
 }

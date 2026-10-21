@@ -285,8 +285,8 @@ fn golden_mage_vs_goblin() {
     assert_eq!(r.damage, 13);
     // Chill: 40% x (1 + pure pair tier 8 = 38%) = 55%, roll 40 succeeds.
     // Buildup 5000 x 1.38 = 6900. Lightning is a pure pair too, so Shock rolls:
-    // 40% x 1.29 / 1.10 (10% lightning resist) = 46%, roll 40 succeeds.
-    // Shock strength 2000 x 1.29 / 1.10 = 2345.
+    // 40% x 1.29 = 51% (the 10% Lightning resist cuts only damage), roll 40 succeeds.
+    // Shock strength 2000 x 1.29 = 2580.
     let s = r.packets()[0].state;
     assert_eq!(
         (s.kind, s.rolled, s.chance_pct, s.roll, s.success, s.applied),
@@ -302,7 +302,7 @@ fn golden_mage_vs_goblin() {
             shock.success,
             shock.applied
         ),
-        (StateKind::Shock, true, 46, 40, true, Applied::Added)
+        (StateKind::Shock, true, 51, 40, true, Applied::Added)
     );
     assert_eq!(
         active(&r),
@@ -316,7 +316,7 @@ fn golden_mage_vs_goblin() {
             ActiveState {
                 kind: StateKind::Shock,
                 turns: 2,
-                power: 2_345,
+                power: 2_580,
                 source: 1
             },
         ]
@@ -427,14 +427,14 @@ fn golden_mage_double_resonance() {
     let shock = r.packets()[1].state;
     assert_eq!(
         (shock.chance_pct, shock.roll, shock.applied),
-        (46, 13, Applied::Added)
+        (51, 13, Applied::Added)
     );
     // Ringing Ice (slot 0) waits for a Freeze that has not landed yet: no jump.
     let ringing: Vec<_> = r.ops(0).map(|o| (o.kind, o.acted)).collect();
     assert_eq!(ringing, [(OpKind::Jump, false)]);
     assert_eq!(r.jump_count, 0);
     // Frost Spark (slot 1): Shock landed, so it chills without a roll. Buildup
-    // 5000 x (1 + 38% tier 8) / 1.10 (Lightning resist) = 6272; with 6900 from the Cold packet
+    // 5000 x (1 + 38% tier 8) = 6900; with 6900 from the Cold packet
     // it passes 10000 and freezes.
     let spark: Vec<_> = r
         .ops(1)
@@ -458,7 +458,7 @@ fn golden_mage_double_resonance() {
             ActiveState {
                 kind: StateKind::Shock,
                 turns: 2,
-                power: 2_345,
+                power: 2_580,
                 source: 1
             },
         ]

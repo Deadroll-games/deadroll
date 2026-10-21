@@ -44,6 +44,7 @@ export * from "./purpose.js";
 export * from "./rangeTag.js";
 export * from "./reactionKind.js";
 export * from "./reactiveData.js";
+export * from "./resistModData.js";
 export * from "./resonanceData.js";
 export * from "./sessionStatus.js";
 export * from "./skillBlocks.js";

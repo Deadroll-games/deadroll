@@ -17,7 +17,8 @@ import {
 
 /**
  * Section 6. `None` only for pure damage. Debuffs and hard control first, then buffs;
- * `Heal` was appended later (a buff kind: restores HP up to the maximum).
+ * `Heal` was appended later (a buff kind: restores HP up to the maximum), then `Resistance`
+ * (patch 9: resistance to the skill's aspects and the bearer's predisposition).
  */
 export const Effect = {
   0: "None",
@@ -30,6 +31,7 @@ export const Effect = {
   7: "Empowerment",
   8: "Protection",
   9: "Heal",
+  10: "Resistance",
   None: 0,
   Weakening: 1,
   Slow: 2,
@@ -40,11 +42,13 @@ export const Effect = {
   Empowerment: 7,
   Protection: 8,
   Heal: 9,
+  Resistance: 10,
 } as const;
 
 /**
  * Section 6. `None` only for pure damage. Debuffs and hard control first, then buffs;
- * `Heal` was appended later (a buff kind: restores HP up to the maximum).
+ * `Heal` was appended later (a buff kind: restores HP up to the maximum), then `Resistance`
+ * (patch 9: resistance to the skill's aspects and the bearer's predisposition).
  */
 export type Effect = (typeof Effect)[Exclude<keyof typeof Effect, number>];
 

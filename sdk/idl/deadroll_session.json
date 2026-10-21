@@ -3677,7 +3677,8 @@
       "name": "Effect",
       "docs": [
         "Section 6. `None` only for pure damage. Debuffs and hard control first, then buffs;",
-        "`Heal` was appended later (a buff kind: restores HP up to the maximum)."
+        "`Heal` was appended later (a buff kind: restores HP up to the maximum), then `Resistance`",
+        "(patch 9: resistance to the skill's aspects and the bearer's predisposition)."
       ],
       "repr": {
         "kind": "rust"
@@ -3714,6 +3715,9 @@
           },
           {
             "name": "Heal"
+          },
+          {
+            "name": "Resistance"
           }
         ]
       }
@@ -3838,6 +3842,17 @@
                 },
                 6
               ]
+            }
+          },
+          {
+            "name": "resist_mod",
+            "docs": [
+              "Patch 9: the target's Resistance after."
+            ],
+            "type": {
+              "defined": {
+                "name": "ResistModData"
+              }
             }
           }
         ]
@@ -4322,6 +4337,29 @@
               "While it is not empty no turn starts and no action is taken."
             ],
             "type": "u8"
+          },
+          {
+            "name": "aura_weights",
+            "docs": [
+              "Each player's auras' aspect weights (a Resistance, `deadroll_rules::aura::Aura::weights_pct`),",
+              "by aura slot like `auras`."
+            ],
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    {
+                      "array": [
+                        "u8",
+                        6
+                      ]
+                    },
+                    2
+                  ]
+                },
+                4
+              ]
+            }
           }
         ]
       }
@@ -4701,13 +4739,14 @@
           {
             "name": "target_mods",
             "docs": [
-              "Timed modifiers on the target (`target_mods[..target_mod_count]`)."
+              "Timed modifiers on the target (`target_mods[..target_mod_count]`), with the weights a",
+              "`deadroll_combat::TimedMod` carries since patch 9 (zero unless a Resistance)."
             ],
             "type": {
               "array": [
                 {
                   "defined": {
-                    "name": "TimedModData"
+                    "name": "ResistModData"
                   }
                 },
                 3
@@ -5026,6 +5065,9 @@
           },
           {
             "name": "Vulnerability"
+          },
+          {
+            "name": "Resistance"
           }
         ]
       }
@@ -5082,6 +5124,17 @@
               "Action points of this turn: speed with Haste and Slow."
             ],
             "type": "u8"
+          },
+          {
+            "name": "resist_mod",
+            "docs": [
+              "Patch 9: the unit's Resistance after the tick."
+            ],
+            "type": {
+              "defined": {
+                "name": "ResistModData"
+              }
+            }
           }
         ]
       }
@@ -5381,7 +5434,8 @@
           {
             "name": "mods",
             "docs": [
-              "Per monster: buffs and debuffs (`deadroll_combat::support`), like `Participation.mods`."
+              "Per monster: buffs and debuffs (`deadroll_combat::support`), like `Participation.mods`",
+              "(the Resistance is in `resist_mods`)."
             ],
             "type": {
               "array": [
@@ -5550,6 +5604,44 @@
                       "defined": {
                         "name": "MonsterAuraData"
                       }
+                    },
+                    2
+                  ]
+                },
+                24
+              ]
+            }
+          },
+          {
+            "name": "resist_mods",
+            "docs": [
+              "Per monster: its Resistance with the aspect weights, like `Participation.resist_mod`."
+            ],
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "ResistModData"
+                  }
+                },
+                24
+              ]
+            }
+          },
+          {
+            "name": "aura_weights",
+            "docs": [
+              "Per monster, per aura slot: a Resistance aura's aspect weights."
+            ],
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    {
+                      "array": [
+                        "u8",
+                        6
+                      ]
                     },
                     2
                   ]
@@ -5971,8 +6063,8 @@
           {
             "name": "mods",
             "docs": [
-              "Buffs and debuffs on this player (`deadroll_combat::support`), one slot per kind;",
-              "`start_turn` counts them down."
+              "Buffs and debuffs on this player (`deadroll_combat::support`), one slot per kind (the",
+              "Resistance is `resist_mod`); `start_turn` counts them down."
             ],
             "type": {
               "array": [
@@ -6047,6 +6139,17 @@
                 },
                 6
               ]
+            }
+          },
+          {
+            "name": "resist_mod",
+            "docs": [
+              "Patch 9: the Resistance on this player with its aspect weights (`mods` has the others)."
+            ],
+            "type": {
+              "defined": {
+                "name": "ResistModData"
+              }
             }
           }
         ]
@@ -6526,6 +6629,36 @@
               "Own turn starts until it can trigger again."
             ],
             "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ResistModData",
+      "docs": [
+        "Patch 9: a unit's Resistance (`kind == Resistance`, `turns == 0` = none) and its aspect",
+        "weights (`deadroll_combat::TimedMod::weights_pct`). Borsh-identical to a `TimedMod`, so a hit",
+        "event mirrors its target modifiers with it too."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "data",
+            "type": {
+              "defined": {
+                "name": "TimedModData"
+              }
+            }
+          },
+          {
+            "name": "weights_pct",
+            "type": {
+              "array": [
+                "u8",
+                6
+              ]
+            }
           }
         ]
       }

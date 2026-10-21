@@ -1,6 +1,8 @@
 use anchor_lang::prelude::*;
-use deadroll_rules::aura::{AuraField, MonsterAuraField, PartyAuras, AURAS_PER_PLAYER};
-use deadroll_types::{Cell, GameSessionData, Tile, MONSTERS_MAX, PARTY_MAX};
+use deadroll_rules::aura::{
+    Aura, AuraField, MonsterAuraField, PartyAuras, PlayerAuras, AURAS_PER_PLAYER,
+};
+use deadroll_types::{Aspect, Cell, GameSessionData, Tile, MONSTERS_MAX, PARTY_MAX};
 
 use super::{
     auras_to_rules, AuraData, PendingMonsterReactiveData, PendingReactiveData, ReactiveData,
@@ -115,6 +117,10 @@ pub struct GameSession {
     /// one bit per slot: the queue `start_turn` and the claims finalize first, in slot order.
     /// While it is not empty no turn starts and no action is taken.
     pub pending_deaths: u8,
+    // Patch 9: resistances.
+    /// Each player's auras' aspect weights (a Resistance, `deadroll_rules::aura::Aura::weights_pct`),
+    /// by aura slot like `auras`.
+    pub aura_weights: [[[u8; Aspect::COUNT]; AURAS_PER_PLAYER]; PARTY_MAX],
 }
 
 impl GameSession {
@@ -151,7 +157,31 @@ impl GameSession {
 
     /// The auras as the rules see them; borrow them with [`Self::aura_field`].
     pub fn party_auras(&self) -> PartyAuras {
-        auras_to_rules(&self.auras)
+        let mut out = auras_to_rules(&self.auras);
+        for (p, w) in out.iter_mut().zip(&self.aura_weights) {
+            for (a, w) in p.iter_mut().zip(w) {
+                a.weights_pct = *w;
+            }
+        }
+        out
+    }
+
+    /// Player `slot`'s auras with their weights.
+    pub fn player_auras(&self, slot: u8) -> PlayerAuras {
+        self.party_auras()[slot as usize]
+    }
+
+    /// Writes player `slot`'s auras and their weights.
+    pub fn set_player_auras(&mut self, slot: u8, auras: &PlayerAuras) {
+        for (i, a) in auras.iter().enumerate() {
+            self.set_aura(slot, i, *a);
+        }
+    }
+
+    /// Writes aura `index` of player `slot` and its weights.
+    pub fn set_aura(&mut self, slot: u8, index: usize, a: Aura) {
+        self.auras[slot as usize][index] = a.into();
+        self.aura_weights[slot as usize][index] = a.weights_pct;
     }
 
     /// The party's auras over the living players' cells, and the monsters' (`Monsters::bearers`).
@@ -184,6 +214,30 @@ mod tests {
         // The next turn (any unit) may act again.
         s.turn_seq += 1;
         assert!(!s.acted());
+    }
+
+    #[test]
+    fn aura_weights_travel_with_their_aura() {
+        use deadroll_combat::ModKind;
+        use deadroll_rules::aura::{Aura, PASSIVE_AURA, REACTIVE_AURA};
+        let mut s = session(&[Cell { x: 0, y: 0 }, Cell { x: 1, y: 0 }]);
+        let ward = Aura {
+            kind: ModKind::Resistance,
+            power_bp: 2_000,
+            turns: 3,
+            weights_pct: [0, 100, 0, 0, 0, 65],
+            ..Aura::default()
+        };
+        s.set_aura(1, REACTIVE_AURA, ward);
+        assert_eq!(s.player_auras(1)[REACTIVE_AURA], ward);
+        assert_eq!(
+            s.party_auras()[1][REACTIVE_AURA].weights_pct,
+            ward.weights_pct
+        );
+        assert!(s.player_auras(1)[PASSIVE_AURA].is_empty());
+        assert_eq!(s.player_auras(0)[REACTIVE_AURA].weights_pct, [0; 6]);
+        s.set_player_auras(1, &Default::default());
+        assert_eq!(s.aura_weights[1][REACTIVE_AURA], [0; 6]);
     }
 
     #[test]
