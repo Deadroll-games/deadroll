@@ -64,22 +64,9 @@ pnpm --filter @deadroll/sdk generate                     # target/idl -> sdk/idl
 pnpm --filter @deadroll/sdk check                        # fails if sdk/idl or sdk/src/generated is stale
 ```
 
-The build cache is never cleaned by hand. On Windows `anchor build` starts cargo in a `\\?\D:\...` folder: it rebuilds the shared crates on every run and its `.so` bytes vary, so programs for deploy are built by the deploy scripts (`cargo build-sbf` in the program folder, cache `target/sbf-deploy/`), never taken from `anchor build`.
-
 A new dependency on a program (CPI, account types) goes only through its `programs/<p>/lib/` package, never the program crate; if it has none yet (render, items, city), create it first (root `Cargo.toml`, `anchor-instruction` skill).
 
-Local validator (the user runs it in WSL, one shared instance; agents never start or reset it):
-
-```
-cd ~ && solana-test-validator --bpf-program CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d core.so --bpf-program KeyspM2ssCJbqUhQ4k7sveSiY4WjnYsrXkC8oDbwde5 session_keys.so
-```
-
-Deploy:
-
-```
-cd tools/scripts && pnpm deploy:local     # all programs + config + registry + rasterizer + demo map, session with mock-vrf
-tools/scripts/deploy-devnet.ts            # devnet upgrade, real VRF; only with the user's OK, show the cost table first
-```
+Deploy: see skill `deploy`. Docs changes: see skill `docs-pass`.
 
 Website:
 
@@ -124,7 +111,7 @@ Keep command output short, it fills the context:
 14. **Player actions are signed by the owner or the owner's session key only.** Nobody acts or claims for someone else.
 15. **Never commit keys or RPC URLs** (`*.keypair.json`, `id.json`, `.env*`, `target/deploy/*.json`, any URL with an api key). Never print private keys or keyed RPC URLs.
 16. **Never mention secret lore** (hidden guilds, encrypted fragments and similar) in code, comments, commits, assets or UI. If a doc section looks like secret lore, skip it.
-17. Do not edit `docs/`. If docs need a change, write the proposed sections in the chat for the user.
+17. Do not edit `docs/`. If docs need a change, propose it via skill `docs-pass`.
 18. Never use em dashes in any text.
 
 ## 6. Where the rules are
@@ -152,6 +139,8 @@ Keep command output short, it fills the context:
 - `rasterizer`: `crates/render`, WASM build, upload to `programs/render`.
 - `pixel-sprite`: drawing sprites in the geometry DSL.
 - `delegate-to-grok`: handing a bounded task to the Grok CLI and reviewing the result.
+- `deploy`: local deploy, devnet upgrade, smoke test, build rules for deploy.
+- `docs-pass`: proposing changes to `docs/` in a copy for the user.
 
 ## 8. What is live
 
