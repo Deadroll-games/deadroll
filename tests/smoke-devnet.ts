@@ -235,7 +235,7 @@ const heroes = [hero, bait];
 for (const h of heroes) {
   h.participation = pda([Buffer.from("participation"), sessionPda.toBuffer(), h.character.toBuffer()], SESSION);
   await session.methods
-    .joinSession(PRICE, h.actor.publicKey)
+    .joinSession(PRICE, PublicKey.default) // the session key comes with Ready
     .accountsStrict({
       player: h.wallet.publicKey, session: sessionPda, character: h.character, participation: h.participation,
       stash: pda([Buffer.from("stash"), sessionPda.toBuffer(), h.character.toBuffer()], SESSION),
@@ -244,12 +244,18 @@ for (const h of heroes) {
     .signers([h.wallet])
     .rpc();
   // Ready: the 4 + 1 + 1 skills taken onto the map; the character is locked and its gear copied.
+  // The same transaction binds the hero's session key (the wallet still signs the moves here).
+  const bind = await session.methods
+    .setSessionKey(h.actor.publicKey)
+    .accountsStrict({ signer: h.wallet.publicKey, session: sessionPda, participation: h.participation })
+    .instruction();
   await session.methods
     .setReady(true, [0, 1, 2, 3, 4, 5])
     .accountsStrict({
       player: h.wallet.publicKey, session: sessionPda, participation: h.participation, character: h.character,
       skillSet: h.skillSet, sessionAuthority, config, characterProgram: CHARACTER, skillExtras: h.skillExtras,
     })
+    .preInstructions([bind])
     .signers([h.wallet])
     .rpc({ commitment: "confirmed" });
   const ready = await session.account.participation.fetch(h.participation);

@@ -67,6 +67,7 @@ import {
   getOpenSessionInstruction,
   getParticipationDecoder,
   getSetReadyInstruction,
+  getSetSessionKeyInstruction,
   getStartSessionInstruction,
   getStartTurnInstruction,
   type ActiveState,
@@ -517,6 +518,19 @@ export async function setReadyIx(
 
 export async function startSessionIx(dm: TransactionSigner, session: Address): Promise<Instruction> {
   return getStartSessionInstruction({ dm, session, monsters: await monstersPda(session), escrow: await escrowPda(session), ...(await vrfAccounts()) });
+}
+
+/**
+ * Binds `sessionKey` to the party (patch 10), main wallet only: for the player's `character`, or for
+ * the DM when `character` is null. The old key stops passing.
+ */
+export async function setSessionKeyIx(wallet: TransactionSigner, session: Address, character: Address | null, sessionKey: Address): Promise<Instruction> {
+  return getSetSessionKeyInstruction({
+    signer: wallet,
+    session,
+    participation: character ? await participationPda(session, character) : undefined,
+    sessionKey,
+  });
 }
 
 /** A player's in-session keys: the session key signs, the SessionTokenV2 proves it may. */

@@ -47,6 +47,7 @@ export * from "./reactiveData.js";
 export * from "./resistModData.js";
 export * from "./resonanceData.js";
 export * from "./sessionStatus.js";
+export * from "./sessionTokenV2.js";
 export * from "./skillBlocks.js";
 export * from "./skillExt.js";
 export * from "./source.js";

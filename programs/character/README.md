@@ -45,7 +45,8 @@ logic is pure (`src/state/gear.rs`) and runs in the program-vs-simulator parity 
 - **Equip / unequip**: refused while `in_session` is set (from `set_ready(true)` until the party
   ends: the bag and the gear are frozen) and for a dead character. Equipping into a taken slot
   replaces what was there; an item is worn in one slot at a time. A signer other than the owner
-  needs a live MagicBlock `SessionTokenV2` the owner issued for the session program (`src/auth.rs`).
+  needs a live MagicBlock `SessionTokenV2` the owner issued for the session program, checked by
+  the `session-keys` crate's `#[session_auth_or]` (`src/auth.rs`: `game_session_token!`).
   Rules and numbers (slots, item level gap, kits) are `deadroll_rules::items` / `BalanceConfig.items`.
 - **Trust**: `session_authority` must be the `["authority"]` PDA of `GameConfig.programs[Session]`.
   `config` is the registry `["config"]` PDA, read in place (`src/trust.rs`), no registry types.

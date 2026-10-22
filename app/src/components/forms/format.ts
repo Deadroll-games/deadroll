@@ -27,6 +27,14 @@ export function formatSol(lamports: bigint): string {
   return `${whole.toString()}.${digits}`;
 }
 
+/** Lamports as SOL to the last lamport (9 decimal places, trailing zeros stripped): what a
+ * confirmation shows before the wallet signs. */
+export function formatSolExact(lamports: bigint): string {
+  const whole = lamports / 1_000_000_000n;
+  const digits = (lamports % 1_000_000_000n).toString().padStart(9, "0").replace(/0+$/, "");
+  return digits.length === 0 ? whole.toString() : `${whole.toString()}.${digits}`;
+}
+
 /** First 4 and last 4 characters, for wallet addresses in the lobby. */
 export function shortAddress(a: string): string {
   return `${a.slice(0, 4)}..${a.slice(-4)}`;

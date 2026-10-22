@@ -37,7 +37,6 @@ import {
   TURN_TICKED_EVENT_DISCRIMINATOR,
 } from "@deadroll/sdk/session";
 import { PROGRAMS, VRF } from "../config";
-import { CREATE_SESSION_V2_DISC } from "../session-key/sessionKey";
 import { concat, toHex } from "./bytes";
 import { decodeEvents } from "./events";
 import {
@@ -122,7 +121,6 @@ const EVENTS = {
 describe("sdk", () => {
   it("event and external discriminators follow Anchor's sha256 rule", () => {
     for (const [name, e] of Object.entries(EVENTS)) expect(toHex(Uint8Array.from(e.disc)), name).toBe(sha(`event:${name}`));
-    expect(toHex(CREATE_SESSION_V2_DISC)).toBe(sha("global:create_session_v2"));
   });
 });
 

@@ -178,6 +178,7 @@ export type MonsterMoveAsyncInput<
   /** mutable `LazyAccount` would re-serialize the whole account on exit). */
   monsters: TAccountMonsters;
   layout: TAccountLayout;
+  /** MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs. */
   sessionToken?: TAccountSessionToken;
   programIdentity?: TAccountProgramIdentity;
   oracleQueue?: TAccountOracleQueue;
@@ -429,6 +430,7 @@ export type MonsterMoveInput<
   /** mutable `LazyAccount` would re-serialize the whole account on exit). */
   monsters: TAccountMonsters;
   layout: TAccountLayout;
+  /** MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs. */
   sessionToken?: TAccountSessionToken;
   programIdentity: TAccountProgramIdentity;
   oracleQueue?: TAccountOracleQueue;
@@ -664,6 +666,7 @@ export type ParsedMonsterMoveInstruction<
     /** mutable `LazyAccount` would re-serialize the whole account on exit). */
     monsters: TAccountMetas[2];
     layout: TAccountMetas[3];
+    /** MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs. */
     sessionToken?: TAccountMetas[4] | undefined;
     programIdentity: TAccountMetas[5];
     oracleQueue: TAccountMetas[6];

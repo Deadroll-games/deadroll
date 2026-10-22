@@ -1,5 +1,5 @@
 //! Events (CONTRACTS.md, section 7). `PlayerReady`, `InitiativeRolled`, `TurnTicked`,
-//! `TurnSkipped`, `ModsTicked`, `EffectResolved`, `SkillUsed`, `PlayerDied`, `FleeVoted`, `RewardsClaimed` and `EscrowClaimed`
+//! `TurnSkipped`, `ModsTicked`, `EffectResolved`, `SkillUsed`, `PlayerDied`, `FleeVoted`, `RewardsClaimed`, `EscrowClaimed` and `SessionKeyChanged`
 //! are session-local.
 use anchor_lang::prelude::*;
 use deadroll_character::state::{MAP_SKILLS, SKILLS_MAX};
@@ -394,4 +394,14 @@ pub struct DeathFinalized {
     pub session: Pubkey,
     pub character: Pubkey,
     pub slot: u8,
+}
+
+/// Patch 10: another temporary key is bound to the party (docs/GAME_COMMISSIONS.md, 8).
+#[event]
+pub struct SessionKeyChanged {
+    pub session: Pubkey,
+    /// The player's character; `None` for the DM's key.
+    pub character: Option<Pubkey>,
+    /// `Participation.session_key` or `GameSession.dm_actor` now; default = none.
+    pub session_key: Pubkey,
 }

@@ -32,6 +32,10 @@ pub struct BalanceConfig {
     pub monsters: MonsterScaling,
     /// Item bases and class starter kits (`crate::items`).
     pub items: ItemTuning,
+    /// Patch 10: the session key's fee prepayment and lifetime (the website reads them). Missing
+    /// in a bench file saved before it: the defaults.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub fees: FeeTuning,
 }
 
 impl BalanceConfig {
@@ -42,6 +46,7 @@ impl BalanceConfig {
         players: PlayerTuning::DEFAULT,
         monsters: MonsterScaling::DEFAULT,
         items: ItemTuning::DEFAULT,
+        fees: FeeTuning::DEFAULT,
     };
 }
 
@@ -418,6 +423,36 @@ impl ItemTuning {
 }
 
 impl Default for ItemTuning {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
+/// The temporary key of a party (docs/GAME_COMMISSIONS.md, 3 and 6.2): what the main wallet moves
+/// to it for turn and VRF fees, and how long its MagicBlock token lives. Lamports.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FeeTuning {
+    /// Moved to the key when joining (or opening) a party.
+    pub prepay_lamports: u64,
+    /// The website warns below this balance.
+    pub low_balance_lamports: u64,
+    /// The website does not top the key up above this balance.
+    pub max_key_lamports: u64,
+    /// `SessionTokenV2.valid_until` = now + this, seconds (the Session Keys program allows a week).
+    pub key_validity_secs: u32,
+}
+
+impl FeeTuning {
+    pub const DEFAULT: FeeTuning = FeeTuning {
+        prepay_lamports: 10_000_000,
+        low_balance_lamports: 2_000_000,
+        max_key_lamports: 50_000_000,
+        key_validity_secs: 3 * 60 * 60,
+    };
+}
+
+impl Default for FeeTuning {
     fn default() -> Self {
         Self::DEFAULT
     }

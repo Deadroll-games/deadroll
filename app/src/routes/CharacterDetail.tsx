@@ -36,7 +36,6 @@ import { HeroSheetPanel } from "../components/stats/HeroSheetPanel";
 import type { HeroSheetPanelProps } from "../components/stats/types";
 import { Inventory } from "../components/items/Inventory";
 import type { InventoryItemView, InventoryProps } from "../components/items/types";
-import { useSessionKey } from "../session-key/SessionKeyProvider";
 import { useAppWallet } from "../wallet/AppWallet";
 import { aspectName, className, formatBp, raceName, STAT_NAMES } from "../chain/names";
 import { skillSetPda } from "../chain/pda";
@@ -111,7 +110,6 @@ export function CharacterDetailPage() {
   const [party, setParty] = useState<PartyInfo>(null);
   const [error, setError] = useState<string | null>(null);
   const wallet = useAppWallet();
-  const sk = useSessionKey();
   const { send, busy } = useTx();
   const combat = useCombat();
   // Level-up points placed but not saved yet, by Stat; Save sends them all at once.
@@ -143,8 +141,8 @@ export function CharacterDetailPage() {
   }, [address]);
   useEffect(() => void load(), [load]);
 
-  // Wear / Take off: the session key when one runs (no wallet popup), else the owner's wallet.
-  const actor = sk.status === "active" && sk.signer ? { signer: sk.signer, token: sk.token } : { signer: wallet.signer, token: null };
+  // Wear / Take off: outside a party, so the owner's wallet (a session key lives for one party only).
+  const actor = { signer: wallet.signer, token: null };
   const act = async (what: string, build: () => Promise<Awaited<ReturnType<typeof equipIx>>>) => {
     if (await send(what, actor.signer, async () => [await build()])) await load();
   };

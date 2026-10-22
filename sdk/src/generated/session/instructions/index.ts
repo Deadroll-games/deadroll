@@ -18,5 +18,6 @@ export * from "./monsterMove.js";
 export * from "./moveUnit.js";
 export * from "./openSession.js";
 export * from "./setReady.js";
+export * from "./setSessionKey.js";
 export * from "./startSession.js";
 export * from "./startTurn.js";

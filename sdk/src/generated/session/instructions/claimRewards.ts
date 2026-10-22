@@ -162,6 +162,7 @@ export type ClaimRewardsAsyncInput<
   sessionAuthority?: TAccountSessionAuthority;
   config?: TAccountConfig;
   characterProgram?: TAccountCharacterProgram;
+  /** MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs. */
   sessionToken?: TAccountSessionToken;
 };
 
@@ -421,6 +422,7 @@ export type ClaimRewardsInput<
   sessionAuthority: TAccountSessionAuthority;
   config: TAccountConfig;
   characterProgram?: TAccountCharacterProgram;
+  /** MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs. */
   sessionToken?: TAccountSessionToken;
 };
 
@@ -624,6 +626,7 @@ export type ParsedClaimRewardsInstruction<
     sessionAuthority: TAccountMetas[6];
     config: TAccountMetas[7];
     characterProgram: TAccountMetas[8];
+    /** MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs. */
     sessionToken?: TAccountMetas[9] | undefined;
   };
   data: ClaimRewardsInstructionData;

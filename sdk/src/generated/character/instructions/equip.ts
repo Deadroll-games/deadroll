@@ -130,6 +130,7 @@ export type EquipInput<
   /** The owner, or their session key with `session_token`. */
   signer: TAccountSigner;
   character: TAccountCharacter;
+  /** MagicBlock `SessionTokenV2` of the session key; none when the owner signs. */
   sessionToken?: TAccountSessionToken;
   itemIndex: EquipInstructionDataArgs["itemIndex"];
   slot: EquipInstructionDataArgs["slot"];
@@ -223,6 +224,7 @@ export type ParsedEquipInstruction<
     /** The owner, or their session key with `session_token`. */
     signer: TAccountMetas[0];
     character: TAccountMetas[1];
+    /** MagicBlock `SessionTokenV2` of the session key; none when the owner signs. */
     sessionToken?: TAccountMetas[2] | undefined;
   };
   data: EquipInstructionData;

@@ -767,7 +767,7 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
     for (const pl of demo.players) {
       Object.assign(pl, demo.playerAccounts(pl.character));
       await session.methods
-        .joinSession(half, pl.actor.publicKey)
+        .joinSession(half, PublicKey.default) // the session key comes with Ready
         .accountsStrict({
           player: pl.wallet.publicKey,
           session: demo.acc.session,
@@ -780,14 +780,18 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
         .signers([pl.wallet])
         .rpc()
         .then(track(`join_session ${pl.kind}`));
-      // The one wallet signature of the play session: this key may act for the player.
-      pl.token = await issueToken(pl.actor, pl.wallet);
     }
     assert.equal((await connection.getBalance(demo.acc.escrow)) - escrowBefore, PRICE.toNumber());
     demo.dmToken = await issueToken(demo.dmActor, demo.dm);
 
     // Ready: the 4 + 1 + 1 skills taken onto the map; the character is locked (bag and gear frozen).
+    // The same main wallet transaction binds the player's session key (docs/PARTY_AND_TURNS.md 2.1).
     for (const pl of demo.players) {
+      pl.token = await issueToken(pl.actor, pl.wallet);
+      const bind = await session.methods
+        .setSessionKey(pl.actor.publicKey)
+        .accountsStrict({ signer: pl.wallet.publicKey, session: demo.acc.session, participation: pl.participation })
+        .instruction();
       await session.methods
         .setReady(true, [0, 1, 2, 3, 4, 5])
         .accountsStrict({
@@ -801,6 +805,7 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
           characterProgram: CHARACTER,
           skillExtras: pda([Buffer.from("skill_extras"), pl.character.toBuffer()], CHARACTER),
         })
+        .preInstructions([bind])
         .signers([pl.wallet])
         .rpc()
         .then(track(`set_ready ${pl.kind}`));

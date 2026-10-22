@@ -251,6 +251,9 @@
         },
         {
           "name": "session_token",
+          "docs": [
+            "MagicBlock `SessionTokenV2` of the session key; none when the owner signs."
+          ],
           "optional": true
         }
       ],
@@ -692,6 +695,9 @@
         },
         {
           "name": "session_token",
+          "docs": [
+            "MagicBlock `SessionTokenV2` of the session key; none when the owner signs."
+          ],
           "optional": true
         }
       ],
@@ -1131,6 +1137,11 @@
       "code": 6032,
       "name": "DescriptionAlreadySet",
       "msg": "This skill already has its description"
+    },
+    {
+      "code": 6033,
+      "name": "InvalidToken",
+      "msg": "Session token is not valid for this signer and owner, or it has expired"
     }
   ],
   "types": [
@@ -2204,6 +2215,34 @@
           {
             "name": "total_xp",
             "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SessionTokenV2",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "target_program",
+            "type": "pubkey"
+          },
+          {
+            "name": "session_signer",
+            "type": "pubkey"
+          },
+          {
+            "name": "fee_payer",
+            "type": "pubkey"
+          },
+          {
+            "name": "valid_until",
+            "type": "i64"
           }
         ]
       }
