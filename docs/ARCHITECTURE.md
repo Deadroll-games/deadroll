@@ -255,7 +255,7 @@ Rules:
 ## 6. App (`app/`)
 
 - **Stack:** React + TypeScript, a static website with no backend (proposal: Vite).
-- Wallet through Solana Wallet Adapter, session keys through the MagicBlock SDK.
+- Wallet through Wallet Standard (`@solana/kit`), session keys through the MagicBlock SDK.
 - Program clients from `sdk/`.
 - The `combat`, `skillcheck`, `mapcheck`, `render` crates are included as WASM.
 - `combat.wasm` is committed in the app. CI checks that it matches a build from the sources. The hit preview is computed by it.
