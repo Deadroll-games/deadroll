@@ -48,6 +48,8 @@ Flags: `--url`, `--wallet`, `--skip-build`, `--map-index <n>` (a map used by a s
 pass the next index for a fresh one), `--uri-base` (NFT uri prefix), `--rasterizer-version` (default 2: sprite format 2;
 version 1 and book 1 hold format 1 and are frozen), `--book-id <n>` (first sprite book id, 2 or more; fails
 if book n.. holds other sprites; without it step 3 picks the id).
+CI only: `--build-only` (build the deploy outputs, no network), `--preloaded` (the validator was started with the
+staged programs at genesis, so no program keypair is needed and nothing is deployed; see `.github/workflows/integration.yml`).
 Devnet only: `--compute-unit-price`, `--yes` (no prompt), `--check-build` (build and check the VRF mode, no network).
 
 The devnet script refuses a session `.so` built with `mock-vrf` (it looks for the mock VRF identity in the

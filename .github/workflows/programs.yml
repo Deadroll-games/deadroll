@@ -1,0 +1,72 @@
+name: programs
+
+# Anchor programs (docs/ARCHITECTURE.md, section 9): build, Rust tests, the sdk is not stale.
+on:
+  pull_request:
+    paths:
+      - "programs/**"
+      - "crates/**"
+      - "sdk/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "Anchor.toml"
+      - "rust-toolchain.toml"
+      - "pnpm-lock.yaml"
+      - ".github/actions/solana/**"
+      - ".github/workflows/programs.yml"
+  push:
+    branches: [main]
+    paths:
+      - "programs/**"
+      - "crates/**"
+      - "sdk/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "Anchor.toml"
+      - "rust-toolchain.toml"
+      - "pnpm-lock.yaml"
+      - ".github/actions/solana/**"
+      - ".github/workflows/programs.yml"
+
+concurrency:
+  group: programs-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  PROGRAMS: -p deadroll-registry -p deadroll-character -p deadroll-items -p deadroll-map -p deadroll-session -p deadroll-city -p deadroll-render-program
+
+jobs:
+  programs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/solana
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: anchor build
+        run: |
+          set -o pipefail
+          anchor build --tools-version v1.54 2>&1 | grep -v "frame space"
+
+      - name: Rust tests of the programs
+        run: cargo test $PROGRAMS
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Compares target/idl from the build above with sdk/idl, then the Codama output.
+      - name: sdk is fresh
+        run: pnpm --filter @deadroll/sdk check

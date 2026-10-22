@@ -1,0 +1,141 @@
+name: integration
+
+# Program tests (programs/*/tests) and cross-program tests (tests/) on a local validator
+# (docs/ARCHITECTURE.md, sections 8-10): session built with mock-vrf, Metaplex Core and Session
+# Keys taken from devnet through the public RPC. No secrets: the wallet is generated per run.
+#
+# The program keypairs are never committed, so the programs cannot be deployed at their ids here.
+# They are loaded at genesis instead (`--upgradeable-program`, upgrade authority = the run wallet)
+# and `deploy-local.ts --preloaded` seeds the rest (config, registry, rasterizer, books, demo map).
+on:
+  pull_request:
+    paths:
+      - "programs/**"
+      - "crates/**"
+      - "tests/**"
+      - "sdk/**"
+      - "tools/scripts/**"
+      - "tools/art/**"
+      - "assets/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "Anchor.toml"
+      - "rust-toolchain.toml"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/actions/solana/**"
+      - ".github/workflows/integration.yml"
+  push:
+    branches: [main]
+    paths:
+      - "programs/**"
+      - "crates/**"
+      - "tests/**"
+      - "sdk/**"
+      - "tools/scripts/**"
+      - "tools/art/**"
+      - "assets/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "Anchor.toml"
+      - "rust-toolchain.toml"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/actions/solana/**"
+      - ".github/workflows/integration.yml"
+
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RPC: http://127.0.0.1:8899
+  # Metaplex Core and MagicBlock Session Keys, as in the local validator command of the deploy skill.
+  CORE_PROGRAM: CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d
+  SESSION_KEYS_PROGRAM: KeyspM2ssCJbqUhQ4k7sveSiY4WjnYsrXkC8oDbwde5
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/solana
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # target/idl and target/types for the tests.
+      - name: anchor build
+        run: |
+          set -o pipefail
+          anchor build --tools-version v1.54 2>&1 | grep -v "frame space"
+
+      # The deploy outputs: every program into target/deploy-stage (session with mock-vrf),
+      # the rasterizer WASM and the palette.
+      - name: deploy build (mock-vrf)
+        working-directory: tools/scripts
+        run: pnpm sdk && node --experimental-strip-types --no-warnings deploy-local.ts --build-only
+
+      - name: run wallet
+        run: |
+          solana-keygen new --no-bip39-passphrase --silent --force -o ~/.config/solana/id.json
+          solana config set --url "$RPC" --keypair ~/.config/solana/id.json >/dev/null
+
+      - name: Core and Session Keys from devnet (public RPC)
+        run: |
+          mkdir -p target/ci
+          solana program dump -u devnet "$CORE_PROGRAM" target/ci/core.so
+          solana program dump -u devnet "$SESSION_KEYS_PROGRAM" target/ci/session_keys.so
+
+      - name: start solana-test-validator
+        run: |
+          WALLET=$(solana-keygen pubkey ~/.config/solana/id.json)
+          ARGS=(--reset --quiet --ledger target/ci/ledger --mint "$WALLET"
+            --bpf-program "$CORE_PROGRAM" target/ci/core.so
+            --bpf-program "$SESSION_KEYS_PROGRAM" target/ci/session_keys.so)
+          # Our programs at their ids from [programs.localnet] in Anchor.toml.
+          while read -r name id; do
+            ARGS+=(--upgradeable-program "$id" "target/deploy-stage/$name.so" "$WALLET")
+          done < <(sed -n '/^\[programs.localnet\]/,/^\[/{s/^\(deadroll_[a-z_]*\) = "\([A-Za-z0-9]*\)"/\1 \2/p}' Anchor.toml)
+          echo "${#ARGS[@]} validator args"
+          nohup solana-test-validator "${ARGS[@]}" > target/ci/validator.log 2>&1 &
+          for i in $(seq 1 60); do
+            solana cluster-version -u "$RPC" >/dev/null 2>&1 && break
+            sleep 2
+          done
+          solana cluster-version -u "$RPC"
+          solana balance -u "$RPC"
+
+      - name: deploy-local (preloaded programs)
+        working-directory: tools/scripts
+        run: node --experimental-strip-types --no-warnings deploy-local.ts --skip-build --preloaded
+
+      - name: program tests (programs/*/tests)
+        working-directory: tests
+        env:
+          ANCHOR_PROVIDER_URL: ${{ env.RPC }}
+        run: ANCHOR_WALLET=~/.config/solana/id.json pnpm test:programs
+
+      - name: cross-program tests (tests/)
+        working-directory: tests
+        env:
+          ANCHOR_PROVIDER_URL: ${{ env.RPC }}
+        run: ANCHOR_WALLET=~/.config/solana/id.json pnpm test:cross
+
+      - name: validator log on failure
+        if: failure()
+        run: tail -n 100 target/ci/validator.log || true

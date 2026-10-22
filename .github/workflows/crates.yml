@@ -1,11 +1,17 @@
 name: crates
 
-# Shared Rust crates only (docs/ARCHITECTURE.md, section 9). Programs get programs.yml later.
+# Shared Rust crates (docs/ARCHITECTURE.md, section 9), the balance simulator with its parity test,
+# and the TS fixtures the website reads. `crates/sim` runs the session program as an rlib, so
+# program changes run this too.
 on:
   pull_request:
     paths:
       - "crates/**"
+      - "programs/**"
       - "app/src/chain/wasm/**"
+      - "app/src/chain/__fixtures__/**"
+      - "tools/scripts/lib/__fixtures__/**"
+      - "assets/registry/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
@@ -14,7 +20,11 @@ on:
     branches: [main]
     paths:
       - "crates/**"
+      - "programs/**"
       - "app/src/chain/wasm/**"
+      - "app/src/chain/__fixtures__/**"
+      - "tools/scripts/lib/__fixtures__/**"
+      - "assets/registry/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
@@ -29,7 +39,10 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  CRATES: -p deadroll-types -p deadroll-combat -p deadroll-skillcheck -p deadroll-mapcheck -p deadroll-render
+  # no_std crates that also build for wasm32.
+  CRATES: -p deadroll-types -p deadroll-combat -p deadroll-skillcheck -p deadroll-mapcheck -p deadroll-render -p deadroll-rules
+  # Host-only: the balance simulator (tests/parity.rs: sim and the session program agree).
+  HOST_CRATES: -p deadroll-sim
 
 jobs:
   crates:
@@ -46,19 +59,40 @@ jobs:
         run: cargo fmt --all --check
 
       - name: clippy
-        run: cargo clippy $CRATES --all-targets -- -D warnings
+        run: cargo clippy $CRATES $HOST_CRATES --all-targets -- -D warnings
 
       - name: clippy (types with anchor)
         run: cargo clippy -p deadroll-types --all-targets --features anchor -- -D warnings
 
       - name: test
-        run: cargo test $CRATES
+        run: cargo test $CRATES $HOST_CRATES
 
       - name: test (types with anchor)
         run: cargo test -p deadroll-types --features anchor
 
       - name: no_std build for wasm32
         run: cargo build $CRATES --target wasm32-unknown-unknown --release
+
+  # The website and the scripts read JSON fixtures written by Rust tests; each test fails when its
+  # committed fixture differs (refresh with UPDATE_TS_FIXTURES=1, root CLAUDE.md 5.5).
+  ts-fixtures:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: skillcheck
+        run: cargo test -p deadroll-skillcheck --test ts_fixtures
+
+      - name: combat wasm
+        run: cargo test -p deadroll-combat-wasm --test ts_fixtures
+
+      - name: registry tables
+        run: cargo test -p deadroll-rules --features serde --test registry
 
   # The website ships a built combat WASM (app/src/chain/wasm/combat.wasm): it must be exactly what
   # crates/combat/wasm builds from this commit.

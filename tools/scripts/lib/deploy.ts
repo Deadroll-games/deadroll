@@ -79,6 +79,9 @@ export type DeployOptions = {
   /** First sprite book id; omitted: the first id whose accounts take the packed books. */
   bookId?: number;
   mapIndex: number;
+  /** CI: the programs were loaded at validator genesis (`--upgradeable-program`), so the ids come
+   * from the sdk, no program keypair is read and nothing is deployed. */
+  preloaded?: boolean;
   computeUnitPrice?: number;
   /** Called with the cost table before anything is sent; return false to stop. */
   confirmCost?: (lines: string[], totalLamports: bigint, balance: bigint) => Promise<boolean>;
@@ -324,6 +327,10 @@ async function preflight(conn: Rpc, opts: DeployOptions, wallet: KeyPairSigner, 
   console.log(`rpc ${opts.url} (solana-core ${version["solana-core"]})`);
   const programIds: Record<string, string> = {};
   for (const p of PROGRAMS) {
+    if (opts.preloaded) {
+      programIds[p.key] = SDK_PROGRAMS[p.key];
+      continue;
+    }
     if (!existsSync(keypairPath(p.name))) throw new Error(`${keypairPath(p.name)} missing; program keypairs are never generated here`);
     const kp = await loadKeypair(keypairPath(p.name));
     // The sdk ids are the IDL addresses; an sdk test keeps them equal to Anchor.toml.
@@ -415,6 +422,7 @@ async function deployPrograms(conn: Rpc, opts: DeployOptions, programIds: Record
       console.log(`${p.name} ${programIds[p.key]}: up to date`);
       continue;
     }
+    if (opts.preloaded) throw new Error(`${p.name}: the validator does not hold ${soPath(p.name)} (--preloaded never deploys)`);
     console.log(`${p.name} ${programIds[p.key]}: ${state.deployed ? "upgrade" : "deploy"} (${so.length} bytes)`);
     const args = [
       "program", "deploy", soPath(p.name),
