@@ -66,6 +66,8 @@ pub mod consts;
 pub mod enums;
 pub mod render;
 pub mod seeds;
+// Not glob-exported: `Target`, `Effect` and `Category` are too generic for the crate root.
+pub mod skill;
 
 pub use accounts::*;
 pub use consts::*;

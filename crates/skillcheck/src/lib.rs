@@ -17,55 +17,9 @@
 //! - [`monster`]: monster skills (docs/BESTIARY.md 3): the registry record, [`validate_monster_skill`]
 //!   (Heal allowed, no class limits) and [`check_monster_selection`] (a spawn's pool mask).
 //!
-//! Integers only, no allocation, `no_std` without the `std`/`anchor` features.
+//! Integers only, no allocation, `no_std` without the `std` feature. No Anchor: the block types
+//! that programs store come from `deadroll_types::skill` (docs/ARCHITECTURE.md, section 5).
 #![cfg_attr(not(feature = "std"), no_std)]
-
-/// Applies the serialization derives for the active feature set to every item inside.
-macro_rules! shared {
-    ($($item:item)*) => {$(
-        #[cfg_attr(
-            feature = "anchor",
-            derive(
-                anchor_lang::prelude::AnchorSerialize,
-                anchor_lang::prelude::AnchorDeserialize,
-                anchor_lang::prelude::InitSpace
-            )
-        )]
-        #[cfg_attr(not(feature = "anchor"), derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
-        $item
-    )*};
-}
-
-/// A `#[repr(u8)]` enum with sequential discriminants from 0, `TryFrom<u8>` and `ALL`.
-/// Discriminants are part of the on-chain format: append only.
-macro_rules! u8_enum {
-    ($(#[$meta:meta])* $name:ident { $first:ident $(, $rest:ident)* $(,)? }) => {
-        shared! {
-            $(#[$meta])*
-            #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-            #[repr(u8)]
-            pub enum $name {
-                #[default]
-                $first,
-                $($rest,)*
-            }
-        }
-
-        impl $name {
-            /// Every variant in discriminant order.
-            pub const ALL: &'static [$name] = &[$name::$first, $($name::$rest,)*];
-            pub const COUNT: usize = Self::ALL.len();
-        }
-
-        impl TryFrom<u8> for $name {
-            type Error = deadroll_types::InvalidValue;
-
-            fn try_from(value: u8) -> Result<Self, Self::Error> {
-                Self::ALL.get(value as usize).copied().ok_or(deadroll_types::InvalidValue(value))
-            }
-        }
-    };
-}
 
 pub mod blocks;
 pub mod derive;
