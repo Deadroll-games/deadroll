@@ -51,7 +51,7 @@ import {
   getWriteChunkInstruction,
 } from "@deadroll/sdk/render";
 
-const root = new URL("../", import.meta.url);
+const root = new URL("../../../", import.meta.url);
 const read = (p: string) => readFileSync(new URL(p, root));
 
 const CONFIG = (await findConfigPda())[0];

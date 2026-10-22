@@ -6,7 +6,29 @@ settings:
 
 importers:
 
-  .: {}
+  .:
+    devDependencies:
+      '@anchor-lang/core':
+        specifier: 1.2.1
+        version: 1.2.1(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
+      '@deadroll/sdk':
+        specifier: workspace:*
+        version: link:sdk
+      '@solana/kit':
+        specifier: 8.4.0
+        version: 8.4.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
+      '@solana/web3.js':
+        specifier: ^1.98.0
+        version: 1.99.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.5
+      tsx:
+        specifier: ^4.20.0
+        version: 4.23.15
+      typescript:
+        specifier: ^5.8.0
+        version: 5.9.3
 
   app:
     dependencies:
@@ -94,30 +116,7 @@ importers:
         specifier: ~5.9
         version: 5.9.3
 
-  tests:
-    dependencies:
-      '@deadroll/sdk':
-        specifier: workspace:*
-        version: link:../sdk
-    devDependencies:
-      '@anchor-lang/core':
-        specifier: 1.2.1
-        version: 1.2.1(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
-      '@solana/kit':
-        specifier: 8.4.0
-        version: 8.4.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
-      '@solana/web3.js':
-        specifier: ^1.98.0
-        version: 1.99.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
-      '@types/node':
-        specifier: ^22.0.0
-        version: 22.20.5
-      tsx:
-        specifier: ^4.20.0
-        version: 4.23.15
-      typescript:
-        specifier: ^5.8.0
-        version: 5.9.3
+  tests: {}
 
   tools/scripts:
     dependencies:

@@ -11,4 +11,4 @@ Program id `2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH`.
 | `set_status(status)` | session PDA | Finalized -> InSession -> Finished |
 
 Events: `MapCreated`, `LayoutWritten`, `SpawnsWritten`, `MapFinalized`, `MapStatusChanged`.
-Tests: `tests/map.test.ts` (`anchor test --validator legacy --skip-build`).
+Tests: `tests/map.test.ts` (`pnpm --filter @deadroll/tests run test:map` on a local validator after `pnpm deploy:local`).

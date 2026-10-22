@@ -17,7 +17,7 @@ Maps, their validation and finalization, the secrets root and the `layout` PDA (
 ## Commands
 ```
 anchor build --tools-version v1.54
-anchor test --validator legacy --skip-build     # tests/map.test.ts
+pnpm --filter @deadroll/tests run test:map      # tests/map.test.ts, local validator after pnpm deploy:local
 cargo clippy -p deadroll-map
 ```
 

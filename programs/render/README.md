@@ -57,8 +57,7 @@ books hold format 2 sprites (`crates/render/FORMAT.md`); a new format needs new 
 
 ```
 anchor build --tools-version v1.54 -p deadroll_render_program
-node tests/fixtures/make-config.mjs        # GameConfig fixture + test wallet (until registry init_config)
 bash crates/render/wasm/build.sh
 cargo test -p deadroll-render --test golden
-anchor test --skip-build --validator legacy --provider.wallet .anchor/test-wallet.json   # tests/render.test.ts
+pnpm --filter @deadroll/tests run test:render   # tests/render.test.ts, local validator after pnpm deploy:local
 ```

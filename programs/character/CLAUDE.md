@@ -34,6 +34,6 @@ pnpm --filter @deadroll/tests run test:gear
 
 ## Done means
 - builds, all tests green, clippy clean
-- every instruction has happy path + rejection tests in `tests/character.test.ts` / `tests/gear.test.ts`
-  (in-session, selection, death and spending level-up points in `tests/session.test.ts`)
+- every instruction has happy path + rejection tests in `tests/character.test.ts` / the root `tests/gear.test.ts`
+  (in-session, selection, death and spending level-up points in `programs/session/tests/session.test.ts`)
 - events emitted for every state change

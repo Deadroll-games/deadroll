@@ -14,8 +14,8 @@ import { createHash, randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 // Node loads the CJS build; its getter exports are invisible to ESM named imports.
 import anchor from "@anchor-lang/core";
-import type { DeadrollSession } from "../target/types/deadroll_session.ts";
-import { newSkill, partyAccounts } from "./skill_ext.ts";
+import type { DeadrollSession } from "../../../target/types/deadroll_session.ts";
+import { newSkill, partyAccounts } from "../../../tests/skill_ext.ts";
 import {
   Connection,
   Keypair,
@@ -39,7 +39,7 @@ function nextSeed(): Buffer {
 type BN = InstanceType<typeof BN>;
 
 const idl = JSON.parse(
-  readFileSync(new URL("../target/idl/deadroll_session.json", import.meta.url), "utf8"),
+  readFileSync(new URL("../../../target/idl/deadroll_session.json", import.meta.url), "utf8"),
 ) as DeadrollSession;
 
 // "confirmed" throughout: with the default "processed" the next simulation can miss a fresh
@@ -528,8 +528,8 @@ describe("deadroll_session: deployed program", () => {
 // ---------------------------------------------------------------------------------------------
 // Part 2: party flow on the demo map, needs registry GameConfig + character + map
 
-const CHARACTER_IDL = new URL("../target/idl/deadroll_character.json", import.meta.url);
-const MAP_IDL = new URL("../target/idl/deadroll_map.json", import.meta.url);
+const CHARACTER_IDL = new URL("../../../target/idl/deadroll_character.json", import.meta.url);
+const MAP_IDL = new URL("../../../target/idl/deadroll_map.json", import.meta.url);
 const missing: string[] = [];
 if ((await connection.getAccountInfo(config))?.owner.equals(REGISTRY) !== true)
   missing.push("registry GameConfig (L4)");
@@ -582,7 +582,7 @@ function equip(owner: Keypair, character: PublicKey, item: number, slot: number)
 const FULL_SELECTION = [0, 1, 2, 3, 4, 5];
 const NO_SKILL = 0xff;
 
-// The map lane's demo preset (tests/map.test.ts): 16x16 room in a wall ring.
+// The map lane's demo preset (programs/map/tests/map.test.ts): 16x16 room in a wall ring.
 const TILE = { Floor: 0, Wall: 1, Entrance: 4, Exit: 5 };
 const ENTRANCE = { x: 1, y: 1 };
 const EXIT = { x: 14, y: 14 };
@@ -646,7 +646,7 @@ async function createFinalizedMap(dm: Keypair, bossLevel = 1, roster: SpawnDef[]
   return { map, layout };
 }
 
-// Same blocks as `deadroll_skillcheck::presets` (tests/character.test.ts).
+// Same blocks as `deadroll_skillcheck::presets` (programs/character/tests/character.test.ts).
 const e = (name: string) => ({ [name]: {} });
 const text = (s: string, len: number) => {
   const out = new Array(len).fill(0);

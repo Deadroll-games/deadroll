@@ -20,13 +20,13 @@ import {
   Transaction,
   TransactionInstruction,
 } from "@solana/web3.js";
-import { newSkill } from "./skill_ext.ts";
+import { newSkill } from "../../../tests/skill_ext.ts";
 import { MPL_CORE_PROGRAM, PROGRAMS } from "@deadroll/sdk";
 
 const MPL_CORE = new PublicKey(MPL_CORE_PROGRAM);
 const REGISTRY = new PublicKey(PROGRAMS.registry);
 const idl = JSON.parse(
-  readFileSync(new URL("../target/idl/deadroll_character.json", import.meta.url), "utf8"),
+  readFileSync(new URL("../../../target/idl/deadroll_character.json", import.meta.url), "utf8"),
 ) as Idl;
 
 const provider = AnchorProvider.env();

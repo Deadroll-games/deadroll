@@ -65,7 +65,7 @@ const WARRIOR = 0;
 const MAGE = 1;
 
 // ---------------------------------------------------------------------------------------------
-// helpers (same conventions as tests/session.test.ts)
+// helpers (same conventions as programs/session/tests/session.test.ts)
 
 const pda = (seeds: (Buffer | Uint8Array)[], programId: PublicKey) => PublicKey.findProgramAddressSync(seeds, programId)[0];
 const sha256 = (data: Buffer | string) => createHash("sha256").update(data).digest();
