@@ -147,4 +147,6 @@ pub enum SessionError {
     InvalidToken,
     #[msg("The party is over: its session key can no longer be set")]
     PartyEnded,
+    #[msg("Joining binds no session key: the key and its prepayment come with Ready")]
+    SessionKeyAtReady,
 }

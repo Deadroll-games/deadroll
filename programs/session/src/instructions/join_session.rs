@@ -57,14 +57,15 @@ pub struct JoinSession<'info> {
 }
 
 /// `contribution` is the player's share of the party price; only what is still missing is taken.
-/// `actor` is the temporary key that will act for this character in this party, written to
-/// `Participation.session_key` (`Pubkey::default()` = none). The site creates its MagicBlock
-/// `SessionTokenV2` and the fee prepayment in the same transaction (docs/GAME_COMMISSIONS.md, 3).
+/// `actor` stays in the signature (agents/CONTRACTS.md 8) but must be `Pubkey::default()`: the
+/// session key and its fee prepayment come with Ready, where the main wallet binds the key with
+/// `set_session_key` in the `set_ready(true)` transaction (docs/PARTY_AND_TURNS.md, 2.1).
 ///
 /// Joining takes a place and pays; the character is not locked yet. `set_ready(true)` takes the
 /// skills onto the map, locks the character (its bag and gear freeze) and copies its stats
 /// (docs/PARTY_AND_TURNS.md, 2.1).
 pub fn handler(ctx: Context<JoinSession>, contribution: u64, actor: Pubkey) -> Result<()> {
+    require_keys_eq!(actor, Pubkey::default(), SessionError::SessionKeyAtReady);
     let accounts = ctx.accounts;
     let game_session = accounts.session.key();
     let character_key = accounts.character.key();
@@ -120,7 +121,8 @@ pub fn handler(ctx: Context<JoinSession>, contribution: u64, actor: Pubkey) -> R
         version: ACCOUNT_VERSION,
         game_session,
         character: character_key,
-        session_key: actor,
+        // Bound at Ready (`set_session_key`); until then only the main wallet acts.
+        session_key: Pubkey::default(),
         slot,
         x: session.entrance.x,
         y: session.entrance.y,

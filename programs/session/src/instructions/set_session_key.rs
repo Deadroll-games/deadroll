@@ -31,9 +31,10 @@ pub struct SetSessionKey<'info> {
     pub participation: Option<Box<Account<'info, Participation>>>,
 }
 
-/// Binds another temporary key to this party (docs/GAME_COMMISSIONS.md, 8): the old key is
-/// lost (closed tab, another browser) or its token expired. The site creates the new key's
-/// `SessionTokenV2` and prepayment in the same transaction. From now on the old key fails
+/// Binds a temporary key to this party: the player's first key at Ready, in the `set_ready(true)`
+/// transaction (docs/PARTY_AND_TURNS.md 2.1), or another one (docs/GAME_COMMISSIONS.md, 8) when
+/// the old key is lost (closed tab, another browser) or its token expired. The site creates the
+/// key's `SessionTokenV2` and prepayment in the same transaction. From now on the old key fails
 /// `auth::check_bound` even with a live token. `Pubkey::default()` unbinds (the main wallet
 /// still acts). Lobby and Active only: after the party only the claims are left, and the main
 /// wallet may sign them.

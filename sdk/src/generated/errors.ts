@@ -188,6 +188,7 @@ export const PROGRAM_ERRORS = {
     6066: ["InvalidDeathAccounts", "The remaining accounts are not the character, skill set and bag of each pending death, in slot order"],
     6067: ["InvalidToken", "Session token is not valid for this signer and wallet, or it has expired"],
     6068: ["PartyEnded", "The party is over: its session key can no longer be set"],
+    6069: ["SessionKeyAtReady", "Joining binds no session key: the key and its prepayment come with Ready"],
   },
   city: {
     6000: ["Unauthorized", "Caller is not authorized for this instruction"],

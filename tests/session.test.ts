@@ -842,10 +842,11 @@ class Party {
   open() {
     return openSession(this.dm, this.fixture.map, this.fixture.layout, PRICE, this.dmActor.publicKey);
   }
-  join(who: number, signer: Keypair, contribution: BN) {
+  /** Joining binds no session key (`actor` must be the default key): that comes with Ready. */
+  joinCall(who: number, signer: Keypair, contribution: BN, actor = PublicKey.default) {
     const pl = this.players[who];
     return program.methods
-      .joinSession(contribution, pl.actor.publicKey)
+      .joinSession(contribution, actor)
       .accountsStrict({
         player: signer.publicKey,
         session: this.acc.session,
@@ -855,11 +856,20 @@ class Party {
         escrow: this.acc.escrow,
         systemProgram: SystemProgram.programId,
       })
-      .signers([signer])
-      .rpc();
+      .signers([signer]);
   }
-  /** Ready takes `selection` onto the map and locks the character; unready unlocks it. */
-  ready(who: number, signer: Keypair, value: boolean, selection = FULL_SELECTION, over: Record<string, PublicKey> = {}) {
+  join(who: number, signer: Keypair, contribution: BN) {
+    return this.joinCall(who, signer, contribution).rpc();
+  }
+  /** `set_session_key(key)` for player `who`, signed by `signer`. */
+  bindCall(who: number, signer: Keypair, key: PublicKey) {
+    return program.methods.setSessionKey(key).accountsStrict({
+      signer: signer.publicKey,
+      session: this.acc.session,
+      participation: this.players[who].participation,
+    });
+  }
+  readyCall(who: number, signer: Keypair, value: boolean, selection = FULL_SELECTION, over: Record<string, PublicKey> = {}) {
     const pl = this.players[who];
     return program.methods
       .setReady(value, selection)
@@ -875,8 +885,16 @@ class Party {
         skillExtras: pda([Buffer.from("skill_extras"), pl.character.toBuffer()], CHARACTER),
         ...over,
       })
-      .signers([signer])
-      .rpc({ commitment: "confirmed" });
+      .signers([signer]);
+  }
+  /** Ready takes `selection` onto the map and locks the character; unready unlocks it. Ready from
+   * the main wallet binds the player's `actor` in the same transaction, like the site (its token is
+   * issued by each test). */
+  async ready(who: number, signer: Keypair, value: boolean, selection = FULL_SELECTION, over: Record<string, PublicKey> = {}) {
+    const pl = this.players[who];
+    const call = this.readyCall(who, signer, value, selection, over);
+    const bind = value && signer === pl.wallet ? [await this.bindCall(who, signer, pl.actor.publicKey).instruction()] : [];
+    return call.preInstructions(bind).rpc({ commitment: "confirmed" });
   }
   start(signer: Keypair) {
     return program.methods
@@ -1566,32 +1584,64 @@ describe("deadroll_session: a session key for one party (patch 10)", { skip: SKI
     await party.open().rpc({ commitment: "confirmed" });
   });
 
-  it("join_session: the token, the prepayment and the join in one main wallet transaction", async () => {
+  it("join_session: the price share only; no session key and no prepayment until Ready", async () => {
+    const p0 = party.players[0];
+    const early = await funded(1);
+    await rejects(party.joinCall(0, p0.wallet, PRICE, early.publicKey).rpc(), "SessionKeyAtReady");
+    const before = await connection.getBalance(party.acc.escrow);
+    await party.join(0, p0.wallet, PRICE);
+    assert.equal((await connection.getBalance(party.acc.escrow)) - before, PRICE.toNumber());
+    const p = await party.part(0);
+    assert.ok(p.core.sessionKey.equals(PublicKey.default));
+    assert.ok(p.core.gameSession.equals(party.acc.session));
+    // A key with a live token from the player's wallet is not bound before Ready: it cannot act.
+    const earlyToken = await issueToken(early, p0.wallet);
+    await rejects(party.move(0, early, [S], earlyToken), "Unauthorized");
+    // Nor may it press Ready: set_ready is the main wallet's.
+    await rejects(party.readyCall(0, early, true).rpc(), "NotPlayer");
+    await rejects(party.readyCall(0, early, true).preInstructions([await party.bindCall(0, p0.wallet, early.publicKey).instruction()]).signers([p0.wallet]).rpc(), "NotPlayer");
+    assert.ok((await party.part(0)).core.sessionKey.equals(PublicKey.default));
+    await provider.sendAndConfirm(new Transaction().add(revokeIx(earlyToken, p0.wallet.publicKey, true)), [p0.wallet]);
+  });
+
+  it("Ready: the token, the prepayment, the key binding and set_ready in one main wallet transaction", async () => {
     const p0 = party.players[0];
     // A fresh key with no SOL: the prepayment is all it has.
     key = Keypair.generate();
     p0.actor = key;
     const created = tokenIx(key, p0.wallet, { topUp: FEES.prepay_lamports });
     token = created.token;
-    await program.methods
-      .joinSession(PRICE, key.publicKey)
-      .accountsStrict({
-        player: p0.wallet.publicKey,
-        session: party.acc.session,
-        character: p0.character,
-        participation: p0.participation,
-        stash: p0.stash,
-        escrow: party.acc.escrow,
-        systemProgram: SystemProgram.programId,
-      })
-      .preInstructions([created.ix])
+    const sig = await party
+      .readyCall(0, p0.wallet, true)
+      .preInstructions([created.ix, await party.bindCall(0, p0.wallet, key.publicKey).instruction()])
       .signers([p0.wallet, key])
       .rpc({ commitment: "confirmed" });
     const p = await party.part(0);
+    assert.ok(p.core.ready);
     assert.ok(p.core.sessionKey.equals(key.publicKey));
-    assert.ok(p.core.gameSession.equals(party.acc.session));
+    assert.ok((await party.character(0)).core.inSession.equals(party.acc.session));
     assert.equal(await connection.getBalance(key.publicKey), FEES.prepay_lamports);
     assert.ok((await connection.getAccountInfo(token))?.owner.equals(SESSION_KEYS));
+    assert.ok((await eventOf(sig, "sessionKeyChanged")).sessionKey.equals(key.publicKey));
+    console.log(`    CU, Ready transaction (token + prepayment + set_session_key + set_ready): ${await unitsOf(sig)}`);
+    // Bound and ready: the key is the party's now, but nothing moves before the start.
+    await rejects(party.move(0, key, [S], token), "NotActive");
+  });
+
+  it("unready keeps the key; Ready again takes no second prepayment and binds nothing new", async () => {
+    const p0 = party.players[0];
+    await party.readyCall(0, p0.wallet, false).rpc({ commitment: "confirmed" });
+    assert.ok((await party.part(0)).core.sessionKey.equals(key.publicKey));
+    assert.ok(await connection.getAccountInfo(token), "unready does not revoke the token");
+    const [keyBefore, walletBefore] = await Promise.all([connection.getBalance(key.publicKey), connection.getBalance(p0.wallet.publicKey)]);
+    // The key is still live and bound: the site sends set_ready alone.
+    const sig = await party.readyCall(0, p0.wallet, true).rpc({ commitment: "confirmed" });
+    assert.ok((await party.part(0)).core.ready);
+    assert.ok((await party.part(0)).core.sessionKey.equals(key.publicKey));
+    assert.equal(await connection.getBalance(key.publicKey), keyBefore);
+    // The provider pays the fee in these tests, so the player's wallet loses nothing at all.
+    assert.equal(await connection.getBalance(p0.wallet.publicKey), walletBefore, "no second prepayment");
+    console.log(`    CU, set_ready(true) alone: ${await unitsOf(sig)}`);
   });
 
   it("set_session_key: the player's or the DM's main wallet only, never a session key", async () => {
@@ -1622,7 +1672,6 @@ describe("deadroll_session: a session key for one party (patch 10)", { skip: SKI
 
   it("replacing the key: one transaction; the old key fails even with a live token, the new one plays", async () => {
     const p0 = party.players[0];
-    await party.ready(0, p0.wallet, true);
     await party.start(party.dm);
     await party.rollInitiative();
     await party.begin();

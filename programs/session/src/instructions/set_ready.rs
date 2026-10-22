@@ -74,6 +74,10 @@ pub struct SetReady<'info> {
 ///   character (its bag and gear freeze until the party ends), and the participation copies the
 ///   character's HP, AP, initiative and gear for the whole party;
 /// - `false`: clears the selection and unlocks the character (`selection` is ignored).
+///
+/// The site puts the player's session key into the same transaction (docs/PARTY_AND_TURNS.md
+/// 2.1): the key's `SessionTokenV2` with its fee prepayment and `set_session_key`, unless the key
+/// bound to this participation is still live. Unready leaves the key as it is.
 pub fn handler(ctx: Context<SetReady>, ready: bool, selection: [u8; MAP_SKILLS]) -> Result<()> {
     let accounts = ctx.accounts;
     let session_key = accounts.session.key();

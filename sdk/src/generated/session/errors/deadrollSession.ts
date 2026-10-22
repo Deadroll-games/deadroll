@@ -152,6 +152,8 @@ export const DEADROLL_SESSION_ERROR__INVALID_DEATH_ACCOUNTS = 0x17b2; // 6066
 export const DEADROLL_SESSION_ERROR__INVALID_TOKEN = 0x17b3; // 6067
 /** PartyEnded: The party is over: its session key can no longer be set */
 export const DEADROLL_SESSION_ERROR__PARTY_ENDED = 0x17b4; // 6068
+/** SessionKeyAtReady: Joining binds no session key: the key and its prepayment come with Ready */
+export const DEADROLL_SESSION_ERROR__SESSION_KEY_AT_READY = 0x17b5; // 6069
 
 export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__ALLY_ACCOUNT_MISSING
@@ -212,6 +214,7 @@ export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__REACTIVE_ACCOUNTS_MISSING
   | typeof DEADROLL_SESSION_ERROR__READY_UNCHANGED
   | typeof DEADROLL_SESSION_ERROR__ROLL_PENDING
+  | typeof DEADROLL_SESSION_ERROR__SESSION_KEY_AT_READY
   | typeof DEADROLL_SESSION_ERROR__SESSION_TOKEN_EXPIRED
   | typeof DEADROLL_SESSION_ERROR__SESSION_TOKEN_MISSING
   | typeof DEADROLL_SESSION_ERROR__SKILL_NOT_SELECTED
@@ -286,6 +289,7 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__REACTIVE_ACCOUNTS_MISSING]: `A reactive skill triggers here: the VRF accounts and the payer are required`,
     [DEADROLL_SESSION_ERROR__READY_UNCHANGED]: `Already in that ready state`,
     [DEADROLL_SESSION_ERROR__ROLL_PENDING]: `Waiting for a dice roll`,
+    [DEADROLL_SESSION_ERROR__SESSION_KEY_AT_READY]: `Joining binds no session key: the key and its prepayment come with Ready`,
     [DEADROLL_SESSION_ERROR__SESSION_TOKEN_EXPIRED]: `Session token has expired`,
     [DEADROLL_SESSION_ERROR__SESSION_TOKEN_MISSING]: `Session key used without a session token`,
     [DEADROLL_SESSION_ERROR__SKILL_NOT_SELECTED]: `This skill was not taken onto the map (set_ready selection)`,

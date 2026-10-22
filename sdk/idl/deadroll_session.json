@@ -3361,6 +3361,11 @@
       "code": 6068,
       "name": "PartyEnded",
       "msg": "The party is over: its session key can no longer be set"
+    },
+    {
+      "code": 6069,
+      "name": "SessionKeyAtReady",
+      "msg": "Joining binds no session key: the key and its prepayment come with Ready"
     }
   ],
   "types": [

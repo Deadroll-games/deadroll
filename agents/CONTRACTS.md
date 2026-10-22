@@ -640,9 +640,13 @@ the Rust and TS field names change:
 ParticipationData { version, game_session (was session), character, session_key (was actor), slot, ... }
 ```
 
-`join_session(contribution, actor)` keeps its signature (section 8); `actor` is written to
-`Participation.session_key`. The site sends it in one main wallet transaction after the key's
-`session_keys::create_session_v2` (token + prepayment); `open_session(price, dm_actor)` the same.
+`join_session(contribution, actor)` keeps its signature (section 8), but `actor` must be
+`Pubkey::default()` (`SessionKeyAtReady` otherwise): joining binds no key, `Participation.session_key`
+stays default until Ready (docs/PARTY_AND_TURNS.md 2.1). Ready is one main wallet transaction:
+`session_keys::create_session_v2` (token + prepayment), `set_session_key(key)`,
+`set_ready(true, selection)`; when the key bound to the participation is still live, only
+`set_ready(true)`. `set_ready(false)` leaves the key bound. `open_session(price, dm_actor)` takes the
+DM's key after its `create_session_v2` in the same transaction.
 
 Session program, instruction added:
 
@@ -654,7 +658,7 @@ set_session_key(session_key: Pubkey)   main wallet only; accounts signer, sessio
 ```
 
 Event `SessionKeyChanged { session, character: Option<Pubkey> (None = DM), session_key }`.
-Errors appended to `SessionError`: `InvalidToken`, `PartyEnded`. Appended to `CharacterError`:
+Errors appended to `SessionError`: `InvalidToken`, `PartyEnded`, `SessionKeyAtReady`. Appended to `CharacterError`:
 `InvalidToken`. The old `SessionTokenMissing`, `InvalidSessionToken`, `SessionTokenExpired` stay,
 unused.
 
