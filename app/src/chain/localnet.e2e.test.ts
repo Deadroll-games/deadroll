@@ -33,6 +33,7 @@ import {
   monsterMoveIx,
   moveIx,
   openSessionIx,
+  setSessionKeyIx,
   partyAccountsOf,
   pickSeed,
   playerAp,
@@ -124,19 +125,25 @@ async function openParty(specs: Spec[]) {
 
     // 3. party: open with price, pay half each, session keys, ready, start
     // One main wallet transaction each, as the site sends them: the key's MagicBlock token and
-    // prepayment with open_session (DM) or join_session (player).
+    // prepayment with open_session (DM) or, for a player, at Ready (docs/PARTY_AND_TURNS.md 2.1).
     const keyIx = (authority: typeof dm, key: typeof dmKey) =>
       createSessionInstruction({ authority, key, targetProgram: PROGRAMS.session, validUntil: BigInt(validUntilFromNow()), prepayLamports: FEES.prepay });
     const dmTok = await keyIx(dm, dmKey);
     await send(dm, [dmTok.instruction, await openSessionIx(dm, built.map, PRICE, dmKey.address)]);
     const dmActor: Actor = { signer: dmKey, token: dmTok.token };
+    // Joining pays the share of the price only.
+    for (const pl of players) await send(pl.wallet, [await joinSessionIx(pl.wallet, acc.session, pl.character, PRICE / 2n, DEFAULT_KEY)]);
+    // Ready: the key's token and prepayment, its binding, and the skills onto the map (the first of
+    // each kind); the character is locked.
     for (const pl of players) {
       const t = await keyIx(pl.wallet, pl.key);
-      await send(pl.wallet, [t.instruction, await joinSessionIx(pl.wallet, acc.session, pl.character, PRICE / 2n, pl.key.address)]);
+      await send(pl.wallet, [
+        t.instruction,
+        await setSessionKeyIx(pl.wallet, acc.session, pl.character, pl.key.address),
+        await setReadyIx(pl.wallet, acc.session, pl.character, true, await mapSelection(pl.character)),
+      ]);
       pl.actor.token = t.token;
     }
-    // Ready takes the skills onto the map (the first of each kind) and locks the character.
-    for (const pl of players) await send(pl.wallet, [await setReadyIx(pl.wallet, acc.session, pl.character, true, await mapSelection(pl.character))]);
     await send(dm, [await startSessionIx(dm, acc.session)]);
 
     const party = (await readParty(acc.session))!;

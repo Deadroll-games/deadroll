@@ -12,6 +12,7 @@ import type { StatsUnit } from "../components/stats/types";
 import { Grid } from "../components/grid/Grid";
 import type { GridAura, GridUnit } from "../components/grid/types";
 import { PartyLobby } from "../components/forms/PartyLobby";
+import { PrepayConfirm } from "../components/forms/PrepayConfirm";
 import type { LobbyPlayer } from "../components/forms/types";
 import { isCurrentAppearance, monsterRequest, tileRequest, TOMBSTONE } from "../chain/appearance";
 import { characterRequest } from "../chain/items";
@@ -93,8 +94,8 @@ import { MOCK_VRF, PROGRAMS, explorerUrl } from "../config";
 import { useSprites } from "../raster/useSprites";
 import { fetchSessionToken, revokeSessionInstruction } from "../session-key/magicblock";
 import { PartyKeyPanel } from "../session-key/PartyKeyPanel";
-import { FEES, topUpRoom } from "../session-key/sessionKey";
-import { commitKey, prepareKey, usePartyKey, type PartyKey } from "../session-key/usePartyKey";
+import { FEES, readyPrepay, topUpRoom } from "../session-key/sessionKey";
+import { commitKey, prepareKey, usePartyKey, type PartyKey, type PreparedKey } from "../session-key/usePartyKey";
 import { sessionTokenPda } from "../chain/pda";
 import { useAppWallet } from "../wallet/AppWallet";
 import { formatSol, shortAddress } from "../wallet/ConnectButton";
@@ -115,6 +116,8 @@ function PartyPicker({ map }: { map: Address | null }) {
   const { send, busy } = useTx();
   const [, setParams] = useSearchParams();
   const [price, setPrice] = useState("0.1");
+  // Opening moves the DM key's prepayment: the DM confirms the amount before anything is signed.
+  const [confirming, setConfirming] = useState(false);
   const [mapAcc, setMapAcc] = useState<MapAcc | null | "missing">(null);
   const [sessions, setSessions] = useState<{ address: Address; data: GameSessionAcc }[]>([]);
   const [myMaps, setMyMaps] = useState<{ address: Address; data: MapAcc }[]>([]);
@@ -172,10 +175,24 @@ function PartyPicker({ map }: { map: Address | null }) {
               Price (SOL){" "}
               <input value={price} onChange={(e) => setPrice(e.target.value)} size={6} inputMode="decimal" />
             </label>
-            <button className="btn primary" disabled={busy !== null || used !== "finalized"} onClick={() => void open()}>
-              {busy ?? "Open party"}
-            </button>
+            {!confirming && (
+              <button className="btn primary" disabled={busy !== null || used !== "finalized"} onClick={() => setConfirming(true)}>
+                {busy ?? "Open party"}
+              </button>
+            )}
           </div>
+          {confirming && (
+            <PrepayConfirm
+              action="Open party"
+              lamports={FEES.prepay}
+              busy={busy !== null || used !== "finalized"}
+              onConfirm={() => {
+                setConfirming(false);
+                void open();
+              }}
+              onCancel={() => setConfirming(false)}
+            />
+          )}
           <p className="muted">
             One signature: the party, plus a session key with {formatSol(FEES.prepay)} for its fees. The key moves the monsters and ends their turns.
           </p>
@@ -845,16 +862,28 @@ function PartyView({ address }: { address: Address }) {
     const join = async (character: string) => {
       const signer = wallet.signer;
       if (!signer) return void (await send("join_session", null, []));
-      // One wallet signature: the key's token, its prepayment and the join (docs/GAME_COMMISSIONS.md 3).
-      // A key this browser already runs for the party (the DM's, another character's) is reused.
-      const fresh = pk.live && pk.signer ? null : await prepareKey(signer);
-      const key = fresh?.signer.address ?? pk.signer!.address;
+      // Joining pays the share of the price only; the session key and its prepayment come with Ready.
       const res = await send(`join_session (pay ${formatSol(contribution)})`, signer, async () => [
-        ...(fresh ? [fresh.instruction] : []),
-        await joinSessionIx(signer, address, character as Address, contribution, key),
+        await joinSessionIx(signer, address, character as Address, contribution, DEFAULT_KEY),
       ]);
+      if (res) ingest(res.signature, res.events);
+      void wallet.refreshBalance();
+    };
+    // Ready (docs/PARTY_AND_TURNS.md 2.1) is one main wallet transaction: the session key for this
+    // participation (a new token with the prepayment and set_session_key, unless this browser's
+    // live key is already bound) and set_ready(true). Not ready leaves the key as it is.
+    const myBound = myJoined?.part.core.sessionKey ?? DEFAULT_KEY;
+    const ready = async (value: boolean, selection: number[]) => {
+      const signer = wallet.signer;
+      if (!myJoined || !signer) return void (await send("set_ready", null, []));
+      const key: { prepared: PreparedKey | null } = { prepared: null };
+      const res = await send(value ? "Ready" : "Not ready", signer, async () => {
+        const k = value ? await pk.readyIxs(signer, address, myJoined.character, myBound) : { ixs: [], prepared: null };
+        key.prepared = k.prepared;
+        return [...k.ixs, await setReadyIx(signer, address, myJoined.character, value, selection)];
+      });
       if (res) {
-        if (fresh) pk.replaced(fresh);
+        if (key.prepared) pk.replaced(key.prepared);
         ingest(res.signature, res.events);
       }
       void wallet.refreshBalance();
@@ -865,7 +894,6 @@ function PartyView({ address }: { address: Address }) {
           Party lobby <LiveBadge status={live} />
         </h1>
         {header}
-      <SessionKeyBox party={party} pk={pk} isDm={isDm} me={me} send={send} busy={busy} />
         <SessionKeyBox party={party} pk={pk} isDm={isDm} me={me} send={send} busy={busy} />
         <PartyLobby
           mapName={shortAddress(s.core.map)}
@@ -880,12 +908,8 @@ function PartyView({ address }: { address: Address }) {
           onJoin={(c) => void join(c)}
           joinLamports={contribution}
           mySkills={myJoined ? (skillNames[myJoined.character] ?? []).map((k) => ({ index: k.slot, name: k.name, category: k.category })) : undefined}
-          onReady={(ready, selection) =>
-            myJoined &&
-            void send(ready ? "set_ready" : "set_ready(false)", wallet.signer, async () => [await setReadyIx(wallet.signer!, address, myJoined.character, ready, selection)]).then(
-              (r) => r && ingest(r.signature, r.events),
-            )
-          }
+          onReady={(value, selection) => void ready(value, selection)}
+          readyPrepayLamports={readyPrepay(pk.readyPlan(myBound))}
           onStart={() =>
             void act("start_session", wallet.signer, async () => [await startSessionIx(wallet.signer!, address)], true)
           }
@@ -895,7 +919,8 @@ function PartyView({ address }: { address: Address }) {
         />
         {!isDm && !myJoined && (
           <p className="muted">
-            Join is one signature: {formatSol(contribution)} into the escrow, and a session key for this party with {formatSol(FEES.prepay)} for its fees.
+            Join is one signature: {formatSol(contribution)} into the escrow. The session key for this party and its {formatSol(FEES.prepay)} fee prepayment
+            come with Ready, after you confirm the amount.
           </p>
         )}
         {isDm && <p className="muted">Share this page's link with the players. Start needs everyone ready and the escrow at the price.</p>}
@@ -1032,6 +1057,7 @@ function PartyView({ address }: { address: Address }) {
         {ended ? `Party ended: ${st}` : "Battle"} <LiveBadge status={live} />
       </h1>
       {header}
+      <SessionKeyBox party={party} pk={pk} isDm={isDm} me={me} send={send} busy={busy} />
       <div style={{ display: "flex", gap: 20, alignItems: "flex-start", flexWrap: "wrap" }}>
         <div>
           <Grid
@@ -1324,8 +1350,10 @@ function SessionKeyBox({ party, pk, isDm, me, send, busy }: { party: Party; pk: 
   const st = status(s);
   const ended = st !== "lobby" && st !== "active";
   const mine = party.players.filter((p) => p.part.player === me);
-  // The keys the party has for my units: my participations' and, for the DM, the monsters'.
-  const boundKeys = [...mine.map((p) => p.part.core.sessionKey), ...(isDm ? [s.dmActor] : [])];
+  // The keys the party has for my units: my participations' and, for the DM, the monsters'. A
+  // participation has none until Ready binds it.
+  const boundMine = mine.filter((p) => p.part.core.sessionKey !== DEFAULT_KEY);
+  const boundKeys = [...boundMine.map((p) => p.part.core.sessionKey), ...(isDm && s.dmActor !== DEFAULT_KEY ? [s.dmActor] : [])];
   if (!signer || (boundKeys.length === 0 && !pk.signer)) return null;
   const bound = !!pk.signer && boundKeys.length > 0 && boundKeys.every((k) => k === pk.signer!.address);
   const playing = bound && pk.live;
@@ -1344,13 +1372,14 @@ function SessionKeyBox({ party, pk, isDm, me, send, busy }: { party: Party; pk: 
       // its SOL, but its token is revoked for the rent.
       const ixs = await pk.returnIxs(signer);
       for (const k of new Set(boundKeys)) {
-        if (k === DEFAULT_KEY || k === pk.signer?.address) continue;
+        if (k === pk.signer?.address) continue;
         const token = await sessionTokenPda(PROGRAMS.session, k, signer.address);
         if (await fetchSessionToken(token)) ixs.push(await revokeSessionInstruction(token, signer));
       }
       ixs.push(next.instruction);
       if (isDm) ixs.push(await setSessionKeyIx(signer, party.address, null, next.signer.address));
-      for (const p of mine) ixs.push(await setSessionKeyIx(signer, party.address, p.character, next.signer.address));
+      // Participations not Ready yet get their key at Ready.
+      for (const p of boundMine) ixs.push(await setSessionKeyIx(signer, party.address, p.character, next.signer.address));
       return ixs;
     });
     if (res) pk.replaced(next);

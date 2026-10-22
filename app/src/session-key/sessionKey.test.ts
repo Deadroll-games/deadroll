@@ -4,9 +4,35 @@ import { getAddressDecoder, type Address } from "@solana/kit";
 import balance from "../chain/balance.json";
 import { toHex } from "../chain/bytes";
 import { transferData } from "../chain/system";
-import { FEES, clearSessionKey, isLowBalance, loadSessionKey, newSeed, saveSessionKey, signerFromSeed, topUpRoom, validUntilFromNow } from "./sessionKey";
+import { FEES, clearSessionKey, isLowBalance, loadSessionKey, newSeed, readyKeyPlan, readyPrepay, saveSessionKey, signerFromSeed, topUpRoom, validUntilFromNow } from "./sessionKey";
 
 const addrOf = (n: number) => getAddressDecoder().decode(new Uint8Array(32).fill(n)) as Address;
+
+describe("the session key at Ready (docs/PARTY_AND_TURNS.md 2.1)", () => {
+  const DEFAULT = "11111111111111111111111111111111" as Address;
+  const mine = addrOf(7);
+
+  it("first Ready: no key in this browser, nothing bound: a new key and the prepayment", () => {
+    expect(readyKeyPlan(null, false, DEFAULT)).toBe("new");
+    expect(readyPrepay("new")).toBe(FEES.prepay);
+  });
+
+  it("Ready again after Not ready: the live bound key is reused, no second prepayment", () => {
+    expect(readyKeyPlan(mine, true, mine)).toBe("reuse");
+    expect(readyPrepay("reuse")).toBe(0n);
+  });
+
+  it("this browser's live key for the party (the DM's, another character's) is bound, not paid again", () => {
+    expect(readyKeyPlan(mine, true, DEFAULT)).toBe("bind");
+    expect(readyKeyPlan(mine, true, addrOf(9))).toBe("bind");
+    expect(readyPrepay("bind")).toBe(0n);
+  });
+
+  it("an expired key, or a key only another browser has: a new key with the prepayment", () => {
+    expect(readyKeyPlan(mine, false, mine)).toBe("new");
+    expect(readyKeyPlan(null, false, addrOf(9))).toBe("new");
+  });
+});
 
 describe("fees (BalanceConfig.fees)", () => {
   it("come from balance.json: 0.01 SOL prepayment, warning below 0.002, top-ups up to 0.05, 3 h tokens", () => {

@@ -106,6 +106,9 @@ export type PartyLobbyProps = {
   error?: string | null;
   /** Map preview slot (the app passes a small <Grid>). */
   mapPreview?: ReactNode;
+  /** What Ready moves from the wallet to a new session key (the fee prepayment). When set, Ready
+   * asks for an explicit confirmation of the amount first; unset or 0 when the party's key is reused. */
+  readyPrepayLamports?: bigint;
 };
 
 /** Unused by the components; exported for callers that place spawns from clicks. */

@@ -1,15 +1,29 @@
 // The session key of one party in this browser (docs/GAME_COMMISSIONS.md 3, 6.2, 8): its signer,
-// token and balance, and the instructions that start, top up, replace and leave it. The main
-// wallet signs those (one popup each); the key signs the game moves.
+// token and balance, and the instructions that start (at Ready, docs/PARTY_AND_TURNS.md 2.1),
+// top up, replace and leave it. The main wallet signs those (one popup each); the key signs the
+// game moves.
 import { useCallback, useEffect, useState } from "react";
 import type { Address, Instruction, KeyPairSigner, TransactionSigner } from "@solana/kit";
 import { DATA_SOURCE, PROGRAMS } from "../config";
 import { client } from "../wallet/client";
 import { TX_SENT_EVENT } from "../chain/txEvents";
+import { setSessionKeyIx } from "../chain/game";
 import { transferSolIx } from "../chain/system";
 import { useAppWallet } from "../wallet/AppWallet";
 import { createSessionInstruction, fetchSessionToken, revokeSessionInstruction } from "./magicblock";
-import { FEES, clearSessionKey, isLowBalance, loadSessionKey, newSeed, saveSessionKey, signerFromSeed, topUpRoom, validUntilFromNow } from "./sessionKey";
+import {
+  FEES,
+  clearSessionKey,
+  isLowBalance,
+  loadSessionKey,
+  newSeed,
+  readyKeyPlan,
+  saveSessionKey,
+  signerFromSeed,
+  topUpRoom,
+  validUntilFromNow,
+  type ReadyKeyPlan,
+} from "./sessionKey";
 
 /** A key made for a transaction that has not confirmed yet: `commitKey` after it did. */
 export type PreparedKey = { signer: KeyPairSigner; seed: Uint8Array; token: Address; validUntil: number; instruction: Instruction };
@@ -63,6 +77,12 @@ export type PartyKey = {
   topUpIx: (wallet: TransactionSigner, lamports: bigint) => Instruction | null;
   /** The instructions that hand this browser's key back: revoke + refund. */
   returnIxs: (wallet: TransactionSigner) => Promise<Instruction[]>;
+  /** What Ready does with the key of a participation bound to `bound` (see `readyKeyPlan`). */
+  readyPlan: (bound: Address) => ReadyKeyPlan;
+  /** The instructions Ready puts before `set_ready(true)`: for a new key this browser's old key
+   * gives back what it holds, the new token takes the prepayment, and `set_session_key` binds it;
+   * `prepared` is committed with `replaced` once the transaction confirmed. */
+  readyIxs: (wallet: TransactionSigner, session: Address, character: Address, bound: Address) => Promise<{ ixs: Instruction[]; prepared: PreparedKey | null }>;
   /** After a replace or leave confirmed: drop the old key, or use the new one. */
   replaced: (next: PreparedKey | null) => void;
   refresh: () => Promise<void>;
@@ -134,6 +154,21 @@ export function usePartyKey(party: Address | null): PartyKey {
     [signer, token],
   );
 
+  const readyPlan = useCallback((bound: Address) => readyKeyPlan(signer?.address ?? null, live, bound), [signer, live]);
+
+  const readyIxs = useCallback(
+    async (from: TransactionSigner, session: Address, character: Address, bound: Address) => {
+      const plan = readyPlan(bound);
+      if (plan === "reuse") return { ixs: [], prepared: null };
+      if (plan === "bind") return { ixs: [await setSessionKeyIx(from, session, character, signer!.address)], prepared: null };
+      const prepared = await prepareKey(from);
+      const ixs = signer && token ? await returnKeyIxs(from, signer, token) : [];
+      ixs.push(prepared.instruction, await setSessionKeyIx(from, session, character, prepared.signer.address));
+      return { ixs, prepared };
+    },
+    [readyPlan, signer, token],
+  );
+
   const replaced = useCallback(
     (next: PreparedKey | null) => {
       if (!authority || !party) return;
@@ -154,6 +189,8 @@ export function usePartyKey(party: Address | null): PartyKey {
     signerFor,
     topUpIx,
     returnIxs,
+    readyPlan,
+    readyIxs,
     replaced,
     refresh: load,
   };

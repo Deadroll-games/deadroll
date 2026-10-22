@@ -191,6 +191,46 @@ describe("PartyLobby", () => {
     expect(onReady).toHaveBeenCalledWith(true, [0, 2, 3, 6, 4, 5]);
   });
 
+  it("Ready with a new session key asks to confirm the prepayment; nothing happens without Confirm", () => {
+    const onReady = vi.fn();
+    const mySkills = [
+      { index: 0, name: "Thrust", category: Category.Active },
+      { index: 1, name: "Bash", category: Category.Active },
+      { index: 2, name: "Cleave", category: Category.Active },
+      { index: 3, name: "Javelin", category: Category.Active },
+      { index: 4, name: "Riposte", category: Category.Reactive },
+      { index: 5, name: "Iron Skin", category: Category.Passive },
+    ];
+    render(<PartyLobby {...lobbyProps({ role: "player", mySlot: 0, players: [BRAN], mySkills, onReady, readyPrepayLamports: 10_000_000n })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Ready" }));
+    expect(onReady).not.toHaveBeenCalled();
+    expect(screen.getByRole("alertdialog").textContent).toContain("Ready takes 0.01 SOL from your wallet");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onReady).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Ready" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Ready" }));
+    expect(onReady).toHaveBeenCalledWith(true, [0, 1, 2, 3, 4, 5]);
+  });
+
+  it("Ready that reuses the party's key and Not ready ask nothing", () => {
+    const onReady = vi.fn();
+    render(<PartyLobby {...lobbyProps({ role: "player", mySlot: 0, players: [{ ...BRAN, ready: true }], mySkills: [], onReady, readyPrepayLamports: 10_000_000n })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Not ready" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(onReady).toHaveBeenCalledTimes(1);
+    cleanup();
+    const mySkills = [
+      ...[0, 1, 2, 3].map((index) => ({ index, name: `A${index}`, category: Category.Active })),
+      { index: 4, name: "R", category: Category.Reactive },
+      { index: 5, name: "P", category: Category.Passive },
+    ];
+    render(<PartyLobby {...lobbyProps({ role: "player", mySlot: 0, players: [BRAN], mySkills, onReady, readyPrepayLamports: 0n })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Ready" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(onReady).toHaveBeenLastCalledWith(true, [0, 1, 2, 3, 4, 5]);
+  });
+
   it("Not ready needs no selection", () => {
     const onReady = vi.fn();
     render(<PartyLobby {...lobbyProps({ role: "player", mySlot: 0, players: [{ ...BRAN, ready: true }], mySkills: [], onReady })} />);

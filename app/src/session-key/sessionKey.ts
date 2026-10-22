@@ -1,6 +1,7 @@
 // The temporary key of one party (docs/GAME_COMMISSIONS.md, 3-8). The main wallet signs once to
-// create its MagicBlock token and prepayment (magicblock.ts) together with join_session or
-// open_session; afterwards the key signs game moves and the session program checks the token and
+// create its MagicBlock token and prepayment (magicblock.ts): a player with set_session_key and
+// set_ready(true) at Ready (docs/PARTY_AND_TURNS.md 2.1), the DM with open_session. Joining binds
+// no key. Afterwards the key signs game moves and the session program checks the token and
 // that the key is the one bound to this party. The key lives in this browser's local storage, one
 // per (wallet, party), so a closed tab gets it back; another browser replaces it.
 import { createKeyPairSignerFromPrivateKeyBytes, type Address, type KeyPairSigner } from "@solana/kit";
@@ -71,3 +72,19 @@ export const validUntilFromNow = (nowMs = Date.now()): number => Math.floor(nowM
 export const topUpRoom = (balanceLamports: bigint): bigint => (balanceLamports >= FEES.maxBalance ? 0n : FEES.maxBalance - balanceLamports);
 
 export const isLowBalance = (balanceLamports: bigint): boolean => balanceLamports < FEES.lowBalance;
+
+/** What Ready does with the session key of the participation whose bound key is `bound`:
+ * - `reuse`: this browser's live key is already bound (Ready again after Not ready): nothing to
+ *   send, no second prepayment;
+ * - `bind`: this browser runs a live key for the party that is not bound here yet (the DM's,
+ *   another character's): set_session_key only, no prepayment;
+ * - `new`: no live key in this browser: a new token with the prepayment, then set_session_key. */
+export type ReadyKeyPlan = "reuse" | "bind" | "new";
+
+export function readyKeyPlan(local: Address | null, live: boolean, bound: Address): ReadyKeyPlan {
+  if (!local || !live) return "new";
+  return local === bound ? "reuse" : "bind";
+}
+
+/** What Ready takes from the wallet for the key (the token's rent deposit aside). */
+export const readyPrepay = (plan: ReadyKeyPlan): bigint => (plan === "new" ? FEES.prepay : 0n);

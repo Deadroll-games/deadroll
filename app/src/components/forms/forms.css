@@ -120,6 +120,18 @@
   flex: 1;
 }
 
+.forms-confirm {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+}
+
+.forms-confirm p {
+  margin: 0;
+}
+
 .forms-header {
   display: flex;
   flex-wrap: wrap;

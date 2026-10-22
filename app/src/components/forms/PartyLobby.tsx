@@ -3,6 +3,7 @@ import { defaultMapSelection, NO_SKILL, type Category } from "../../chain/skillc
 import { className, raceName } from "../../chain/names";
 import { formatSol, shortAddress } from "./format";
 import { MapSkillPicker, selectionError, selectionOf } from "./MapSkillPicker";
+import { PrepayConfirm } from "./PrepayConfirm";
 import type { PartyLobbyProps } from "./types";
 import "./forms.css";
 
@@ -30,6 +31,9 @@ export function PartyLobby(p: PartyLobbyProps) {
     });
   const selection = selectionOf(skills, checked);
   const pickError = p.mySkills ? selectionError(skills, selection) : null;
+  // Ready with a new session key moves its prepayment: the player confirms the amount first.
+  const prepay = p.readyPrepayLamports ?? 0n;
+  const [confirming, setConfirming] = useState(false);
   const selected = p.myCharacters.some((character) => character.address === picked)
     ? picked
     : (p.myCharacters[0]?.address ?? "");
@@ -109,15 +113,28 @@ export function PartyLobby(p: PartyLobbyProps) {
               <MapSkillPicker skills={p.mySkills} checked={checked} disabled={locked} onToggle={toggle} />
             ) : null}
             {!me?.ready && pickError ? <p className="error">{pickError}</p> : null}
-            <button
-              type="button"
-              className="btn primary"
-              disabled={locked || !me || (!me.ready && pickError !== null)}
-              aria-pressed={Boolean(me?.ready)}
-              onClick={() => p.onReady(!me?.ready, selection)}
-            >
-              {me?.ready ? "Not ready" : "Ready"}
-            </button>
+            {confirming && !me?.ready && prepay > 0n ? (
+              <PrepayConfirm
+                action="Ready"
+                lamports={prepay}
+                busy={locked || pickError !== null}
+                onConfirm={() => {
+                  setConfirming(false);
+                  p.onReady(true, selection);
+                }}
+                onCancel={() => setConfirming(false)}
+              />
+            ) : (
+              <button
+                type="button"
+                className="btn primary"
+                disabled={locked || !me || (!me.ready && pickError !== null)}
+                aria-pressed={Boolean(me?.ready)}
+                onClick={() => (!me?.ready && prepay > 0n ? setConfirming(true) : p.onReady(!me?.ready, selection))}
+              >
+                {me?.ready ? "Not ready" : "Ready"}
+              </button>
+            )}
           </>
         ) : null}
 
