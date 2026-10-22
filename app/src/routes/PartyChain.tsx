@@ -12,6 +12,7 @@ import type { StatsUnit } from "../components/stats/types";
 import { Grid } from "../components/grid/Grid";
 import type { GridAura, GridUnit } from "../components/grid/types";
 import { PartyLobby } from "../components/forms/PartyLobby";
+import { PrepayConfirm } from "../components/forms/PrepayConfirm";
 import type { LobbyPlayer } from "../components/forms/types";
 import { isCurrentAppearance, monsterRequest, tileRequest, TOMBSTONE } from "../chain/appearance";
 import { characterRequest } from "../chain/items";
@@ -46,6 +47,8 @@ import {
   readParty,
   sessionAccounts,
   setReadyIx,
+  setSessionKeyIx,
+  DEFAULT_KEY,
   startSessionIx,
   startTurnIx,
   status,
@@ -87,9 +90,13 @@ import { monsterBaseAp, monsterDefense, playerDefense, unitStats } from "../chai
 import { activeMods, combatSkill, effectText, modsAt, modsTickText, toEffectResolved, type CombatSkill, type EffectResolved } from "../chain/support";
 import { useTx } from "../chain/useTx";
 import { MAP_MAX, PARTY_MAX, type Cell, type Class, type HitResult, type Race, type Tile } from "../chain/types";
-import { MOCK_VRF, explorerUrl } from "../config";
+import { MOCK_VRF, PROGRAMS, explorerUrl } from "../config";
 import { useSprites } from "../raster/useSprites";
-import { useSessionKey } from "../session-key/SessionKeyProvider";
+import { fetchSessionToken, revokeSessionInstruction } from "../session-key/magicblock";
+import { PartyKeyPanel } from "../session-key/PartyKeyPanel";
+import { FEES, readyPrepay, topUpRoom } from "../session-key/sessionKey";
+import { commitKey, prepareKey, usePartyKey, type PartyKey, type PreparedKey } from "../session-key/usePartyKey";
+import { sessionTokenPda } from "../chain/pda";
 import { useAppWallet } from "../wallet/AppWallet";
 import { formatSol, shortAddress } from "../wallet/ConnectButton";
 
@@ -106,10 +113,11 @@ export function PartyChain() {
 
 function PartyPicker({ map }: { map: Address | null }) {
   const wallet = useAppWallet();
-  const sk = useSessionKey();
   const { send, busy } = useTx();
   const [, setParams] = useSearchParams();
   const [price, setPrice] = useState("0.1");
+  // Opening moves the DM key's prepayment: the DM confirms the amount before anything is signed.
+  const [confirming, setConfirming] = useState(false);
   const [mapAcc, setMapAcc] = useState<MapAcc | null | "missing">(null);
   const [sessions, setSessions] = useState<{ address: Address; data: GameSessionAcc }[]>([]);
   const [myMaps, setMyMaps] = useState<{ address: Address; data: MapAcc }[]>([]);
@@ -127,12 +135,16 @@ function PartyPicker({ map }: { map: Address | null }) {
 
   const open = async () => {
     if (!map || !wallet.signer) return void (await send("open_session", wallet.signer, []));
-    // The DM's session key moves monsters and ends their turns without popups.
-    const dmKey = sk.signer ?? (await sk.start());
-    if (!dmKey) return;
+    // The DM's key for this party moves monsters and ends their turns without popups: its token,
+    // its prepayment and the opening are one wallet signature (docs/GAME_COMMISSIONS.md 7).
+    const signer = wallet.signer;
+    const dmKey = await prepareKey(signer);
     const lamports = BigInt(Math.round(Number(price) * 1e9));
-    const res = await send("open_session", wallet.signer, async () => [await openSessionIx(wallet.signer!, map, lamports, dmKey.address)]);
-    if (res) setParams({ s: (await sessionAccounts(map)).session });
+    const res = await send("open_session", signer, async () => [dmKey.instruction, await openSessionIx(signer, map, lamports, dmKey.signer.address)]);
+    if (!res) return;
+    const { session } = await sessionAccounts(map);
+    commitKey(signer.address, session, dmKey);
+    setParams({ s: session });
   };
 
   const used = mapAcc && mapAcc !== "missing" ? mapStatus(mapAcc) : null;
@@ -163,11 +175,27 @@ function PartyPicker({ map }: { map: Address | null }) {
               Price (SOL){" "}
               <input value={price} onChange={(e) => setPrice(e.target.value)} size={6} inputMode="decimal" />
             </label>
-            <button className="btn primary" disabled={busy !== null || used !== "finalized"} onClick={() => void open()}>
-              {busy ?? "Open party"}
-            </button>
+            {!confirming && (
+              <button className="btn primary" disabled={busy !== null || used !== "finalized"} onClick={() => setConfirming(true)}>
+                {busy ?? "Open party"}
+              </button>
+            )}
           </div>
-          <p className="muted">Starts your session key if needed: it moves the monsters and ends their turns.</p>
+          {confirming && (
+            <PrepayConfirm
+              action="Open party"
+              lamports={FEES.prepay}
+              busy={busy !== null || used !== "finalized"}
+              onConfirm={() => {
+                setConfirming(false);
+                void open();
+              }}
+              onCancel={() => setConfirming(false)}
+            />
+          )}
+          <p className="muted">
+            One signature: the party, plus a session key with {formatSol(FEES.prepay)} for its fees. The key moves the monsters and ends their turns.
+          </p>
         </div>
       )}
       <div className="panel">
@@ -218,7 +246,7 @@ type Roll = { key: string; hit: Hit | null; effect: EffectView | null };
 
 function PartyView({ address }: { address: Address }) {
   const wallet = useAppWallet();
-  const sk = useSessionKey();
+  const pk = usePartyKey(address);
   const { send, busy } = useTx();
   const { party, error, events, ingest, refresh, live } = useParty(address);
   const combat = useCombat();
@@ -260,15 +288,19 @@ function PartyView({ address }: { address: Address }) {
   const myTurn = !!activePlayer && activePlayer.part.player === me;
   const monsterTurn = unit !== null && unit >= MONSTER_BASE;
 
-  const payer: TransactionSigner | null = sk.signer ?? wallet.signer;
+  // The party's key pays what anyone may send (start_turn, the localnet oracle, tombstones).
+  const payer: TransactionSigner | null = (pk.live ? pk.signer : null) ?? wallet.signer;
   const tombLog = useAutoFreezeTombstone(payer, me);
 
+  /** Who signs for the unit whose bound key is `actor`: this browser's key with its token, or the
+   * main wallet (a popup). */
   const actorFor = useCallback(
     (actor: Address): Actor | null => {
-      if (sk.signer && sk.token && sk.signer.address === actor) return { signer: sk.signer, token: sk.token };
+      const key = pk.signerFor(actor);
+      if (key && pk.token) return { signer: key, token: pk.token };
       return wallet.signer ? { signer: wallet.signer, token: null } : null;
     },
-    [sk.signer, sk.token, wallet.signer],
+    [pk, wallet.signer],
   );
 
   const label = useCallback(
@@ -402,13 +434,13 @@ function PartyView({ address }: { address: Address }) {
       const pl = p.players.find((x) => x.participation === pend);
       if (!pl) return;
       const seed = await pickSeed(kind);
-      const res = await send("VRF roll (localnet oracle)", sk.signer ?? wallet.signer, async () => [await consumeIx(address, pend, pl.character, seed, p.session.layout, partyAccountsOf(p.session, pend))], {
+      const res = await send("VRF roll (localnet oracle)", payer, async () => [await consumeIx(address, pend, pl.character, seed, p.session.layout, partyAccountsOf(p.session, pend))], {
         quiet: true,
         silent: quietFail,
       });
       if (res) ingest(res.signature, res.events);
     },
-    [address, party?.tiles, seedKind, send, sk.signer, wallet.signer, ingest],
+    [address, party?.tiles, seedKind, send, payer, ingest],
   );
 
   // DM window fallback: a roll still pending after 3.5 s (the acting window closed) gets answered.
@@ -447,8 +479,8 @@ function PartyView({ address }: { address: Address }) {
           // A failed start (no SOL, RPC down) is retried after 3 s, by the poll or the next action.
           if (startFailed.current?.seq === next.turnSeq && Date.now() - startFailed.current.at < 3_000) break;
           // Finalizing deaths (patch 6): any tab of the party pays, with its own session key.
-          const own = next.finalize ? (sk.signer ?? wallet.signer) : null;
-          const actor = next.finalize ? (own ? { signer: own, token: null } : null) : actorFor(next.player ? next.player.part.core.actor : p.session.dmActor);
+          const own = next.finalize ? payer : null;
+          const actor = next.finalize ? (own ? { signer: own, token: null } : null) : actorFor(next.player ? next.player.part.core.sessionKey : p.session.dmActor);
           if (!actor) break;
           const player = next.player ? { participation: next.player.participation, character: next.player.character } : null;
           const deaths = await deathAccountsOf(p.session);
@@ -611,26 +643,26 @@ function PartyView({ address }: { address: Address }) {
     if (!activePlayer || !s) return;
     const steps = pathTo(to);
     if (!steps?.length) return;
-    const actor = actorFor(activePlayer.part.core.actor);
+    const actor = actorFor(activePlayer.part.core.sessionKey);
     void act(`move ${label(activePlayer.slot)}`, actor?.signer ?? null, async () => [await moveIx(actor!, address, activePlayer.character, s.layout, steps)], false);
   };
   const attack = (monster: number) => {
     if (!activePlayer || !canAttack || chosenSide !== "enemy") return;
-    const actor = actorFor(activePlayer.part.core.actor);
+    const actor = actorFor(activePlayer.part.core.sessionKey);
     void act(`attack ${label(MONSTER_BASE + monster)}`, actor?.signer ?? null, async () => [await actIx(actor!, address, activePlayer.character, chosenSkill, monster, null, s!.layout)], true);
   };
   /** A heal or buff on an ally: the target is its player slot, its Participation unless a self-cast. */
   const support = (slot: number) => {
     const ally = party?.players.find((p) => p.slot === slot);
     if (!activePlayer || !canAttack || chosenSide !== "ally" || !ally || !chosen) return;
-    const actor = actorFor(activePlayer.part.core.actor);
+    const actor = actorFor(activePlayer.part.core.sessionKey);
     const allyAccount = slot === activePlayer.slot ? null : ally.participation;
     void act(`${chosen.name} on ${label(slot)}`, actor?.signer ?? null, async () => [await actIx(actor!, address, activePlayer.character, chosenSkill, slot, allyAccount, s!.layout)], true);
   };
   const endTurn = () => {
     if (!s) return;
     if (activePlayer) {
-      const actor = actorFor(activePlayer.part.core.actor);
+      const actor = actorFor(activePlayer.part.core.sessionKey);
       void act("end turn", actor?.signer ?? null, async () => [await endTurnIx(actor!, address, activePlayer.character)], false);
     } else {
       const actor = actorFor(s.dmActor);
@@ -828,13 +860,32 @@ function PartyView({ address }: { address: Address }) {
     const share = (s.core.priceLamports + 1n) / 2n;
     const contribution = remaining < share ? remaining : share;
     const join = async (character: string) => {
-      if (!wallet.signer) return void (await send("join_session", null, []));
-      const key = sk.signer ?? (await sk.start());
-      if (!key) return;
-      const res = await send(`join_session (pay ${formatSol(contribution)})`, wallet.signer, async () => [
-        await joinSessionIx(wallet.signer!, address, character as Address, contribution, key.address),
+      const signer = wallet.signer;
+      if (!signer) return void (await send("join_session", null, []));
+      // Joining pays the share of the price only; the session key and its prepayment come with Ready.
+      const res = await send(`join_session (pay ${formatSol(contribution)})`, signer, async () => [
+        await joinSessionIx(signer, address, character as Address, contribution, DEFAULT_KEY),
       ]);
       if (res) ingest(res.signature, res.events);
+      void wallet.refreshBalance();
+    };
+    // Ready (docs/PARTY_AND_TURNS.md 2.1) is one main wallet transaction: the session key for this
+    // participation (a new token with the prepayment and set_session_key, unless this browser's
+    // live key is already bound) and set_ready(true). Not ready leaves the key as it is.
+    const myBound = myJoined?.part.core.sessionKey ?? DEFAULT_KEY;
+    const ready = async (value: boolean, selection: number[]) => {
+      const signer = wallet.signer;
+      if (!myJoined || !signer) return void (await send("set_ready", null, []));
+      const key: { prepared: PreparedKey | null } = { prepared: null };
+      const res = await send(value ? "Ready" : "Not ready", signer, async () => {
+        const k = value ? await pk.readyIxs(signer, address, myJoined.character, myBound) : { ixs: [], prepared: null };
+        key.prepared = k.prepared;
+        return [...k.ixs, await setReadyIx(signer, address, myJoined.character, value, selection)];
+      });
+      if (res) {
+        if (key.prepared) pk.replaced(key.prepared);
+        ingest(res.signature, res.events);
+      }
       void wallet.refreshBalance();
     };
     return (
@@ -843,6 +894,7 @@ function PartyView({ address }: { address: Address }) {
           Party lobby <LiveBadge status={live} />
         </h1>
         {header}
+        <SessionKeyBox party={party} pk={pk} isDm={isDm} me={me} send={send} busy={busy} />
         <PartyLobby
           mapName={shortAddress(s.core.map)}
           dm={s.core.dm}
@@ -856,12 +908,8 @@ function PartyView({ address }: { address: Address }) {
           onJoin={(c) => void join(c)}
           joinLamports={contribution}
           mySkills={myJoined ? (skillNames[myJoined.character] ?? []).map((k) => ({ index: k.slot, name: k.name, category: k.category })) : undefined}
-          onReady={(ready, selection) =>
-            myJoined &&
-            void send(ready ? "set_ready" : "set_ready(false)", wallet.signer, async () => [await setReadyIx(wallet.signer!, address, myJoined.character, ready, selection)]).then(
-              (r) => r && ingest(r.signature, r.events),
-            )
-          }
+          onReady={(value, selection) => void ready(value, selection)}
+          readyPrepayLamports={readyPrepay(pk.readyPlan(myBound))}
           onStart={() =>
             void act("start_session", wallet.signer, async () => [await startSessionIx(wallet.signer!, address)], true)
           }
@@ -871,7 +919,8 @@ function PartyView({ address }: { address: Address }) {
         />
         {!isDm && !myJoined && (
           <p className="muted">
-            Join pays {formatSol(contribution)} into the escrow and binds your session key (started on demand) to the party.
+            Join is one signature: {formatSol(contribution)} into the escrow. The session key for this party and its {formatSol(FEES.prepay)} fee prepayment
+            come with Ready, after you confirm the amount.
           </p>
         )}
         {isDm && <p className="muted">Share this page's link with the players. Start needs everyone ready and the escrow at the price.</p>}
@@ -1008,6 +1057,7 @@ function PartyView({ address }: { address: Address }) {
         {ended ? `Party ended: ${st}` : "Battle"} <LiveBadge status={live} />
       </h1>
       {header}
+      <SessionKeyBox party={party} pk={pk} isDm={isDm} me={me} send={send} busy={busy} />
       <div style={{ display: "flex", gap: 20, alignItems: "flex-start", flexWrap: "wrap" }}>
         <div>
           <Grid
@@ -1092,7 +1142,6 @@ function PartyView({ address }: { address: Address }) {
                       ))}
                     </ul>
                   )}
-                  <p className="muted">Session key: {sk.signer && activePlayer && sk.signer.address === activePlayer.part.core.actor ? "signing moves, no popups" : "not bound to this party; the wallet signs"}</p>
                 </>
               )}
               {monsterTurn && isDm && (
@@ -1257,7 +1306,7 @@ export function Claims({
                   className="btn"
                   disabled={busy !== null}
                   onClick={() => {
-                    const actor = actorFor(p.part.core.actor);
+                    const actor = actorFor(p.part.core.sessionKey);
                     void send(`claim_rewards ${bytesText(p.char.name)}`, actor?.signer ?? null, async () => {
                       // Pending deaths of the party are finalized first (patch 6).
                       const deaths = await deathAccountsOf(s);
@@ -1286,6 +1335,77 @@ export function Claims({
       )}
       {party.escrow?.claimed && <p className="ok">The DM took {formatSol(party.escrow.collected)} from the escrow; the map is finished.</p>}
     </div>
+  );
+}
+
+/**
+ * This browser's session key for the party (docs/GAME_COMMISSIONS.md 6.2, 8): top up while
+ * playing, replace a lost or expired one, and leave (revoke + refund) when the party is over. Each
+ * is one main-wallet transaction.
+ */
+function SessionKeyBox({ party, pk, isDm, me, send, busy }: { party: Party; pk: PartyKey; isDm: boolean; me: Address | null; send: ReturnType<typeof useTx>["send"]; busy: string | null }) {
+  const wallet = useAppWallet();
+  const signer = wallet.signer;
+  const s = party.session;
+  const st = status(s);
+  const ended = st !== "lobby" && st !== "active";
+  const mine = party.players.filter((p) => p.part.player === me);
+  // The keys the party has for my units: my participations' and, for the DM, the monsters'. A
+  // participation has none until Ready binds it.
+  const boundMine = mine.filter((p) => p.part.core.sessionKey !== DEFAULT_KEY);
+  const boundKeys = [...boundMine.map((p) => p.part.core.sessionKey), ...(isDm && s.dmActor !== DEFAULT_KEY ? [s.dmActor] : [])];
+  if (!signer || (boundKeys.length === 0 && !pk.signer)) return null;
+  const bound = !!pk.signer && boundKeys.length > 0 && boundKeys.every((k) => k === pk.signer!.address);
+  const playing = bound && pk.live;
+  const room = pk.balance === null ? 0n : topUpRoom(pk.balance);
+  const topUpLamports = room < FEES.prepay ? room : FEES.prepay;
+
+  const topUp = () =>
+    void send(`top up the session key ${formatSol(topUpLamports)}`, signer, async () => {
+      const ix = pk.topUpIx(signer, topUpLamports);
+      return ix ? [ix] : [];
+    });
+  const replace = async () => {
+    const next = await prepareKey(signer);
+    const res = await send("new session key", signer, async () => {
+      // This browser's old key gives back what it holds; a key only another browser has keeps
+      // its SOL, but its token is revoked for the rent.
+      const ixs = await pk.returnIxs(signer);
+      for (const k of new Set(boundKeys)) {
+        if (k === pk.signer?.address) continue;
+        const token = await sessionTokenPda(PROGRAMS.session, k, signer.address);
+        if (await fetchSessionToken(token)) ixs.push(await revokeSessionInstruction(token, signer));
+      }
+      ixs.push(next.instruction);
+      if (isDm) ixs.push(await setSessionKeyIx(signer, party.address, null, next.signer.address));
+      // Participations not Ready yet get their key at Ready.
+      for (const p of boundMine) ixs.push(await setSessionKeyIx(signer, party.address, p.character, next.signer.address));
+      return ixs;
+    });
+    if (res) pk.replaced(next);
+  };
+  const leave = async () => {
+    const res = await send("leave: revoke the session key and return its SOL", signer, () => pk.returnIxs(signer));
+    if (res) pk.replaced(null);
+  };
+
+  return (
+    <PartyKeyPanel
+      keyAddress={pk.signer?.address ?? null}
+      bound={bound}
+      live={pk.live}
+      balance={pk.balance}
+      low={pk.low}
+      lowLamports={FEES.lowBalance}
+      secondsLeft={pk.validUntil === null ? null : pk.validUntil - Math.floor(Date.now() / 1000)}
+      ended={ended}
+      busy={busy !== null}
+      onTopUp={playing && !ended && topUpLamports > 0n ? topUp : undefined}
+      topUpLamports={topUpLamports}
+      replaceLamports={FEES.prepay}
+      onReplace={!ended && !playing && boundKeys.length > 0 ? () => void replace() : undefined}
+      onLeave={pk.signer && (ended || !bound) ? () => void leave() : undefined}
+    />
   );
 }
 

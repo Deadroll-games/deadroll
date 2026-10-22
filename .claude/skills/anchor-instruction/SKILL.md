@@ -47,14 +47,25 @@ Reading another program's account needs no CPI: deserialize with the owner check
 
 ## Actor check (Session Keys seam)
 
-Every game action in `session` calls one helper:
+Every game action in `session` uses the `session-keys` crate's macros (docs/GAME_COMMISSIONS.md 4), then binds the key to the party (section 5):
 
 ```rust
-auth::check_actor(&ctx.accounts.signer, &ctx.accounts.participation, ctx.accounts.session_token.as_ref())?;
+#[derive(Accounts, Session)]
+pub struct Move<'info> {
+    // ...
+    #[session(signer = signer, authority = participation.player)]
+    pub session_token: Option<Account<'info, SessionTokenV2>>,
+}
+
+#[session_auth_or(ctx.accounts.signer.key() == ctx.accounts.participation.player, SessionError::Unauthorized)]
+pub fn handler(ctx: Context<Move>, ...) -> Result<()> {
+    auth::check_bound(accounts.signer.key, &participation.player, &participation.core.session_key)?;
 ```
 
-- Target: MagicBlock Session Keys token (`session-keys` crate), the token's authority must be the character owner and the target program must be `session`.
-- Fallback: `signer == participation.actor || signer == character.owner`.
+- The macro checks the token PDA (this program, signer, main wallet) and its expiry; it names `SessionError::InvalidToken`, which is our own appended variant.
+- `#[session_auth_or]` rebuilds the function without generics: a handler with `<'info>` wraps a small `fn authorize(ctx: &Context<X>)` instead (`claim_rewards`).
+- DM actions: `authority = session.core.dm`, bound key `GameSession.dm_actor`. The key is replaced only by `set_session_key` (main wallet).
+- `character` (`equip`, `unequip`): the token's target is the session program, so `auth::game_session_token!` implements `SessionV2` instead of the derive.
 - A session key must never be able to move SOL or items out (`docs/GAME_COMMISSIONS.md`). Test it.
 
 ## Randomness (VRF seam)
@@ -77,9 +88,10 @@ auth::check_actor(&ctx.accounts.signer, &ctx.accounts.participation, ctx.account
 
 ```rust
 use anchor_lang::prelude::*;
+use session_keys::{session_auth_or, Session, SessionTokenV2};
 use crate::{auth, errors::SessionError, events::*, state::*};
 
-#[derive(Accounts)]
+#[derive(Accounts, Session)]
 pub struct Move<'info> {
     #[account(mut, seeds = [b"session", session.map.as_ref()], bump = session.bump)]
     pub session: Account<'info, GameSession>,
@@ -89,15 +101,19 @@ pub struct Move<'info> {
         bump = participation.bump,
     )]
     pub participation: Account<'info, Participation>,
-    /// CHECK: owner and layout checked in auth::check_actor
-    pub session_token: Option<UncheckedAccount<'info>>,
+    #[session(signer = signer, authority = participation.player)]
+    pub session_token: Option<Account<'info, SessionTokenV2>>,
     pub signer: Signer<'info>,
 }
 
+#[session_auth_or(
+    ctx.accounts.signer.key() == ctx.accounts.participation.player,
+    SessionError::Unauthorized
+)]
 pub fn handler(ctx: Context<Move>, path: [u8; 8], len: u8) -> Result<()> {
     let s = &mut ctx.accounts.session;
     let p = &mut ctx.accounts.participation;
-    auth::check_actor(&ctx.accounts.signer, p, ctx.accounts.session_token.as_ref())?;
+    auth::check_bound(ctx.accounts.signer.key, &p.player, &p.core.session_key)?;
     require!(s.is_turn_of(p.slot), SessionError::NotYourTurn);
     require!(!s.pending_vrf, SessionError::RollPending);
     // validate path against MapLayout (read, no CPI), spend action points

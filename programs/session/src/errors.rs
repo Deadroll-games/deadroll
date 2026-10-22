@@ -140,4 +140,13 @@ pub enum SessionError {
     DeathsPending,
     #[msg("The remaining accounts are not the character, skill set and bag of each pending death, in slot order")]
     InvalidDeathAccounts,
+    // Patch 10: session keys through the `session-keys` macros (docs/GAME_COMMISSIONS.md 4-5).
+    /// Named by `#[session_auth_or]`: the token is not this program's for this signer and
+    /// wallet, or it expired.
+    #[msg("Session token is not valid for this signer and wallet, or it has expired")]
+    InvalidToken,
+    #[msg("The party is over: its session key can no longer be set")]
+    PartyEnded,
+    #[msg("Joining binds no session key: the key and its prepayment come with Ready")]
+    SessionKeyAtReady,
 }

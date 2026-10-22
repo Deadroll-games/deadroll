@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
 use deadroll_skillcheck::Target;
 use deadroll_types::{seeds, Cell, SessionStatus};
+use session_keys::{session_auth_or, Session, SessionTokenV2};
 
 use crate::{
     auth,
@@ -16,7 +17,7 @@ use crate::{
     vrf::{self, CallbackAccounts, RequestAccounts},
 };
 
-#[derive(Accounts)]
+#[derive(Accounts, Session)]
 pub struct Act<'info> {
     /// Main wallet or the participation's session key; pays the VRF fee.
     #[account(mut)]
@@ -57,8 +58,9 @@ pub struct Act<'info> {
     pub bag: UncheckedAccount<'info>,
     /// Read-only, never Borsh-decoded: owner and discriminator checked here, session in `Monsters`.
     pub monsters: LazyAccount<'info, MonsterState>,
-    /// CHECK: MagicBlock `SessionTokenV2`, checked in `auth::check_actor`.
-    pub session_token: Option<UncheckedAccount<'info>>,
+    /// MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs.
+    #[session(signer = signer, authority = participation.player)]
+    pub session_token: Option<Account<'info, SessionTokenV2>>,
     /// CHECK: our `["identity"]` PDA, signs the VRF request.
     #[account(seeds = [vrf::PROGRAM_IDENTITY_SEED], bump)]
     pub program_identity: UncheckedAccount<'info>,
@@ -93,15 +95,18 @@ pub struct Act<'info> {
 /// `skill_slot`: a slot of the character's `SkillSet`, or `BASE_ATTACK` for the weapon.
 /// `target`: by the skill's side (`combat_input::target_side`): a monster index for the weapon,
 /// damage and debuff skills, a player slot (the caster's own included) for heal and buff skills.
+#[session_auth_or(
+    ctx.accounts.signer.key() == ctx.accounts.participation.player,
+    SessionError::Unauthorized
+)]
 pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
     let accounts = ctx.accounts;
     let session = &mut accounts.session;
     let participation = &mut accounts.participation;
-    auth::check_actor(
-        &accounts.signer,
+    auth::check_bound(
+        accounts.signer.key,
         &participation.player,
-        &participation.core.actor,
-        accounts.session_token.as_ref(),
+        &participation.core.session_key,
     )?;
     require!(
         session.core.status == SessionStatus::Active,

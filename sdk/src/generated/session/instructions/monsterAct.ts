@@ -198,6 +198,7 @@ export type MonsterActAsyncInput<
   character: TAccountCharacter;
   skillSet: TAccountSkillSet;
   bag: TAccountBag;
+  /** MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs. */
   sessionToken?: TAccountSessionToken;
   programIdentity?: TAccountProgramIdentity;
   oracleQueue?: TAccountOracleQueue;
@@ -519,6 +520,7 @@ export type MonsterActInput<
   character: TAccountCharacter;
   skillSet: TAccountSkillSet;
   bag: TAccountBag;
+  /** MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs. */
   sessionToken?: TAccountSessionToken;
   programIdentity: TAccountProgramIdentity;
   oracleQueue?: TAccountOracleQueue;
@@ -819,6 +821,7 @@ export type ParsedMonsterActInstruction<
     character: TAccountMetas[4];
     skillSet: TAccountMetas[5];
     bag: TAccountMetas[6];
+    /** MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs. */
     sessionToken?: TAccountMetas[7] | undefined;
     programIdentity: TAccountMetas[8];
     oracleQueue: TAccountMetas[9];

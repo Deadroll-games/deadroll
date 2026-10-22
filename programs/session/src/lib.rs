@@ -127,4 +127,10 @@ pub mod deadroll_session {
     pub fn claim_escrow<'info>(ctx: Context<'info, ClaimEscrow<'info>>) -> Result<()> {
         claim_escrow::handler(ctx)
     }
+
+    /// Patch 10: binds another temporary key to the party, main wallet only (the player's with
+    /// its participation, the DM's without one); the old key stops passing.
+    pub fn set_session_key(ctx: Context<SetSessionKey>, session_key: Pubkey) -> Result<()> {
+        set_session_key::handler(ctx, session_key)
+    }
 }

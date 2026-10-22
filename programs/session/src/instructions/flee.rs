@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 use deadroll_types::{seeds, SessionStatus};
+use session_keys::{session_auth_or, Session, SessionTokenV2};
 
 use crate::{
     auth,
@@ -10,7 +11,7 @@ use crate::{
     turns,
 };
 
-#[derive(Accounts)]
+#[derive(Accounts, Session)]
 pub struct Flee<'info> {
     /// Main wallet or the participation's session key.
     pub signer: Signer<'info>,
@@ -32,21 +33,25 @@ pub struct Flee<'info> {
         bump = participation.core.bump,
     )]
     pub participation: Box<Account<'info, Participation>>,
-    /// CHECK: MagicBlock `SessionTokenV2`, checked in `auth::check_actor`.
-    pub session_token: Option<UncheckedAccount<'info>>,
+    /// MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs.
+    #[session(signer = signer, authority = participation.player)]
+    pub session_token: Option<Account<'info, SessionTokenV2>>,
 }
 
 /// "Escape" (docs/PARTY_AND_TURNS.md, section 7.3): sets this player's intent and spends the
 /// whole turn. When every living player has the intent, the party flees: no XP, no rewards.
+#[session_auth_or(
+    ctx.accounts.signer.key() == ctx.accounts.participation.player,
+    SessionError::Unauthorized
+)]
 pub fn handler(ctx: Context<Flee>) -> Result<()> {
     let accounts = ctx.accounts;
     let session = &mut accounts.session;
     let participation = &accounts.participation;
-    auth::check_actor(
-        &accounts.signer,
+    auth::check_bound(
+        accounts.signer.key,
         &participation.player,
-        &participation.core.actor,
-        accounts.session_token.as_ref(),
+        &participation.core.session_key,
     )?;
     require!(
         session.core.status == SessionStatus::Active,

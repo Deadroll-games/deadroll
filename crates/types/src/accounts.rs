@@ -167,10 +167,13 @@ shared! {
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub struct ParticipationData {
         pub version: u8,
-        pub session: Pubkey,
+        /// The party (`GameSession` PDA). Patch 10: named as in docs/GAME_COMMISSIONS.md, 5
+        /// (was `session`; same bytes).
+        pub game_session: Pubkey,
         pub character: Pubkey,
-        /// Session key or burner allowed to act for this character.
-        pub actor: Pubkey,
+        /// The temporary key that acts for this character in this party, `Pubkey::default()` =
+        /// none. Patch 10: named as in docs/GAME_COMMISSIONS.md, 5 (was `actor`; same bytes).
+        pub session_key: Pubkey,
         pub slot: u8,
         pub x: u8,
         pub y: u8,

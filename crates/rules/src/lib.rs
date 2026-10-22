@@ -34,7 +34,8 @@ pub mod turn;
 pub mod units;
 
 pub use config::{
-    BalanceConfig, ItemBaseStats, ItemTuning, MonsterScaling, PlayerTuning, LEVELS, TIERS,
+    BalanceConfig, FeeTuning, ItemBaseStats, ItemTuning, MonsterScaling, PlayerTuning, LEVELS,
+    TIERS,
 };
 pub use input::{EffectAction, HeroStats, Side, SkillStats, SkillUse};
 pub use items::{EquipError, Equipment, ItemBonus};

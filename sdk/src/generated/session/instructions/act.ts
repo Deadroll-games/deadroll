@@ -195,6 +195,7 @@ export type ActAsyncInput<
   bag: TAccountBag;
   /** Read-only, never Borsh-decoded: owner and discriminator checked here, session in `Monsters`. */
   monsters: TAccountMonsters;
+  /** MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs. */
   sessionToken?: TAccountSessionToken;
   programIdentity?: TAccountProgramIdentity;
   oracleQueue?: TAccountOracleQueue;
@@ -535,6 +536,7 @@ export type ActInput<
   bag: TAccountBag;
   /** Read-only, never Borsh-decoded: owner and discriminator checked here, session in `Monsters`. */
   monsters: TAccountMonsters;
+  /** MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs. */
   sessionToken?: TAccountSessionToken;
   programIdentity: TAccountProgramIdentity;
   oracleQueue?: TAccountOracleQueue;
@@ -852,6 +854,7 @@ export type ParsedActInstruction<
     bag: TAccountMetas[5];
     /** Read-only, never Borsh-decoded: owner and discriminator checked here, session in `Monsters`. */
     monsters: TAccountMetas[6];
+    /** MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs. */
     sessionToken?: TAccountMetas[7] | undefined;
     programIdentity: TAccountMetas[8];
     oracleQueue: TAccountMetas[9];

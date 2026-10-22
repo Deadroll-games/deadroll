@@ -24,6 +24,7 @@ import {
   SystemProgram,
   Transaction,
   ComputeBudgetProgram,
+  sendAndConfirmTransaction,
   TransactionInstruction,
 } from "@solana/web3.js";
 import { MPL_CORE_PROGRAM, PROGRAMS, SESSION_KEYS_PROGRAM, VRF } from "@deadroll/sdk";
@@ -226,12 +227,13 @@ async function eventOf(sig: string, name: string): Promise<any> {
   return found.data;
 }
 
-/** MagicBlock Session Keys `create_session_v2`, signed by the session key and the main wallet. */
-async function issueToken(
+/** MagicBlock Session Keys `create_session_v2`, signed by the session key and the main wallet;
+ * `topUp`: lamports the main wallet moves to the key (the fee prepayment). */
+function tokenIx(
   signer: Keypair,
   authority: Keypair,
-  opts: { target?: PublicKey; validUntil?: number } = {},
-): Promise<PublicKey> {
+  opts: { target?: PublicKey; validUntil?: number; topUp?: number } = {},
+): { ix: TransactionInstruction; token: PublicKey } {
   const target = opts.target ?? SESSION;
   const token = pda(
     [
@@ -246,13 +248,28 @@ async function issueToken(
     opts.validUntil === undefined
       ? Buffer.from([0])
       : Buffer.concat([Buffer.from([1]), new BN(opts.validUntil).toArrayLike(Buffer, "le", 8)]);
+  const topUp = opts.topUp === undefined ? null : new BN(opts.topUp).toArrayLike(Buffer, "le", 8);
   const data = Buffer.concat([
     sighash("global:create_session_v2"),
-    Buffer.from([0]), // top_up: None
+    topUp ? Buffer.from([1, 1]) : Buffer.from([0]), // top_up
     validUntil,
-    Buffer.from([0]), // lamports: None
+    topUp ? Buffer.concat([Buffer.from([1]), topUp]) : Buffer.from([0]), // lamports
   ]);
-  const ix = new TransactionInstruction({
+  return { ix: tokenInstruction(token, signer, authority, target, data), token };
+}
+
+async function issueToken(
+  signer: Keypair,
+  authority: Keypair,
+  opts: { target?: PublicKey; validUntil?: number } = {},
+): Promise<PublicKey> {
+  const { ix, token } = tokenIx(signer, authority, opts);
+  await provider.sendAndConfirm(new Transaction().add(ix), [signer, authority]);
+  return token;
+}
+
+function tokenInstruction(token: PublicKey, signer: Keypair, authority: Keypair, target: PublicKey, data: Buffer) {
+  return new TransactionInstruction({
     programId: SESSION_KEYS,
     keys: [
       { pubkey: token, isSigner: false, isWritable: true },
@@ -264,22 +281,25 @@ async function issueToken(
     ],
     data,
   });
-  await provider.sendAndConfirm(new Transaction().add(ix), [signer, authority]);
-  return token;
 }
 
-async function revokeToken(token: PublicKey, authority: PublicKey): Promise<void> {
-  const ix = new TransactionInstruction({
+/** `revoke_session_v2`: anyone may revoke an expired token; a live one needs the main wallet's
+ * signature (`authoritySigns`). */
+function revokeIx(token: PublicKey, authority: PublicKey, authoritySigns = false): TransactionInstruction {
+  return new TransactionInstruction({
     programId: SESSION_KEYS,
     keys: [
       { pubkey: token, isSigner: false, isWritable: true },
       { pubkey: authority, isSigner: false, isWritable: true }, // fee payer gets the rent back
-      { pubkey: authority, isSigner: false, isWritable: false },
+      { pubkey: authority, isSigner: authoritySigns, isWritable: false },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
     ],
     data: sighash("global:revoke_session_v2"),
   });
-  await provider.sendAndConfirm(new Transaction().add(ix), []);
+}
+
+async function revokeToken(token: PublicKey, authority: PublicKey): Promise<void> {
+  await provider.sendAndConfirm(new Transaction().add(revokeIx(token, authority)), []);
 }
 
 function openSession(dm: Keypair, map: PublicKey, layout: PublicKey, price: BN, dmActor: PublicKey) {
@@ -822,10 +842,11 @@ class Party {
   open() {
     return openSession(this.dm, this.fixture.map, this.fixture.layout, PRICE, this.dmActor.publicKey);
   }
-  join(who: number, signer: Keypair, contribution: BN) {
+  /** Joining binds no session key (`actor` must be the default key): that comes with Ready. */
+  joinCall(who: number, signer: Keypair, contribution: BN, actor = PublicKey.default) {
     const pl = this.players[who];
     return program.methods
-      .joinSession(contribution, pl.actor.publicKey)
+      .joinSession(contribution, actor)
       .accountsStrict({
         player: signer.publicKey,
         session: this.acc.session,
@@ -835,11 +856,20 @@ class Party {
         escrow: this.acc.escrow,
         systemProgram: SystemProgram.programId,
       })
-      .signers([signer])
-      .rpc();
+      .signers([signer]);
   }
-  /** Ready takes `selection` onto the map and locks the character; unready unlocks it. */
-  ready(who: number, signer: Keypair, value: boolean, selection = FULL_SELECTION, over: Record<string, PublicKey> = {}) {
+  join(who: number, signer: Keypair, contribution: BN) {
+    return this.joinCall(who, signer, contribution).rpc();
+  }
+  /** `set_session_key(key)` for player `who`, signed by `signer`. */
+  bindCall(who: number, signer: Keypair, key: PublicKey) {
+    return program.methods.setSessionKey(key).accountsStrict({
+      signer: signer.publicKey,
+      session: this.acc.session,
+      participation: this.players[who].participation,
+    });
+  }
+  readyCall(who: number, signer: Keypair, value: boolean, selection = FULL_SELECTION, over: Record<string, PublicKey> = {}) {
     const pl = this.players[who];
     return program.methods
       .setReady(value, selection)
@@ -855,8 +885,16 @@ class Party {
         skillExtras: pda([Buffer.from("skill_extras"), pl.character.toBuffer()], CHARACTER),
         ...over,
       })
-      .signers([signer])
-      .rpc({ commitment: "confirmed" });
+      .signers([signer]);
+  }
+  /** Ready takes `selection` onto the map and locks the character; unready unlocks it. Ready from
+   * the main wallet binds the player's `actor` in the same transaction, like the site (its token is
+   * issued by each test). */
+  async ready(who: number, signer: Keypair, value: boolean, selection = FULL_SELECTION, over: Record<string, PublicKey> = {}) {
+    const pl = this.players[who];
+    const call = this.readyCall(who, signer, value, selection, over);
+    const bind = value && signer === pl.wallet ? [await this.bindCall(who, signer, pl.actor.publicKey).instruction()] : [];
+    return call.preInstructions(bind).rpc({ commitment: "confirmed" });
   }
   start(signer: Keypair) {
     return program.methods
@@ -1172,7 +1210,7 @@ class Party {
     }
     return assert.fail("no VRF value gave the wanted rolls");
   }
-  flee(who: number, signer: Keypair) {
+  flee(who: number, signer: Keypair, token: PublicKey | null = null) {
     return program.methods
       .flee()
       .accountsStrict({
@@ -1180,7 +1218,7 @@ class Party {
         session: this.acc.session,
         monsters: this.acc.monsters,
         participation: this.players[who].participation,
-        sessionToken: null,
+        sessionToken: token,
       })
       .signers([signer])
       .rpc();
@@ -1499,16 +1537,20 @@ describe("deadroll_session: lobby, auth and movement on the demo map", { skip: S
   it("auth: main wallet or bound session key with a live token from that wallet", async () => {
     const [p0, p1] = party.players;
     await rejects(party.move(0, stranger, [S]), "Unauthorized");
-    await rejects(party.move(0, p0.actor, [S]), "SessionTokenMissing");
+    await rejects(party.move(0, p0.actor, [S]), "Unauthorized");
     const foreign = await issueToken(p0.actor, p1.wallet);
-    await rejects(party.move(0, p0.actor, [S], foreign), "InvalidSessionToken");
+    await rejects(party.move(0, p0.actor, [S], foreign), "InvalidToken");
     const now = (await connection.getBlockTime(await connection.getSlot()))!;
     const expired = await issueToken(p0.actor, p0.wallet, { validUntil: now - 60 });
-    await rejects(party.move(0, p0.actor, [S], expired), "SessionTokenExpired");
+    await rejects(party.move(0, p0.actor, [S], expired), "InvalidToken");
     await revokeToken(expired, p0.wallet.publicKey);
     p0Token = await issueToken(p0.actor, p0.wallet);
     p1Token = await issueToken(p1.actor, p1.wallet);
-    await rejects(party.move(0, p1.actor, [S], p1Token), "Unauthorized");
+    // Another player's key with its own token: the token is not p0's.
+    await rejects(party.move(0, p1.actor, [S], p1Token), "InvalidToken");
+    // A live token from p0's wallet, but for a key not bound to this party (another party's).
+    const unbound = await funded(1);
+    await rejects(party.move(0, unbound, [S], await issueToken(unbound, p0.wallet)), "Unauthorized");
   });
 
   it("move_unit: walls, occupancy and action points", async () => {
@@ -1520,6 +1562,159 @@ describe("deadroll_session: lobby, auth and movement on the demo map", { skip: S
     await party.move(0, key, [S], p0Token);
     const p = await party.part(0);
     assert.deepEqual([p.core.x, p.core.y, p.core.actionPoints], [1, 2, p.maxAp - 1]);
+  });
+});
+
+describe("deadroll_session: a session key for one party (patch 10)", { skip: SKIP_PARTY }, () => {
+  // docs/GAME_COMMISSIONS.md 6.2: the prepayment comes from the balance table, like on the site.
+  const FEES = JSON.parse(readFileSync(new URL("../app/src/chain/balance.json", import.meta.url), "utf8")).fees;
+  let party: Party, stranger: Keypair;
+  let key: Keypair, token: PublicKey;
+
+  const setKey = (signer: Keypair, who: number | null, sessionKey: PublicKey) =>
+    program.methods.setSessionKey(sessionKey).accountsStrict({
+      signer: signer.publicKey,
+      session: party.acc.session,
+      participation: who === null ? null : party.players[who].participation,
+    });
+
+  before(async () => {
+    party = await Party.create(["warrior"]);
+    stranger = await funded(1);
+    await party.open().rpc({ commitment: "confirmed" });
+  });
+
+  it("join_session: the price share only; no session key and no prepayment until Ready", async () => {
+    const p0 = party.players[0];
+    const early = await funded(1);
+    await rejects(party.joinCall(0, p0.wallet, PRICE, early.publicKey).rpc(), "SessionKeyAtReady");
+    const before = await connection.getBalance(party.acc.escrow);
+    await party.join(0, p0.wallet, PRICE);
+    assert.equal((await connection.getBalance(party.acc.escrow)) - before, PRICE.toNumber());
+    const p = await party.part(0);
+    assert.ok(p.core.sessionKey.equals(PublicKey.default));
+    assert.ok(p.core.gameSession.equals(party.acc.session));
+    // A key with a live token from the player's wallet is not bound before Ready: it cannot act.
+    const earlyToken = await issueToken(early, p0.wallet);
+    await rejects(party.move(0, early, [S], earlyToken), "Unauthorized");
+    // Nor may it press Ready: set_ready is the main wallet's.
+    await rejects(party.readyCall(0, early, true).rpc(), "NotPlayer");
+    await rejects(party.readyCall(0, early, true).preInstructions([await party.bindCall(0, p0.wallet, early.publicKey).instruction()]).signers([p0.wallet]).rpc(), "NotPlayer");
+    assert.ok((await party.part(0)).core.sessionKey.equals(PublicKey.default));
+    await provider.sendAndConfirm(new Transaction().add(revokeIx(earlyToken, p0.wallet.publicKey, true)), [p0.wallet]);
+  });
+
+  it("Ready: the token, the prepayment, the key binding and set_ready in one main wallet transaction", async () => {
+    const p0 = party.players[0];
+    // A fresh key with no SOL: the prepayment is all it has.
+    key = Keypair.generate();
+    p0.actor = key;
+    const created = tokenIx(key, p0.wallet, { topUp: FEES.prepay_lamports });
+    token = created.token;
+    const sig = await party
+      .readyCall(0, p0.wallet, true)
+      .preInstructions([created.ix, await party.bindCall(0, p0.wallet, key.publicKey).instruction()])
+      .signers([p0.wallet, key])
+      .rpc({ commitment: "confirmed" });
+    const p = await party.part(0);
+    assert.ok(p.core.ready);
+    assert.ok(p.core.sessionKey.equals(key.publicKey));
+    assert.ok((await party.character(0)).core.inSession.equals(party.acc.session));
+    assert.equal(await connection.getBalance(key.publicKey), FEES.prepay_lamports);
+    assert.ok((await connection.getAccountInfo(token))?.owner.equals(SESSION_KEYS));
+    assert.ok((await eventOf(sig, "sessionKeyChanged")).sessionKey.equals(key.publicKey));
+    console.log(`    CU, Ready transaction (token + prepayment + set_session_key + set_ready): ${await unitsOf(sig)}`);
+    // Bound and ready: the key is the party's now, but nothing moves before the start.
+    await rejects(party.move(0, key, [S], token), "NotActive");
+  });
+
+  it("unready keeps the key; Ready again takes no second prepayment and binds nothing new", async () => {
+    const p0 = party.players[0];
+    await party.readyCall(0, p0.wallet, false).rpc({ commitment: "confirmed" });
+    assert.ok((await party.part(0)).core.sessionKey.equals(key.publicKey));
+    assert.ok(await connection.getAccountInfo(token), "unready does not revoke the token");
+    const [keyBefore, walletBefore] = await Promise.all([connection.getBalance(key.publicKey), connection.getBalance(p0.wallet.publicKey)]);
+    // The key is still live and bound: the site sends set_ready alone.
+    const sig = await party.readyCall(0, p0.wallet, true).rpc({ commitment: "confirmed" });
+    assert.ok((await party.part(0)).core.ready);
+    assert.ok((await party.part(0)).core.sessionKey.equals(key.publicKey));
+    assert.equal(await connection.getBalance(key.publicKey), keyBefore);
+    // The provider pays the fee in these tests, so the player's wallet loses nothing at all.
+    assert.equal(await connection.getBalance(p0.wallet.publicKey), walletBefore, "no second prepayment");
+    console.log(`    CU, set_ready(true) alone: ${await unitsOf(sig)}`);
+  });
+
+  it("set_session_key: the player's or the DM's main wallet only, never a session key", async () => {
+    const p0 = party.players[0];
+    const next = Keypair.generate().publicKey;
+    await rejects(setKey(stranger, 0, next).signers([stranger]).rpc(), "NotPlayer");
+    await rejects(setKey(key, 0, next).signers([key]).rpc(), "NotPlayer");
+    await rejects(setKey(party.dm, 0, next).signers([party.dm]).rpc(), "NotPlayer");
+    await rejects(setKey(p0.wallet, null, next).signers([p0.wallet]).rpc(), "NotDm");
+    await rejects(setKey(party.dmActor, null, next).signers([party.dmActor]).rpc(), "NotDm");
+    // The DM binds another key of their own (a new browser): monsters move with it from now on.
+    const dmKey = await funded(1);
+    const sig = await setKey(party.dm, null, dmKey.publicKey).signers([party.dm]).rpc({ commitment: "confirmed" });
+    const ev = await eventOf(sig, "sessionKeyChanged");
+    assert.equal(ev.character, null);
+    assert.ok(ev.sessionKey.equals(dmKey.publicKey));
+    assert.ok((await party.state()).dmActor.equals(dmKey.publicKey));
+    party.dmActor = dmKey;
+  });
+
+  it("a stolen key moves no value and cannot change the party", async () => {
+    const p0 = party.players[0];
+    await rejects(party.ready(0, key, true), "NotPlayer");
+    await rejects(spendStatPoints(key, p0.character, [1, 0, 0, 0]), "NotOwner");
+    await rejects(setKey(key, 0, key.publicKey).signers([key]).rpc(), "NotPlayer");
+    await rejects(party.start(key), "NotDm");
+  });
+
+  it("replacing the key: one transaction; the old key fails even with a live token, the new one plays", async () => {
+    const p0 = party.players[0];
+    await party.start(party.dm);
+    await party.rollInitiative();
+    await party.begin();
+    await party.skipTo(0);
+    const old = key;
+    key = Keypair.generate();
+    const created = tokenIx(key, p0.wallet, { topUp: FEES.prepay_lamports });
+    const sig = await setKey(p0.wallet, 0, key.publicKey)
+      .preInstructions([revokeIx(token, p0.wallet.publicKey, true), created.ix])
+      .signers([p0.wallet, key])
+      .rpc({ commitment: "confirmed" });
+    const ev = await eventOf(sig, "sessionKeyChanged");
+    assert.ok(ev.character.equals(p0.character) && ev.sessionKey.equals(key.publicKey));
+    assert.equal(await connection.getAccountInfo(token), null, "the old token is revoked");
+    token = created.token;
+    p0.actor = key;
+    await rejects(party.move(0, old, [S], await issueToken(old, p0.wallet)), "Unauthorized");
+    await party.move(0, key, [S], token);
+  });
+
+  it("after the party the key passes no game instruction; leaving revokes it and refunds the key", async () => {
+    const p0 = party.players[0];
+    await party.flee(0, key, token);
+    assert.ok((await party.state()).core.status.fled);
+    await rejects(party.move(0, key, [N], token), "NotActive");
+    await rejects(party.endTurn(key, 0, token), "NotActive");
+    await rejects(setKey(p0.wallet, 0, Keypair.generate().publicKey).signers([p0.wallet]).rpc(), "PartyEnded");
+    await rejects(party.claimEscrow(party.dmActor), "NotDm");
+    // The claim is still the owner's own: the key may send it (docs/PARTY_AND_TURNS.md 1, step 10).
+    await party.claimRewards(0, key, token);
+    // "Leave": the main wallet revokes the token (its rent comes back) and the key sends all it has
+    // left back; the main wallet pays the fee, so the key ends at zero.
+    const left = await connection.getBalance(key.publicKey);
+    const before = await connection.getBalance(p0.wallet.publicKey);
+    const tx = new Transaction().add(
+      revokeIx(token, p0.wallet.publicKey, true),
+      SystemProgram.transfer({ fromPubkey: key.publicKey, toPubkey: p0.wallet.publicKey, lamports: left }),
+    );
+    tx.feePayer = p0.wallet.publicKey;
+    await sendAndConfirmTransaction(connection, tx, [p0.wallet, key], { commitment: "confirmed" });
+    assert.equal(await connection.getBalance(key.publicKey), 0);
+    assert.equal(await connection.getAccountInfo(token), null);
+    assert.ok((await connection.getBalance(p0.wallet.publicKey)) > before + left - 20_000);
   });
 });
 
@@ -1699,8 +1894,8 @@ describe("deadroll_session: combat, death, victory and payouts", { skip: SKIP_PA
     await rejects(party.claimRewards(0, party.dm), "NotRewardOwner");
     p1ClaimToken = await issueToken(p1.actor, p1.wallet);
     await rejects(party.claimRewards(0, p1.actor, p1ClaimToken), "NotRewardOwner");
-    await rejects(party.claimRewards(0, p0.actor), "SessionTokenMissing");
-    await rejects(party.claimRewards(0, p0.actor, await issueToken(p0.actor, p1.wallet)), "InvalidSessionToken");
+    await rejects(party.claimRewards(0, p0.actor), "Unauthorized");
+    await rejects(party.claimRewards(0, p0.actor, await issueToken(p0.actor, p1.wallet)), "InvalidToken");
     assert.equal((await party.state()).settledMask, 0, "nothing settled by a rejected claim");
   });
 

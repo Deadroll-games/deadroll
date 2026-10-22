@@ -13,6 +13,7 @@ pub mod monster_move;
 pub mod move_unit;
 pub mod open_session;
 pub mod set_ready;
+pub mod set_session_key;
 pub mod start_session;
 pub mod start_turn;
 
@@ -28,5 +29,6 @@ pub use monster_move::*;
 pub use move_unit::*;
 pub use open_session::*;
 pub use set_ready::*;
+pub use set_session_key::*;
 pub use start_session::*;
 pub use start_turn::*;

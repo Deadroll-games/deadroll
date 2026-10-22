@@ -35,10 +35,17 @@ import {
 /** session `["participation", session, character]`. */
 export type ParticipationData = {
   version: number;
-  session: Address;
+  /**
+   * The party (`GameSession` PDA). Patch 10: named as in docs/GAME_COMMISSIONS.md, 5
+   * (was `session`; same bytes).
+   */
+  gameSession: Address;
   character: Address;
-  /** Session key or burner allowed to act for this character. */
-  actor: Address;
+  /**
+   * The temporary key that acts for this character in this party, `Pubkey::default()` =
+   * none. Patch 10: named as in docs/GAME_COMMISSIONS.md, 5 (was `actor`; same bytes).
+   */
+  sessionKey: Address;
   slot: number;
   x: number;
   y: number;
@@ -51,10 +58,17 @@ export type ParticipationData = {
 
 export type ParticipationDataArgs = {
   version: number;
-  session: Address;
+  /**
+   * The party (`GameSession` PDA). Patch 10: named as in docs/GAME_COMMISSIONS.md, 5
+   * (was `session`; same bytes).
+   */
+  gameSession: Address;
   character: Address;
-  /** Session key or burner allowed to act for this character. */
-  actor: Address;
+  /**
+   * The temporary key that acts for this character in this party, `Pubkey::default()` =
+   * none. Patch 10: named as in docs/GAME_COMMISSIONS.md, 5 (was `actor`; same bytes).
+   */
+  sessionKey: Address;
   slot: number;
   x: number;
   y: number;
@@ -68,9 +82,9 @@ export type ParticipationDataArgs = {
 export function getParticipationDataEncoder(): FixedSizeEncoder<ParticipationDataArgs> {
   return getStructEncoder([
     ["version", getU8Encoder()],
-    ["session", getAddressEncoder()],
+    ["gameSession", getAddressEncoder()],
     ["character", getAddressEncoder()],
-    ["actor", getAddressEncoder()],
+    ["sessionKey", getAddressEncoder()],
     ["slot", getU8Encoder()],
     ["x", getU8Encoder()],
     ["y", getU8Encoder()],
@@ -85,9 +99,9 @@ export function getParticipationDataEncoder(): FixedSizeEncoder<ParticipationDat
 export function getParticipationDataDecoder(): FixedSizeDecoder<ParticipationData> {
   return getStructDecoder([
     ["version", getU8Decoder()],
-    ["session", getAddressDecoder()],
+    ["gameSession", getAddressDecoder()],
     ["character", getAddressDecoder()],
-    ["actor", getAddressDecoder()],
+    ["sessionKey", getAddressDecoder()],
     ["slot", getU8Decoder()],
     ["x", getU8Decoder()],
     ["y", getU8Decoder()],

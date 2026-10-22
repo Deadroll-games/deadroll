@@ -122,6 +122,7 @@ export type FleeInput<
   session: TAccountSession;
   monsters: TAccountMonsters;
   participation: TAccountParticipation;
+  /** MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs. */
   sessionToken?: TAccountSessionToken;
 };
 
@@ -246,6 +247,7 @@ export type ParsedFleeInstruction<
     session: TAccountMetas[1];
     monsters: TAccountMetas[2];
     participation: TAccountMetas[3];
+    /** MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs. */
     sessionToken?: TAccountMetas[4] | undefined;
   };
   data: FleeInstructionData;

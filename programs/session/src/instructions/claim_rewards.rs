@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 use deadroll_types::{seeds, SessionStatus};
+use session_keys::{session_auth_or, Session, SessionTokenV2};
 
 use crate::{
     auth,
@@ -12,7 +13,7 @@ use crate::{
     vrf::SyscallRoll,
 };
 
-#[derive(Accounts)]
+#[derive(Accounts, Session)]
 pub struct ClaimRewards<'info> {
     /// The character's owner (the participation's `player`) or its session key.
     pub signer: Signer<'info>,
@@ -48,8 +49,20 @@ pub struct ClaimRewards<'info> {
     /// CHECK: the character program.
     #[account(address = deadroll_character::ID)]
     pub character_program: UncheckedAccount<'info>,
-    /// CHECK: MagicBlock `SessionTokenV2`, checked in `auth::check_actor`.
-    pub session_token: Option<UncheckedAccount<'info>>,
+    /// MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs.
+    #[session(signer = signer, authority = participation.player)]
+    pub session_token: Option<Account<'info, SessionTokenV2>>,
+}
+
+/// The owner's main wallet, or its session key with a live token. A function of its own:
+/// `#[session_auth_or]` rebuilds the function it wraps without generics, and `handler` needs
+/// its `'info`.
+#[session_auth_or(
+    ctx.accounts.signer.key() == ctx.accounts.participation.player,
+    SessionError::Unauthorized
+)]
+fn authorize(ctx: &Context<ClaimRewards>) -> Result<()> {
+    Ok(())
 }
 
 /// Owner (main wallet or session key) only, once per character after the party ended
@@ -63,21 +76,19 @@ pub struct ClaimRewards<'info> {
 ///
 /// TODO(P1, L6.5): only after the DM's final audit.
 pub fn handler<'info>(ctx: Context<'info, ClaimRewards<'info>>) -> Result<()> {
-    let accounts = ctx.accounts;
-    let participation = &accounts.participation;
-    let caller = accounts.signer.key();
+    // Only the owner or its key bound to this party (docs/GAME_COMMISSIONS.md 5).
+    let participation = &ctx.accounts.participation;
     require!(
-        caller == participation.player
-            || (participation.core.actor != Pubkey::default()
-                && caller == participation.core.actor),
+        auth::check_bound(
+            ctx.accounts.signer.key,
+            &participation.player,
+            &participation.core.session_key,
+        )
+        .is_ok(),
         SessionError::NotRewardOwner
     );
-    auth::check_actor(
-        &accounts.signer,
-        &participation.player,
-        &participation.core.actor,
-        accounts.session_token.as_ref(),
-    )?;
+    authorize(&ctx)?;
+    let accounts = ctx.accounts;
     let session = &mut accounts.session;
     let status = session.core.status;
     require!(

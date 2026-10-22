@@ -9,7 +9,8 @@ import { generateKeyPairSigner, lamports, type Address, type KeyPairSigner } fro
 import demoMap from "../../../assets/registry/maps/demo_16x16.json";
 import { PROGRAMS } from "../config";
 import { client } from "../wallet/client";
-import { createSessionV2Instruction } from "../session-key/sessionKey";
+import { createSessionInstruction } from "../session-key/magicblock";
+import { FEES, validUntilFromNow } from "../session-key/sessionKey";
 import { decodeEvents, type ChainEvent } from "./events";
 import {
   BASE_ATTACK,
@@ -32,6 +33,7 @@ import {
   monsterMoveIx,
   moveIx,
   openSessionIx,
+  setSessionKeyIx,
   partyAccountsOf,
   pickSeed,
   playerAp,
@@ -122,23 +124,26 @@ async function openParty(specs: Spec[]) {
     const acc = await sessionAccounts(built.map);
 
     // 3. party: open with price, pay half each, session keys, ready, start
-    await send(dm, [await openSessionIx(dm, built.map, PRICE, dmKey.address)]);
+    // One main wallet transaction each, as the site sends them: the key's MagicBlock token and
+    // prepayment with open_session (DM) or, for a player, at Ready (docs/PARTY_AND_TURNS.md 2.1).
+    const keyIx = (authority: typeof dm, key: typeof dmKey) =>
+      createSessionInstruction({ authority, key, targetProgram: PROGRAMS.session, validUntil: BigInt(validUntilFromNow()), prepayLamports: FEES.prepay });
+    const dmTok = await keyIx(dm, dmKey);
+    await send(dm, [dmTok.instruction, await openSessionIx(dm, built.map, PRICE, dmKey.address)]);
+    const dmActor: Actor = { signer: dmKey, token: dmTok.token };
+    // Joining pays the share of the price only.
+    for (const pl of players) await send(pl.wallet, [await joinSessionIx(pl.wallet, acc.session, pl.character, PRICE / 2n, DEFAULT_KEY)]);
+    // Ready: the key's token and prepayment, its binding, and the skills onto the map (the first of
+    // each kind); the character is locked.
     for (const pl of players) {
-      await send(pl.wallet, [await joinSessionIx(pl.wallet, acc.session, pl.character, PRICE / 2n, pl.key.address)]);
-      const { instruction, sessionToken } = await createSessionV2Instruction({
-        authority: pl.wallet,
-        sessionSigner: pl.key,
-        targetProgram: PROGRAMS.session,
-        validUntil: BigInt(Math.floor(Date.now() / 1000) + 3600),
-      });
-      await send(pl.wallet, [instruction]);
-      pl.actor.token = sessionToken;
+      const t = await keyIx(pl.wallet, pl.key);
+      await send(pl.wallet, [
+        t.instruction,
+        await setSessionKeyIx(pl.wallet, acc.session, pl.character, pl.key.address),
+        await setReadyIx(pl.wallet, acc.session, pl.character, true, await mapSelection(pl.character)),
+      ]);
+      pl.actor.token = t.token;
     }
-    const dmTok = await createSessionV2Instruction({ authority: dm, sessionSigner: dmKey, targetProgram: PROGRAMS.session, validUntil: BigInt(Math.floor(Date.now() / 1000) + 3600) });
-    await send(dm, [dmTok.instruction]);
-    const dmActor: Actor = { signer: dmKey, token: dmTok.sessionToken };
-    // Ready takes the skills onto the map (the first of each kind) and locks the character.
-    for (const pl of players) await send(pl.wallet, [await setReadyIx(pl.wallet, acc.session, pl.character, true, await mapSelection(pl.character))]);
     await send(dm, [await startSessionIx(dm, acc.session)]);
 
     const party = (await readParty(acc.session))!;

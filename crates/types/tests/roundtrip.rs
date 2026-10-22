@@ -153,9 +153,9 @@ fn game_session(version: u8) -> GameSessionData {
 fn participation(version: u8) -> ParticipationData {
     ParticipationData {
         version,
-        session: pk(11),
+        game_session: pk(11),
         character: pk(12),
-        actor: pk(13),
+        session_key: pk(13),
         slot: u8::MAX,
         x: u8::MAX,
         y: u8::MAX,
