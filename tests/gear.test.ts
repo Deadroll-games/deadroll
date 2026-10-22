@@ -4,7 +4,7 @@
 //
 // Needs the character program and the registry GameConfig (tools/scripts deploy:local). The
 // in-session lock (AlreadyLocked) and the dead character (CharacterDead) need a party: they run
-// in tests/session.test.ts. LevelTooLow cannot happen with the level 1 starter items; the rule is
+// in programs/session/tests/session.test.ts. LevelTooLow cannot happen with the level 1 starter items; the rule is
 // covered by the unit tests (programs/character/src/state/gear.rs, crates/rules/tests/items.rs).
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";

@@ -2,7 +2,7 @@
 // `anchor build --tools-version v1.54 -p deadroll_registry`, `anchor deploy -p deadroll_registry
 // --provider.cluster localnet`, then:
 //   cd tests && ANCHOR_PROVIDER_URL=http://127.0.0.1:8899 ANCHOR_WALLET=<keypair json> \
-//     node --import tsx --test --test-concurrency=1 registry.test.ts
+//     node --import tsx --test --test-concurrency=1 ../programs/registry/tests/registry.test.ts
 // `GameConfig` and the tables are singletons other lanes read: the tests use the wallet as the
 // authority, read what already exists, and skip authority-only cases if someone else owns it.
 import { strict as assert } from "node:assert";
@@ -451,7 +451,7 @@ describe("registry", () => {
 
     it("patch 6: monster skills pass the monster builder rules (Heal only as an action or a reaction)", async (t) => {
       if (!owned) return t.skip(ownerSkip);
-      const shared = JSON.parse(readFileSync(new URL("../tools/scripts/lib/__fixtures__/registry-tables.json", import.meta.url), "utf8"));
+      const shared = JSON.parse(readFileSync(new URL("../../../tools/scripts/lib/__fixtures__/registry-tables.json", import.meta.url), "utf8"));
       const record = (i: number) => Uint8Array.from(Buffer.from(shared.monster_skills.slice(i * 64, i * 64 + 64), "hex"));
       // The last slot is past the shipped skills; clear it afterwards.
       const at = (MONSTER_SKILLS_MAX - 1) * MONSTER_SKILL_SIZE;

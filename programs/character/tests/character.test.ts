@@ -20,13 +20,13 @@ import {
   Transaction,
   TransactionInstruction,
 } from "@solana/web3.js";
-import { newSkill } from "./skill_ext.ts";
+import { newSkill } from "../../../tests/skill_ext.ts";
 import { MPL_CORE_PROGRAM, PROGRAMS } from "@deadroll/sdk";
 
 const MPL_CORE = new PublicKey(MPL_CORE_PROGRAM);
 const REGISTRY = new PublicKey(PROGRAMS.registry);
 const idl = JSON.parse(
-  readFileSync(new URL("../target/idl/deadroll_character.json", import.meta.url), "utf8"),
+  readFileSync(new URL("../../../target/idl/deadroll_character.json", import.meta.url), "utf8"),
 ) as Idl;
 
 const provider = AnchorProvider.env();
@@ -646,7 +646,7 @@ describe("set_skill_description", { skip: NEEDS_CONFIG }, () => {
   it("writes a description once, then refuses a second one", async () => {
     const p = await newPlayer();
     const c = await create(p, warrior());
-    const sig = await describeIx(p, c.character, 2, text("Thrown hard and low.", 200)).rpc({ commitment: "confirmed" });
+    const sig = await describeIx(p, c.character, 2, text("Thrown hard and low.", 200)).rpc({ commitment: "confirmed", preflightCommitment: "processed" });
     const tx = await connection.getTransaction(sig, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
     const parser = new (await import("@anchor-lang/core")).EventParser(ID, program.coder);
     const ev = [...parser.parseLogs(tx?.meta?.logMessages ?? [])].find((x) => x.name === "skillDescribed");

@@ -47,7 +47,7 @@ const BLEEDING_CLEAVE = 3;
 const ENTRANCE = { x: 1, y: 1 };
 const EXIT = { x: 14, y: 14 };
 const [WOLF, GOBLIN, CHIEFTAIN, GOBLIN_WARRIOR, SHAMAN] = [0, 1, 2, 3, 4];
-/** tests/session.test.ts CAMP: monster indices wolves 0, 1; goblins 2, 3; chieftain 4; warrior 5; shaman 6. */
+/** programs/session/tests/session.test.ts CAMP: monster indices wolves 0, 1; goblins 2, 3; chieftain 4; warrior 5; shaman 6. */
 const CAMP = [
   { id: WOLF, x: 10, y: 3, pack: 1, skills: 0b0111 },
   { id: WOLF, x: 11, y: 3, pack: 1, skills: 0b1110 },

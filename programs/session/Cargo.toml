@@ -20,7 +20,6 @@ no-log-ix-name = []
 idl-build = [
     "anchor-lang/idl-build",
     "deadroll-types/idl-build",
-    "deadroll-skillcheck/idl-build",
     "session-keys/idl-build",
 ]
 anchor-debug = []
@@ -48,7 +47,7 @@ deadroll-combat = { workspace = true, features = ["borsh"] }
 # Shared game rules and the balance table (no Anchor), also used by tools/balance.
 deadroll-rules.workspace = true
 # Skill block enums (category, purpose) of the character's `SkillRecord`.
-deadroll-skillcheck = { workspace = true, features = ["anchor"] }
+deadroll-skillcheck.workspace = true
 ephemeral-vrf-sdk.workspace = true
 # Dice: the SHA-256 syscall gives the same rolls as `deadroll_combat::VrfRoll` for far fewer CU.
 solana-sha256-hasher = { version = "3.1", features = ["sha2"] }

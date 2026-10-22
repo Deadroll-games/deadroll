@@ -3,25 +3,18 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "//": "Dependencies are in the root package.json, so the program tests in programs/*/tests resolve them too.",
   "scripts": {
     "sdk": "pnpm --filter @deadroll/sdk build",
-    "test": "pnpm sdk && node --import tsx --test --test-concurrency=1 \"*.test.ts\"",
-    "test:character": "pnpm sdk && node --import tsx --test character.test.ts",
-    "test:render": "pnpm sdk && node --import tsx --test render.test.ts",
-    "test:map": "pnpm sdk && node --import tsx --test map.test.ts",
-    "test:session": "pnpm sdk && node --import tsx --test session.test.ts",
+    "test": "pnpm sdk && node --import tsx --test --test-concurrency=1 \"../programs/*/tests/*.test.ts\" \"*.test.ts\"",
+    "test:programs": "pnpm sdk && node --import tsx --test --test-concurrency=1 \"../programs/*/tests/*.test.ts\"",
+    "test:cross": "pnpm sdk && node --import tsx --test --test-concurrency=1 \"*.test.ts\"",
+    "test:character": "pnpm sdk && node --import tsx --test ../programs/character/tests/character.test.ts",
+    "test:registry": "pnpm sdk && node --import tsx --test ../programs/registry/tests/registry.test.ts",
+    "test:render": "pnpm sdk && node --import tsx --test ../programs/render/tests/render.test.ts",
+    "test:map": "pnpm sdk && node --import tsx --test ../programs/map/tests/map.test.ts",
+    "test:session": "pnpm sdk && node --import tsx --test ../programs/session/tests/session.test.ts",
     "test:demo": "pnpm sdk && node --import tsx --test demo.test.ts",
     "test:gear": "pnpm sdk && node --import tsx --test gear.test.ts"
-  },
-  "devDependencies": {
-    "@anchor-lang/core": "1.2.1",
-    "@solana/kit": "8.4.0",
-    "@solana/web3.js": "^1.98.0",
-    "@types/node": "^22.0.0",
-    "tsx": "^4.20.0",
-    "typescript": "^5.8.0"
-  },
-  "dependencies": {
-    "@deadroll/sdk": "workspace:*"
   }
 }

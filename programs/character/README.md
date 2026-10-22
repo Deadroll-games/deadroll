@@ -91,5 +91,5 @@ pnpm --filter @deadroll/tests run test:character           # needs ANCHOR_PROVID
 pnpm --filter @deadroll/tests run test:gear
 ```
 
-Tests: `tests/character.test.ts` and `tests/gear.test.ts`, fresh keypairs. The in-session lock,
-the map selection and the death burn run through the session program in `tests/session.test.ts`.
+Tests: `tests/character.test.ts` and the root `tests/gear.test.ts`, fresh keypairs. The in-session lock,
+the map selection and the death burn run through the session program in `programs/session/tests/session.test.ts`.

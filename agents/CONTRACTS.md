@@ -675,3 +675,14 @@ or an expired one, with `InvalidToken`; a live token for a key the party does no
 `deadroll_rules::BalanceConfig.fees: FeeTuning { prepay_lamports, low_balance_lamports,
 max_key_lamports, key_validity_secs }` (appended; defaults 0.01 SOL, 0.002 SOL, 0.05 SOL, 3 h), read
 by the website from `balance.json`. No program reads it.
+
+## 19. Patch 14: skill blocks move to crates/types
+
+`crates/types`: new module `skill` (not glob-exported at the crate root) with `Category`,
+`Purpose`, `Target`, `Effect`, `Trigger`, `SkillBlocks`, `SkillExt` and `SKILL_ASPECTS_MAX`,
+moved from `crates/skillcheck` with the same derives, discriminants and field order. Nothing
+renamed or removed: `deadroll_skillcheck` re-exports them (`pub use deadroll_types::skill::*`),
+so every `deadroll_skillcheck::SkillBlocks` path is unchanged. `crates/skillcheck` loses its
+`anchor` and `idl-build` features (no Anchor outside `types`, docs/ARCHITECTURE.md 5).
+
+Same borsh bytes and `InitSpace` (pinned in `crates/types/tests/roundtrip.rs`); IDLs unchanged.

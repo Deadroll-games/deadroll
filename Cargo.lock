@@ -1487,7 +1487,6 @@ dependencies = [
 name = "deadroll-skillcheck"
 version = "0.1.0"
 dependencies = [
- "anchor-lang",
  "borsh 1.8.1",
  "deadroll-types",
 ]

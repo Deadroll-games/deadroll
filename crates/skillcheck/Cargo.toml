@@ -9,17 +9,12 @@ publish.workspace = true
 
 [features]
 default = []
-std = ["borsh/std", "deadroll-types/std"]
-# Derive Anchor traits on `SkillBlocks` and the enums, so the character program can take them
-# as instruction args and store them in accounts (same pattern as `crates/types`).
-anchor = ["dep:anchor-lang", "std", "deadroll-types/anchor"]
-# Put the types into program IDLs (and so into the Codama sdk).
-idl-build = ["anchor", "anchor-lang/idl-build", "deadroll-types/idl-build"]
+std = ["deadroll-types/std"]
 
+# No Anchor here (docs/ARCHITECTURE.md, section 5): `SkillBlocks` and the block enums live in
+# `deadroll_types::skill`, and the programs turn on `deadroll-types/anchor` for them.
 [dependencies]
 deadroll-types.workspace = true
-borsh.workspace = true
-anchor-lang = { workspace = true, optional = true }
 
 [dev-dependencies]
 borsh = { workspace = true, features = ["std"] }

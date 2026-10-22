@@ -14,7 +14,8 @@ the class starter `presets`.
 - Enum discriminants and the `SkillBlocks` field order are on-chain format: append only.
 - Every number in `derive.rs` and `rules.rs` is a BALANCE placeholder; changing one changes stored
   skills of new characters only.
-- Feature `anchor` / `idl-build` mirror `crates/types` so the program can use the types in args.
+- No Anchor in this crate (docs/ARCHITECTURE.md, section 5). `SkillBlocks`, `SkillExt` and the block
+  enums live in `deadroll_types::skill` (re-exported here), because programs store them in accounts.
 - Forbidden: editing other zones, crates/types, agents/CONTRACTS.md.
 
 ## Commands

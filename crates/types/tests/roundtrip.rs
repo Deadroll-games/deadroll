@@ -323,6 +323,43 @@ fn size_matches_anchor_init_space() {
     assert_eq!(ItemRecord::SIZE, ItemRecord::INIT_SPACE);
     assert_eq!(EquipRef::SIZE, EquipRef::INIT_SPACE);
     assert_eq!(LoadoutData::SIZE, LoadoutData::INIT_SPACE);
+    assert_eq!(skill::SkillBlocks::SIZE, skill::SkillBlocks::INIT_SPACE);
+    assert_eq!(skill::SkillExt::SIZE, skill::SkillExt::INIT_SPACE);
+}
+
+/// Moved here from `crates/skillcheck` (patch 14): the bytes stored in character and session
+/// accounts must stay exactly these.
+#[test]
+fn skill_blocks_bytes() {
+    use skill::*;
+    let blocks = SkillBlocks {
+        category: Category::Reactive,
+        purpose: Purpose::Debuff,
+        source: Source::Combat,
+        form: Form::Projectile,
+        target: Target::Line,
+        aspects: [Aspect::Cold, Aspect::Piercing, Aspect::Fire],
+        aspect_count: 3,
+        effect: last(Effect::ALL),
+        trigger: last(Trigger::ALL),
+        aura_radius: 2,
+    };
+    let bytes = check(&blocks, SkillBlocks::SIZE);
+    assert_eq!(bytes, [1, 2, 1, 1, 1, 1, 5, 0, 3, 10, 6, 2]);
+
+    let ext = SkillExt {
+        range: RangeTag::Ranged,
+        timing: TimeTag::DoT,
+        hp_below_pct: 40,
+    };
+    assert_eq!(check(&ext, SkillExt::SIZE), [1, 1, 40]);
+    assert_eq!(check(&SkillExt::MELEE, SkillExt::SIZE), [0, 0, 0]);
+
+    assert_eq!(Category::COUNT, 3);
+    assert_eq!(Purpose::COUNT, 3);
+    assert_eq!(Target::COUNT, 2);
+    assert_eq!(Effect::COUNT, 11);
+    assert_eq!(Trigger::COUNT, 7);
 }
 
 fn loadout(version: u8) -> LoadoutData {

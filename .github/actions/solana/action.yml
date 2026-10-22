@@ -1,0 +1,51 @@
+name: solana toolchain
+description: >
+  Rust from rust-toolchain.toml, Solana CLI 4.1.2 (Agave), Anchor CLI 1.2.1 and platform tools
+  v1.54, the versions of CLAUDE.md, section 2.
+
+runs:
+  using: composite
+  steps:
+    - name: Rust from rust-toolchain.toml
+      shell: bash
+      run: rustup toolchain install
+
+    # Platform tools v1.54 are downloaded into ~/.cache/solana by the first
+    # `cargo build-sbf --tools-version v1.54` and saved with the rest at the end of the job.
+    - name: Cache Solana CLI, platform tools and Anchor CLI
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.local/share/solana
+          ~/.cache/solana
+          ~/.local/bin/anchor
+        key: solana-4.1.2-anchor-1.2.1-tools-v1.54-${{ runner.os }}
+
+    - name: Solana CLI 4.1.2 (Anza installer)
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: sh -c "$(curl -sSfL https://release.anza.xyz/v4.1.2/install)"
+
+    # The release binary of the Anchor repository (the file `avm install 1.2.1` downloads).
+    - name: Anchor CLI 1.2.1
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        mkdir -p ~/.local/bin
+        curl -sSfL -o ~/.local/bin/anchor \
+          https://github.com/solana-foundation/anchor/releases/download/v1.2.1/anchor-1.2.1-x86_64-unknown-linux-gnu
+        chmod +x ~/.local/bin/anchor
+
+    - name: PATH
+      shell: bash
+      run: |
+        echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+    - name: Versions
+      shell: bash
+      run: |
+        solana --version
+        anchor --version
+        cargo build-sbf --version
