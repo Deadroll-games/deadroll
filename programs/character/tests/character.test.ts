@@ -646,7 +646,7 @@ describe("set_skill_description", { skip: NEEDS_CONFIG }, () => {
   it("writes a description once, then refuses a second one", async () => {
     const p = await newPlayer();
     const c = await create(p, warrior());
-    const sig = await describeIx(p, c.character, 2, text("Thrown hard and low.", 200)).rpc({ commitment: "confirmed" });
+    const sig = await describeIx(p, c.character, 2, text("Thrown hard and low.", 200)).rpc({ commitment: "confirmed", preflightCommitment: "confirmed" });
     const tx = await connection.getTransaction(sig, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
     const parser = new (await import("@anchor-lang/core")).EventParser(ID, program.coder);
     const ev = [...parser.parseLogs(tx?.meta?.logMessages ?? [])].find((x) => x.name === "skillDescribed");

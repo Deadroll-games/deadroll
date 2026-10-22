@@ -90,6 +90,10 @@ jobs:
         working-directory: tools/scripts
         run: pnpm sdk && node --experimental-strip-types --no-warnings deploy-local.ts --build-only
 
+      # target/render-golden: the reference images render.test.ts compares the chain output with.
+      - name: render golden
+        run: cargo test -q -p deadroll-render --test golden
+
       - name: run wallet
         run: |
           solana-keygen new --no-bip39-passphrase --silent --force -o ~/.config/solana/id.json
