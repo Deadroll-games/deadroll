@@ -11,7 +11,7 @@ Version 0.1. How a player plays a party without confirming every roll in the wal
 **Solution:** session keys.
 
 - The player plays with their regular wallet (Phantom, etc.). Characters, items and SOL stay **only in it**.
-- When joining a party, the browser creates a **temporary key**, and the player signs **once** a permission: "this key may make game moves on my behalf in this party", and transfers a small **fee prepayment** to the key.
+- When pressing Ready, the browser creates a **temporary key**, and the player signs **once** a permission: "this key may make game moves on my behalf in this party", and transfers a small **fee prepayment** to the key.
 - After that, all game actions are signed by the temporary key, with no windows. The player just clicks the dice.
 - When the party ends: the permission is revoked, and the remainder of the prepayment is returned to the main wallet.
 
@@ -23,7 +23,7 @@ There is **no** in-game wallet that stores assets. The key in the browser never 
 
 - The Session Keys program (originally by Gum, maintained by MagicBlock), address `KeyspM2ssCJbqUhQ4k7sveSiY4WjnYsrXkC8oDbwde5`.
 - Rust: the `session-keys` crate (`SessionTokenV2`, `#[derive(Session)]`, the `session_auth_or` macro).
-- Client: the TS package `@session-keys/*` for creating the token.
+- Client: there are no `@session-keys/*` packages. The site uses `@magicblock-labs/gum-sdk` to create and revoke `SessionTokenV2`, through its own adapter. `gum-react-sdk` does not fit: it creates V1 tokens and needs React 18 and the Solana Wallet Adapter.
 - For local tests the program must be cloned into `solana-test-validator` (`solana program dump` + `--bpf-program`).
 
 Before implementation, check the current versions and API in the MagicBlock documentation.
@@ -34,18 +34,29 @@ Before implementation, check the current versions and API in the MagicBlock docu
 
 ```
 1. Joining the party
+   The player signs ONE transaction with the MAIN wallet: pays their share of the party
+   price into the escrow. No key is created yet, and no prepayment is taken.
+2. Ready
    a. The browser generates a temporary keypair (only in the tab's memory/local storage).
    b. The player signs ONE transaction with the MAIN wallet:
-      - create a SessionToken: temporary key, Deadroll program, expiry;
+      - create a SessionToken: temporary key, Deadroll program, expiry (3 hours);
       - transfer the prepayment to the temporary key (0.01 SOL by default);
-      - write the token into the player's participation PDA for this party (section 5).
-2. Play
+      - write the temporary key's public key into the player's participation PDA for this
+        party (section 5);
+      - select skills for the map and lock the character (`PARTY_AND_TURNS.md`, section 2.1).
+   If this browser already runs a live key for this party, only the character lock and
+   skill selection are signed; no new token or prepayment is created.
+3. Play
    Every turn/roll/attack: the transaction is signed and paid for by the temporary key.
-3. End of the party
+4. End of the party
    a. The DM closes the party → all participants' tokens stop passing validation.
    b. The client revokes the SessionToken (the rent deposit for the token account is returned)
       and transfers the remainder of the prepayment back to the main wallet.
 ```
+
+A lost or expired key (the token lasts 3 hours) is replaced from the session key panel: this signs a
+new SessionToken and rewrites the public key in `Participation`, without touching the party price
+contribution already paid at joining.
 
 If the player closed the tab and the temporary key is lost, only the remainder of the prepayment is lost (no more than the top-up amount). All assets stay on the main wallet, and the token will expire on its own.
 
@@ -132,13 +143,19 @@ The DM closed the party → `status != Active` → all participants' session key
 
 | Parameter                            | Default value                                                        |
 | ------------------------------------ | -------------------------------------------------------------------- |
-| Top-up when joining the party        | 0.01 SOL (~2000 turns without priority fee)                          |
+| Top-up at Ready                      | 0.01 SOL (~2000 turns without priority fee)                          |
 | Low balance warning                  | below 0.002 SOL                                                      |
 | Top-up during the party              | a "top up" button, signed by the main wallet, without leaving the party |
 | Maximum balance of the temporary key | 0.05 SOL (the interface does not allow topping up more)              |
 | Refund                               | automatically on leaving the party                                   |
+| Token lifetime                       | 3 hours                                                               |
 
 The rent deposit for the `SessionToken` account (small, on the order of thousandths of a SOL) is paid by the main wallet and returned when the token is revoked.
+
+Before every signature that moves SOL from the main wallet (Ready, Replace key, a top-up), the site
+shows the exact amount and waits for the player to confirm; without confirming, nothing is signed. A
+repeat Ready with this party's live key does not charge the prepayment again (see section 3). Pressing
+Not ready does not revoke the key.
 
 ### 6.3 Dice rolls
 
@@ -157,7 +174,7 @@ The party price is **separate money**, not the fee prepayment.
 | Who sets it        | the player (0.01 SOL by default) | the DM sets the total price, players pay shares   |
 | When it is returned | the remainder on leaving the party | only if the DM abandoned the party or the party did not fill |
 
-Joining a party pays both amounts in one transaction of the main wallet. The party price rules are in `PARTY_AND_TURNS.md`, section 3.
+The two amounts are paid in separate transactions: the price share at joining, the fee prepayment at Ready. The party price rules are in `PARTY_AND_TURNS.md`, section 3.
 
 ---
 
@@ -165,7 +182,7 @@ Joining a party pays both amounts in one transaction of the main wallet. The par
 
 The DM uses the same scheme on their side:
 
-- when opening a party, signs once with the main wallet the permission for their temporary key and the prepayment;
+- when opening a party, signs once with the main wallet the permission for their temporary key and the prepayment, after the site shows the exact amount and the DM confirms it;
 - after that, without windows, moves monsters, rolls their dice, applies their skills, opens tiles (revealing the map commitment);
 - DM session rights: only monster actions and map reveals in **their own** party. Rewards, experience and closing the party are signed by the DM's main wallet.
 
@@ -173,10 +190,11 @@ The DM uses the same scheme on their side:
 
 ## 8. UX
 
-- Joining a party: one button "Start session", one wallet window.
+- Joining a party: one signature, only the price share leaves the wallet.
+- Ready: one signature after the site shows the fee prepayment amount and the player confirms it.
 - The interface always shows the prepayment balance and the time until the session ends.
-- Leaving a party: one button, refund of the remainder and revocation of the token in one transaction.
-- If the tab is closed during a party: on return, the client tries to restore the temporary key from the tab's storage; if there is no key, it offers to start a new session in the same party (the old key in `Participation` is replaced with the main wallet's signature).
+- Leaving a party: one button, revocation of the token and refund of the remainder after the party; the key itself can claim rewards and experience (`PARTY_AND_TURNS.md`, section 2, step 10). There is no peaceful exit mid-party yet.
+- If the tab is closed during a party: on return, the client tries to restore the temporary key from the tab's storage; if there is no key, it offers to replace it from the key panel (the old key in `Participation` is replaced with the main wallet's signature, after confirming the amount).
 
 ---
 
@@ -186,7 +204,7 @@ The DM uses the same scheme on their side:
 - [ ] Split instructions into session-allowed and owner-only (section 4)
 - [ ] The `Participation` PDA and the party binding checks (section 5)
 - [ ] Game instructions do not create accounts
-- [ ] Client: session creation + top-up in one transaction
+- [ ] Client: session creation + top-up in the Ready transaction
 - [ ] Client: leaving, token revocation and refund of the remainder in one transaction
 - [ ] Low balance warning and top-up without leaving the party
 - [ ] DM session with limited rights
