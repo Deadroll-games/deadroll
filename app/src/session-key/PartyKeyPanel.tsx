@@ -1,5 +1,8 @@
 // The party's session key at a glance (docs/GAME_COMMISSIONS.md 6.2, 8): balance, time left,
-// the low-balance warning and the main-wallet buttons. Pure UI over its props.
+// the low-balance warning and the main-wallet buttons. Pure UI over its props. Top up and replace
+// move SOL to a key: they ask to confirm the exact amount before anything is signed.
+import { useState } from "react";
+import { PrepayConfirm } from "../components/forms/PrepayConfirm";
 import { formatSol, shortAddress } from "../wallet/ConnectButton";
 
 export type PartyKeyPanelProps = {
@@ -21,6 +24,8 @@ export type PartyKeyPanelProps = {
   onTopUp?: () => void;
   topUpLamports: bigint;
   onReplace?: () => void;
+  /** The prepayment a new key takes (BalanceConfig.fees). */
+  replaceLamports: bigint;
   onLeave?: () => void;
 };
 
@@ -33,6 +38,14 @@ function timeLeft(secs: number): string {
 
 export function PartyKeyPanel(p: PartyKeyPanelProps) {
   const playing = p.keyAddress !== null && p.bound && p.live;
+  const [confirming, setConfirming] = useState<"topUp" | "replace" | null>(null);
+  const replaceLabel = p.keyAddress === null ? "Start a session key" : "Replace the key";
+  const confirm =
+    confirming === "topUp" && p.onTopUp
+      ? { action: "Top up", lamports: p.topUpLamports, newKey: false, run: p.onTopUp }
+      : confirming === "replace" && p.onReplace
+        ? { action: replaceLabel, lamports: p.replaceLamports, newKey: true, run: p.onReplace }
+        : null;
   return (
     <div className="panel" aria-label="Session key">
       <h3>Session key</h3>
@@ -48,15 +61,28 @@ export function PartyKeyPanel(p: PartyKeyPanelProps) {
       {p.keyAddress !== null && p.low && !p.ended && (
         <p className="error">Low balance: below {formatSol(p.lowLamports)}. Top up, or the next moves need the wallet.</p>
       )}
+      {confirm && (
+        <PrepayConfirm
+          action={confirm.action}
+          lamports={confirm.lamports}
+          newKey={confirm.newKey}
+          busy={p.busy}
+          onConfirm={() => {
+            setConfirming(null);
+            confirm.run();
+          }}
+          onCancel={() => setConfirming(null)}
+        />
+      )}
       <div className="row">
-        {p.onTopUp && (
-          <button className="btn" disabled={p.busy} onClick={p.onTopUp}>
+        {p.onTopUp && !confirm && (
+          <button className="btn" disabled={p.busy} onClick={() => setConfirming("topUp")}>
             Top up {formatSol(p.topUpLamports)}
           </button>
         )}
-        {p.onReplace && (
-          <button className="btn" disabled={p.busy} onClick={p.onReplace}>
-            {p.keyAddress === null ? "Start a session key" : "Replace the key"}
+        {p.onReplace && !confirm && (
+          <button className="btn" disabled={p.busy} onClick={() => setConfirming("replace")}>
+            {replaceLabel}
           </button>
         )}
         {p.onLeave && (

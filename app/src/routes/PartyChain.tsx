@@ -1402,6 +1402,7 @@ function SessionKeyBox({ party, pk, isDm, me, send, busy }: { party: Party; pk: 
       busy={busy !== null}
       onTopUp={playing && !ended && topUpLamports > 0n ? topUp : undefined}
       topUpLamports={topUpLamports}
+      replaceLamports={FEES.prepay}
       onReplace={!ended && !playing && boundKeys.length > 0 ? () => void replace() : undefined}
       onLeave={pk.signer && (ended || !bound) ? () => void leave() : undefined}
     />

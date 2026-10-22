@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Category } from "../../chain/skillcheck";
 import { Aspect, Class, Race, Tile } from "../../chain/types";
 import { CharacterForm } from "./CharacterForm";
-import { formatSol, pointsLeft, shortAddress } from "./format";
+import { formatSol, formatSolExact, pointsLeft, shortAddress } from "./format";
 import { MapPalette } from "./MapPalette";
 import { PartyLobby } from "./PartyLobby";
 import type { CharacterDraft, LobbyPlayer, MapPaletteProps, PartyLobbyProps } from "./types";
@@ -32,6 +32,11 @@ describe("format helpers", () => {
 
   it("formats lamports as SOL", () => {
     expect(formatSol(1_500_000_000n)).toBe("1.5");
+    // A confirmation shows the amount to the lamport.
+    expect(formatSolExact(8_765_432n)).toBe("0.008765432");
+    expect(formatSolExact(10_000_000n)).toBe("0.01");
+    expect(formatSolExact(2_000_000_000n)).toBe("2");
+    expect(formatSolExact(0n)).toBe("0");
     expect(formatSol(0n)).toBe("0");
     expect(formatSol(123_456_789n)).toBe("0.1234");
     expect(formatSol(2_000_000_000n)).toBe("2");
