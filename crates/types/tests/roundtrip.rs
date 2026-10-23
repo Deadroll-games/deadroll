@@ -128,6 +128,26 @@ fn map_layout(version: u8) -> MapLayoutData {
         entrance: Cell { x: 0, y: 1 },
         exit: Cell { x: 31, y: 31 },
         bump: u8::MAX,
+        chests: [point_max(); CHESTS_MAX],
+        chest_count: CHESTS_MAX as u8,
+        boss_table: u8::MAX,
+    }
+}
+
+fn point_max() -> MapPoint {
+    MapPoint {
+        kind: last(PointKind::ALL),
+        x: u8::MAX,
+        y: u8::MAX,
+        data: u8::MAX,
+    }
+}
+
+fn cache_slot_max() -> CacheSlot {
+    CacheSlot {
+        kind: last(RewardKind::ALL),
+        id: u16::MAX,
+        qty: u16::MAX,
     }
 }
 
@@ -210,6 +230,54 @@ enum_tests! {
     map_status: MapStatus, 4;
     stat: Stat, STATS_COUNT;
     program_idx: ProgramIdx, PROGRAMS_COUNT;
+    point_kind: PointKind, 1;
+    reward_kind: RewardKind, 5;
+    reward_source: RewardSource, 4;
+    cache_status: CacheStatus, 2;
+}
+
+#[test]
+fn loot_structs() {
+    check(&point_max(), MapPoint::SIZE);
+    check(&cache_slot_max(), CacheSlot::SIZE);
+    let bag = BagSlot {
+        kind: last(RewardKind::ALL),
+        id: u16::MAX,
+        qty: u8::MAX,
+    };
+    check(&bag, BagSlot::SIZE);
+    assert!(BagSlot::EMPTY.is_empty() && CacheSlot::EMPTY.is_empty());
+    assert_eq!(RewardKind::Consumable as u8, 2);
+    assert_eq!(RewardSource::Stash as u8, 3);
+}
+
+/// `Participation` keeps the cache as raw bytes: they must be the borsh bytes of the slots.
+#[test]
+fn raw_cache_is_borsh() {
+    let mut slots = [CacheSlot::EMPTY; CACHE_SLOTS];
+    slots[0] = cache_slot_max();
+    slots[CACHE_SLOTS - 1] = CacheSlot {
+        kind: RewardKind::Recipe,
+        id: 0x0102,
+        qty: 7,
+    };
+    let raw = CacheSlot::write_all(&slots);
+    assert_eq!(raw.to_vec(), borsh::to_vec(&slots).unwrap());
+    assert_eq!(CacheSlot::read_all(&raw), slots);
+    let mut bad = raw;
+    bad[0] = RewardKind::COUNT as u8;
+    assert!(CacheSlot::read(&bad, 0).is_empty());
+}
+
+#[test]
+fn layout_chest_list_is_bounded() {
+    let mut l = map_layout(1);
+    assert_eq!(l.chest_list().len(), CHESTS_MAX);
+    l.chest_count = u8::MAX;
+    assert_eq!(l.chest_list().len(), CHESTS_MAX);
+    l.chest_count = 1;
+    assert_eq!(l.chest_list(), &[point_max()]);
+    assert_eq!(point_max().cell(), Cell { x: 255, y: 255 });
 }
 
 #[test]
@@ -300,6 +368,8 @@ fn seeds_match_contract() {
     assert_eq!(seeds::CHARACTER, b"character");
     assert_eq!(seeds::PARTICIPATION, b"participation");
     assert_eq!(seeds::MONSTERS, b"monsters");
+    assert_eq!(seeds::REWARDS, b"rewards");
+    assert_eq!(seeds::CACHE, b"cache");
 }
 
 #[cfg(feature = "anchor")]
@@ -311,6 +381,9 @@ fn size_matches_anchor_init_space() {
     assert_eq!(Cell::SIZE, Cell::INIT_SPACE);
     assert_eq!(ActiveState::SIZE, ActiveState::INIT_SPACE);
     assert_eq!(Spawn::SIZE, Spawn::INIT_SPACE);
+    assert_eq!(MapPoint::SIZE, MapPoint::INIT_SPACE);
+    assert_eq!(CacheSlot::SIZE, CacheSlot::INIT_SPACE);
+    assert_eq!(BagSlot::SIZE, BagSlot::INIT_SPACE);
     assert_eq!(Monster::SIZE, Monster::INIT_SPACE);
     assert_eq!(Aspect::SIZE, Aspect::INIT_SPACE);
     assert_eq!(GameConfigData::SIZE, GameConfigData::INIT_SPACE);

@@ -1,5 +1,5 @@
 {
-  "note": "placeholder, tune in sim. pool_start/pool_len: a run of monster_skills.json; kin: the family kin-only skills reach",
+  "note": "placeholder, tune in sim. pool_start/pool_len: a run of monster_skills.json; kin: the family kin-only skills reach; loot_table: the body loot table in reward_tables.json (none: no body loot)",
   "records": [
     {
       "id": 0,
@@ -28,7 +28,8 @@
       "xp": 10,
       "pool_start": 0,
       "pool_len": 4,
-      "kin": "Wolf"
+      "kin": "Wolf",
+      "loot_table": 4
     },
     {
       "id": 1,
@@ -57,7 +58,8 @@
       "xp": 6,
       "pool_start": 4,
       "pool_len": 2,
-      "kin": "Goblin"
+      "kin": "Goblin",
+      "loot_table": 5
     },
     {
       "id": 2,
@@ -86,7 +88,8 @@
       "xp": 50,
       "pool_start": 6,
       "pool_len": 5,
-      "kin": "Goblin"
+      "kin": "Goblin",
+      "loot_table": 6
     },
     {
       "id": 3,

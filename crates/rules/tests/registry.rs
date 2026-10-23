@@ -15,12 +15,13 @@ fn hex(bytes: &[u8]) -> String {
 fn registry_bytes_match_the_seed_fixture() {
     let r = Registry::shipped().unwrap();
     let json = format!(
-        "{{\n  \"note\": \"assets/registry encoded by deadroll-rules (crates/rules/tests/registry.rs)\",\n  \"aspects\": \"{}\",\n  \"traits\": \"{}\",\n  \"resonances\": \"{}\",\n  \"bestiary\": \"{}\",\n  \"monster_skills\": \"{}\"\n}}\n",
+        "{{\n  \"note\": \"assets/registry encoded by deadroll-rules (crates/rules/tests/registry.rs)\",\n  \"aspects\": \"{}\",\n  \"traits\": \"{}\",\n  \"resonances\": \"{}\",\n  \"bestiary\": \"{}\",\n  \"monster_skills\": \"{}\",\n  \"rewards\": \"{}\"\n}}\n",
         hex(&r.aspects),
         hex(&r.traits),
         hex(&r.resonances),
         hex(&r.bestiary),
-        hex(&r.monster_skills)
+        hex(&r.monster_skills),
+        hex(&r.rewards)
     );
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../tools/scripts/lib/__fixtures__/registry-tables.json");

@@ -46,8 +46,11 @@ pub mod record {
     /// immune (docs/DAMAGE_TYPES_AND_MIXES.md 9: "immunity to magical").
     pub const RESIST_TAGS: usize = 42;
     pub const IMMUNE_TAGS: usize = 43;
-    /// `[44..48]` reserved (zero).
-    pub const RESERVED: usize = 44;
+    /// Patch 11: the body loot table, a registry `Rewards` id (`NONE` = no body loot,
+    /// docs/BESTIARY.md 9, 12).
+    pub const LOOT_TABLE: usize = 44;
+    /// `[45..48]` reserved (zero).
+    pub const RESERVED: usize = 45;
     /// Predisposition / kin byte for "none".
     pub const NONE: u8 = 0xFF;
 }
@@ -164,6 +167,8 @@ pub struct MonsterTemplate {
     pub pool_len: u8,
     /// [`NO_KIN`] for none.
     pub kin: u8,
+    /// Patch 11: the body loot table (registry `Rewards` id, `NO_TABLE` = none).
+    pub loot_table: u8,
 }
 
 /// One template at a level: what the hit inputs need.
@@ -189,6 +194,9 @@ pub struct MonsterProfile {
     /// Killing it wins the party (docs/PARTY_AND_TURNS.md, 7.1).
     pub boss: bool,
     pub kin: u8,
+    /// Patch 11: the table its body drops from, `NO_TABLE` for none (no table, or a summoned
+    /// helper: docs/BESTIARY.md 9.1).
+    pub loot_table: u8,
 }
 
 fn u16_at(r: &[u8], at: usize) -> u16 {
@@ -232,6 +240,7 @@ impl MonsterTemplate {
             || r[SPEED] == 0
             || r[POOL_LEN] as usize > deadroll_skillcheck::monster::POOL_MAX
             || r[RESERVED..].iter().any(|b| *b != 0)
+            || (r[LOOT_TABLE] != NONE && r[LOOT_TABLE] as usize >= crate::loot::record::RECORDS_MAX)
         {
             return None;
         }
@@ -264,6 +273,7 @@ impl MonsterTemplate {
             pool_start: r[POOL_START],
             pool_len: r[POOL_LEN],
             kin: r[KIN],
+            loot_table: r[LOOT_TABLE],
         })
     }
 
@@ -306,6 +316,11 @@ impl MonsterTemplate {
             xp: self.xp.saturating_mul(l.max(1)),
             boss: self.is_boss(),
             kin: self.kin,
+            loot_table: if crate::loot::drops_body_loot(self.role) {
+                self.loot_table
+            } else {
+                deadroll_types::NO_TABLE
+            },
         }
     }
 
@@ -440,6 +455,7 @@ mod tests {
         r[39] = 0;
         r[40] = 4;
         r[41] = 0;
+        r[record::LOOT_TABLE] = 4;
         r
     }
 
@@ -448,6 +464,8 @@ mod tests {
         let s = MonsterScaling::DEFAULT;
         let t = MonsterTemplate::from_record(&wolf()).unwrap();
         assert_eq!(t.role, Role::Fast);
+        assert_eq!(t.loot_table, 4);
+        assert_eq!(t.profile(1, &s).loot_table, 4);
         assert_eq!((t.pool_start, t.pool_len, t.kin), (0, 4, 0));
         let p = t.profile(2, &s);
         assert_eq!((p.weapon.min, p.weapon.max), (3, 6));
@@ -477,6 +495,7 @@ mod tests {
             (record::IMMUNE_STATES, 0x80),
             (record::POOL_LEN, 17),
             (record::RESERVED, 1),
+            (record::LOOT_TABLE, 32),
         ] {
             let mut r = ok;
             r[at] = v;

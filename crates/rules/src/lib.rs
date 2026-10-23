@@ -22,6 +22,7 @@ pub mod config;
 pub mod input;
 pub mod items;
 pub mod line;
+pub mod loot;
 pub mod monster;
 pub mod monster_ai;
 pub mod player;
@@ -34,8 +35,8 @@ pub mod turn;
 pub mod units;
 
 pub use config::{
-    BalanceConfig, FeeTuning, ItemBaseStats, ItemTuning, MonsterScaling, PlayerTuning, LEVELS,
-    TIERS,
+    BalanceConfig, FeeTuning, ItemBaseStats, ItemTuning, LootTuning, MonsterScaling, PlayerTuning,
+    LEVELS, MAP_TIERS, TIERS,
 };
 pub use input::{EffectAction, HeroStats, Side, SkillStats, SkillUse};
 pub use items::{EquipError, Equipment, ItemBonus};

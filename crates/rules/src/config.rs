@@ -7,7 +7,7 @@
 use deadroll_combat::{Balance, SupportBalance};
 use deadroll_skillcheck::SkillTuning;
 use deadroll_types::{
-    Aspect, Class, EquipSlot, Form, ItemBase, Race, RangeTag, StateKind, STATS_COUNT,
+    Aspect, Class, EquipSlot, Form, ItemBase, Race, RangeTag, StateKind, PARTY_MAX, STATS_COUNT,
 };
 
 use crate::items::KIT_MAX;
@@ -36,6 +36,10 @@ pub struct BalanceConfig {
     /// in a bench file saved before it: the defaults.
     #[cfg_attr(feature = "serde", serde(default))]
     pub fees: FeeTuning,
+    /// Patch 11: chests, reward budget, reward rolls, the bag (`crate::loot`). Missing in a bench
+    /// file saved before it: the defaults.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub loot: LootTuning,
 }
 
 impl BalanceConfig {
@@ -47,6 +51,7 @@ impl BalanceConfig {
         monsters: MonsterScaling::DEFAULT,
         items: ItemTuning::DEFAULT,
         fees: FeeTuning::DEFAULT,
+        loot: LootTuning::DEFAULT,
     };
 }
 
@@ -453,6 +458,71 @@ impl FeeTuning {
 }
 
 impl Default for FeeTuning {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
+/// Map tiers with numbers (`deadroll_mapcheck::limits`): tables by map tier have this length,
+/// index `tier - 1`.
+pub const MAP_TIERS: usize = deadroll_mapcheck::limits::TIER_MAX as usize;
+/// Steps of [`LootTuning::over_tier_xp_bp`]: 1, 2 or more levels above the map tier.
+pub const OVER_TIER_STEPS: usize = 2;
+
+/// Patch 11: rewards (docs/PARTY_AND_TURNS.md 9, docs/MAP_DESCRIPTION.md 7.1 and 10.2,
+/// docs/ITEMS_AND_CRAFT.md 6.1). The reward tables themselves are registry data.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LootTuning {
+    /// Visible chests a map may have, by map tier.
+    pub chests: [u8; MAP_TIERS],
+    /// Reward budget of a map (chests and boss table costs), by map tier, then by the map's
+    /// minimum players (index `min_players - 1`): it grows with party size.
+    pub budget: [[u16; PARTY_MAX]; MAP_TIERS],
+    /// Registry reward table ids a DM may put on a map, by map tier, bit `1 << id`. A table
+    /// whose top level is above the tier is refused anyway.
+    pub allowed_tables: [u64; MAP_TIERS],
+    /// Chance, in basis points, that a reward event's level goes one step above the table's
+    /// base level; rolled again for every further step (the base level drops most often).
+    pub level_step_bp: u16,
+    /// Action points to open a chest (docs/PARTY_AND_TURNS.md 5.1).
+    pub chest_open_ap: u8,
+    /// No living monster may be this close (Chebyshev distance) to the chest or to the player
+    /// who opens it.
+    pub chest_monster_radius: u8,
+    /// The DM issues the rewards within this many seconds of the party's end; after it, every
+    /// player claims their own cache and gets their contribution back.
+    pub settle_timeout_secs: u32,
+    /// Experience of a character above the map tier's top level, by levels above (1, then 2 or
+    /// more), basis points (docs/PARTY_AND_TURNS.md 9.5).
+    pub over_tier_xp_bp: [u16; OVER_TIER_STEPS],
+    /// From this many levels above the map tier no rewards are rolled for the character.
+    pub over_tier_no_loot: u8,
+    /// Units in one bag resource slot (docs/ITEMS_AND_CRAFT.md 6.1).
+    pub resource_stack_max: u8,
+    /// Identical consumables in one bag consumable slot.
+    pub consumable_stack_max: u8,
+}
+
+impl LootTuning {
+    pub const DEFAULT: LootTuning = LootTuning {
+        chests: [1, 2],
+        budget: [[6, 8, 10, 12], [10, 13, 16, 20]],
+        // Tier 1: the tier 1 stub chest and boss tables; tier 2 also its own
+        // (assets/registry/reward_tables.json).
+        allowed_tables: [0b0011, 0b1111],
+        level_step_bp: 2_500,
+        chest_open_ap: 1,
+        chest_monster_radius: 3,
+        settle_timeout_secs: 24 * 60 * 60,
+        over_tier_xp_bp: [5_000, 0],
+        over_tier_no_loot: 2,
+        resource_stack_max: 10,
+        consumable_stack_max: 5,
+    };
+}
+
+impl Default for LootTuning {
     fn default() -> Self {
         Self::DEFAULT
     }

@@ -5,6 +5,7 @@
 #![no_std]
 
 pub mod limits;
+pub mod loot;
 pub mod path;
 pub mod roster;
 pub mod tiles;
@@ -13,6 +14,7 @@ use deadroll_skillcheck::{check_monster_selection, monster::RECORDS_MAX, SkillEr
 use deadroll_types::{Cell, MapLayoutData, Tile, SESSION_SKILLS_MAX, SPAWNS_MAX, SPAWN_ELITE};
 
 use limits::{tier_limits, BOSSES, BOSS_HELPERS, PACK_RADIUS, SIDE_MAX, SIDE_MIN};
+use loot::{MapLoot, TableRules};
 use roster::{Role, SpawnRules};
 use tiles::{cell_index, in_bounds, is_passable};
 
@@ -76,6 +78,29 @@ pub enum MapCheckError {
     TooManyElites,
     /// More distinct chosen skills than a session copies (`SESSION_SKILLS_MAX`).
     TooManySessionSkills,
+    // Patch 11: chests and rewards (docs/MAP_DESCRIPTION.md 7.1, 10; PARTY_AND_TURNS.md 9.2).
+    /// The map's minimum players is outside `1..=PARTY_MAX`.
+    MinPlayersOutOfRange,
+    /// More visible chests than the tier allows.
+    TooManyChests,
+    /// A point whose type is not a visible chest.
+    InvalidPoint,
+    ChestOutOfBounds,
+    ChestNotPassable,
+    /// A chest on the entrance, the exit, a spawn or another chest.
+    ChestOverlap,
+    /// No reward table with this id.
+    UnknownTable,
+    /// A reward table not allowed on this tier (not listed, or levels above the tier).
+    TableNotAllowed,
+    /// The boss has no reward table.
+    BossTableMissing,
+    /// The boss table has one level: no room for the boss guarantee (PARTY_AND_TURNS 9.4).
+    BossTableOneLevel,
+    /// Chests and boss cost more than the budget for the map's minimum players.
+    OverBudget,
+    /// No cell next to a chest can be reached from the entrance.
+    ChestUnreachable,
 }
 
 impl MapCheckError {
@@ -85,13 +110,14 @@ impl MapCheckError {
 }
 
 /// Runs every builder rule on a map. `template_of` gives a bestiary id's rules from the registry
-/// (`None`: no such template).
-pub fn check_map(
+/// (`None`: no such template); `loot` the chest and reward table rules (patch 11).
+pub fn check_map<R: Fn(u8) -> Option<TableRules>>(
     width: u8,
     height: u8,
     tier: u8,
     layout: &MapLayoutData,
     template_of: impl Fn(u8) -> Option<SpawnRules>,
+    loot: &MapLoot<R>,
 ) -> Result<(), MapCheckError> {
     let role_of = |id: u8| template_of(id).map(|t| t.role);
     use MapCheckError as E;
@@ -219,7 +245,17 @@ pub fn check_map(
         }
     }
 
-    let reach = path::reachable_from(&layout.tiles, width, height, layout.entrance);
+    loot::check_chests(width, height, limits.level_max, layout, loot)?;
+
+    // Closed chests occupy their cell: the paths go around them.
+    let (chests, chest_count) = loot::chest_cells(layout);
+    let reach = path::reachable_avoiding(
+        &layout.tiles,
+        width,
+        height,
+        layout.entrance,
+        &chests[..chest_count],
+    );
     if !reach.contains(layout.exit) {
         return Err(E::ExitUnreachable);
     }
@@ -229,7 +265,7 @@ pub fn check_map(
     {
         return Err(E::SpawnUnreachable);
     }
-    Ok(())
+    loot::check_chest_access(width, height, layout, &reach)
 }
 
 /// Every cell inside the map is a `Tile`, with exactly one entrance and one exit that match
@@ -278,7 +314,7 @@ fn check_tiles(width: u8, height: u8, layout: &MapLayoutData) -> Result<(), MapC
 mod tests {
     use super::*;
     use deadroll_skillcheck::Category;
-    use deadroll_types::{Pubkey, Spawn, MAP_CELLS};
+    use deadroll_types::{MapPoint, PointKind, Pubkey, Spawn, CHESTS_MAX, MAP_CELLS, NO_TABLE};
 
     /// Test bestiary ids (the shipped registry order).
     mod ids {
@@ -345,11 +381,68 @@ mod tests {
             entrance: ENTRANCE,
             exit: EXIT,
             bump: 0,
+            chests: [chest(5, 5, tables::SMALL); CHESTS_MAX],
+            chest_count: 1,
+            boss_table: tables::BOSS,
+        }
+    }
+
+    /// Test reward tables.
+    mod tables {
+        /// Levels 1, cost 2.
+        pub const SMALL: u8 = 0;
+        /// Levels 1-2, cost 4.
+        pub const BOSS: u8 = 1;
+        /// Levels 3-4 (tier 2), cost 5.
+        pub const HIGH: u8 = 2;
+        /// Levels 1-2, cost 3, not in the allowed mask.
+        pub const UNLISTED: u8 = 3;
+    }
+
+    fn table_of(id: u8) -> Option<TableRules> {
+        let (level_base, level_max, cost) = match id {
+            tables::SMALL => (1, 1, 2),
+            tables::BOSS => (1, 2, 4),
+            tables::HIGH => (3, 4, 5),
+            tables::UNLISTED => (1, 2, 3),
+            _ => return None,
+        };
+        Some(TableRules {
+            level_base,
+            level_max,
+            cost,
+        })
+    }
+
+    type TestLoot = MapLoot<fn(u8) -> Option<TableRules>>;
+
+    fn test_loot() -> TestLoot {
+        loot_for(1)
+    }
+
+    fn loot_for(min_players: u8) -> TestLoot {
+        MapLoot {
+            min_players,
+            rules: loot::LootRules {
+                chests: 2,
+                budget: [6, 8, 10, 12],
+                allowed: 0b0111,
+            },
+            table_of,
+        }
+    }
+
+    fn chest(x: u8, y: u8, table: u8) -> MapPoint {
+        MapPoint {
+            kind: PointKind::Chest,
+            x,
+            y,
+            data: table,
         }
     }
 
     fn check(layout: &MapLayoutData) -> Result<(), MapCheckError> {
-        check_map(16, 16, 1, layout, p0_role)
+        check_map(16, 16, 1, layout, p0_role, &test_loot())
     }
 
     fn set(layout: &mut MapLayoutData, x: u8, y: u8, tile: Tile) {
@@ -369,18 +462,18 @@ mod tests {
         set(&mut layout, 31, 31, Tile::Exit);
         layout.entrance = Cell { x: 0, y: 0 };
         layout.exit = Cell { x: 31, y: 31 };
-        assert_eq!(check_map(32, 32, 1, &layout, p0_role), Ok(()));
+        assert_eq!(check_map(32, 32, 1, &layout, p0_role, &test_loot()), Ok(()));
     }
 
     #[test]
     fn rejects_size() {
         let layout = demo();
         assert_eq!(
-            check_map(7, 16, 1, &layout, p0_role),
+            check_map(7, 16, 1, &layout, p0_role, &test_loot()),
             Err(MapCheckError::SizeOutOfRange)
         );
         assert_eq!(
-            check_map(16, 33, 1, &layout, p0_role),
+            check_map(16, 33, 1, &layout, p0_role, &test_loot()),
             Err(MapCheckError::SizeOutOfRange)
         );
     }
@@ -389,11 +482,11 @@ mod tests {
     fn rejects_tier() {
         let layout = demo();
         assert_eq!(
-            check_map(16, 16, 0, &layout, p0_role),
+            check_map(16, 16, 0, &layout, p0_role, &test_loot()),
             Err(MapCheckError::TierOutOfRange)
         );
         assert_eq!(
-            check_map(16, 16, 3, &layout, p0_role),
+            check_map(16, 16, 3, &layout, p0_role, &test_loot()),
             Err(MapCheckError::TierOutOfRange)
         );
     }
@@ -499,7 +592,7 @@ mod tests {
         for s in layout.spawns.iter_mut() {
             s.level = 3;
         }
-        assert_eq!(check_map(16, 16, 2, &layout, p0_role), Ok(()));
+        assert_eq!(check_map(16, 16, 2, &layout, p0_role, &test_loot()), Ok(()));
     }
 
     #[test]
@@ -570,13 +663,16 @@ mod tests {
             }
         };
         assert_eq!(
-            check_map(16, 16, 1, &layout, wolves_are_loners),
+            check_map(16, 16, 1, &layout, wolves_are_loners, &test_loot()),
             Err(MapCheckError::TwoLoners)
         );
         // One loner per pack is fine.
         let mut layout = demo();
         layout.spawns[1].bestiary_id = ids::GOBLIN;
-        assert_eq!(check_map(16, 16, 1, &layout, wolves_are_loners), Ok(()));
+        assert_eq!(
+            check_map(16, 16, 1, &layout, wolves_are_loners, &test_loot()),
+            Ok(())
+        );
     }
 
     #[test]
@@ -614,6 +710,159 @@ mod tests {
         assert_eq!(MapCheckError::SizeOutOfRange.code(), 0);
         assert_eq!(MapCheckError::SpawnUnreachable.code(), 22);
         assert_eq!(MapCheckError::TooManySessionSkills.code(), 28);
+        assert_eq!(MapCheckError::MinPlayersOutOfRange.code(), 29);
+        assert_eq!(MapCheckError::ChestUnreachable.code(), 40);
+    }
+
+    #[test]
+    fn map_without_chests_is_valid() {
+        let mut layout = demo();
+        layout.chest_count = 0;
+        assert_eq!(check(&layout), Ok(()));
+    }
+
+    #[test]
+    fn rejects_min_players_out_of_range() {
+        let layout = demo();
+        for bad in [0, 5] {
+            assert_eq!(
+                check_map(16, 16, 1, &layout, p0_role, &loot_for(bad)),
+                Err(MapCheckError::MinPlayersOutOfRange)
+            );
+        }
+        assert_eq!(check_map(16, 16, 1, &layout, p0_role, &loot_for(4)), Ok(()));
+    }
+
+    #[test]
+    fn rejects_too_many_chests() {
+        let mut layout = demo();
+        layout.chests[1] = chest(6, 6, tables::SMALL);
+        layout.chest_count = 2;
+        assert_eq!(
+            check_map(16, 16, 1, &layout, p0_role, &loot_for(2)),
+            Ok(()),
+            "the tier allows two"
+        );
+        layout.chests[2] = chest(7, 7, tables::SMALL);
+        layout.chest_count = 3;
+        assert_eq!(check(&layout), Err(MapCheckError::TooManyChests));
+        layout.chest_count = CHESTS_MAX as u8 + 1;
+        assert_eq!(check(&layout), Err(MapCheckError::TooManyChests));
+    }
+
+    #[test]
+    fn rejects_chest_placement() {
+        let mut layout = demo();
+        layout.chests[0] = chest(16, 5, tables::SMALL);
+        assert_eq!(check(&layout), Err(MapCheckError::ChestOutOfBounds));
+        layout.chests[0] = chest(0, 5, tables::SMALL);
+        assert_eq!(check(&layout), Err(MapCheckError::ChestNotPassable));
+        for cell in [ENTRANCE, EXIT, Cell { x: 6, y: 2 }] {
+            layout.chests[0] = chest(cell.x, cell.y, tables::SMALL);
+            assert_eq!(check(&layout), Err(MapCheckError::ChestOverlap));
+        }
+        layout.chests[0] = chest(5, 5, tables::SMALL);
+        layout.chests[1] = chest(5, 5, tables::SMALL);
+        layout.chest_count = 2;
+        assert_eq!(check(&layout), Err(MapCheckError::ChestOverlap));
+    }
+
+    #[test]
+    fn rejects_point_that_is_not_a_chest() {
+        let mut layout = demo();
+        // A byte past `PointKind` cannot be decoded; a future variant would be rejected here too.
+        layout.chests[0].kind = PointKind::Chest;
+        assert_eq!(check(&layout), Ok(()));
+        assert_eq!(PointKind::COUNT, 1);
+    }
+
+    #[test]
+    fn rejects_tables() {
+        let mut layout = demo();
+        layout.chests[0].data = 9;
+        assert_eq!(check(&layout), Err(MapCheckError::UnknownTable));
+        layout.chests[0].data = tables::UNLISTED;
+        assert_eq!(check(&layout), Err(MapCheckError::TableNotAllowed));
+        layout.chests[0].data = tables::HIGH;
+        assert_eq!(
+            check(&layout),
+            Err(MapCheckError::TableNotAllowed),
+            "levels above tier 1"
+        );
+        layout.chests[0].data = tables::SMALL;
+        layout.boss_table = NO_TABLE;
+        assert_eq!(check(&layout), Err(MapCheckError::BossTableMissing));
+        layout.boss_table = tables::SMALL;
+        assert_eq!(check(&layout), Err(MapCheckError::BossTableOneLevel));
+        layout.boss_table = tables::UNLISTED;
+        assert_eq!(check(&layout), Err(MapCheckError::TableNotAllowed));
+    }
+
+    #[test]
+    fn budget_grows_with_min_players() {
+        let mut layout = demo();
+        // Two chests (2 + 2) and the boss (4): 8 points.
+        layout.chests[1] = chest(6, 6, tables::SMALL);
+        layout.chest_count = 2;
+        assert_eq!(
+            check_map(16, 16, 1, &layout, p0_role, &loot_for(1)),
+            Err(MapCheckError::OverBudget)
+        );
+        assert_eq!(check_map(16, 16, 1, &layout, p0_role, &loot_for(2)), Ok(()));
+    }
+
+    #[test]
+    fn closed_chest_blocks_the_path() {
+        let mut layout = demo();
+        // A wall at x = 13 with one gap at (13, 7) between the room and the exit (14, 14).
+        for y in 1..15 {
+            set(&mut layout, 13, y, Tile::Wall);
+        }
+        set(&mut layout, 13, 7, Tile::Floor);
+        assert_eq!(check(&layout), Ok(()));
+        layout.chests[0] = chest(13, 7, tables::SMALL);
+        assert_eq!(check(&layout), Err(MapCheckError::ExitUnreachable));
+    }
+
+    #[test]
+    fn closed_chest_hides_a_spawn() {
+        let mut layout = demo();
+        // Wall off the wolves' corner but one gap, then put the chest in the gap.
+        for x in 1..=8 {
+            set(&mut layout, x, 4, Tile::Wall);
+        }
+        for y in 1..4 {
+            set(&mut layout, 8, y, Tile::Wall);
+        }
+        set(&mut layout, 3, 4, Tile::Floor);
+        layout.entrance = Cell { x: 1, y: 6 };
+        set(&mut layout, ENTRANCE.x, ENTRANCE.y, Tile::Floor);
+        set(&mut layout, 1, 6, Tile::Entrance);
+        assert_eq!(check(&layout), Ok(()));
+        layout.chests[0] = chest(3, 4, tables::SMALL);
+        assert_eq!(check(&layout), Err(MapCheckError::SpawnUnreachable));
+    }
+
+    #[test]
+    fn chest_needs_a_reachable_neighbor() {
+        let mut layout = demo();
+        // A chest in a walled pocket: every neighbor is a wall.
+        for (x, y) in [
+            (4, 4),
+            (5, 4),
+            (6, 4),
+            (4, 5),
+            (6, 5),
+            (4, 6),
+            (5, 6),
+            (6, 6),
+        ] {
+            set(&mut layout, x, y, Tile::Wall);
+        }
+        assert_eq!(check(&layout), Err(MapCheckError::ChestUnreachable));
+        // One open diagonal neighbor is enough.
+        set(&mut layout, 6, 6, Tile::Floor);
+        assert_eq!(check(&layout), Ok(()));
     }
 
     /// Wolves with a pool of 4 actives and a passive at `start`.
@@ -635,25 +884,25 @@ mod tests {
         let roster = with_pool(0);
         // No skills chosen while the pool has some.
         assert_eq!(
-            check_map(16, 16, 1, &layout, &roster),
+            check_map(16, 16, 1, &layout, &roster, &test_loot()),
             Err(MapCheckError::MonsterSkillCount)
         );
         layout.spawns[0].skills = 0b1_0111;
         layout.spawns[1].skills = 0b1_1110;
-        assert_eq!(check_map(16, 16, 1, &layout, &roster), Ok(()));
+        assert_eq!(check_map(16, 16, 1, &layout, &roster, &test_loot()), Ok(()));
         layout.spawns[1].skills = 0b10_0111;
         assert_eq!(
-            check_map(16, 16, 1, &layout, &roster),
+            check_map(16, 16, 1, &layout, &roster, &test_loot()),
             Err(MapCheckError::MonsterSkillUnknown)
         );
         // An elite takes all four actives.
         layout.spawns[1].skills = 0b1_1111;
         assert_eq!(
-            check_map(16, 16, 1, &layout, &roster),
+            check_map(16, 16, 1, &layout, &roster, &test_loot()),
             Err(MapCheckError::MonsterSkillCount)
         );
         layout.spawns[1].flags = SPAWN_ELITE;
-        assert_eq!(check_map(16, 16, 1, &layout, &roster), Ok(()));
+        assert_eq!(check_map(16, 16, 1, &layout, &roster, &test_loot()), Ok(()));
     }
 
     #[test]
@@ -664,7 +913,7 @@ mod tests {
         layout.spawns[1].flags = SPAWN_ELITE;
         assert_eq!(check(&layout), Err(MapCheckError::TooManyElites));
         assert_eq!(
-            check_map(16, 16, 2, &layout, p0_role),
+            check_map(16, 16, 2, &layout, p0_role, &test_loot()),
             Err(MapCheckError::LevelOutOfTier)
         );
         let mut layout = demo();
@@ -681,7 +930,7 @@ mod tests {
             Some(t)
         };
         assert_eq!(
-            check_map(16, 16, 1, &layout, high),
+            check_map(16, 16, 1, &layout, high, &test_loot()),
             Err(MapCheckError::TierBelowTemplate)
         );
     }
@@ -702,7 +951,7 @@ mod tests {
         }
         // 5 templates x 16 distinct skills = 80 > 32.
         assert_eq!(
-            check_map(16, 16, 1, &layout, roster),
+            check_map(16, 16, 1, &layout, roster, &test_loot()),
             Err(MapCheckError::TooManySessionSkills)
         );
         // The same two templates share their skills: 2 x 16 = 32 fit.
@@ -718,6 +967,6 @@ mod tests {
             }
             Some(t)
         };
-        assert_eq!(check_map(16, 16, 1, &layout, two), Ok(()));
+        assert_eq!(check_map(16, 16, 1, &layout, two, &test_loot()), Ok(()));
     }
 }

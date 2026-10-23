@@ -25,6 +25,10 @@ import {
   loadEncodedTables,
   encodeMonsterSkills,
   MONSTER_SKILL_SIZE,
+  encodeRewards,
+  validate_reward,
+  REWARD_SIZE,
+  NO_TABLE,
 } from "./registry-records.ts";
 
 function load(name: string): unknown {
@@ -137,6 +141,7 @@ test("the encoder gives the bytes deadroll-rules reads (sim and program)", () =>
   assert.equal(hex(encodeResonances(load("resonances.json"))), fixture.resonances);
   assert.equal(hex(encodeBestiary(load("bestiary.json"))), fixture.bestiary);
   assert.equal(hex(encodeMonsterSkills(load("monster_skills.json"))), fixture.monster_skills);
+  assert.equal(hex(encodeRewards(load("reward_tables.json"))), fixture.rewards);
 });
 
 test("patch 6: monster skill records and the bestiary pools", () => {
@@ -192,4 +197,28 @@ test("ops: args by kind, crit flag, bad ops refused", () => {
       })),
     }),
   );
+});
+
+test("reward tables: stub file, validator mirrors LootTable::from_record", () => {
+  const bytes = encodeRewards(load("reward_tables.json"));
+  assert.equal(bytes.length % REWARD_SIZE, 0);
+  assert.equal(validate_write(TableKind.Rewards, 0, bytes), true);
+  const first = bytes.slice(0, REWARD_SIZE);
+  assert.equal(validate_reward(new Uint8Array(REWARD_SIZE)), true, "empty id");
+  const bad = (at: number, v: number) => {
+    const r = first.slice();
+    r[at] = v;
+    return !validate_reward(r);
+  };
+  assert.ok(bad(0, 2), "present");
+  assert.ok(bad(3, 1), "reserved");
+  assert.ok(bad(1, 0), "base 0");
+  assert.ok(bad(2, 9), "more than 4 levels");
+  assert.ok(bad(8, 0), "a used level without entries");
+  assert.ok(bad(9, 9), "unknown kind");
+  assert.ok(bad(12, 0), "qty 0");
+  // The bestiary points at a body table, the helpers at none.
+  const bestiary = encodeBestiary(load("bestiary.json"));
+  assert.equal(bestiary[44], 4);
+  assert.equal(bestiary[4 * MONSTER_SIZE + 44], NO_TABLE);
 });

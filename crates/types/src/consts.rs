@@ -37,3 +37,16 @@ pub const SPAWN_ELITE: u8 = 1;
 pub const MONSTER_SLOTS: usize = 7;
 /// Distinct monster skills one session copies from the registry (`MonsterState.skill_table`).
 pub const SESSION_SKILLS_MAX: usize = 32;
+/// Patch 11: visible chests one map layout can hold (`MapLayoutData.chests`); the limit per
+/// map tier is `deadroll_rules::LootTuning::chests`.
+pub const CHESTS_MAX: usize = 4;
+/// "No reward table" (`MapLayoutData.boss_table`, a bestiary template's loot table).
+pub const NO_TABLE: u8 = 0xFF;
+/// Distinct rewards one temporary cache holds, merged by `(kind, id)`.
+pub const CACHE_SLOTS: usize = 32;
+/// Bytes of a raw cache (`CacheSlot::SIZE` per slot), as `Participation` stores it.
+pub const CACHE_BYTES: usize = CACHE_SLOTS * 5;
+/// Resource slots of the bag (docs/ITEMS_AND_CRAFT.md 6.1): one kind per slot.
+pub const BAG_RESOURCE_SLOTS: usize = 40;
+/// Consumable slots of the bag (docs/ITEMS_AND_CRAFT.md 6.1).
+pub const BAG_CONSUMABLE_SLOTS: usize = 5;

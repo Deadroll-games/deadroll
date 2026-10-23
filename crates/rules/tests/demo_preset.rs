@@ -5,18 +5,23 @@
 //! Preset format:
 //! ```json
 //! { "name": "demo_16x16", "width": 16, "height": 16, "tier": 1,
+//!   "min_players": 1, "boss_table": 1, "chests": [{ "x": 9, "y": 10, "table": 0 }],
 //!   "rows": ["################", "#E.............#", ...],
 //!   "spawns": [{ "bestiary_id": 0, "x": 5, "y": 2, "level": 1, "skills": 0,
 //!                "flags": 0, "aspects": 0, "pack": 1 }] }
 //! ```
 //! Row characters: `#` Wall, `.` Floor, `~` Water, `D` Door, `E` Entrance, `X` Exit, `T` Trap.
-//! The entrance and exit cells come from the `E` and `X` characters.
+//! The entrance and exit cells come from the `E` and `X` characters. Patch 11: `min_players`,
+//! `boss_table` (`reward_tables.json` id) and the visible `chests`.
 
 use std::path::PathBuf;
 
-use deadroll_mapcheck::{check_map, tiles::cell_index};
-use deadroll_rules::{registry::Registry, BalanceConfig};
-use deadroll_types::{Cell, MapLayoutData, Pubkey, Spawn, Tile, MAP_CELLS, SPAWNS_MAX};
+use deadroll_mapcheck::{check_map, loot::MapLoot, tiles::cell_index};
+use deadroll_rules::{loot::map_rules, registry::Registry, BalanceConfig};
+use deadroll_types::{
+    Cell, MapLayoutData, MapPoint, PointKind, Pubkey, Spawn, Tile, CHESTS_MAX, MAP_CELLS,
+    SPAWNS_MAX,
+};
 use serde_json::Value;
 
 fn tile(ch: char) -> Tile {
@@ -41,7 +46,7 @@ fn u8_field(v: &Value, key: &str) -> u8 {
 }
 
 /// Builds the layout described by a preset, as the seed script writes it on-chain.
-fn load(path: &PathBuf) -> (u8, u8, u8, MapLayoutData) {
+fn load(path: &PathBuf) -> (u8, u8, u8, u8, MapLayoutData) {
     let json: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     let (width, height, tier) = (
         u8_field(&json, "width"),
@@ -91,6 +96,18 @@ fn load(path: &PathBuf) -> (u8, u8, u8, MapLayoutData) {
         };
     }
 
+    let points = json["chests"].as_array().expect("chests");
+    assert!(points.len() <= CHESTS_MAX);
+    let mut chests = [MapPoint::default(); CHESTS_MAX];
+    for (slot, c) in chests.iter_mut().zip(points) {
+        *slot = MapPoint {
+            kind: PointKind::Chest,
+            x: u8_field(c, "x"),
+            y: u8_field(c, "y"),
+            data: u8_field(c, "table"),
+        };
+    }
+
     let layout = MapLayoutData {
         version: 1,
         map: Pubkey::default(),
@@ -100,8 +117,11 @@ fn load(path: &PathBuf) -> (u8, u8, u8, MapLayoutData) {
         entrance,
         exit,
         bump: 0,
+        chests,
+        chest_count: points.len() as u8,
+        boss_table: u8_field(&json, "boss_table"),
     };
-    (width, height, tier, layout)
+    (width, height, tier, u8_field(&json, "min_players"), layout)
 }
 
 #[test]
@@ -113,10 +133,21 @@ fn every_preset_passes_the_builder_rules() {
     for entry in std::fs::read_dir(&dir).expect("assets/registry/maps") {
         let path = entry.unwrap().path();
         if path.extension().is_some_and(|e| e == "json") {
-            let (width, height, tier, layout) = load(&path);
+            let (width, height, tier, min_players, layout) = load(&path);
+            let loot = MapLoot {
+                min_players,
+                rules: map_rules(&cfg.loot, tier),
+                table_of: |id: u8| reg.reward_table(id).map(|t| t.rules()),
+            };
             assert_eq!(
-                check_map(width, height, tier, &layout, |id| reg
-                    .spawn_rules(id, &cfg.monsters)),
+                check_map(
+                    width,
+                    height,
+                    tier,
+                    &layout,
+                    |id| reg.spawn_rules(id, &cfg.monsters),
+                    &loot
+                ),
                 Ok(()),
                 "{}",
                 path.display()

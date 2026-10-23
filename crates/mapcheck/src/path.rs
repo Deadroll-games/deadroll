@@ -52,10 +52,25 @@ const _: () = assert!(MAP_MAX.is_power_of_two());
 ///
 /// Hot loop on-chain (`finalize_map`): `closed` holds visited and impassable cells together,
 /// so each neighbor costs one bit test.
-#[inline(never)]
 pub fn reachable_from(tiles: &[u8; MAP_CELLS], width: u8, height: u8, start: Cell) -> Reach {
+    reachable_avoiding(tiles, width, height, start, &[])
+}
+
+/// [`reachable_from`] with `blocked` cells closed as well (patch 11: closed chests occupy their
+/// cell). A blocked `start` reaches nothing.
+#[inline(never)]
+pub fn reachable_avoiding(
+    tiles: &[u8; MAP_CELLS],
+    width: u8,
+    height: u8,
+    start: Cell,
+    blocked: &[Cell],
+) -> Reach {
     let mut reach = Reach::empty();
-    if !in_bounds(start, width, height) || !byte_is_passable(tiles[cell_index(start.x, start.y)]) {
+    if !in_bounds(start, width, height)
+        || !byte_is_passable(tiles[cell_index(start.x, start.y)])
+        || blocked.contains(&start)
+    {
         return reach;
     }
     let (w, h) = (width as usize, height as usize);
@@ -66,6 +81,11 @@ pub fn reachable_from(tiles: &[u8; MAP_CELLS], width: u8, height: u8, start: Cel
             if !byte_is_passable(byte) {
                 closed.set(row + i);
             }
+        }
+    }
+    for c in blocked {
+        if in_bounds(*c, width, height) {
+            closed.set(cell_index(c.x, c.y));
         }
     }
     // Every cell enters the queue at most once, so a plain array never overflows.
@@ -144,6 +164,26 @@ mod tests {
         let tiles = grid(&[".~~~."]);
         let reach = reachable_from(&tiles, 5, 1, Cell { x: 0, y: 0 });
         assert!(reach.contains(Cell { x: 4, y: 0 }));
+    }
+
+    #[test]
+    fn blocked_cells_close_a_corridor() {
+        let tiles = grid(&["....."]);
+        let gate = Cell { x: 2, y: 0 };
+        let reach = reachable_avoiding(&tiles, 5, 1, Cell { x: 0, y: 0 }, &[gate]);
+        assert_eq!(reach.count(), 2);
+        assert!(!reach.contains(gate));
+        assert_eq!(
+            reachable_avoiding(&tiles, 5, 1, gate, &[gate]).count(),
+            0,
+            "blocked start"
+        );
+        // Out-of-map blocked cells are ignored.
+        let far = Cell { x: 9, y: 9 };
+        assert_eq!(
+            reachable_avoiding(&tiles, 5, 1, Cell { x: 0, y: 0 }, &[far]).count(),
+            5
+        );
     }
 
     #[test]

@@ -1,0 +1,128 @@
+{
+  "note": "STUB: test tables on the current resource ids 0-7, real loot later. id = table id (MapLayout chests, boss_table, bestiary loot_table). levels[i] = the rewards of level level_base + i, each equally likely. cost: budget points (LootTuning.budget, allowed_tables). Body tables (cost 0) are not put on maps.",
+  "records": [
+    {
+      "id": 0,
+      "name": "tier 1 chest (stub)",
+      "level_base": 1,
+      "level_max": 2,
+      "cost": 2,
+      "levels": [
+        [
+          { "kind": "Resource", "id": 0, "qty": 2 },
+          { "kind": "Resource", "id": 1, "qty": 2 },
+          { "kind": "Resource", "id": 2, "qty": 1 },
+          { "kind": "Consumable", "id": 0, "qty": 1 }
+        ],
+        [
+          { "kind": "Resource", "id": 3, "qty": 2 },
+          { "kind": "Resource", "id": 4, "qty": 1 },
+          { "kind": "Recipe", "id": 0, "qty": 1 }
+        ]
+      ]
+    },
+    {
+      "id": 1,
+      "name": "tier 1 boss (stub)",
+      "level_base": 1,
+      "level_max": 2,
+      "cost": 4,
+      "levels": [
+        [
+          { "kind": "Resource", "id": 5, "qty": 2 },
+          { "kind": "Resource", "id": 6, "qty": 1 }
+        ],
+        [
+          { "kind": "Recipe", "id": 1, "qty": 1 },
+          { "kind": "Blank", "id": 0, "qty": 1 },
+          { "kind": "Resource", "id": 7, "qty": 2 }
+        ]
+      ]
+    },
+    {
+      "id": 2,
+      "name": "tier 2 chest (stub)",
+      "level_base": 3,
+      "level_max": 4,
+      "cost": 4,
+      "levels": [
+        [
+          { "kind": "Resource", "id": 0, "qty": 4 },
+          { "kind": "Resource", "id": 3, "qty": 3 }
+        ],
+        [
+          { "kind": "Resource", "id": 4, "qty": 3 },
+          { "kind": "Reagent", "id": 0, "qty": 1 }
+        ]
+      ]
+    },
+    {
+      "id": 3,
+      "name": "tier 2 boss (stub)",
+      "level_base": 3,
+      "level_max": 4,
+      "cost": 6,
+      "levels": [
+        [
+          { "kind": "Recipe", "id": 2, "qty": 1 },
+          { "kind": "Resource", "id": 7, "qty": 4 }
+        ],
+        [
+          { "kind": "Blank", "id": 1, "qty": 1 },
+          { "kind": "Reagent", "id": 1, "qty": 2 }
+        ]
+      ]
+    },
+    {
+      "id": 4,
+      "name": "body: beasts (stub)",
+      "level_base": 1,
+      "level_max": 4,
+      "cost": 0,
+      "levels": [
+        [{ "kind": "Resource", "id": 2, "qty": 1 }],
+        [{ "kind": "Resource", "id": 2, "qty": 2 }],
+        [{ "kind": "Resource", "id": 2, "qty": 3 }],
+        [{ "kind": "Resource", "id": 2, "qty": 4 }]
+      ]
+    },
+    {
+      "id": 5,
+      "name": "body: goblins (stub)",
+      "level_base": 1,
+      "level_max": 4,
+      "cost": 0,
+      "levels": [
+        [
+          { "kind": "Resource", "id": 1, "qty": 1 },
+          { "kind": "Resource", "id": 6, "qty": 1 }
+        ],
+        [
+          { "kind": "Resource", "id": 1, "qty": 2 },
+          { "kind": "Resource", "id": 6, "qty": 1 }
+        ],
+        [{ "kind": "Resource", "id": 1, "qty": 3 }],
+        [{ "kind": "Resource", "id": 1, "qty": 4 }]
+      ]
+    },
+    {
+      "id": 6,
+      "name": "body: goblin chieftain (stub)",
+      "level_base": 1,
+      "level_max": 4,
+      "cost": 0,
+      "levels": [
+        [
+          { "kind": "Recipe", "id": 3, "qty": 1 },
+          { "kind": "Resource", "id": 7, "qty": 2 }
+        ],
+        [
+          { "kind": "Recipe", "id": 3, "qty": 1 },
+          { "kind": "Resource", "id": 7, "qty": 3 }
+        ],
+        [{ "kind": "Recipe", "id": 4, "qty": 1 }],
+        [{ "kind": "Recipe", "id": 4, "qty": 1 }]
+      ]
+    }
+  ]
+}

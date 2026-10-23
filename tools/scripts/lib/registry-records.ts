@@ -27,6 +27,16 @@ export const KIN_ONLY = 1;
 export const NO_KIN = 0xff;
 export const TABLE_CAP = 4096;
 export const NO_ASPECT = 0xff;
+/** Patch 11: reward table records (`deadroll_rules::loot::record`). */
+export const REWARD_SIZE = 108;
+export const REWARDS_MAX = 32;
+export const REWARD_LEVELS = 4;
+export const REWARD_ENTRIES = 6;
+const REWARD_LEVELS_AT = 8;
+const REWARD_LEVEL_SIZE = 1 + REWARD_ENTRIES * 4;
+/** Bestiary byte 44 "no body loot" and a map without a boss table. */
+export const NO_TABLE = 0xff;
+export const REWARD_KIND: Record<string, number> = { Resource: 0, Recipe: 1, Consumable: 2, Blank: 3, Reagent: 4 };
 
 export const TableKind = {
   Aspects: 0,
@@ -36,6 +46,7 @@ export const TableKind = {
   Prefabs: 4,
   Traits: 5,
   MonsterSkills: 6,
+  Rewards: 7,
 } as const;
 export type TableKind = (typeof TableKind)[keyof typeof TableKind];
 
@@ -208,6 +219,7 @@ export const TABLES = [
   { table: "prefabs", kind: TableKind.Prefabs, seed: "prefabs", file: "prefabs.json", recordSize: 1 },
   { table: "traits", kind: TableKind.Traits, seed: "traits", file: "traits.json", recordSize: TRAIT_SIZE },
   { table: "monster_skills", kind: TableKind.MonsterSkills, seed: "monster_skills", file: "monster_skills.json", recordSize: MONSTER_SKILL_SIZE },
+  { table: "rewards", kind: TableKind.Rewards, seed: "rewards", file: "reward_tables.json", recordSize: REWARD_SIZE },
 ] as const;
 
 export function registryAsset(name: string): string {
@@ -230,6 +242,8 @@ export function recordSize(kind: TableKind): number {
       return TRAIT_SIZE;
     case TableKind.MonsterSkills:
       return MONSTER_SKILL_SIZE;
+    case TableKind.Rewards:
+      return REWARD_SIZE;
   }
 }
 
@@ -249,6 +263,8 @@ export function maxLen(kind: TableKind): number {
       return Object.keys(TINT_TRAIT).length * TRAIT_SIZE;
     case TableKind.MonsterSkills:
       return MONSTER_SKILLS_MAX * MONSTER_SKILL_SIZE;
+    case TableKind.Rewards:
+      return REWARDS_MAX * REWARD_SIZE;
   }
 }
 
@@ -334,7 +350,9 @@ export function validate_monster(r: Uint8Array): boolean {
     // Patch 9: [42] resisted tags, [43] immune tags (sources, then forms).
     (r[42] & ~TAG_BITS) === 0 &&
     (r[43] & ~TAG_BITS) === 0 &&
-    r.subarray(44).every((b) => b === 0) &&
+    // Patch 11: [44] the body loot table (a reward table id or NO_TABLE), then reserved.
+    (r[44] === NO_TABLE || r[44] < REWARDS_MAX) &&
+    r.subarray(45).every((b) => b === 0) &&
     u16At(r, 30) <= u16At(r, 32)
   );
 }
@@ -370,6 +388,35 @@ export function validate_monster_skill(r: Uint8Array): boolean {
 }
 
 /** Checks one record of a typed table. `index` is the record's position in the table. */
+/**
+ * Patch 11: a reward table record (`deadroll_rules::loot::LootTable::from_record`): all zero, or
+ * present with levels base..max (at most 4), 1-6 entries on each used level, known kinds, qty >= 1,
+ * every unused byte zero.
+ */
+export function validate_reward(r: Uint8Array): boolean {
+  if (r.length !== REWARD_SIZE) return false;
+  if (r.every((b) => b === 0)) return true;
+  const [present, base, max] = [r[0], r[1], r[2]];
+  if (present !== 1 || r[3] !== 0 || r[6] !== 0 || r[7] !== 0) return false;
+  if (base === 0 || max < base || max - base + 1 > REWARD_LEVELS) return false;
+  const span = max - base + 1;
+  const kinds = Object.keys(REWARD_KIND).length;
+  for (let i = 0; i < REWARD_LEVELS; i++) {
+    const at = REWARD_LEVELS_AT + i * REWARD_LEVEL_SIZE;
+    const count = r[at];
+    if (i < span ? count < 1 || count > REWARD_ENTRIES : count !== 0) return false;
+    for (let j = 0; j < REWARD_ENTRIES; j++) {
+      const e = r.subarray(at + 1 + j * 4, at + 5 + j * 4);
+      if (j >= count) {
+        if (e.some((b) => b !== 0)) return false;
+      } else if (e[0] >= kinds || e[3] === 0) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 export function validate_record(kind: TableKind, index: number, r: Uint8Array): boolean {
   if (r.length !== recordSize(kind)) return false;
   switch (kind) {
@@ -414,6 +461,8 @@ export function validate_record(kind: TableKind, index: number, r: Uint8Array): 
       return r[0] <= 1 && r[2] <= 1 && (r[0] === 0 || r[1] >= 1);
     case TableKind.Prefabs:
       return true;
+    case TableKind.Rewards:
+      return validate_reward(r);
   }
 }
 
@@ -635,6 +684,8 @@ export function encodeMonster(json: unknown): Uint8Array {
   out[39] = rec.pool_start === undefined ? 0 : requireInt(rec.pool_start, "pool_start", 0, MONSTER_SKILLS_MAX - 1);
   out[40] = rec.pool_len === undefined ? 0 : requireInt(rec.pool_len, "pool_len", 0, POOL_MAX);
   out[41] = rec.kin === undefined || rec.kin === null ? NO_KIN : lookup(KIN, rec.kin, "kin");
+  // Patch 11: the body loot table.
+  out[44] = rec.loot_table === undefined || rec.loot_table === null ? NO_TABLE : requireInt(rec.loot_table, "loot_table", 0, REWARDS_MAX - 1);
   return out;
 }
 
@@ -672,6 +723,43 @@ export function encodeMonsterSkills(json: unknown): Uint8Array {
     const id = requireInt(rec.id, "id", 0, MONSTER_SKILLS_MAX - 1);
     if (id !== i) fail(`monster skill ${i} must have id ${i}`);
     out.set(encodeMonsterSkill(rec), i * MONSTER_SKILL_SIZE);
+  }
+  return out;
+}
+
+/** Patch 11: `reward_tables.json` (`deadroll_rules::registry::encode_rewards`). */
+export function encodeRewards(json: unknown): Uint8Array {
+  const records = recordsOf(json, "reward tables");
+  if (records.length > REWARDS_MAX) fail(`at most ${REWARDS_MAX} reward tables`);
+  const out = new Uint8Array(records.length * REWARD_SIZE);
+  for (let i = 0; i < records.length; i++) {
+    const rec = asObject(records[i], "reward table");
+    const id = requireInt(rec.id, "id", 0, REWARDS_MAX - 1);
+    if (id !== i) fail(`reward table ${i} must have id ${i}`);
+    const r = new Uint8Array(REWARD_SIZE);
+    const base = requireInt(rec.level_base, "level_base", 1, 255);
+    const max = requireInt(rec.level_max, "level_max", base, 255);
+    if (!Array.isArray(rec.levels) || rec.levels.length !== max - base + 1 || rec.levels.length > REWARD_LEVELS) {
+      fail(`reward table ${i}: one list per level from base to max, at most ${REWARD_LEVELS}`);
+    }
+    r[0] = 1;
+    r[1] = base;
+    r[2] = max;
+    putU16(r, 4, requireInt(rec.cost, "cost", 0, 0xffff));
+    rec.levels.forEach((entries: unknown, l: number) => {
+      if (!Array.isArray(entries) || entries.length > REWARD_ENTRIES) fail(`reward table ${i}: at most ${REWARD_ENTRIES} entries per level`);
+      const at = REWARD_LEVELS_AT + l * REWARD_LEVEL_SIZE;
+      r[at] = entries.length;
+      entries.forEach((e: unknown, j: number) => {
+        const entry = asObject(e, "reward entry");
+        const p = at + 1 + j * 4;
+        r[p] = lookup(REWARD_KIND, entry.kind, "reward kind");
+        putU16(r, p + 1, requireInt(entry.id, "id", 0, 0xffff));
+        r[p + 3] = requireInt(entry.qty, "qty", 1, 255);
+      });
+    });
+    if (!validate_reward(r)) fail(`reward table ${i}: invalid`);
+    out.set(r, i * REWARD_SIZE);
   }
   return out;
 }
@@ -737,6 +825,8 @@ export function encodeRegistryFile(table: string, json: unknown): Uint8Array {
       return encodeTraits(json);
     case "monster_skills":
       return encodeMonsterSkills(json);
+    case "rewards":
+      return encodeRewards(json);
     default:
       fail(`unknown table ${table}`);
   }

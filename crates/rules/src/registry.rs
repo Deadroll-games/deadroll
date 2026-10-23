@@ -15,9 +15,12 @@ use deadroll_skillcheck::{
     Category, Effect, Purpose, SkillBlocks, SkillExt, SkillTuning, Target, Trigger,
     SKILL_ASPECTS_MAX,
 };
-use deadroll_types::{Aspect, Family, Form, RangeTag, Source, StateKind, TimeTag};
+use deadroll_types::{
+    Aspect, Family, Form, RangeTag, RewardKind, Source, StateKind, TimeTag, NO_TABLE,
+};
 use serde::{Deserialize, Serialize};
 
+use crate::loot::{self, LootEntry, LootLevel, LootTable};
 use crate::monster::{record, MonsterDefense, MonsterTemplate, NO_KIN};
 
 /// Bestiary slots (registry `BESTIARY_MAX`).
@@ -42,6 +45,11 @@ pub struct Registry {
     pub resonances: Vec<u8>,
     pub bestiary: Vec<u8>,
     pub monster_skills: Vec<u8>,
+    /// Patch 11: the `rewards` table body, its tables by id (`None` for an empty id) and their
+    /// names from the JSON.
+    pub rewards: Vec<u8>,
+    pub reward_tables: Vec<Option<LootTable>>,
+    pub reward_names: Vec<String>,
 }
 
 impl Registry {
@@ -62,7 +70,24 @@ impl Registry {
         let mut r = Registry::from_bytes(aspects, traits, resonances, bestiary, monster_skills)?;
         r.monster_names = names::<MonsterJson>(&bestiary_json, |m| m.name.clone())?;
         r.skill_names = names::<MonsterSkillJson>(&skills_json, |m| m.name.clone())?;
+        let rewards_json = read("reward_tables.json")?;
+        r.set_rewards(encode_rewards(&rewards_json)?);
+        r.reward_names = names::<RewardTableJson>(&rewards_json, |t| t.name.clone())?;
         Ok(r)
+    }
+
+    /// Sets the `rewards` table body and decodes its tables.
+    pub fn set_rewards(&mut self, rewards: Vec<u8>) {
+        self.reward_tables = rewards
+            .chunks(loot::record::SIZE)
+            .map(LootTable::from_record)
+            .collect();
+        self.rewards = rewards;
+    }
+
+    /// Reward table `id`.
+    pub fn reward_table(&self, id: u8) -> Option<LootTable> {
+        self.reward_tables.get(id as usize).copied().flatten()
     }
 
     /// The default location: `assets/registry` of this repository.
@@ -104,6 +129,9 @@ impl Registry {
             resonances,
             bestiary,
             monster_skills,
+            rewards: Vec::new(),
+            reward_tables: Vec::new(),
+            reward_names: Vec::new(),
         })
     }
 
@@ -311,6 +339,9 @@ pub struct MonsterJson {
     pub pool_len: u8,
     #[serde(default)]
     pub kin: Option<String>,
+    /// Patch 11: the body loot table (`reward_tables.json` id), none = no body loot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loot_table: Option<u8>,
 }
 
 /// The whole `bestiary.json`.
@@ -628,8 +659,79 @@ pub fn encode_bestiary(json: &str) -> Result<Vec<u8>, String> {
             None => NO_KIN,
             Some(k) => index(&KINS, k, "kin")?,
         };
+        r[record::LOOT_TABLE] = m.loot_table.unwrap_or(NO_TABLE);
         MonsterTemplate::from_record(&r).ok_or_else(|| format!("bestiary {i}: invalid"))?;
         out.extend_from_slice(&r);
+    }
+    Ok(out)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RewardEntryJson {
+    kind: String,
+    id: u16,
+    qty: u8,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RewardTableJson {
+    id: u8,
+    name: String,
+    level_base: u8,
+    level_max: u8,
+    cost: u16,
+    levels: Vec<Vec<RewardEntryJson>>,
+}
+
+/// Patch 11: `reward_tables.json` as the `rewards` table body (programs/registry README), each
+/// record checked by `LootTable::from_record`.
+pub fn encode_rewards(json: &str) -> Result<Vec<u8>, String> {
+    let list: Vec<RewardTableJson> = records(json, "reward tables")?;
+    if list.len() > loot::record::RECORDS_MAX {
+        return Err(format!(
+            "reward tables: at most {} records",
+            loot::record::RECORDS_MAX
+        ));
+    }
+    let mut out = Vec::new();
+    for (i, t) in list.iter().enumerate() {
+        let label = format!("reward table {i} ({})", t.name);
+        if t.id as usize != i {
+            return Err(format!("{label} must have id {i}"));
+        }
+        if t.levels.len() != (t.level_max.saturating_sub(t.level_base) as usize + 1) {
+            return Err(format!("{label}: one list per level from base to max"));
+        }
+        if t.levels.len() > loot::record::LEVELS {
+            return Err(format!("{label}: at most {} levels", loot::record::LEVELS));
+        }
+        let mut table = LootTable {
+            level_base: t.level_base,
+            level_max: t.level_max,
+            cost: t.cost,
+            levels: [LootLevel::default(); loot::record::LEVELS],
+        };
+        for (level, entries) in table.levels.iter_mut().zip(&t.levels) {
+            if entries.len() > loot::record::ENTRIES {
+                return Err(format!(
+                    "{label}: at most {} entries per level",
+                    loot::record::ENTRIES
+                ));
+            }
+            level.count = entries.len() as u8;
+            for (e, j) in level.entries.iter_mut().zip(entries) {
+                *e = LootEntry {
+                    kind: parse(&j.kind, RewardKind::ALL, "reward kind")?,
+                    id: j.id,
+                    qty: j.qty,
+                };
+            }
+        }
+        let bytes = table.to_record();
+        LootTable::from_record(&bytes).ok_or_else(|| format!("{label}: invalid"))?;
+        out.extend_from_slice(&bytes);
     }
     Ok(out)
 }

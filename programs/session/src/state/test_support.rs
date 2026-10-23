@@ -72,6 +72,9 @@ pub fn layout_account(map: Pubkey) -> TestAccount {
         entrance: Cell { x: 0, y: 0 },
         exit: Cell { x: 7, y: 7 },
         bump: 255,
+        chests: Default::default(),
+        chest_count: 0,
+        boss_table: deadroll_types::NO_TABLE,
     };
     let mut data = MAP_LAYOUT_DISCRIMINATOR.to_vec();
     layout.serialize(&mut data).unwrap();

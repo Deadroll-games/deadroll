@@ -33,6 +33,8 @@ anchor-lang.workspace = true
 deadroll-types = { workspace = true, features = ["anchor"] }
 deadroll-combat.workspace = true
 deadroll-skillcheck.workspace = true
+# Patch 11: the reward table record (`deadroll_rules::loot`), the decoder every reader uses.
+deadroll-rules.workspace = true
 bytemuck = { version = "1", features = ["derive"] }
 
 [dev-dependencies]

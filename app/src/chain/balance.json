@@ -825,5 +825,40 @@
     "low_balance_lamports": 2000000,
     "max_key_lamports": 50000000,
     "key_validity_secs": 10800
+  },
+  "loot": {
+    "chests": [
+      1,
+      2
+    ],
+    "budget": [
+      [
+        6,
+        8,
+        10,
+        12
+      ],
+      [
+        10,
+        13,
+        16,
+        20
+      ]
+    ],
+    "allowed_tables": [
+      3,
+      15
+    ],
+    "level_step_bp": 2500,
+    "chest_open_ap": 1,
+    "chest_monster_radius": 3,
+    "settle_timeout_secs": 86400,
+    "over_tier_xp_bp": [
+      5000,
+      0
+    ],
+    "over_tier_no_loot": 2,
+    "resource_stack_max": 10,
+    "consumable_stack_max": 5
   }
 }

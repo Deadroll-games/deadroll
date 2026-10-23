@@ -16,8 +16,9 @@
 //! discriminator. `SIZE` is the max borsh size (`Option` counted as `Some`).
 
 use crate::{
-    Aspect, Class, EquipSlot, EquipSource, ItemBase, LayerRef, MapStatus, Pubkey, Race,
-    SessionStatus, StateKind, EMPTY_ITEM, EQUIP_SLOTS, LAYERS_MAX, MAP_CELLS, MONSTERS_MAX,
+    Aspect, Class, EquipSlot, EquipSource, ItemBase, LayerRef, MapStatus, PointKind, Pubkey, Race,
+    RewardKind, SessionStatus, StateKind, BAG_CONSUMABLE_SLOTS, BAG_RESOURCE_SLOTS, CACHE_BYTES,
+    CACHE_SLOTS, CHESTS_MAX, EMPTY_ITEM, EQUIP_SLOTS, LAYERS_MAX, MAP_CELLS, MONSTERS_MAX,
     PARTY_MAX, PROGRAMS_COUNT, SOULBOUND_MAX, SPAWNS_MAX, STATES_MAX, STATS_COUNT, TURN_ORDER_MAX,
     URI_BASE_LEN,
 };
@@ -55,6 +56,42 @@ shared! {
         pub flags: u8,
         pub aspects: u8,
         pub pack: u8,
+    }
+
+    /// Patch 11: a map point `(type, x, y, data)` (docs/MAP_DESCRIPTION.md 7.1).
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct MapPoint {
+        pub kind: PointKind,
+        pub x: u8,
+        pub y: u8,
+        /// A visible chest: its reward table id.
+        pub data: u8,
+    }
+
+    /// Patch 11: one reward kind in a temporary cache, `qty == 0` = empty.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct CacheSlot {
+        pub kind: RewardKind,
+        pub id: u16,
+        pub qty: u16,
+    }
+
+    /// Patch 11: one bag slot (docs/ITEMS_AND_CRAFT.md 6.1), `qty == 0` = empty (then `kind`
+    /// and `id` are zero too).
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct BagSlot {
+        pub kind: RewardKind,
+        pub id: u16,
+        pub qty: u8,
+    }
+
+    /// Patch 11: what a character carries besides items (docs/ITEMS_AND_CRAFT.md 6.1): resources
+    /// (recipes, blanks and reagents too) one kind per slot, and consumables. In character `Bag`
+    /// and the "Done" of the bag screen.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct BagLayout {
+        pub resources: [BagSlot; BAG_RESOURCE_SLOTS],
+        pub consumables: [BagSlot; BAG_CONSUMABLE_SLOTS],
     }
 
     /// A live monster in a session.
@@ -142,6 +179,12 @@ shared! {
         pub entrance: Cell,
         pub exit: Cell,
         pub bump: u8,
+        // Patch 11: points and rewards (docs/MAP_DESCRIPTION.md 7.1, PARTY_AND_TURNS.md 9.2).
+        /// Visible chests, `0..chest_count` used: `data` is the reward table id.
+        pub chests: [MapPoint; CHESTS_MAX],
+        pub chest_count: u8,
+        /// The reward table of the boss (registry `Rewards` id, `NO_TABLE` = none).
+        pub boss_table: u8,
     }
 
     /// session `["session", map]`.
@@ -280,8 +323,119 @@ impl MapData {
 }
 
 impl MapLayoutData {
-    pub const SIZE: usize =
-        1 + PUBKEY + MAP_CELLS + SPAWNS_MAX * Spawn::SIZE + 1 + Cell::SIZE * 2 + 1;
+    pub const SIZE: usize = 1
+        + PUBKEY
+        + MAP_CELLS
+        + SPAWNS_MAX * Spawn::SIZE
+        + 1
+        + Cell::SIZE * 2
+        + 1
+        + CHESTS_MAX * MapPoint::SIZE
+        + 1
+        + 1;
+
+    /// The visible chests in use.
+    pub fn chest_list(&self) -> &[MapPoint] {
+        &self.chests[..(self.chest_count as usize).min(CHESTS_MAX)]
+    }
+}
+
+impl MapPoint {
+    pub const SIZE: usize = PointKind::SIZE + 3;
+
+    pub const fn cell(&self) -> Cell {
+        Cell {
+            x: self.x,
+            y: self.y,
+        }
+    }
+}
+
+impl CacheSlot {
+    pub const SIZE: usize = RewardKind::SIZE + 2 + 2;
+    pub const EMPTY: CacheSlot = CacheSlot {
+        kind: RewardKind::Resource,
+        id: 0,
+        qty: 0,
+    };
+
+    pub const fn is_empty(&self) -> bool {
+        self.qty == 0
+    }
+
+    /// Slot `at` of a raw cache (`Participation` keeps it as bytes, so a VRF callback does not
+    /// decode it field by field). A byte that is not a `RewardKind` reads as empty.
+    pub fn read(raw: &[u8; CACHE_BYTES], at: usize) -> CacheSlot {
+        let b = &raw[at * Self::SIZE..(at + 1) * Self::SIZE];
+        match RewardKind::try_from(b[0]) {
+            Ok(kind) => CacheSlot {
+                kind,
+                id: u16::from_le_bytes([b[1], b[2]]),
+                qty: u16::from_le_bytes([b[3], b[4]]),
+            },
+            Err(_) => Self::EMPTY,
+        }
+    }
+
+    /// Writes slot `at` of a raw cache (the same bytes as borsh).
+    pub fn write(&self, raw: &mut [u8; CACHE_BYTES], at: usize) {
+        let b = &mut raw[at * Self::SIZE..(at + 1) * Self::SIZE];
+        b[0] = self.kind as u8;
+        b[1..3].copy_from_slice(&self.id.to_le_bytes());
+        b[3..5].copy_from_slice(&self.qty.to_le_bytes());
+    }
+
+    /// Every slot of a raw cache.
+    pub fn read_all(raw: &[u8; CACHE_BYTES]) -> [CacheSlot; CACHE_SLOTS] {
+        let mut out = [Self::EMPTY; CACHE_SLOTS];
+        for (i, s) in out.iter_mut().enumerate() {
+            *s = Self::read(raw, i);
+        }
+        out
+    }
+
+    /// A raw cache holding these slots.
+    pub fn write_all(slots: &[CacheSlot; CACHE_SLOTS]) -> [u8; CACHE_BYTES] {
+        let mut raw = [0; CACHE_BYTES];
+        for (i, s) in slots.iter().enumerate() {
+            s.write(&mut raw, i);
+        }
+        raw
+    }
+}
+
+const _: () = assert!(CACHE_BYTES == CACHE_SLOTS * CacheSlot::SIZE);
+
+impl BagLayout {
+    pub const SIZE: usize = (BAG_RESOURCE_SLOTS + BAG_CONSUMABLE_SLOTS) * BagSlot::SIZE;
+    pub const EMPTY: BagLayout = BagLayout {
+        resources: [BagSlot::EMPTY; BAG_RESOURCE_SLOTS],
+        consumables: [BagSlot::EMPTY; BAG_CONSUMABLE_SLOTS],
+    };
+
+    /// Every slot, resources first.
+    pub fn slots(&self) -> impl Iterator<Item = &BagSlot> {
+        self.resources.iter().chain(&self.consumables)
+    }
+}
+
+impl Default for BagLayout {
+    fn default() -> Self {
+        Self::EMPTY
+    }
+}
+
+impl BagSlot {
+    pub const SIZE: usize = RewardKind::SIZE + 2 + 1;
+    pub const EMPTY: BagSlot = BagSlot {
+        kind: RewardKind::Resource,
+        id: 0,
+        qty: 0,
+    };
+
+    pub const fn is_empty(&self) -> bool {
+        self.qty == 0
+    }
 }
 
 impl GameSessionData {

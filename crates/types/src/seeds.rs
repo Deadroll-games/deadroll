@@ -55,3 +55,8 @@ pub const ESCROW: &[u8] = b"escrow";
 pub const STASH: &[u8] = b"stash";
 /// `["city"]` in city.
 pub const CITY: &[u8] = b"city";
+/// `["rewards"]` in registry (patch 11): reward tables (docs/PARTY_AND_TURNS.md 9.2).
+pub const REWARDS: &[u8] = b"rewards";
+/// `["cache", character]` in session (patch 11): the temporary cache once the party is over,
+/// until the player lays it out into the bag.
+pub const CACHE: &[u8] = b"cache";
