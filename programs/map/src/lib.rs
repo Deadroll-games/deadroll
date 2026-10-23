@@ -9,7 +9,7 @@ pub mod instructions;
 pub mod state;
 pub mod trust;
 
-use deadroll_types::{Cell, MapStatus, Spawn};
+use deadroll_types::{Cell, MapPoint, MapStatus, Spawn};
 use instructions::*;
 
 declare_id!("2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH");
@@ -25,8 +25,9 @@ pub mod deadroll_map {
         width: u8,
         height: u8,
         tier: u8,
+        min_players: u8,
     ) -> Result<()> {
-        create_map::handler(ctx, index, width, height, tier)
+        create_map::handler(ctx, index, width, height, tier, min_players)
     }
 
     /// DM writes a chunk of tile bytes into a draft layout.
@@ -42,6 +43,15 @@ pub mod deadroll_map {
         spawns: Vec<Spawn>,
     ) -> Result<()> {
         write_spawns::handler(ctx, entrance, exit, spawns)
+    }
+
+    /// Patch 11: DM replaces the visible chests and the boss reward table of a draft layout.
+    pub fn write_chests(
+        ctx: Context<WriteLayout>,
+        chests: Vec<MapPoint>,
+        boss_table: u8,
+    ) -> Result<()> {
+        write_chests::handler(ctx, chests, boss_table)
     }
 
     /// DM finalizes a draft: builder rules, layout hash, secrets root. The map is immutable after.

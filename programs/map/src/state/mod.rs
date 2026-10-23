@@ -27,6 +27,6 @@ mod tests {
             &hash(b"account:MapLayout").to_bytes()[..8]
         );
         assert_eq!(MapLayout::INIT_SPACE, MapLayoutData::SIZE);
-        assert_eq!(Map::INIT_SPACE, MapData::SIZE + 1);
+        assert_eq!(Map::INIT_SPACE, MapData::SIZE + 2);
     }
 }

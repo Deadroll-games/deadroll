@@ -9,6 +9,8 @@ pub struct MapCreated {
     pub width: u8,
     pub height: u8,
     pub tier: u8,
+    /// Patch 11.
+    pub min_players: u8,
 }
 
 #[event]
@@ -37,4 +39,12 @@ pub struct MapStatusChanged {
     pub map: Pubkey,
     pub from: MapStatus,
     pub to: MapStatus,
+}
+
+/// Patch 11.
+#[event]
+pub struct ChestsWritten {
+    pub map: Pubkey,
+    pub chest_count: u8,
+    pub boss_table: u8,
 }

@@ -34,6 +34,7 @@ import {
   getSpawnEncoder,
   getWriteLayoutInstruction,
   getWriteSpawnsInstruction,
+  getWriteChestsInstruction,
   type MapStatus,
 } from "@deadroll/sdk/map";
 import { findConfigPda, findTablePda } from "@deadroll/sdk/registry";
@@ -53,11 +54,15 @@ const enc = getAddressEncoder();
 const MAP_MAX = 32;
 const MAP_CELLS = 1024;
 const SPAWNS_MAX = 24;
+// Patch 11: visible chests and reward tables (assets/registry/reward_tables.json, LootTuning).
+const CHESTS_MAX = 4;
+const NO_TABLE = 0xff;
+const T1_CHEST = 0, T1_BOSS = 1, T2_CHEST = 2, T2_BOSS = 3;
 const TILE = { Floor: 0, Wall: 1, Water: 2, Door: 3, Entrance: 4, Exit: 5, Trap: 6 };
 const STATUS = { Draft: 0, Finalized: 1, InSession: 2, Finished: 3 };
 const WOLF = 0, GOBLIN = 1, CHIEFTAIN = 2, WARRIOR = 3, SHAMAN = 4;
 /** `MapLayoutData::SIZE`: the bytes `layout_hash` covers, after the discriminator. */
-const LAYOUT_CORE_SIZE = 1 + 32 + MAP_CELLS + SPAWNS_MAX * 9 + 1 + 2 + 2 + 1;
+const LAYOUT_CORE_SIZE = 1 + 32 + MAP_CELLS + SPAWNS_MAX * 9 + 1 + 2 + 2 + 1 + CHESTS_MAX * 4 + 1 + 1;
 /** Anchor `ConstraintSeeds`. */
 const CONSTRAINT_SEEDS = 2006;
 
@@ -92,9 +97,9 @@ const tableAddress = async (seed: string) => (await findTablePda({ seed }))[0];
 
 type Signer = Awaited<ReturnType<typeof generateKeyPairSigner>>;
 
-async function createMapIx(dm: Signer, index: number, width: number, height: number, tier: number) {
+async function createMapIx(dm: Signer, index: number, width: number, height: number, tier: number, minPlayers = 1) {
   const map = await mapAddress(dm.address, index);
-  return getCreateMapInstruction({ dm, map, layout: await layoutAddress(map), index, width, height, tier });
+  return getCreateMapInstruction({ dm, map, layout: await layoutAddress(map), index, width, height, tier, minPlayers });
 }
 
 async function editAccounts(dm: Signer, map: string) {
@@ -109,13 +114,21 @@ async function writeSpawnsIx(dm: Signer, map: string, entrance: Cell, exit: Cell
   return getWriteSpawnsInstruction({ ...(await editAccounts(dm, map)), entrance, exit, spawns: spawns.map(spawnArgs) });
 }
 
-/** Patch 6: the registry bestiary and monster skills tables follow the layout; `tables` overrides them. */
+type Chest = { x: number; y: number; table: number };
+
+async function writeChestsIx(dm: Signer, map: string, chests: Chest[], bossTable: number) {
+  const points = chests.map((c) => ({ kind: 0, x: c.x, y: c.y, data: c.table }));
+  return getWriteChestsInstruction({ ...(await editAccounts(dm, map)), chests: points, bossTable });
+}
+
+/** Patch 6 and 11: the registry bestiary, monster skills and rewards tables follow the layout; `tables` overrides them. */
 async function finalizeIx(dm: Signer, map: string, root: number[], tables: string[] | null = null) {
-  const [bestiary, skills] = tables ?? [await tableAddress("bestiary"), await tableAddress("monster_skills")];
+  const [bestiary, skills, rewards] = tables ?? [await tableAddress("bestiary"), await tableAddress("monster_skills"), await tableAddress("rewards")];
   return getFinalizeMapInstruction({
     ...(await editAccounts(dm, map)),
     bestiary: address(bestiary),
     monsterSkills: address(skills),
+    rewards: address(rewards),
     secretsRoot: Uint8Array.from(root),
   });
 }
@@ -189,7 +202,7 @@ async function data(addr: string): Promise<Uint8Array> {
 }
 
 async function readMap(addr: string) {
-  const { core, tier } = getMapDecoder().decode(await data(addr));
+  const { core, tier, minPlayers } = getMapDecoder().decode(await data(addr));
   return {
     version: core.version,
     dm: Uint8Array.from(enc.encode(core.dm)),
@@ -200,6 +213,7 @@ async function readMap(addr: string) {
     layoutHash: Array.from(core.layoutHash),
     secretsRoot: Array.from(core.secretsRoot),
     tier,
+    minPlayers,
   };
 }
 
@@ -216,6 +230,8 @@ async function readLayout(addr: string) {
     spawnCount: core.spawnCount,
     entrance: core.entrance,
     exit: core.exit,
+    chests: core.chests.slice(0, core.chestCount).map((c) => ({ x: c.x, y: c.y, table: c.data })),
+    bossTable: core.bossTable,
   };
 }
 
@@ -241,8 +257,11 @@ const demoSpawns = (): Spawn[] => [
   { id: SHAMAN, x: 12, y: 11, pack: 3, skills: 0b111 },
 ];
 
-async function create(dm: Signer, index = 0, width = 16, height = 16, tier = 1) {
-  await send(dm, [await createMapIx(dm, index, width, height, tier)]);
+/** One tier 1 chest in the room, the tier 1 boss table: 2 + 4 points, the tier 1 budget for one player. */
+const DEMO_CHESTS: Chest[] = [{ x: 5, y: 5, table: T1_CHEST }];
+
+async function create(dm: Signer, index = 0, width = 16, height = 16, tier = 1, minPlayers = 1) {
+  await send(dm, [await createMapIx(dm, index, width, height, tier, minPlayers)]);
   const map = await mapAddress(dm.address, index);
   return { map, layout: await layoutAddress(map) };
 }
@@ -251,6 +270,7 @@ async function demoDraft(dm: Signer, index = 0) {
   const accounts = await create(dm, index);
   await send(dm, [await writeLayoutIx(dm, accounts.map, 0, demoTiles())]);
   await send(dm, [await writeSpawnsIx(dm, accounts.map, ENTRANCE, EXIT, demoSpawns())]);
+  await send(dm, [await writeChestsIx(dm, accounts.map, DEMO_CHESTS, T1_BOSS)]);
   return accounts;
 }
 
@@ -300,6 +320,16 @@ describe("map: create_map", () => {
     const dm = await funded();
     for (const tier of [0, 3]) {
       await expectErr(send(dm, [await createMapIx(dm, 0, 16, 16, tier)]), err("TierOutOfRange"));
+    }
+  });
+
+  it("patch 11: stores the minimum players and rejects it outside 1..=4", async () => {
+    const dm = await funded();
+    const { map, layout } = await create(dm, 0, 16, 16, 1, 3);
+    assert.equal((await readMap(map)).minPlayers, 3);
+    assert.equal((await readLayout(layout)).bossTable, NO_TABLE);
+    for (const bad of [0, 5]) {
+      await expectErr(send(dm, [await createMapIx(dm, 1, 16, 16, 1, bad)]), err("MinPlayersOutOfRange"));
     }
   });
 
@@ -426,6 +456,7 @@ describe("map: finalize_map", () => {
     await send(dm, [await writeLayoutIx(dm, map, 0, grid.slice(0, 512))]);
     await send(dm, [await writeLayoutIx(dm, map, 512, grid.slice(512))]);
     await send(dm, [await writeSpawnsIx(dm, map, { x: 0, y: 0 }, { x: 31, y: 31 }, demoSpawns())]);
+    await send(dm, [await writeChestsIx(dm, map, DEMO_CHESTS, T1_BOSS)]);
     const cu = await send(dm, [await finalizeIx(dm, map, new Array(32).fill(0))]);
     console.log(`finalize 32x32: ${cu} CU`);
     assert.ok(cu < 200_000, `${cu} CU`);
@@ -478,7 +509,7 @@ describe("map: finalize_map", () => {
     await send(dm, [await writeSpawnsIx(dm, map, ENTRANCE, EXIT, demoSpawns())]);
     const tileset = await tableAddress("tileset");
     const skills = await tableAddress("monster_skills");
-    await expectErr(send(dm, [await finalizeIx(dm, map, new Array(32).fill(0), [tileset, skills])]), err("InvalidRegistryTable"));
+    await expectErr(send(dm, [await finalizeIx(dm, map, new Array(32).fill(0), [tileset, skills, await tableAddress("rewards")])]), err("InvalidRegistryTable"));
     // An elite wolf with all 4 skills finalizes.
     const cu = await finalizeWith((s) => {
       s[0].flags = 1;
@@ -530,5 +561,118 @@ describe("map: set_status", () => {
     const { map } = await demoFinal(dm);
     const ix = setStatusIx(map, dm, SYSTEM_PROGRAM, STATUS.InSession);
     await expectErr(send(dm, [ix]), CONSTRAINT_SEEDS);
+  });
+});
+
+describe("map: write_chests (patch 11)", () => {
+  it("writes the chests and the boss table, then clears old slots", async () => {
+    const dm = await funded();
+    const { map, layout } = await create(dm);
+    const two = [{ x: 5, y: 5, table: T1_CHEST }, { x: 6, y: 6, table: T1_BOSS }];
+    await send(dm, [await writeChestsIx(dm, map, two, T1_BOSS)]);
+    let l = await readLayout(layout);
+    assert.deepEqual(l.chests, two);
+    assert.equal(l.bossTable, T1_BOSS);
+    await send(dm, [await writeChestsIx(dm, map, two.slice(1), NO_TABLE)]);
+    l = await readLayout(layout);
+    assert.deepEqual(l.chests, two.slice(1));
+    assert.equal(l.bossTable, NO_TABLE);
+    // The bytes after the used chest are zero.
+    const at = 8 + 1 + 32 + MAP_CELLS + SPAWNS_MAX * 9 + 1 + 4 + 1;
+    assert.ok(l.raw.slice(at + 4, at + CHESTS_MAX * 4).every((b) => b === 0));
+  });
+
+  it("rejects more than CHESTS_MAX chests", async () => {
+    const dm = await funded();
+    const { map } = await create(dm);
+    const many = Array.from({ length: CHESTS_MAX + 1 }, (_, i) => ({ x: 2 + i, y: 2, table: T1_CHEST }));
+    await expectErr(send(dm, [await writeChestsIx(dm, map, many, T1_BOSS)]), err("TooManyChests"));
+  });
+
+  it("rejects a signer that is not the DM", async () => {
+    const dm = await funded();
+    const other = await funded();
+    const { map } = await create(dm);
+    await expectErr(send(other, [await writeChestsIx(other, map, DEMO_CHESTS, T1_BOSS)]), err("NotDm"));
+  });
+
+  it("rejects writes after finalize", async () => {
+    const dm = await funded();
+    const { map } = await demoFinal(dm);
+    await expectErr(send(dm, [await writeChestsIx(dm, map, [], T1_BOSS)]), err("NotDraft"));
+  });
+});
+
+describe("map: finalize_map chests and rewards (patch 11)", () => {
+  const root = new Array(32).fill(0);
+
+  it("checks the chest rules of the builder", async () => {
+    const dm = await funded();
+    const { map } = await demoDraft(dm);
+    const finalizeWith = async (chests: Chest[], boss: number) => {
+      await send(dm, [await writeChestsIx(dm, map, chests, boss)]);
+      return send(dm, [await finalizeIx(dm, map, root)]);
+    };
+    // Tier 1 allows one chest.
+    await expectErr(finalizeWith([...DEMO_CHESTS, { x: 6, y: 6, table: T1_CHEST }], T1_BOSS), err("TooManyChests"));
+    await expectErr(finalizeWith([{ x: 0, y: 5, table: T1_CHEST }], T1_BOSS), err("ChestNotPassable"));
+    await expectErr(finalizeWith([{ x: 20, y: 5, table: T1_CHEST }], T1_BOSS), err("ChestOutOfBounds"));
+    await expectErr(finalizeWith([{ ...ENTRANCE, table: T1_CHEST }], T1_BOSS), err("ChestOverlap"));
+    await expectErr(finalizeWith([{ x: 6, y: 2, table: T1_CHEST }], T1_BOSS), err("ChestOverlap"));
+    await expectErr(finalizeWith([{ x: 5, y: 5, table: 31 }], T1_BOSS), err("UnknownTable"));
+    // A tier 2 table on a tier 1 map.
+    await expectErr(finalizeWith([{ x: 5, y: 5, table: T2_CHEST }], T1_BOSS), err("TableNotAllowed"));
+    await expectErr(finalizeWith(DEMO_CHESTS, NO_TABLE), err("BossTableMissing"));
+    // A body table is not on the allowed list of any tier. (A one-level boss table, BossTableOneLevel,
+    // needs a one-level table on the list: crates/mapcheck unit tests.)
+    await expectErr(finalizeWith(DEMO_CHESTS, 4), err("TableNotAllowed"));
+    // Other accounts in place of the rewards table.
+    await send(dm, [await writeChestsIx(dm, map, DEMO_CHESTS, T1_BOSS)]);
+    const bestiary = await tableAddress("bestiary");
+    const skills = await tableAddress("monster_skills");
+    await expectErr(send(dm, [await finalizeIx(dm, map, root, [bestiary, skills, bestiary])]), err("InvalidRegistryTable"));
+    const cu = await finalizeWith(DEMO_CHESTS, T1_BOSS);
+    console.log(`finalize 16x16 with a chest: ${cu} CU`);
+    assert.equal((await readMap(map)).status, STATUS.Finalized);
+  });
+
+  it("a closed chest blocks the way and needs a reachable neighbor", async () => {
+    const dm = await funded();
+    const { map } = await demoDraft(dm);
+    // A wall at x = 13 with one gap at (13, 7) between the room and the exit.
+    for (let y = 1; y < 15; y++) await send(dm, [await writeLayoutIx(dm, map, y * MAP_MAX + 13, [TILE.Wall])]);
+    await send(dm, [await writeLayoutIx(dm, map, 7 * MAP_MAX + 13, [TILE.Floor])]);
+    await send(dm, [await writeChestsIx(dm, map, [{ x: 13, y: 7, table: T1_CHEST }], T1_BOSS)]);
+    await expectErr(send(dm, [await finalizeIx(dm, map, root)]), err("ExitUnreachable"));
+    // A chest walled in on every side.
+    await send(dm, [await writeLayoutIx(dm, map, 7 * MAP_MAX + 13, [TILE.Wall])]);
+    await send(dm, [await writeLayoutIx(dm, map, 13, [TILE.Floor])]);
+    await send(dm, [await writeLayoutIx(dm, map, 14 * MAP_MAX + 13, [TILE.Floor])]);
+    for (const [x, y] of [[4, 4], [5, 4], [6, 4], [4, 5], [6, 5], [4, 6], [5, 6], [6, 6]]) {
+      await send(dm, [await writeLayoutIx(dm, map, y * MAP_MAX + x, [TILE.Wall])]);
+    }
+    await send(dm, [await writeChestsIx(dm, map, DEMO_CHESTS, T1_BOSS)]);
+    await expectErr(send(dm, [await finalizeIx(dm, map, root)]), err("ChestUnreachable"));
+  });
+
+  it("the budget grows with the map's minimum players", async () => {
+    // Tier 2: two chests (4 + 4) and the boss (6) cost 14; the budget is 10 for one player and 16
+    // for three (LootTuning::DEFAULT).
+    const spawns = demoSpawns().map((s) => ({ ...s, level: 3 }));
+    const chests = [{ x: 5, y: 5, table: T2_CHEST }, { x: 8, y: 8, table: T2_CHEST }];
+    for (const [min, ok] of [[1, false], [3, true]] as const) {
+      const dm = await funded();
+      const { map } = await create(dm, 0, 16, 16, 2, min);
+      await send(dm, [await writeLayoutIx(dm, map, 0, demoTiles())]);
+      await send(dm, [await writeSpawnsIx(dm, map, ENTRANCE, EXIT, spawns)]);
+      await send(dm, [await writeChestsIx(dm, map, chests, T2_BOSS)]);
+      const run = send(dm, [await finalizeIx(dm, map, root)]);
+      if (ok) {
+        await run;
+        assert.equal((await readMap(map)).status, STATUS.Finalized);
+      } else {
+        await expectErr(run, err("OverBudget"));
+      }
+    }
   });
 });

@@ -3,6 +3,9 @@
   "width": 16,
   "height": 16,
   "tier": 1,
+  "min_players": 1,
+  "boss_table": 1,
+  "chests": [{ "x": 9, "y": 10, "table": 0 }],
   "rows": [
     "################",
     "#E...###.......#",
