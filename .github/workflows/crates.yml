@@ -91,6 +91,9 @@ jobs:
       - name: combat wasm
         run: cargo test -p deadroll-combat-wasm --test ts_fixtures
 
+      - name: mapcheck wasm
+        run: cargo test -p deadroll-mapcheck-wasm --test ts_fixtures
+
       - name: registry tables
         run: cargo test -p deadroll-rules --features serde --test registry
 
@@ -103,3 +106,13 @@ jobs:
 
       - name: rebuild and compare
         run: bash crates/combat/wasm/build.sh --check
+
+  # The map builder ships a built mapcheck WASM (app/src/chain/wasm/mapcheck.wasm, patch 13): it must
+  # be exactly what crates/mapcheck/wasm builds from this commit.
+  mapcheck-wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: rebuild and compare
+        run: bash crates/mapcheck/wasm/build.sh --check

@@ -942,6 +942,8 @@ export const registryBestiary = () => registryTable(bestiaryPda);
 export const registryMonsterSkills = () => registryTable(monsterSkillsPda);
 /** Patch 11: the registry `rewards` body (108-byte reward table records by id). */
 export const registryRewards = () => registryTable(rewardsPda);
+/** Patch 13: the registry `tileset` body (8-byte records by tile type). */
+export const registryTileset = () => registryTable(tilesetPda);
 
 /**
  * consume_randomness for the pending action: the callback gets the pending participation's player,

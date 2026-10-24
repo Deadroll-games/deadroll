@@ -9,8 +9,8 @@ import type { BuilderTool } from "../components/forms/types";
 import { MAP_PRESETS, presetToLayout } from "../chain/mock";
 import { BESTIARY_NAMES, bestiaryName } from "../chain/names";
 import { SPAWNS_MAX, Tile, cellByte, cellIndex, type Cell, type Spawn } from "../chain/types";
-import { SHIPPED_TILE_COST } from "../chain/tiles";
-import { buildMapIxs, draftPoints, mapRent, mapStatus, mapsOf, type MapAcc, type MapDraft } from "../chain/game";
+import { MAPCHECK_MESSAGES, useMapcheck, type MapCheckDraft, type MapcheckWasm } from "../chain/mapcheckWasm";
+import { buildMapIxs, draftPoints, mapRent, mapStatus, mapsOf, type MapAcc } from "../chain/game";
 import {
   CHESTS_MAX,
   CHEST_RADIUS_MAX,
@@ -19,9 +19,7 @@ import {
   SETTLE_TIMEOUT_MAX_SECS,
   SETTLE_TIMEOUT_MIN_SECS,
   NO_TABLE,
-  TABLE_ERROR_MESSAGES,
   budgetOf,
-  checkTables,
   levelsLabel,
   rewardTables,
   settleLabel,
@@ -50,45 +48,24 @@ export function spawnSkillError(view: SpawnView | null): string | null {
 
 const BESTIARY = Object.entries(BESTIARY_NAMES).map(([id, name]) => ({ id: Number(id), name }));
 const PRESETS = MAP_PRESETS.map((p) => ({ name: p.name, width: p.width, height: p.height }));
-/** Passable by the shipped Tileset (the chain's verdict is finalize_map's, with the registry Tileset). */
-const walkable = (tiles: Uint8Array, c: Cell) => (SHIPPED_TILE_COST[(tiles[cellIndex(c.x, c.y)] ?? 0) >> 3] ?? 0) > 0;
 const same = (a: Cell | null, b: Cell) => a !== null && a.x === b.x && a.y === b.y;
 
 /**
- * Quick client-side checks so the DM sees obvious mistakes before paying for transactions.
- * The authority is crates/mapcheck inside map.finalize_map.
- * TODO(L9.6): run crates/mapcheck through WASM for the exact same verdict.
+ * The verdict finalize_map would give the draft: crates/mapcheck through WASM, on the registry
+ * tables the program reads (docs/MAP_DESCRIPTION.md 1, 10). Empty = the map is valid. A spawn's skill
+ * choice also gets its own line (the combat module's check, `spawnSkillError`).
  */
-export function quickCheck(
-  map: Pick<MapDraft, "tiles" | "entrance" | "exit" | "spawns">,
-  skillError: (s: Spawn) => string | null = () => null,
-  loot?: { tier: number; minPlayers: number; chests: Chest[]; bossTable: number; tables: RewardTable[] },
-): string[] {
-  const { tiles, entrance, exit, spawns } = map;
-  const errors: string[] = [];
-  // Patch 13: the entrance and the exit are points on cells that can be entered.
-  if (!entrance) errors.push("Place the entrance");
-  else if (!walkable(tiles, entrance)) errors.push("The entrance must stand on a walkable tile");
-  if (!exit) errors.push("Place the exit");
-  else if (!walkable(tiles, exit)) errors.push("The exit must stand on a walkable tile");
-  if (entrance && exit && same(entrance, exit)) errors.push("The entrance and the exit share a cell");
-  if (spawns.length > SPAWNS_MAX) errors.push(`At most ${SPAWNS_MAX} spawns`);
-  spawns.forEach((s, i) => {
-    if (!walkable(tiles, s)) errors.push(`Spawn ${i} (${bestiaryName(s.bestiaryId)}) is not on a walkable tile`);
-    if (same(entrance, s) || same(exit, s)) errors.push(`Spawn ${i} (${bestiaryName(s.bestiaryId)}) stands on the entrance or the exit`);
-    const skills = skillError(s);
-    if (skills) errors.push(`Spawn ${i} (${bestiaryName(s.bestiaryId)}): ${skills}`);
-  });
-  if (loot) {
-    // Patch 11: a closed chest occupies a free walkable cell (the reachable neighbor is finalize_map's).
-    loot.chests.forEach((c, i) => {
-      if (!walkable(tiles, c) || same(entrance, c) || same(exit, c)) errors.push(`Chest ${i} must stand on a free walkable tile`);
-      if (spawns.some((s) => s.x === c.x && s.y === c.y)) errors.push(`Chest ${i} stands on a spawn`);
-    });
-    const verdict = checkTables(loot.tier, loot.minPlayers, loot.chests.map((c) => c.table), loot.bossTable, loot.tables);
-    if ("err" in verdict) errors.push(TABLE_ERROR_MESSAGES[verdict.err]);
-  }
-  return errors;
+export function mapVerdict(mapcheck: MapcheckWasm | null, draft: MapCheckDraft, skillError: (s: Spawn) => string | null = () => null): string[] {
+  if (!mapcheck) return ["The map checker is still loading"];
+  const rule = mapcheck.check(draft);
+  if (!rule) return [];
+  const spawns = rule.startsWith("MonsterSkill")
+    ? draft.spawns.flatMap((sp, i) => {
+        const e = skillError(sp);
+        return e ? [`Spawn ${i} (${bestiaryName(sp.bestiaryId)}): ${e}`] : [];
+      })
+    : [];
+  return [MAPCHECK_MESSAGES[rule], ...spawns];
 }
 
 export function MapBuilderPage() {
@@ -107,6 +84,13 @@ export function MapBuilderPage() {
   const combat = useCombat();
   const registry = useBuilderRegistry();
   const tables = useMemo(() => (registry ? rewardTables(registry.rewards) : []), [registry]);
+  // Patch 13: the builder rules of finalize_map, from the same registry tables.
+  const loadedMapcheck = useMapcheck();
+  const mapcheck = useMemo(() => {
+    if (!loadedMapcheck || !registry) return null;
+    loadedMapcheck.setTables({ bestiary: registry.bestiary, monsterSkills: registry.skills, rewards: registry.rewards, tileset: registry.tileset });
+    return loadedMapcheck;
+  }, [loadedMapcheck, registry]);
   const [rent, setRent] = useState<bigint | null>(null);
   const viewOf = useCallback((sp: Pick<Spawn, "bestiaryId" | "flags" | "skills">) => (combat && registry ? spawnView(combat, registry, sp) : null), [combat, registry]);
   const [myMaps, setMyMaps] = useState<{ address: Address; data: MapAcc }[]>([]);
@@ -240,8 +224,7 @@ export function MapBuilderPage() {
             )}
             errors={errors}
             onValidate={() => {
-              const loot = { tier, minPlayers: layout.minPlayers, chests: layout.chests, bossTable: layout.bossTable, tables };
-              const e = quickCheck(layout, (sp) => spawnSkillError(viewOf(sp)), loot);
+              const e = mapVerdict(mapcheck, { width: size.width, height: size.height, tier, ...layout }, (sp) => spawnSkillError(viewOf(sp)));
               setErrors(e);
               setValidated(e.length === 0);
             }}

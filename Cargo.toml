@@ -1,5 +1,5 @@
 [workspace]
-members = ["programs/*", "programs/*/lib", "crates/*", "crates/combat/wasm", "crates/render/wasm", "tools/art", "tools/balance"]
+members = ["programs/*", "programs/*/lib", "crates/*", "crates/combat/wasm", "crates/mapcheck/wasm", "crates/render/wasm", "tools/art", "tools/balance"]
 resolver = "2"
 
 [workspace.package]

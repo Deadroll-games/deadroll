@@ -1367,6 +1367,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "deadroll-mapcheck-wasm"
+version = "0.1.0"
+dependencies = [
+ "borsh 1.8.1",
+ "deadroll-mapcheck",
+ "deadroll-rules",
+ "deadroll-types",
+ "serde_json",
+]
+
+[[package]]
 name = "deadroll-registry"
 version = "0.1.0"
 dependencies = [
