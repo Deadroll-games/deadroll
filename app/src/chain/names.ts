@@ -13,7 +13,8 @@ export const ASPECT_NAMES = ["Fire", "Cold", "Lightning", "Blood", "Blunt", "Pie
 export const STATE_NAMES = ["Burning", "Chill", "Freeze", "Bleeding", "Shock", "Stun", "Penetration"] as const;
 export const RACE_NAMES = ["Human", "Forest elf"] as const;
 export const CLASS_NAMES = ["Warrior", "Mage", "Support"] as const;
-export const TILE_NAMES = ["Floor", "Wall", "Water", "Door", "Entrance", "Exit", "Trap"] as const;
+/** By tile type id (`Tile`, patch 13). */
+export const TILE_NAMES = ["Void", "Stone floor", "Wooden floor", "Dirt", "Wall", "Door", "Shallow water", "Deep water", "Stairs", "Rubble", "Chasm"] as const;
 /** Where a tint comes from. Only weapons carry an aspect in the first version (CHARACTER 8.1: no class aspect). */
 export const CARRIER_NAMES = ["Race", "Class", "Weapon"] as const;
 export const STAT_NAMES = ["Strength", "Dexterity", "Intelligence", "Endurance"] as const;

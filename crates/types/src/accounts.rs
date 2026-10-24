@@ -18,7 +18,7 @@
 use crate::{
     Aspect, Class, EquipSlot, EquipSource, ItemBase, LayerRef, MapStatus, PointKind, Pubkey, Race,
     RewardKind, SessionStatus, StateKind, BAG_CONSUMABLE_SLOTS, BAG_RESOURCE_SLOTS, CACHE_BYTES,
-    CACHE_SLOTS, CHESTS_MAX, EMPTY_ITEM, EQUIP_SLOTS, LAYERS_MAX, MAP_CELLS, MONSTERS_MAX,
+    CACHE_SLOTS, CHESTS_MAX, EMPTY_ITEM, EQUIP_SLOTS, LAYERS_MAX, MAP_CELLS, MONSTERS_MAX, POINTS_MAX,
     PARTY_MAX, PROGRAMS_COUNT, SOULBOUND_MAX, SPAWNS_MAX, STATES_MAX, STATS_COUNT, TURN_ORDER_MAX,
     URI_BASE_LEN,
 };
@@ -512,3 +512,60 @@ impl LoadoutData {
 }
 
 const _: () = assert!(EQUIP_SLOTS == EquipSlot::COUNT);
+
+// Patch 13: the map layout with points (docs/MAP_DESCRIPTION.md 3, 4.1, 7.1). It replaces
+// `MapLayoutData` as the core of the map program's `MapLayout`; the old struct stays unused.
+shared! {
+    /// map `["layout", map]` (patch 13).
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct MapLayoutDataV2 {
+        pub version: u8,
+        pub map: Pubkey,
+        /// Row-major cell bytes (`cell_byte`: tile type and variant), `MAP_MAX` cells per row.
+        pub cells: [u8; MAP_CELLS],
+        pub spawns: [Spawn; SPAWNS_MAX],
+        pub spawn_count: u8,
+        /// The entrance, the exit and the visible chests, `0..point_count` used.
+        pub points: [MapPoint; POINTS_MAX],
+        pub point_count: u8,
+        /// The reward table of the boss (registry `Rewards` id, `NO_TABLE` = none).
+        pub boss_table: u8,
+        pub bump: u8,
+    }
+}
+
+impl MapLayoutDataV2 {
+    pub const SIZE: usize = 1
+        + PUBKEY
+        + MAP_CELLS
+        + SPAWNS_MAX * Spawn::SIZE
+        + 1
+        + POINTS_MAX * MapPoint::SIZE
+        + 1
+        + 1
+        + 1;
+
+    /// The points in use.
+    pub fn point_list(&self) -> &[MapPoint] {
+        &self.points[..(self.point_count as usize).min(POINTS_MAX)]
+    }
+
+    /// The first point of `kind`, if any (`deadroll_mapcheck` makes the entrance and the exit
+    /// unique).
+    pub fn point(&self, kind: PointKind) -> Option<Cell> {
+        self.point_list().iter().find(|p| p.kind == kind).map(MapPoint::cell)
+    }
+
+    pub fn entrance(&self) -> Option<Cell> {
+        self.point(PointKind::Entrance)
+    }
+
+    pub fn exit(&self) -> Option<Cell> {
+        self.point(PointKind::Exit)
+    }
+
+    /// The visible chests in point order (a chest's index in a session is its place here).
+    pub fn chests(&self) -> impl Iterator<Item = &MapPoint> {
+        self.point_list().iter().filter(|p| p.kind == PointKind::Chest)
+    }
+}

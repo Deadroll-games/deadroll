@@ -5,7 +5,7 @@
 use anchor_lang::prelude::*;
 use deadroll_combat::tables::{self, decode_aspect, decode_pair, decode_trait};
 use deadroll_skillcheck::{monster, SkillTuning};
-use deadroll_types::{seeds, Aspect, Form, Source, StateKind, Tile, NO_TABLE};
+use deadroll_types::{seeds, Aspect, Form, Source, StateKind, NO_TABLE};
 
 /// Which table an instruction works on. Discriminants are part of the format: append only.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -73,7 +73,7 @@ impl TableKind {
             Self::Aspects => Aspect::COUNT * ASPECT_SIZE,
             Self::Resonances => Aspect::COUNT * Aspect::COUNT * RESONANCE_SIZE,
             Self::Bestiary => BESTIARY_MAX * MONSTER_SIZE,
-            Self::Tileset => Tile::COUNT * TILE_SIZE,
+            Self::Tileset => deadroll_rules::tiles::record::RECORDS_MAX * TILE_SIZE,
             Self::Prefabs => crate::state::TABLE_CAP,
             Self::Traits => tables::TRAITS_LEN,
             Self::MonsterSkills => MONSTER_SKILLS_MAX * MONSTER_SKILL_SIZE,
@@ -86,7 +86,7 @@ pub const ASPECT_SIZE: usize = tables::ASPECT_RECORD;
 pub const RESONANCE_SIZE: usize = tables::PAIR_RECORD;
 pub const TRAIT_SIZE: usize = tables::TRAIT_RECORD;
 pub const MONSTER_SIZE: usize = 48;
-pub const TILE_SIZE: usize = 8;
+pub const TILE_SIZE: usize = deadroll_rules::tiles::record::SIZE;
 /// Bestiary ids are record indices. P0: 0 wolf, 1 goblin, 2 goblin chieftain, 3 goblin warrior, 4 goblin shaman.
 pub const BESTIARY_MAX: usize = 32;
 /// Monster skill records (`deadroll_skillcheck::monster`): 128 x 32 B.
@@ -124,7 +124,7 @@ pub fn validate_record(kind: TableKind, index: usize, r: &[u8]) -> bool {
         TableKind::Traits => decode_trait(r).is_some(),
         TableKind::Bestiary => validate_monster(r),
         // [passable, move_cost, blocks_los, flags, reserved x4]
-        TableKind::Tileset => r[0] <= 1 && r[2] <= 1 && (r[0] == 0 || r[1] >= 1),
+        TableKind::Tileset => deadroll_rules::tiles::validate_record(r),
         TableKind::Prefabs => true,
         // The monster builder rules (docs/BESTIARY.md 3.1), the decoder every reader uses.
         TableKind::MonsterSkills => {

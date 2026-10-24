@@ -1,6 +1,9 @@
 // Step paths for move_unit / monster_move, as tests/demo.test.ts `route` and `walk`: cheapest path
-// over passable cells not taken by a living unit (traps avoided), step costs from the Tileset.
-import { MAP_MAX, Tile, type Cell } from "./types";
+// over passable cells not taken by a living unit or a closed chest, step costs from the Tileset
+// (`GameSession.tile_cost` by tile type, a cell byte's bits 7-3).
+import { MAP_MAX, Tile, cellByte, cellKind, type Cell } from "./types";
+
+const WALL = cellByte(Tile.Wall);
 
 export const DIR = { N: 0, E: 1, S: 2, W: 3 } as const;
 export const MAX_PATH = 16;
@@ -16,8 +19,8 @@ export type Step = { dir: number; cost: number; to: Cell };
 export const cheb = (a: Cell, b: Cell) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
 
 /**
- * Cheapest steps from `from` to the first cell where `goal` holds. `tileCost[tile]` is the AP cost
- * (0 = blocked, `GameSession.tile_cost`); traps are avoided like the test does.
+ * Cheapest steps from `from` to the first cell where `goal` holds. `tileCost[kind]` is the AP cost
+ * of a tile type (0 = blocked, `GameSession.tile_cost`).
  */
 export function route(opts: {
   from: Cell;
@@ -31,9 +34,8 @@ export function route(opts: {
   const { from, goal, tiles, width, height, tileCost, taken } = opts;
   const cost = (x: number, y: number) => {
     if (x < 0 || y < 0 || x >= width || y >= height) return 0;
-    const t = tiles[y * MAP_MAX + x] ?? Tile.Wall;
-    if (t === Tile.Trap || taken.has(y * MAP_MAX + x)) return 0;
-    return tileCost[t] ?? 0;
+    if (taken.has(y * MAP_MAX + x)) return 0;
+    return tileCost[cellKind(tiles[y * MAP_MAX + x] ?? WALL)] ?? 0;
   };
   const start = from.y * MAP_MAX + from.x;
   const dist = new Map<number, number>([[start, 0]]);
@@ -110,8 +112,7 @@ export function reachable(opts: {
       const ny = y + dy;
       if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
       const nk = ny * MAP_MAX + nx;
-      const t = tiles[nk] ?? Tile.Wall;
-      const c = t === Tile.Trap || taken.has(nk) ? 0 : (tileCost[t] ?? 0);
+      const c = taken.has(nk) ? 0 : (tileCost[cellKind(tiles[nk] ?? WALL)] ?? 0);
       if (!c) continue;
       const d = dist.get(k)! + c;
       if (d > ap || (dist.has(nk) && dist.get(nk)! <= d)) continue;

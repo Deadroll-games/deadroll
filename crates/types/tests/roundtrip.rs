@@ -134,6 +134,20 @@ fn map_layout(version: u8) -> MapLayoutData {
     }
 }
 
+fn map_layout_v2(version: u8) -> MapLayoutDataV2 {
+    MapLayoutDataV2 {
+        version,
+        map: pk(7),
+        cells: [u8::MAX; MAP_CELLS],
+        spawns: [spawn_max(); SPAWNS_MAX],
+        spawn_count: SPAWNS_MAX as u8,
+        points: [point_max(); POINTS_MAX],
+        point_count: POINTS_MAX as u8,
+        boss_table: u8::MAX,
+        bump: u8::MAX,
+    }
+}
+
 fn point_max() -> MapPoint {
     MapPoint {
         kind: last(PointKind::ALL),
@@ -230,7 +244,8 @@ enum_tests! {
     map_status: MapStatus, 4;
     stat: Stat, STATS_COUNT;
     program_idx: ProgramIdx, PROGRAMS_COUNT;
-    point_kind: PointKind, 1;
+    point_kind: PointKind, 3;
+    tile_kind: TileKind, 11;
     reward_kind: RewardKind, 5;
     reward_source: RewardSource, 4;
     cache_status: CacheStatus, 3;
@@ -281,12 +296,49 @@ fn layout_chest_list_is_bounded() {
 }
 
 #[test]
+fn cell_bytes() {
+    let byte = cell_byte(TileKind::Chasm as u8, 5);
+    assert_eq!(byte, 0b0101_0101);
+    assert_eq!(cell_kind(byte), TileKind::Chasm as u8);
+    assert_eq!(cell_variant(byte), 5);
+    assert_eq!(cell_kind(u8::MAX) as usize, TILE_KINDS_MAX - 1);
+    assert_eq!(cell_variant(u8::MAX) as usize, TILE_VARIANTS - 1);
+    assert_eq!(cell_byte(TileKind::Void as u8, 0), 0);
+}
+
+#[test]
+fn layout_points() {
+    let point = |kind, x| MapPoint { kind, x, y: 0, data: 0 };
+    let mut layout = map_layout_v2(1);
+    layout.points[..4].copy_from_slice(&[
+        point(PointKind::Chest, 1),
+        point(PointKind::Exit, 2),
+        point(PointKind::Entrance, 3),
+        point(PointKind::Chest, 4),
+    ]);
+    layout.point_count = 4;
+    assert_eq!(layout.entrance(), Some(Cell { x: 3, y: 0 }));
+    assert_eq!(layout.exit(), Some(Cell { x: 2, y: 0 }));
+    let chests: Vec<u8> = layout.chests().map(|p| p.x).collect();
+    assert_eq!(chests, [1, 4]);
+    layout.point_count = 1;
+    assert_eq!(layout.entrance(), None);
+    layout.point_count = u8::MAX;
+    assert_eq!(layout.point_list().len(), POINTS_MAX);
+}
+
+#[test]
 fn enum_discriminants_match_contract_order() {
     assert_eq!(Aspect::Piercing as u8, 5);
     assert_eq!(Race::ForestElf as u8, 1);
     assert_eq!(StateKind::Bleeding as u8, 3);
     assert_eq!(StateKind::Penetration as u8, 6);
     assert_eq!(Tile::Trap as u8, 6);
+    assert_eq!(PointKind::Chest as u8, 0);
+    assert_eq!(PointKind::Exit as u8, 2);
+    assert_eq!(TileKind::Wall as u8, 4);
+    assert_eq!(TileKind::Stairs as u8, 8);
+    assert_eq!(TileKind::Chasm as u8, 10);
     assert_eq!(SessionStatus::Abandoned as u8, 5);
     assert_eq!(MapStatus::Finished as u8, 3);
     assert_eq!(ProgramIdx::Session as usize, 5);
@@ -328,6 +380,8 @@ fn account_sizes_and_version_first() {
     assert_eq!(check(&game_config(v), GameConfigData::SIZE)[0], v);
     assert_eq!(check(&map(v), MapData::SIZE)[0], v);
     assert_eq!(check(&map_layout(v), MapLayoutData::SIZE)[0], v);
+    assert_eq!(check(&map_layout_v2(v), MapLayoutDataV2::SIZE)[0], v);
+    assert_eq!(MapLayoutDataV2::SIZE, 1301);
     assert_eq!(check(&game_session(v), GameSessionData::SIZE)[0], v);
     assert_eq!(check(&participation(v), ParticipationData::SIZE)[0], v);
     assert_eq!(check(&monster_state(v), MonsterStateData::SIZE)[0], v);
@@ -390,6 +444,7 @@ fn size_matches_anchor_init_space() {
     assert_eq!(CharacterData::SIZE, CharacterData::INIT_SPACE);
     assert_eq!(MapData::SIZE, MapData::INIT_SPACE);
     assert_eq!(MapLayoutData::SIZE, MapLayoutData::INIT_SPACE);
+    assert_eq!(MapLayoutDataV2::SIZE, MapLayoutDataV2::INIT_SPACE);
     assert_eq!(GameSessionData::SIZE, GameSessionData::INIT_SPACE);
     assert_eq!(ParticipationData::SIZE, ParticipationData::INIT_SPACE);
     assert_eq!(MonsterStateData::SIZE, MonsterStateData::INIT_SPACE);

@@ -14,7 +14,7 @@ import { useEffect, useState } from "react";
 import wasmUrl from "./wasm/combat.wasm?url";
 import { Reader, concat, u16le, u32le } from "./bytes";
 import type { ActiveStateAcc, AuraAcc, CharacterAcc, MonsterAcc, SkillRecordAcc } from "./game";
-import type { ActiveState, Cell, TimedMod } from "./types";
+import { cellKind, type ActiveState, type Cell, type TimedMod } from "./types";
 
 /** `ABI_VERSION` of the module this wrapper speaks. */
 export const COMBAT_ABI = 8;
@@ -794,12 +794,12 @@ export function partyInputOf(
 }
 
 /**
- * The impassable cells of a map as a line request's bitmap: `tiles` is `MapLayout.tiles` (stride
- * 32), a tile whose cost in the session (`GameSession.tile_cost`, by tile) is 0 cannot be entered.
+ * The impassable cells of a map as a line request's bitmap: `tiles` is `MapLayout.cells` (stride
+ * 32), a cell whose tile type costs 0 in the session (`GameSession.tile_cost`) cannot be entered.
  */
 export function blockedOf(tiles: ArrayLike<number>, tileCost: ArrayLike<number>): Uint8Array {
   const out = new Uint8Array(COMBAT_BLOCKED_LEN);
-  for (let i = 0; i < COMBAT_BLOCKED_LEN * 8; i++) if ((tileCost[tiles[i] ?? 0] ?? 0) === 0) out[i >> 3]! |= 1 << (i & 7);
+  for (let i = 0; i < COMBAT_BLOCKED_LEN * 8; i++) if ((tileCost[cellKind(tiles[i] ?? 0)] ?? 0) === 0) out[i >> 3]! |= 1 << (i & 7);
   return out;
 }
 

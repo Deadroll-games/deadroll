@@ -49,8 +49,8 @@ test("JSON files encode to the exact table sizes", () => {
   assert.equal(resonances.length, 36 * RESONANCE_SIZE);
   assert.equal(bestiary.length, 5 * 48);
   assert.equal(bestiary.length, 240);
-  assert.equal(tileset.length, 56);
-  assert.equal(tileset.length, 7 * TILE_SIZE);
+  assert.equal(tileset.length, 88);
+  assert.equal(tileset.length, 11 * TILE_SIZE);
   assert.equal(prefabs.length, 0);
 });
 
@@ -103,8 +103,8 @@ test("monster defenses by tag (patch 9)", () => {
 
 test("passable tile with cost 0 throws", () => {
   const json = load("tileset.json") as { records: Array<Record<string, unknown>> };
-  json.records[0].cost = 0;
-  assert.throws(() => encodeTile(json.records[0]), /passable tile with cost 0/);
+  json.records[1].cost = 0;
+  assert.throws(() => encodeTile(json.records[1]), /passable tile with cost 0/);
 });
 
 test("Piercing+Cold (Icy Point): an override, Penetration chills", () => {
@@ -142,6 +142,7 @@ test("the encoder gives the bytes deadroll-rules reads (sim and program)", () =>
   assert.equal(hex(encodeBestiary(load("bestiary.json"))), fixture.bestiary);
   assert.equal(hex(encodeMonsterSkills(load("monster_skills.json"))), fixture.monster_skills);
   assert.equal(hex(encodeRewards(load("reward_tables.json"))), fixture.rewards);
+  assert.equal(hex(encodeTileset(load("tileset.json"))), fixture.tileset);
 });
 
 test("patch 6: monster skill records and the bestiary pools", () => {

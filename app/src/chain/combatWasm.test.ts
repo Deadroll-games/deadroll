@@ -30,7 +30,7 @@ import {
   type SpawnSkillsRequest,
   type UnitModsRequest,
 } from "./combatWasm";
-import { Aspect, ModKind, Tile } from "./types";
+import { Aspect, ModKind, Tile, cellByte } from "./types";
 
 const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
 
@@ -123,9 +123,9 @@ describe("combat wasm", () => {
       bearers: [],
     });
     // A wall (cost 0) at (2, 1) on an otherwise open map: bit 1 * 32 + 2.
-    const tiles = new Uint8Array(1024);
-    tiles[32 + 2] = Tile.Wall;
-    const costs = new Uint8Array(8).fill(1);
+    const tiles = new Uint8Array(1024).fill(cellByte(Tile.StoneFloor, 3));
+    tiles[32 + 2] = cellByte(Tile.Wall, 1);
+    const costs = new Uint8Array(32).fill(1);
     costs[Tile.Wall] = 0;
     const blocked = blockedOf(tiles, costs);
     expect(blocked[4]).toBe(1 << 2);

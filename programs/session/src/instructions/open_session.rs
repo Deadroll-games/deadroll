@@ -154,7 +154,7 @@ pub fn handler(ctx: Context<OpenSession>, price_lamports: u64, dm_actor: Pubkey)
     session.layout = accounts.layout.key();
     session.width = map.width;
     session.height = map.height;
-    session.entrance = layout.entrance();
+    session.entrance = layout.entrance()?;
     session.dm_actor = dm_actor;
     session.tile_cost = read_tile_costs(&accounts.tileset)?;
     // Patch 11: the map's rewards, fixed for the party.

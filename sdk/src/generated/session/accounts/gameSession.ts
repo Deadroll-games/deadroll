@@ -133,8 +133,6 @@ export type GameSession = {
   monsterInitiative: Array<number>;
   /** Initiative of each player slot, set at `join_session`. */
   playerInitiative: Array<number>;
-  /** Step cost in action points per `Tile`, 0 = cannot be entered (registry `Tileset`). */
-  tileCost: ReadonlyUint8Array;
   /**
    * `turn_seq` in which the current unit used its one attack or active skill
    * (docs/PARTY_AND_TURNS.md, 5.1). Only the current unit acts, so one field serves all.
@@ -218,6 +216,11 @@ export type GameSession = {
    */
   chestRadius: number;
   settleTimeoutSecs: number;
+  /**
+   * Step cost in action points per tile type id (`TileKind`, a cell byte's bits 7-3), 0 = cannot
+   * be entered (registry `Tileset`, copied at `open_session`).
+   */
+  tileCost: ReadonlyUint8Array;
 };
 
 export type GameSessionArgs = {
@@ -263,8 +266,6 @@ export type GameSessionArgs = {
   monsterInitiative: Array<number>;
   /** Initiative of each player slot, set at `join_session`. */
   playerInitiative: Array<number>;
-  /** Step cost in action points per `Tile`, 0 = cannot be entered (registry `Tileset`). */
-  tileCost: ReadonlyUint8Array;
   /**
    * `turn_seq` in which the current unit used its one attack or active skill
    * (docs/PARTY_AND_TURNS.md, 5.1). Only the current unit acts, so one field serves all.
@@ -348,6 +349,11 @@ export type GameSessionArgs = {
    */
   chestRadius: number;
   settleTimeoutSecs: number;
+  /**
+   * Step cost in action points per tile type id (`TileKind`, a cell byte's bits 7-3), 0 = cannot
+   * be entered (registry `Tileset`, copied at `open_session`).
+   */
+  tileCost: ReadonlyUint8Array;
 };
 
 /** Gets the encoder for {@link GameSessionArgs} account data. */
@@ -374,7 +380,6 @@ export function getGameSessionEncoder(): FixedSizeEncoder<GameSessionArgs> {
       ["monsterSpeed", fixEncoderSize(getBytesEncoder(), 24)],
       ["monsterInitiative", getArrayEncoder(getU16Encoder(), { size: 24 })],
       ["playerInitiative", getArrayEncoder(getU16Encoder(), { size: 4 })],
-      ["tileCost", fixEncoderSize(getBytesEncoder(), 7)],
       ["actedSeq", getU32Encoder()],
       ["startedSeq", getU32Encoder()],
       ["pendingTarget", getAddressEncoder()],
@@ -409,6 +414,7 @@ export function getGameSessionEncoder(): FixedSizeEncoder<GameSessionArgs> {
       ["endedAt", getI64Encoder()],
       ["chestRadius", getU8Encoder()],
       ["settleTimeoutSecs", getU32Encoder()],
+      ["tileCost", fixEncoderSize(getBytesEncoder(), 32)],
     ]),
     (value) => ({ ...value, discriminator: GAME_SESSION_DISCRIMINATOR }),
   );
@@ -437,7 +443,6 @@ export function getGameSessionDecoder(): FixedSizeDecoder<GameSession> {
     ["monsterSpeed", fixDecoderSize(getBytesDecoder(), 24)],
     ["monsterInitiative", getArrayDecoder(getU16Decoder(), { size: 24 })],
     ["playerInitiative", getArrayDecoder(getU16Decoder(), { size: 4 })],
-    ["tileCost", fixDecoderSize(getBytesDecoder(), 7)],
     ["actedSeq", getU32Decoder()],
     ["startedSeq", getU32Decoder()],
     ["pendingTarget", getAddressDecoder()],
@@ -472,6 +477,7 @@ export function getGameSessionDecoder(): FixedSizeDecoder<GameSession> {
     ["endedAt", getI64Decoder()],
     ["chestRadius", getU8Decoder()],
     ["settleTimeoutSecs", getU32Decoder()],
+    ["tileCost", fixDecoderSize(getBytesDecoder(), 32)],
   ]);
 }
 
@@ -537,5 +543,5 @@ export async function fetchAllMaybeGameSession(
 }
 
 export function getGameSessionSize(): number {
-  return 1055;
+  return 1080;
 }

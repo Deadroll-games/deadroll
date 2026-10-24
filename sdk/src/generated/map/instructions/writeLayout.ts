@@ -83,12 +83,12 @@ export type WriteLayoutInstruction<
 export type WriteLayoutInstructionData = {
   discriminator: ReadonlyUint8Array;
   offset: number;
-  tiles: ReadonlyUint8Array;
+  cells: ReadonlyUint8Array;
 };
 
 export type WriteLayoutInstructionDataArgs = {
   offset: number;
-  tiles: ReadonlyUint8Array;
+  cells: ReadonlyUint8Array;
 };
 
 export function getWriteLayoutInstructionDataEncoder(): Encoder<WriteLayoutInstructionDataArgs> {
@@ -96,7 +96,7 @@ export function getWriteLayoutInstructionDataEncoder(): Encoder<WriteLayoutInstr
     getStructEncoder([
       ["discriminator", fixEncoderSize(getBytesEncoder(), 8)],
       ["offset", getU16Encoder()],
-      ["tiles", addEncoderSizePrefix(getBytesEncoder(), getU32Encoder())],
+      ["cells", addEncoderSizePrefix(getBytesEncoder(), getU32Encoder())],
     ]),
     (value) => ({ ...value, discriminator: WRITE_LAYOUT_DISCRIMINATOR }),
   );
@@ -106,7 +106,7 @@ export function getWriteLayoutInstructionDataDecoder(): Decoder<WriteLayoutInstr
   return getStructDecoder([
     ["discriminator", fixDecoderSize(getBytesDecoder(), 8)],
     ["offset", getU16Decoder()],
-    ["tiles", addDecoderSizePrefix(getBytesDecoder(), getU32Decoder())],
+    ["cells", addDecoderSizePrefix(getBytesDecoder(), getU32Decoder())],
   ]);
 }
 
@@ -129,7 +129,7 @@ export type WriteLayoutAsyncInput<
   map: TAccountMap;
   layout?: TAccountLayout;
   offset: WriteLayoutInstructionDataArgs["offset"];
-  tiles: WriteLayoutInstructionDataArgs["tiles"];
+  cells: WriteLayoutInstructionDataArgs["cells"];
 };
 
 export async function getWriteLayoutInstructionAsync<
@@ -226,7 +226,7 @@ export type WriteLayoutInput<
   map: TAccountMap;
   layout: TAccountLayout;
   offset: WriteLayoutInstructionDataArgs["offset"];
-  tiles: WriteLayoutInstructionDataArgs["tiles"];
+  cells: WriteLayoutInstructionDataArgs["cells"];
 };
 
 export function getWriteLayoutInstruction<

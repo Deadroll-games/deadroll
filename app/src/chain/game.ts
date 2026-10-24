@@ -45,7 +45,7 @@ import {
   getMapLayoutDecoder,
   getMapLayoutSize,
   getMapSize,
-  getWriteChestsInstruction,
+  getWritePointsInstruction,
   getWriteLayoutInstruction,
   getWriteSpawnsInstruction,
   MapStatus,
@@ -126,10 +126,11 @@ import {
   monsterSkillsPda,
   rewardsPda,
 } from "./pda";
+import type { GridPoint } from "../components/grid/types";
 import type { Chest } from "./loot";
 import { pathArgs, type Step } from "./route";
 import { PRESETS, SKILL_DESCRIPTION_LEN, SKILL_NAME_LEN, type NamedSkill } from "./skillcheck";
-import { Aspect, Class, MAP_CELLS, MAP_MAX, Race, Tile, type Cell, type Spawn } from "./types";
+import { Aspect, Class, MAP_CELLS, MAP_MAX, Race, Tile, cellByte, type Cell, type Spawn } from "./types";
 
 // ---------------------------------------------------------------------------------------------
 // decoded account shapes: the generated sdk types (numbers for enums, `Option` for Rust options)
@@ -404,7 +405,8 @@ export function freezeTombstoneIx(character: Address, asset: Address, payer: Tra
 // ---------------------------------------------------------------------------------------------
 // maps
 
-/** Patch 11: `minPlayers` sets the reward budget, `chests` and `bossTable` are reward table ids. */
+/** Patch 11: `minPlayers` sets the reward budget, `chests` and `bossTable` are reward table ids.
+ * Patch 13: `tiles` are cell bytes (`cellByte`), the entrance and the exit are points. */
 export type MapDraft = {
   width: number;
   height: number;
@@ -414,44 +416,57 @@ export type MapDraft = {
   chestRadius: number;
   settleTimeoutSecs: number;
   tiles: Uint8Array;
+  entrance: Cell | null;
+  exit: Cell | null;
   spawns: Spawn[];
   chests: Chest[];
   bossTable: number;
 };
 
-/** Tiles exactly as the chain stores them: stride 32, cells outside the map Floor (0). */
+/** Cells exactly as the chain stores them: stride 32, cells outside the map Void (0). */
 export function chainTiles(d: MapDraft): Uint8Array {
   const out = new Uint8Array(MAP_CELLS);
-  for (let y = 0; y < d.height; y++) for (let x = 0; x < d.width; x++) out[y * MAP_MAX + x] = d.tiles[y * MAP_MAX + x] ?? Tile.Wall;
+  for (let y = 0; y < d.height; y++) for (let x = 0; x < d.width; x++) out[y * MAP_MAX + x] = d.tiles[y * MAP_MAX + x] ?? cellByte(Tile.Wall);
   return out;
 }
 
-export function findTile(d: MapDraft, tile: Tile): Cell | null {
-  for (let y = 0; y < d.height; y++) for (let x = 0; x < d.width; x++) if (d.tiles[y * MAP_MAX + x] === tile) return { x, y };
-  return null;
+/** `MapLayout.points`: the entrance, the exit, then the chests (a chest's index in a party is its place
+ * among the chests). */
+export function mapPoints(d: Pick<MapDraft, "entrance" | "exit" | "chests">) {
+  if (!d.entrance || !d.exit) throw new Error("the map needs an entrance and an exit");
+  const at = (kind: PointKind, c: Cell, data = 0) => ({ kind, x: c.x, y: c.y, data });
+  return [at(PointKind.Entrance, d.entrance), at(PointKind.Exit, d.exit), ...d.chests.map((c) => at(PointKind.Chest, c, c.table))];
 }
 
-/** create_map, write_layout, write_spawns, write_chests, finalize_map (one transaction each, as the test). */
+/** The entrance and the exit of a draft, for the grid. */
+export function draftPoints(d: Pick<MapDraft, "entrance" | "exit">): GridPoint[] {
+  return [
+    ...(d.entrance ? [{ ...d.entrance, kind: "entrance" as const }] : []),
+    ...(d.exit ? [{ ...d.exit, kind: "exit" as const }] : []),
+  ];
+}
+
+/** create_map, write_layout, write_spawns, write_points, finalize_map (one transaction each, as the test). */
 export async function buildMapIxs(dm: TransactionSigner, d: MapDraft): Promise<{ map: Address; layout: Address; index: number; ixs: Instruction[] }> {
   const index = crypto.getRandomValues(new Uint32Array(1))[0]!;
   const map = await mapPda(dm.address, index);
   const layout = await layoutPda(map);
   const edit = { dm, map, layout };
   const tiles = chainTiles(d);
-  const entrance = findTile(d, Tile.Entrance);
-  const exit = findTile(d, Tile.Exit);
-  if (!entrance || !exit) throw new Error("the map needs an entrance and an exit");
+  const points = mapPoints(d);
   const ixs = [
     getCreateMapInstruction({ ...edit, systemProgram: SYSTEM_PROGRAM, index, width: d.width, height: d.height, tier: d.tier, minPlayers: d.minPlayers, chestRadius: d.chestRadius, settleTimeoutSecs: d.settleTimeoutSecs }),
-    getWriteLayoutInstruction({ ...edit, offset: 0, tiles: tiles.slice(0, (d.height - 1) * MAP_MAX + d.width) }),
-    getWriteSpawnsInstruction({ ...edit, entrance, exit, spawns: d.spawns }),
-    getWriteChestsInstruction({ ...edit, chests: d.chests.map((c) => ({ kind: PointKind.Chest, x: c.x, y: c.y, data: c.table })), bossTable: d.bossTable }),
-    // The builder rules read the registry bestiary, monster skills (roles, pools, slots) and reward tables.
+    getWriteLayoutInstruction({ ...edit, offset: 0, cells: tiles.slice(0, (d.height - 1) * MAP_MAX + d.width) }),
+    getWriteSpawnsInstruction({ ...edit, spawns: d.spawns }),
+    getWritePointsInstruction({ ...edit, points, bossTable: d.bossTable }),
+    // The builder rules read the registry bestiary, monster skills (roles, pools, slots), reward
+    // tables and the tileset (patch 13).
     getFinalizeMapInstruction({
       ...edit,
       bestiary: await bestiaryPda(),
       monsterSkills: await monsterSkillsPda(),
       rewards: await rewardsPda(),
+      tileset: await tilesetPda(),
       secretsRoot: new Uint8Array(32),
     }),
   ];
@@ -481,7 +496,14 @@ export function mapsOf(dm: Address) {
 
 export async function mapTiles(layout: Address): Promise<Uint8Array | null> {
   const l = await getAccount("MapLayout", layout);
-  return l ? Uint8Array.from(l.core.tiles) : null;
+  return l ? Uint8Array.from(l.core.cells) : null;
+}
+
+/** Patch 13: the entrance and the exit of a layout, for the grid. */
+export function layoutPoints(core: { points: { kind: PointKind; x: number; y: number }[]; pointCount: number }): GridPoint[] {
+  return core.points.slice(0, core.pointCount).flatMap((p): GridPoint[] =>
+    p.kind === PointKind.Entrance ? [{ x: p.x, y: p.y, kind: "entrance" }] : p.kind === PointKind.Exit ? [{ x: p.x, y: p.y, kind: "exit" }] : [],
+  );
 }
 
 function addrBytes(a: Address): Uint8Array {
@@ -1019,9 +1041,15 @@ export type Party = {
   escrow: { collected: bigint; claimed: boolean } | null;
   map: MapAcc | null;
   tiles: Uint8Array | null;
+  /** Patch 13: the entrance and the exit (read with the cells, once). */
+  points: GridPoint[];
 };
 
+/** The points read with a layout's cells: a caller passes the cells back, the points come along. */
+const LAYOUT_POINTS = new WeakMap<Uint8Array, GridPoint[]>();
+
 export async function readParty(address: Address, tiles: Uint8Array | null = null, prev: Party | null = null): Promise<Party | null> {
+  let points = (tiles && LAYOUT_POINTS.get(tiles)) ?? [];
   // With the previous read of the same party, the player, participation, character, map and layout
   // addresses are already known, so everything comes in ONE getMultipleAccounts call. If the roster
   // or the map changed (a join), the guess is wrong and the second call fetches the right accounts.
@@ -1054,7 +1082,10 @@ export async function readParty(address: Address, tiles: Uint8Array | null = nul
   const map = rawMap ? decodeAccount("Map", rawMap) : null;
   if (!tiles) {
     const rawLayout = extra[chars.length * 2 + 1];
-    tiles = rawLayout ? Uint8Array.from(decodeAccount("MapLayout", rawLayout).core.tiles) : null;
+    const layout = rawLayout ? decodeAccount("MapLayout", rawLayout).core : null;
+    tiles = layout ? Uint8Array.from(layout.cells) : null;
+    points = layout ? layoutPoints(layout) : [];
+    if (tiles) LAYOUT_POINTS.set(tiles, points);
   }
   const monsterCooldowns = (monsterState?.skillCooldowns ?? []).slice(0, count).map((c) => Uint8Array.from(c));
   const monsterRecords = (monsterState?.records ?? []).slice(0, count).map((r) => Uint8Array.from(r));
@@ -1087,6 +1118,7 @@ export async function readParty(address: Address, tiles: Uint8Array | null = nul
     escrow: escrow && { collected: escrow.collected, claimed: escrow.claimed },
     map,
     tiles,
+    points,
   };
 }
 

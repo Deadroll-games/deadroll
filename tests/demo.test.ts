@@ -22,7 +22,10 @@ import {
   ComputeBudgetProgram,
   TransactionInstruction,
 } from "@solana/web3.js";
-import { MAP_STRIDE, Tile, layoutBytes, loadMapPreset } from "../tools/scripts/lib/demo-map.ts";
+import { MAP_STRIDE, cellKind, layoutBytes, loadMapPreset, presetPoints } from "../tools/scripts/lib/demo-map.ts";
+
+/** `PointKind` as the Anchor client encodes it, by discriminant. */
+const POINT_KIND = [{ chest: {} }, { entrance: {} }, { exit: {} }];
 import { newSkill, partyAccounts } from "./skill_ext.ts";
 import { MPL_CORE_PROGRAM, PROGRAMS, SESSION_KEYS_PROGRAM, VRF } from "@deadroll/sdk";
 
@@ -361,12 +364,12 @@ class Demo {
       .rpc()
       .then(track("create_map"));
     await mapProgram.methods.writeLayout(0, Buffer.from(layoutBytes(preset))).accountsStrict(edit).signers([this.dm]).rpc().then(track("write_layout"));
-    await mapProgram.methods.writeSpawns(preset.entrance, preset.exit, preset.spawns).accountsStrict(edit).signers([this.dm]).rpc().then(track("write_spawns"));
-    const chests = preset.chests.map((c) => ({ kind: { chest: {} }, x: c.x, y: c.y, data: c.table }));
-    await mapProgram.methods.writeChests(chests, preset.bossTable).accountsStrict(edit).signers([this.dm]).rpc().then(track("write_chests"));
+    await mapProgram.methods.writeSpawns(preset.spawns).accountsStrict(edit).signers([this.dm]).rpc().then(track("write_spawns"));
+    const points = presetPoints(preset).map((p) => ({ ...p, kind: POINT_KIND[p.kind] }));
+    await mapProgram.methods.writePoints(points, preset.bossTable).accountsStrict(edit).signers([this.dm]).rpc().then(track("write_points"));
     await mapProgram.methods
       .finalizeMap(new Array(32).fill(0))
-      .accountsStrict({ ...edit, bestiary, monsterSkills, rewards })
+      .accountsStrict({ ...edit, bestiary, monsterSkills, rewards, tileset })
       .signers([this.dm])
       .rpc()
       .then(track("finalize_map"));
@@ -607,7 +610,7 @@ class Demo {
 
   /**
    * Shortest step list from `from` to any cell where `goal` holds, over passable cells not taken
-   * by a living unit (traps avoided), with each step's action-point cost.
+   * by a living unit or a closed chest, with each step's action-point cost.
    */
   async route(from: { x: number; y: number }, goal: (x: number, y: number) => boolean, mover: number) {
     const s = await this.state();
@@ -620,9 +623,9 @@ class Demo {
     for (let i = 0; i < s.chestCount; i++) if (!(s.chestsOpened & (1 << i))) taken.add(s.chests[i].y * MAP_STRIDE + s.chests[i].x);
     const cost = (x: number, y: number) => {
       if (x < 0 || y < 0 || x >= preset.width || y >= preset.height) return 0;
-      const t = preset.tiles[y * MAP_STRIDE + x];
-      if (t === Tile.Wall || t === Tile.Trap || taken.has(y * MAP_STRIDE + x)) return 0;
-      return t === Tile.Water ? 2 : 1;
+      // Patch 13: the step cost of the cell's tile type, as the session copied the Tileset.
+      if (taken.has(y * MAP_STRIDE + x)) return 0;
+      return s.tileCost[cellKind(preset.tiles[y * MAP_STRIDE + x])];
     };
     const dirs = [
       [N, 0, -1],

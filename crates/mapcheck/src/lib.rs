@@ -11,12 +11,14 @@ pub mod roster;
 pub mod tiles;
 
 use deadroll_skillcheck::{check_monster_selection, monster::RECORDS_MAX, SkillError};
-use deadroll_types::{Cell, MapLayoutData, Tile, SESSION_SKILLS_MAX, SPAWNS_MAX, SPAWN_ELITE};
+use deadroll_types::{
+    Cell, MapLayoutDataV2, PointKind, POINTS_MAX, SESSION_SKILLS_MAX, SPAWNS_MAX, SPAWN_ELITE,
+};
 
 use limits::{tier_limits, BOSSES, BOSS_HELPERS, PACK_RADIUS, SIDE_MAX, SIDE_MIN};
 use loot::{MapLoot, TableRules};
 use roster::{Role, SpawnRules};
-use tiles::{cell_index, in_bounds, is_passable};
+use tiles::{cell_index, in_bounds, TileRules};
 
 /// The first broken builder rule. One variant per rule; `code()` is stable.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -26,15 +28,16 @@ pub enum MapCheckError {
     SizeOutOfRange,
     /// No limits for this map tier.
     TierOutOfRange,
-    /// A cell inside the map holds a byte that is not a `Tile`.
+    /// A cell inside the map has a tile type the `Tileset` does not have (patch 13; before it,
+    /// a byte that is not a `Tile`).
     InvalidTile,
-    /// Not exactly one `Entrance` tile.
+    /// Not exactly one entrance point (patch 13; before it, the `Entrance` tile).
     EntranceCount,
-    /// Not exactly one `Exit` tile.
+    /// Not exactly one exit point (patch 13; before it, the `Exit` tile).
     ExitCount,
-    /// `layout.entrance` is not the `Entrance` tile.
+    /// Unused since patch 13 (the entrance tile and field are gone).
     EntranceMismatch,
-    /// `layout.exit` is not the `Exit` tile.
+    /// Unused since patch 13 (the exit tile and field are gone).
     ExitMismatch,
     /// `spawn_count` is above `SPAWNS_MAX`.
     TooManySpawns,
@@ -83,7 +86,7 @@ pub enum MapCheckError {
     MinPlayersOutOfRange,
     /// More visible chests than the tier allows.
     TooManyChests,
-    /// A point whose type is not a visible chest.
+    /// Unused since patch 13 (a point may be the entrance, the exit or a chest).
     InvalidPoint,
     ChestOutOfBounds,
     ChestNotPassable,
@@ -101,6 +104,15 @@ pub enum MapCheckError {
     OverBudget,
     /// No cell next to a chest can be reached from the entrance.
     ChestUnreachable,
+    // Patch 13: the entrance and the exit are points (docs/MAP_DESCRIPTION.md 7.1).
+    /// `point_count` is above `POINTS_MAX`.
+    TooManyPoints,
+    /// The entrance or the exit is outside the map.
+    PointOutOfBounds,
+    /// The entrance or the exit is on a cell that cannot be entered.
+    PointNotPassable,
+    /// The entrance and the exit on one cell.
+    PointOverlap,
 }
 
 impl MapCheckError {
@@ -109,13 +121,15 @@ impl MapCheckError {
     }
 }
 
-/// Runs every builder rule on a map. `template_of` gives a bestiary id's rules from the registry
-/// (`None`: no such template); `loot` the chest and reward table rules (patch 11).
+/// Runs every builder rule on a map. `tiles` are the registry `Tileset` (patch 13);
+/// `template_of` gives a bestiary id's rules from the registry (`None`: no such template);
+/// `loot` the chest and reward table rules (patch 11).
 pub fn check_map<R: Fn(u8) -> Option<TableRules>>(
     width: u8,
     height: u8,
     tier: u8,
-    layout: &MapLayoutData,
+    layout: &MapLayoutDataV2,
+    tiles: &TileRules,
     template_of: impl Fn(u8) -> Option<SpawnRules>,
     loot: &MapLoot<R>,
 ) -> Result<(), MapCheckError> {
@@ -128,7 +142,9 @@ pub fn check_map<R: Fn(u8) -> Option<TableRules>>(
     }
     let limits = tier_limits(tier).ok_or(E::TierOutOfRange)?;
 
-    check_tiles(width, height, layout)?;
+    check_tiles(width, height, layout, tiles)?;
+    let ends = check_points(width, height, layout, tiles)?;
+    let [entrance, exit] = ends;
 
     let count = layout.spawn_count as usize;
     if count > SPAWNS_MAX {
@@ -149,13 +165,10 @@ pub fn check_map<R: Fn(u8) -> Option<TableRules>>(
         if !in_bounds(cell, width, height) {
             return Err(E::SpawnOutOfBounds);
         }
-        let tile =
-            Tile::try_from(layout.tiles[cell_index(cell.x, cell.y)]).map_err(|_| E::InvalidTile)?;
-        if !is_passable(tile) {
+        if !tiles.is_passable(layout.cells[cell_index(cell.x, cell.y)]) {
             return Err(E::SpawnNotPassable);
         }
-        let taken = cell == layout.entrance
-            || cell == layout.exit
+        let taken = ends.contains(&cell)
             || spawns[..i].iter().any(|s| s.x == spawn.x && s.y == spawn.y);
         if taken {
             return Err(E::SpawnOverlap);
@@ -245,18 +258,19 @@ pub fn check_map<R: Fn(u8) -> Option<TableRules>>(
         }
     }
 
-    loot::check_chests(width, height, limits.level_max, layout, loot)?;
+    loot::check_chests(width, height, limits.level_max, layout, tiles, ends, loot)?;
 
     // Closed chests occupy their cell: the paths go around them.
     let (chests, chest_count) = loot::chest_cells(layout);
     let reach = path::reachable_avoiding(
-        &layout.tiles,
+        &layout.cells,
+        tiles,
         width,
         height,
-        layout.entrance,
+        entrance,
         &chests[..chest_count],
     );
-    if !reach.contains(layout.exit) {
+    if !reach.contains(exit) {
         return Err(E::ExitUnreachable);
     }
     if spawns
@@ -268,53 +282,67 @@ pub fn check_map<R: Fn(u8) -> Option<TableRules>>(
     loot::check_chest_access(width, height, layout, &reach)
 }
 
-/// Every cell inside the map is a `Tile`, with exactly one entrance and one exit that match
-/// the layout points.
-fn check_tiles(width: u8, height: u8, layout: &MapLayoutData) -> Result<(), MapCheckError> {
-    use MapCheckError as E;
-
-    let (mut entrances, mut exits) = (0u16, 0u16);
-    let (mut entrance, mut exit) = (Cell::default(), Cell::default());
-    // Raw byte compares: this runs per cell on-chain.
-    const ENTRANCE: u8 = Tile::Entrance as u8;
-    const EXIT: u8 = Tile::Exit as u8;
+/// Every cell inside the map has a tile type the `Tileset` has (any variant).
+fn check_tiles(
+    width: u8,
+    height: u8,
+    layout: &MapLayoutDataV2,
+    tiles: &TileRules,
+) -> Result<(), MapCheckError> {
     for y in 0..height {
         let row = cell_index(0, y);
-        for (x, &byte) in layout.tiles[row..row + width as usize].iter().enumerate() {
-            match byte {
-                ENTRANCE => {
-                    entrances += 1;
-                    entrance = Cell { x: x as u8, y };
-                }
-                EXIT => {
-                    exits += 1;
-                    exit = Cell { x: x as u8, y };
-                }
-                b if b as usize >= Tile::COUNT => return Err(E::InvalidTile),
-                _ => {}
-            }
+        if !layout.cells[row..row + width as usize].iter().all(|&b| tiles.knows(b)) {
+            return Err(MapCheckError::InvalidTile);
         }
     }
-    if entrances != 1 {
-        return Err(E::EntranceCount);
-    }
-    if exits != 1 {
-        return Err(E::ExitCount);
-    }
-    if layout.entrance != entrance {
-        return Err(E::EntranceMismatch);
-    }
-    if layout.exit != exit {
-        return Err(E::ExitMismatch);
-    }
     Ok(())
+}
+
+/// Exactly one entrance and one exit point, inside the map, on cells that can be entered and
+/// apart. Returns `[entrance, exit]`. Chests are `loot::check_chests`'s.
+fn check_points(
+    width: u8,
+    height: u8,
+    layout: &MapLayoutDataV2,
+    tiles: &TileRules,
+) -> Result<[Cell; 2], MapCheckError> {
+    use MapCheckError as E;
+
+    if layout.point_count as usize > POINTS_MAX {
+        return Err(E::TooManyPoints);
+    }
+    let mut ends = [None; 2];
+    for point in layout.point_list() {
+        let (end, twice) = match point.kind {
+            PointKind::Entrance => (0, E::EntranceCount),
+            PointKind::Exit => (1, E::ExitCount),
+            PointKind::Chest => continue,
+        };
+        if ends[end].is_some() {
+            return Err(twice);
+        }
+        let cell = point.cell();
+        if !in_bounds(cell, width, height) {
+            return Err(E::PointOutOfBounds);
+        }
+        if !tiles.is_passable(layout.cells[cell_index(cell.x, cell.y)]) {
+            return Err(E::PointNotPassable);
+        }
+        ends[end] = Some(cell);
+    }
+    let entrance = ends[0].ok_or(E::EntranceCount)?;
+    let exit = ends[1].ok_or(E::ExitCount)?;
+    if entrance == exit {
+        return Err(E::PointOverlap);
+    }
+    Ok([entrance, exit])
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use deadroll_skillcheck::Category;
-    use deadroll_types::{MapPoint, PointKind, Pubkey, Spawn, CHESTS_MAX, MAP_CELLS, NO_TABLE};
+    use deadroll_types::{cell_byte, MapPoint, Pubkey, Spawn, TileKind, MAP_CELLS, NO_TABLE};
 
     /// Test bestiary ids (the shipped registry order).
     mod ids {
@@ -351,16 +379,37 @@ mod tests {
         }
     }
 
+    fn tiles() -> TileRules {
+        tiles::tests::starter()
+    }
+
+    const FLOOR: u8 = TileKind::StoneFloor as u8 * 8;
+    const WALL: u8 = TileKind::Wall as u8 * 8;
+
+    fn point(kind: PointKind, cell: Cell, data: u8) -> MapPoint {
+        MapPoint {
+            kind,
+            x: cell.x,
+            y: cell.y,
+            data,
+        }
+    }
+
     /// A valid tier 1, 16x16 map: open room in a wall ring, wolves, goblins, boss pack.
-    fn demo() -> MapLayoutData {
-        let mut tiles = [Tile::Wall as u8; MAP_CELLS];
+    /// Points: the entrance, the exit, then the chests.
+    fn demo() -> MapLayoutDataV2 {
+        let mut cells = [WALL; MAP_CELLS];
         for y in 1..15 {
             for x in 1..15 {
-                tiles[cell_index(x, y)] = Tile::Floor as u8;
+                cells[cell_index(x, y)] = FLOOR;
             }
         }
-        tiles[cell_index(ENTRANCE.x, ENTRANCE.y)] = Tile::Entrance as u8;
-        tiles[cell_index(EXIT.x, EXIT.y)] = Tile::Exit as u8;
+        let mut points = [MapPoint::default(); POINTS_MAX];
+        points[..3].copy_from_slice(&[
+            point(PointKind::Entrance, ENTRANCE, 0),
+            point(PointKind::Exit, EXIT, 0),
+            chest(5, 5, tables::SMALL),
+        ]);
         let mut spawns = [Spawn::default(); SPAWNS_MAX];
         let list = [
             spawn(ids::WOLF, 6, 2, 1),
@@ -372,19 +421,27 @@ mod tests {
             spawn(ids::GOBLIN_SHAMAN, 12, 11, 3),
         ];
         spawns[..list.len()].copy_from_slice(&list);
-        MapLayoutData {
+        MapLayoutDataV2 {
             version: 1,
             map: Pubkey::default(),
-            tiles,
+            cells,
             spawns,
             spawn_count: list.len() as u8,
-            entrance: ENTRANCE,
-            exit: EXIT,
-            bump: 0,
-            chests: [chest(5, 5, tables::SMALL); CHESTS_MAX],
-            chest_count: 1,
+            points,
+            point_count: 3,
             boss_table: tables::BOSS,
+            bump: 0,
         }
+    }
+
+    /// Replaces the chests (the points after the entrance and the exit).
+    fn set_chests(layout: &mut MapLayoutDataV2, chests: &[MapPoint]) {
+        layout.points[2..2 + chests.len()].copy_from_slice(chests);
+        layout.point_count = 2 + chests.len() as u8;
+    }
+
+    fn chest0(layout: &mut MapLayoutDataV2) -> &mut MapPoint {
+        &mut layout.points[2]
     }
 
     /// Test reward tables.
@@ -441,12 +498,12 @@ mod tests {
         }
     }
 
-    fn check(layout: &MapLayoutData) -> Result<(), MapCheckError> {
-        check_map(16, 16, 1, layout, p0_role, &test_loot())
+    fn check(layout: &MapLayoutDataV2) -> Result<(), MapCheckError> {
+        check_map(16, 16, 1, layout, &tiles(), p0_role, &test_loot())
     }
 
-    fn set(layout: &mut MapLayoutData, x: u8, y: u8, tile: Tile) {
-        layout.tiles[cell_index(x, y)] = tile as u8;
+    fn set(layout: &mut MapLayoutDataV2, x: u8, y: u8, kind: TileKind) {
+        layout.cells[cell_index(x, y)] = kind as u8 * 8;
     }
 
     #[test]
@@ -457,23 +514,21 @@ mod tests {
     #[test]
     fn largest_map_is_valid() {
         let mut layout = demo();
-        layout.tiles = [Tile::Floor as u8; MAP_CELLS];
-        set(&mut layout, 0, 0, Tile::Entrance);
-        set(&mut layout, 31, 31, Tile::Exit);
-        layout.entrance = Cell { x: 0, y: 0 };
-        layout.exit = Cell { x: 31, y: 31 };
-        assert_eq!(check_map(32, 32, 1, &layout, p0_role, &test_loot()), Ok(()));
+        layout.cells = [FLOOR; MAP_CELLS];
+        layout.points[0] = point(PointKind::Entrance, Cell { x: 0, y: 0 }, 0);
+        layout.points[1] = point(PointKind::Exit, Cell { x: 31, y: 31 }, 0);
+        assert_eq!(check_map(32, 32, 1, &layout, &tiles(), p0_role, &test_loot()), Ok(()));
     }
 
     #[test]
     fn rejects_size() {
         let layout = demo();
         assert_eq!(
-            check_map(7, 16, 1, &layout, p0_role, &test_loot()),
+            check_map(7, 16, 1, &layout, &tiles(), p0_role, &test_loot()),
             Err(MapCheckError::SizeOutOfRange)
         );
         assert_eq!(
-            check_map(16, 33, 1, &layout, p0_role, &test_loot()),
+            check_map(16, 33, 1, &layout, &tiles(), p0_role, &test_loot()),
             Err(MapCheckError::SizeOutOfRange)
         );
     }
@@ -482,58 +537,121 @@ mod tests {
     fn rejects_tier() {
         let layout = demo();
         assert_eq!(
-            check_map(16, 16, 0, &layout, p0_role, &test_loot()),
+            check_map(16, 16, 0, &layout, &tiles(), p0_role, &test_loot()),
             Err(MapCheckError::TierOutOfRange)
         );
         assert_eq!(
-            check_map(16, 16, 3, &layout, p0_role, &test_loot()),
+            check_map(16, 16, 3, &layout, &tiles(), p0_role, &test_loot()),
             Err(MapCheckError::TierOutOfRange)
         );
     }
 
     #[test]
-    fn rejects_unknown_tile_byte_inside_the_map() {
+    fn rejects_unknown_tile_type_inside_the_map() {
         let mut layout = demo();
-        layout.tiles[cell_index(5, 5)] = Tile::COUNT as u8;
+        layout.cells[cell_index(5, 7)] = cell_byte(TileKind::COUNT as u8, 0);
         assert_eq!(check(&layout), Err(MapCheckError::InvalidTile));
+        // A reserved id the Tileset gets later is fine from then on.
+        let mut more = tiles();
+        more.known |= 1 << TileKind::COUNT;
+        more.cost[TileKind::COUNT] = 1;
+        assert_eq!(
+            check_map(16, 16, 1, &layout, &more, p0_role, &test_loot()),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn every_starter_tile_and_variant_is_known() {
+        let mut layout = demo();
+        for (i, &kind) in TileKind::ALL.iter().enumerate() {
+            layout.cells[cell_index(1 + i as u8, 8)] = cell_byte(kind as u8, 7);
+        }
+        assert_eq!(check(&layout), Ok(()));
     }
 
     #[test]
     fn ignores_bytes_outside_the_map() {
         let mut layout = demo();
-        layout.tiles[cell_index(20, 20)] = u8::MAX;
-        layout.tiles[cell_index(16, 0)] = Tile::Entrance as u8;
+        layout.cells[cell_index(20, 20)] = u8::MAX;
+        layout.cells[cell_index(16, 0)] = u8::MAX;
+        assert_eq!(check(&layout), Ok(()));
+    }
+
+    #[test]
+    fn the_variant_does_not_change_passability() {
+        let mut layout = demo();
+        for x in 1..15 {
+            layout.cells[cell_index(x, 13)] = cell_byte(TileKind::Dirt as u8, x % 8);
+        }
         assert_eq!(check(&layout), Ok(()));
     }
 
     #[test]
     fn rejects_entrance_count() {
         let mut layout = demo();
-        set(&mut layout, 1, 1, Tile::Floor);
+        layout.points[0] = chest(2, 2, tables::SMALL);
         assert_eq!(check(&layout), Err(MapCheckError::EntranceCount));
-        set(&mut layout, 1, 1, Tile::Entrance);
-        set(&mut layout, 2, 1, Tile::Entrance);
+        let mut layout = demo();
+        layout.points[3] = point(PointKind::Entrance, Cell { x: 2, y: 1 }, 0);
+        layout.point_count = 4;
         assert_eq!(check(&layout), Err(MapCheckError::EntranceCount));
     }
 
     #[test]
     fn rejects_exit_count() {
         let mut layout = demo();
-        set(&mut layout, 14, 14, Tile::Floor);
+        layout.point_count = 1;
         assert_eq!(check(&layout), Err(MapCheckError::ExitCount));
-        set(&mut layout, 14, 14, Tile::Exit);
-        set(&mut layout, 13, 14, Tile::Exit);
+        let mut layout = demo();
+        layout.points[3] = point(PointKind::Exit, Cell { x: 13, y: 14 }, 0);
+        layout.point_count = 4;
         assert_eq!(check(&layout), Err(MapCheckError::ExitCount));
     }
 
     #[test]
-    fn rejects_point_mismatch() {
+    fn points_may_come_in_any_order() {
         let mut layout = demo();
-        layout.entrance = Cell { x: 2, y: 1 };
-        assert_eq!(check(&layout), Err(MapCheckError::EntranceMismatch));
+        layout.points.swap(0, 2);
+        layout.points.swap(1, 2);
+        assert_eq!(check(&layout), Ok(()));
+    }
+
+    #[test]
+    fn rejects_entrance_and_exit_placement() {
         let mut layout = demo();
-        layout.exit = Cell { x: 14, y: 13 };
-        assert_eq!(check(&layout), Err(MapCheckError::ExitMismatch));
+        layout.point_count = POINTS_MAX as u8 + 1;
+        assert_eq!(check(&layout), Err(MapCheckError::TooManyPoints));
+        let mut layout = demo();
+        layout.points[0].x = 16;
+        assert_eq!(check(&layout), Err(MapCheckError::PointOutOfBounds));
+        let mut layout = demo();
+        layout.points[1].y = 16;
+        assert_eq!(check(&layout), Err(MapCheckError::PointOutOfBounds));
+        let mut layout = demo();
+        layout.points[0] = point(PointKind::Entrance, Cell { x: 0, y: 1 }, 0);
+        assert_eq!(check(&layout), Err(MapCheckError::PointNotPassable));
+        for kind in [TileKind::Void, TileKind::DeepWater, TileKind::Chasm] {
+            let mut layout = demo();
+            set(&mut layout, EXIT.x, EXIT.y, kind);
+            assert_eq!(
+                check(&layout),
+                Err(MapCheckError::PointNotPassable),
+                "{kind:?}"
+            );
+        }
+        let mut layout = demo();
+        layout.points[1] = point(PointKind::Exit, ENTRANCE, 0);
+        assert_eq!(check(&layout), Err(MapCheckError::PointOverlap));
+    }
+
+    #[test]
+    fn exit_may_be_on_stairs_or_water() {
+        let mut layout = demo();
+        set(&mut layout, EXIT.x, EXIT.y, TileKind::Stairs);
+        assert_eq!(check(&layout), Ok(()));
+        set(&mut layout, EXIT.x, EXIT.y, TileKind::ShallowWater);
+        assert_eq!(check(&layout), Ok(()));
     }
 
     #[test]
@@ -553,7 +671,7 @@ mod tests {
     #[test]
     fn rejects_spawn_on_wall() {
         let mut layout = demo();
-        set(&mut layout, 6, 2, Tile::Wall);
+        set(&mut layout, 6, 2, TileKind::Wall);
         assert_eq!(check(&layout), Err(MapCheckError::SpawnNotPassable));
     }
 
@@ -592,7 +710,7 @@ mod tests {
         for s in layout.spawns.iter_mut() {
             s.level = 3;
         }
-        assert_eq!(check_map(16, 16, 2, &layout, p0_role, &test_loot()), Ok(()));
+        assert_eq!(check_map(16, 16, 2, &layout, &tiles(), p0_role, &test_loot()), Ok(()));
     }
 
     #[test]
@@ -663,14 +781,14 @@ mod tests {
             }
         };
         assert_eq!(
-            check_map(16, 16, 1, &layout, wolves_are_loners, &test_loot()),
+            check_map(16, 16, 1, &layout, &tiles(), wolves_are_loners, &test_loot()),
             Err(MapCheckError::TwoLoners)
         );
         // One loner per pack is fine.
         let mut layout = demo();
         layout.spawns[1].bestiary_id = ids::GOBLIN;
         assert_eq!(
-            check_map(16, 16, 1, &layout, wolves_are_loners, &test_loot()),
+            check_map(16, 16, 1, &layout, &tiles(), wolves_are_loners, &test_loot()),
             Ok(())
         );
     }
@@ -688,7 +806,7 @@ mod tests {
     fn rejects_map_without_path_to_exit() {
         let mut layout = demo();
         for x in 1..15 {
-            set(&mut layout, x, 13, Tile::Wall);
+            set(&mut layout, x, 13, TileKind::Wall);
         }
         assert_eq!(check(&layout), Err(MapCheckError::ExitUnreachable));
     }
@@ -697,8 +815,8 @@ mod tests {
     fn rejects_unreachable_spawn() {
         let mut layout = demo();
         // Wall in the first wolf.
-        for (x, y) in [(5, 2), (7, 2), (6, 1), (6, 3)] {
-            set(&mut layout, x, y, Tile::Wall);
+        for (x, y) in [(5, 1), (6, 1), (7, 1), (5, 2), (7, 2), (5, 3), (6, 3), (7, 3)] {
+            set(&mut layout, x, y, TileKind::Wall);
         }
         layout.spawns[1].x = 7;
         layout.spawns[1].y = 4;
@@ -712,12 +830,47 @@ mod tests {
         assert_eq!(MapCheckError::TooManySessionSkills.code(), 28);
         assert_eq!(MapCheckError::MinPlayersOutOfRange.code(), 29);
         assert_eq!(MapCheckError::ChestUnreachable.code(), 40);
+        assert_eq!(MapCheckError::PointOverlap.code(), 44);
     }
+
+    #[test]
+    fn diagonal_steps_cross_a_staggered_wall() {
+        // Two wall rows across the room, open at (7, 8) and (8, 9): only the diagonal step
+        // (7, 8) -> (8, 9) links the halves.
+        let mut layout = demo();
+        for x in 1..15 {
+            set(&mut layout, x, 8, TileKind::Wall);
+            set(&mut layout, x, 9, TileKind::Wall);
+        }
+        set(&mut layout, 7, 8, TileKind::StoneFloor);
+        set(&mut layout, 8, 9, TileKind::StoneFloor);
+        assert_eq!(check(&layout), Ok(()));
+        set(&mut layout, 8, 9, TileKind::Wall);
+        assert_eq!(check(&layout), Err(MapCheckError::ExitUnreachable));
+    }
+
+    #[test]
+    fn deep_water_and_chasm_cut_the_map_rubble_does_not() {
+        for (kind, verdict) in [
+            (TileKind::DeepWater, Err(MapCheckError::ExitUnreachable)),
+            (TileKind::Chasm, Err(MapCheckError::ExitUnreachable)),
+            (TileKind::Void, Err(MapCheckError::ExitUnreachable)),
+            (TileKind::Rubble, Ok(())),
+            (TileKind::ShallowWater, Ok(())),
+        ] {
+            let mut layout = demo();
+            for x in 1..15 {
+                set(&mut layout, x, 13, kind);
+            }
+            assert_eq!(check(&layout), verdict, "{kind:?}");
+        }
+    }
+
 
     #[test]
     fn map_without_chests_is_valid() {
         let mut layout = demo();
-        layout.chest_count = 0;
+        set_chests(&mut layout, &[]);
         assert_eq!(check(&layout), Ok(()));
     }
 
@@ -726,70 +879,61 @@ mod tests {
         let layout = demo();
         for bad in [0, 5] {
             assert_eq!(
-                check_map(16, 16, 1, &layout, p0_role, &loot_for(bad)),
+                check_map(16, 16, 1, &layout, &tiles(), p0_role, &loot_for(bad)),
                 Err(MapCheckError::MinPlayersOutOfRange)
             );
         }
-        assert_eq!(check_map(16, 16, 1, &layout, p0_role, &loot_for(4)), Ok(()));
+        assert_eq!(check_map(16, 16, 1, &layout, &tiles(), p0_role, &loot_for(4)), Ok(()));
     }
 
     #[test]
     fn rejects_too_many_chests() {
         let mut layout = demo();
-        layout.chests[1] = chest(6, 6, tables::SMALL);
-        layout.chest_count = 2;
+        let small = |x, y| chest(x, y, tables::SMALL);
+        set_chests(&mut layout, &[small(5, 5), small(6, 6)]);
         assert_eq!(
-            check_map(16, 16, 1, &layout, p0_role, &loot_for(2)),
+            check_map(16, 16, 1, &layout, &tiles(), p0_role, &loot_for(2)),
             Ok(()),
             "the tier allows two"
         );
-        layout.chests[2] = chest(7, 7, tables::SMALL);
-        layout.chest_count = 3;
+        set_chests(&mut layout, &[small(5, 5), small(6, 6), small(7, 7)]);
         assert_eq!(check(&layout), Err(MapCheckError::TooManyChests));
-        layout.chest_count = CHESTS_MAX as u8 + 1;
+        set_chests(&mut layout, &[small(5, 5), small(6, 6), small(7, 7), small(8, 8)]);
         assert_eq!(check(&layout), Err(MapCheckError::TooManyChests));
     }
 
     #[test]
     fn rejects_chest_placement() {
         let mut layout = demo();
-        layout.chests[0] = chest(16, 5, tables::SMALL);
+        *chest0(&mut layout) = chest(16, 5, tables::SMALL);
         assert_eq!(check(&layout), Err(MapCheckError::ChestOutOfBounds));
-        layout.chests[0] = chest(0, 5, tables::SMALL);
+        *chest0(&mut layout) = chest(0, 5, tables::SMALL);
+        assert_eq!(check(&layout), Err(MapCheckError::ChestNotPassable));
+        set(&mut layout, 0, 5, TileKind::DeepWater);
         assert_eq!(check(&layout), Err(MapCheckError::ChestNotPassable));
         for cell in [ENTRANCE, EXIT, Cell { x: 6, y: 2 }] {
-            layout.chests[0] = chest(cell.x, cell.y, tables::SMALL);
+            *chest0(&mut layout) = chest(cell.x, cell.y, tables::SMALL);
             assert_eq!(check(&layout), Err(MapCheckError::ChestOverlap));
         }
-        layout.chests[0] = chest(5, 5, tables::SMALL);
-        layout.chests[1] = chest(5, 5, tables::SMALL);
-        layout.chest_count = 2;
+        let small = chest(5, 5, tables::SMALL);
+        set_chests(&mut layout, &[small, small]);
         assert_eq!(check(&layout), Err(MapCheckError::ChestOverlap));
-    }
-
-    #[test]
-    fn rejects_point_that_is_not_a_chest() {
-        let mut layout = demo();
-        // A byte past `PointKind` cannot be decoded; a future variant would be rejected here too.
-        layout.chests[0].kind = PointKind::Chest;
-        assert_eq!(check(&layout), Ok(()));
-        assert_eq!(PointKind::COUNT, 1);
     }
 
     #[test]
     fn rejects_tables() {
         let mut layout = demo();
-        layout.chests[0].data = 9;
+        chest0(&mut layout).data = 9;
         assert_eq!(check(&layout), Err(MapCheckError::UnknownTable));
-        layout.chests[0].data = tables::UNLISTED;
+        chest0(&mut layout).data = tables::UNLISTED;
         assert_eq!(check(&layout), Err(MapCheckError::TableNotAllowed));
-        layout.chests[0].data = tables::HIGH;
+        chest0(&mut layout).data = tables::HIGH;
         assert_eq!(
             check(&layout),
             Err(MapCheckError::TableNotAllowed),
             "levels above tier 1"
         );
-        layout.chests[0].data = tables::SMALL;
+        chest0(&mut layout).data = tables::SMALL;
         layout.boss_table = NO_TABLE;
         assert_eq!(check(&layout), Err(MapCheckError::BossTableMissing));
         layout.boss_table = tables::SMALL;
@@ -802,13 +946,15 @@ mod tests {
     fn budget_grows_with_min_players() {
         let mut layout = demo();
         // Two chests (2 + 2) and the boss (4): 8 points.
-        layout.chests[1] = chest(6, 6, tables::SMALL);
-        layout.chest_count = 2;
+        set_chests(
+            &mut layout,
+            &[chest(5, 5, tables::SMALL), chest(6, 6, tables::SMALL)],
+        );
         assert_eq!(
-            check_map(16, 16, 1, &layout, p0_role, &loot_for(1)),
+            check_map(16, 16, 1, &layout, &tiles(), p0_role, &loot_for(1)),
             Err(MapCheckError::OverBudget)
         );
-        assert_eq!(check_map(16, 16, 1, &layout, p0_role, &loot_for(2)), Ok(()));
+        assert_eq!(check_map(16, 16, 1, &layout, &tiles(), p0_role, &loot_for(2)), Ok(()));
     }
 
     #[test]
@@ -816,11 +962,11 @@ mod tests {
         let mut layout = demo();
         // A wall at x = 13 with one gap at (13, 7) between the room and the exit (14, 14).
         for y in 1..15 {
-            set(&mut layout, 13, y, Tile::Wall);
+            set(&mut layout, 13, y, TileKind::Wall);
         }
-        set(&mut layout, 13, 7, Tile::Floor);
+        set(&mut layout, 13, 7, TileKind::StoneFloor);
         assert_eq!(check(&layout), Ok(()));
-        layout.chests[0] = chest(13, 7, tables::SMALL);
+        *chest0(&mut layout) = chest(13, 7, tables::SMALL);
         assert_eq!(check(&layout), Err(MapCheckError::ExitUnreachable));
     }
 
@@ -829,17 +975,15 @@ mod tests {
         let mut layout = demo();
         // Wall off the wolves' corner but one gap, then put the chest in the gap.
         for x in 1..=8 {
-            set(&mut layout, x, 4, Tile::Wall);
+            set(&mut layout, x, 4, TileKind::Wall);
         }
         for y in 1..4 {
-            set(&mut layout, 8, y, Tile::Wall);
+            set(&mut layout, 8, y, TileKind::Wall);
         }
-        set(&mut layout, 3, 4, Tile::Floor);
-        layout.entrance = Cell { x: 1, y: 6 };
-        set(&mut layout, ENTRANCE.x, ENTRANCE.y, Tile::Floor);
-        set(&mut layout, 1, 6, Tile::Entrance);
+        set(&mut layout, 3, 4, TileKind::StoneFloor);
+        layout.points[0] = point(PointKind::Entrance, Cell { x: 1, y: 6 }, 0);
         assert_eq!(check(&layout), Ok(()));
-        layout.chests[0] = chest(3, 4, tables::SMALL);
+        *chest0(&mut layout) = chest(3, 4, tables::SMALL);
         assert_eq!(check(&layout), Err(MapCheckError::SpawnUnreachable));
     }
 
@@ -857,11 +1001,11 @@ mod tests {
             (5, 6),
             (6, 6),
         ] {
-            set(&mut layout, x, y, Tile::Wall);
+            set(&mut layout, x, y, TileKind::Wall);
         }
         assert_eq!(check(&layout), Err(MapCheckError::ChestUnreachable));
         // One open diagonal neighbor is enough.
-        set(&mut layout, 6, 6, Tile::Floor);
+        set(&mut layout, 6, 6, TileKind::StoneFloor);
         assert_eq!(check(&layout), Ok(()));
     }
 
@@ -884,25 +1028,25 @@ mod tests {
         let roster = with_pool(0);
         // No skills chosen while the pool has some.
         assert_eq!(
-            check_map(16, 16, 1, &layout, &roster, &test_loot()),
+            check_map(16, 16, 1, &layout, &tiles(), &roster, &test_loot()),
             Err(MapCheckError::MonsterSkillCount)
         );
         layout.spawns[0].skills = 0b1_0111;
         layout.spawns[1].skills = 0b1_1110;
-        assert_eq!(check_map(16, 16, 1, &layout, &roster, &test_loot()), Ok(()));
+        assert_eq!(check_map(16, 16, 1, &layout, &tiles(), &roster, &test_loot()), Ok(()));
         layout.spawns[1].skills = 0b10_0111;
         assert_eq!(
-            check_map(16, 16, 1, &layout, &roster, &test_loot()),
+            check_map(16, 16, 1, &layout, &tiles(), &roster, &test_loot()),
             Err(MapCheckError::MonsterSkillUnknown)
         );
         // An elite takes all four actives.
         layout.spawns[1].skills = 0b1_1111;
         assert_eq!(
-            check_map(16, 16, 1, &layout, &roster, &test_loot()),
+            check_map(16, 16, 1, &layout, &tiles(), &roster, &test_loot()),
             Err(MapCheckError::MonsterSkillCount)
         );
         layout.spawns[1].flags = SPAWN_ELITE;
-        assert_eq!(check_map(16, 16, 1, &layout, &roster, &test_loot()), Ok(()));
+        assert_eq!(check_map(16, 16, 1, &layout, &tiles(), &roster, &test_loot()), Ok(()));
     }
 
     #[test]
@@ -913,7 +1057,7 @@ mod tests {
         layout.spawns[1].flags = SPAWN_ELITE;
         assert_eq!(check(&layout), Err(MapCheckError::TooManyElites));
         assert_eq!(
-            check_map(16, 16, 2, &layout, p0_role, &test_loot()),
+            check_map(16, 16, 2, &layout, &tiles(), p0_role, &test_loot()),
             Err(MapCheckError::LevelOutOfTier)
         );
         let mut layout = demo();
@@ -930,7 +1074,7 @@ mod tests {
             Some(t)
         };
         assert_eq!(
-            check_map(16, 16, 1, &layout, high, &test_loot()),
+            check_map(16, 16, 1, &layout, &tiles(), high, &test_loot()),
             Err(MapCheckError::TierBelowTemplate)
         );
     }
@@ -951,7 +1095,7 @@ mod tests {
         }
         // 5 templates x 16 distinct skills = 80 > 32.
         assert_eq!(
-            check_map(16, 16, 1, &layout, roster, &test_loot()),
+            check_map(16, 16, 1, &layout, &tiles(), roster, &test_loot()),
             Err(MapCheckError::TooManySessionSkills)
         );
         // The same two templates share their skills: 2 x 16 = 32 fit.
@@ -967,6 +1111,6 @@ mod tests {
             }
             Some(t)
         };
-        assert_eq!(check_map(16, 16, 1, &layout, two, &test_loot()), Ok(()));
+        assert_eq!(check_map(16, 16, 1, &layout, &tiles(), two, &test_loot()), Ok(()));
     }
 }

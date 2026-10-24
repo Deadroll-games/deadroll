@@ -9,6 +9,6 @@
 export * from "./createMap.js";
 export * from "./finalizeMap.js";
 export * from "./setStatus.js";
-export * from "./writeChests.js";
 export * from "./writeLayout.js";
+export * from "./writePoints.js";
 export * from "./writeSpawns.js";

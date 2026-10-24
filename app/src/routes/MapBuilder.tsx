@@ -8,8 +8,9 @@ import { PrepayConfirm } from "../components/forms/PrepayConfirm";
 import type { BuilderTool } from "../components/forms/types";
 import { MAP_PRESETS, presetToLayout } from "../chain/mock";
 import { BESTIARY_NAMES, bestiaryName } from "../chain/names";
-import { SPAWNS_MAX, Tile, cellIndex, type Cell, type Spawn } from "../chain/types";
-import { buildMapIxs, mapRent, mapStatus, mapsOf, type MapAcc } from "../chain/game";
+import { SPAWNS_MAX, Tile, cellByte, cellIndex, type Cell, type Spawn } from "../chain/types";
+import { SHIPPED_TILE_COST } from "../chain/tiles";
+import { buildMapIxs, draftPoints, mapRent, mapStatus, mapsOf, type MapAcc, type MapDraft } from "../chain/game";
 import {
   CHESTS_MAX,
   CHEST_RADIUS_MAX,
@@ -49,7 +50,9 @@ export function spawnSkillError(view: SpawnView | null): string | null {
 
 const BESTIARY = Object.entries(BESTIARY_NAMES).map(([id, name]) => ({ id: Number(id), name }));
 const PRESETS = MAP_PRESETS.map((p) => ({ name: p.name, width: p.width, height: p.height }));
-const WALKABLE = new Set<number>([Tile.Floor, Tile.Door, Tile.Entrance, Tile.Exit, Tile.Trap]);
+/** Passable by the shipped Tileset (the chain's verdict is finalize_map's, with the registry Tileset). */
+const walkable = (tiles: Uint8Array, c: Cell) => (SHIPPED_TILE_COST[(tiles[cellIndex(c.x, c.y)] ?? 0) >> 3] ?? 0) > 0;
+const same = (a: Cell | null, b: Cell) => a !== null && a.x === b.x && a.y === b.y;
 
 /**
  * Quick client-side checks so the DM sees obvious mistakes before paying for transactions.
@@ -57,35 +60,29 @@ const WALKABLE = new Set<number>([Tile.Floor, Tile.Door, Tile.Entrance, Tile.Exi
  * TODO(L9.6): run crates/mapcheck through WASM for the exact same verdict.
  */
 export function quickCheck(
-  tiles: Uint8Array,
-  width: number,
-  height: number,
-  spawns: Spawn[],
+  map: Pick<MapDraft, "tiles" | "entrance" | "exit" | "spawns">,
   skillError: (s: Spawn) => string | null = () => null,
   loot?: { tier: number; minPlayers: number; chests: Chest[]; bossTable: number; tables: RewardTable[] },
 ): string[] {
+  const { tiles, entrance, exit, spawns } = map;
   const errors: string[] = [];
-  let entrances = 0;
-  let exits = 0;
-  for (let y = 0; y < height; y++)
-    for (let x = 0; x < width; x++) {
-      const t = tiles[cellIndex(x, y)];
-      if (t === Tile.Entrance) entrances++;
-      if (t === Tile.Exit) exits++;
-    }
-  if (entrances !== 1) errors.push(`Need exactly one entrance, found ${entrances}`);
-  if (exits !== 1) errors.push(`Need exactly one exit, found ${exits}`);
+  // Patch 13: the entrance and the exit are points on cells that can be entered.
+  if (!entrance) errors.push("Place the entrance");
+  else if (!walkable(tiles, entrance)) errors.push("The entrance must stand on a walkable tile");
+  if (!exit) errors.push("Place the exit");
+  else if (!walkable(tiles, exit)) errors.push("The exit must stand on a walkable tile");
+  if (entrance && exit && same(entrance, exit)) errors.push("The entrance and the exit share a cell");
   if (spawns.length > SPAWNS_MAX) errors.push(`At most ${SPAWNS_MAX} spawns`);
   spawns.forEach((s, i) => {
-    if (!WALKABLE.has(tiles[cellIndex(s.x, s.y)] ?? Tile.Wall)) errors.push(`Spawn ${i} (${bestiaryName(s.bestiaryId)}) is not on a walkable tile`);
+    if (!walkable(tiles, s)) errors.push(`Spawn ${i} (${bestiaryName(s.bestiaryId)}) is not on a walkable tile`);
+    if (same(entrance, s) || same(exit, s)) errors.push(`Spawn ${i} (${bestiaryName(s.bestiaryId)}) stands on the entrance or the exit`);
     const skills = skillError(s);
     if (skills) errors.push(`Spawn ${i} (${bestiaryName(s.bestiaryId)}): ${skills}`);
   });
   if (loot) {
     // Patch 11: a closed chest occupies a free walkable cell (the reachable neighbor is finalize_map's).
     loot.chests.forEach((c, i) => {
-      const t = tiles[cellIndex(c.x, c.y)] ?? Tile.Wall;
-      if (!WALKABLE.has(t) || t === Tile.Entrance || t === Tile.Exit) errors.push(`Chest ${i} must stand on a free walkable tile`);
+      if (!walkable(tiles, c) || same(entrance, c) || same(exit, c)) errors.push(`Chest ${i} must stand on a free walkable tile`);
       if (spawns.some((s) => s.x === c.x && s.y === c.y)) errors.push(`Chest ${i} stands on a spawn`);
     });
     const verdict = checkTables(loot.tier, loot.minPlayers, loot.chests.map((c) => c.table), loot.bossTable, loot.tables);
@@ -98,7 +95,7 @@ export function MapBuilderPage() {
   const first = MAP_PRESETS[0]!;
   const [size, setSize] = useState({ width: first.width, height: first.height });
   const [layout, setLayout] = useState(() => presetToLayout(first));
-  const [tool, setTool] = useState<BuilderTool>({ kind: "tile", tile: Tile.Floor });
+  const [tool, setTool] = useState<BuilderTool>({ kind: "tile", tile: Tile.StoneFloor });
   const [errors, setErrors] = useState<string[]>([]);
   const [validated, setValidated] = useState(false);
   const [finalized, setFinalized] = useState(false);
@@ -123,14 +120,14 @@ export function MapBuilderPage() {
   }, [wallet.address]);
   useEffect(() => void refreshMaps(), [refreshMaps]);
 
-  // create_map, write_layout, write_spawns, write_chests, finalize_map: the chain runs
+  // create_map, write_layout, write_spawns, write_points, finalize_map: the chain runs
   // crates/mapcheck in finalize_map.
   const finalizeOnChain = async () => {
     setRent(null);
     const dm = wallet.signer;
     if (!dm) return void (await send("finalize_map", null, []));
     const b = await buildMapIxs(dm, { width: size.width, height: size.height, tier, ...layout });
-    const names = ["create_map", "write_layout", "write_spawns", "write_chests", "finalize_map"];
+    const names = ["create_map", "write_layout", "write_spawns", "write_points", "finalize_map"];
     for (const [i, ix] of b.ixs.entries()) {
       if (!(await send(names[i]!, dm, [ix], { quiet: i < b.ixs.length - 1 }))) return;
     }
@@ -156,26 +153,37 @@ export function MapBuilderPage() {
   };
 
   const onCell = ({ x, y }: Cell) => {
+    const cell = { x, y };
+    const onPoint = same(layout.entrance, cell) || same(layout.exit, cell);
     if (tool.kind === "tile") {
       const tiles = layout.tiles.slice();
-      tiles[cellIndex(x, y)] = tool.tile;
+      tiles[cellIndex(x, y)] = cellByte(tool.tile);
       edit({ ...layout, tiles });
+    } else if (tool.kind === "entrance" || tool.kind === "exit") {
+      const taken = layout.chests.some((c) => c.x === x && c.y === y) || layout.spawns.some((s) => s.x === x && s.y === y) || onPoint;
+      if (!taken) edit({ ...layout, [tool.kind]: cell });
     } else if (tool.kind === "chest") {
       const limit = Math.min(CHESTS_MAX, tierLoot(tier)?.chests ?? 0);
       const taken = layout.chests.some((c) => c.x === x && c.y === y) || layout.spawns.some((s) => s.x === x && s.y === y);
-      if (taken || layout.chests.length >= limit) return;
+      if (taken || onPoint || layout.chests.length >= limit) return;
       // The first table the tier allows; the DM picks another in the loot panel.
       const table = tables.find((t) => t.cost > 0 && tableAllowed(t, tier))?.id ?? NO_TABLE;
       edit({ ...layout, chests: [...layout.chests, { x, y, table }] });
     } else if (tool.kind === "spawn") {
-      if (layout.chests.some((c) => c.x === x && c.y === y)) return;
+      if (onPoint || layout.chests.some((c) => c.x === x && c.y === y)) return;
       if (layout.spawns.some((s) => s.x === x && s.y === y) || layout.spawns.length >= SPAWNS_MAX) return;
       const pack = Math.max(0, ...layout.spawns.map((s) => s.pack)) + 1;
       // The default choice fills the slots (the first skills of each kind of the pool).
       const skills = viewOf({ bestiaryId: tool.bestiaryId, flags: 0, skills: 0 })?.check?.defaultMask ?? 0;
       edit({ ...layout, spawns: [...layout.spawns, { bestiaryId: tool.bestiaryId, x, y, level: 1, skills, flags: 0, aspects: 0, pack }] });
     } else {
-      edit({ ...layout, spawns: layout.spawns.filter((s) => s.x !== x || s.y !== y), chests: layout.chests.filter((c) => c.x !== x || c.y !== y) });
+      edit({
+        ...layout,
+        spawns: layout.spawns.filter((s) => s.x !== x || s.y !== y),
+        chests: layout.chests.filter((c) => c.x !== x || c.y !== y),
+        entrance: same(layout.entrance, cell) ? null : layout.entrance,
+        exit: same(layout.exit, cell) ? null : layout.exit,
+      });
     }
   };
 
@@ -200,6 +208,7 @@ export function MapBuilderPage() {
           tiles={layout.tiles}
           units={units}
           chests={chests}
+          points={draftPoints(layout)}
           cellPx={32}
           onCellClick={onCell}
           onUnitClick={(u) => onCell({ x: u.x, y: u.y })}
@@ -232,7 +241,7 @@ export function MapBuilderPage() {
             errors={errors}
             onValidate={() => {
               const loot = { tier, minPlayers: layout.minPlayers, chests: layout.chests, bossTable: layout.bossTable, tables };
-              const e = quickCheck(layout.tiles, size.width, size.height, layout.spawns, (sp) => spawnSkillError(viewOf(sp)), loot);
+              const e = quickCheck(layout, (sp) => spawnSkillError(viewOf(sp)), loot);
               setErrors(e);
               setValidated(e.length === 0);
             }}
