@@ -123,7 +123,9 @@ fn loot_check_matches_the_ts_fixture() {
     if std::env::var_os("UPDATE_TS_FIXTURES").is_some() {
         fs::write(&path, &text).unwrap();
     }
-    let committed = fs::read_to_string(&path).unwrap_or_default().replace("\r\n", "\n");
+    let committed = fs::read_to_string(&path)
+        .unwrap_or_default()
+        .replace("\r\n", "\n");
     assert!(
         committed == text,
         "stale fixture: run UPDATE_TS_FIXTURES=1 cargo test -p deadroll-rules --features serde --test loot_ts_fixtures"

@@ -15,9 +15,11 @@ use deadroll_registry::state::{
 };
 use deadroll_rules::{items::Equipment, MonsterTemplate};
 use deadroll_skillcheck::monster::MonsterSkill;
-use deadroll_types::{Cell, CharacterData, MapData, Spawn, Tile, MAP_CELLS, MAP_MAX, SPAWNS_MAX};
+use deadroll_types::{
+    Cell, CharacterData, MapData, MapPoint, Spawn, Tile, CHESTS_MAX, MAP_CELLS, MAP_MAX, SPAWNS_MAX,
+};
 
-use crate::errors::SessionError;
+use crate::{errors::SessionError, state::LOOT_RECORD_LEN};
 
 /// Registry `["bestiary"]` table (checked against its derivation in the tests).
 pub const BESTIARY_TABLE: Pubkey = pubkey!("3uJyWiz7NeVekP4w1iZkKxKnJ5pMbxC6ciz7kxN3MZtM");
@@ -29,6 +31,8 @@ pub const TRAITS_TABLE: Pubkey = pubkey!("3yqgW5wFnwbqWAoGvvA1cAmw9gQxqz8TKA4vHX
 pub const RESONANCES_TABLE: Pubkey = pubkey!("5wvxCqYJgp3gckLyZeNz3md4g8qmRxd7nenhkqtBNXjG");
 /// Registry `["monster_skills"]` table (patch 6).
 pub const MONSTER_SKILLS_TABLE: Pubkey = pubkey!("NQNEuKDUZhACnTJ9sD3dW49BoiPtJPatp6bpY61r81p");
+/// Registry `["rewards"]` table (patch 11).
+pub const REWARDS_TABLE: Pubkey = pubkey!("FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK");
 
 /// `sha256("account:Character")[..8]`.
 pub const CHARACTER_DISCRIMINATOR: [u8; 8] = [0x8c, 0x73, 0xa5, 0x24, 0xf1, 0x99, 0x66, 0x54];
@@ -87,6 +91,14 @@ pub fn read_map(info: &AccountInfo) -> Result<MapData> {
     decode(info, &deadroll_map::ID, &MAP_DISCRIMINATOR).ok_or(error!(SessionError::InvalidMap))
 }
 
+/// A `deadroll_map` `Map` with the fields after its core: the tier and (patch 11) the minimum
+/// players.
+pub fn read_map_full(info: &AccountInfo) -> Result<(MapData, u8, u8)> {
+    let m: deadroll_map::state::Map = decode(info, &deadroll_map::ID, &MAP_DISCRIMINATOR)
+        .ok_or(error!(SessionError::InvalidMap))?;
+    Ok((m.core, m.tier, m.min_players))
+}
+
 /// Byte offsets inside a `MapLayout` account (discriminator included).
 mod layout_off {
     use super::*;
@@ -95,7 +107,11 @@ mod layout_off {
     pub const SPAWNS: usize = TILES + MAP_CELLS;
     pub const SPAWN_COUNT: usize = SPAWNS + SPAWNS_MAX * Spawn::SIZE;
     pub const ENTRANCE: usize = SPAWN_COUNT + 1;
-    pub const END: usize = ENTRANCE + 2 * Cell::SIZE + 1;
+    /// Patch 11: after the exit and the bump.
+    pub const CHESTS: usize = ENTRANCE + 2 * Cell::SIZE + 1;
+    pub const CHEST_COUNT: usize = CHESTS + CHESTS_MAX * MapPoint::SIZE;
+    pub const BOSS_TABLE: usize = CHEST_COUNT + 1;
+    pub const END: usize = BOSS_TABLE + 1;
 }
 
 /// A `deadroll_map` `MapLayout` account, read in place (the account is ~1.3 KB, too big to copy
@@ -138,6 +154,24 @@ impl<'a> MapLayoutView<'a> {
         let start = layout_off::SPAWNS + index * Spawn::SIZE;
         Spawn::deserialize(&mut &self.data[start..start + Spawn::SIZE])
             .map_err(|_| error!(SessionError::InvalidLayout))
+    }
+
+    /// Patch 11: the visible chests (`chest_count` used; `finalize_map` checked them).
+    pub fn chests(&self) -> Result<([MapPoint; CHESTS_MAX], u8)> {
+        let mut out = [MapPoint::default(); CHESTS_MAX];
+        for (i, p) in out.iter_mut().enumerate() {
+            let at = layout_off::CHESTS + i * MapPoint::SIZE;
+            *p = MapPoint::deserialize(&mut &self.data[at..at + MapPoint::SIZE])
+                .map_err(|_| error!(SessionError::InvalidLayout))?;
+        }
+        let count = self.data[layout_off::CHEST_COUNT];
+        require!(count as usize <= CHESTS_MAX, SessionError::InvalidLayout);
+        Ok((out, count))
+    }
+
+    /// Patch 11: the boss's reward table.
+    pub fn boss_table(&self) -> u8 {
+        self.data[layout_off::BOSS_TABLE]
     }
 
     pub fn entrance(&self) -> Cell {
@@ -293,6 +327,20 @@ pub fn read_monster_skill(info: &AccountInfo, index: usize) -> Result<MonsterSki
     MonsterSkill::decode_session(&r[1..]).ok_or(error!(SessionError::InvalidMonsterSkills))
 }
 
+/// Patch 11: reward table `id` of the registry `rewards` table, checked by
+/// `deadroll_rules::loot::LootTable::from_record`; `InvalidRewardTables` if it is empty, not
+/// written or malformed.
+pub fn read_reward_table(info: &AccountInfo, id: u8) -> Result<[u8; LOOT_RECORD_LEN]> {
+    let r: [u8; LOOT_RECORD_LEN] =
+        table_record(info, &REWARDS_TABLE, TableKind::Rewards, id as usize)?
+            .ok_or(SessionError::InvalidRewardTables)?;
+    require!(
+        deadroll_rules::loot::LootTable::from_record(&r).is_some(),
+        SessionError::InvalidRewardTables
+    );
+    Ok(r)
+}
+
 /// Step cost in action points of every tile, in `Tile` order; 0 = cannot be entered. Every
 /// record must be written.
 pub fn read_tile_costs(info: &AccountInfo) -> Result<[u8; Tile::COUNT]> {
@@ -349,6 +397,7 @@ mod tests {
         assert_eq!(pda(seeds::TRAITS), TRAITS_TABLE);
         assert_eq!(pda(seeds::RESONANCES), RESONANCES_TABLE);
         assert_eq!(pda(seeds::MONSTER_SKILLS), MONSTER_SKILLS_TABLE);
+        assert_eq!(pda(seeds::REWARDS), REWARDS_TABLE);
     }
 
     #[test]

@@ -18,7 +18,7 @@ from `crates/skillcheck`, item rules from `crates/rules` (`items`, `BalanceConfi
   pure in `src/state/gear.rs`; `crates/sim/tests/parity.rs` runs it.
 - CPI out: mpl-core only (`src/cpi_out/nft.rs`, feature `nft`). No CPI into game programs, and none
   from `mark_dead` (ARCHITECTURE.md 4.4). Never deserialize a Core `Asset` or `Collection` on-chain.
-- CPI in: session (`lock_for_session`, `grant_rewards`, `mark_dead`, `unlock`), checked by
+- CPI in: session (`lock_for_session`, `grant_xp`, `apply_bag`, `mark_dead`, `unlock`), checked by
   `trust::check_session_caller`. Keep their account order: `[character, session_authority, config, ...]`.
 - Errors are append only.
 - Forbidden: editing other zones, crates/types, agents/CONTRACTS.md.

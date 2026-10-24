@@ -269,6 +269,10 @@ describe("PartyLobby", () => {
     );
     fireEvent.change(screen.getByLabelText("Character"), { target: { value: ARIA.player } });
     fireEvent.click(screen.getByRole("button", { name: "Join and pay 0.1 SOL" }));
+    // Patch 11: the share and the rent of the party accounts are confirmed first.
+    expect(onJoin).not.toHaveBeenCalled();
+    expect(screen.getByRole("alertdialog").textContent).toContain("rent of your party accounts");
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Join" }));
     expect(onJoin).toHaveBeenCalledWith(ARIA.player);
   });
 });

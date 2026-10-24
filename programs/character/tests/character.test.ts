@@ -386,7 +386,10 @@ describe("create_character", { skip: NEEDS_CONFIG }, () => {
     const bag = await fetchBag(c.character);
     assert.ok(bag.character.equals(c.character));
     assert.equal(bag.itemCount, 0);
-    assert.deepEqual(bag.resources, new Array(8).fill(0));
+    // Patch 11: resources and consumables in slots, all empty.
+    assert.equal(bag.layout.resources.length, 40);
+    assert.equal(bag.layout.consumables.length, 5);
+    assert.ok([...bag.layout.resources, ...bag.layout.consumables].every((s: any) => s.qty === 0 && s.id === 0));
 
     const asset = await readAsset(c.asset.publicKey);
     assert.ok(asset.programOwner.equals(MPL_CORE));
@@ -494,17 +497,33 @@ describe("session-only instructions: untrusted callers", { skip: NEEDS_CONFIG },
     await fails(call(await funded(1)), "UntrustedCaller");
   });
 
-  it("grant_rewards rejects an untrusted caller", async () => {
+  it("patch 11: grant_xp rejects the player and strangers", async () => {
     const p = await newPlayer();
     const c = await create(p, warrior());
-    await fails(
-      program.methods
-        .grantRewards(100, [1, 0, 0, 0, 0, 0, 0, 0])
-        .accountsStrict({ ...session(c.character, p.publicKey), bag: bagOf(c.character) })
-        .signers([p])
-        .rpc(),
-      "UntrustedCaller",
-    );
+    for (const caller of [p, await funded(1)]) {
+      await fails(program.methods.grantXp(100).accountsStrict(session(c.character, caller.publicKey)).signers([caller]).rpc(), "UntrustedCaller");
+    }
+    assert.equal((await fetchCharacter(c.character)).core.xp, 0);
+  });
+
+  it("patch 11: apply_bag rejects the player and strangers", async () => {
+    const p = await newPlayer();
+    const c = await create(p, warrior());
+    // The player claims 5 wood from a cache of their own making: refused before any check.
+    const slot = (id: number, qty: number) => ({ kind: { resource: {} }, id, qty });
+    const cache = Array.from({ length: 32 }, (_, i) => (i === 0 ? slot(0, 5) : slot(0, 0)));
+    const layout = { resources: Array.from({ length: 40 }, (_, i) => (i === 0 ? slot(0, 5) : slot(0, 0))), consumables: Array.from({ length: 5 }, () => slot(0, 0)) };
+    for (const caller of [p, await funded(1)]) {
+      await fails(
+        program.methods
+          .applyBag(cache, layout)
+          .accountsStrict({ ...session(c.character, caller.publicKey), bag: bagOf(c.character) })
+          .signers([caller])
+          .rpc(),
+        "UntrustedCaller",
+      );
+    }
+    assert.equal((await fetchBag(c.character)).layout.resources[0].qty, 0, "nothing written");
   });
 
   it("mark_dead rejects the player and strangers", async () => {
@@ -571,7 +590,7 @@ describe("freeze_tombstone", { skip: NEEDS_CONFIG }, () => {
 
 describe("session flow: lock, rewards, death, unlock, freeze", { skip: NEEDS_SESSION }, () => {
   // Runs through the session program once L7 deploys it (join_session -> lock_for_session,
-  // victory -> grant_rewards, HP 0 -> mark_dead, end -> unlock), then freeze_tombstone by a
+  // victory -> grant_xp, HP 0 -> mark_dead, end -> unlock), then freeze_tombstone by a
   // stranger and a failing Core transfer of the frozen tombstone. Covered by L8.2 until then.
   it("locks, levels up, dies, unlocks and freezes the tombstone NFT");
 });

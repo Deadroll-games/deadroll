@@ -72,4 +72,15 @@ pub enum CharacterError {
     /// for this signer and owner, or it expired.
     #[msg("Session token is not valid for this signer and owner, or it has expired")]
     InvalidToken,
+    // Patch 11: "Done" in the bag screen (`apply_bag`, deadroll_rules::loot::BagError).
+    #[msg("An empty bag slot must be all zero")]
+    BagDirtySlot,
+    #[msg(
+        "Consumables go only in the consumable slots, everything else only in the resource slots"
+    )]
+    BagWrongSection,
+    #[msg("More units in one bag slot than a stack holds")]
+    BagStackTooBig,
+    #[msg("The new bag holds more of a reward than the bag and the cache had")]
+    BagMoreThanOwned,
 }

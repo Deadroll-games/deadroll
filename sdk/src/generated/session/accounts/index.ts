@@ -10,4 +10,4 @@ export * from "./escrow.js";
 export * from "./gameSession.js";
 export * from "./monsterState.js";
 export * from "./participation.js";
-export * from "./tempStash.js";
+export * from "./rewardCache.js";

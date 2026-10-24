@@ -10,11 +10,11 @@
 use anchor_lang::prelude::*;
 use anchor_lang::{AccountDeserialize, AccountSerialize};
 use deadroll_rules::HeroStats;
-use deadroll_types::{CharacterData, PARTY_MAX};
+use deadroll_types::{CacheSlot, CharacterData, PARTY_MAX};
 
 use crate::{
     errors::SessionError,
-    state::{external::read_character, GameSession, Participation},
+    state::{add_to_cache_raw, external::read_character, GameSession, Participation},
 };
 
 /// The `(participation, character)` keys of every living player but `except`, in slot order.
@@ -130,6 +130,31 @@ impl<'a, 'info> Party<'a, 'info> {
 
     pub fn put(&mut self, slot: u8, p: Box<Participation>) {
         self.loaded[slot as usize] = Some(p);
+    }
+
+    /// Patch 11: adds to player `slot`'s cache. A participation handed out (written back whole
+    /// by [`Self::store`]) takes it in its decoded copy; any other is written in place, never
+    /// decoded. Returns how many rewards did not fit.
+    pub fn add_to_cache(&mut self, slot: u8, xp: u32, rewards: &[CacheSlot]) -> Result<u8> {
+        let s = slot as usize;
+        let (info, _) = self
+            .infos
+            .get(s)
+            .copied()
+            .flatten()
+            .ok_or(SessionError::InvalidPartyAccounts)?;
+        if self.dirty & (1 << slot) != 0 {
+            let p = self.loaded[s]
+                .as_mut()
+                .ok_or(SessionError::InvalidPartyAccounts)?;
+            return Ok(p.add_to_cache(xp, rewards));
+        }
+        // A copy decoded only to read stays in step with the account.
+        if let Some(p) = self.loaded[s].as_mut() {
+            p.add_to_cache(xp, rewards);
+        }
+        let mut data = info.try_borrow_mut_data()?;
+        add_to_cache_raw(&mut data, xp, rewards)
     }
 
     /// Writes back every participation that was handed out.

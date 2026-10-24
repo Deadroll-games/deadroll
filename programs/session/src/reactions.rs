@@ -29,7 +29,7 @@ use deadroll_rules::{
     HeroStats, MonsterDefense,
 };
 use deadroll_skillcheck::{Purpose, Target};
-use deadroll_types::{seeds, Cell, Monster, SessionStatus, MONSTERS_MAX, PARTY_MAX};
+use deadroll_types::{seeds, Cell, Monster, SessionStatus, CHESTS_MAX, MONSTERS_MAX, PARTY_MAX};
 
 use crate::{
     errors::SessionError,
@@ -116,13 +116,13 @@ impl ReactEvents {
 }
 
 /// The map as a resonance's spread sees it: the layout's walls (the registry tile costs) and
-/// every living unit before the spread.
+/// every living unit before the spread, and (patch 11) every closed chest, which occupies its cell.
 struct SessionField<'a> {
     width: u8,
     height: u8,
     layout: &'a MapLayoutView<'a>,
     tile_cost: &'a [u8; deadroll_types::Tile::COUNT],
-    units: [Cell; PARTY_MAX + MONSTERS_MAX],
+    units: [Cell; PARTY_MAX + MONSTERS_MAX + CHESTS_MAX],
     unit_count: usize,
 }
 
@@ -440,7 +440,7 @@ impl<'a, 'info> Cb<'a, 'info> {
             height: session.height,
             layout: &layout,
             tile_cost: &session.tile_cost,
-            units: [Cell::default(); PARTY_MAX + MONSTERS_MAX],
+            units: [Cell::default(); PARTY_MAX + MONSTERS_MAX + CHESTS_MAX],
             unit_count: 0,
         };
         for slot in 0..session.core.player_count {
@@ -452,6 +452,12 @@ impl<'a, 'info> Cb<'a, 'info> {
         for m in all.iter().take(count as usize).filter(|m| m.alive) {
             field.units[field.unit_count] = cell_of(m);
             field.unit_count += 1;
+        }
+        for (i, c) in session.chest_list().iter().enumerate() {
+            if session.chests_opened & (1 << i) == 0 {
+                field.units[field.unit_count] = c.cell();
+                field.unit_count += 1;
+            }
         }
         let mut cells = self.monsters.burning_cells()?;
         let out = spread(

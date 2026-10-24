@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 
 use deadroll_types::{Aspect, Class, EquipSlot, ItemBase, Race, STATS_COUNT};
 
-use crate::state::{MAP_SKILLS, RESOURCE_KINDS};
+use crate::state::MAP_SKILLS;
 
 #[event]
 pub struct ProfileCreated {
@@ -29,13 +29,19 @@ pub struct CharacterLocked {
     pub session: Pubkey,
 }
 
+/// Patch 11: replaces `RewardsGranted` (resources reach the bag only through `BagApplied`).
 #[event]
-pub struct RewardsGranted {
+pub struct XpGranted {
     pub character: Pubkey,
     pub xp: u32,
-    pub resources: [u32; RESOURCE_KINDS],
     pub level: u16,
     pub total_xp: u32,
+}
+
+/// Patch 11: the owner's "Done" in the bag screen wrote the new layout.
+#[event]
+pub struct BagApplied {
+    pub character: Pubkey,
 }
 
 #[event]

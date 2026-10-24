@@ -10,6 +10,6 @@ export * from "./escrow.js";
 export * from "./monsters.js";
 export * from "./participation.js";
 export * from "./programIdentity.js";
+export * from "./rewardCache.js";
 export * from "./session.js";
 export * from "./sessionAuthority.js";
-export * from "./stash.js";

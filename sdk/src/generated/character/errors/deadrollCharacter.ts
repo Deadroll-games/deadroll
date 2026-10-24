@@ -82,11 +82,23 @@ export const DEADROLL_CHARACTER_ERROR__INVALID_DESCRIPTION = 0x178f; // 6031
 export const DEADROLL_CHARACTER_ERROR__DESCRIPTION_ALREADY_SET = 0x1790; // 6032
 /** InvalidToken: Session token is not valid for this signer and owner, or it has expired */
 export const DEADROLL_CHARACTER_ERROR__INVALID_TOKEN = 0x1791; // 6033
+/** BagDirtySlot: An empty bag slot must be all zero */
+export const DEADROLL_CHARACTER_ERROR__BAG_DIRTY_SLOT = 0x1792; // 6034
+/** BagWrongSection: Consumables go only in the consumable slots, everything else only in the resource slots */
+export const DEADROLL_CHARACTER_ERROR__BAG_WRONG_SECTION = 0x1793; // 6035
+/** BagStackTooBig: More units in one bag slot than a stack holds */
+export const DEADROLL_CHARACTER_ERROR__BAG_STACK_TOO_BIG = 0x1794; // 6036
+/** BagMoreThanOwned: The new bag holds more of a reward than the bag and the cache had */
+export const DEADROLL_CHARACTER_ERROR__BAG_MORE_THAN_OWNED = 0x1795; // 6037
 
 export type DeadrollCharacterError =
   | typeof DEADROLL_CHARACTER_ERROR__ALREADY_FROZEN
   | typeof DEADROLL_CHARACTER_ERROR__ALREADY_LOCKED
   | typeof DEADROLL_CHARACTER_ERROR__ASSET_MISMATCH
+  | typeof DEADROLL_CHARACTER_ERROR__BAG_DIRTY_SLOT
+  | typeof DEADROLL_CHARACTER_ERROR__BAG_MORE_THAN_OWNED
+  | typeof DEADROLL_CHARACTER_ERROR__BAG_STACK_TOO_BIG
+  | typeof DEADROLL_CHARACTER_ERROR__BAG_WRONG_SECTION
   | typeof DEADROLL_CHARACTER_ERROR__CHARACTER_DEAD
   | typeof DEADROLL_CHARACTER_ERROR__DESCRIPTION_ALREADY_SET
   | typeof DEADROLL_CHARACTER_ERROR__INVALID_CONFIG
@@ -126,6 +138,10 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_CHARACTER_ERROR__ALREADY_FROZEN]: `Tombstone NFT is already frozen`,
     [DEADROLL_CHARACTER_ERROR__ALREADY_LOCKED]: `Character is already locked in a session`,
     [DEADROLL_CHARACTER_ERROR__ASSET_MISMATCH]: `Asset is not this character's NFT`,
+    [DEADROLL_CHARACTER_ERROR__BAG_DIRTY_SLOT]: `An empty bag slot must be all zero`,
+    [DEADROLL_CHARACTER_ERROR__BAG_MORE_THAN_OWNED]: `The new bag holds more of a reward than the bag and the cache had`,
+    [DEADROLL_CHARACTER_ERROR__BAG_STACK_TOO_BIG]: `More units in one bag slot than a stack holds`,
+    [DEADROLL_CHARACTER_ERROR__BAG_WRONG_SECTION]: `Consumables go only in the consumable slots, everything else only in the resource slots`,
     [DEADROLL_CHARACTER_ERROR__CHARACTER_DEAD]: `Character is dead`,
     [DEADROLL_CHARACTER_ERROR__DESCRIPTION_ALREADY_SET]: `This skill already has its description`,
     [DEADROLL_CHARACTER_ERROR__INVALID_CONFIG]: `Not the registry GameConfig account`,

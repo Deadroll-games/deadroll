@@ -4,13 +4,14 @@ use deadroll_types::{seeds, SessionStatus};
 use crate::{
     combat_input::{effect_action, target_side, Side},
     errors::SessionError,
+    loot::{self, CallbackCaches},
     outcomes,
     party::Party,
     reactions::{is_debuff, Cb},
     rules::{Unit, BASE_ATTACK, NATURAL_ATTACK},
     state::{
         external::read_character, pending_kind, GameSession, Monsters, Participation,
-        PendingAction, PendingMonsterReactiveData, PendingReactiveData,
+        PendingAction, PendingMonsterReactiveData, PendingReactiveData, NO_CHEST,
     },
     turns, vrf,
 };
@@ -110,7 +111,25 @@ pub fn handler<'info>(
         hero,
     );
 
-    if session.pending_reactive.kind != pending_kind::NONE {
+    if session.pending_chest != NO_CHEST {
+        // Patch 11, `open_chest`: the chest's reward event, nothing else.
+        let chest = session.pending_chest;
+        session.pending_chest = NO_CHEST;
+        let slot = main.core.slot;
+        let mut caches = CallbackCaches {
+            main,
+            party: &mut cb.party,
+        };
+        loot::open_chest(
+            session,
+            session_key,
+            &monsters,
+            chest,
+            slot,
+            randomness,
+            &mut caches,
+        )?;
+    } else if session.pending_reactive.kind != pending_kind::NONE {
         // `monster_move` / `start_turn`: a roll only for the reactives it triggered.
         require!(
             session.pending_reactive.bearers & (1 << main.core.slot) != 0,
@@ -216,10 +235,28 @@ pub fn handler<'info>(
             _ => return err!(SessionError::InvalidPendingAccounts),
         }
     }
+    // Patch 11: the kills of this action, and any waiting from `start_turn`, pay out now: the
+    // experience and body rewards into the living players' caches.
+    let kills = session.unpaid_kills;
+    if kills != 0 {
+        let mut caches = CallbackCaches {
+            main,
+            party: &mut cb.party,
+        };
+        loot::pay_kills(
+            session,
+            session_key,
+            &monsters,
+            kills,
+            randomness,
+            &mut caches,
+        )?;
+        session.unpaid_kills = 0;
+    }
     cb.party.store()?;
 
     settle(session, randomness)?;
-    outcomes::emit_if_ended(session, session_key);
+    outcomes::emit_if_ended(session, session_key)?;
     Ok(())
 }
 

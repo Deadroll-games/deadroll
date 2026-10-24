@@ -51,6 +51,8 @@ import {
   getCellEncoder,
   getGameSessionDataDecoder,
   getGameSessionDataEncoder,
+  getMapPointDecoder,
+  getMapPointEncoder,
   getPendingActionDecoder,
   getPendingActionEncoder,
   getPendingMonsterReactiveDataDecoder,
@@ -65,6 +67,8 @@ import {
   type CellArgs,
   type GameSessionData,
   type GameSessionDataArgs,
+  type MapPoint,
+  type MapPointArgs,
   type PendingAction,
   type PendingActionArgs,
   type PendingMonsterReactiveData,
@@ -116,11 +120,12 @@ export type GameSession = {
    * (docs/PARTY_AND_TURNS.md, section 7.3).
    */
   fleeMask: number;
-  /** Bit per player slot: `claim_rewards` done after the party ended. */
+  /**
+   * Bit per player slot: settled after the party ended (`settle_party` sets every bit,
+   * `claim_after_timeout` its own).
+   */
   settledMask: number;
-  /** Experience from killed monsters; every living player gets all of it on victory. */
-  xpPool: number;
-  /** VRF value of the boss kill; the reward rolls derive from it. */
+  /** VRF value of the boss kill. */
   victorySeed: ReadonlyUint8Array;
   /** Bestiary speed (action points per turn) of each monster, by monster index. */
   monsterSpeed: ReadonlyUint8Array;
@@ -178,6 +183,35 @@ export type GameSession = {
    * by aura slot like `auras`.
    */
   auraWeights: Array<Array<ReadonlyUint8Array>>;
+  /** The map's tier and minimum players (`start_session` needs that many). */
+  tier: number;
+  minPlayers: number;
+  /** The visible chests: cell and reward table id; `0..chest_count` used. */
+  chests: Array<MapPoint>;
+  chestCount: number;
+  /** The reward table of the boss event (registry id). */
+  bossTable: number;
+  /** Bit per chest: opened (then it no longer occupies its cell). */
+  chestsOpened: number;
+  /** The chest whose roll is pending (`open_chest`), `NO_CHEST` for every other roll. */
+  pendingChest: number;
+  /**
+   * Each player's share of the rewards (`deadroll_rules::loot::reward_share`), set at
+   * `set_ready(true)`: experience in basis points, and a bit per slot whose rewards are rolled.
+   */
+  xpBp: Array<number>;
+  lootMask: number;
+  /**
+   * Bit per monster killed where no party accounts were at hand (over-time damage in
+   * `start_turn`): its experience and body rewards go out with the next callback, or at the
+   * settlement.
+   */
+  unpaidKills: number;
+  /**
+   * Unix time the party ended (Victory, Wiped, Fled): the DM settles before
+   * `ended_at + LootTuning.settle_timeout_secs`, the players claim after.
+   */
+  endedAt: bigint;
 };
 
 export type GameSessionArgs = {
@@ -210,11 +244,12 @@ export type GameSessionArgs = {
    * (docs/PARTY_AND_TURNS.md, section 7.3).
    */
   fleeMask: number;
-  /** Bit per player slot: `claim_rewards` done after the party ended. */
+  /**
+   * Bit per player slot: settled after the party ended (`settle_party` sets every bit,
+   * `claim_after_timeout` its own).
+   */
   settledMask: number;
-  /** Experience from killed monsters; every living player gets all of it on victory. */
-  xpPool: number;
-  /** VRF value of the boss kill; the reward rolls derive from it. */
+  /** VRF value of the boss kill. */
   victorySeed: ReadonlyUint8Array;
   /** Bestiary speed (action points per turn) of each monster, by monster index. */
   monsterSpeed: ReadonlyUint8Array;
@@ -272,6 +307,35 @@ export type GameSessionArgs = {
    * by aura slot like `auras`.
    */
   auraWeights: Array<Array<ReadonlyUint8Array>>;
+  /** The map's tier and minimum players (`start_session` needs that many). */
+  tier: number;
+  minPlayers: number;
+  /** The visible chests: cell and reward table id; `0..chest_count` used. */
+  chests: Array<MapPointArgs>;
+  chestCount: number;
+  /** The reward table of the boss event (registry id). */
+  bossTable: number;
+  /** Bit per chest: opened (then it no longer occupies its cell). */
+  chestsOpened: number;
+  /** The chest whose roll is pending (`open_chest`), `NO_CHEST` for every other roll. */
+  pendingChest: number;
+  /**
+   * Each player's share of the rewards (`deadroll_rules::loot::reward_share`), set at
+   * `set_ready(true)`: experience in basis points, and a bit per slot whose rewards are rolled.
+   */
+  xpBp: Array<number>;
+  lootMask: number;
+  /**
+   * Bit per monster killed where no party accounts were at hand (over-time damage in
+   * `start_turn`): its experience and body rewards go out with the next callback, or at the
+   * settlement.
+   */
+  unpaidKills: number;
+  /**
+   * Unix time the party ended (Victory, Wiped, Fled): the DM settles before
+   * `ended_at + LootTuning.settle_timeout_secs`, the players claim after.
+   */
+  endedAt: number | bigint;
 };
 
 /** Gets the encoder for {@link GameSessionArgs} account data. */
@@ -294,7 +358,6 @@ export function getGameSessionEncoder(): FixedSizeEncoder<GameSessionArgs> {
       ["pending", getPendingActionEncoder()],
       ["fleeMask", getU8Encoder()],
       ["settledMask", getU8Encoder()],
-      ["xpPool", getU32Encoder()],
       ["victorySeed", fixEncoderSize(getBytesEncoder(), 32)],
       ["monsterSpeed", fixEncoderSize(getBytesEncoder(), 24)],
       ["monsterInitiative", getArrayEncoder(getU16Encoder(), { size: 24 })],
@@ -321,6 +384,17 @@ export function getGameSessionEncoder(): FixedSizeEncoder<GameSessionArgs> {
           { size: 4 },
         ),
       ],
+      ["tier", getU8Encoder()],
+      ["minPlayers", getU8Encoder()],
+      ["chests", getArrayEncoder(getMapPointEncoder(), { size: 4 })],
+      ["chestCount", getU8Encoder()],
+      ["bossTable", getU8Encoder()],
+      ["chestsOpened", getU8Encoder()],
+      ["pendingChest", getU8Encoder()],
+      ["xpBp", getArrayEncoder(getU16Encoder(), { size: 4 })],
+      ["lootMask", getU8Encoder()],
+      ["unpaidKills", getU32Encoder()],
+      ["endedAt", getI64Encoder()],
     ]),
     (value) => ({ ...value, discriminator: GAME_SESSION_DISCRIMINATOR }),
   );
@@ -345,7 +419,6 @@ export function getGameSessionDecoder(): FixedSizeDecoder<GameSession> {
     ["pending", getPendingActionDecoder()],
     ["fleeMask", getU8Decoder()],
     ["settledMask", getU8Decoder()],
-    ["xpPool", getU32Decoder()],
     ["victorySeed", fixDecoderSize(getBytesDecoder(), 32)],
     ["monsterSpeed", fixDecoderSize(getBytesDecoder(), 24)],
     ["monsterInitiative", getArrayDecoder(getU16Decoder(), { size: 24 })],
@@ -372,6 +445,17 @@ export function getGameSessionDecoder(): FixedSizeDecoder<GameSession> {
         { size: 4 },
       ),
     ],
+    ["tier", getU8Decoder()],
+    ["minPlayers", getU8Decoder()],
+    ["chests", getArrayDecoder(getMapPointDecoder(), { size: 4 })],
+    ["chestCount", getU8Decoder()],
+    ["bossTable", getU8Decoder()],
+    ["chestsOpened", getU8Decoder()],
+    ["pendingChest", getU8Decoder()],
+    ["xpBp", getArrayDecoder(getU16Decoder(), { size: 4 })],
+    ["lootMask", getU8Decoder()],
+    ["unpaidKills", getU32Decoder()],
+    ["endedAt", getI64Decoder()],
   ]);
 }
 
@@ -437,5 +521,5 @@ export async function fetchAllMaybeGameSession(
 }
 
 export function getGameSessionSize(): number {
-  return 1011;
+  return 1050;
 }

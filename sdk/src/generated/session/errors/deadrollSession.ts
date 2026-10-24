@@ -154,21 +154,57 @@ export const DEADROLL_SESSION_ERROR__INVALID_TOKEN = 0x17b3; // 6067
 export const DEADROLL_SESSION_ERROR__PARTY_ENDED = 0x17b4; // 6068
 /** SessionKeyAtReady: Joining binds no session key: the key and its prepayment come with Ready */
 export const DEADROLL_SESSION_ERROR__SESSION_KEY_AT_READY = 0x17b5; // 6069
+/** TooManyLootTables: Too many different reward tables for one party */
+export const DEADROLL_SESSION_ERROR__TOO_MANY_LOOT_TABLES = 0x17b6; // 6070
+/** InvalidRewardTables: Account is not the registry rewards table, or a table the map names is missing */
+export const DEADROLL_SESSION_ERROR__INVALID_REWARD_TABLES = 0x17b7; // 6071
+/** NotEnoughPlayers: Fewer players than the map's minimum */
+export const DEADROLL_SESSION_ERROR__NOT_ENOUGH_PLAYERS = 0x17b8; // 6072
+/** InvalidChest: No such chest on this map */
+export const DEADROLL_SESSION_ERROR__INVALID_CHEST = 0x17b9; // 6073
+/** ChestOpened: This chest is already open */
+export const DEADROLL_SESSION_ERROR__CHEST_OPENED = 0x17ba; // 6074
+/** ChestNotAdjacent: Stand next to the chest to open it */
+export const DEADROLL_SESSION_ERROR__CHEST_NOT_ADJACENT = 0x17bb; // 6075
+/** MonsterNearChest: A living monster is too close to the chest or to you */
+export const DEADROLL_SESSION_ERROR__MONSTER_NEAR_CHEST = 0x17bc; // 6076
+/** ChestInTheWay: A closed chest occupies this cell */
+export const DEADROLL_SESSION_ERROR__CHEST_IN_THE_WAY = 0x17bd; // 6077
+/** SettleDeadlinePassed: The DM's time to settle the party is over: each player claims their own */
+export const DEADROLL_SESSION_ERROR__SETTLE_DEADLINE_PASSED = 0x17be; // 6078
+/** SettleDeadlineNotPassed: The DM can still settle the party: wait for the deadline */
+export const DEADROLL_SESSION_ERROR__SETTLE_DEADLINE_NOT_PASSED = 0x17bf; // 6079
+/** InvalidSettleAccounts: The remaining accounts are not the participation, reward cache and character of each player, in slot order */
+export const DEADROLL_SESSION_ERROR__INVALID_SETTLE_ACCOUNTS = 0x17c0; // 6080
+/** DmMainWalletOnly: The DM settles with the main wallet, not a session key */
+export const DEADROLL_SESSION_ERROR__DM_MAIN_WALLET_ONLY = 0x17c1; // 6081
+/** CacheNotClaimed: This cache is not settled yet */
+export const DEADROLL_SESSION_ERROR__CACHE_NOT_CLAIMED = 0x17c2; // 6082
+/** InvalidRewardCache: This cache belongs to another character or party */
+export const DEADROLL_SESSION_ERROR__INVALID_REWARD_CACHE = 0x17c3; // 6083
+/** NotCacheOwner: Only the character's owner, with the main wallet, closes its cache */
+export const DEADROLL_SESSION_ERROR__NOT_CACHE_OWNER = 0x17c4; // 6084
 
 export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__ALLY_ACCOUNT_MISSING
   | typeof DEADROLL_SESSION_ERROR__ALREADY_ACTED
   | typeof DEADROLL_SESSION_ERROR__ALREADY_CLAIMED
   | typeof DEADROLL_SESSION_ERROR__ALREADY_SETTLED
+  | typeof DEADROLL_SESSION_ERROR__CACHE_NOT_CLAIMED
   | typeof DEADROLL_SESSION_ERROR__CELL_BLOCKED
   | typeof DEADROLL_SESSION_ERROR__CELL_OCCUPIED
   | typeof DEADROLL_SESSION_ERROR__CHARACTER_BUSY
   | typeof DEADROLL_SESSION_ERROR__CHARACTER_DEAD
+  | typeof DEADROLL_SESSION_ERROR__CHEST_IN_THE_WAY
+  | typeof DEADROLL_SESSION_ERROR__CHEST_NOT_ADJACENT
+  | typeof DEADROLL_SESSION_ERROR__CHEST_OPENED
   | typeof DEADROLL_SESSION_ERROR__DEATH_ACCOUNTS_MISSING
   | typeof DEADROLL_SESSION_ERROR__DEATHS_PENDING
+  | typeof DEADROLL_SESSION_ERROR__DM_MAIN_WALLET_ONLY
   | typeof DEADROLL_SESSION_ERROR__INVALID_ACTION
   | typeof DEADROLL_SESSION_ERROR__INVALID_ALLY_TARGET
   | typeof DEADROLL_SESSION_ERROR__INVALID_CHARACTER
+  | typeof DEADROLL_SESSION_ERROR__INVALID_CHEST
   | typeof DEADROLL_SESSION_ERROR__INVALID_DEATH_ACCOUNTS
   | typeof DEADROLL_SESSION_ERROR__INVALID_DIRECTION
   | typeof DEADROLL_SESSION_ERROR__INVALID_LAYOUT
@@ -181,7 +217,10 @@ export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__INVALID_PATH_LENGTH
   | typeof DEADROLL_SESSION_ERROR__INVALID_PENDING_ACCOUNTS
   | typeof DEADROLL_SESSION_ERROR__INVALID_REGISTRY_TABLE
+  | typeof DEADROLL_SESSION_ERROR__INVALID_REWARD_CACHE
+  | typeof DEADROLL_SESSION_ERROR__INVALID_REWARD_TABLES
   | typeof DEADROLL_SESSION_ERROR__INVALID_SESSION_TOKEN
+  | typeof DEADROLL_SESSION_ERROR__INVALID_SETTLE_ACCOUNTS
   | typeof DEADROLL_SESSION_ERROR__INVALID_SKILL
   | typeof DEADROLL_SESSION_ERROR__INVALID_SKILL_SET
   | typeof DEADROLL_SESSION_ERROR__INVALID_TARGET
@@ -189,14 +228,17 @@ export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__INVALID_TOKEN
   | typeof DEADROLL_SESSION_ERROR__LINE_BLOCKED
   | typeof DEADROLL_SESSION_ERROR__MAP_NOT_FINALIZED
+  | typeof DEADROLL_SESSION_ERROR__MONSTER_NEAR_CHEST
   | typeof DEADROLL_SESSION_ERROR__MONSTER_SKILL_MISSING
   | typeof DEADROLL_SESSION_ERROR__NO_PLAYERS
   | typeof DEADROLL_SESSION_ERROR__NO_ROLL_PENDING
   | typeof DEADROLL_SESSION_ERROR__NOT_ACTIVE
   | typeof DEADROLL_SESSION_ERROR__NOT_ALL_READY
+  | typeof DEADROLL_SESSION_ERROR__NOT_CACHE_OWNER
   | typeof DEADROLL_SESSION_ERROR__NOT_CHARACTER_OWNER
   | typeof DEADROLL_SESSION_ERROR__NOT_DM
   | typeof DEADROLL_SESSION_ERROR__NOT_ENOUGH_ACTION_POINTS
+  | typeof DEADROLL_SESSION_ERROR__NOT_ENOUGH_PLAYERS
   | typeof DEADROLL_SESSION_ERROR__NOT_FINISHED
   | typeof DEADROLL_SESSION_ERROR__NOT_IN_LOBBY
   | typeof DEADROLL_SESSION_ERROR__NOT_PLAYER
@@ -217,8 +259,11 @@ export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__SESSION_KEY_AT_READY
   | typeof DEADROLL_SESSION_ERROR__SESSION_TOKEN_EXPIRED
   | typeof DEADROLL_SESSION_ERROR__SESSION_TOKEN_MISSING
+  | typeof DEADROLL_SESSION_ERROR__SETTLE_DEADLINE_NOT_PASSED
+  | typeof DEADROLL_SESSION_ERROR__SETTLE_DEADLINE_PASSED
   | typeof DEADROLL_SESSION_ERROR__SKILL_NOT_SELECTED
   | typeof DEADROLL_SESSION_ERROR__SKILL_ON_COOLDOWN
+  | typeof DEADROLL_SESSION_ERROR__TOO_MANY_LOOT_TABLES
   | typeof DEADROLL_SESSION_ERROR__TOO_MANY_MONSTER_SKILLS
   | typeof DEADROLL_SESSION_ERROR__TURN_ALREADY_STARTED
   | typeof DEADROLL_SESSION_ERROR__TURN_NOT_STARTED
@@ -235,15 +280,21 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__ALREADY_ACTED]: `Only one attack or active skill per turn`,
     [DEADROLL_SESSION_ERROR__ALREADY_CLAIMED]: `Escrow is already claimed`,
     [DEADROLL_SESSION_ERROR__ALREADY_SETTLED]: `Rewards of this character are already settled`,
+    [DEADROLL_SESSION_ERROR__CACHE_NOT_CLAIMED]: `This cache is not settled yet`,
     [DEADROLL_SESSION_ERROR__CELL_BLOCKED]: `Cell cannot be entered`,
     [DEADROLL_SESSION_ERROR__CELL_OCCUPIED]: `Cell is occupied`,
     [DEADROLL_SESSION_ERROR__CHARACTER_BUSY]: `Character is already in a session`,
     [DEADROLL_SESSION_ERROR__CHARACTER_DEAD]: `Character is dead`,
+    [DEADROLL_SESSION_ERROR__CHEST_IN_THE_WAY]: `A closed chest occupies this cell`,
+    [DEADROLL_SESSION_ERROR__CHEST_NOT_ADJACENT]: `Stand next to the chest to open it`,
+    [DEADROLL_SESSION_ERROR__CHEST_OPENED]: `This chest is already open`,
     [DEADROLL_SESSION_ERROR__DEATH_ACCOUNTS_MISSING]: `A death needs the character's SkillSet and Bag`,
     [DEADROLL_SESSION_ERROR__DEATHS_PENDING]: `A death is waiting to be finalized: start_turn (or a claim) first`,
+    [DEADROLL_SESSION_ERROR__DM_MAIN_WALLET_ONLY]: `The DM settles with the main wallet, not a session key`,
     [DEADROLL_SESSION_ERROR__INVALID_ACTION]: `Unknown monster action`,
     [DEADROLL_SESSION_ERROR__INVALID_ALLY_TARGET]: `Target is not a living ally`,
     [DEADROLL_SESSION_ERROR__INVALID_CHARACTER]: `Account is not a Deadroll character`,
+    [DEADROLL_SESSION_ERROR__INVALID_CHEST]: `No such chest on this map`,
     [DEADROLL_SESSION_ERROR__INVALID_DEATH_ACCOUNTS]: `The remaining accounts are not the character, skill set and bag of each pending death, in slot order`,
     [DEADROLL_SESSION_ERROR__INVALID_DIRECTION]: `Unknown step direction`,
     [DEADROLL_SESSION_ERROR__INVALID_LAYOUT]: `Account is not the layout of this map`,
@@ -256,7 +307,10 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__INVALID_PATH_LENGTH]: `Path is empty or too long`,
     [DEADROLL_SESSION_ERROR__INVALID_PENDING_ACCOUNTS]: `Callback accounts do not match the pending action`,
     [DEADROLL_SESSION_ERROR__INVALID_REGISTRY_TABLE]: `Account is not the expected registry table`,
+    [DEADROLL_SESSION_ERROR__INVALID_REWARD_CACHE]: `This cache belongs to another character or party`,
+    [DEADROLL_SESSION_ERROR__INVALID_REWARD_TABLES]: `Account is not the registry rewards table, or a table the map names is missing`,
     [DEADROLL_SESSION_ERROR__INVALID_SESSION_TOKEN]: `Session token is not valid for this signer, wallet or program`,
+    [DEADROLL_SESSION_ERROR__INVALID_SETTLE_ACCOUNTS]: `The remaining accounts are not the participation, reward cache and character of each player, in slot order`,
     [DEADROLL_SESSION_ERROR__INVALID_SKILL]: `Skill cannot be used as an action`,
     [DEADROLL_SESSION_ERROR__INVALID_SKILL_SET]: `Account is not the skill set of this character`,
     [DEADROLL_SESSION_ERROR__INVALID_TARGET]: `Target is not a living enemy`,
@@ -264,14 +318,17 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__INVALID_TOKEN]: `Session token is not valid for this signer and wallet, or it has expired`,
     [DEADROLL_SESSION_ERROR__LINE_BLOCKED]: `A wall cuts the line before the target`,
     [DEADROLL_SESSION_ERROR__MAP_NOT_FINALIZED]: `Map is not finalized`,
+    [DEADROLL_SESSION_ERROR__MONSTER_NEAR_CHEST]: `A living monster is too close to the chest or to you`,
     [DEADROLL_SESSION_ERROR__MONSTER_SKILL_MISSING]: `This monster has no active skill in that slot`,
     [DEADROLL_SESSION_ERROR__NO_PLAYERS]: `Party has no players`,
     [DEADROLL_SESSION_ERROR__NO_ROLL_PENDING]: `No dice roll is pending`,
     [DEADROLL_SESSION_ERROR__NOT_ACTIVE]: `Session is not active`,
     [DEADROLL_SESSION_ERROR__NOT_ALL_READY]: `Not every player is ready`,
+    [DEADROLL_SESSION_ERROR__NOT_CACHE_OWNER]: `Only the character's owner, with the main wallet, closes its cache`,
     [DEADROLL_SESSION_ERROR__NOT_CHARACTER_OWNER]: `Character does not belong to the signer`,
     [DEADROLL_SESSION_ERROR__NOT_DM]: `Only the DM of this session can do this`,
     [DEADROLL_SESSION_ERROR__NOT_ENOUGH_ACTION_POINTS]: `Not enough action points`,
+    [DEADROLL_SESSION_ERROR__NOT_ENOUGH_PLAYERS]: `Fewer players than the map's minimum`,
     [DEADROLL_SESSION_ERROR__NOT_FINISHED]: `Party has not ended`,
     [DEADROLL_SESSION_ERROR__NOT_IN_LOBBY]: `Session is not in the lobby`,
     [DEADROLL_SESSION_ERROR__NOT_PLAYER]: `Only the player who joined with this character can do this`,
@@ -292,8 +349,11 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__SESSION_KEY_AT_READY]: `Joining binds no session key: the key and its prepayment come with Ready`,
     [DEADROLL_SESSION_ERROR__SESSION_TOKEN_EXPIRED]: `Session token has expired`,
     [DEADROLL_SESSION_ERROR__SESSION_TOKEN_MISSING]: `Session key used without a session token`,
+    [DEADROLL_SESSION_ERROR__SETTLE_DEADLINE_NOT_PASSED]: `The DM can still settle the party: wait for the deadline`,
+    [DEADROLL_SESSION_ERROR__SETTLE_DEADLINE_PASSED]: `The DM's time to settle the party is over: each player claims their own`,
     [DEADROLL_SESSION_ERROR__SKILL_NOT_SELECTED]: `This skill was not taken onto the map (set_ready selection)`,
     [DEADROLL_SESSION_ERROR__SKILL_ON_COOLDOWN]: `Skill is on cooldown`,
+    [DEADROLL_SESSION_ERROR__TOO_MANY_LOOT_TABLES]: `Too many different reward tables for one party`,
     [DEADROLL_SESSION_ERROR__TOO_MANY_MONSTER_SKILLS]: `Too many different monster skills for one party`,
     [DEADROLL_SESSION_ERROR__TURN_ALREADY_STARTED]: `This turn has already started`,
     [DEADROLL_SESSION_ERROR__TURN_NOT_STARTED]: `The turn has not started: call start_turn first`,

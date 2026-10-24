@@ -10,6 +10,8 @@ import {
   combineCodec,
   fixDecoderSize,
   fixEncoderSize,
+  getArrayDecoder,
+  getArrayEncoder,
   getBytesDecoder,
   getBytesEncoder,
   getProgramDerivedAddress,
@@ -34,36 +36,37 @@ import {
 } from "@solana/kit";
 import {
   getAccountMetaFactory,
-  getAddressFromResolvedInstructionAccount,
   type InstructionAccountInput,
   type InstructionAccountInputAddress,
   type InstructionSignerInput,
   type ResolvedInstructionAccount,
   type ResolvedInstructionAccountMeta,
 } from "@solana/program-client-core";
-import { findEscrowPda, findSessionAuthorityPda } from "../pdas/index.js";
+import { findSessionAuthorityPda } from "../pdas/index.js";
 import { DEADROLL_SESSION_PROGRAM_ADDRESS } from "../programs/index.js";
+import {
+  getBagSlotDecoder,
+  getBagSlotEncoder,
+  type BagSlot,
+  type BagSlotArgs,
+} from "../types/index.js";
 
-export const CLAIM_ESCROW_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Array([
-  200, 80, 182, 159, 61, 75, 9, 205,
+export const CLOSE_CACHE_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Array([
+  14, 159, 134, 244, 1, 8, 146, 164,
 ]);
 
-export function getClaimEscrowDiscriminatorBytes(): ReadonlyUint8Array {
-  return fixEncoderSize(getBytesEncoder(), 8).encode(
-    CLAIM_ESCROW_DISCRIMINATOR,
-  );
+export function getCloseCacheDiscriminatorBytes(): ReadonlyUint8Array {
+  return fixEncoderSize(getBytesEncoder(), 8).encode(CLOSE_CACHE_DISCRIMINATOR);
 }
 
-export type ClaimEscrowInstruction<
+export type CloseCacheInstruction<
   TProgram extends string = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
-  TAccountDm extends string | AccountMeta<string> = string,
-  TAccountSession extends string | AccountMeta<string> = string,
-  TAccountEscrow extends string | AccountMeta<string> = string,
-  TAccountMap extends string | AccountMeta<string> = string,
+  TAccountOwner extends string | AccountMeta<string> = string,
+  TAccountRewardCache extends string | AccountMeta<string> = string,
+  TAccountCharacter extends string | AccountMeta<string> = string,
+  TAccountBag extends string | AccountMeta<string> = string,
   TAccountSessionAuthority extends string | AccountMeta<string> = string,
   TAccountConfig extends string | AccountMeta<string> = string,
-  TAccountMapProgram extends string | AccountMeta<string> =
-    "2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH",
   TAccountCharacterProgram extends string | AccountMeta<string> =
     "9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL",
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
@@ -71,25 +74,23 @@ export type ClaimEscrowInstruction<
   InstructionWithData<ReadonlyUint8Array> &
   InstructionWithAccounts<
     [
-      TAccountDm extends string
-        ? WritableSignerAccount<TAccountDm> & AccountSignerMeta<TAccountDm>
-        : TAccountDm,
-      TAccountSession extends string
-        ? WritableAccount<TAccountSession>
-        : TAccountSession,
-      TAccountEscrow extends string
-        ? WritableAccount<TAccountEscrow>
-        : TAccountEscrow,
-      TAccountMap extends string ? WritableAccount<TAccountMap> : TAccountMap,
+      TAccountOwner extends string
+        ? WritableSignerAccount<TAccountOwner> &
+            AccountSignerMeta<TAccountOwner>
+        : TAccountOwner,
+      TAccountRewardCache extends string
+        ? WritableAccount<TAccountRewardCache>
+        : TAccountRewardCache,
+      TAccountCharacter extends string
+        ? ReadonlyAccount<TAccountCharacter>
+        : TAccountCharacter,
+      TAccountBag extends string ? WritableAccount<TAccountBag> : TAccountBag,
       TAccountSessionAuthority extends string
         ? ReadonlyAccount<TAccountSessionAuthority>
         : TAccountSessionAuthority,
       TAccountConfig extends string
         ? ReadonlyAccount<TAccountConfig>
         : TAccountConfig,
-      TAccountMapProgram extends string
-        ? ReadonlyAccount<TAccountMapProgram>
-        : TAccountMapProgram,
       TAccountCharacterProgram extends string
         ? ReadonlyAccount<TAccountCharacterProgram>
         : TAccountCharacterProgram,
@@ -97,96 +98,107 @@ export type ClaimEscrowInstruction<
     ]
   >;
 
-export type ClaimEscrowInstructionData = { discriminator: ReadonlyUint8Array };
+export type CloseCacheInstructionData = {
+  discriminator: ReadonlyUint8Array;
+  resources: Array<BagSlot>;
+  consumables: Array<BagSlot>;
+};
 
-export type ClaimEscrowInstructionDataArgs = {};
+export type CloseCacheInstructionDataArgs = {
+  resources: Array<BagSlotArgs>;
+  consumables: Array<BagSlotArgs>;
+};
 
-export function getClaimEscrowInstructionDataEncoder(): FixedSizeEncoder<ClaimEscrowInstructionDataArgs> {
+export function getCloseCacheInstructionDataEncoder(): FixedSizeEncoder<CloseCacheInstructionDataArgs> {
   return transformEncoder(
-    getStructEncoder([["discriminator", fixEncoderSize(getBytesEncoder(), 8)]]),
-    (value) => ({ ...value, discriminator: CLAIM_ESCROW_DISCRIMINATOR }),
+    getStructEncoder([
+      ["discriminator", fixEncoderSize(getBytesEncoder(), 8)],
+      ["resources", getArrayEncoder(getBagSlotEncoder(), { size: 40 })],
+      ["consumables", getArrayEncoder(getBagSlotEncoder(), { size: 5 })],
+    ]),
+    (value) => ({ ...value, discriminator: CLOSE_CACHE_DISCRIMINATOR }),
   );
 }
 
-export function getClaimEscrowInstructionDataDecoder(): FixedSizeDecoder<ClaimEscrowInstructionData> {
+export function getCloseCacheInstructionDataDecoder(): FixedSizeDecoder<CloseCacheInstructionData> {
   return getStructDecoder([
     ["discriminator", fixDecoderSize(getBytesDecoder(), 8)],
+    ["resources", getArrayDecoder(getBagSlotDecoder(), { size: 40 })],
+    ["consumables", getArrayDecoder(getBagSlotDecoder(), { size: 5 })],
   ]);
 }
 
-export function getClaimEscrowInstructionDataCodec(): FixedSizeCodec<
-  ClaimEscrowInstructionDataArgs,
-  ClaimEscrowInstructionData
+export function getCloseCacheInstructionDataCodec(): FixedSizeCodec<
+  CloseCacheInstructionDataArgs,
+  CloseCacheInstructionData
 > {
   return combineCodec(
-    getClaimEscrowInstructionDataEncoder(),
-    getClaimEscrowInstructionDataDecoder(),
+    getCloseCacheInstructionDataEncoder(),
+    getCloseCacheInstructionDataDecoder(),
   );
 }
 
-export type ClaimEscrowAsyncInput<
-  TAccountDm extends InstructionSignerInput = InstructionSignerInput,
-  TAccountSession extends InstructionAccountInput = InstructionAccountInput,
-  TAccountEscrow extends InstructionAccountInput = InstructionAccountInput,
-  TAccountMap extends InstructionAccountInput = InstructionAccountInput,
+export type CloseCacheAsyncInput<
+  TAccountOwner extends InstructionSignerInput = InstructionSignerInput,
+  TAccountRewardCache extends InstructionAccountInput = InstructionAccountInput,
+  TAccountCharacter extends InstructionAccountInput = InstructionAccountInput,
+  TAccountBag extends InstructionAccountInput = InstructionAccountInput,
   TAccountSessionAuthority extends InstructionAccountInput =
     InstructionAccountInput,
   TAccountConfig extends InstructionAccountInput = InstructionAccountInput,
-  TAccountMapProgram extends InstructionAccountInput = InstructionAccountInput,
   TAccountCharacterProgram extends InstructionAccountInput =
     InstructionAccountInput,
 > = {
-  /** DM main wallet only: this moves lamports (docs/GAME_COMMISSIONS.md, section 4). */
-  dm: TAccountDm;
-  session: TAccountSession;
-  escrow?: TAccountEscrow;
-  map: TAccountMap;
+  /** The character's owner, main wallet only: "Done" in the bag screen. Gets the rent back. */
+  owner: TAccountOwner;
+  rewardCache: TAccountRewardCache;
+  character: TAccountCharacter;
+  bag: TAccountBag;
   sessionAuthority?: TAccountSessionAuthority;
   config?: TAccountConfig;
-  mapProgram?: TAccountMapProgram;
   characterProgram?: TAccountCharacterProgram;
+  resources: CloseCacheInstructionDataArgs["resources"];
+  consumables: CloseCacheInstructionDataArgs["consumables"];
 };
 
-export async function getClaimEscrowInstructionAsync<
-  TAccountDm extends InstructionSignerInput,
-  TAccountSession extends InstructionAccountInput,
-  TAccountEscrow extends InstructionAccountInput,
-  TAccountMap extends InstructionAccountInput,
+export async function getCloseCacheInstructionAsync<
+  TAccountOwner extends InstructionSignerInput,
+  TAccountRewardCache extends InstructionAccountInput,
+  TAccountCharacter extends InstructionAccountInput,
+  TAccountBag extends InstructionAccountInput,
   TAccountSessionAuthority extends InstructionAccountInput,
   TAccountConfig extends InstructionAccountInput,
-  TAccountMapProgram extends InstructionAccountInput,
   TAccountCharacterProgram extends InstructionAccountInput,
   TProgramAddress extends Address = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
 >(
-  input: ClaimEscrowAsyncInput<
-    TAccountDm,
-    TAccountSession,
-    TAccountEscrow,
-    TAccountMap,
+  input: CloseCacheAsyncInput<
+    TAccountOwner,
+    TAccountRewardCache,
+    TAccountCharacter,
+    TAccountBag,
     TAccountSessionAuthority,
     TAccountConfig,
-    TAccountMapProgram,
     TAccountCharacterProgram
   >,
   config?: { programAddress?: TProgramAddress },
 ): Promise<
-  ClaimEscrowInstruction<
+  CloseCacheInstruction<
     TProgramAddress,
     ResolvedInstructionAccountMeta<
-      TAccountDm,
-      InstructionAccountInputAddress<TAccountDm>
+      TAccountOwner,
+      InstructionAccountInputAddress<TAccountOwner>
     >,
     ResolvedInstructionAccountMeta<
-      TAccountSession,
-      InstructionAccountInputAddress<TAccountSession>
+      TAccountRewardCache,
+      InstructionAccountInputAddress<TAccountRewardCache>
     >,
     ResolvedInstructionAccountMeta<
-      TAccountEscrow,
-      InstructionAccountInputAddress<TAccountEscrow>
+      TAccountCharacter,
+      InstructionAccountInputAddress<TAccountCharacter>
     >,
     ResolvedInstructionAccountMeta<
-      TAccountMap,
-      InstructionAccountInputAddress<TAccountMap>
+      TAccountBag,
+      InstructionAccountInputAddress<TAccountBag>
     >,
     ResolvedInstructionAccountMeta<
       TAccountSessionAuthority,
@@ -195,10 +207,6 @@ export async function getClaimEscrowInstructionAsync<
     ResolvedInstructionAccountMeta<
       TAccountConfig,
       InstructionAccountInputAddress<TAccountConfig>
-    >,
-    ResolvedInstructionAccountMeta<
-      TAccountMapProgram,
-      InstructionAccountInputAddress<TAccountMapProgram>
     >,
     ResolvedInstructionAccountMeta<
       TAccountCharacterProgram,
@@ -215,25 +223,24 @@ export async function getClaimEscrowInstructionAsync<
 
   // Original accounts.
   const originalAccounts = {
-    dm: { value: input.dm ?? null, isSigner: true, isWritable: true },
-    session: {
-      value: input.session ?? null,
+    owner: { value: input.owner ?? null, isSigner: true, isWritable: true },
+    rewardCache: {
+      value: input.rewardCache ?? null,
       isSigner: false,
       isWritable: true,
     },
-    escrow: { value: input.escrow ?? null, isSigner: false, isWritable: true },
-    map: { value: input.map ?? null, isSigner: false, isWritable: true },
+    character: {
+      value: input.character ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    bag: { value: input.bag ?? null, isSigner: false, isWritable: true },
     sessionAuthority: {
       value: input.sessionAuthority ?? null,
       isSigner: false,
       isWritable: false,
     },
     config: { value: input.config ?? null, isSigner: false, isWritable: false },
-    mapProgram: {
-      value: input.mapProgram ?? null,
-      isSigner: false,
-      isWritable: false,
-    },
     characterProgram: {
       value: input.characterProgram ?? null,
       isSigner: false,
@@ -245,18 +252,10 @@ export async function getClaimEscrowInstructionAsync<
     ResolvedInstructionAccount
   >;
 
+  // Original args.
+  const args = { ...input };
+
   // Resolve default values.
-  if (!accounts.escrow.value) {
-    accounts.escrow.value = await findEscrowPda(
-      {
-        session: getAddressFromResolvedInstructionAccount(
-          "session",
-          accounts.session.value,
-        ),
-      },
-      { programAddress },
-    );
-  }
   if (!accounts.sessionAuthority.value) {
     accounts.sessionAuthority.value = await findSessionAuthorityPda({
       programAddress,
@@ -271,10 +270,6 @@ export async function getClaimEscrowInstructionAsync<
       ],
     });
   }
-  if (!accounts.mapProgram.value) {
-    accounts.mapProgram.value =
-      "2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH" as Address<"2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH">;
-  }
   if (!accounts.characterProgram.value) {
     accounts.characterProgram.value =
       "9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL" as Address<"9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL">;
@@ -282,34 +277,35 @@ export async function getClaimEscrowInstructionAsync<
 
   return Object.freeze({
     accounts: [
-      getAccountMeta("dm", accounts.dm),
-      getAccountMeta("session", accounts.session),
-      getAccountMeta("escrow", accounts.escrow),
-      getAccountMeta("map", accounts.map),
+      getAccountMeta("owner", accounts.owner),
+      getAccountMeta("rewardCache", accounts.rewardCache),
+      getAccountMeta("character", accounts.character),
+      getAccountMeta("bag", accounts.bag),
       getAccountMeta("sessionAuthority", accounts.sessionAuthority),
       getAccountMeta("config", accounts.config),
-      getAccountMeta("mapProgram", accounts.mapProgram),
       getAccountMeta("characterProgram", accounts.characterProgram),
     ],
-    data: getClaimEscrowInstructionDataEncoder().encode({}),
+    data: getCloseCacheInstructionDataEncoder().encode(
+      args as CloseCacheInstructionDataArgs,
+    ),
     programAddress,
-  } as ClaimEscrowInstruction<
+  } as CloseCacheInstruction<
     TProgramAddress,
     ResolvedInstructionAccountMeta<
-      TAccountDm,
-      InstructionAccountInputAddress<TAccountDm>
+      TAccountOwner,
+      InstructionAccountInputAddress<TAccountOwner>
     >,
     ResolvedInstructionAccountMeta<
-      TAccountSession,
-      InstructionAccountInputAddress<TAccountSession>
+      TAccountRewardCache,
+      InstructionAccountInputAddress<TAccountRewardCache>
     >,
     ResolvedInstructionAccountMeta<
-      TAccountEscrow,
-      InstructionAccountInputAddress<TAccountEscrow>
+      TAccountCharacter,
+      InstructionAccountInputAddress<TAccountCharacter>
     >,
     ResolvedInstructionAccountMeta<
-      TAccountMap,
-      InstructionAccountInputAddress<TAccountMap>
+      TAccountBag,
+      InstructionAccountInputAddress<TAccountBag>
     >,
     ResolvedInstructionAccountMeta<
       TAccountSessionAuthority,
@@ -320,78 +316,72 @@ export async function getClaimEscrowInstructionAsync<
       InstructionAccountInputAddress<TAccountConfig>
     >,
     ResolvedInstructionAccountMeta<
-      TAccountMapProgram,
-      InstructionAccountInputAddress<TAccountMapProgram>
-    >,
-    ResolvedInstructionAccountMeta<
       TAccountCharacterProgram,
       InstructionAccountInputAddress<TAccountCharacterProgram>
     >
   >);
 }
 
-export type ClaimEscrowInput<
-  TAccountDm extends InstructionSignerInput = InstructionSignerInput,
-  TAccountSession extends InstructionAccountInput = InstructionAccountInput,
-  TAccountEscrow extends InstructionAccountInput = InstructionAccountInput,
-  TAccountMap extends InstructionAccountInput = InstructionAccountInput,
+export type CloseCacheInput<
+  TAccountOwner extends InstructionSignerInput = InstructionSignerInput,
+  TAccountRewardCache extends InstructionAccountInput = InstructionAccountInput,
+  TAccountCharacter extends InstructionAccountInput = InstructionAccountInput,
+  TAccountBag extends InstructionAccountInput = InstructionAccountInput,
   TAccountSessionAuthority extends InstructionAccountInput =
     InstructionAccountInput,
   TAccountConfig extends InstructionAccountInput = InstructionAccountInput,
-  TAccountMapProgram extends InstructionAccountInput = InstructionAccountInput,
   TAccountCharacterProgram extends InstructionAccountInput =
     InstructionAccountInput,
 > = {
-  /** DM main wallet only: this moves lamports (docs/GAME_COMMISSIONS.md, section 4). */
-  dm: TAccountDm;
-  session: TAccountSession;
-  escrow: TAccountEscrow;
-  map: TAccountMap;
+  /** The character's owner, main wallet only: "Done" in the bag screen. Gets the rent back. */
+  owner: TAccountOwner;
+  rewardCache: TAccountRewardCache;
+  character: TAccountCharacter;
+  bag: TAccountBag;
   sessionAuthority: TAccountSessionAuthority;
   config: TAccountConfig;
-  mapProgram?: TAccountMapProgram;
   characterProgram?: TAccountCharacterProgram;
+  resources: CloseCacheInstructionDataArgs["resources"];
+  consumables: CloseCacheInstructionDataArgs["consumables"];
 };
 
-export function getClaimEscrowInstruction<
-  TAccountDm extends InstructionSignerInput,
-  TAccountSession extends InstructionAccountInput,
-  TAccountEscrow extends InstructionAccountInput,
-  TAccountMap extends InstructionAccountInput,
+export function getCloseCacheInstruction<
+  TAccountOwner extends InstructionSignerInput,
+  TAccountRewardCache extends InstructionAccountInput,
+  TAccountCharacter extends InstructionAccountInput,
+  TAccountBag extends InstructionAccountInput,
   TAccountSessionAuthority extends InstructionAccountInput,
   TAccountConfig extends InstructionAccountInput,
-  TAccountMapProgram extends InstructionAccountInput,
   TAccountCharacterProgram extends InstructionAccountInput,
   TProgramAddress extends Address = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
 >(
-  input: ClaimEscrowInput<
-    TAccountDm,
-    TAccountSession,
-    TAccountEscrow,
-    TAccountMap,
+  input: CloseCacheInput<
+    TAccountOwner,
+    TAccountRewardCache,
+    TAccountCharacter,
+    TAccountBag,
     TAccountSessionAuthority,
     TAccountConfig,
-    TAccountMapProgram,
     TAccountCharacterProgram
   >,
   config?: { programAddress?: TProgramAddress },
-): ClaimEscrowInstruction<
+): CloseCacheInstruction<
   TProgramAddress,
   ResolvedInstructionAccountMeta<
-    TAccountDm,
-    InstructionAccountInputAddress<TAccountDm>
+    TAccountOwner,
+    InstructionAccountInputAddress<TAccountOwner>
   >,
   ResolvedInstructionAccountMeta<
-    TAccountSession,
-    InstructionAccountInputAddress<TAccountSession>
+    TAccountRewardCache,
+    InstructionAccountInputAddress<TAccountRewardCache>
   >,
   ResolvedInstructionAccountMeta<
-    TAccountEscrow,
-    InstructionAccountInputAddress<TAccountEscrow>
+    TAccountCharacter,
+    InstructionAccountInputAddress<TAccountCharacter>
   >,
   ResolvedInstructionAccountMeta<
-    TAccountMap,
-    InstructionAccountInputAddress<TAccountMap>
+    TAccountBag,
+    InstructionAccountInputAddress<TAccountBag>
   >,
   ResolvedInstructionAccountMeta<
     TAccountSessionAuthority,
@@ -400,10 +390,6 @@ export function getClaimEscrowInstruction<
   ResolvedInstructionAccountMeta<
     TAccountConfig,
     InstructionAccountInputAddress<TAccountConfig>
-  >,
-  ResolvedInstructionAccountMeta<
-    TAccountMapProgram,
-    InstructionAccountInputAddress<TAccountMapProgram>
   >,
   ResolvedInstructionAccountMeta<
     TAccountCharacterProgram,
@@ -419,25 +405,24 @@ export function getClaimEscrowInstruction<
 
   // Original accounts.
   const originalAccounts = {
-    dm: { value: input.dm ?? null, isSigner: true, isWritable: true },
-    session: {
-      value: input.session ?? null,
+    owner: { value: input.owner ?? null, isSigner: true, isWritable: true },
+    rewardCache: {
+      value: input.rewardCache ?? null,
       isSigner: false,
       isWritable: true,
     },
-    escrow: { value: input.escrow ?? null, isSigner: false, isWritable: true },
-    map: { value: input.map ?? null, isSigner: false, isWritable: true },
+    character: {
+      value: input.character ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    bag: { value: input.bag ?? null, isSigner: false, isWritable: true },
     sessionAuthority: {
       value: input.sessionAuthority ?? null,
       isSigner: false,
       isWritable: false,
     },
     config: { value: input.config ?? null, isSigner: false, isWritable: false },
-    mapProgram: {
-      value: input.mapProgram ?? null,
-      isSigner: false,
-      isWritable: false,
-    },
     characterProgram: {
       value: input.characterProgram ?? null,
       isSigner: false,
@@ -449,11 +434,10 @@ export function getClaimEscrowInstruction<
     ResolvedInstructionAccount
   >;
 
+  // Original args.
+  const args = { ...input };
+
   // Resolve default values.
-  if (!accounts.mapProgram.value) {
-    accounts.mapProgram.value =
-      "2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH" as Address<"2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH">;
-  }
   if (!accounts.characterProgram.value) {
     accounts.characterProgram.value =
       "9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL" as Address<"9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL">;
@@ -461,34 +445,35 @@ export function getClaimEscrowInstruction<
 
   return Object.freeze({
     accounts: [
-      getAccountMeta("dm", accounts.dm),
-      getAccountMeta("session", accounts.session),
-      getAccountMeta("escrow", accounts.escrow),
-      getAccountMeta("map", accounts.map),
+      getAccountMeta("owner", accounts.owner),
+      getAccountMeta("rewardCache", accounts.rewardCache),
+      getAccountMeta("character", accounts.character),
+      getAccountMeta("bag", accounts.bag),
       getAccountMeta("sessionAuthority", accounts.sessionAuthority),
       getAccountMeta("config", accounts.config),
-      getAccountMeta("mapProgram", accounts.mapProgram),
       getAccountMeta("characterProgram", accounts.characterProgram),
     ],
-    data: getClaimEscrowInstructionDataEncoder().encode({}),
+    data: getCloseCacheInstructionDataEncoder().encode(
+      args as CloseCacheInstructionDataArgs,
+    ),
     programAddress,
-  } as ClaimEscrowInstruction<
+  } as CloseCacheInstruction<
     TProgramAddress,
     ResolvedInstructionAccountMeta<
-      TAccountDm,
-      InstructionAccountInputAddress<TAccountDm>
+      TAccountOwner,
+      InstructionAccountInputAddress<TAccountOwner>
     >,
     ResolvedInstructionAccountMeta<
-      TAccountSession,
-      InstructionAccountInputAddress<TAccountSession>
+      TAccountRewardCache,
+      InstructionAccountInputAddress<TAccountRewardCache>
     >,
     ResolvedInstructionAccountMeta<
-      TAccountEscrow,
-      InstructionAccountInputAddress<TAccountEscrow>
+      TAccountCharacter,
+      InstructionAccountInputAddress<TAccountCharacter>
     >,
     ResolvedInstructionAccountMeta<
-      TAccountMap,
-      InstructionAccountInputAddress<TAccountMap>
+      TAccountBag,
+      InstructionAccountInputAddress<TAccountBag>
     >,
     ResolvedInstructionAccountMeta<
       TAccountSessionAuthority,
@@ -499,49 +484,44 @@ export function getClaimEscrowInstruction<
       InstructionAccountInputAddress<TAccountConfig>
     >,
     ResolvedInstructionAccountMeta<
-      TAccountMapProgram,
-      InstructionAccountInputAddress<TAccountMapProgram>
-    >,
-    ResolvedInstructionAccountMeta<
       TAccountCharacterProgram,
       InstructionAccountInputAddress<TAccountCharacterProgram>
     >
   >);
 }
 
-export type ParsedClaimEscrowInstruction<
+export type ParsedCloseCacheInstruction<
   TProgram extends string = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
   TAccountMetas extends readonly AccountMeta[] = readonly AccountMeta[],
 > = {
   programAddress: Address<TProgram>;
   accounts: {
-    /** DM main wallet only: this moves lamports (docs/GAME_COMMISSIONS.md, section 4). */
-    dm: TAccountMetas[0];
-    session: TAccountMetas[1];
-    escrow: TAccountMetas[2];
-    map: TAccountMetas[3];
+    /** The character's owner, main wallet only: "Done" in the bag screen. Gets the rent back. */
+    owner: TAccountMetas[0];
+    rewardCache: TAccountMetas[1];
+    character: TAccountMetas[2];
+    bag: TAccountMetas[3];
     sessionAuthority: TAccountMetas[4];
     config: TAccountMetas[5];
-    mapProgram: TAccountMetas[6];
-    characterProgram: TAccountMetas[7];
+    characterProgram: TAccountMetas[6];
   };
-  data: ClaimEscrowInstructionData;
+  data: CloseCacheInstructionData;
 };
 
-export function parseClaimEscrowInstruction<
+export function parseCloseCacheInstruction<
   TProgram extends string,
   TAccountMetas extends readonly AccountMeta[],
 >(
   instruction: Instruction<TProgram> &
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
-): ParsedClaimEscrowInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 8) {
+): ParsedCloseCacheInstruction<TProgram, TAccountMetas> {
+  if (instruction.accounts.length < 7) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 8,
+        expectedAccountMetas: 7,
       },
     );
   }
@@ -554,15 +534,14 @@ export function parseClaimEscrowInstruction<
   return {
     programAddress: instruction.programAddress,
     accounts: {
-      dm: getNextAccount(),
-      session: getNextAccount(),
-      escrow: getNextAccount(),
-      map: getNextAccount(),
+      owner: getNextAccount(),
+      rewardCache: getNextAccount(),
+      character: getNextAccount(),
+      bag: getNextAccount(),
       sessionAuthority: getNextAccount(),
       config: getNextAccount(),
-      mapProgram: getNextAccount(),
       characterProgram: getNextAccount(),
     },
-    data: getClaimEscrowInstructionDataDecoder().decode(instruction.data),
+    data: getCloseCacheInstructionDataDecoder().decode(instruction.data),
   };
 }

@@ -9,7 +9,7 @@ use deadroll_rules::{
 use deadroll_skillcheck::{monster::POOL_MAX, Category};
 use deadroll_types::{
     seeds, ActiveState, GameSessionData, MapStatus, Monster, SessionStatus, Spawn, MAP_MAX,
-    MONSTERS_MAX, MONSTER_SLOTS, PARTY_MAX, STATES_MAX, TURN_ORDER_MAX,
+    MONSTERS_MAX, MONSTER_SLOTS, NO_TABLE, PARTY_MAX, STATES_MAX, TURN_ORDER_MAX,
 };
 
 use crate::{
@@ -19,11 +19,11 @@ use crate::{
     rules::{BALANCE, EMPTY_UNIT, MIN_PRICE_LAMPORTS},
     state::{
         external::{
-            read_bestiary, read_map, read_monster_skill, read_table_body, read_tile_costs,
-            MapLayoutView, ASPECTS_TABLE, BESTIARY_TABLE, MONSTER_SKILLS_TABLE, RESONANCES_TABLE,
-            TILESET_TABLE, TRAITS_TABLE,
+            read_bestiary, read_map_full, read_monster_skill, read_reward_table, read_table_body,
+            read_tile_costs, MapLayoutView, ASPECTS_TABLE, BESTIARY_TABLE, MONSTER_SKILLS_TABLE,
+            RESONANCES_TABLE, REWARDS_TABLE, TILESET_TABLE, TRAITS_TABLE,
         },
-        Escrow, GameSession, Monsters, ACCOUNT_VERSION, RES_ASPECTS_LEN, RES_PAIRS_LEN,
+        Escrow, GameSession, Monsters, ACCOUNT_VERSION, NO_CHEST, RES_ASPECTS_LEN, RES_PAIRS_LEN,
         RES_TRAITS_LEN,
     },
 };
@@ -86,11 +86,15 @@ pub struct OpenSession<'info> {
     /// pools, copied into `MonsterState`.
     #[account(address = MONSTER_SKILLS_TABLE @ SessionError::InvalidRegistryTable)]
     pub monster_skills: UncheckedAccount<'info>,
+    /// CHECK: registry `["rewards"]` table (patch 11): the bodies', chests' and boss's reward
+    /// tables, copied into `MonsterState`.
+    #[account(address = REWARDS_TABLE @ SessionError::InvalidRegistryTable)]
+    pub rewards: UncheckedAccount<'info>,
 }
 
 pub fn handler(ctx: Context<OpenSession>, price_lamports: u64, dm_actor: Pubkey) -> Result<()> {
     let accounts = ctx.accounts;
-    let map = read_map(&accounts.map)?;
+    let (map, tier, min_players) = read_map_full(&accounts.map)?;
     require_keys_eq!(map.dm, accounts.dm.key(), SessionError::NotDm);
     require!(
         map.status == MapStatus::Finalized,
@@ -141,6 +145,12 @@ pub fn handler(ctx: Context<OpenSession>, price_lamports: u64, dm_actor: Pubkey)
     session.entrance = layout.entrance();
     session.dm_actor = dm_actor;
     session.tile_cost = read_tile_costs(&accounts.tileset)?;
+    // Patch 11: the map's rewards, fixed for the party.
+    session.tier = tier;
+    session.min_players = min_players;
+    (session.chests, session.chest_count) = layout.chests()?;
+    session.boss_table = layout.boss_table();
+    session.pending_chest = NO_CHEST;
 
     let monsters = Monsters::create(
         &accounts.monsters,
@@ -155,6 +165,7 @@ pub fn handler(ctx: Context<OpenSession>, price_lamports: u64, dm_actor: Pubkey)
         &accounts.resonances,
         &monsters,
     )?;
+    monsters.clear_loot_tables()?;
     for i in 0..spawn_count {
         let spawn = layout.spawn(i as usize)?;
         let (record, template) = read_bestiary(&accounts.bestiary, spawn.bestiary_id)?;
@@ -164,6 +175,7 @@ pub fn handler(ctx: Context<OpenSession>, price_lamports: u64, dm_actor: Pubkey)
         monsters.set_record(i, &record)?;
         monsters.set_defense(i, &template.defense)?;
         copy_skills(&monsters, i, &spawn, &template, &accounts.monster_skills)?;
+        copy_loot_table(&monsters, &accounts.rewards, template.loot_table)?;
         monsters.set(
             i,
             &Monster {
@@ -182,6 +194,14 @@ pub fn handler(ctx: Context<OpenSession>, price_lamports: u64, dm_actor: Pubkey)
         )?;
     }
     monsters.set_count(spawn_count)?;
+    for id in session
+        .chest_list()
+        .iter()
+        .map(|c| c.data)
+        .chain([session.boss_table])
+    {
+        copy_loot_table(&monsters, &accounts.rewards, id)?;
+    }
     drop(layout);
 
     let escrow = &mut accounts.escrow;
@@ -209,6 +229,17 @@ pub fn handler(ctx: Context<OpenSession>, price_lamports: u64, dm_actor: Pubkey)
         monsters: spawn_count,
     });
     Ok(())
+}
+
+/// Patch 11: copies registry reward table `id` into the party's `MonsterState` once
+/// (`NO_TABLE`: nothing). `finalize_map` checked the chests' and the boss's; a body table must
+/// decode too, or the kill could not be paid.
+#[inline(never)]
+fn copy_loot_table(monsters: &Monsters, rewards: &AccountInfo, id: u8) -> Result<()> {
+    if id == NO_TABLE || monsters.loot_table(id)?.is_some() {
+        return Ok(());
+    }
+    monsters.add_loot_table(id, &read_reward_table(rewards, id)?)
 }
 
 /// Copies the registry resonance tables into the session's `MonsterState` (fixed for the party,

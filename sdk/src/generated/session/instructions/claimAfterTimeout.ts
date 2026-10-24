@@ -28,9 +28,9 @@ import {
   type InstructionWithAccounts,
   type InstructionWithData,
   type ReadonlyAccount,
-  type ReadonlySignerAccount,
   type ReadonlyUint8Array,
   type WritableAccount,
+  type WritableSignerAccount,
 } from "@solana/kit";
 import {
   getAccountMetaFactory,
@@ -41,183 +41,169 @@ import {
   type ResolvedInstructionAccount,
   type ResolvedInstructionAccountMeta,
 } from "@solana/program-client-core";
-import {
-  findParticipationPda,
-  findSessionAuthorityPda,
-  findStashPda,
-} from "../pdas/index.js";
+import { findEscrowPda, findSessionAuthorityPda } from "../pdas/index.js";
 import { DEADROLL_SESSION_PROGRAM_ADDRESS } from "../programs/index.js";
 
-export const CLAIM_REWARDS_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Array([
-  4, 144, 132, 71, 116, 23, 151, 80,
-]);
+export const CLAIM_AFTER_TIMEOUT_DISCRIMINATOR: ReadonlyUint8Array =
+  new Uint8Array([90, 0, 225, 186, 150, 114, 231, 76]);
 
-export function getClaimRewardsDiscriminatorBytes(): ReadonlyUint8Array {
+export function getClaimAfterTimeoutDiscriminatorBytes(): ReadonlyUint8Array {
   return fixEncoderSize(getBytesEncoder(), 8).encode(
-    CLAIM_REWARDS_DISCRIMINATOR,
+    CLAIM_AFTER_TIMEOUT_DISCRIMINATOR,
   );
 }
 
-export type ClaimRewardsInstruction<
+export type ClaimAfterTimeoutInstruction<
   TProgram extends string = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
-  TAccountSigner extends string | AccountMeta<string> = string,
+  TAccountPlayer extends string | AccountMeta<string> = string,
   TAccountSession extends string | AccountMeta<string> = string,
-  TAccountParticipation extends string | AccountMeta<string> = string,
-  TAccountStash extends string | AccountMeta<string> = string,
-  TAccountCharacter extends string | AccountMeta<string> = string,
-  TAccountBag extends string | AccountMeta<string> = string,
+  TAccountEscrow extends string | AccountMeta<string> = string,
+  TAccountMonsters extends string | AccountMeta<string> = string,
+  TAccountMap extends string | AccountMeta<string> = string,
   TAccountSessionAuthority extends string | AccountMeta<string> = string,
   TAccountConfig extends string | AccountMeta<string> = string,
+  TAccountMapProgram extends string | AccountMeta<string> =
+    "2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH",
   TAccountCharacterProgram extends string | AccountMeta<string> =
     "9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL",
-  TAccountSessionToken extends string | AccountMeta<string> = string,
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
 > = Instruction<TProgram> &
   InstructionWithData<ReadonlyUint8Array> &
   InstructionWithAccounts<
     [
-      TAccountSigner extends string
-        ? ReadonlySignerAccount<TAccountSigner> &
-            AccountSignerMeta<TAccountSigner>
-        : TAccountSigner,
+      TAccountPlayer extends string
+        ? WritableSignerAccount<TAccountPlayer> &
+            AccountSignerMeta<TAccountPlayer>
+        : TAccountPlayer,
       TAccountSession extends string
         ? WritableAccount<TAccountSession>
         : TAccountSession,
-      TAccountParticipation extends string
-        ? ReadonlyAccount<TAccountParticipation>
-        : TAccountParticipation,
-      TAccountStash extends string
-        ? WritableAccount<TAccountStash>
-        : TAccountStash,
-      TAccountCharacter extends string
-        ? WritableAccount<TAccountCharacter>
-        : TAccountCharacter,
-      TAccountBag extends string ? WritableAccount<TAccountBag> : TAccountBag,
+      TAccountEscrow extends string
+        ? WritableAccount<TAccountEscrow>
+        : TAccountEscrow,
+      TAccountMonsters extends string
+        ? ReadonlyAccount<TAccountMonsters>
+        : TAccountMonsters,
+      TAccountMap extends string ? WritableAccount<TAccountMap> : TAccountMap,
       TAccountSessionAuthority extends string
         ? ReadonlyAccount<TAccountSessionAuthority>
         : TAccountSessionAuthority,
       TAccountConfig extends string
         ? ReadonlyAccount<TAccountConfig>
         : TAccountConfig,
+      TAccountMapProgram extends string
+        ? ReadonlyAccount<TAccountMapProgram>
+        : TAccountMapProgram,
       TAccountCharacterProgram extends string
         ? ReadonlyAccount<TAccountCharacterProgram>
         : TAccountCharacterProgram,
-      TAccountSessionToken extends string
-        ? ReadonlyAccount<TAccountSessionToken>
-        : TAccountSessionToken,
       ...TRemainingAccounts,
     ]
   >;
 
-export type ClaimRewardsInstructionData = { discriminator: ReadonlyUint8Array };
+export type ClaimAfterTimeoutInstructionData = {
+  discriminator: ReadonlyUint8Array;
+};
 
-export type ClaimRewardsInstructionDataArgs = {};
+export type ClaimAfterTimeoutInstructionDataArgs = {};
 
-export function getClaimRewardsInstructionDataEncoder(): FixedSizeEncoder<ClaimRewardsInstructionDataArgs> {
+export function getClaimAfterTimeoutInstructionDataEncoder(): FixedSizeEncoder<ClaimAfterTimeoutInstructionDataArgs> {
   return transformEncoder(
     getStructEncoder([["discriminator", fixEncoderSize(getBytesEncoder(), 8)]]),
-    (value) => ({ ...value, discriminator: CLAIM_REWARDS_DISCRIMINATOR }),
+    (value) => ({ ...value, discriminator: CLAIM_AFTER_TIMEOUT_DISCRIMINATOR }),
   );
 }
 
-export function getClaimRewardsInstructionDataDecoder(): FixedSizeDecoder<ClaimRewardsInstructionData> {
+export function getClaimAfterTimeoutInstructionDataDecoder(): FixedSizeDecoder<ClaimAfterTimeoutInstructionData> {
   return getStructDecoder([
     ["discriminator", fixDecoderSize(getBytesDecoder(), 8)],
   ]);
 }
 
-export function getClaimRewardsInstructionDataCodec(): FixedSizeCodec<
-  ClaimRewardsInstructionDataArgs,
-  ClaimRewardsInstructionData
+export function getClaimAfterTimeoutInstructionDataCodec(): FixedSizeCodec<
+  ClaimAfterTimeoutInstructionDataArgs,
+  ClaimAfterTimeoutInstructionData
 > {
   return combineCodec(
-    getClaimRewardsInstructionDataEncoder(),
-    getClaimRewardsInstructionDataDecoder(),
+    getClaimAfterTimeoutInstructionDataEncoder(),
+    getClaimAfterTimeoutInstructionDataDecoder(),
   );
 }
 
-export type ClaimRewardsAsyncInput<
-  TAccountSigner extends InstructionSignerInput = InstructionSignerInput,
+export type ClaimAfterTimeoutAsyncInput<
+  TAccountPlayer extends InstructionSignerInput = InstructionSignerInput,
   TAccountSession extends InstructionAccountInput = InstructionAccountInput,
-  TAccountParticipation extends InstructionAccountInput =
-    InstructionAccountInput,
-  TAccountStash extends InstructionAccountInput = InstructionAccountInput,
-  TAccountCharacter extends InstructionAccountInput = InstructionAccountInput,
-  TAccountBag extends InstructionAccountInput = InstructionAccountInput,
+  TAccountEscrow extends InstructionAccountInput = InstructionAccountInput,
+  TAccountMonsters extends InstructionAccountInput = InstructionAccountInput,
+  TAccountMap extends InstructionAccountInput = InstructionAccountInput,
   TAccountSessionAuthority extends InstructionAccountInput =
     InstructionAccountInput,
   TAccountConfig extends InstructionAccountInput = InstructionAccountInput,
+  TAccountMapProgram extends InstructionAccountInput = InstructionAccountInput,
   TAccountCharacterProgram extends InstructionAccountInput =
     InstructionAccountInput,
-  TAccountSessionToken extends InstructionAccountInput =
-    InstructionAccountInput,
 > = {
-  /** The character's owner (the participation's `player`) or its session key. */
-  signer: TAccountSigner;
+  /**
+   * The player's main wallet (the participation's `player`): the refund goes here, so no
+   * session key.
+   */
+  player: TAccountPlayer;
   session: TAccountSession;
-  participation?: TAccountParticipation;
-  stash?: TAccountStash;
-  character: TAccountCharacter;
-  bag: TAccountBag;
+  escrow?: TAccountEscrow;
+  monsters: TAccountMonsters;
+  map: TAccountMap;
   sessionAuthority?: TAccountSessionAuthority;
   config?: TAccountConfig;
+  mapProgram?: TAccountMapProgram;
   characterProgram?: TAccountCharacterProgram;
-  /** MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs. */
-  sessionToken?: TAccountSessionToken;
 };
 
-export async function getClaimRewardsInstructionAsync<
-  TAccountSigner extends InstructionSignerInput,
+export async function getClaimAfterTimeoutInstructionAsync<
+  TAccountPlayer extends InstructionSignerInput,
   TAccountSession extends InstructionAccountInput,
-  TAccountParticipation extends InstructionAccountInput,
-  TAccountStash extends InstructionAccountInput,
-  TAccountCharacter extends InstructionAccountInput,
-  TAccountBag extends InstructionAccountInput,
+  TAccountEscrow extends InstructionAccountInput,
+  TAccountMonsters extends InstructionAccountInput,
+  TAccountMap extends InstructionAccountInput,
   TAccountSessionAuthority extends InstructionAccountInput,
   TAccountConfig extends InstructionAccountInput,
+  TAccountMapProgram extends InstructionAccountInput,
   TAccountCharacterProgram extends InstructionAccountInput,
-  TAccountSessionToken extends InstructionAccountInput,
   TProgramAddress extends Address = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
 >(
-  input: ClaimRewardsAsyncInput<
-    TAccountSigner,
+  input: ClaimAfterTimeoutAsyncInput<
+    TAccountPlayer,
     TAccountSession,
-    TAccountParticipation,
-    TAccountStash,
-    TAccountCharacter,
-    TAccountBag,
+    TAccountEscrow,
+    TAccountMonsters,
+    TAccountMap,
     TAccountSessionAuthority,
     TAccountConfig,
-    TAccountCharacterProgram,
-    TAccountSessionToken
+    TAccountMapProgram,
+    TAccountCharacterProgram
   >,
   config?: { programAddress?: TProgramAddress },
 ): Promise<
-  ClaimRewardsInstruction<
+  ClaimAfterTimeoutInstruction<
     TProgramAddress,
     ResolvedInstructionAccountMeta<
-      TAccountSigner,
-      InstructionAccountInputAddress<TAccountSigner>
+      TAccountPlayer,
+      InstructionAccountInputAddress<TAccountPlayer>
     >,
     ResolvedInstructionAccountMeta<
       TAccountSession,
       InstructionAccountInputAddress<TAccountSession>
     >,
     ResolvedInstructionAccountMeta<
-      TAccountParticipation,
-      InstructionAccountInputAddress<TAccountParticipation>
+      TAccountEscrow,
+      InstructionAccountInputAddress<TAccountEscrow>
     >,
     ResolvedInstructionAccountMeta<
-      TAccountStash,
-      InstructionAccountInputAddress<TAccountStash>
+      TAccountMonsters,
+      InstructionAccountInputAddress<TAccountMonsters>
     >,
     ResolvedInstructionAccountMeta<
-      TAccountCharacter,
-      InstructionAccountInputAddress<TAccountCharacter>
-    >,
-    ResolvedInstructionAccountMeta<
-      TAccountBag,
-      InstructionAccountInputAddress<TAccountBag>
+      TAccountMap,
+      InstructionAccountInputAddress<TAccountMap>
     >,
     ResolvedInstructionAccountMeta<
       TAccountSessionAuthority,
@@ -228,12 +214,12 @@ export async function getClaimRewardsInstructionAsync<
       InstructionAccountInputAddress<TAccountConfig>
     >,
     ResolvedInstructionAccountMeta<
-      TAccountCharacterProgram,
-      InstructionAccountInputAddress<TAccountCharacterProgram>
+      TAccountMapProgram,
+      InstructionAccountInputAddress<TAccountMapProgram>
     >,
     ResolvedInstructionAccountMeta<
-      TAccountSessionToken,
-      InstructionAccountInputAddress<TAccountSessionToken>
+      TAccountCharacterProgram,
+      InstructionAccountInputAddress<TAccountCharacterProgram>
     >
   >
 > {
@@ -246,37 +232,32 @@ export async function getClaimRewardsInstructionAsync<
 
   // Original accounts.
   const originalAccounts = {
-    signer: { value: input.signer ?? null, isSigner: true, isWritable: false },
+    player: { value: input.player ?? null, isSigner: true, isWritable: true },
     session: {
       value: input.session ?? null,
       isSigner: false,
       isWritable: true,
     },
-    participation: {
-      value: input.participation ?? null,
+    escrow: { value: input.escrow ?? null, isSigner: false, isWritable: true },
+    monsters: {
+      value: input.monsters ?? null,
       isSigner: false,
       isWritable: false,
     },
-    stash: { value: input.stash ?? null, isSigner: false, isWritable: true },
-    character: {
-      value: input.character ?? null,
-      isSigner: false,
-      isWritable: true,
-    },
-    bag: { value: input.bag ?? null, isSigner: false, isWritable: true },
+    map: { value: input.map ?? null, isSigner: false, isWritable: true },
     sessionAuthority: {
       value: input.sessionAuthority ?? null,
       isSigner: false,
       isWritable: false,
     },
     config: { value: input.config ?? null, isSigner: false, isWritable: false },
-    characterProgram: {
-      value: input.characterProgram ?? null,
+    mapProgram: {
+      value: input.mapProgram ?? null,
       isSigner: false,
       isWritable: false,
     },
-    sessionToken: {
-      value: input.sessionToken ?? null,
+    characterProgram: {
+      value: input.characterProgram ?? null,
       isSigner: false,
       isWritable: false,
     },
@@ -287,31 +268,12 @@ export async function getClaimRewardsInstructionAsync<
   >;
 
   // Resolve default values.
-  if (!accounts.participation.value) {
-    accounts.participation.value = await findParticipationPda(
+  if (!accounts.escrow.value) {
+    accounts.escrow.value = await findEscrowPda(
       {
         session: getAddressFromResolvedInstructionAccount(
           "session",
           accounts.session.value,
-        ),
-        character: getAddressFromResolvedInstructionAccount(
-          "character",
-          accounts.character.value,
-        ),
-      },
-      { programAddress },
-    );
-  }
-  if (!accounts.stash.value) {
-    accounts.stash.value = await findStashPda(
-      {
-        session: getAddressFromResolvedInstructionAccount(
-          "session",
-          accounts.session.value,
-        ),
-        character: getAddressFromResolvedInstructionAccount(
-          "character",
-          accounts.character.value,
         ),
       },
       { programAddress },
@@ -331,6 +293,10 @@ export async function getClaimRewardsInstructionAsync<
       ],
     });
   }
+  if (!accounts.mapProgram.value) {
+    accounts.mapProgram.value =
+      "2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH" as Address<"2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH">;
+  }
   if (!accounts.characterProgram.value) {
     accounts.characterProgram.value =
       "9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL" as Address<"9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL">;
@@ -338,44 +304,39 @@ export async function getClaimRewardsInstructionAsync<
 
   return Object.freeze({
     accounts: [
-      getAccountMeta("signer", accounts.signer),
+      getAccountMeta("player", accounts.player),
       getAccountMeta("session", accounts.session),
-      getAccountMeta("participation", accounts.participation),
-      getAccountMeta("stash", accounts.stash),
-      getAccountMeta("character", accounts.character),
-      getAccountMeta("bag", accounts.bag),
+      getAccountMeta("escrow", accounts.escrow),
+      getAccountMeta("monsters", accounts.monsters),
+      getAccountMeta("map", accounts.map),
       getAccountMeta("sessionAuthority", accounts.sessionAuthority),
       getAccountMeta("config", accounts.config),
+      getAccountMeta("mapProgram", accounts.mapProgram),
       getAccountMeta("characterProgram", accounts.characterProgram),
-      getAccountMeta("sessionToken", accounts.sessionToken),
     ],
-    data: getClaimRewardsInstructionDataEncoder().encode({}),
+    data: getClaimAfterTimeoutInstructionDataEncoder().encode({}),
     programAddress,
-  } as ClaimRewardsInstruction<
+  } as ClaimAfterTimeoutInstruction<
     TProgramAddress,
     ResolvedInstructionAccountMeta<
-      TAccountSigner,
-      InstructionAccountInputAddress<TAccountSigner>
+      TAccountPlayer,
+      InstructionAccountInputAddress<TAccountPlayer>
     >,
     ResolvedInstructionAccountMeta<
       TAccountSession,
       InstructionAccountInputAddress<TAccountSession>
     >,
     ResolvedInstructionAccountMeta<
-      TAccountParticipation,
-      InstructionAccountInputAddress<TAccountParticipation>
+      TAccountEscrow,
+      InstructionAccountInputAddress<TAccountEscrow>
     >,
     ResolvedInstructionAccountMeta<
-      TAccountStash,
-      InstructionAccountInputAddress<TAccountStash>
+      TAccountMonsters,
+      InstructionAccountInputAddress<TAccountMonsters>
     >,
     ResolvedInstructionAccountMeta<
-      TAccountCharacter,
-      InstructionAccountInputAddress<TAccountCharacter>
-    >,
-    ResolvedInstructionAccountMeta<
-      TAccountBag,
-      InstructionAccountInputAddress<TAccountBag>
+      TAccountMap,
+      InstructionAccountInputAddress<TAccountMap>
     >,
     ResolvedInstructionAccountMeta<
       TAccountSessionAuthority,
@@ -386,97 +347,89 @@ export async function getClaimRewardsInstructionAsync<
       InstructionAccountInputAddress<TAccountConfig>
     >,
     ResolvedInstructionAccountMeta<
-      TAccountCharacterProgram,
-      InstructionAccountInputAddress<TAccountCharacterProgram>
+      TAccountMapProgram,
+      InstructionAccountInputAddress<TAccountMapProgram>
     >,
     ResolvedInstructionAccountMeta<
-      TAccountSessionToken,
-      InstructionAccountInputAddress<TAccountSessionToken>
+      TAccountCharacterProgram,
+      InstructionAccountInputAddress<TAccountCharacterProgram>
     >
   >);
 }
 
-export type ClaimRewardsInput<
-  TAccountSigner extends InstructionSignerInput = InstructionSignerInput,
+export type ClaimAfterTimeoutInput<
+  TAccountPlayer extends InstructionSignerInput = InstructionSignerInput,
   TAccountSession extends InstructionAccountInput = InstructionAccountInput,
-  TAccountParticipation extends InstructionAccountInput =
-    InstructionAccountInput,
-  TAccountStash extends InstructionAccountInput = InstructionAccountInput,
-  TAccountCharacter extends InstructionAccountInput = InstructionAccountInput,
-  TAccountBag extends InstructionAccountInput = InstructionAccountInput,
+  TAccountEscrow extends InstructionAccountInput = InstructionAccountInput,
+  TAccountMonsters extends InstructionAccountInput = InstructionAccountInput,
+  TAccountMap extends InstructionAccountInput = InstructionAccountInput,
   TAccountSessionAuthority extends InstructionAccountInput =
     InstructionAccountInput,
   TAccountConfig extends InstructionAccountInput = InstructionAccountInput,
+  TAccountMapProgram extends InstructionAccountInput = InstructionAccountInput,
   TAccountCharacterProgram extends InstructionAccountInput =
     InstructionAccountInput,
-  TAccountSessionToken extends InstructionAccountInput =
-    InstructionAccountInput,
 > = {
-  /** The character's owner (the participation's `player`) or its session key. */
-  signer: TAccountSigner;
+  /**
+   * The player's main wallet (the participation's `player`): the refund goes here, so no
+   * session key.
+   */
+  player: TAccountPlayer;
   session: TAccountSession;
-  participation: TAccountParticipation;
-  stash: TAccountStash;
-  character: TAccountCharacter;
-  bag: TAccountBag;
+  escrow: TAccountEscrow;
+  monsters: TAccountMonsters;
+  map: TAccountMap;
   sessionAuthority: TAccountSessionAuthority;
   config: TAccountConfig;
+  mapProgram?: TAccountMapProgram;
   characterProgram?: TAccountCharacterProgram;
-  /** MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs. */
-  sessionToken?: TAccountSessionToken;
 };
 
-export function getClaimRewardsInstruction<
-  TAccountSigner extends InstructionSignerInput,
+export function getClaimAfterTimeoutInstruction<
+  TAccountPlayer extends InstructionSignerInput,
   TAccountSession extends InstructionAccountInput,
-  TAccountParticipation extends InstructionAccountInput,
-  TAccountStash extends InstructionAccountInput,
-  TAccountCharacter extends InstructionAccountInput,
-  TAccountBag extends InstructionAccountInput,
+  TAccountEscrow extends InstructionAccountInput,
+  TAccountMonsters extends InstructionAccountInput,
+  TAccountMap extends InstructionAccountInput,
   TAccountSessionAuthority extends InstructionAccountInput,
   TAccountConfig extends InstructionAccountInput,
+  TAccountMapProgram extends InstructionAccountInput,
   TAccountCharacterProgram extends InstructionAccountInput,
-  TAccountSessionToken extends InstructionAccountInput,
   TProgramAddress extends Address = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
 >(
-  input: ClaimRewardsInput<
-    TAccountSigner,
+  input: ClaimAfterTimeoutInput<
+    TAccountPlayer,
     TAccountSession,
-    TAccountParticipation,
-    TAccountStash,
-    TAccountCharacter,
-    TAccountBag,
+    TAccountEscrow,
+    TAccountMonsters,
+    TAccountMap,
     TAccountSessionAuthority,
     TAccountConfig,
-    TAccountCharacterProgram,
-    TAccountSessionToken
+    TAccountMapProgram,
+    TAccountCharacterProgram
   >,
   config?: { programAddress?: TProgramAddress },
-): ClaimRewardsInstruction<
+): ClaimAfterTimeoutInstruction<
   TProgramAddress,
   ResolvedInstructionAccountMeta<
-    TAccountSigner,
-    InstructionAccountInputAddress<TAccountSigner>
+    TAccountPlayer,
+    InstructionAccountInputAddress<TAccountPlayer>
   >,
   ResolvedInstructionAccountMeta<
     TAccountSession,
     InstructionAccountInputAddress<TAccountSession>
   >,
   ResolvedInstructionAccountMeta<
-    TAccountParticipation,
-    InstructionAccountInputAddress<TAccountParticipation>
+    TAccountEscrow,
+    InstructionAccountInputAddress<TAccountEscrow>
   >,
   ResolvedInstructionAccountMeta<
-    TAccountStash,
-    InstructionAccountInputAddress<TAccountStash>
+    TAccountMonsters,
+    InstructionAccountInputAddress<TAccountMonsters>
   >,
   ResolvedInstructionAccountMeta<
-    TAccountCharacter,
-    InstructionAccountInputAddress<TAccountCharacter>
-  >,
-  ResolvedInstructionAccountMeta<
-    TAccountBag,
-    InstructionAccountInputAddress<TAccountBag>
+    TAccountMap,
+    InstructionAccountInputAddress<TAccountMap>
   >,
   ResolvedInstructionAccountMeta<
     TAccountSessionAuthority,
@@ -487,12 +440,12 @@ export function getClaimRewardsInstruction<
     InstructionAccountInputAddress<TAccountConfig>
   >,
   ResolvedInstructionAccountMeta<
-    TAccountCharacterProgram,
-    InstructionAccountInputAddress<TAccountCharacterProgram>
+    TAccountMapProgram,
+    InstructionAccountInputAddress<TAccountMapProgram>
   >,
   ResolvedInstructionAccountMeta<
-    TAccountSessionToken,
-    InstructionAccountInputAddress<TAccountSessionToken>
+    TAccountCharacterProgram,
+    InstructionAccountInputAddress<TAccountCharacterProgram>
   >
 > {
   // Program address.
@@ -504,37 +457,32 @@ export function getClaimRewardsInstruction<
 
   // Original accounts.
   const originalAccounts = {
-    signer: { value: input.signer ?? null, isSigner: true, isWritable: false },
+    player: { value: input.player ?? null, isSigner: true, isWritable: true },
     session: {
       value: input.session ?? null,
       isSigner: false,
       isWritable: true,
     },
-    participation: {
-      value: input.participation ?? null,
+    escrow: { value: input.escrow ?? null, isSigner: false, isWritable: true },
+    monsters: {
+      value: input.monsters ?? null,
       isSigner: false,
       isWritable: false,
     },
-    stash: { value: input.stash ?? null, isSigner: false, isWritable: true },
-    character: {
-      value: input.character ?? null,
-      isSigner: false,
-      isWritable: true,
-    },
-    bag: { value: input.bag ?? null, isSigner: false, isWritable: true },
+    map: { value: input.map ?? null, isSigner: false, isWritable: true },
     sessionAuthority: {
       value: input.sessionAuthority ?? null,
       isSigner: false,
       isWritable: false,
     },
     config: { value: input.config ?? null, isSigner: false, isWritable: false },
-    characterProgram: {
-      value: input.characterProgram ?? null,
+    mapProgram: {
+      value: input.mapProgram ?? null,
       isSigner: false,
       isWritable: false,
     },
-    sessionToken: {
-      value: input.sessionToken ?? null,
+    characterProgram: {
+      value: input.characterProgram ?? null,
       isSigner: false,
       isWritable: false,
     },
@@ -545,6 +493,10 @@ export function getClaimRewardsInstruction<
   >;
 
   // Resolve default values.
+  if (!accounts.mapProgram.value) {
+    accounts.mapProgram.value =
+      "2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH" as Address<"2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH">;
+  }
   if (!accounts.characterProgram.value) {
     accounts.characterProgram.value =
       "9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL" as Address<"9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL">;
@@ -552,44 +504,39 @@ export function getClaimRewardsInstruction<
 
   return Object.freeze({
     accounts: [
-      getAccountMeta("signer", accounts.signer),
+      getAccountMeta("player", accounts.player),
       getAccountMeta("session", accounts.session),
-      getAccountMeta("participation", accounts.participation),
-      getAccountMeta("stash", accounts.stash),
-      getAccountMeta("character", accounts.character),
-      getAccountMeta("bag", accounts.bag),
+      getAccountMeta("escrow", accounts.escrow),
+      getAccountMeta("monsters", accounts.monsters),
+      getAccountMeta("map", accounts.map),
       getAccountMeta("sessionAuthority", accounts.sessionAuthority),
       getAccountMeta("config", accounts.config),
+      getAccountMeta("mapProgram", accounts.mapProgram),
       getAccountMeta("characterProgram", accounts.characterProgram),
-      getAccountMeta("sessionToken", accounts.sessionToken),
     ],
-    data: getClaimRewardsInstructionDataEncoder().encode({}),
+    data: getClaimAfterTimeoutInstructionDataEncoder().encode({}),
     programAddress,
-  } as ClaimRewardsInstruction<
+  } as ClaimAfterTimeoutInstruction<
     TProgramAddress,
     ResolvedInstructionAccountMeta<
-      TAccountSigner,
-      InstructionAccountInputAddress<TAccountSigner>
+      TAccountPlayer,
+      InstructionAccountInputAddress<TAccountPlayer>
     >,
     ResolvedInstructionAccountMeta<
       TAccountSession,
       InstructionAccountInputAddress<TAccountSession>
     >,
     ResolvedInstructionAccountMeta<
-      TAccountParticipation,
-      InstructionAccountInputAddress<TAccountParticipation>
+      TAccountEscrow,
+      InstructionAccountInputAddress<TAccountEscrow>
     >,
     ResolvedInstructionAccountMeta<
-      TAccountStash,
-      InstructionAccountInputAddress<TAccountStash>
+      TAccountMonsters,
+      InstructionAccountInputAddress<TAccountMonsters>
     >,
     ResolvedInstructionAccountMeta<
-      TAccountCharacter,
-      InstructionAccountInputAddress<TAccountCharacter>
-    >,
-    ResolvedInstructionAccountMeta<
-      TAccountBag,
-      InstructionAccountInputAddress<TAccountBag>
+      TAccountMap,
+      InstructionAccountInputAddress<TAccountMap>
     >,
     ResolvedInstructionAccountMeta<
       TAccountSessionAuthority,
@@ -600,52 +547,53 @@ export function getClaimRewardsInstruction<
       InstructionAccountInputAddress<TAccountConfig>
     >,
     ResolvedInstructionAccountMeta<
-      TAccountCharacterProgram,
-      InstructionAccountInputAddress<TAccountCharacterProgram>
+      TAccountMapProgram,
+      InstructionAccountInputAddress<TAccountMapProgram>
     >,
     ResolvedInstructionAccountMeta<
-      TAccountSessionToken,
-      InstructionAccountInputAddress<TAccountSessionToken>
+      TAccountCharacterProgram,
+      InstructionAccountInputAddress<TAccountCharacterProgram>
     >
   >);
 }
 
-export type ParsedClaimRewardsInstruction<
+export type ParsedClaimAfterTimeoutInstruction<
   TProgram extends string = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
   TAccountMetas extends readonly AccountMeta[] = readonly AccountMeta[],
 > = {
   programAddress: Address<TProgram>;
   accounts: {
-    /** The character's owner (the participation's `player`) or its session key. */
-    signer: TAccountMetas[0];
+    /**
+     * The player's main wallet (the participation's `player`): the refund goes here, so no
+     * session key.
+     */
+    player: TAccountMetas[0];
     session: TAccountMetas[1];
-    participation: TAccountMetas[2];
-    stash: TAccountMetas[3];
-    character: TAccountMetas[4];
-    bag: TAccountMetas[5];
-    sessionAuthority: TAccountMetas[6];
-    config: TAccountMetas[7];
+    escrow: TAccountMetas[2];
+    monsters: TAccountMetas[3];
+    map: TAccountMetas[4];
+    sessionAuthority: TAccountMetas[5];
+    config: TAccountMetas[6];
+    mapProgram: TAccountMetas[7];
     characterProgram: TAccountMetas[8];
-    /** MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs. */
-    sessionToken?: TAccountMetas[9] | undefined;
   };
-  data: ClaimRewardsInstructionData;
+  data: ClaimAfterTimeoutInstructionData;
 };
 
-export function parseClaimRewardsInstruction<
+export function parseClaimAfterTimeoutInstruction<
   TProgram extends string,
   TAccountMetas extends readonly AccountMeta[],
 >(
   instruction: Instruction<TProgram> &
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
-): ParsedClaimRewardsInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 10) {
+): ParsedClaimAfterTimeoutInstruction<TProgram, TAccountMetas> {
+  if (instruction.accounts.length < 9) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 10,
+        expectedAccountMetas: 9,
       },
     );
   }
@@ -655,26 +603,19 @@ export function parseClaimRewardsInstruction<
     accountIndex += 1;
     return accountMeta;
   };
-  const getNextOptionalAccount = () => {
-    const accountMeta = getNextAccount();
-    return accountMeta.address === DEADROLL_SESSION_PROGRAM_ADDRESS
-      ? undefined
-      : accountMeta;
-  };
   return {
     programAddress: instruction.programAddress,
     accounts: {
-      signer: getNextAccount(),
+      player: getNextAccount(),
       session: getNextAccount(),
-      participation: getNextAccount(),
-      stash: getNextAccount(),
-      character: getNextAccount(),
-      bag: getNextAccount(),
+      escrow: getNextAccount(),
+      monsters: getNextAccount(),
+      map: getNextAccount(),
       sessionAuthority: getNextAccount(),
       config: getNextAccount(),
+      mapProgram: getNextAccount(),
       characterProgram: getNextAccount(),
-      sessionToken: getNextOptionalAccount(),
     },
-    data: getClaimRewardsInstructionDataDecoder().decode(instruction.data),
+    data: getClaimAfterTimeoutInstructionDataDecoder().decode(instruction.data),
   };
 }

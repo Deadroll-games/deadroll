@@ -39,7 +39,7 @@ import {
   getGameSessionCodec,
   getMonsterStateCodec,
   getParticipationCodec,
-  getTempStashCodec,
+  getRewardCacheCodec,
   type Escrow,
   type EscrowArgs,
   type GameSession,
@@ -48,13 +48,13 @@ import {
   type MonsterStateArgs,
   type Participation,
   type ParticipationArgs,
-  type TempStash,
-  type TempStashArgs,
+  type RewardCache,
+  type RewardCacheArgs,
 } from "../accounts/index.js";
 import {
   getActInstructionAsync,
-  getClaimEscrowInstructionAsync,
-  getClaimRewardsInstructionAsync,
+  getClaimAfterTimeoutInstructionAsync,
+  getCloseCacheInstructionAsync,
   getConsumeRandomnessInstruction,
   getEndTurnInstruction,
   getFleeInstruction,
@@ -62,14 +62,16 @@ import {
   getMonsterActInstructionAsync,
   getMonsterMoveInstructionAsync,
   getMoveUnitInstructionAsync,
+  getOpenChestInstructionAsync,
   getOpenSessionInstructionAsync,
   getSetReadyInstructionAsync,
   getSetSessionKeyInstruction,
+  getSettlePartyInstructionAsync,
   getStartSessionInstructionAsync,
   getStartTurnInstructionAsync,
   parseActInstruction,
-  parseClaimEscrowInstruction,
-  parseClaimRewardsInstruction,
+  parseClaimAfterTimeoutInstruction,
+  parseCloseCacheInstruction,
   parseConsumeRandomnessInstruction,
   parseEndTurnInstruction,
   parseFleeInstruction,
@@ -77,14 +79,16 @@ import {
   parseMonsterActInstruction,
   parseMonsterMoveInstruction,
   parseMoveUnitInstruction,
+  parseOpenChestInstruction,
   parseOpenSessionInstruction,
   parseSetReadyInstruction,
   parseSetSessionKeyInstruction,
+  parseSettlePartyInstruction,
   parseStartSessionInstruction,
   parseStartTurnInstruction,
   type ActAsyncInput,
-  type ClaimEscrowAsyncInput,
-  type ClaimRewardsAsyncInput,
+  type ClaimAfterTimeoutAsyncInput,
+  type CloseCacheAsyncInput,
   type ConsumeRandomnessInput,
   type EndTurnInput,
   type FleeInput,
@@ -92,10 +96,11 @@ import {
   type MonsterActAsyncInput,
   type MonsterMoveAsyncInput,
   type MoveUnitAsyncInput,
+  type OpenChestAsyncInput,
   type OpenSessionAsyncInput,
   type ParsedActInstruction,
-  type ParsedClaimEscrowInstruction,
-  type ParsedClaimRewardsInstruction,
+  type ParsedClaimAfterTimeoutInstruction,
+  type ParsedCloseCacheInstruction,
   type ParsedConsumeRandomnessInstruction,
   type ParsedEndTurnInstruction,
   type ParsedFleeInstruction,
@@ -103,13 +108,16 @@ import {
   type ParsedMonsterActInstruction,
   type ParsedMonsterMoveInstruction,
   type ParsedMoveUnitInstruction,
+  type ParsedOpenChestInstruction,
   type ParsedOpenSessionInstruction,
   type ParsedSetReadyInstruction,
   type ParsedSetSessionKeyInstruction,
+  type ParsedSettlePartyInstruction,
   type ParsedStartSessionInstruction,
   type ParsedStartTurnInstruction,
   type SetReadyAsyncInput,
   type SetSessionKeyInput,
+  type SettlePartyAsyncInput,
   type StartSessionAsyncInput,
   type StartTurnAsyncInput,
 } from "../instructions/index.js";
@@ -118,9 +126,9 @@ import {
   findMonstersPda,
   findParticipationPda,
   findProgramIdentityPda,
+  findRewardCachePda,
   findSessionAuthorityPda,
   findSessionPda,
-  findStashPda,
 } from "../pdas/index.js";
 
 export const DEADROLL_SESSION_PROGRAM_ADDRESS =
@@ -131,12 +139,12 @@ export const DeadrollSessionAccount = {
   1: "GameSession",
   2: "MonsterState",
   3: "Participation",
-  4: "TempStash",
+  4: "RewardCache",
   Escrow: 0,
   GameSession: 1,
   MonsterState: 2,
   Participation: 3,
-  TempStash: 4,
+  RewardCache: 4,
 } as const;
 
 export type DeadrollSessionAccount = (typeof DeadrollSessionAccount)[Exclude<
@@ -196,12 +204,12 @@ export function identifyDeadrollSessionAccount(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
-        new Uint8Array([151, 121, 12, 93, 150, 184, 160, 251]),
+        new Uint8Array([81, 38, 221, 114, 44, 42, 107, 152]),
       ),
       0,
     )
   ) {
-    return DeadrollSessionAccount.TempStash;
+    return DeadrollSessionAccount.RewardCache;
   }
   throw new SolanaError(
     SOLANA_ERROR__PROGRAM_CLIENTS__FAILED_TO_IDENTIFY_ACCOUNT,
@@ -212,58 +220,68 @@ export function identifyDeadrollSessionAccount(
 export const DeadrollSessionEvent = {
   0: "ActionRequested",
   1: "AuraChanged",
-  2: "CellBurned",
-  3: "DeathFinalized",
-  4: "EffectResolved",
-  5: "EscrowClaimed",
-  6: "FleeVoted",
-  7: "HitResolved",
-  8: "InitiativeRolled",
-  9: "ModsTicked",
-  10: "MonsterAuraChanged",
-  11: "MonsterKilled",
-  12: "MonsterReactiveTriggered",
-  13: "Moved",
-  14: "PlayerDied",
-  15: "PlayerJoined",
-  16: "PlayerReady",
-  17: "ReactiveTriggered",
-  18: "ResonanceSpread",
-  19: "RewardsClaimed",
-  20: "SessionEnded",
-  21: "SessionKeyChanged",
-  22: "SessionOpened",
-  23: "SkillUsed",
-  24: "TurnSkipped",
-  25: "TurnStarted",
-  26: "TurnTicked",
+  2: "CacheClosed",
+  3: "CacheSettled",
+  4: "CellBurned",
+  5: "ChestOpenRequested",
+  6: "ChestOpened",
+  7: "ContributionRefunded",
+  8: "DeathFinalized",
+  9: "EffectResolved",
+  10: "EscrowClaimed",
+  11: "FleeVoted",
+  12: "HitResolved",
+  13: "InitiativeRolled",
+  14: "ModsTicked",
+  15: "MonsterAuraChanged",
+  16: "MonsterKilled",
+  17: "MonsterReactiveTriggered",
+  18: "Moved",
+  19: "PlayerDied",
+  20: "PlayerJoined",
+  21: "PlayerReady",
+  22: "ReactiveTriggered",
+  23: "ResonanceSpread",
+  24: "RewardsRolled",
+  25: "SessionEnded",
+  26: "SessionKeyChanged",
+  27: "SessionOpened",
+  28: "SkillUsed",
+  29: "TurnSkipped",
+  30: "TurnStarted",
+  31: "TurnTicked",
   ActionRequested: 0,
   AuraChanged: 1,
-  CellBurned: 2,
-  DeathFinalized: 3,
-  EffectResolved: 4,
-  EscrowClaimed: 5,
-  FleeVoted: 6,
-  HitResolved: 7,
-  InitiativeRolled: 8,
-  ModsTicked: 9,
-  MonsterAuraChanged: 10,
-  MonsterKilled: 11,
-  MonsterReactiveTriggered: 12,
-  Moved: 13,
-  PlayerDied: 14,
-  PlayerJoined: 15,
-  PlayerReady: 16,
-  ReactiveTriggered: 17,
-  ResonanceSpread: 18,
-  RewardsClaimed: 19,
-  SessionEnded: 20,
-  SessionKeyChanged: 21,
-  SessionOpened: 22,
-  SkillUsed: 23,
-  TurnSkipped: 24,
-  TurnStarted: 25,
-  TurnTicked: 26,
+  CacheClosed: 2,
+  CacheSettled: 3,
+  CellBurned: 4,
+  ChestOpenRequested: 5,
+  ChestOpened: 6,
+  ContributionRefunded: 7,
+  DeathFinalized: 8,
+  EffectResolved: 9,
+  EscrowClaimed: 10,
+  FleeVoted: 11,
+  HitResolved: 12,
+  InitiativeRolled: 13,
+  ModsTicked: 14,
+  MonsterAuraChanged: 15,
+  MonsterKilled: 16,
+  MonsterReactiveTriggered: 17,
+  Moved: 18,
+  PlayerDied: 19,
+  PlayerJoined: 20,
+  PlayerReady: 21,
+  ReactiveTriggered: 22,
+  ResonanceSpread: 23,
+  RewardsRolled: 24,
+  SessionEnded: 25,
+  SessionKeyChanged: 26,
+  SessionOpened: 27,
+  SkillUsed: 28,
+  TurnSkipped: 29,
+  TurnStarted: 30,
+  TurnTicked: 31,
 } as const;
 
 export type DeadrollSessionEvent = (typeof DeadrollSessionEvent)[Exclude<
@@ -301,12 +319,67 @@ export function identifyDeadrollSessionEvent(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([125, 194, 33, 136, 122, 241, 180, 14]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionEvent.CacheClosed;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([110, 87, 20, 149, 117, 122, 197, 232]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionEvent.CacheSettled;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([149, 22, 45, 253, 36, 237, 180, 116]),
       ),
       0,
     )
   ) {
     return DeadrollSessionEvent.CellBurned;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([255, 80, 253, 189, 158, 46, 209, 252]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionEvent.ChestOpenRequested;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([102, 3, 231, 141, 157, 137, 52, 246]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionEvent.ChestOpened;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([102, 69, 70, 93, 207, 228, 30, 111]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionEvent.ContributionRefunded;
   }
   if (
     containsBytes(
@@ -488,12 +561,12 @@ export function identifyDeadrollSessionEvent(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
-        new Uint8Array([75, 98, 88, 18, 219, 112, 88, 121]),
+        new Uint8Array([160, 209, 32, 22, 55, 150, 108, 241]),
       ),
       0,
     )
   ) {
-    return DeadrollSessionEvent.RewardsClaimed;
+    return DeadrollSessionEvent.RewardsRolled;
   }
   if (
     containsBytes(
@@ -579,8 +652,8 @@ export function identifyDeadrollSessionEvent(
 
 export const DeadrollSessionInstruction = {
   0: "Act",
-  1: "ClaimEscrow",
-  2: "ClaimRewards",
+  1: "ClaimAfterTimeout",
+  2: "CloseCache",
   3: "ConsumeRandomness",
   4: "EndTurn",
   5: "Flee",
@@ -588,14 +661,16 @@ export const DeadrollSessionInstruction = {
   7: "MonsterAct",
   8: "MonsterMove",
   9: "MoveUnit",
-  10: "OpenSession",
-  11: "SetReady",
-  12: "SetSessionKey",
-  13: "StartSession",
-  14: "StartTurn",
+  10: "OpenChest",
+  11: "OpenSession",
+  12: "SetReady",
+  13: "SetSessionKey",
+  14: "SettleParty",
+  15: "StartSession",
+  16: "StartTurn",
   Act: 0,
-  ClaimEscrow: 1,
-  ClaimRewards: 2,
+  ClaimAfterTimeout: 1,
+  CloseCache: 2,
   ConsumeRandomness: 3,
   EndTurn: 4,
   Flee: 5,
@@ -603,11 +678,13 @@ export const DeadrollSessionInstruction = {
   MonsterAct: 7,
   MonsterMove: 8,
   MoveUnit: 9,
-  OpenSession: 10,
-  SetReady: 11,
-  SetSessionKey: 12,
-  StartSession: 13,
-  StartTurn: 14,
+  OpenChest: 10,
+  OpenSession: 11,
+  SetReady: 12,
+  SetSessionKey: 13,
+  SettleParty: 14,
+  StartSession: 15,
+  StartTurn: 16,
 } as const;
 
 export type DeadrollSessionInstruction =
@@ -635,23 +712,23 @@ export function identifyDeadrollSessionInstruction(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
-        new Uint8Array([200, 80, 182, 159, 61, 75, 9, 205]),
+        new Uint8Array([90, 0, 225, 186, 150, 114, 231, 76]),
       ),
       0,
     )
   ) {
-    return DeadrollSessionInstruction.ClaimEscrow;
+    return DeadrollSessionInstruction.ClaimAfterTimeout;
   }
   if (
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
-        new Uint8Array([4, 144, 132, 71, 116, 23, 151, 80]),
+        new Uint8Array([14, 159, 134, 244, 1, 8, 146, 164]),
       ),
       0,
     )
   ) {
-    return DeadrollSessionInstruction.ClaimRewards;
+    return DeadrollSessionInstruction.CloseCache;
   }
   if (
     containsBytes(
@@ -734,6 +811,17 @@ export function identifyDeadrollSessionInstruction(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([143, 8, 253, 123, 197, 30, 173, 15]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionInstruction.OpenChest;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([130, 54, 124, 7, 236, 20, 104, 104]),
       ),
       0,
@@ -762,6 +850,17 @@ export function identifyDeadrollSessionInstruction(
     )
   ) {
     return DeadrollSessionInstruction.SetSessionKey;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([110, 32, 235, 37, 79, 52, 117, 88]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionInstruction.SettleParty;
   }
   if (
     containsBytes(
@@ -798,11 +897,11 @@ export type ParsedDeadrollSessionInstruction<
       instructionType: typeof DeadrollSessionInstruction.Act;
     } & ParsedActInstruction<TProgram>)
   | ({
-      instructionType: typeof DeadrollSessionInstruction.ClaimEscrow;
-    } & ParsedClaimEscrowInstruction<TProgram>)
+      instructionType: typeof DeadrollSessionInstruction.ClaimAfterTimeout;
+    } & ParsedClaimAfterTimeoutInstruction<TProgram>)
   | ({
-      instructionType: typeof DeadrollSessionInstruction.ClaimRewards;
-    } & ParsedClaimRewardsInstruction<TProgram>)
+      instructionType: typeof DeadrollSessionInstruction.CloseCache;
+    } & ParsedCloseCacheInstruction<TProgram>)
   | ({
       instructionType: typeof DeadrollSessionInstruction.ConsumeRandomness;
     } & ParsedConsumeRandomnessInstruction<TProgram>)
@@ -825,6 +924,9 @@ export type ParsedDeadrollSessionInstruction<
       instructionType: typeof DeadrollSessionInstruction.MoveUnit;
     } & ParsedMoveUnitInstruction<TProgram>)
   | ({
+      instructionType: typeof DeadrollSessionInstruction.OpenChest;
+    } & ParsedOpenChestInstruction<TProgram>)
+  | ({
       instructionType: typeof DeadrollSessionInstruction.OpenSession;
     } & ParsedOpenSessionInstruction<TProgram>)
   | ({
@@ -833,6 +935,9 @@ export type ParsedDeadrollSessionInstruction<
   | ({
       instructionType: typeof DeadrollSessionInstruction.SetSessionKey;
     } & ParsedSetSessionKeyInstruction<TProgram>)
+  | ({
+      instructionType: typeof DeadrollSessionInstruction.SettleParty;
+    } & ParsedSettlePartyInstruction<TProgram>)
   | ({
       instructionType: typeof DeadrollSessionInstruction.StartSession;
     } & ParsedStartSessionInstruction<TProgram>)
@@ -852,18 +957,18 @@ export function parseDeadrollSessionInstruction<TProgram extends string>(
         ...parseActInstruction(instruction),
       };
     }
-    case DeadrollSessionInstruction.ClaimEscrow: {
+    case DeadrollSessionInstruction.ClaimAfterTimeout: {
       assertIsInstructionWithAccounts(instruction);
       return {
-        instructionType: DeadrollSessionInstruction.ClaimEscrow,
-        ...parseClaimEscrowInstruction(instruction),
+        instructionType: DeadrollSessionInstruction.ClaimAfterTimeout,
+        ...parseClaimAfterTimeoutInstruction(instruction),
       };
     }
-    case DeadrollSessionInstruction.ClaimRewards: {
+    case DeadrollSessionInstruction.CloseCache: {
       assertIsInstructionWithAccounts(instruction);
       return {
-        instructionType: DeadrollSessionInstruction.ClaimRewards,
-        ...parseClaimRewardsInstruction(instruction),
+        instructionType: DeadrollSessionInstruction.CloseCache,
+        ...parseCloseCacheInstruction(instruction),
       };
     }
     case DeadrollSessionInstruction.ConsumeRandomness: {
@@ -915,6 +1020,13 @@ export function parseDeadrollSessionInstruction<TProgram extends string>(
         ...parseMoveUnitInstruction(instruction),
       };
     }
+    case DeadrollSessionInstruction.OpenChest: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: DeadrollSessionInstruction.OpenChest,
+        ...parseOpenChestInstruction(instruction),
+      };
+    }
     case DeadrollSessionInstruction.OpenSession: {
       assertIsInstructionWithAccounts(instruction);
       return {
@@ -934,6 +1046,13 @@ export function parseDeadrollSessionInstruction<TProgram extends string>(
       return {
         instructionType: DeadrollSessionInstruction.SetSessionKey,
         ...parseSetSessionKeyInstruction(instruction),
+      };
+    }
+    case DeadrollSessionInstruction.SettleParty: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: DeadrollSessionInstruction.SettleParty,
+        ...parseSettlePartyInstruction(instruction),
       };
     }
     case DeadrollSessionInstruction.StartSession: {
@@ -979,21 +1098,21 @@ export type DeadrollSessionPluginAccounts = {
     SelfFetchFunctions<MonsterStateArgs, MonsterState>;
   participation: ReturnType<typeof getParticipationCodec> &
     SelfFetchFunctions<ParticipationArgs, Participation>;
-  tempStash: ReturnType<typeof getTempStashCodec> &
-    SelfFetchFunctions<TempStashArgs, TempStash>;
+  rewardCache: ReturnType<typeof getRewardCacheCodec> &
+    SelfFetchFunctions<RewardCacheArgs, RewardCache>;
 };
 
 export type DeadrollSessionPluginInstructions = {
   act: (
     input: ActAsyncInput,
   ) => ReturnType<typeof getActInstructionAsync> & SelfPlanAndSendFunctions;
-  claimEscrow: (
-    input: ClaimEscrowAsyncInput,
-  ) => ReturnType<typeof getClaimEscrowInstructionAsync> &
+  claimAfterTimeout: (
+    input: ClaimAfterTimeoutAsyncInput,
+  ) => ReturnType<typeof getClaimAfterTimeoutInstructionAsync> &
     SelfPlanAndSendFunctions;
-  claimRewards: (
-    input: ClaimRewardsAsyncInput,
-  ) => ReturnType<typeof getClaimRewardsInstructionAsync> &
+  closeCache: (
+    input: CloseCacheAsyncInput,
+  ) => ReturnType<typeof getCloseCacheInstructionAsync> &
     SelfPlanAndSendFunctions;
   consumeRandomness: (
     input: ConsumeRandomnessInput,
@@ -1021,6 +1140,10 @@ export type DeadrollSessionPluginInstructions = {
     input: MoveUnitAsyncInput,
   ) => ReturnType<typeof getMoveUnitInstructionAsync> &
     SelfPlanAndSendFunctions;
+  openChest: (
+    input: OpenChestAsyncInput,
+  ) => ReturnType<typeof getOpenChestInstructionAsync> &
+    SelfPlanAndSendFunctions;
   openSession: (
     input: OpenSessionAsyncInput,
   ) => ReturnType<typeof getOpenSessionInstructionAsync> &
@@ -1032,6 +1155,10 @@ export type DeadrollSessionPluginInstructions = {
   setSessionKey: (
     input: SetSessionKeyInput,
   ) => ReturnType<typeof getSetSessionKeyInstruction> &
+    SelfPlanAndSendFunctions;
+  settleParty: (
+    input: SettlePartyAsyncInput,
+  ) => ReturnType<typeof getSettlePartyInstructionAsync> &
     SelfPlanAndSendFunctions;
   startSession: (
     input: StartSessionAsyncInput,
@@ -1048,7 +1175,7 @@ export type DeadrollSessionPluginPdas = {
   escrow: typeof findEscrowPda;
   sessionAuthority: typeof findSessionAuthorityPda;
   participation: typeof findParticipationPda;
-  stash: typeof findStashPda;
+  rewardCache: typeof findRewardCachePda;
   session: typeof findSessionPda;
   monsters: typeof findMonstersPda;
 };
@@ -1071,20 +1198,20 @@ export function deadrollSessionProgram() {
           gameSession: addSelfFetchFunctions(client, getGameSessionCodec()),
           monsterState: addSelfFetchFunctions(client, getMonsterStateCodec()),
           participation: addSelfFetchFunctions(client, getParticipationCodec()),
-          tempStash: addSelfFetchFunctions(client, getTempStashCodec()),
+          rewardCache: addSelfFetchFunctions(client, getRewardCacheCodec()),
         },
         instructions: {
           act: (input) =>
             addSelfPlanAndSendFunctions(client, getActInstructionAsync(input)),
-          claimEscrow: (input) =>
+          claimAfterTimeout: (input) =>
             addSelfPlanAndSendFunctions(
               client,
-              getClaimEscrowInstructionAsync(input),
+              getClaimAfterTimeoutInstructionAsync(input),
             ),
-          claimRewards: (input) =>
+          closeCache: (input) =>
             addSelfPlanAndSendFunctions(
               client,
-              getClaimRewardsInstructionAsync(input),
+              getCloseCacheInstructionAsync(input),
             ),
           consumeRandomness: (input) =>
             addSelfPlanAndSendFunctions(
@@ -1115,6 +1242,11 @@ export function deadrollSessionProgram() {
               client,
               getMoveUnitInstructionAsync(input),
             ),
+          openChest: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getOpenChestInstructionAsync(input),
+            ),
           openSession: (input) =>
             addSelfPlanAndSendFunctions(
               client,
@@ -1129,6 +1261,11 @@ export function deadrollSessionProgram() {
             addSelfPlanAndSendFunctions(
               client,
               getSetSessionKeyInstruction(input),
+            ),
+          settleParty: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getSettlePartyInstructionAsync(input),
             ),
           startSession: (input) =>
             addSelfPlanAndSendFunctions(
@@ -1149,7 +1286,7 @@ export function deadrollSessionProgram() {
           escrow: findEscrowPda,
           sessionAuthority: findSessionAuthorityPda,
           participation: findParticipationPda,
-          stash: findStashPda,
+          rewardCache: findRewardCachePda,
           session: findSessionPda,
           monsters: findMonstersPda,
         },

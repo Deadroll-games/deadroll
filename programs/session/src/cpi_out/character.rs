@@ -1,9 +1,6 @@
 use anchor_lang::prelude::*;
-use deadroll_character::{
-    cpi,
-    cpi::accounts,
-    state::{MAP_SKILLS, RESOURCE_KINDS},
-};
+use deadroll_character::{cpi, cpi::accounts, state::MAP_SKILLS};
+use deadroll_types::{BagLayout, CacheSlot, CACHE_SLOTS};
 
 use super::{signed, SessionSigner};
 
@@ -64,19 +61,42 @@ pub fn mark_dead<'info>(s: &SessionSigner<'_, 'info>, d: &DeathAccounts<'_, 'inf
     })
 }
 
-/// `character::grant_rewards(xp, resources)` on victory.
-pub fn grant_rewards<'info>(
+/// `character::grant_xp(xp)` when a victory is settled (patch 11): the cache's experience.
+pub fn grant_xp<'info>(
+    s: &SessionSigner<'_, 'info>,
+    character: &AccountInfo<'info>,
+    xp: u32,
+) -> Result<()> {
+    signed(s.bump, |seeds| {
+        cpi::grant_xp(
+            CpiContext::new_with_signer(
+                deadroll_character::ID,
+                accounts::GrantXp {
+                    character: character.clone(),
+                    session_authority: s.authority(),
+                    config: s.config(),
+                },
+                seeds,
+            ),
+            xp,
+        )
+    })
+}
+
+/// `character::apply_bag(cache, layout)` at "Done" in the bag screen (patch 11, `close_cache`):
+/// the session passes the cache it holds; the character program checks the layout against it.
+pub fn apply_bag<'info>(
     s: &SessionSigner<'_, 'info>,
     character: &AccountInfo<'info>,
     bag: &AccountInfo<'info>,
-    xp: u32,
-    resources: [u32; RESOURCE_KINDS],
+    cache: [CacheSlot; CACHE_SLOTS],
+    layout: BagLayout,
 ) -> Result<()> {
     signed(s.bump, |seeds| {
-        cpi::grant_rewards(
+        cpi::apply_bag(
             CpiContext::new_with_signer(
                 deadroll_character::ID,
-                accounts::GrantRewards {
+                accounts::ApplyBag {
                     character: character.clone(),
                     session_authority: s.authority(),
                     config: s.config(),
@@ -84,8 +104,8 @@ pub fn grant_rewards<'info>(
                 },
                 seeds,
             ),
-            xp,
-            resources,
+            cache,
+            layout,
         )
     })
 }

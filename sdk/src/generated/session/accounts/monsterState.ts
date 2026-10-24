@@ -119,6 +119,10 @@ export type MonsterState = {
   resistMods: Array<ResistModData>;
   /** Per monster, per aura slot: a Resistance aura's aspect weights. */
   auraWeights: Array<Array<ReadonlyUint8Array>>;
+  /** Registry id of each copied table, `NO_TABLE` = free. */
+  lootIds: ReadonlyUint8Array;
+  /** The copied records (`deadroll_rules::loot::record`), by `loot_ids` position. */
+  lootTables: Array<ReadonlyUint8Array>;
 };
 
 export type MonsterStateArgs = {
@@ -166,6 +170,10 @@ export type MonsterStateArgs = {
   resistMods: Array<ResistModDataArgs>;
   /** Per monster, per aura slot: a Resistance aura's aspect weights. */
   auraWeights: Array<Array<ReadonlyUint8Array>>;
+  /** Registry id of each copied table, `NO_TABLE` = free. */
+  lootIds: ReadonlyUint8Array;
+  /** The copied records (`deadroll_rules::loot::record`), by `loot_ids` position. */
+  lootTables: Array<ReadonlyUint8Array>;
 };
 
 /** Gets the encoder for {@link MonsterStateArgs} account data. */
@@ -228,6 +236,11 @@ export function getMonsterStateEncoder(): FixedSizeEncoder<MonsterStateArgs> {
           { size: 24 },
         ),
       ],
+      ["lootIds", fixEncoderSize(getBytesEncoder(), 12)],
+      [
+        "lootTables",
+        getArrayEncoder(fixEncoderSize(getBytesEncoder(), 108), { size: 12 }),
+      ],
     ]),
     (value) => ({ ...value, discriminator: MONSTER_STATE_DISCRIMINATOR }),
   );
@@ -287,6 +300,11 @@ export function getMonsterStateDecoder(): FixedSizeDecoder<MonsterState> {
         getArrayDecoder(fixDecoderSize(getBytesDecoder(), 6), { size: 2 }),
         { size: 24 },
       ),
+    ],
+    ["lootIds", fixDecoderSize(getBytesDecoder(), 12)],
+    [
+      "lootTables",
+      getArrayDecoder(fixDecoderSize(getBytesDecoder(), 108), { size: 12 }),
     ],
   ]);
 }
@@ -353,5 +371,5 @@ export async function fetchAllMaybeMonsterState(
 }
 
 export function getMonsterStateSize(): number {
-  return 6916;
+  return 8224;
 }

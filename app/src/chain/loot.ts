@@ -119,3 +119,46 @@ export function levelsLabel(t: RewardTable | undefined): string {
   if (!t) return "unknown table";
   return t.levelBase === t.levelMax ? `level ${t.levelBase}` : `levels ${t.levelBase}-${t.levelMax}`;
 }
+
+/** `RewardKind` (crates/types), in discriminant order. */
+export const REWARD_KINDS = ["resource", "recipe", "consumable", "blank", "reagent"] as const;
+export type RewardKindName = (typeof REWARD_KINDS)[number];
+/** One reward in a cache or a bag slot. */
+export type Reward = { kind: number; id: number; qty: number };
+
+/** `Participation.cache`: `CacheSlot`s of 5 bytes (kind, id u16 LE, qty u16 LE), used ones only
+ * (`CacheSlot::read_all`; a kind byte out of range reads as empty). */
+export function cacheRewards(raw: ArrayLike<number>): Reward[] {
+  const out: Reward[] = [];
+  for (let at = 0; at + 5 <= raw.length; at += 5) {
+    const kind = raw[at]!;
+    const qty = raw[at + 3]! | (raw[at + 4]! << 8);
+    if (qty > 0 && kind < REWARD_KINDS.length) out.push({ kind, id: raw[at + 1]! | (raw[at + 2]! << 8), qty });
+  }
+  return out;
+}
+
+/** A reward as text until the item names and icons exist (placeholder). */
+export function rewardLabel(r: Reward): string {
+  return `${REWARD_KINDS[r.kind] ?? "?"} #${r.id} x${r.qty}`;
+}
+
+/** The DM's deadline to settle (`settlement::deadline`): unix seconds. A `mock-vrf` localnet build
+ * waits 20 s instead; the site shows the real number. */
+export function settleDeadline(endedAt: bigint | number): number {
+  return Number(endedAt) + balance.loot.settle_timeout_secs;
+}
+
+/** `LootTuning.chest_open_ap`: what opening a chest costs. */
+export const CHEST_OPEN_AP = balance.loot.chest_open_ap;
+
+/** The visible chests of a session (`GameSession.chests`, `chest_count` used) and which are open. */
+export function chestsOf(s: { chests: { x: number; y: number; data: number }[]; chestCount: number; chestsOpened: number }) {
+  return s.chests.slice(0, Math.min(s.chestCount, CHESTS_MAX)).map((c, index) => ({
+    index,
+    x: c.x,
+    y: c.y,
+    table: c.data,
+    opened: (s.chestsOpened & (1 << index)) !== 0,
+  }));
+}

@@ -100,6 +100,9 @@ export type PartyLobbyProps = {
   onJoin: (characterAddress: string) => void;
   /** What Join pays (the player's share); defaults to the full price. */
   joinLamports?: bigint;
+  /** Patch 11: the rent of the accounts Join creates (participation, reward cache), shown with the
+   * share before anything is signed. */
+  joinRentLamports?: bigint;
   /** Ready with the skills taken onto the map (SkillSet indexes, 4 + 1 + 1, NO_SKILL = empty), or unready. */
   onReady: (ready: boolean, selection: number[]) => void;
   /** For role "player": the joined character's skills, by SkillSet index, for the map selection. */

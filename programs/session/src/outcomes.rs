@@ -11,8 +11,9 @@ use crate::{
     state::{GameSession, Monsters},
 };
 
-/// Monster `index` reached 0 HP, killed by unit `by`: its XP goes into the pool, `MonsterKilled`.
-/// The boss wins the party (docs/PARTY_AND_TURNS.md, 7.1) and `seed` becomes the reward seed.
+/// Monster `index` reached 0 HP, killed by unit `by`: `MonsterKilled`, and the kill waits in
+/// `GameSession.unpaid_kills` for its experience and rewards (`crate::loot::pay_kills`, at the end
+/// of the callback or at the settlement). The boss wins the party (docs/PARTY_AND_TURNS.md, 7.1).
 /// XP and the boss role come from its copied bestiary record. The caller writes `monster` back.
 pub fn monster_killed(
     session: &mut GameSession,
@@ -26,7 +27,7 @@ pub fn monster_killed(
     monster.alive = false;
     let profile = monsters.profile(index, monster.level)?;
     let (xp, boss) = (profile.xp, profile.boss);
-    session.xp_pool = session.xp_pool.saturating_add(xp);
+    session.unpaid_kills |= 1 << index;
     emit!(MonsterKilled {
         session: session_key,
         monster: index,
@@ -166,17 +167,21 @@ pub fn finalize_deaths<'info>(
     Ok(())
 }
 
-/// Emits `SessionEnded` when the party is over; returns whether it is.
-pub fn emit_if_ended(session: &GameSession, session_key: Pubkey) -> bool {
+/// Emits `SessionEnded` when the party is over and stamps `GameSession.ended_at` (patch 11:
+/// the DM's deadline to settle counts from here); returns whether it is over.
+pub fn emit_if_ended(session: &mut GameSession, session_key: Pubkey) -> Result<bool> {
     if session.core.status == SessionStatus::Active {
-        return false;
+        return Ok(false);
+    }
+    if session.ended_at == 0 {
+        session.ended_at = Clock::get()?.unix_timestamp;
     }
     emit!(SessionEnded {
         session: session_key,
         status: session.core.status,
         round: session.core.round,
     });
-    true
+    Ok(true)
 }
 
 #[cfg(test)]

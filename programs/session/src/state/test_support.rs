@@ -108,6 +108,17 @@ pub fn monsters_account(session: Pubkey, monsters: &[Monster]) -> TestAccount {
             *r = record;
         }
     }
+    // Patch 11: every shipped reward table, by id, as `open_session` copies the ones a map needs.
+    let mut loot_ids = [deadroll_types::NO_TABLE; super::LOOT_TABLES_MAX];
+    let mut loot_tables = [[0; super::LOOT_RECORD_LEN]; super::LOOT_TABLES_MAX];
+    let mut n = 0;
+    for id in 0..super::LOOT_TABLES_MAX as u8 {
+        if let Some(t) = reg.reward_table(id) {
+            loot_ids[n] = id;
+            loot_tables[n] = t.to_record();
+            n += 1;
+        }
+    }
     let state = MonsterState {
         core: MonsterStateData {
             version: 1,
@@ -131,6 +142,8 @@ pub fn monsters_account(session: Pubkey, monsters: &[Monster]) -> TestAccount {
         auras: [Default::default(); MONSTERS_MAX],
         resist_mods: Default::default(),
         aura_weights: Default::default(),
+        loot_ids,
+        loot_tables,
     };
     let mut data = Vec::new();
     state.try_serialize(&mut data).unwrap();
@@ -172,7 +185,6 @@ pub fn session(players: &[Cell]) -> GameSession {
         pending: Default::default(),
         flee_mask: 0,
         settled_mask: 0,
-        xp_pool: 0,
         victory_seed: [0; 32],
         monster_speed: [4; MONSTERS_MAX],
         monster_initiative: [0; MONSTERS_MAX],
@@ -188,6 +200,18 @@ pub fn session(players: &[Cell]) -> GameSession {
         pending_monster_reactive: Default::default(),
         pending_deaths: 0,
         aura_weights: Default::default(),
+        tier: 1,
+        min_players: 1,
+        chests: Default::default(),
+        chest_count: 0,
+        boss_table: deadroll_types::NO_TABLE,
+        chests_opened: 0,
+        pending_chest: super::NO_CHEST,
+        // Full experience, rewards rolled for everyone.
+        xp_bp: [deadroll_types::BP as u16; PARTY_MAX],
+        loot_mask: 0b1111,
+        unpaid_kills: 0,
+        ended_at: 0,
     }
 }
 

@@ -43,6 +43,8 @@ pub fn walk_path(
             !occupied(session, monsters, mover, at)?,
             SessionError::CellOccupied
         );
+        // Patch 11: a closed chest occupies its cell (decisions of patch 11).
+        require!(!session.closed_chest_at(at), SessionError::ChestInTheWay);
         action_points = action_points
             .checked_sub(cost)
             .ok_or(SessionError::NotEnoughActionPoints)?;
@@ -178,6 +180,36 @@ mod tests {
 
     fn walk_alone(start: Cell, steps: &[u8], ap: u8) -> Result<(Cell, u8)> {
         walk(&[start], 0, &[], P0, start, steps, ap)
+    }
+
+    #[test]
+    fn a_closed_chest_blocks_an_opened_one_does_not() {
+        let walk_with_chest = |opened: u8| -> Result<(Cell, u8)> {
+            let mut s = session(&[ORIGIN]);
+            s.chests[0] = deadroll_types::MapPoint {
+                kind: deadroll_types::PointKind::Chest,
+                x: 1,
+                y: 1,
+                data: 0,
+            };
+            s.chest_count = 1;
+            s.chests_opened = opened;
+            let monsters_session = Pubkey::new_unique();
+            let mut layout = layout_account(s.core.map);
+            let mut monsters = monsters_account(monsters_session, &[]);
+            let (layout_info, monsters_info) = (layout.info(), monsters.info());
+            let layout_view = MapLayoutView::load(&layout_info)?;
+            let monsters_view = Monsters::load(&monsters_info, &monsters_session)?;
+            let buf = [S, E, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+            let path = Path {
+                steps: &buf,
+                len: 2,
+            };
+            walk_path(&s, &layout_view, &monsters_view, P0, ORIGIN, path, 5)
+        };
+        let err = walk_with_chest(0).unwrap_err();
+        assert_eq!(code(err), u32::from(SessionError::ChestInTheWay));
+        assert_eq!(walk_with_chest(1).unwrap(), (Cell { x: 1, y: 1 }, 3));
     }
 
     #[test]

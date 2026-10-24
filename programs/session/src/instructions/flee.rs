@@ -5,7 +5,8 @@ use session_keys::{session_auth_or, Session, SessionTokenV2};
 use crate::{
     auth,
     errors::SessionError,
-    events::{FleeVoted, SessionEnded},
+    events::FleeVoted,
+    outcomes,
     rules::Unit,
     state::{GameSession, Monsters, Participation},
     turns,
@@ -79,11 +80,7 @@ pub fn handler(ctx: Context<Flee>) -> Result<()> {
 
     if turns::everyone_flees(session.flee_mask, session.alive_mask) {
         session.core.status = SessionStatus::Fled;
-        emit!(SessionEnded {
-            session: session_key,
-            status: SessionStatus::Fled,
-            round: session.core.round,
-        });
+        outcomes::emit_if_ended(session, session_key)?;
         return Ok(());
     }
     let monsters = Monsters::load(&accounts.monsters, &session_key)?;

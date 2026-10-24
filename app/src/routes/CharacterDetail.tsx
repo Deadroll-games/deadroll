@@ -1,6 +1,7 @@
 // One character in full: sprite, identity, stats, HP, skills, party and its items: what is
-// worn by slot, the soulbound items, Wear / Take off (the owner's wallet or session key).
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+// worn by slot, the soulbound items, Wear / Take off (the owner's wallet or session key). Patch 11:
+// the bag next to the settled cache, laid out freely and sent once with "Done".
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import type { Address } from "@solana/kit";
 import { isCurrentAppearance } from "../chain/appearance";
@@ -30,7 +31,23 @@ import {
 } from "../chain/items";
 import { useTx } from "../chain/useTx";
 import { heroInputOf, useCombat } from "../chain/combatWasm";
-import { spendStatPointsIx } from "../chain/game";
+import { closeCacheIx, spendStatPointsIx } from "../chain/game";
+import { BagPanel } from "../components/bag/BagPanel";
+import {
+  checkBagLayout,
+  discard,
+  layoutArgs,
+  loadLocks,
+  moveSlot,
+  replace,
+  saveLocks,
+  slotKey,
+  split,
+  take,
+  type Bag,
+  type BagState,
+} from "../chain/bagLayout";
+import { rewardLabel, type Reward } from "../chain/loot";
 import { equipmentOf } from "../chain/items";
 import { HeroSheetPanel } from "../components/stats/HeroSheetPanel";
 import type { HeroSheetPanelProps } from "../components/stats/types";
@@ -38,7 +55,7 @@ import { Inventory } from "../components/items/Inventory";
 import type { InventoryItemView, InventoryProps } from "../components/items/types";
 import { useAppWallet } from "../wallet/AppWallet";
 import { aspectName, className, formatBp, raceName, STAT_NAMES } from "../chain/names";
-import { skillSetPda } from "../chain/pda";
+import { bagPda, rewardCachePda, skillSetPda } from "../chain/pda";
 import { Aspect, Class, Race } from "../chain/types";
 import { DATA_SOURCE, explorerUrl } from "../config";
 import { OldCharacterLabel } from "../raster/OldCharacter";
@@ -114,15 +131,31 @@ export function CharacterDetailPage() {
   const combat = useCombat();
   // Level-up points placed but not saved yet, by Stat; Save sends them all at once.
   const [plan, setPlan] = useState<number[]>([0, 0, 0, 0]);
+  // Patch 11: the bag on chain, the settled cache (null: none waits) and the layout in progress.
+  const [bagBase, setBagBase] = useState<BagState | null>(null);
+  const [cacheBase, setCacheBase] = useState<Reward[] | null>(null);
+  const [work, setWork] = useState<BagState | null>(null);
+  const [picked, setPicked] = useState<number | null>(null);
+  const [locks, setLocks] = useState<Set<string>>(() => (address ? loadLocks(address) : new Set()));
 
   const load = useCallback(async () => {
     if (DATA_SOURCE !== "chain" || !address) return;
     const addr = address as Address;
     try {
-      const [acc, set] = await Promise.all([
+      const [acc, set, bag, cache] = await Promise.all([
         getAccount("Character", addr),
         getAccount("SkillSet", await skillSetPda(addr)),
+        getAccount("Bag", await bagPda(addr)),
+        getAccount("RewardCache", await rewardCachePda(addr)),
       ]);
+      const plain = (x: { kind: number; id: number; qty: number }): Reward => ({ kind: x.kind, id: x.id, qty: x.qty });
+      const base: Bag = bag ? { resources: bag.layout.resources.map(plain), consumables: bag.layout.consumables.map(plain) } : { resources: [], consumables: [] };
+      // CacheStatus: Open 0, Claimed 1. An open cache belongs to a party still running.
+      const settled = cache && cache.status === 1 ? cache.slots.map(plain).filter((x) => x.qty > 0) : null;
+      setBagBase({ bag: base, cache: settled ?? [] });
+      setCacheBase(settled);
+      setWork({ bag: base, cache: settled ?? [] });
+      setPicked(null);
       setC(acc ?? "missing");
       setPlan([0, 0, 0, 0]);
       setSkills(set ? set.skills.slice(0, set.count) : []);
@@ -187,6 +220,44 @@ export function CharacterDetailPage() {
         })()
       : null;
 
+  const owner = c && c !== "missing" && wallet.address === c.core.owner;
+  const bagError = useMemo(() => (work && bagBase ? checkBagLayout(bagBase.bag, cacheBase ?? [], work.bag) : null), [work, bagBase, cacheBase]);
+  const apply = (next: BagState | null) => next && setWork(next);
+  const bagPanel =
+    work && c && c !== "missing" ? (
+      <BagPanel
+        bag={work.bag}
+        cache={work.cache}
+        editable={!!owner && cacheBase !== null}
+        locks={locks}
+        picked={picked}
+        error={bagError ? `The chain would refuse this layout (${bagError})` : null}
+        busy={busy !== null}
+        label={rewardLabel}
+        onPick={setPicked}
+        onTakeAll={(i) => apply(take(work, i, null, undefined, locks))}
+        onPlace={(i, to) => apply(replace(work, i, to, locks))}
+        onMove={(from, to) => apply(moveSlot(work, from, to))}
+        onSplit={(at) => apply(split(work, at))}
+        onDiscard={(at) => apply(discard(work, at, locks))}
+        onToggleLock={(at) =>
+          setLocks((l) => {
+            const next = new Set(l);
+            const key = slotKey(at);
+            if (next.has(key)) next.delete(key);
+            else next.add(key);
+            saveLocks(addr, next);
+            return next;
+          })
+        }
+        onReset={() => bagBase && setWork(bagBase)}
+        // "Done": the owner's main wallet; the rest of the cache burns and its rent comes back.
+        onDone={() =>
+          void send("Done (close_cache)", wallet.signer, async () => [await closeCacheIx(wallet.signer!, addr, layoutArgs(work.bag))]).then((ok) => ok && load())
+        }
+      />
+    ) : null;
+
   if (DATA_SOURCE !== "chain") return <p className="muted">Character details need chain mode.</p>;
   return (
     <section>
@@ -199,7 +270,7 @@ export function CharacterDetailPage() {
       {error && <p className="error">{error}</p>}
       {c === null && !error && <p className="muted">Loading…</p>}
       {c === "missing" && <p className="error">No character at this address.</p>}
-      {c && c !== "missing" && <CharacterDetailView address={address as Address} c={c} skills={skills} party={party} items={items} sheet={sheet} />}
+      {c && c !== "missing" && <CharacterDetailView address={address as Address} c={c} skills={skills} party={party} items={items} sheet={sheet} bag={bagPanel} />}
     </section>
   );
 }
@@ -211,6 +282,7 @@ export function CharacterDetailView({
   party,
   items = null,
   sheet = null,
+  bag = null,
 }: {
   address: Address;
   c: CharacterAcc;
@@ -220,6 +292,8 @@ export function CharacterDetailView({
   items?: Omit<InventoryProps, "icon"> | null;
   /** Derived stats and the level-up point plan; null: the core stats only. */
   sheet?: HeroSheetPanelProps | null;
+  /** Patch 11: the bag screen (with the settled cache); null while it loads. */
+  bag?: ReactNode;
 }) {
   const dead = !c.core.alive;
   const current = isCurrentAppearance(c.core.appearance);
@@ -346,6 +420,11 @@ export function CharacterDetailView({
             </table>
           </div>
         )}
+      </section>
+
+      <section className="panel char-detail-wide">
+        <h2>Bag</h2>
+        {bag ?? <p className="muted">Loading the bag…</p>}
       </section>
 
       <section className="panel char-detail-wide">

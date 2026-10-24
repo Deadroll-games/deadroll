@@ -1,10 +1,13 @@
 //! Events (CONTRACTS.md, section 7). `PlayerReady`, `InitiativeRolled`, `TurnTicked`,
-//! `TurnSkipped`, `ModsTicked`, `EffectResolved`, `SkillUsed`, `PlayerDied`, `FleeVoted`, `RewardsClaimed`, `EscrowClaimed` and `SessionKeyChanged`
+//! `TurnSkipped`, `ModsTicked`, `EffectResolved`, `SkillUsed`, `PlayerDied`, `FleeVoted`, `RewardsRolled`, `ChestOpenRequested`, `ChestOpened`, `CacheSettled`, `ContributionRefunded`, `CacheClosed`, `EscrowClaimed` and `SessionKeyChanged`
 //! are session-local.
 use anchor_lang::prelude::*;
 use deadroll_character::state::{MAP_SKILLS, SKILLS_MAX};
 
-use deadroll_types::{ActiveState, Cell, SessionStatus, StateKind, STATES_MAX, TURN_ORDER_MAX};
+use deadroll_types::{
+    ActiveState, CacheSlot, Cell, RewardSource, SessionStatus, StateKind, PARTY_MAX, STATES_MAX,
+    TURN_ORDER_MAX,
+};
 
 use deadroll_skillcheck::{Effect, Trigger};
 
@@ -30,6 +33,8 @@ pub struct PlayerJoined {
     pub slot: u8,
     pub contribution: u64,
     pub collected: u64,
+    /// Patch 11: the character's cache from an earlier party was still open and burned.
+    pub cache_burned: bool,
 }
 
 #[event]
@@ -245,12 +250,68 @@ pub struct FleeVoted {
 }
 
 #[event]
-pub struct RewardsClaimed {
+pub struct RewardsRolled {
+    pub session: Pubkey,
+    /// Patch 11: a body, the boss table, a chest (docs/PARTY_AND_TURNS.md 9.3).
+    pub source: RewardSource,
+    /// The killed monster, or the chest.
+    pub index: u8,
+    /// Registry reward table id (`NO_TABLE` = none: experience only).
+    pub table: u8,
+    pub level: u8,
+    /// By player slot: experience into the cache.
+    pub xp: [u32; PARTY_MAX],
+    /// By player slot: the reward and the boss guarantee's extra one (empty = none).
+    pub rewards: [[CacheSlot; 2]; PARTY_MAX],
+    /// Bit per player slot whose cache was full: what did not fit is lost.
+    pub lost: u8,
+}
+
+/// Patch 11: a player opens a visible chest; the roll is pending.
+#[event]
+pub struct ChestOpenRequested {
+    pub session: Pubkey,
+    pub chest: u8,
+    pub slot: u8,
+    pub action: u32,
+    pub action_points: u8,
+}
+
+/// Patch 11: a chest is open (it no longer occupies its cell); `RewardsRolled` has what it gave.
+#[event]
+pub struct ChestOpened {
+    pub session: Pubkey,
+    pub chest: u8,
+    pub slot: u8,
+}
+
+/// Patch 11: a player's cache after the party: theirs to lay out (`granted`), or burned (dead)
+/// or abandoned (fled). `xp` went to the character.
+#[event]
+pub struct CacheSettled {
     pub session: Pubkey,
     pub character: Pubkey,
     pub slot: u8,
     pub xp: u32,
-    pub resources: [u32; 8],
+    pub granted: bool,
+}
+
+/// Patch 11: a player took their contribution back after the DM's deadline passed.
+#[event]
+pub struct ContributionRefunded {
+    pub session: Pubkey,
+    pub player: Pubkey,
+    pub slot: u8,
+    pub amount: u64,
+}
+
+/// Patch 11: "Done" in the bag screen: the cache is closed, `applied` = the bag layout written
+/// (false for a dead character).
+#[event]
+pub struct CacheClosed {
+    pub character: Pubkey,
+    pub session: Pubkey,
+    pub applied: bool,
 }
 
 #[event]

@@ -7,6 +7,9 @@
  */
 
 export * from "./aspect.js";
+export * from "./bagLayout.js";
+export * from "./bagSlot.js";
+export * from "./cacheSlot.js";
 export * from "./category.js";
 export * from "./characterData.js";
 export * from "./class.js";
@@ -23,6 +26,7 @@ export * from "./newSkill.js";
 export * from "./purpose.js";
 export * from "./race.js";
 export * from "./rangeTag.js";
+export * from "./rewardKind.js";
 export * from "./sessionTokenV2.js";
 export * from "./skillBlocks.js";
 export * from "./skillExt.js";

@@ -5,16 +5,15 @@ use anchor_lang::{
 use deadroll_character::state::MAP_SKILLS;
 use deadroll_skillcheck::NO_SKILL;
 use deadroll_types::{
-    seeds, ActiveState, ParticipationData, SessionStatus, EMPTY_ITEM, EQUIP_SLOTS, PARTY_MAX,
-    STATES_MAX,
+    seeds, ActiveState, CacheSlot, CacheStatus, ParticipationData, SessionStatus, CACHE_SLOTS,
+    EMPTY_ITEM, EQUIP_SLOTS, PARTY_MAX, STATES_MAX,
 };
 
 use crate::{
     errors::SessionError,
     events::PlayerJoined,
     state::{
-        external::read_character, Escrow, GameSession, Participation, TempStash, ACCOUNT_VERSION,
-        STASH_RESOURCES,
+        external::read_character, Escrow, GameSession, Participation, RewardCache, ACCOUNT_VERSION,
     },
 };
 
@@ -39,14 +38,17 @@ pub struct JoinSession<'info> {
         bump,
     )]
     pub participation: Box<Account<'info, Participation>>,
+    /// Patch 11: the character's reward cache after the party (`RewardCache`), created on its
+    /// first party; a cache left open from an earlier party burns here and is rebound to this
+    /// one (decisions of patch 11).
     #[account(
-        init,
+        init_if_needed,
         payer = player,
-        space = 8 + TempStash::INIT_SPACE,
-        seeds = [seeds::STASH, session.key().as_ref(), character.key().as_ref()],
+        space = 8 + RewardCache::INIT_SPACE,
+        seeds = [seeds::CACHE, character.key().as_ref()],
         bump,
     )]
-    pub stash: Box<Account<'info, TempStash>>,
+    pub reward_cache: Box<Account<'info, RewardCache>>,
     #[account(
         mut,
         seeds = [seeds::ESCROW, session.key().as_ref()],
@@ -140,13 +142,16 @@ pub fn handler(ctx: Context<JoinSession>, contribution: u64, actor: Pubkey) -> R
     participation.class_tier = 0;
     participation.skills = [NO_SKILL; MAP_SKILLS];
 
-    let stash = &mut accounts.stash;
-    stash.version = ACCOUNT_VERSION;
-    stash.session = game_session;
-    stash.character = character_key;
-    stash.xp = 0;
-    stash.resources = [0; STASH_RESOURCES];
-    stash.bump = ctx.bumps.stash;
+    // The cache of the party lives in `participation` (zero from `init`) until the settlement.
+    let cache = &mut accounts.reward_cache;
+    let burned = cache.version != 0 && cache.slots.iter().any(|s| !s.is_empty());
+    cache.version = ACCOUNT_VERSION;
+    cache.character = character_key;
+    cache.session = game_session;
+    cache.status = CacheStatus::Open;
+    cache.xp = 0;
+    cache.slots = [CacheSlot::EMPTY; CACHE_SLOTS];
+    cache.bump = ctx.bumps.reward_cache;
 
     emit!(PlayerJoined {
         session: game_session,
@@ -155,6 +160,7 @@ pub fn handler(ctx: Context<JoinSession>, contribution: u64, actor: Pubkey) -> R
         slot,
         contribution: paid,
         collected: accounts.escrow.collected,
+        cache_burned: burned,
     });
     Ok(())
 }

@@ -149,4 +149,35 @@ pub enum SessionError {
     PartyEnded,
     #[msg("Joining binds no session key: the key and its prepayment come with Ready")]
     SessionKeyAtReady,
+    // Patch 11: rewards (docs/PARTY_AND_TURNS.md 8-9, MAP_DESCRIPTION.md 7.1).
+    #[msg("Too many different reward tables for one party")]
+    TooManyLootTables,
+    #[msg("Account is not the registry rewards table, or a table the map names is missing")]
+    InvalidRewardTables,
+    #[msg("Fewer players than the map's minimum")]
+    NotEnoughPlayers,
+    #[msg("No such chest on this map")]
+    InvalidChest,
+    #[msg("This chest is already open")]
+    ChestOpened,
+    #[msg("Stand next to the chest to open it")]
+    ChestNotAdjacent,
+    #[msg("A living monster is too close to the chest or to you")]
+    MonsterNearChest,
+    #[msg("A closed chest occupies this cell")]
+    ChestInTheWay,
+    #[msg("The DM's time to settle the party is over: each player claims their own")]
+    SettleDeadlinePassed,
+    #[msg("The DM can still settle the party: wait for the deadline")]
+    SettleDeadlineNotPassed,
+    #[msg("The remaining accounts are not the participation, reward cache and character of each player, in slot order")]
+    InvalidSettleAccounts,
+    #[msg("The DM settles with the main wallet, not a session key")]
+    DmMainWalletOnly,
+    #[msg("This cache is not settled yet")]
+    CacheNotClaimed,
+    #[msg("This cache belongs to another character or party")]
+    InvalidRewardCache,
+    #[msg("Only the character's owner, with the main wallet, closes its cache")]
+    NotCacheOwner,
 }

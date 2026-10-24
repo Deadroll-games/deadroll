@@ -324,25 +324,27 @@
       ]
     },
     {
-      "name": "claim_escrow",
+      "name": "claim_after_timeout",
       "docs": [
-        "After the party ended: the DM takes the escrow and the map goes `Finished`."
+        "Patch 11: after the DM's deadline, a player settles their own character and takes their",
+        "contribution back."
       ],
       "discriminator": [
-        200,
-        80,
-        182,
-        159,
-        61,
-        75,
-        9,
-        205
+        90,
+        0,
+        225,
+        186,
+        150,
+        114,
+        231,
+        76
       ],
       "accounts": [
         {
-          "name": "dm",
+          "name": "player",
           "docs": [
-            "DM main wallet only: this moves lamports (docs/GAME_COMMISSIONS.md, section 4)."
+            "The player's main wallet (the participation's `player`): the refund goes here, so no",
+            "session key."
           ],
           "writable": true,
           "signer": true
@@ -394,6 +396,9 @@
               }
             ]
           }
+        },
+        {
+          "name": "monsters"
         },
         {
           "name": "map",
@@ -487,115 +492,55 @@
       "args": []
     },
     {
-      "name": "claim_rewards",
+      "name": "close_cache",
       "docs": [
-        "After the party ended: rewards and unlock for one character (its owner or their session key)."
+        "Patch 11, \"Done\" in the bag screen: the owner's bag layout from the settled cache (main",
+        "wallet), then the cache closes."
       ],
       "discriminator": [
-        4,
-        144,
-        132,
-        71,
-        116,
-        23,
-        151,
-        80
+        14,
+        159,
+        134,
+        244,
+        1,
+        8,
+        146,
+        164
       ],
       "accounts": [
         {
-          "name": "signer",
+          "name": "owner",
           "docs": [
-            "The character's owner (the participation's `player`) or its session key."
+            "The character's owner, main wallet only: \"Done\" in the bag screen. Gets the rent back."
           ],
+          "writable": true,
           "signer": true
         },
         {
-          "name": "session",
+          "name": "reward_cache",
           "writable": true,
           "pda": {
             "seeds": [
               {
                 "kind": "const",
                 "value": [
-                  115,
-                  101,
-                  115,
-                  115,
-                  105,
-                  111,
-                  110
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "session.core.map",
-                "account": "GameSession"
-              }
-            ]
-          }
-        },
-        {
-          "name": "participation",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  112,
-                  97,
-                  114,
-                  116,
-                  105,
                   99,
-                  105,
-                  112,
                   97,
-                  116,
-                  105,
-                  111,
-                  110
+                  99,
+                  104,
+                  101
                 ]
               },
               {
                 "kind": "account",
-                "path": "session"
-              },
-              {
-                "kind": "account",
-                "path": "character"
+                "path": "reward_cache.character",
+                "account": "RewardCache"
               }
             ]
           }
         },
         {
-          "name": "stash",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  115,
-                  116,
-                  97,
-                  115,
-                  104
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "session"
-              },
-              {
-                "kind": "account",
-                "path": "character"
-              }
-            ]
-          }
-        },
-        {
-          "name": "character",
-          "writable": true
+          "name": "character"
         },
         {
           "name": "bag",
@@ -680,16 +625,18 @@
         {
           "name": "character_program",
           "address": "9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL"
-        },
-        {
-          "name": "session_token",
-          "docs": [
-            "MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs."
-          ],
-          "optional": true
         }
       ],
-      "args": []
+      "args": [
+        {
+          "name": "layout",
+          "type": {
+            "defined": {
+              "name": "BagLayout"
+            }
+          }
+        }
+      ]
     },
     {
       "name": "consume_randomness",
@@ -1107,23 +1054,24 @@
           }
         },
         {
-          "name": "stash",
+          "name": "reward_cache",
+          "docs": [
+            "Patch 11: the character's reward cache after the party (`RewardCache`), created on its",
+            "first party; a cache left open from an earlier party burns here and is rebound to this",
+            "one (decisions of patch 11)."
+          ],
           "writable": true,
           "pda": {
             "seeds": [
               {
                 "kind": "const",
                 "value": [
-                  115,
-                  116,
+                  99,
                   97,
-                  115,
-                  104
+                  99,
+                  104,
+                  101
                 ]
-              },
-              {
-                "kind": "account",
-                "path": "session"
               },
               {
                 "kind": "account",
@@ -1729,6 +1677,272 @@
       ]
     },
     {
+      "name": "open_chest",
+      "docs": [
+        "Patch 11: a player opens a visible chest next to them on their turn (AP); the rewards are",
+        "rolled in the VRF callback into every living player's cache."
+      ],
+      "discriminator": [
+        143,
+        8,
+        253,
+        123,
+        197,
+        30,
+        173,
+        15
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "docs": [
+            "Main wallet or the participation's session key; pays the VRF fee."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.core.map",
+                "account": "GameSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "participation",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  114,
+                  116,
+                  105,
+                  99,
+                  105,
+                  112,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              },
+              {
+                "kind": "account",
+                "path": "participation.core.character",
+                "account": "Participation"
+              }
+            ]
+          }
+        },
+        {
+          "name": "character"
+        },
+        {
+          "name": "skill_set",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  107,
+                  105,
+                  108,
+                  108,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "participation.core.character",
+                "account": "Participation"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                132,
+                79,
+                200,
+                222,
+                125,
+                119,
+                176,
+                36,
+                2,
+                248,
+                81,
+                254,
+                245,
+                232,
+                116,
+                196,
+                19,
+                216,
+                176,
+                11,
+                37,
+                101,
+                255,
+                203,
+                101,
+                107,
+                25,
+                128,
+                35,
+                254,
+                139,
+                255
+              ]
+            }
+          }
+        },
+        {
+          "name": "bag",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  97,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "participation.core.character",
+                "account": "Participation"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                132,
+                79,
+                200,
+                222,
+                125,
+                119,
+                176,
+                36,
+                2,
+                248,
+                81,
+                254,
+                245,
+                232,
+                116,
+                196,
+                19,
+                216,
+                176,
+                11,
+                37,
+                101,
+                255,
+                203,
+                101,
+                107,
+                25,
+                128,
+                35,
+                254,
+                139,
+                255
+              ]
+            }
+          }
+        },
+        {
+          "name": "monsters",
+          "docs": [
+            "Read-only, never Borsh-decoded: owner and discriminator checked here, session in `Monsters`."
+          ]
+        },
+        {
+          "name": "session_token",
+          "docs": [
+            "MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs."
+          ],
+          "optional": true
+        },
+        {
+          "name": "program_identity",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "oracle_queue",
+          "writable": true,
+          "address": "Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh"
+        },
+        {
+          "name": "vrf_program",
+          "address": "Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz"
+        },
+        {
+          "name": "slot_hashes",
+          "address": "SysvarS1otHashes111111111111111111111111111"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "layout"
+        }
+      ],
+      "args": [
+        {
+          "name": "chest",
+          "type": "u8"
+        }
+      ]
+    },
+    {
       "name": "open_session",
       "docs": [
         "DM opens a party on a finalized map: session, monsters and escrow; map goes `InSession`."
@@ -1941,6 +2155,13 @@
             "pools, copied into `MonsterState`."
           ],
           "address": "NQNEuKDUZhACnTJ9sD3dW49BoiPtJPatp6bpY61r81p"
+        },
+        {
+          "name": "rewards",
+          "docs": [
+            "tables, copied into `MonsterState`."
+          ],
+          "address": "FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK"
         }
       ],
       "args": [
@@ -2310,6 +2531,178 @@
       ]
     },
     {
+      "name": "settle_party",
+      "docs": [
+        "Patch 11 (replaces `claim_rewards` and `claim_escrow`): the DM, main wallet only, settles",
+        "every player once the party ended (caches become theirs, experience, unlock) and takes the",
+        "escrow; the map goes `Finished`."
+      ],
+      "discriminator": [
+        110,
+        32,
+        235,
+        37,
+        79,
+        52,
+        117,
+        88
+      ],
+      "accounts": [
+        {
+          "name": "dm",
+          "docs": [
+            "DM main wallet only: this moves lamports and the rewards (docs/GAME_COMMISSIONS.md 7);",
+            "the DM's session key is refused."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.core.map",
+                "account": "GameSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              }
+            ]
+          }
+        },
+        {
+          "name": "monsters",
+          "docs": [
+            "waiting for their rewards are paid from it."
+          ]
+        },
+        {
+          "name": "map",
+          "writable": true
+        },
+        {
+          "name": "session_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                9,
+                93,
+                27,
+                37,
+                218,
+                79,
+                221,
+                125,
+                83,
+                7,
+                123,
+                151,
+                252,
+                231,
+                65,
+                177,
+                65,
+                225,
+                242,
+                116,
+                20,
+                215,
+                178,
+                225,
+                173,
+                88,
+                9,
+                192,
+                113,
+                184,
+                209,
+                219
+              ]
+            }
+          }
+        },
+        {
+          "name": "map_program",
+          "address": "2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH"
+        },
+        {
+          "name": "character_program",
+          "address": "9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "start_session",
       "docs": [
         "DM starts the party once everyone is ready and the price is collected: requests the",
@@ -2650,16 +3043,16 @@
       ]
     },
     {
-      "name": "TempStash",
+      "name": "RewardCache",
       "discriminator": [
-        151,
-        121,
-        12,
-        93,
-        150,
-        184,
-        160,
-        251
+        81,
+        38,
+        221,
+        114,
+        44,
+        42,
+        107,
+        152
       ]
     }
   ],
@@ -2691,6 +3084,32 @@
       ]
     },
     {
+      "name": "CacheClosed",
+      "discriminator": [
+        125,
+        194,
+        33,
+        136,
+        122,
+        241,
+        180,
+        14
+      ]
+    },
+    {
+      "name": "CacheSettled",
+      "discriminator": [
+        110,
+        87,
+        20,
+        149,
+        117,
+        122,
+        197,
+        232
+      ]
+    },
+    {
       "name": "CellBurned",
       "discriminator": [
         149,
@@ -2701,6 +3120,45 @@
         237,
         180,
         116
+      ]
+    },
+    {
+      "name": "ChestOpenRequested",
+      "discriminator": [
+        255,
+        80,
+        253,
+        189,
+        158,
+        46,
+        209,
+        252
+      ]
+    },
+    {
+      "name": "ChestOpened",
+      "discriminator": [
+        102,
+        3,
+        231,
+        141,
+        157,
+        137,
+        52,
+        246
+      ]
+    },
+    {
+      "name": "ContributionRefunded",
+      "discriminator": [
+        102,
+        69,
+        70,
+        93,
+        207,
+        228,
+        30,
+        111
       ]
     },
     {
@@ -2912,16 +3370,16 @@
       ]
     },
     {
-      "name": "RewardsClaimed",
+      "name": "RewardsRolled",
       "discriminator": [
-        75,
-        98,
-        88,
-        18,
-        219,
-        112,
-        88,
-        121
+        160,
+        209,
+        32,
+        22,
+        55,
+        150,
+        108,
+        241
       ]
     },
     {
@@ -3366,6 +3824,81 @@
       "code": 6069,
       "name": "SessionKeyAtReady",
       "msg": "Joining binds no session key: the key and its prepayment come with Ready"
+    },
+    {
+      "code": 6070,
+      "name": "TooManyLootTables",
+      "msg": "Too many different reward tables for one party"
+    },
+    {
+      "code": 6071,
+      "name": "InvalidRewardTables",
+      "msg": "Account is not the registry rewards table, or a table the map names is missing"
+    },
+    {
+      "code": 6072,
+      "name": "NotEnoughPlayers",
+      "msg": "Fewer players than the map's minimum"
+    },
+    {
+      "code": 6073,
+      "name": "InvalidChest",
+      "msg": "No such chest on this map"
+    },
+    {
+      "code": 6074,
+      "name": "ChestOpened",
+      "msg": "This chest is already open"
+    },
+    {
+      "code": 6075,
+      "name": "ChestNotAdjacent",
+      "msg": "Stand next to the chest to open it"
+    },
+    {
+      "code": 6076,
+      "name": "MonsterNearChest",
+      "msg": "A living monster is too close to the chest or to you"
+    },
+    {
+      "code": 6077,
+      "name": "ChestInTheWay",
+      "msg": "A closed chest occupies this cell"
+    },
+    {
+      "code": 6078,
+      "name": "SettleDeadlinePassed",
+      "msg": "The DM's time to settle the party is over: each player claims their own"
+    },
+    {
+      "code": 6079,
+      "name": "SettleDeadlineNotPassed",
+      "msg": "The DM can still settle the party: wait for the deadline"
+    },
+    {
+      "code": 6080,
+      "name": "InvalidSettleAccounts",
+      "msg": "The remaining accounts are not the participation, reward cache and character of each player, in slot order"
+    },
+    {
+      "code": 6081,
+      "name": "DmMainWalletOnly",
+      "msg": "The DM settles with the main wallet, not a session key"
+    },
+    {
+      "code": 6082,
+      "name": "CacheNotClaimed",
+      "msg": "This cache is not settled yet"
+    },
+    {
+      "code": 6083,
+      "name": "InvalidRewardCache",
+      "msg": "This cache belongs to another character or party"
+    },
+    {
+      "code": 6084,
+      "name": "NotCacheOwner",
+      "msg": "Only the character's owner, with the main wallet, closes its cache"
     }
   ],
   "types": [
@@ -3640,6 +4173,73 @@
       }
     },
     {
+      "name": "BagLayout",
+      "docs": [
+        "Patch 11: what a character carries besides items (docs/ITEMS_AND_CRAFT.md 6.1): resources",
+        "(recipes, blanks and reagents too) one kind per slot, and consumables. In character `Bag`",
+        "and the \"Done\" of the bag screen."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "resources",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "BagSlot"
+                  }
+                },
+                40
+              ]
+            }
+          },
+          {
+            "name": "consumables",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "BagSlot"
+                  }
+                },
+                5
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "BagSlot",
+      "docs": [
+        "Patch 11: one bag slot (docs/ITEMS_AND_CRAFT.md 6.1), `qty == 0` = empty (then `kind`",
+        "and `id` are zero too)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "kind",
+            "type": {
+              "defined": {
+                "name": "RewardKind"
+              }
+            }
+          },
+          {
+            "name": "id",
+            "type": "u16"
+          },
+          {
+            "name": "qty",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
       "name": "BurningCellData",
       "docs": [
         "`deadroll_rules::spread::BurningCell`."
@@ -3675,6 +4275,111 @@
               "Turn-order id of the unit that set it on fire."
             ],
             "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CacheClosed",
+      "docs": [
+        "Patch 11: \"Done\" in the bag screen: the cache is closed, `applied` = the bag layout written",
+        "(false for a dead character)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "character",
+            "type": "pubkey"
+          },
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "applied",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CacheSettled",
+      "docs": [
+        "Patch 11: a player's cache after the party: theirs to lay out (`granted`), or burned (dead)",
+        "or abandoned (fled). `xp` went to the character."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "character",
+            "type": "pubkey"
+          },
+          {
+            "name": "slot",
+            "type": "u8"
+          },
+          {
+            "name": "xp",
+            "type": "u32"
+          },
+          {
+            "name": "granted",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CacheSlot",
+      "docs": [
+        "Patch 11: one reward kind in a temporary cache, `qty == 0` = empty."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "kind",
+            "type": {
+              "defined": {
+                "name": "RewardKind"
+              }
+            }
+          },
+          {
+            "name": "id",
+            "type": "u16"
+          },
+          {
+            "name": "qty",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CacheStatus",
+      "docs": [
+        "session `RewardCache.status`: `Open` while the party runs (the rewards are in the",
+        "`Participation`), `Claimed` once they are the player's (issued, or claimed after the",
+        "timeout) and wait for \"Done\" in the bag screen."
+      ],
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Open"
+          },
+          {
+            "name": "Claimed"
           }
         ]
       }
@@ -3791,6 +4496,87 @@
                 6
               ]
             }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ChestOpenRequested",
+      "docs": [
+        "Patch 11: a player opens a visible chest; the roll is pending."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "chest",
+            "type": "u8"
+          },
+          {
+            "name": "slot",
+            "type": "u8"
+          },
+          {
+            "name": "action",
+            "type": "u32"
+          },
+          {
+            "name": "action_points",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ChestOpened",
+      "docs": [
+        "Patch 11: a chest is open (it no longer occupies its cell); `RewardsRolled` has what it gave."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "chest",
+            "type": "u8"
+          },
+          {
+            "name": "slot",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ContributionRefunded",
+      "docs": [
+        "Patch 11: a player took their contribution back after the DM's deadline passed."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "slot",
+            "type": "u8"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
           }
         ]
       }
@@ -4312,21 +5098,15 @@
           {
             "name": "settled_mask",
             "docs": [
-              "Bit per player slot: `claim_rewards` done after the party ended."
+              "Bit per player slot: settled after the party ended (`settle_party` sets every bit,",
+              "`claim_after_timeout` its own)."
             ],
             "type": "u8"
           },
           {
-            "name": "xp_pool",
-            "docs": [
-              "Experience from killed monsters; every living player gets all of it on victory."
-            ],
-            "type": "u32"
-          },
-          {
             "name": "victory_seed",
             "docs": [
-              "VRF value of the boss kill; the reward rolls derive from it."
+              "VRF value of the boss kill."
             ],
             "type": {
               "array": [
@@ -4513,6 +5293,92 @@
                 4
               ]
             }
+          },
+          {
+            "name": "tier",
+            "docs": [
+              "The map's tier and minimum players (`start_session` needs that many)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "min_players",
+            "type": "u8"
+          },
+          {
+            "name": "chests",
+            "docs": [
+              "The visible chests: cell and reward table id; `0..chest_count` used."
+            ],
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "MapPoint"
+                  }
+                },
+                4
+              ]
+            }
+          },
+          {
+            "name": "chest_count",
+            "type": "u8"
+          },
+          {
+            "name": "boss_table",
+            "docs": [
+              "The reward table of the boss event (registry id)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "chests_opened",
+            "docs": [
+              "Bit per chest: opened (then it no longer occupies its cell)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "pending_chest",
+            "docs": [
+              "The chest whose roll is pending (`open_chest`), `NO_CHEST` for every other roll."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "xp_bp",
+            "docs": [
+              "Each player's share of the rewards (`deadroll_rules::loot::reward_share`), set at",
+              "`set_ready(true)`: experience in basis points, and a bit per slot whose rewards are rolled."
+            ],
+            "type": {
+              "array": [
+                "u16",
+                4
+              ]
+            }
+          },
+          {
+            "name": "loot_mask",
+            "type": "u8"
+          },
+          {
+            "name": "unpaid_kills",
+            "docs": [
+              "Bit per monster killed where no party accounts were at hand (over-time damage in",
+              "`start_turn`): its experience and body rewards go out with the next callback, or at the",
+              "settlement."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "ended_at",
+            "docs": [
+              "Unix time the party ended (Victory, Wiped, Fled): the DM settles before",
+              "`ended_at + LootTuning.settle_timeout_secs`, the players claim after."
+            ],
+            "type": "i64"
           }
         ]
       }
@@ -5134,6 +6000,40 @@
           },
           {
             "name": "Line"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MapPoint",
+      "docs": [
+        "Patch 11: a map point `(type, x, y, data)` (docs/MAP_DESCRIPTION.md 7.1)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "kind",
+            "type": {
+              "defined": {
+                "name": "PointKind"
+              }
+            }
+          },
+          {
+            "name": "x",
+            "type": "u8"
+          },
+          {
+            "name": "y",
+            "type": "u8"
+          },
+          {
+            "name": "data",
+            "docs": [
+              "A visible chest: its reward table id."
+            ],
+            "type": "u8"
           }
         ]
       }
@@ -5802,6 +6702,35 @@
                 24
               ]
             }
+          },
+          {
+            "name": "loot_ids",
+            "docs": [
+              "Registry id of each copied table, `NO_TABLE` = free."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                12
+              ]
+            }
+          },
+          {
+            "name": "loot_tables",
+            "docs": [
+              "The copied records (`deadroll_rules::loot::record`), by `loot_ids` position."
+            ],
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    "u8",
+                    108
+                  ]
+                },
+                12
+              ]
+            }
           }
         ]
       }
@@ -6304,6 +7233,26 @@
                 "name": "ResistModData"
               }
             }
+          },
+          {
+            "name": "cache_xp",
+            "docs": [
+              "Experience of the kills, the player's share already applied."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "cache",
+            "docs": [
+              "The rewards, `CacheSlot`s as raw bytes (`CacheSlot::read_all`): never decoded field by",
+              "field."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                160
+              ]
+            }
           }
         ]
       }
@@ -6581,6 +7530,13 @@
           {
             "name": "collected",
             "type": "u64"
+          },
+          {
+            "name": "cache_burned",
+            "docs": [
+              "Patch 11: the character's cache from an earlier party was still open and burned."
+            ],
+            "type": "bool"
           }
         ]
       }
@@ -6620,6 +7576,24 @@
               "HP with the gear, copied at ready."
             ],
             "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PointKind",
+      "docs": [
+        "A map point type (`MapPoint.kind`, docs/MAP_DESCRIPTION.md 7.1). The entrance and the exit",
+        "stay in `MapLayoutData.entrance` / `exit`; only visible chests are points for now."
+      ],
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Chest"
           }
         ]
       }
@@ -7013,7 +7987,133 @@
       }
     },
     {
-      "name": "RewardsClaimed",
+      "name": "RewardCache",
+      "docs": [
+        "`[\"cache\", character]` (patch 11): a character's temporary cache once its party is settled,",
+        "until \"Done\" in the bag screen (`close_cache`). During the party the cache lives in",
+        "`Participation` (docs/PARTY_AND_TURNS.md 8, 10.2); this account outlives the party and is found",
+        "by the character alone, so the next `join_session` burns a cache left open.",
+        "",
+        "Created at `join_session` with the player's rent; a later `join_session` of the same",
+        "character rebinds it to the new party (what it held burns). Closed by `close_cache`, the rent",
+        "back to the owner."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "character",
+            "type": "pubkey"
+          },
+          {
+            "name": "session",
+            "docs": [
+              "The party it belongs to."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "status",
+            "docs": [
+              "`Open` while the party runs (empty here), `Claimed` once settled: then it is the owner's",
+              "to lay out."
+            ],
+            "type": {
+              "defined": {
+                "name": "CacheStatus"
+              }
+            }
+          },
+          {
+            "name": "xp",
+            "docs": [
+              "Experience granted with the settlement (shown on the summary)."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "slots",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "CacheSlot"
+                  }
+                },
+                32
+              ]
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RewardKind",
+      "docs": [
+        "What a reward is. All of them are counters by id in the bag (docs/ITEMS_AND_CRAFT.md 2);",
+        "`Consumable` goes to the consumable slots, the rest to the resource slots."
+      ],
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Resource"
+          },
+          {
+            "name": "Recipe"
+          },
+          {
+            "name": "Consumable"
+          },
+          {
+            "name": "Blank"
+          },
+          {
+            "name": "Reagent"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RewardSource",
+      "docs": [
+        "Where a reward event comes from (docs/PARTY_AND_TURNS.md 9.3, docs/BESTIARY.md 9).",
+        "`Stash` (hidden stashes) is reserved: secrets are not in the game yet."
+      ],
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Body"
+          },
+          {
+            "name": "Chest"
+          },
+          {
+            "name": "Boss"
+          },
+          {
+            "name": "Stash"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RewardsRolled",
       "type": {
         "kind": "struct",
         "fields": [
@@ -7022,25 +8122,73 @@
             "type": "pubkey"
           },
           {
-            "name": "character",
-            "type": "pubkey"
+            "name": "source",
+            "docs": [
+              "Patch 11: a body, the boss table, a chest (docs/PARTY_AND_TURNS.md 9.3)."
+            ],
+            "type": {
+              "defined": {
+                "name": "RewardSource"
+              }
+            }
           },
           {
-            "name": "slot",
+            "name": "index",
+            "docs": [
+              "The killed monster, or the chest."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "table",
+            "docs": [
+              "Registry reward table id (`NO_TABLE` = none: experience only)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "level",
             "type": "u8"
           },
           {
             "name": "xp",
-            "type": "u32"
-          },
-          {
-            "name": "resources",
+            "docs": [
+              "By player slot: experience into the cache."
+            ],
             "type": {
               "array": [
                 "u32",
-                8
+                4
               ]
             }
+          },
+          {
+            "name": "rewards",
+            "docs": [
+              "By player slot: the reward and the boss guarantee's extra one (empty = none)."
+            ],
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    {
+                      "defined": {
+                        "name": "CacheSlot"
+                      }
+                    },
+                    2
+                  ]
+                },
+                4
+              ]
+            }
+          },
+          {
+            "name": "lost",
+            "docs": [
+              "Bit per player slot whose cache was full: what did not fit is lost."
+            ],
+            "type": "u8"
           }
         ]
       }
@@ -7542,47 +8690,6 @@
           },
           {
             "name": "Line"
-          }
-        ]
-      }
-    },
-    {
-      "name": "TempStash",
-      "docs": [
-        "`[\"stash\", session, character]`: experience and rewards that become the character's only on",
-        "victory or peaceful exit (docs/PARTY_AND_TURNS.md, section 8)."
-      ],
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "version",
-            "type": "u8"
-          },
-          {
-            "name": "session",
-            "type": "pubkey"
-          },
-          {
-            "name": "character",
-            "type": "pubkey"
-          },
-          {
-            "name": "xp",
-            "type": "u32"
-          },
-          {
-            "name": "resources",
-            "type": {
-              "array": [
-                "u32",
-                8
-              ]
-            }
-          },
-          {
-            "name": "bump",
-            "type": "u8"
           }
         ]
       }
