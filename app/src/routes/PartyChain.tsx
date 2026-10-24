@@ -45,8 +45,7 @@ import {
   mapStatus,
   mapsOf,
   monsterActIx,
-  monsterMoveIx,
-  moveIx,
+  movePathIx,
   myCharacters,
   openSessionIx,
   openSessions,
@@ -91,7 +90,7 @@ import { errorName } from "../chain/send";
 import { statusLabel, type SubStatus } from "../chain/subscribe";
 import { cooldownLabel, skillCooldowns, skillUsedText, skipText, startTurnFor, takenOntoMap, tickText, turnActed, turnStarted } from "../chain/turns";
 import { skillSetPda } from "../chain/pda";
-import { affordable, cheb, reachable, route, type Step } from "../chain/route";
+import { affordable, cheb, extendPath, pathCost, reachable, route, type Step } from "../chain/route";
 import { useAutoFreezeTombstone } from "../chain/useAutoFreezeTombstone";
 import { useParty, type PartyEvent } from "../chain/useParty";
 import { BASIC_ATTACK_AP, Purpose, inReach, rangeReach, type RangeTag } from "../chain/skillcheck";
@@ -670,27 +669,46 @@ function PartyView({ address }: { address: Address }) {
   const mRange = (mChosen ? mChosen.sheet.ext[0]! : (mSheet?.range ?? 0)) as RangeTag;
   const mAp = mChosen ? mChosen.sheet.apCost : BASIC_ATTACK_AP;
 
-  const pathTo = useCallback(
-    (to: Cell): Step[] | null => {
-      if (!party?.tiles || !s || !moverPos || unit === null) return null;
-      const steps = route({ from: moverPos, goal: (x, y) => x === to.x && y === to.y, tiles: party.tiles, width: s.width, height: s.height, tileCost, taken: taken(party, unit) });
-      return steps ? affordable(steps, moverAp) : null;
-    },
-    [party, s, moverPos, unit, tileCost, taken, moverAp],
+  const ground = useMemo(
+    () => (party?.tiles && s && unit !== null ? { tiles: party.tiles, width: s.width, height: s.height, tileCost, taken: taken(party, unit) } : null),
+    [party, s, unit, tileCost, taken],
   );
+  // Patch 13: the path is marked cell by cell (a far cell adds the cheapest way to it) and walked in
+  // one move_path. It belongs to this unit's turn: a new turn starts an empty one.
+  const planKey = `${s?.turnSeq ?? 0}:${unit ?? -1}:${moverPos?.x ?? -1},${moverPos?.y ?? -1}`;
+  const [plan, setPlan] = useState<{ key: string; steps: Step[] }>({ key: "", steps: [] });
+  const planned = plan.key === planKey ? plan.steps : [];
   const reach = useMemo(
-    () => (party?.tiles && s && moverPos && unit !== null && canMove ? reachable({ from: moverPos, ap: moverAp, tiles: party.tiles, width: s.width, height: s.height, tileCost, taken: taken(party, unit) }) : []),
-    [party, s, moverPos, unit, moverAp, tileCost, taken, canMove],
+    // What the rest of the action points reach from the end of the marked path.
+    () => (ground && moverPos && canMove ? reachable({ ...ground, from: planned.at(-1)?.to ?? moverPos, ap: moverAp - pathCost(planned) }) : []),
+    [ground, moverPos, moverAp, canMove, planned],
   );
-  const preview = hover && moverPos ? (pathTo(hover)?.map((st) => st.to) ?? []) : [];
+  const hoverPlan = hover && moverPos && ground ? extendPath(ground, moverPos, planned, hover, moverAp) : null;
+  const preview = (hoverPlan ?? planned).map((st) => st.to);
 
   // ---- actions
-  const movePlayer = (to: Cell) => {
-    if (!activePlayer || !s) return;
-    const steps = pathTo(to);
-    if (!steps?.length) return;
-    const actor = actorFor(activePlayer.part.core.sessionKey);
-    void act(`move ${label(activePlayer.slot)}`, actor?.signer ?? null, async () => [await moveIx(actor!, address, activePlayer.character, s.layout, steps)], false);
+  /** Sends the planned path of the unit whose turn it is. */
+  const walkPlan = () => {
+    if (!s || unit === null || planned.length === 0) return;
+    const steps = planned;
+    setPlan({ key: "", steps: [] });
+    if (activePlayer && myTurn) {
+      const actor = actorFor(activePlayer.part.core.sessionKey);
+      const mover = { kind: "player" as const, slot: activePlayer.slot, character: activePlayer.character };
+      void act(`move ${label(activePlayer.slot)}`, actor?.signer ?? null, async () => [await movePathIx(actor!, address, s.layout, mover, steps)], false);
+    } else if (monsterTurn && isDm) {
+      const actor = actorFor(s.dmActor);
+      const mover = { kind: "monster" as const, index: unit - MONSTER_BASE };
+      void act(`move ${label(unit)}`, actor?.signer ?? null, async () => [await movePathIx(actor!, address, s.layout, mover, steps)], false);
+    }
+  };
+  /** A click on a cell: the path's end walks it, any other cell extends (or cuts back) the path. */
+  const markCell = (to: Cell) => {
+    if (!ground || !moverPos) return;
+    const end = planned.at(-1)?.to;
+    if (end && end.x === to.x && end.y === to.y) return walkPlan();
+    const next = extendPath(ground, moverPos, planned, to, moverAp);
+    if (next) setPlan({ key: planKey, steps: next });
   };
   // Patch 11: the visible chests; a closed one next to the player opens for AP on its turn.
   const registry = useBuilderRegistry();
@@ -739,13 +757,6 @@ function PartyView({ address }: { address: Address }) {
       const actor = actorFor(s.dmActor);
       void act("end monster turn", actor?.signer ?? null, async () => [await endTurnIx(actor!, address, null)], false);
     }
-  };
-  const moveMonster = (to: Cell) => {
-    if (!s || unit === null) return;
-    const steps = pathTo(to);
-    if (!steps?.length) return;
-    const actor = actorFor(s.dmActor);
-    void act(`move ${label(unit)}`, actor?.signer ?? null, async () => [await monsterMoveIx(actor!, address, s.layout, unit - MONSTER_BASE, steps)], false);
   };
   const monsterAttack = (slot: number) => {
     const target = party?.players.find((p) => p.slot === slot);
@@ -823,7 +834,7 @@ function PartyView({ address }: { address: Address }) {
           const steps = route({ from: m, goal: (x, y) => inRange({ x, y }), tiles: p.tiles, width: p.session.width, height: p.session.height, tileCost: Array.from(p.session.tileCost), taken: taken(p, u) });
           const take = steps ? affordable(steps, ap, keep) : [];
           if (take.length) {
-            const r = await send(`move ${label(u)}`, actor.signer, async () => [await monsterMoveIx(actor, address, p!.session.layout, mi, take)], { quiet: true });
+            const r = await send(`move ${label(u)}`, actor.signer, async () => [await movePathIx(actor, address, p!.session.layout, { kind: "monster", index: mi }, take)], { quiet: true });
             if (r) ingest(r.signature, r.events);
             ap -= take.reduce((n, x) => n + x.cost, 0);
           }
@@ -1163,7 +1174,7 @@ function PartyView({ address }: { address: Address }) {
             unitSprite={unitSprite}
             tileSprite={tileSprite}
             onCellHover={setHover}
-            onCellClick={(c) => (!canMove ? undefined : myTurn ? movePlayer(c) : monsterTurn && isDm ? moveMonster(c) : undefined)}
+            onCellClick={(c) => (canMove && (myTurn || (monsterTurn && isDm)) ? markCell(c) : undefined)}
             onUnitClick={(u) => {
               if (!canAttack) return;
               if (myTurn && chosenSide === "enemy" && u.kind === "monster" && u.alive) attack(u.id - MONSTER_BASE);
@@ -1275,6 +1286,16 @@ function PartyView({ address }: { address: Address }) {
                 </>
               )}
               <div className="row">
+                {(myTurn || (monsterTurn && isDm)) && planned.length > 0 && (
+                  <>
+                    <button className="btn primary" disabled={busy !== null || !canMove} onClick={walkPlan}>
+                      Go: {planned.length} {planned.length === 1 ? "cell" : "cells"}, {pathCost(planned)} AP
+                    </button>
+                    <button className="btn" disabled={busy !== null} onClick={() => setPlan({ key: "", steps: [] })}>
+                      Clear path
+                    </button>
+                  </>
+                )}
                 {(myTurn || (monsterTurn && isDm)) && (
                   <button className="btn" disabled={busy !== null || !canMove} onClick={endTurn}>
                     End turn

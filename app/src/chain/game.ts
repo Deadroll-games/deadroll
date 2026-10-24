@@ -69,9 +69,8 @@ import {
   getGameSessionDecoder,
   getJoinSessionInstruction,
   getMonsterActInstruction,
-  getMonsterMoveInstruction,
   getMonsterStateDecoder,
-  getMoveUnitInstruction,
+  getMovePathInstruction,
   getOpenChestInstruction,
   getOpenSessionInstruction,
   getParticipationDecoder,
@@ -128,7 +127,7 @@ import {
 } from "./pda";
 import type { GridPoint } from "../components/grid/types";
 import type { Chest } from "./loot";
-import { pathArgs, type Step } from "./route";
+import type { Step } from "./route";
 import { PRESETS, SKILL_DESCRIPTION_LEN, SKILL_NAME_LEN, type NamedSkill } from "./skillcheck";
 import { Aspect, Class, MAP_CELLS, MAP_MAX, Race, Tile, cellByte, type Cell, type Spawn } from "./types";
 
@@ -654,19 +653,25 @@ export type Actor = { signer: TransactionSigner; token: Address | null };
 /** An optional account: undefined is Anchor's None (the program id). */
 const opt = <T>(v: T | null): T | undefined => v ?? undefined;
 
-export async function moveIx(actor: Actor, session: Address, character: Address, layout: Address, steps: Step[]): Promise<Instruction> {
-  const path = pathArgs(steps);
-  return getMoveUnitInstruction({
+/** Who moves: a player (its slot and character) or a monster of the DM (its index). */
+export type Mover = { kind: "player"; slot: number; character: Address } | { kind: "monster"; index: number };
+
+/**
+ * Patch 13: `move_path` for a player (its main wallet or session key) or a monster (the DM's): the
+ * cells of `steps` in order. Stepping next to an enemy can trigger its reactive skill (a VRF roll),
+ * so the VRF accounts always come along.
+ */
+export async function movePathIx(actor: Actor, session: Address, layout: Address, mover: Mover, steps: Step[]): Promise<Instruction> {
+  return getMovePathInstruction({
     signer: actor.signer,
     session,
-    participation: await participationPda(session, character),
+    participation: mover.kind === "player" ? await participationPda(session, mover.character) : undefined,
     monsters: await monstersPda(session),
     layout,
     sessionToken: opt(actor.token),
-    // Patch 6: stepping next to a monster can trigger its reactive skill (a VRF roll).
     ...(await vrfAccounts()),
-    steps: Uint8Array.from(path.steps),
-    len: path.len,
+    unit: mover.kind === "player" ? mover.slot : MONSTER_BASE + mover.index,
+    path: steps.map((s) => s.to),
   });
 }
 
@@ -767,22 +772,6 @@ export async function startTurnIx(
     ...(await vrfAccounts()),
   });
   return withRemaining(ix, deaths);
-}
-
-export async function monsterMoveIx(dmActor: Actor, session: Address, layout: Address, monster: number, steps: Step[]): Promise<Instruction> {
-  const path = pathArgs(steps);
-  return getMonsterMoveInstruction({
-    signer: dmActor.signer,
-    session,
-    monsters: await monstersPda(session),
-    layout,
-    sessionToken: opt(dmActor.token),
-    // A monster stepping next to a player can trigger its reactive skill (a VRF roll).
-    ...(await vrfAccounts()),
-    monster,
-    steps: Uint8Array.from(path.steps),
-    len: path.len,
-  });
 }
 
 /**

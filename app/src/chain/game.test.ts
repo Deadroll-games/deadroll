@@ -56,7 +56,7 @@ import {
   joinSessionIx,
   setReadyIx,
   mockVrfSigner,
-  moveIx,
+  movePathIx,
   partyAccountsOf,
   startTurnIx,
   computeLimitIx,
@@ -71,7 +71,7 @@ import { toHitResolved } from "./hit";
 import { toEffectResolved } from "./support";
 import { Effect } from "./skillcheck";
 import { bagPda, bestiaryPda, gameConfigPda, monsterSkillsPda, rewardCachePda, rewardsPda, monstersPda, participationPda, programIdentityPda, sessionAuthorityPda, sessionTokenPda, skillExtrasPda, skillSetPda, tilesetPda } from "./pda";
-import { affordable, pathArgs, reachable, route } from "./route";
+import { affordable, extendPath, reachable, route } from "./route";
 import { explainFailure } from "./send";
 import { Applied, Aspect, Class, HitOutcome, JumpMode, MAP_MAX, ModKind, OpKind, StateKind, Tile, cellByte } from "./types";
 import { SHIPPED_TILE_COST } from "./tiles";
@@ -137,27 +137,39 @@ describe("session builders", () => {
   const session = addrOf(7);
   const character = addrOf(8);
 
-  it("move_unit: 16 direction bytes, len, accounts in Accounts order", async () => {
+  it("move_path (patch 13): the unit, the cells as a Vec, accounts in Accounts order", async () => {
     const signer = await generateKeyPairSigner();
     const actor: Actor = { signer, token: addrOf(9) };
-    const steps = [1, 1, 2].map((dir) => ({ dir, cost: 1, to: { x: 0, y: 0 } }));
-    const ix = await moveIx(actor, session, character, addrOf(10), steps);
-    const want = concat(ixDisc("move_unit"), Uint8Array.from([1, 1, 2, ...new Array(13).fill(0)]), Uint8Array.of(3));
-    expect(toHex(ix.data as Uint8Array)).toBe(toHex(want));
-    expect(ix.accounts!.map((a) => [a.address, a.role])).toEqual([
-      [signer.address, AccountRole.WRITABLE_SIGNER],
-      [session, AccountRole.WRITABLE],
-      [await participationPda(session, character), AccountRole.WRITABLE],
-      [await monstersPda(session), AccountRole.READONLY],
-      [addrOf(10), AccountRole.READONLY],
-      [addrOf(9), AccountRole.READONLY],
-      // Patch 6: a monster's EnemyAdjacent reaction is a VRF roll the mover pays for.
+    const cells = [{ x: 1, y: 2 }, { x: 2, y: 3 }, { x: 3, y: 3 }];
+    const steps = cells.map((to) => ({ cost: 1, to }));
+    const vrf = async () => [
+      // A reaction of the enemy next to the new cell is a VRF roll the mover pays for.
       [await programIdentityPda(), AccountRole.READONLY],
       [VRF.oracleQueue, AccountRole.WRITABLE],
       [VRF.program, AccountRole.READONLY],
       [VRF.slotHashes, AccountRole.READONLY],
-      ['11111111111111111111111111111111', AccountRole.READONLY],
+      ["11111111111111111111111111111111", AccountRole.READONLY],
+    ];
+    const player = await movePathIx(actor, session, addrOf(10), { kind: "player", slot: 2, character }, steps);
+    // unit u8, then Vec<Cell>: u32 LE count and (x, y) per cell.
+    const want = concat(ixDisc("move_path"), Uint8Array.of(2, 3, 0, 0, 0, 1, 2, 2, 3, 3, 3));
+    expect(toHex(player.data as Uint8Array)).toBe(toHex(want));
+    expect(player.accounts!.map((a) => [a.address, a.role])).toEqual([
+      [signer.address, AccountRole.WRITABLE_SIGNER],
+      [session, AccountRole.WRITABLE],
+      [await participationPda(session, character), AccountRole.WRITABLE],
+      [await monstersPda(session), AccountRole.WRITABLE],
+      [addrOf(10), AccountRole.READONLY],
+      [addrOf(9), AccountRole.READONLY],
+      ...(await vrf()),
     ]);
+    // A monster: unit MONSTER_BASE + index, no participation (the program id in its place).
+    const dm: Actor = { signer, token: null };
+    const monster = await movePathIx(dm, session, addrOf(10), { kind: "monster", index: 3 }, steps.slice(0, 1));
+    expect(toHex(monster.data as Uint8Array)).toBe(toHex(concat(ixDisc("move_path"), Uint8Array.of(7, 1, 0, 0, 0, 1, 2))));
+    const roles = monster.accounts!.map((a) => a.address);
+    expect(roles[2]).toBe(PROGRAMS.session);
+    expect(roles[5]).toBe(PROGRAMS.session);
   });
 
   it("act: skill slot and target, VRF accounts after the session token, the map layout last", async () => {
@@ -797,21 +809,40 @@ describe("route", () => {
   const tileCost = SHIPPED_TILE_COST;
   const base = { tiles, width: 5, height: 3, tileCost, taken: new Set<number>() };
 
-  it("finds the cheapest path around walls and through water", () => {
+  it("finds the cheapest path over the 8 neighbors, around walls and water", () => {
     const steps = route({ ...base, from: { x: 0, y: 0 }, goal: (x, y) => x === 4 && y === 0 })!;
-    // Around the wall through (2,2); its only way east is the water at (3,2), which costs 2.
-    expect(steps.at(-1)!.to).toEqual({ x: 4, y: 0 });
-    expect(steps.find((s) => s.to.x === 3 && s.to.y === 2)?.cost).toBe(2);
-    expect(steps.reduce((n, s) => n + s.cost, 0)).toBe(9);
+    // Diagonally around the wall through (2,2), past the water at (3,2).
+    expect(steps.map((s) => s.to)).toEqual([{ x: 1, y: 1 }, { x: 2, y: 2 }, { x: 3, y: 1 }, { x: 4, y: 0 }]);
+    expect(steps.reduce((n, s) => n + s.cost, 0)).toBe(4);
+    // With (3,1) taken the only way is the water, which costs 2.
+    const around = route({ ...base, taken: new Set([1 * MAP_MAX + 3]), from: { x: 0, y: 0 }, goal: (x, y) => x === 4 && y === 0 })!;
+    expect(around.find((s) => s.to.x === 3 && s.to.y === 2)?.cost).toBe(2);
   });
 
-  it("cuts a path to the action points and pads move args to 16", () => {
+  it("cuts a path to the action points and to 16 cells", () => {
     const steps = route({ ...base, from: { x: 0, y: 0 }, goal: (x, y) => x === 4 && y === 0 })!;
     const take = affordable(steps, 5, 2);
-    expect(take.reduce((n, s) => n + s.cost, 0)).toBeLessThanOrEqual(3);
-    const args = pathArgs(take);
-    expect(args.steps).toHaveLength(16);
-    expect(args.len).toBe(take.length);
+    expect(take.map((s) => s.to)).toEqual([{ x: 1, y: 1 }, { x: 2, y: 2 }, { x: 3, y: 1 }]);
+    const long = Array.from({ length: 20 }, () => ({ cost: 1, to: { x: 0, y: 0 } }));
+    expect(affordable(long, 99)).toHaveLength(16);
+  });
+
+  it("a path marked cell by cell", () => {
+    const from = { x: 0, y: 0 };
+    let path = extendPath(base, from, [], { x: 1, y: 1 }, 5)!;
+    expect(path.map((s) => s.to)).toEqual([{ x: 1, y: 1 }]);
+    // A far cell adds the cheapest way to it.
+    path = extendPath(base, from, path, { x: 3, y: 1 }, 5)!;
+    expect(path.map((s) => s.to)).toEqual([{ x: 1, y: 1 }, { x: 2, y: 2 }, { x: 3, y: 1 }]);
+    // Not past the action points, not into a wall, not onto the end again.
+    expect(extendPath(base, from, path, { x: 4, y: 0 }, 3)).toBeNull();
+    expect(extendPath(base, from, path, { x: 2, y: 1 }, 5)).toBeNull();
+    expect(extendPath(base, from, path, { x: 3, y: 1 }, 5)).toBeNull();
+    // A cell on the path cuts it back; the start empties it.
+    expect(extendPath(base, from, path, { x: 1, y: 1 }, 5)!.length).toBe(1);
+    expect(extendPath(base, from, path, from, 5)).toEqual([]);
+    // Water costs 2.
+    expect(extendPath(base, { x: 4, y: 2 }, [], { x: 3, y: 2 }, 5)![0]!.cost).toBe(2);
   });
 
   it("reachable stays within the action points and off taken cells", () => {

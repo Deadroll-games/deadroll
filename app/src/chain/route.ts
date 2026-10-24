@@ -1,45 +1,51 @@
-// Step paths for move_unit / monster_move, as tests/demo.test.ts `route` and `walk`: cheapest path
-// over passable cells not taken by a living unit or a closed chest, step costs from the Tileset
-// (`GameSession.tile_cost` by tile type, a cell byte's bits 7-3).
+// Paths for move_path (patch 13), as tests/demo.test.ts `route`: cells in order over the 8
+// neighbors (a diagonal is one step), passable cells not taken by a living unit or a closed chest,
+// step costs from the Tileset (`GameSession.tile_cost` by tile type, a cell byte's bits 7-3). The
+// chain checks the path itself (deadroll_mapcheck::walk); this only plans it.
 import { MAP_MAX, Tile, cellByte, cellKind, type Cell } from "./types";
 
-const WALL = cellByte(Tile.Wall);
-
-export const DIR = { N: 0, E: 1, S: 2, W: 3 } as const;
 export const MAX_PATH = 16;
-const DIRS: [number, number, number][] = [
-  [DIR.N, 0, -1],
-  [DIR.E, 1, 0],
-  [DIR.S, 0, 1],
-  [DIR.W, -1, 0],
+const WALL = cellByte(Tile.Wall);
+const DIRS: [number, number][] = [
+  [0, -1],
+  [1, -1],
+  [1, 0],
+  [1, 1],
+  [0, 1],
+  [-1, 1],
+  [-1, 0],
+  [-1, -1],
 ];
 
-export type Step = { dir: number; cost: number; to: Cell };
+/** One cell of a path and what stepping onto it costs. */
+export type Step = { cost: number; to: Cell };
 
-export const cheb = (a: Cell, b: Cell) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
-
-/**
- * Cheapest steps from `from` to the first cell where `goal` holds. `tileCost[kind]` is the AP cost
- * of a tile type (0 = blocked, `GameSession.tile_cost`).
- */
-export function route(opts: {
-  from: Cell;
-  goal: (x: number, y: number) => boolean;
+export type Ground = {
   tiles: Uint8Array;
   width: number;
   height: number;
-  tileCost: number[];
+  tileCost: ArrayLike<number>;
+  /** Cells held by a living unit (not the mover) or a closed chest, as `y * 32 + x`. */
   taken: Set<number>;
-}): Step[] | null {
-  const { from, goal, tiles, width, height, tileCost, taken } = opts;
-  const cost = (x: number, y: number) => {
-    if (x < 0 || y < 0 || x >= width || y >= height) return 0;
-    if (taken.has(y * MAP_MAX + x)) return 0;
-    return tileCost[cellKind(tiles[y * MAP_MAX + x] ?? WALL)] ?? 0;
-  };
+};
+
+export const cheb = (a: Cell, b: Cell) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
+/** `b` is one of the 8 neighbors of `a` (`deadroll_mapcheck::walk::adjacent`). */
+export const adjacent = (a: Cell, b: Cell) => cheb(a, b) === 1;
+
+/** Action points to step onto `(x, y)`, 0 = cannot. */
+export function costAt(g: Ground, x: number, y: number): number {
+  if (x < 0 || y < 0 || x >= g.width || y >= g.height) return 0;
+  if (g.taken.has(y * MAP_MAX + x)) return 0;
+  return g.tileCost[cellKind(g.tiles[y * MAP_MAX + x] ?? WALL)] ?? 0;
+}
+
+/** Cheapest steps from `from` to the first cell where `goal` holds. */
+export function route(opts: Ground & { from: Cell; goal: (x: number, y: number) => boolean }): Step[] | null {
+  const { from, goal } = opts;
   const start = from.y * MAP_MAX + from.x;
   const dist = new Map<number, number>([[start, 0]]);
-  const prev = new Map<number, [number, number, number]>();
+  const prev = new Map<number, [number, number]>();
   const done = new Set<number>();
   for (;;) {
     let best = -1;
@@ -51,19 +57,18 @@ export function route(opts: {
     if (goal(x, y)) {
       const steps: Step[] = [];
       for (let k = best; prev.has(k); k = prev.get(k)![0]) {
-        const [, dir, c] = prev.get(k)!;
-        steps.unshift({ dir, cost: c, to: { x: k % MAP_MAX, y: Math.floor(k / MAP_MAX) } });
+        steps.unshift({ cost: prev.get(k)![1], to: { x: k % MAP_MAX, y: Math.floor(k / MAP_MAX) } });
       }
       return steps;
     }
-    for (const [dir, dx, dy] of DIRS) {
-      const c = cost(x + dx, y + dy);
+    for (const [dx, dy] of DIRS) {
+      const c = costAt(opts, x + dx, y + dy);
       if (!c) continue;
       const k = (y + dy) * MAP_MAX + x + dx;
       const d = dist.get(best)! + c;
       if (!dist.has(k) || d < dist.get(k)!) {
         dist.set(k, d);
-        prev.set(k, [best, dir, c]);
+        prev.set(k, [best, c]);
       }
     }
   }
@@ -81,25 +86,35 @@ export function affordable(steps: Step[], ap: number, keep = 0): Step[] {
   return take;
 }
 
-/** `move_unit` / `monster_move` args: 16 direction bytes, zero padded, and the used length. */
-export function pathArgs(steps: Step[]): { steps: number[]; len: number } {
-  const dirs = steps.slice(0, MAX_PATH).map((s) => s.dir);
-  const len = dirs.length;
-  while (dirs.length < MAX_PATH) dirs.push(0);
-  return { steps: dirs, len };
+export const pathCost = (steps: Step[]) => steps.reduce((n, s) => n + s.cost, 0);
+
+/**
+ * A path built cell by cell (the player marks the cells): `to` next to the path's end is one more
+ * step; a farther cell appends the cheapest way there. Null when it cannot be added (blocked, out of
+ * action points, past MAX_PATH): the path stays as it was.
+ */
+export function extendPath(g: Ground, from: Cell, path: Step[], to: Cell, ap: number): Step[] | null {
+  const end = path.at(-1)?.to ?? from;
+  if (end.x === to.x && end.y === to.y) return null;
+  // A cell already on the path cuts it back there.
+  const back = path.findIndex((s) => s.to.x === to.x && s.to.y === to.y);
+  if (back >= 0) return path.slice(0, back + 1);
+  if (to.x === from.x && to.y === from.y) return [];
+  let more: Step[] | null;
+  if (adjacent(end, to)) {
+    const cost = costAt(g, to.x, to.y);
+    more = cost ? [{ cost, to }] : null;
+  } else {
+    more = route({ ...g, from: end, goal: (x, y) => x === to.x && y === to.y });
+  }
+  if (!more || more.length === 0) return null;
+  const next = [...path, ...more];
+  return next.length <= MAX_PATH && pathCost(next) <= ap ? next : null;
 }
 
 /** Cells reachable from `from` with at most `ap` action points (for the move highlight). */
-export function reachable(opts: {
-  from: Cell;
-  ap: number;
-  tiles: Uint8Array;
-  width: number;
-  height: number;
-  tileCost: number[];
-  taken: Set<number>;
-}): Cell[] {
-  const { from, ap, tiles, width, height, tileCost, taken } = opts;
+export function reachable(opts: Ground & { from: Cell; ap: number }): Cell[] {
+  const { from, ap } = opts;
   const dist = new Map<number, number>([[from.y * MAP_MAX + from.x, 0]]);
   const queue = [from.y * MAP_MAX + from.x];
   while (queue.length) {
@@ -107,13 +122,10 @@ export function reachable(opts: {
     const k = queue.shift()!;
     const x = k % MAP_MAX;
     const y = Math.floor(k / MAP_MAX);
-    for (const [, dx, dy] of DIRS) {
-      const nx = x + dx;
-      const ny = y + dy;
-      if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
-      const nk = ny * MAP_MAX + nx;
-      const c = taken.has(nk) ? 0 : (tileCost[cellKind(tiles[nk] ?? WALL)] ?? 0);
+    for (const [dx, dy] of DIRS) {
+      const c = costAt(opts, x + dx, y + dy);
       if (!c) continue;
+      const nk = (y + dy) * MAP_MAX + x + dx;
       const d = dist.get(k)! + c;
       if (d > ap || (dist.has(nk) && dist.get(nk)! <= d)) continue;
       dist.set(nk, d);

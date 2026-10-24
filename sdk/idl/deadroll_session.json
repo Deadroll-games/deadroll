@@ -1538,151 +1538,28 @@
       ]
     },
     {
-      "name": "monster_move",
+      "name": "move_path",
       "docs": [
-        "DM moves a monster along a path on that monster's turn."
+        "Patch 13: the actor moves `unit` (a player slot, or a monster of the DM) along `path`, the",
+        "cells in order (8 neighbors), on its turn; it spends action points, no rolls. Replaces",
+        "`move_unit` and `monster_move`."
       ],
       "discriminator": [
-        89,
-        217,
-        46,
-        212,
-        219,
-        241,
-        41,
-        78
-      ],
-      "accounts": [
-        {
-          "name": "signer",
-          "docs": [
-            "DM main wallet or the DM's session key; pays the VRF fee when the move triggers a",
-            "reactive skill."
-          ],
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "session",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  115,
-                  101,
-                  115,
-                  115,
-                  105,
-                  111,
-                  110
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "session.core.map",
-                "account": "GameSession"
-              }
-            ]
-          }
-        },
-        {
-          "name": "monsters",
-          "docs": [
-            "mutable `LazyAccount` would re-serialize the whole account on exit)."
-          ],
-          "writable": true
-        },
-        {
-          "name": "layout"
-        },
-        {
-          "name": "session_token",
-          "docs": [
-            "MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs."
-          ],
-          "optional": true
-        },
-        {
-          "name": "program_identity",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  105,
-                  100,
-                  101,
-                  110,
-                  116,
-                  105,
-                  116,
-                  121
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "oracle_queue",
-          "writable": true,
-          "address": "Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh"
-        },
-        {
-          "name": "vrf_program",
-          "address": "Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz"
-        },
-        {
-          "name": "slot_hashes",
-          "address": "SysvarS1otHashes111111111111111111111111111"
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        }
-      ],
-      "args": [
-        {
-          "name": "monster",
-          "type": "u8"
-        },
-        {
-          "name": "steps",
-          "type": {
-            "array": [
-              "u8",
-              16
-            ]
-          }
-        },
-        {
-          "name": "len",
-          "type": "u8"
-        }
-      ]
-    },
-    {
-      "name": "move_unit",
-      "docs": [
-        "Player moves along a path of grid steps on their turn."
-      ],
-      "discriminator": [
-        145,
+        158,
+        240,
+        177,
         126,
-        36,
-        232,
-        217,
-        195,
-        127,
-        23
+        150,
+        198,
+        158,
+        225
       ],
       "accounts": [
         {
           "name": "signer",
           "docs": [
-            "Main wallet or the participation's session key; pays the VRF fee when the move triggers a",
-            "monster's reactive skill (patch 6)."
+            "The actor: for a player its main wallet or its session key, for a monster the DM's main",
+            "wallet or the DM's session key. Pays the VRF fee when the move triggers a reactive skill."
           ],
           "writable": true,
           "signer": true
@@ -1714,44 +1591,18 @@
         },
         {
           "name": "participation",
+          "docs": [
+            "The moving player's `Participation`; none when a monster moves."
+          ],
           "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  112,
-                  97,
-                  114,
-                  116,
-                  105,
-                  99,
-                  105,
-                  112,
-                  97,
-                  116,
-                  105,
-                  111,
-                  110
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "session"
-              },
-              {
-                "kind": "account",
-                "path": "participation.core.character",
-                "account": "Participation"
-              }
-            ]
-          }
+          "optional": true
         },
         {
           "name": "monsters",
           "docs": [
-            "Read-only, never Borsh-decoded: owner and discriminator checked here, session in `Monsters`."
-          ]
+            "monster's move; a mutable `LazyAccount` would re-serialize the whole account on exit)."
+          ],
+          "writable": true
         },
         {
           "name": "layout"
@@ -1759,7 +1610,7 @@
         {
           "name": "session_token",
           "docs": [
-            "MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs."
+            "MagicBlock `SessionTokenV2` of the actor's session key; none when the main wallet signs."
           ],
           "optional": true
         },
@@ -1803,17 +1654,18 @@
       ],
       "args": [
         {
-          "name": "steps",
-          "type": {
-            "array": [
-              "u8",
-              16
-            ]
-          }
+          "name": "unit",
+          "type": "u8"
         },
         {
-          "name": "len",
-          "type": "u8"
+          "name": "path",
+          "type": {
+            "vec": {
+              "defined": {
+                "name": "Cell"
+              }
+            }
+          }
         }
       ]
     },
@@ -4073,6 +3925,16 @@
       "code": 6088,
       "name": "NotLockedHere",
       "msg": "The character is not locked in this party"
+    },
+    {
+      "code": 6089,
+      "name": "PathNotAdjacent",
+      "msg": "A cell of the path is not next to the one before it"
+    },
+    {
+      "code": 6090,
+      "name": "ActorMismatch",
+      "msg": "The unit, the participation and the signer do not match"
     }
   ],
   "types": [

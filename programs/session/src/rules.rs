@@ -23,11 +23,8 @@ pub const BALANCE: &BalanceConfig = &BalanceConfig::DEFAULT;
 
 /// Minimum party price: 0.01 SOL (docs/PARTY_AND_TURNS.md, section 3.1).
 pub const MIN_PRICE_LAMPORTS: u64 = 10_000_000;
-/// Max steps in one `move_unit` / `monster_move`.
-pub const MAX_PATH: usize = 16;
-
-/// Grid step: 0 = north (y - 1), 1 = east, 2 = south, 3 = west.
-pub const DIRECTIONS: u8 = 4;
+/// Most cells one `move_path` walks (`deadroll_mapcheck::walk`).
+pub use deadroll_mapcheck::walk::MAX_PATH;
 
 /// Action points per turn from speed (docs/CHARACTER.md, section 3.1).
 pub fn player_ap(race: Race, class: Class, dexterity: u16) -> u8 {

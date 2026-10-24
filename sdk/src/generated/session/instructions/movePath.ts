@@ -10,6 +10,8 @@ import {
   combineCodec,
   fixDecoderSize,
   fixEncoderSize,
+  getArrayDecoder,
+  getArrayEncoder,
   getBytesDecoder,
   getBytesEncoder,
   getStructDecoder,
@@ -22,9 +24,9 @@ import {
   type AccountMeta,
   type AccountSignerMeta,
   type Address,
-  type FixedSizeCodec,
-  type FixedSizeDecoder,
-  type FixedSizeEncoder,
+  type Codec,
+  type Decoder,
+  type Encoder,
   type Instruction,
   type InstructionWithAccounts,
   type InstructionWithData,
@@ -43,21 +45,26 @@ import {
 } from "@solana/program-client-core";
 import { findProgramIdentityPda } from "../pdas/index.js";
 import { DEADROLL_SESSION_PROGRAM_ADDRESS } from "../programs/index.js";
+import {
+  getCellDecoder,
+  getCellEncoder,
+  type Cell,
+  type CellArgs,
+} from "../types/index.js";
 
-export const MONSTER_MOVE_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Array([
-  89, 217, 46, 212, 219, 241, 41, 78,
+export const MOVE_PATH_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Array([
+  158, 240, 177, 126, 150, 198, 158, 225,
 ]);
 
-export function getMonsterMoveDiscriminatorBytes(): ReadonlyUint8Array {
-  return fixEncoderSize(getBytesEncoder(), 8).encode(
-    MONSTER_MOVE_DISCRIMINATOR,
-  );
+export function getMovePathDiscriminatorBytes(): ReadonlyUint8Array {
+  return fixEncoderSize(getBytesEncoder(), 8).encode(MOVE_PATH_DISCRIMINATOR);
 }
 
-export type MonsterMoveInstruction<
+export type MovePathInstruction<
   TProgram extends string = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
   TAccountSigner extends string | AccountMeta<string> = string,
   TAccountSession extends string | AccountMeta<string> = string,
+  TAccountParticipation extends string | AccountMeta<string> = string,
   TAccountMonsters extends string | AccountMeta<string> = string,
   TAccountLayout extends string | AccountMeta<string> = string,
   TAccountSessionToken extends string | AccountMeta<string> = string,
@@ -82,6 +89,9 @@ export type MonsterMoveInstruction<
       TAccountSession extends string
         ? WritableAccount<TAccountSession>
         : TAccountSession,
+      TAccountParticipation extends string
+        ? WritableAccount<TAccountParticipation>
+        : TAccountParticipation,
       TAccountMonsters extends string
         ? WritableAccount<TAccountMonsters>
         : TAccountMonsters,
@@ -110,53 +120,51 @@ export type MonsterMoveInstruction<
     ]
   >;
 
-export type MonsterMoveInstructionData = {
+export type MovePathInstructionData = {
   discriminator: ReadonlyUint8Array;
-  monster: number;
-  steps: ReadonlyUint8Array;
-  len: number;
+  unit: number;
+  path: Array<Cell>;
 };
 
-export type MonsterMoveInstructionDataArgs = {
-  monster: number;
-  steps: ReadonlyUint8Array;
-  len: number;
+export type MovePathInstructionDataArgs = {
+  unit: number;
+  path: Array<CellArgs>;
 };
 
-export function getMonsterMoveInstructionDataEncoder(): FixedSizeEncoder<MonsterMoveInstructionDataArgs> {
+export function getMovePathInstructionDataEncoder(): Encoder<MovePathInstructionDataArgs> {
   return transformEncoder(
     getStructEncoder([
       ["discriminator", fixEncoderSize(getBytesEncoder(), 8)],
-      ["monster", getU8Encoder()],
-      ["steps", fixEncoderSize(getBytesEncoder(), 16)],
-      ["len", getU8Encoder()],
+      ["unit", getU8Encoder()],
+      ["path", getArrayEncoder(getCellEncoder())],
     ]),
-    (value) => ({ ...value, discriminator: MONSTER_MOVE_DISCRIMINATOR }),
+    (value) => ({ ...value, discriminator: MOVE_PATH_DISCRIMINATOR }),
   );
 }
 
-export function getMonsterMoveInstructionDataDecoder(): FixedSizeDecoder<MonsterMoveInstructionData> {
+export function getMovePathInstructionDataDecoder(): Decoder<MovePathInstructionData> {
   return getStructDecoder([
     ["discriminator", fixDecoderSize(getBytesDecoder(), 8)],
-    ["monster", getU8Decoder()],
-    ["steps", fixDecoderSize(getBytesDecoder(), 16)],
-    ["len", getU8Decoder()],
+    ["unit", getU8Decoder()],
+    ["path", getArrayDecoder(getCellDecoder())],
   ]);
 }
 
-export function getMonsterMoveInstructionDataCodec(): FixedSizeCodec<
-  MonsterMoveInstructionDataArgs,
-  MonsterMoveInstructionData
+export function getMovePathInstructionDataCodec(): Codec<
+  MovePathInstructionDataArgs,
+  MovePathInstructionData
 > {
   return combineCodec(
-    getMonsterMoveInstructionDataEncoder(),
-    getMonsterMoveInstructionDataDecoder(),
+    getMovePathInstructionDataEncoder(),
+    getMovePathInstructionDataDecoder(),
   );
 }
 
-export type MonsterMoveAsyncInput<
+export type MovePathAsyncInput<
   TAccountSigner extends InstructionSignerInput = InstructionSignerInput,
   TAccountSession extends InstructionAccountInput = InstructionAccountInput,
+  TAccountParticipation extends InstructionAccountInput =
+    InstructionAccountInput,
   TAccountMonsters extends InstructionAccountInput = InstructionAccountInput,
   TAccountLayout extends InstructionAccountInput = InstructionAccountInput,
   TAccountSessionToken extends InstructionAccountInput =
@@ -170,29 +178,31 @@ export type MonsterMoveAsyncInput<
     InstructionAccountInput,
 > = {
   /**
-   * DM main wallet or the DM's session key; pays the VRF fee when the move triggers a
-   * reactive skill.
+   * The actor: for a player its main wallet or its session key, for a monster the DM's main
+   * wallet or the DM's session key. Pays the VRF fee when the move triggers a reactive skill.
    */
   signer: TAccountSigner;
   session: TAccountSession;
-  /** mutable `LazyAccount` would re-serialize the whole account on exit). */
+  /** The moving player's `Participation`; none when a monster moves. */
+  participation?: TAccountParticipation;
+  /** monster's move; a mutable `LazyAccount` would re-serialize the whole account on exit). */
   monsters: TAccountMonsters;
   layout: TAccountLayout;
-  /** MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs. */
+  /** MagicBlock `SessionTokenV2` of the actor's session key; none when the main wallet signs. */
   sessionToken?: TAccountSessionToken;
   programIdentity?: TAccountProgramIdentity;
   oracleQueue?: TAccountOracleQueue;
   vrfProgram?: TAccountVrfProgram;
   slotHashes?: TAccountSlotHashes;
   systemProgram?: TAccountSystemProgram;
-  monster: MonsterMoveInstructionDataArgs["monster"];
-  steps: MonsterMoveInstructionDataArgs["steps"];
-  len: MonsterMoveInstructionDataArgs["len"];
+  unit: MovePathInstructionDataArgs["unit"];
+  path: MovePathInstructionDataArgs["path"];
 };
 
-export async function getMonsterMoveInstructionAsync<
+export async function getMovePathInstructionAsync<
   TAccountSigner extends InstructionSignerInput,
   TAccountSession extends InstructionAccountInput,
+  TAccountParticipation extends InstructionAccountInput,
   TAccountMonsters extends InstructionAccountInput,
   TAccountLayout extends InstructionAccountInput,
   TAccountSessionToken extends InstructionAccountInput,
@@ -203,9 +213,10 @@ export async function getMonsterMoveInstructionAsync<
   TAccountSystemProgram extends InstructionAccountInput,
   TProgramAddress extends Address = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
 >(
-  input: MonsterMoveAsyncInput<
+  input: MovePathAsyncInput<
     TAccountSigner,
     TAccountSession,
+    TAccountParticipation,
     TAccountMonsters,
     TAccountLayout,
     TAccountSessionToken,
@@ -217,7 +228,7 @@ export async function getMonsterMoveInstructionAsync<
   >,
   config?: { programAddress?: TProgramAddress },
 ): Promise<
-  MonsterMoveInstruction<
+  MovePathInstruction<
     TProgramAddress,
     ResolvedInstructionAccountMeta<
       TAccountSigner,
@@ -226,6 +237,10 @@ export async function getMonsterMoveInstructionAsync<
     ResolvedInstructionAccountMeta<
       TAccountSession,
       InstructionAccountInputAddress<TAccountSession>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountParticipation,
+      InstructionAccountInputAddress<TAccountParticipation>
     >,
     ResolvedInstructionAccountMeta<
       TAccountMonsters,
@@ -273,6 +288,11 @@ export async function getMonsterMoveInstructionAsync<
     signer: { value: input.signer ?? null, isSigner: true, isWritable: true },
     session: {
       value: input.session ?? null,
+      isSigner: false,
+      isWritable: true,
+    },
+    participation: {
+      value: input.participation ?? null,
       isSigner: false,
       isWritable: true,
     },
@@ -348,6 +368,7 @@ export async function getMonsterMoveInstructionAsync<
     accounts: [
       getAccountMeta("signer", accounts.signer),
       getAccountMeta("session", accounts.session),
+      getAccountMeta("participation", accounts.participation),
       getAccountMeta("monsters", accounts.monsters),
       getAccountMeta("layout", accounts.layout),
       getAccountMeta("sessionToken", accounts.sessionToken),
@@ -357,11 +378,11 @@ export async function getMonsterMoveInstructionAsync<
       getAccountMeta("slotHashes", accounts.slotHashes),
       getAccountMeta("systemProgram", accounts.systemProgram),
     ],
-    data: getMonsterMoveInstructionDataEncoder().encode(
-      args as MonsterMoveInstructionDataArgs,
+    data: getMovePathInstructionDataEncoder().encode(
+      args as MovePathInstructionDataArgs,
     ),
     programAddress,
-  } as MonsterMoveInstruction<
+  } as MovePathInstruction<
     TProgramAddress,
     ResolvedInstructionAccountMeta<
       TAccountSigner,
@@ -370,6 +391,10 @@ export async function getMonsterMoveInstructionAsync<
     ResolvedInstructionAccountMeta<
       TAccountSession,
       InstructionAccountInputAddress<TAccountSession>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountParticipation,
+      InstructionAccountInputAddress<TAccountParticipation>
     >,
     ResolvedInstructionAccountMeta<
       TAccountMonsters,
@@ -406,9 +431,11 @@ export async function getMonsterMoveInstructionAsync<
   >);
 }
 
-export type MonsterMoveInput<
+export type MovePathInput<
   TAccountSigner extends InstructionSignerInput = InstructionSignerInput,
   TAccountSession extends InstructionAccountInput = InstructionAccountInput,
+  TAccountParticipation extends InstructionAccountInput =
+    InstructionAccountInput,
   TAccountMonsters extends InstructionAccountInput = InstructionAccountInput,
   TAccountLayout extends InstructionAccountInput = InstructionAccountInput,
   TAccountSessionToken extends InstructionAccountInput =
@@ -422,29 +449,31 @@ export type MonsterMoveInput<
     InstructionAccountInput,
 > = {
   /**
-   * DM main wallet or the DM's session key; pays the VRF fee when the move triggers a
-   * reactive skill.
+   * The actor: for a player its main wallet or its session key, for a monster the DM's main
+   * wallet or the DM's session key. Pays the VRF fee when the move triggers a reactive skill.
    */
   signer: TAccountSigner;
   session: TAccountSession;
-  /** mutable `LazyAccount` would re-serialize the whole account on exit). */
+  /** The moving player's `Participation`; none when a monster moves. */
+  participation?: TAccountParticipation;
+  /** monster's move; a mutable `LazyAccount` would re-serialize the whole account on exit). */
   monsters: TAccountMonsters;
   layout: TAccountLayout;
-  /** MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs. */
+  /** MagicBlock `SessionTokenV2` of the actor's session key; none when the main wallet signs. */
   sessionToken?: TAccountSessionToken;
   programIdentity: TAccountProgramIdentity;
   oracleQueue?: TAccountOracleQueue;
   vrfProgram?: TAccountVrfProgram;
   slotHashes?: TAccountSlotHashes;
   systemProgram?: TAccountSystemProgram;
-  monster: MonsterMoveInstructionDataArgs["monster"];
-  steps: MonsterMoveInstructionDataArgs["steps"];
-  len: MonsterMoveInstructionDataArgs["len"];
+  unit: MovePathInstructionDataArgs["unit"];
+  path: MovePathInstructionDataArgs["path"];
 };
 
-export function getMonsterMoveInstruction<
+export function getMovePathInstruction<
   TAccountSigner extends InstructionSignerInput,
   TAccountSession extends InstructionAccountInput,
+  TAccountParticipation extends InstructionAccountInput,
   TAccountMonsters extends InstructionAccountInput,
   TAccountLayout extends InstructionAccountInput,
   TAccountSessionToken extends InstructionAccountInput,
@@ -455,9 +484,10 @@ export function getMonsterMoveInstruction<
   TAccountSystemProgram extends InstructionAccountInput,
   TProgramAddress extends Address = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
 >(
-  input: MonsterMoveInput<
+  input: MovePathInput<
     TAccountSigner,
     TAccountSession,
+    TAccountParticipation,
     TAccountMonsters,
     TAccountLayout,
     TAccountSessionToken,
@@ -468,7 +498,7 @@ export function getMonsterMoveInstruction<
     TAccountSystemProgram
   >,
   config?: { programAddress?: TProgramAddress },
-): MonsterMoveInstruction<
+): MovePathInstruction<
   TProgramAddress,
   ResolvedInstructionAccountMeta<
     TAccountSigner,
@@ -477,6 +507,10 @@ export function getMonsterMoveInstruction<
   ResolvedInstructionAccountMeta<
     TAccountSession,
     InstructionAccountInputAddress<TAccountSession>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountParticipation,
+    InstructionAccountInputAddress<TAccountParticipation>
   >,
   ResolvedInstructionAccountMeta<
     TAccountMonsters,
@@ -523,6 +557,11 @@ export function getMonsterMoveInstruction<
     signer: { value: input.signer ?? null, isSigner: true, isWritable: true },
     session: {
       value: input.session ?? null,
+      isSigner: false,
+      isWritable: true,
+    },
+    participation: {
+      value: input.participation ?? null,
       isSigner: false,
       isWritable: true,
     },
@@ -593,6 +632,7 @@ export function getMonsterMoveInstruction<
     accounts: [
       getAccountMeta("signer", accounts.signer),
       getAccountMeta("session", accounts.session),
+      getAccountMeta("participation", accounts.participation),
       getAccountMeta("monsters", accounts.monsters),
       getAccountMeta("layout", accounts.layout),
       getAccountMeta("sessionToken", accounts.sessionToken),
@@ -602,11 +642,11 @@ export function getMonsterMoveInstruction<
       getAccountMeta("slotHashes", accounts.slotHashes),
       getAccountMeta("systemProgram", accounts.systemProgram),
     ],
-    data: getMonsterMoveInstructionDataEncoder().encode(
-      args as MonsterMoveInstructionDataArgs,
+    data: getMovePathInstructionDataEncoder().encode(
+      args as MovePathInstructionDataArgs,
     ),
     programAddress,
-  } as MonsterMoveInstruction<
+  } as MovePathInstruction<
     TProgramAddress,
     ResolvedInstructionAccountMeta<
       TAccountSigner,
@@ -615,6 +655,10 @@ export function getMonsterMoveInstruction<
     ResolvedInstructionAccountMeta<
       TAccountSession,
       InstructionAccountInputAddress<TAccountSession>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountParticipation,
+      InstructionAccountInputAddress<TAccountParticipation>
     >,
     ResolvedInstructionAccountMeta<
       TAccountMonsters,
@@ -651,46 +695,48 @@ export function getMonsterMoveInstruction<
   >);
 }
 
-export type ParsedMonsterMoveInstruction<
+export type ParsedMovePathInstruction<
   TProgram extends string = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
   TAccountMetas extends readonly AccountMeta[] = readonly AccountMeta[],
 > = {
   programAddress: Address<TProgram>;
   accounts: {
     /**
-     * DM main wallet or the DM's session key; pays the VRF fee when the move triggers a
-     * reactive skill.
+     * The actor: for a player its main wallet or its session key, for a monster the DM's main
+     * wallet or the DM's session key. Pays the VRF fee when the move triggers a reactive skill.
      */
     signer: TAccountMetas[0];
     session: TAccountMetas[1];
-    /** mutable `LazyAccount` would re-serialize the whole account on exit). */
-    monsters: TAccountMetas[2];
-    layout: TAccountMetas[3];
-    /** MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs. */
-    sessionToken?: TAccountMetas[4] | undefined;
-    programIdentity: TAccountMetas[5];
-    oracleQueue: TAccountMetas[6];
-    vrfProgram: TAccountMetas[7];
-    slotHashes: TAccountMetas[8];
-    systemProgram: TAccountMetas[9];
+    /** The moving player's `Participation`; none when a monster moves. */
+    participation?: TAccountMetas[2] | undefined;
+    /** monster's move; a mutable `LazyAccount` would re-serialize the whole account on exit). */
+    monsters: TAccountMetas[3];
+    layout: TAccountMetas[4];
+    /** MagicBlock `SessionTokenV2` of the actor's session key; none when the main wallet signs. */
+    sessionToken?: TAccountMetas[5] | undefined;
+    programIdentity: TAccountMetas[6];
+    oracleQueue: TAccountMetas[7];
+    vrfProgram: TAccountMetas[8];
+    slotHashes: TAccountMetas[9];
+    systemProgram: TAccountMetas[10];
   };
-  data: MonsterMoveInstructionData;
+  data: MovePathInstructionData;
 };
 
-export function parseMonsterMoveInstruction<
+export function parseMovePathInstruction<
   TProgram extends string,
   TAccountMetas extends readonly AccountMeta[],
 >(
   instruction: Instruction<TProgram> &
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
-): ParsedMonsterMoveInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 10) {
+): ParsedMovePathInstruction<TProgram, TAccountMetas> {
+  if (instruction.accounts.length < 11) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 10,
+        expectedAccountMetas: 11,
       },
     );
   }
@@ -711,6 +757,7 @@ export function parseMonsterMoveInstruction<
     accounts: {
       signer: getNextAccount(),
       session: getNextAccount(),
+      participation: getNextOptionalAccount(),
       monsters: getNextAccount(),
       layout: getNextAccount(),
       sessionToken: getNextOptionalAccount(),
@@ -720,6 +767,6 @@ export function parseMonsterMoveInstruction<
       slotHashes: getNextAccount(),
       systemProgram: getNextAccount(),
     },
-    data: getMonsterMoveInstructionDataDecoder().decode(instruction.data),
+    data: getMovePathInstructionDataDecoder().decode(instruction.data),
   };
 }

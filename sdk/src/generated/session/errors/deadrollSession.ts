@@ -192,8 +192,13 @@ export const DEADROLL_SESSION_ERROR__TOO_MANY_PENDING_PARTIES = 0x17c6; // 6086
 export const DEADROLL_SESSION_ERROR__INVALID_CACHE_SESSIONS = 0x17c7; // 6087
 /** NotLockedHere: The character is not locked in this party */
 export const DEADROLL_SESSION_ERROR__NOT_LOCKED_HERE = 0x17c8; // 6088
+/** PathNotAdjacent: A cell of the path is not next to the one before it */
+export const DEADROLL_SESSION_ERROR__PATH_NOT_ADJACENT = 0x17c9; // 6089
+/** ActorMismatch: The unit, the participation and the signer do not match */
+export const DEADROLL_SESSION_ERROR__ACTOR_MISMATCH = 0x17ca; // 6090
 
 export type DeadrollSessionError =
+  | typeof DEADROLL_SESSION_ERROR__ACTOR_MISMATCH
   | typeof DEADROLL_SESSION_ERROR__ALLY_ACCOUNT_MISSING
   | typeof DEADROLL_SESSION_ERROR__ALREADY_ACTED
   | typeof DEADROLL_SESSION_ERROR__ALREADY_CLAIMED
@@ -261,6 +266,7 @@ export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__PARTICIPATION_MISSING
   | typeof DEADROLL_SESSION_ERROR__PARTY_ENDED
   | typeof DEADROLL_SESSION_ERROR__PARTY_FULL
+  | typeof DEADROLL_SESSION_ERROR__PATH_NOT_ADJACENT
   | typeof DEADROLL_SESSION_ERROR__PRICE_NOT_COLLECTED
   | typeof DEADROLL_SESSION_ERROR__PRICE_TOO_LOW
   | typeof DEADROLL_SESSION_ERROR__REACTIVE_ACCOUNTS_MISSING
@@ -288,6 +294,7 @@ let deadrollSessionErrorMessages:
   Record<DeadrollSessionError, string> | undefined;
 if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !== "production") {
   deadrollSessionErrorMessages = {
+    [DEADROLL_SESSION_ERROR__ACTOR_MISMATCH]: `The unit, the participation and the signer do not match`,
     [DEADROLL_SESSION_ERROR__ALLY_ACCOUNT_MISSING]: `A heal or buff on another ally needs that ally's participation`,
     [DEADROLL_SESSION_ERROR__ALREADY_ACTED]: `Only one attack or active skill per turn`,
     [DEADROLL_SESSION_ERROR__ALREADY_CLAIMED]: `Escrow is already claimed`,
@@ -355,6 +362,7 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__PARTICIPATION_MISSING]: `Participation account is required on a player's turn`,
     [DEADROLL_SESSION_ERROR__PARTY_ENDED]: `The party is over: its session key can no longer be set`,
     [DEADROLL_SESSION_ERROR__PARTY_FULL]: `Party is full`,
+    [DEADROLL_SESSION_ERROR__PATH_NOT_ADJACENT]: `A cell of the path is not next to the one before it`,
     [DEADROLL_SESSION_ERROR__PRICE_NOT_COLLECTED]: `Party price is not collected yet`,
     [DEADROLL_SESSION_ERROR__PRICE_TOO_LOW]: `Party price is below the minimum`,
     [DEADROLL_SESSION_ERROR__REACTIVE_ACCOUNTS_MISSING]: `A reactive skill triggers here: the VRF accounts and the payer are required`,

@@ -38,8 +38,7 @@ import {
   freezeTombstoneIx,
   joinSessionIx,
   monsterActIx,
-  monsterMoveIx,
-  moveIx,
+  movePathIx,
   openSessionIx,
   setSessionKeyIx,
   partyAccountsOf,
@@ -277,7 +276,7 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
             const steps = route({ from: pos, goal: (x, y) => cheb({ x, y }, m) === 1, tiles, width: s.width, height: s.height, tileCost: tileCost(party), taken: taken(party, unit) });
             const take = steps ? affordable(steps, ap, 2) : [];
             if (take.length) {
-              await send(pl.key, [await moveIx(pl.actor, acc.session, pl.character, s.layout, take)]);
+              await send(pl.key, [await movePathIx(pl.actor, acc.session, s.layout, { kind: "player", slot: unit, character: pl.character }, take)]);
               ap -= take.reduce((n, st) => n + st.cost, 0);
             }
           }
@@ -308,7 +307,7 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
             const steps = route({ from: m, goal: (x, y) => cheb({ x, y }, target) === 1, tiles, width: s.width, height: s.height, tileCost: tileCost(party), taken: taken(party, unit) });
             const take = steps ? affordable(steps, ap, 2) : [];
             if (take.length) {
-              await send(dmKey, [await monsterMoveIx(dmActor, acc.session, s.layout, mi, take)]);
+              await send(dmKey, [await movePathIx(dmActor, acc.session, s.layout, { kind: "monster", index: mi }, take)]);
               ap = await afterMonsterMove(acc.session, tiles, mi, oracle);
             }
           }
@@ -466,7 +465,7 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
             const steps = route({ from: m, goal: (x, y) => cheb({ x, y }, target) === 1, tiles, width: s.width, height: s.height, tileCost: tileCost(party), taken: taken(party, unit) });
             const take = steps ? affordable(steps, ap, 2) : [];
             if (take.length) {
-              await send(dmKey, [await monsterMoveIx(dmActor, acc.session, s.layout, mi, take)]);
+              await send(dmKey, [await movePathIx(dmActor, acc.session, s.layout, { kind: "monster", index: mi }, take)]);
               ap = await afterMonsterMove(acc.session, tiles, mi, oracle);
             }
           }
@@ -583,7 +582,7 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
             const steps = route({ from: m, goal: (x, y) => cheb({ x, y }, target) === 1, tiles, width: s.width, height: s.height, tileCost: tileCost(party), taken: taken(party, unit) });
             const take = steps ? affordable(steps, ap, 2) : [];
             if (take.length) {
-              await send(dmKey, [await monsterMoveIx(dmActor, acc.session, s.layout, mi, take)]);
+              await send(dmKey, [await movePathIx(dmActor, acc.session, s.layout, { kind: "monster", index: mi }, take)]);
               ap = await afterMonsterMove(acc.session, tiles, mi, oracle);
             }
           }

@@ -230,6 +230,8 @@ export const PROGRAM_ERRORS = {
     6086: ["TooManyPendingParties", "Too many parties wait for this character's rewards: claim one, or wait for its deadline"],
     6087: ["InvalidCacheSessions", "The remaining accounts are not the GameSession of each open reward cache entry, in entry order"],
     6088: ["NotLockedHere", "The character is not locked in this party"],
+    6089: ["PathNotAdjacent", "A cell of the path is not next to the one before it"],
+    6090: ["ActorMismatch", "The unit, the participation and the signer do not match"],
   },
   city: {
     6000: ["Unauthorized", "Caller is not authorized for this instruction"],

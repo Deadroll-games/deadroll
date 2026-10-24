@@ -9,6 +9,7 @@ pub mod loot;
 pub mod path;
 pub mod roster;
 pub mod tiles;
+pub mod walk;
 
 use deadroll_skillcheck::{check_monster_selection, monster::RECORDS_MAX, SkillError};
 use deadroll_types::{

@@ -161,10 +161,29 @@ async function rejects(promise: Promise<unknown>, code: string): Promise<void> {
   assert.fail(`expected ${code}, transaction succeeded`);
 }
 
-function path(steps: number[]): [number[], number] {
-  const padded = [...steps.slice(0, MAX_PATH)];
-  while (padded.length < MAX_PATH) padded.push(0);
-  return [padded, steps.length];
+const DELTA: [number, number][] = [
+  [0, -1],
+  [1, 0],
+  [0, 1],
+  [-1, 0],
+  [1, -1],
+  [1, 1],
+  [-1, 1],
+  [-1, -1],
+];
+
+type Cell = { x: number; y: number };
+
+/** Patch 13: direction steps from `start` as the cells of a move_path (u8, so off the map wraps). */
+function cellsOf(start: Cell, steps: number[]): Cell[] {
+  const out: Cell[] = [];
+  let at = start;
+  for (const d of steps) {
+    const [dx, dy] = DELTA[d];
+    at = { x: (at.x + dx) & 0xff, y: (at.y + dy) & 0xff };
+    out.push(at);
+  }
+  return out;
 }
 
 /** Roll `index` of a VRF value, exactly `deadroll_combat::VrfRoll`: sha256(seed ‖ index u32 LE). */
@@ -1153,33 +1172,29 @@ class Party {
     }
     assert.fail(`unit ${unit} never got a turn`);
   }
-  move(who: number, signer: Keypair, steps: number[], token: PublicKey | null = null) {
-    const [padded, len] = path(steps);
-    return program.methods
-      .moveUnit(padded, len)
-      .accountsStrict({
-        signer: signer.publicKey,
-        session: this.acc.session,
-        participation: this.players[who].participation,
-        monsters: this.acc.monsters,
-        layout: this.fixture.layout,
-        sessionToken: token,
-        // Patch 6: stepping next to a monster can trigger its reactive skill (a VRF roll).
-        ...vrfAccounts,
-      })
-      .signers([signer])
-      .rpc();
+  /** Player `who` walks the direction `steps` from where it stands (one move_path). */
+  async move(who: number, signer: Keypair, steps: number[], token: PublicKey | null = null) {
+    const p = await this.part(who);
+    const cells = cellsOf({ x: p.core.x, y: p.core.y }, steps);
+    return this.movePath(signer, who, cells, this.players[who].participation, token);
   }
-  monsterMove(signer: Keypair, monster: number, steps: number[], token: PublicKey | null = null) {
-    const [padded, len] = path(steps);
+  /** The DM walks `monster` along the direction `steps` (one move_path). */
+  async monsterMove(signer: Keypair, monster: number, steps: number[], token: PublicKey | null = null) {
+    const m = (await this.monsters()).core.monsters[monster];
+    return this.movePath(signer, MONSTER_BASE + monster, cellsOf({ x: m.x, y: m.y }, steps), null, token);
+  }
+  /** Patch 13: move_path as sent: the unit, the cells, the participation of a moving player. */
+  movePath(signer: Keypair, unit: number, cells: Cell[], participation: PublicKey | null, token: PublicKey | null = null) {
     return program.methods
-      .monsterMove(monster, padded, len)
+      .movePath(unit, cells)
       .accountsStrict({
         signer: signer.publicKey,
         session: this.acc.session,
+        participation,
         monsters: this.acc.monsters,
         layout: this.fixture.layout,
         sessionToken: token,
+        // Stepping next to an enemy can trigger its reactive skill (a VRF roll).
         ...vrfAccounts,
       })
       .signers([signer])
@@ -1706,6 +1721,33 @@ describe("deadroll_session: lobby, auth and movement on the demo map", { skip: S
     const p = await party.part(0);
     assert.deepEqual([p.core.x, p.core.y, p.core.actionPoints], [1, 2, p.maxAp - 1]);
   });
+
+  it("move_path (patch 13): cells in order, diagonals, the actor and the unit", async () => {
+    const [p0, p1] = party.players;
+    const key = p0.actor;
+    const at = await party.part(0);
+    const here = { x: at.core.x, y: at.core.y };
+    const move = (cells: Cell[], signer = key, unit = 0, part: PublicKey | null = p0.participation, token: PublicKey | null = p0Token) =>
+      party.movePath(signer, unit, cells, part, token);
+    await rejects(move([]), "InvalidPathLength");
+    await rejects(move(cellsOf(here, new Array(MAX_PATH + 1).fill(E).map((d, i) => (i % 2 ? W : d)))), "InvalidPathLength");
+    await rejects(move([{ x: here.x + 2, y: here.y }]), "PathNotAdjacent");
+    await rejects(move([here]), "PathNotAdjacent");
+    await rejects(move([{ x: here.x, y: here.y + 1 }, { x: here.x, y: here.y + 3 }]), "PathNotAdjacent");
+    // A player unit with another player's participation, or with none; a monster unit with one.
+    await rejects(move([{ x: here.x, y: here.y + 1 }], p1.wallet, 0, p1.participation, null), "ActorMismatch");
+    await rejects(move([{ x: here.x, y: here.y + 1 }], party.dm, 0, null, null), "ActorMismatch");
+    await rejects(move([{ x: here.x, y: here.y + 1 }], p0.wallet, MONSTER_BASE, p0.participation, null), "ActorMismatch");
+    // A player's wallet or key never moves a monster: the DM's authority.
+    await rejects(move([{ x: 5, y: 5 }], p0.wallet, MONSTER_BASE, null, null), "Unauthorized");
+    // One diagonal step costs one action point.
+    await move([{ x: here.x + 1, y: here.y + 1 }]);
+    const p = await party.part(0);
+    assert.deepEqual([p.core.x, p.core.y, p.core.actionPoints], [here.x + 1, here.y + 1, at.core.actionPoints - 1]);
+    assert.deepEqual((await party.state()).playerPos[0], { x: here.x + 1, y: here.y + 1 });
+    // Back, so the tests after this one find the player where they expect it.
+    await move([here]);
+  });
 });
 
 describe("deadroll_session: a session key for one party (patch 10)", { skip: SKIP_PARTY }, () => {
@@ -1961,6 +2003,8 @@ describe("deadroll_session: combat, death, victory and payouts", { skip: SKIP_PA
     const wolfTurn = s.core.turnOrder[s.core.turnIndex] - MONSTER_BASE;
     // A monster's turn starts first too (no participation needed).
     await rejects(party.monsterMove(party.dm, wolfTurn, [S]), "TurnNotStarted");
+    // Patch 13: a monster that is not this turn's.
+    await rejects(party.monsterMove(party.dm, (wolfTurn + 1) % 2, [S]), "NotYourTurn");
     await rejects(party.monsterAct(party.dm, wolfTurn, 0), "TurnNotStarted");
     await rejects(party.endTurn(party.dm, null), "TurnNotStarted");
     await rejects(party.startTurn(0), "NotYourTurn");
@@ -3610,5 +3654,34 @@ describe("deadroll_session: at most 3 parties wait for one character's rewards (
     const again = await y.join(0, pl.wallet, PRICE);
     assert.equal((await eventOf(again, "playerJoined")).cacheBurned, 0, "nothing burned this time");
     assert.ok((await y.entry(0)).status.open !== undefined);
+  });
+});
+
+describe("deadroll_session: what a move_path costs (patch 13)", { skip: SKIP_PARTY }, () => {
+  it("measures the longest walks of a player and of a wolf, and one cell of each", async () => {
+    // The wolves away from the rows the walks take, so no reactive skill cuts them short.
+    const roster = DEMO_SPAWNS.map((x, i) => (i === 0 ? { ...x, x: 9, y: 8 } : i === 1 ? { ...x, x: 10, y: 9 } : x));
+    const party = await Party.create(["warrior", "mage"], { roster });
+    await party.startAll();
+    const cu: string[] = [];
+    const walk = async (label: string, sig: string, cells: number) => cu.push(`${label} ${cells} cells: ${await unitsOf(sig)} CU`);
+    for (const who of [0, 1]) {
+      await party.skipTo(who);
+      const p = await party.part(who);
+      const ap = who === 0 ? p.maxAp : 1;
+      // Player 0 along row 1, player 1 one cell down.
+      const steps = who === 0 ? new Array(ap).fill(E) : [S];
+      await walk(`player`, await party.move(who, party.players[who].wallet, steps), steps.length);
+      const after = await party.part(who);
+      assert.equal(after.core.actionPoints, p.core.actionPoints - steps.length);
+    }
+    for (const wolf of [0, 1]) {
+      await party.skipTo(MONSTER_BASE + wolf);
+      const m = (await party.monsters()).core.monsters[wolf];
+      const steps = wolf === 0 ? new Array(m.actionPoints).fill(W) : [S];
+      await walk(`wolf`, await party.monsterMove(party.dm, wolf, steps), steps.length);
+      assert.equal((await party.monsters()).core.monsters[wolf].actionPoints, m.actionPoints - steps.length);
+    }
+    console.log(`    CU, move_path: ${cu.join("; ")}`);
   });
 });

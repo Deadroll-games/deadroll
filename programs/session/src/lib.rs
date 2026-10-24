@@ -24,8 +24,8 @@ pub mod vrf;
 
 use deadroll_character::state::MAP_SKILLS;
 use deadroll_types::BagLayout;
+use deadroll_types::Cell;
 use instructions::*;
-use rules::MAX_PATH;
 
 declare_id!("3gzfih2WaBgXcYZ57jWokmZM3FDE6QHX5y4R9EvKZoNJ");
 
@@ -75,19 +75,11 @@ pub mod deadroll_session {
         start_turn::handler(ctx)
     }
 
-    /// Player moves along a path of grid steps on their turn.
-    pub fn move_unit(ctx: Context<MoveUnit>, steps: [u8; MAX_PATH], len: u8) -> Result<()> {
-        move_unit::handler(ctx, steps, len)
-    }
-
-    /// DM moves a monster along a path on that monster's turn.
-    pub fn monster_move(
-        ctx: Context<MonsterMove>,
-        monster: u8,
-        steps: [u8; MAX_PATH],
-        len: u8,
-    ) -> Result<()> {
-        monster_move::handler(ctx, monster, steps, len)
+    /// Patch 13: the actor moves `unit` (a player slot, or a monster of the DM) along `path`, the
+    /// cells in order (8 neighbors), on its turn; it spends action points, no rolls. Replaces
+    /// `move_unit` and `monster_move`.
+    pub fn move_path(ctx: Context<MovePath>, unit: u8, path: Vec<Cell>) -> Result<()> {
+        move_path::handler(ctx, unit, path)
     }
 
     /// Ends the current unit's turn and starts the next living unit's.
