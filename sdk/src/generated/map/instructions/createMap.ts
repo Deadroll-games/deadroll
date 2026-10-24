@@ -88,6 +88,7 @@ export type CreateMapInstructionData = {
   width: number;
   height: number;
   tier: number;
+  minPlayers: number;
 };
 
 export type CreateMapInstructionDataArgs = {
@@ -95,6 +96,7 @@ export type CreateMapInstructionDataArgs = {
   width: number;
   height: number;
   tier: number;
+  minPlayers: number;
 };
 
 export function getCreateMapInstructionDataEncoder(): FixedSizeEncoder<CreateMapInstructionDataArgs> {
@@ -105,6 +107,7 @@ export function getCreateMapInstructionDataEncoder(): FixedSizeEncoder<CreateMap
       ["width", getU8Encoder()],
       ["height", getU8Encoder()],
       ["tier", getU8Encoder()],
+      ["minPlayers", getU8Encoder()],
     ]),
     (value) => ({ ...value, discriminator: CREATE_MAP_DISCRIMINATOR }),
   );
@@ -117,6 +120,7 @@ export function getCreateMapInstructionDataDecoder(): FixedSizeDecoder<CreateMap
     ["width", getU8Decoder()],
     ["height", getU8Decoder()],
     ["tier", getU8Decoder()],
+    ["minPlayers", getU8Decoder()],
   ]);
 }
 
@@ -145,6 +149,7 @@ export type CreateMapAsyncInput<
   width: CreateMapInstructionDataArgs["width"];
   height: CreateMapInstructionDataArgs["height"];
   tier: CreateMapInstructionDataArgs["tier"];
+  minPlayers: CreateMapInstructionDataArgs["minPlayers"];
 };
 
 export async function getCreateMapInstructionAsync<
@@ -280,6 +285,7 @@ export type CreateMapInput<
   width: CreateMapInstructionDataArgs["width"];
   height: CreateMapInstructionDataArgs["height"];
   tier: CreateMapInstructionDataArgs["tier"];
+  minPlayers: CreateMapInstructionDataArgs["minPlayers"];
 };
 
 export function getCreateMapInstruction<

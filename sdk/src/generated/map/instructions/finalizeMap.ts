@@ -62,6 +62,8 @@ export type FinalizeMapInstruction<
     "3uJyWiz7NeVekP4w1iZkKxKnJ5pMbxC6ciz7kxN3MZtM",
   TAccountMonsterSkills extends string | AccountMeta<string> =
     "NQNEuKDUZhACnTJ9sD3dW49BoiPtJPatp6bpY61r81p",
+  TAccountRewards extends string | AccountMeta<string> =
+    "FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK",
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
 > = Instruction<TProgram> &
   InstructionWithData<ReadonlyUint8Array> &
@@ -80,6 +82,9 @@ export type FinalizeMapInstruction<
       TAccountMonsterSkills extends string
         ? ReadonlyAccount<TAccountMonsterSkills>
         : TAccountMonsterSkills,
+      TAccountRewards extends string
+        ? ReadonlyAccount<TAccountRewards>
+        : TAccountRewards,
       ...TRemainingAccounts,
     ]
   >;
@@ -127,6 +132,7 @@ export type FinalizeMapAsyncInput<
   TAccountBestiary extends InstructionAccountInput = InstructionAccountInput,
   TAccountMonsterSkills extends InstructionAccountInput =
     InstructionAccountInput,
+  TAccountRewards extends InstructionAccountInput = InstructionAccountInput,
 > = {
   dm: TAccountDm;
   map: TAccountMap;
@@ -134,6 +140,7 @@ export type FinalizeMapAsyncInput<
   /** spawns, read in place by `deadroll_registry::state::view`. */
   bestiary?: TAccountBestiary;
   monsterSkills?: TAccountMonsterSkills;
+  rewards?: TAccountRewards;
   secretsRoot: FinalizeMapInstructionDataArgs["secretsRoot"];
 };
 
@@ -143,6 +150,7 @@ export async function getFinalizeMapInstructionAsync<
   TAccountLayout extends InstructionAccountInput,
   TAccountBestiary extends InstructionAccountInput,
   TAccountMonsterSkills extends InstructionAccountInput,
+  TAccountRewards extends InstructionAccountInput,
   TProgramAddress extends Address = typeof DEADROLL_MAP_PROGRAM_ADDRESS,
 >(
   input: FinalizeMapAsyncInput<
@@ -150,7 +158,8 @@ export async function getFinalizeMapInstructionAsync<
     TAccountMap,
     TAccountLayout,
     TAccountBestiary,
-    TAccountMonsterSkills
+    TAccountMonsterSkills,
+    TAccountRewards
   >,
   config?: { programAddress?: TProgramAddress },
 ): Promise<
@@ -175,6 +184,10 @@ export async function getFinalizeMapInstructionAsync<
     ResolvedInstructionAccountMeta<
       TAccountMonsterSkills,
       InstructionAccountInputAddress<TAccountMonsterSkills>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountRewards,
+      InstructionAccountInputAddress<TAccountRewards>
     >
   >
 > {
@@ -196,6 +209,11 @@ export async function getFinalizeMapInstructionAsync<
     },
     monsterSkills: {
       value: input.monsterSkills ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    rewards: {
+      value: input.rewards ?? null,
       isSigner: false,
       isWritable: false,
     },
@@ -228,6 +246,10 @@ export async function getFinalizeMapInstructionAsync<
     accounts.monsterSkills.value =
       "NQNEuKDUZhACnTJ9sD3dW49BoiPtJPatp6bpY61r81p" as Address<"NQNEuKDUZhACnTJ9sD3dW49BoiPtJPatp6bpY61r81p">;
   }
+  if (!accounts.rewards.value) {
+    accounts.rewards.value =
+      "FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK" as Address<"FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK">;
+  }
 
   return Object.freeze({
     accounts: [
@@ -236,6 +258,7 @@ export async function getFinalizeMapInstructionAsync<
       getAccountMeta("layout", accounts.layout),
       getAccountMeta("bestiary", accounts.bestiary),
       getAccountMeta("monsterSkills", accounts.monsterSkills),
+      getAccountMeta("rewards", accounts.rewards),
     ],
     data: getFinalizeMapInstructionDataEncoder().encode(
       args as FinalizeMapInstructionDataArgs,
@@ -262,6 +285,10 @@ export async function getFinalizeMapInstructionAsync<
     ResolvedInstructionAccountMeta<
       TAccountMonsterSkills,
       InstructionAccountInputAddress<TAccountMonsterSkills>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountRewards,
+      InstructionAccountInputAddress<TAccountRewards>
     >
   >);
 }
@@ -273,6 +300,7 @@ export type FinalizeMapInput<
   TAccountBestiary extends InstructionAccountInput = InstructionAccountInput,
   TAccountMonsterSkills extends InstructionAccountInput =
     InstructionAccountInput,
+  TAccountRewards extends InstructionAccountInput = InstructionAccountInput,
 > = {
   dm: TAccountDm;
   map: TAccountMap;
@@ -280,6 +308,7 @@ export type FinalizeMapInput<
   /** spawns, read in place by `deadroll_registry::state::view`. */
   bestiary?: TAccountBestiary;
   monsterSkills?: TAccountMonsterSkills;
+  rewards?: TAccountRewards;
   secretsRoot: FinalizeMapInstructionDataArgs["secretsRoot"];
 };
 
@@ -289,6 +318,7 @@ export function getFinalizeMapInstruction<
   TAccountLayout extends InstructionAccountInput,
   TAccountBestiary extends InstructionAccountInput,
   TAccountMonsterSkills extends InstructionAccountInput,
+  TAccountRewards extends InstructionAccountInput,
   TProgramAddress extends Address = typeof DEADROLL_MAP_PROGRAM_ADDRESS,
 >(
   input: FinalizeMapInput<
@@ -296,7 +326,8 @@ export function getFinalizeMapInstruction<
     TAccountMap,
     TAccountLayout,
     TAccountBestiary,
-    TAccountMonsterSkills
+    TAccountMonsterSkills,
+    TAccountRewards
   >,
   config?: { programAddress?: TProgramAddress },
 ): FinalizeMapInstruction<
@@ -320,6 +351,10 @@ export function getFinalizeMapInstruction<
   ResolvedInstructionAccountMeta<
     TAccountMonsterSkills,
     InstructionAccountInputAddress<TAccountMonsterSkills>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountRewards,
+    InstructionAccountInputAddress<TAccountRewards>
   >
 > {
   // Program address.
@@ -343,6 +378,11 @@ export function getFinalizeMapInstruction<
       isSigner: false,
       isWritable: false,
     },
+    rewards: {
+      value: input.rewards ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
   };
   const accounts = originalAccounts as Record<
     keyof typeof originalAccounts,
@@ -361,6 +401,10 @@ export function getFinalizeMapInstruction<
     accounts.monsterSkills.value =
       "NQNEuKDUZhACnTJ9sD3dW49BoiPtJPatp6bpY61r81p" as Address<"NQNEuKDUZhACnTJ9sD3dW49BoiPtJPatp6bpY61r81p">;
   }
+  if (!accounts.rewards.value) {
+    accounts.rewards.value =
+      "FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK" as Address<"FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK">;
+  }
 
   return Object.freeze({
     accounts: [
@@ -369,6 +413,7 @@ export function getFinalizeMapInstruction<
       getAccountMeta("layout", accounts.layout),
       getAccountMeta("bestiary", accounts.bestiary),
       getAccountMeta("monsterSkills", accounts.monsterSkills),
+      getAccountMeta("rewards", accounts.rewards),
     ],
     data: getFinalizeMapInstructionDataEncoder().encode(
       args as FinalizeMapInstructionDataArgs,
@@ -395,6 +440,10 @@ export function getFinalizeMapInstruction<
     ResolvedInstructionAccountMeta<
       TAccountMonsterSkills,
       InstructionAccountInputAddress<TAccountMonsterSkills>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountRewards,
+      InstructionAccountInputAddress<TAccountRewards>
     >
   >);
 }
@@ -411,6 +460,7 @@ export type ParsedFinalizeMapInstruction<
     /** spawns, read in place by `deadroll_registry::state::view`. */
     bestiary: TAccountMetas[3];
     monsterSkills: TAccountMetas[4];
+    rewards: TAccountMetas[5];
   };
   data: FinalizeMapInstructionData;
 };
@@ -423,12 +473,12 @@ export function parseFinalizeMapInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
 ): ParsedFinalizeMapInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 5) {
+  if (instruction.accounts.length < 6) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 5,
+        expectedAccountMetas: 6,
       },
     );
   }
@@ -446,6 +496,7 @@ export function parseFinalizeMapInstruction<
       layout: getNextAccount(),
       bestiary: getNextAccount(),
       monsterSkills: getNextAccount(),
+      rewards: getNextAccount(),
     },
     data: getFinalizeMapInstructionDataDecoder().decode(instruction.data),
   };

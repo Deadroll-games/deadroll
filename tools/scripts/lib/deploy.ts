@@ -24,7 +24,7 @@ import {
   type KeyPairSigner,
 } from "@solana/kit";
 import { PROGRAM_CRATES, PROGRAMS as SDK_PROGRAMS, type ProgramName } from "@deadroll/sdk";
-import { MapStatus, findLayoutPda, findMapPda, getCreateMapInstruction, getFinalizeMapInstruction, getMapDecoder, getWriteLayoutInstruction, getWriteSpawnsInstruction } from "@deadroll/sdk/map";
+import { MapStatus, findLayoutPda, findMapPda, getCreateMapInstruction, getFinalizeMapInstruction, getMapDecoder, getWriteChestsInstruction, getWriteLayoutInstruction, getWriteSpawnsInstruction, PointKind } from "@deadroll/sdk/map";
 import {
   findTablePda,
   getGameConfigDataDecoder,
@@ -604,7 +604,7 @@ async function ensureDemoMap(conn: Rpc, opts: DeployOptions, wallet: KeyPairSign
   let data = await fetchData(conn.rpc, map);
   if (!data) {
     await send(conn, wallet, [
-      getCreateMapInstruction({ ...edit, systemProgram: SYSTEM_PROGRAM, index: opts.mapIndex, width: preset.width, height: preset.height, tier: preset.tier }),
+      getCreateMapInstruction({ ...edit, systemProgram: SYSTEM_PROGRAM, index: opts.mapIndex, width: preset.width, height: preset.height, tier: preset.tier, minPlayers: preset.minPlayers }),
     ]);
     console.log(`create_map: ${map} (index ${opts.mapIndex})`);
     data = (await fetchData(conn.rpc, map))!;
@@ -619,12 +619,16 @@ async function ensureDemoMap(conn: Rpc, opts: DeployOptions, wallet: KeyPairSign
   if (MAP_STRIDE !== 32) throw new Error("unexpected stride");
   await send(conn, wallet, [getWriteLayoutInstruction({ ...edit, offset: 0, tiles: layoutBytes(preset) })]);
   await send(conn, wallet, [getWriteSpawnsInstruction({ ...edit, entrance: preset.entrance, exit: preset.exit, spawns: preset.spawns })]);
+  const chests = preset.chests.map((c) => ({ kind: PointKind.Chest, x: c.x, y: c.y, data: c.table }));
+  await send(conn, wallet, [getWriteChestsInstruction({ ...edit, chests, bossTable: preset.bossTable })]);
   // No secret cells in the demo preset; a fixed root keeps reruns identical. The builder rules
-  // read the registry bestiary and monster skills (roles, pools, slots).
+  // read the registry bestiary, monster skills (roles, pools, slots) and reward tables.
   const table = async (seed: string) => (await findTablePda({ seed }))[0];
   const secretsRoot = sha256(enc.encode(`deadroll:${preset.name}:no-secrets`));
-  await send(conn, wallet, [getFinalizeMapInstruction({ ...edit, bestiary: await table("bestiary"), monsterSkills: await table("monster_skills"), secretsRoot })]);
-  console.log(`write_layout, write_spawns, finalize_map: ${map} Finalized`);
+  await send(conn, wallet, [
+    getFinalizeMapInstruction({ ...edit, bestiary: await table("bestiary"), monsterSkills: await table("monster_skills"), rewards: await table("rewards"), secretsRoot }),
+  ]);
+  console.log(`write_layout, write_spawns, write_chests, finalize_map: ${map} Finalized`);
   return { map, layout, status: "Finalized", preset };
 }
 

@@ -6,6 +6,9 @@ import { readFileSync } from "node:fs";
 export const MAP_STRIDE = 32;
 export const MAP_CELLS = MAP_STRIDE * MAP_STRIDE;
 export const SPAWNS_MAX = 24;
+/** `CHESTS_MAX` and `NO_TABLE` (crates/types). */
+export const CHESTS_MAX = 4;
+export const NO_TABLE = 0xff;
 
 /** `Tile` discriminants (crates/types). */
 export const Tile = { Floor: 0, Wall: 1, Water: 2, Door: 3, Entrance: 4, Exit: 5, Trap: 6 } as const;
@@ -31,11 +34,18 @@ export type Spawn = {
   aspects: number;
   pack: number;
 };
+/** A visible chest (`MapPoint` with `PointKind::Chest`): the cell and its reward table id. */
+export type Chest = { x: number; y: number; table: number };
 export type MapPreset = {
   name: string;
   width: number;
   height: number;
   tier: number;
+  /** Patch 11: the reward budget counts from this party size. */
+  minPlayers: number;
+  /** Patch 11: reward table of the boss event. */
+  bossTable: number;
+  chests: Chest[];
   /** `MAP_CELLS` bytes, index `y * MAP_STRIDE + x`; cells outside the map stay Floor (0). */
   tiles: Uint8Array;
   entrance: Cell;
@@ -87,7 +97,16 @@ export function parseMapPreset(json: any): MapPreset {
     aspects: u8(s.aspects ?? 0, `spawn ${i} aspects`),
     pack: u8(s.pack, `spawn ${i} pack`),
   }));
-  return { name: String(json.name ?? ""), width, height, tier, tiles, entrance, exit, spawns };
+  const chestList: unknown = json.chests ?? [];
+  if (!Array.isArray(chestList) || chestList.length > CHESTS_MAX) throw new Error(`chests must be a list of at most ${CHESTS_MAX}`);
+  const chests = chestList.map((c: any, i: number) => ({
+    x: u8(c.x, `chest ${i} x`),
+    y: u8(c.y, `chest ${i} y`),
+    table: u8(c.table, `chest ${i} table`),
+  }));
+  const minPlayers = u8(json.min_players ?? 1, "min_players");
+  const bossTable = u8(json.boss_table ?? NO_TABLE, "boss_table");
+  return { name: String(json.name ?? ""), width, height, tier, minPlayers, bossTable, chests, tiles, entrance, exit, spawns };
 }
 
 export function loadMapPreset(path: string | URL = DEMO_MAP_PATH): MapPreset {
