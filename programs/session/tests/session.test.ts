@@ -3557,3 +3557,52 @@ describe("deadroll_session: a new party after the deadline burns the unclaimed r
     assert.equal(eventsNamed(claim, "contributionRefunded")[0].amount.toString(), PRICE.toString());
   });
 });
+
+describe("deadroll_session: at most 3 parties wait for one character's rewards (patch 11)", { skip: SKIP_PARTY }, () => {
+  /** A party of one on a fresh map with \`pl\`'s character (\`pl\` null: a new warrior). */
+  async function partyOf(pl: Player | null, settleTimeoutSecs: number): Promise<Party> {
+    const party = await Party.create(pl ? [] : ["warrior"], { loot: { settleTimeoutSecs } });
+    if (pl) party.players.push({ ...pl, ...playerAccounts(party.acc.session, pl.character) });
+    return party;
+  }
+  /** Plays \`party\` to its end (the lone player flees) and frees the character. */
+  async function endAndLeave(party: Party) {
+    await party.startAll();
+    await party.flee(0, party.players[0].wallet);
+    assert.ok((await party.state()).core.status.fled);
+    await party.leave(0);
+  }
+
+  it("a 4th join is refused; it passes once a deadline passed, and once the DM settled one", async () => {
+    // Three ended parties, none settled: A and B give the DM 10 minutes, C a few seconds.
+    const a = await partyOf(null, 600);
+    const pl = a.players[0];
+    await endAndLeave(a);
+    const b = await partyOf(pl, 600);
+    await endAndLeave(b);
+    const c = await partyOf(pl, SHORT_SETTLE_SECS);
+    await endAndLeave(c);
+    for (const party of [a, b, c]) assert.ok((await party.entry(0)).status.open !== undefined, "waits for its settlement");
+
+    const x = await partyOf(pl, 600);
+    await x.open().rpc();
+    await rejects(x.join(0, pl.wallet, PRICE), "TooManyPendingParties");
+
+    // C's deadline passes: its entry burns at the join and frees the place.
+    await untilChainTime((await c.state()).endedAt.toNumber() + SHORT_SETTLE_SECS + 2);
+    const joined = await x.join(0, pl.wallet, PRICE);
+    assert.equal((await eventOf(joined, "playerJoined")).cacheBurned, 1 << 2, "C's entry burned");
+    assert.equal(await c.entry(0), undefined);
+
+    // A, B and X wait now (X is still in its lobby): a 5th join is refused again ...
+    const y = await partyOf(pl, 600);
+    await y.open().rpc();
+    await rejects(y.join(0, pl.wallet, PRICE), "TooManyPendingParties");
+    // ... until A's DM settles it (a fled party: the entry just empties).
+    await a.settleParty();
+    assert.equal(await a.entry(0), undefined);
+    const again = await y.join(0, pl.wallet, PRICE);
+    assert.equal((await eventOf(again, "playerJoined")).cacheBurned, 0, "nothing burned this time");
+    assert.ok((await y.entry(0)).status.open !== undefined);
+  });
+});
