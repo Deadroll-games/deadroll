@@ -233,7 +233,7 @@ enum_tests! {
     point_kind: PointKind, 1;
     reward_kind: RewardKind, 5;
     reward_source: RewardSource, 4;
-    cache_status: CacheStatus, 2;
+    cache_status: CacheStatus, 3;
 }
 
 #[test]

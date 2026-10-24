@@ -159,9 +159,8 @@ export type JoinSessionAsyncInput<
   character: TAccountCharacter;
   participation?: TAccountParticipation;
   /**
-   * Patch 11: the character's reward cache after the party (`RewardCache`), created on its
-   * first party; a cache left open from an earlier party burns here and is rebound to this
-   * one (decisions of patch 11).
+   * Patch 11: the character's reward caches (`RewardCache`), created on its first party; this
+   * party takes a free entry, and what is no longer safe to keep burns (see the handler).
    */
   rewardCache?: TAccountRewardCache;
   escrow?: TAccountEscrow;
@@ -375,9 +374,8 @@ export type JoinSessionInput<
   character: TAccountCharacter;
   participation: TAccountParticipation;
   /**
-   * Patch 11: the character's reward cache after the party (`RewardCache`), created on its
-   * first party; a cache left open from an earlier party burns here and is rebound to this
-   * one (decisions of patch 11).
+   * Patch 11: the character's reward caches (`RewardCache`), created on its first party; this
+   * party takes a free entry, and what is no longer safe to keep burns (see the handler).
    */
   rewardCache: TAccountRewardCache;
   escrow: TAccountEscrow;
@@ -547,9 +545,8 @@ export type ParsedJoinSessionInstruction<
     character: TAccountMetas[2];
     participation: TAccountMetas[3];
     /**
-     * Patch 11: the character's reward cache after the party (`RewardCache`), created on its
-     * first party; a cache left open from an earlier party burns here and is rebound to this
-     * one (decisions of patch 11).
+     * Patch 11: the character's reward caches (`RewardCache`), created on its first party; this
+     * party takes a free entry, and what is no longer safe to keep burns (see the handler).
      */
     rewardCache: TAccountMetas[4];
     escrow: TAccountMetas[5];

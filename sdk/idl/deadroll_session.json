@@ -629,6 +629,10 @@
       ],
       "args": [
         {
+          "name": "session",
+          "type": "pubkey"
+        },
+        {
           "name": "layout",
           "type": {
             "defined": {
@@ -1056,9 +1060,8 @@
         {
           "name": "reward_cache",
           "docs": [
-            "Patch 11: the character's reward cache after the party (`RewardCache`), created on its",
-            "first party; a cache left open from an earlier party burns here and is rebound to this",
-            "one (decisions of patch 11)."
+            "Patch 11: the character's reward caches (`RewardCache`), created on its first party; this",
+            "party takes a free entry, and what is no longer safe to keep burns (see the handler)."
           ],
           "writable": true,
           "pda": {
@@ -1118,6 +1121,144 @@
           "type": "pubkey"
         }
       ]
+    },
+    {
+      "name": "leave_party",
+      "docs": [
+        "Patch 11: the owner releases a living character from its ended party (it may join another",
+        "before the party is settled)."
+      ],
+      "discriminator": [
+        180,
+        131,
+        70,
+        106,
+        109,
+        232,
+        0,
+        255
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "docs": [
+            "The character's owner, main wallet."
+          ],
+          "signer": true
+        },
+        {
+          "name": "session",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.core.map",
+                "account": "GameSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "character",
+          "docs": [
+            "written by the unlock CPI."
+          ],
+          "writable": true
+        },
+        {
+          "name": "session_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                9,
+                93,
+                27,
+                37,
+                218,
+                79,
+                221,
+                125,
+                83,
+                7,
+                123,
+                151,
+                252,
+                231,
+                65,
+                177,
+                65,
+                225,
+                242,
+                116,
+                20,
+                215,
+                178,
+                225,
+                173,
+                88,
+                9,
+                192,
+                113,
+                184,
+                209,
+                219
+              ]
+            }
+          }
+        },
+        {
+          "name": "character_program",
+          "address": "9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL"
+        }
+      ],
+      "args": []
     },
     {
       "name": "monster_act",
@@ -3305,6 +3446,19 @@
       ]
     },
     {
+      "name": "PartyLeft",
+      "discriminator": [
+        34,
+        166,
+        133,
+        39,
+        139,
+        208,
+        84,
+        178
+      ]
+    },
+    {
       "name": "PlayerDied",
       "discriminator": [
         127,
@@ -3899,6 +4053,26 @@
       "code": 6084,
       "name": "NotCacheOwner",
       "msg": "Only the character's owner, with the main wallet, closes its cache"
+    },
+    {
+      "code": 6085,
+      "name": "SettleTimeoutTooShort",
+      "msg": "The map gives the DM less than the minimum time to settle"
+    },
+    {
+      "code": 6086,
+      "name": "TooManyPendingParties",
+      "msg": "Too many parties wait for this character's rewards: claim one, or wait for its deadline"
+    },
+    {
+      "code": 6087,
+      "name": "InvalidCacheSessions",
+      "msg": "The remaining accounts are not the GameSession of each open reward cache entry, in entry order"
+    },
+    {
+      "code": 6088,
+      "name": "NotLockedHere",
+      "msg": "The character is not locked in this party"
     }
   ],
   "types": [
@@ -4304,6 +4478,55 @@
       }
     },
     {
+      "name": "CacheEntry",
+      "docs": [
+        "One party's rewards in a [`RewardCache`]."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "docs": [
+              "The party."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "CacheStatus"
+              }
+            }
+          },
+          {
+            "name": "xp",
+            "docs": [
+              "Experience granted with the settlement (shown on the summary)."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "slots",
+            "docs": [
+              "`Claimed`: the rewards, the owner's to lay out with \"Done\"."
+            ],
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "CacheSlot"
+                  }
+                },
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
       "name": "CacheSettled",
       "docs": [
         "Patch 11: a player's cache after the party: theirs to lay out (`granted`), or burned (dead)",
@@ -4365,9 +4588,9 @@
     {
       "name": "CacheStatus",
       "docs": [
-        "session `RewardCache.status`: `Open` while the party runs (the rewards are in the",
-        "`Participation`), `Claimed` once they are the player's (issued, or claimed after the",
-        "timeout) and wait for \"Done\" in the bag screen."
+        "One party's entry in the session `RewardCache`: `Empty` (free), `Open` while the party runs",
+        "or waits to be settled (the rewards are in its `Participation`), `Claimed` once they are",
+        "the player's (issued, or claimed after the timeout) and wait for \"Done\" in the bag screen."
       ],
       "repr": {
         "kind": "rust"
@@ -4375,6 +4598,9 @@
       "type": {
         "kind": "enum",
         "variants": [
+          {
+            "name": "Empty"
+          },
           {
             "name": "Open"
           },
@@ -5376,9 +5602,21 @@
             "name": "ended_at",
             "docs": [
               "Unix time the party ended (Victory, Wiped, Fled): the DM settles before",
-              "`ended_at + LootTuning.settle_timeout_secs`, the players claim after."
+              "`ended_at + settle_timeout_secs`, the players claim after."
             ],
             "type": "i64"
+          },
+          {
+            "name": "chest_radius",
+            "docs": [
+              "The map's DM-set numbers: no living monster within `chest_radius` of a chest or of any",
+              "living player when it opens; the DM's time to settle after the end."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "settle_timeout_secs",
+            "type": "u32"
           }
         ]
       }
@@ -7334,6 +7572,25 @@
       }
     },
     {
+      "name": "PartyLeft",
+      "docs": [
+        "Patch 11: the owner released the character from its ended party."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "character",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
       "name": "PendingAction",
       "docs": [
         "The roll waiting for its VRF value (`core.pending_vrf`), resolved by `consume_randomness`:",
@@ -7534,9 +7791,10 @@
           {
             "name": "cache_burned",
             "docs": [
-              "Patch 11: the character's cache from an earlier party was still open and burned."
+              "Patch 11: bit per reward cache entry that burned (a settled cache left without \"Done\", or",
+              "an earlier party's past its DM deadline)."
             ],
-            "type": "bool"
+            "type": "u8"
           }
         ]
       }
@@ -7989,14 +8247,15 @@
     {
       "name": "RewardCache",
       "docs": [
-        "`[\"cache\", character]` (patch 11): a character's temporary cache once its party is settled,",
-        "until \"Done\" in the bag screen (`close_cache`). During the party the cache lives in",
-        "`Participation` (docs/PARTY_AND_TURNS.md 8, 10.2); this account outlives the party and is found",
-        "by the character alone, so the next `join_session` burns a cache left open.",
+        "`[\"cache\", character]` (patch 11): a character's temporary caches once its parties end, until",
+        "\"Done\" in the bag screen (`close_cache`). During a party the cache lives in `Participation`",
+        "(docs/PARTY_AND_TURNS.md 8, 10.2); its entry here is `Open`, and the settlement turns it into",
+        "`Claimed` (or empties it). Found by the character alone, so `join_session` burns what is no",
+        "longer safe to keep: a `Claimed` entry (the owner did not press \"Done\"), and an `Open` one whose",
+        "party ended and whose DM deadline passed (the player could have claimed it).",
         "",
-        "Created at `join_session` with the player's rent; a later `join_session` of the same",
-        "character rebinds it to the new party (what it held burns). Closed by `close_cache`, the rent",
-        "back to the owner."
+        "Created at the character's first `join_session` with the player's rent; closed by",
+        "`close_cache` once every entry is empty, the rent back to the owner."
       ],
       "type": {
         "kind": "struct",
@@ -8010,41 +8269,15 @@
             "type": "pubkey"
           },
           {
-            "name": "session",
-            "docs": [
-              "The party it belongs to."
-            ],
-            "type": "pubkey"
-          },
-          {
-            "name": "status",
-            "docs": [
-              "`Open` while the party runs (empty here), `Claimed` once settled: then it is the owner's",
-              "to lay out."
-            ],
-            "type": {
-              "defined": {
-                "name": "CacheStatus"
-              }
-            }
-          },
-          {
-            "name": "xp",
-            "docs": [
-              "Experience granted with the settlement (shown on the summary)."
-            ],
-            "type": "u32"
-          },
-          {
-            "name": "slots",
+            "name": "entries",
             "type": {
               "array": [
                 {
                   "defined": {
-                    "name": "CacheSlot"
+                    "name": "CacheEntry"
                   }
                 },
-                32
+                3
               ]
             }
           },

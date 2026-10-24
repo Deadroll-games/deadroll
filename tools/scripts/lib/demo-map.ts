@@ -43,6 +43,10 @@ export type MapPreset = {
   tier: number;
   /** Patch 11: the reward budget counts from this party size. */
   minPlayers: number;
+  /** Patch 11, set by the DM: no monster this close to a chest or a player when it opens. */
+  chestRadius: number;
+  /** Patch 11, set by the DM: seconds to issue the rewards after a party ends. */
+  settleTimeoutSecs: number;
   /** Patch 11: reward table of the boss event. */
   bossTable: number;
   chests: Chest[];
@@ -106,7 +110,10 @@ export function parseMapPreset(json: any): MapPreset {
   }));
   const minPlayers = u8(json.min_players ?? 1, "min_players");
   const bossTable = u8(json.boss_table ?? NO_TABLE, "boss_table");
-  return { name: String(json.name ?? ""), width, height, tier, minPlayers, bossTable, chests, tiles, entrance, exit, spawns };
+  const chestRadius = u8(json.chest_radius ?? 3, "chest_radius");
+  const settleTimeoutSecs = Number(json.settle_timeout_secs ?? 3600);
+  if (!Number.isInteger(settleTimeoutSecs) || settleTimeoutSecs < 1) throw new Error("settle_timeout_secs must be a positive integer");
+  return { name: String(json.name ?? ""), width, height, tier, minPlayers, chestRadius, settleTimeoutSecs, bossTable, chests, tiles, entrance, exit, spawns };
 }
 
 export function loadMapPreset(path: string | URL = DEMO_MAP_PATH): MapPreset {

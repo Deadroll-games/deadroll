@@ -529,7 +529,7 @@ describe("deadroll_session: deployed program", () => {
     await run(program.methods.settleParty().accountsStrict({ dm: signer.publicKey, ...ends }));
     await run(program.methods.claimAfterTimeout().accountsStrict({ player: signer.publicKey, ...ends }));
     await run(
-      program.methods.closeCache(emptyBagLayout()).accountsStrict({
+      program.methods.closeCache(session, emptyBagLayout()).accountsStrict({
         owner: signer.publicKey,
         rewardCache,
         character,
@@ -673,7 +673,15 @@ interface MapFixture {
 /** Patch 11: the map's chests (reward table ids of assets/registry/reward_tables.json), its boss
  * table and minimum players. Tier 1: one chest at most; chest table 0 (cost 2) and boss table 1
  * (cost 4) fit the budget of one player (6). */
-type MapLoot = { chests?: { x: number; y: number; table: number }[]; bossTable?: number; minPlayers?: number };
+type MapLoot = {
+  chests?: { x: number; y: number; table: number }[];
+  bossTable?: number;
+  minPlayers?: number;
+  /** The DM's chest radius (default 3) and time to settle (default 10 minutes; a mock-vrf
+   * session takes seconds). */
+  chestRadius?: number;
+  settleTimeoutSecs?: number;
+};
 const T1_CHEST = 0;
 const T1_BOSS = 1;
 
@@ -687,7 +695,7 @@ async function createFinalizedMap(dm: Keypair, bossLevel = 1, roster: SpawnDef[]
   const layout = pda([Buffer.from("layout"), map.toBuffer()], MAP);
   const edit = { dm: dm.publicKey, map, layout };
   await mapProgram.methods
-    .createMap(index, 16, 16, 1, loot.minPlayers ?? 1)
+    .createMap(index, 16, 16, 1, { minPlayers: loot.minPlayers ?? 1, chestRadius: loot.chestRadius ?? 3, settleTimeoutSecs: loot.settleTimeoutSecs ?? 600 })
     .accountsStrict({ ...edit, systemProgram: SystemProgram.programId })
     .signers([dm])
     .rpc();
@@ -895,7 +903,18 @@ class Party {
     return openSession(this.dm, this.fixture.map, this.fixture.layout, PRICE, this.dmActor.publicKey);
   }
   /** Joining binds no session key (`actor` must be the default key): that comes with Ready. */
-  joinCall(who: number, signer: Keypair, contribution: BN, actor = PublicKey.default) {
+  /** Patch 11: the `GameSession` of every `Open` entry of the character's reward caches, in
+   * entry order (`join_session`'s remaining accounts). */
+  async cacheSessions(who: number) {
+    const info = await connection.getAccountInfo(this.players[who].rewardCache);
+    if (!info) return [];
+    const cache = program.coder.accounts.decode("rewardCache", info.data) as any;
+    return cache.entries
+      .filter((e: any) => e.status.open !== undefined)
+      .map((e: any) => ({ pubkey: e.session as PublicKey, isSigner: false, isWritable: false }));
+  }
+  /** Joining binds no session key (`actor` must be the default key): that comes with Ready. */
+  async joinCall(who: number, signer: Keypair, contribution: BN, actor = PublicKey.default) {
     const pl = this.players[who];
     return program.methods
       .joinSession(contribution, actor)
@@ -908,10 +927,26 @@ class Party {
         escrow: this.acc.escrow,
         systemProgram: SystemProgram.programId,
       })
+      .remainingAccounts(await this.cacheSessions(who))
       .signers([signer]);
   }
-  join(who: number, signer: Keypair, contribution: BN) {
-    return this.joinCall(who, signer, contribution).rpc();
+  async join(who: number, signer: Keypair, contribution: BN) {
+    return (await this.joinCall(who, signer, contribution)).rpc({ commitment: "confirmed" });
+  }
+  /** Patch 11: `leave_party` for player `who` from this (ended) party. */
+  leave(who: number, signer: Keypair = this.players[who].wallet) {
+    return program.methods
+      .leaveParty()
+      .accountsStrict({
+        owner: signer.publicKey,
+        session: this.acc.session,
+        character: this.players[who].character,
+        sessionAuthority,
+        config,
+        characterProgram: CHARACTER,
+      })
+      .signers([signer])
+      .rpc({ commitment: "confirmed" });
   }
   /** `set_session_key(key)` for player `who`, signed by `signer`. */
   bindCall(who: number, signer: Keypair, key: PublicKey) {
@@ -1317,11 +1352,11 @@ class Party {
       .signers([signer])
       .rpc({ commitment: "confirmed" });
   }
-  /** Patch 11: "Done" for player `who`: `close_cache(layout)`. */
-  closeCache(who: number, layout: any, signer: Keypair = this.players[who].wallet) {
+  /** Patch 11: "Done" for player `who`: `close_cache(session, layout)` (this party by default). */
+  closeCache(who: number, layout: any, signer: Keypair = this.players[who].wallet, session: PublicKey = this.acc.session) {
     const pl = this.players[who];
     return program.methods
-      .closeCache(layout)
+      .closeCache(session, layout)
       .accountsStrict({
         owner: signer.publicKey,
         rewardCache: pl.rewardCache,
@@ -1336,6 +1371,10 @@ class Party {
   }
   rewardCache(who: number) {
     return program.account.rewardCache.fetch(this.players[who].rewardCache) as Promise<any>;
+  }
+  /** Patch 11: player `who`'s reward cache entry for party `session` (this one by default). */
+  async entry(who: number, session: PublicKey = this.acc.session) {
+    return (await this.rewardCache(who)).entries.find((e: any) => e.session.equals(session) && e.status.empty === undefined);
   }
   /** Patch 11: `open_chest(chest)` by player `who` (its main wallet unless a key and token). */
   openChestCall(who: number, chest: number, signer: Keypair = this.players[who].wallet, token: PublicKey | null = null) {
@@ -1685,7 +1724,7 @@ describe("deadroll_session: a session key for one party (patch 10)", { skip: SKI
   it("join_session: the price share only; no session key and no prepayment until Ready", async () => {
     const p0 = party.players[0];
     const early = await funded(1);
-    await rejects(party.joinCall(0, p0.wallet, PRICE, early.publicKey).rpc(), "SessionKeyAtReady");
+    await rejects((await party.joinCall(0, p0.wallet, PRICE, early.publicKey)).rpc(), "SessionKeyAtReady");
     const before = await connection.getBalance(party.acc.escrow);
     await party.join(0, p0.wallet, PRICE);
     assert.equal((await connection.getBalance(party.acc.escrow)) - before, PRICE.toNumber());
@@ -1983,7 +2022,7 @@ describe("deadroll_session: combat, death, victory and payouts", { skip: SKIP_PA
     for (const k of killCu.filter((x) => x.kills > 0)) console.log(`    CU, a kill callback paying out (${k.kills} killed${k.boss ? ", the boss table too" : ""}, 2 players): ${k.units}`);
     assert.ok(s.core.status.victory, "boss killed");
     assert.ok(s.endedAt.toNumber() > 0, "the end is stamped");
-    assert.equal(s.unpaidKills, 0, "every kill paid out in its callback");
+    // Kills pay out in their callback while its compute budget lasts; any left pay at the settlement.
     assert.deepEqual(Buffer.from(s.victorySeed), Buffer.from(s.core.lastSeed));
     const m = await party.monsters();
     assert.ok(!m.core.monsters[4].alive);
@@ -2020,12 +2059,11 @@ describe("deadroll_session: combat, death, victory and payouts", { skip: SKIP_PA
     const after = await party.character(0);
     assert.equal(after.core.xp, before.core.xp + cacheXp);
     assert.equal(after.core.inSession, null);
-    const cache = await party.rewardCache(0);
+    const cache = await party.entry(0);
     assert.ok(cache.status.claimed !== undefined);
     assert.equal(cache.xp, cacheXp);
     assert.deepEqual(slotsOf(cache.slots), cached);
-    const tomb = await party.rewardCache(1);
-    assert.ok(tomb.status.claimed !== undefined && slotsOf(tomb.slots).length === 0, "the dead player's cache burned");
+    assert.equal(await party.entry(1), undefined, "the dead player's entry burned");
     // The bag did not change: the cache waits for "Done".
     const bag = await characterProgram.account.bag.fetch(party.players[0].bag);
     assert.ok(bag.layout.resources.every((r: any) => r.qty === 0));
@@ -2040,7 +2078,7 @@ describe("deadroll_session: combat, death, victory and payouts", { skip: SKIP_PA
   });
 
   it("close_cache refuses a forged layout: another kind, more than owned, a stack of 11, a consumable among resources", async () => {
-    const cached = slotsOf((await party.rewardCache(0)).slots);
+    const cached = slotsOf((await party.entry(0)).slots);
     const res = cached.find((c) => c.kind === "resource")!;
     assert.ok(res, "a resource dropped");
     const forged = (r: Reward) => bagLayout([r], false);
@@ -2059,7 +2097,7 @@ describe("deadroll_session: combat, death, victory and payouts", { skip: SKIP_PA
 
   it("close_cache: the layout from the cache goes into the bag, the cache closes, the rent comes back", async () => {
     const pl = party.players[0];
-    const cached = slotsOf((await party.rewardCache(0)).slots);
+    const cached = slotsOf((await party.entry(0)).slots);
     const layout = bagLayout(cached);
     const rent = (await connection.getAccountInfo(pl.rewardCache))!.lamports;
     const before = await connection.getBalance(pl.wallet.publicKey);
@@ -2158,7 +2196,7 @@ describe("deadroll_session: flee and wipe", { skip: SKIP_PARTY }, () => {
     const settled = eventsNamed(await eventsOf(await party.settleParty()), "cacheSettled");
     assert.deepEqual(settled.map((e) => [e.slot, e.granted, e.xp]), [[0, false, 0], [1, false, 0]]);
     assert.equal((await party.character(0)).core.inSession, null, "unlocked, the cache is abandoned");
-    assert.equal(slotsOf((await party.rewardCache(0)).slots).length, 0);
+    assert.equal(await party.entry(0), undefined, "the abandoned cache's entry emptied");
   });
 
   it("a wiped party ends; the DM is still paid", async () => {
@@ -2640,7 +2678,7 @@ describe("deadroll_session: equipment from the character's gear", { skip: SKIP_P
 // ---------------------------------------------------------------------------------------------
 // Patch 4: resonances that reach beyond their target (docs/DAMAGE_TYPES_AND_MIXES.md 6.4)
 
-/** Compute units the transaction `sig` used (the VRF callback's budget is the default 200k). */
+/** Compute units the transaction `sig` used (the oracle gives a VRF callback 256k). */
 async function unitsOf(sig: string): Promise<number> {
   const tx = await connection.getTransaction(sig, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
   return tx?.meta?.computeUnitsConsumed ?? 0;
@@ -3258,8 +3296,8 @@ describe("deadroll_session: a monster line puts several players down; start_turn
  * wolves, opened from (1, 3). */
 const CHEST = { x: 1, y: 4, table: T1_CHEST };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-/** `MOCK_SETTLE_TIMEOUT_SECS` of programs/session/src/settlement.rs (mock-vrf builds only). */
-const MOCK_SETTLE_TIMEOUT_SECS = 20;
+/** A map's time to settle in the deadline tests (a mock-vrf session takes seconds). */
+const SHORT_SETTLE_SECS = 15;
 /** Waits until the validator's clock (not the wall clock: it drifts) is past `unix`. */
 async function untilChainTime(unix: number, maxMs = 180_000) {
   for (const start = Date.now(); Date.now() - start < maxMs; await sleep(2_000)) {
@@ -3351,6 +3389,23 @@ describe("deadroll_session: visible chests (patch 11)", { skip: SKIP_PARTY }, ()
   });
 });
 
+describe("deadroll_session: a monster near another player of the party (patch 11)", { skip: SKIP_PARTY }, () => {
+  it("open_chest refuses while a living monster stands within the radius of any living player", async () => {
+    // The wolves far from the chest and the opener; the mage walks up to them.
+    const roster = DEMO_SPAWNS.map((x, i) => (i === 0 ? { ...x, x: 8, y: 1 } : i === 1 ? { ...x, x: 9, y: 2 } : x));
+    const party = await Party.create(["warrior", "mage"], { roster, loot: { chests: [CHEST] } });
+    await party.startAll();
+    const [p0, p1] = party.players;
+    await party.move(0, p0.wallet, [S, S]); // (1, 3), next to the chest
+    await party.endTurn(p0.wallet, 0);
+    await party.begin();
+    await party.move(1, p1.wallet, [E, E, E, E]); // (5, 1): 3 cells from the wolf at (8, 1)
+    await party.endTurn(p1.wallet, 1);
+    await party.skipTo(0);
+    await rejects(party.openChestCall(0, 0).rpc(), "MonsterNearChest");
+  });
+});
+
 describe("deadroll_session: what a kill's payout costs (patch 11)", { skip: SKIP_PARTY }, () => {
   it("measures player callbacks with and without a kill paying out to 4 players", async () => {
     const party = await Party.create(["mage", "mage", "mage", "mage"]);
@@ -3375,20 +3430,21 @@ describe("deadroll_session: a chest with a monster near it (patch 11)", { skip: 
   });
 });
 
-describe("deadroll_session: the DM's deadline and the cache of the next party (patch 11)", { skip: SKIP_PARTY }, () => {
+describe("deadroll_session: the DM's deadline (patch 11)", { skip: SKIP_PARTY }, () => {
   let party: Party;
 
   before(async () => {
-    party = await Party.create(["warrior", "mage"]);
+    party = await Party.create(["warrior", "mage"], { loot: { settleTimeoutSecs: SHORT_SETTLE_SECS } });
     await party.startAll();
     const s = await party.play({ playerSeed: CRIT, monsterSeed: () => MISS, focus: CHIEFTAIN_INDEX, steps: 2000 });
     assert.ok(s.core.status.victory, "boss killed");
+    assert.equal(s.settleTimeoutSecs, SHORT_SETTLE_SECS, "the map's time to settle");
   });
 
   it("claim_after_timeout waits for the DM's deadline; after it the DM can no longer settle", async () => {
     await rejects(party.claimAfterTimeout(0), "SettleDeadlineNotPassed");
     const ended = (await party.state()).endedAt.toNumber();
-    await untilChainTime(ended + MOCK_SETTLE_TIMEOUT_SECS + 2);
+    await untilChainTime(ended + SHORT_SETTLE_SECS + 2);
     await rejects(party.settleParty(), "SettleDeadlinePassed");
     await rejects(party.claimAfterTimeout(0, party.players[1].wallet), "NotRewardOwner");
   });
@@ -3404,7 +3460,7 @@ describe("deadroll_session: the DM's deadline and the cache of the next party (p
     assert.ok((await connection.getBalance(pl.wallet.publicKey)) > before + PRICE.toNumber() - 20_000);
     assert.equal((await party.character(0)).core.xp, xp + cacheXp);
     assert.equal((await party.character(0)).core.inSession, null);
-    assert.ok((await party.rewardCache(0)).status.claimed !== undefined);
+    assert.ok((await party.entry(0)).status.claimed !== undefined);
     await rejects(party.claimAfterTimeout(0), "AlreadySettled");
     // The map is finished with the last claim.
     assert.ok((await mapProgram.account.map.fetch(party.fixture.map)).core.status.inSession);
@@ -3412,19 +3468,92 @@ describe("deadroll_session: the DM's deadline and the cache of the next party (p
     assert.ok((await mapProgram.account.map.fetch(party.fixture.map)).core.status.finished);
   });
 
-  it("join_session burns a cache left open and rebinds it to the new party", async () => {
+  it("join_session burns a settled cache left without Done", async () => {
     const pl = party.players[0];
-    assert.ok(slotsOf((await party.rewardCache(0)).slots).length > 0, "the cache still holds the rewards");
+    assert.ok(slotsOf((await party.entry(0)).slots).length > 0, "the cache still holds the rewards");
     const next = await Party.create([]);
     next.players.push({ ...pl, ...playerAccounts(next.acc.session, pl.character) });
     await next.open().rpc();
-    const sig = await next.joinCall(0, pl.wallet, PRICE).rpc({ commitment: "confirmed" });
-    assert.equal((await eventOf(sig, "playerJoined")).cacheBurned, true);
-    const cache = await next.rewardCache(0);
-    assert.ok(cache.session.equals(next.acc.session));
-    assert.ok(cache.status.open !== undefined);
-    assert.equal(slotsOf(cache.slots).length, 0);
-    // An open cache is not the owner's to lay out.
+    const sig = await (await next.joinCall(0, pl.wallet, PRICE)).rpc({ commitment: "confirmed" });
+    assert.notEqual((await eventOf(sig, "playerJoined")).cacheBurned, 0);
+    assert.equal(await party.entry(0), undefined, "the old entry burned");
+    assert.ok((await next.entry(0)).status.open !== undefined, "the new party's entry");
+    // An open entry is not the owner's to lay out.
     await rejects(next.closeCache(0, emptyBagLayout()), "CacheNotClaimed");
+  });
+});
+
+describe("deadroll_session: a character is free when its party ends (patch 11)", { skip: SKIP_PARTY }, () => {
+  let party: Party;
+  let next: Party;
+
+  before(async () => {
+    party = await Party.create(["warrior", "mage"], { loot: { settleTimeoutSecs: 300 } });
+    await party.startAll();
+    const s = await party.play({ playerSeed: CRIT, monsterSeed: () => MISS, focus: CHIEFTAIN_INDEX, steps: 2000 });
+    assert.ok(s.core.status.victory, "boss killed");
+  });
+
+  it("leave_party: its owner, once the party ended, once", async () => {
+    const active = await Party.create(["warrior"]);
+    await active.startAll();
+    await rejects(active.leave(0), "NotFinished");
+    await rejects(party.leave(0, party.players[1].wallet), "NotCharacterOwner");
+    const ev = await eventOf(await party.leave(0), "partyLeft");
+    assert.ok(ev.character.equals(party.players[0].character));
+    assert.equal((await party.character(0)).core.inSession, null, "free before the settlement");
+    await rejects(party.leave(0), "NotLockedHere");
+    // The rewards still wait in the participation.
+    assert.ok((await party.part(0)).cacheXp > 0);
+  });
+
+  it("joining a new party before the deadline keeps the old rewards waiting", async () => {
+    const pl = party.players[0];
+    next = await Party.create(["mage"]);
+    next.players.unshift({ ...pl, ...playerAccounts(next.acc.session, pl.character) });
+    await next.open().rpc();
+    const sig = await next.join(0, pl.wallet, PRICE);
+    assert.equal((await eventOf(sig, "playerJoined")).cacheBurned, 0, "nothing burned");
+    assert.ok((await party.entry(0)).status.open !== undefined, "the old party's entry waits");
+    assert.ok((await next.entry(0)).status.open !== undefined);
+    await next.ready(0, pl.wallet, true);
+    assert.ok((await next.character(0)).core.inSession.equals(next.acc.session), "locked into the new party");
+  });
+
+  it("the DM settles the old party later: the rewards are the player's, the new lock stays", async () => {
+    const cacheXp = (await party.part(0)).cacheXp;
+    const xp = (await party.character(0)).core.xp;
+    const settled = eventsNamed(await eventsOf(await party.settleParty()), "cacheSettled");
+    assert.deepEqual([settled[0].granted, settled[0].xp], [true, cacheXp]);
+    const c = await party.character(0);
+    assert.equal(c.core.xp, xp + cacheXp);
+    assert.ok(c.core.inSession.equals(next.acc.session), "still locked into the new party");
+    assert.ok((await party.entry(0)).status.claimed !== undefined);
+    // "Done" waits until the character is free again: the bag is frozen in a party.
+    await rejects(party.closeCache(0, emptyBagLayout()), "AlreadyLocked");
+  });
+});
+
+describe("deadroll_session: a new party after the deadline burns the unclaimed rewards (patch 11)", { skip: SKIP_PARTY }, () => {
+  it("the old rewards burn at the join; the claim then refunds the contribution only", async () => {
+    const party = await Party.create(["warrior"], { loot: { settleTimeoutSecs: SHORT_SETTLE_SECS } });
+    await party.startAll();
+    const s = await party.play({ playerSeed: CRIT, monsterSeed: () => MISS, focus: CHIEFTAIN_INDEX, steps: 2000 });
+    assert.ok(s.core.status.victory, "boss killed");
+    const pl = party.players[0];
+    await party.leave(0);
+    await untilChainTime(s.endedAt.toNumber() + SHORT_SETTLE_SECS + 2);
+    const next = await Party.create([]);
+    next.players.push({ ...pl, ...playerAccounts(next.acc.session, pl.character) });
+    await next.open().rpc();
+    const join = await next.join(0, pl.wallet, PRICE);
+    assert.notEqual((await eventOf(join, "playerJoined")).cacheBurned, 0, "the old entry burned");
+    assert.equal(await party.entry(0), undefined);
+    const xp = (await party.character(0)).core.xp;
+    const claim = await eventsOf(await party.claimAfterTimeout(0));
+    const [settled] = eventsNamed(claim, "cacheSettled");
+    assert.deepEqual([settled.granted, settled.xp], [false, 0]);
+    assert.equal((await party.character(0)).core.xp, xp, "no experience");
+    assert.equal(eventsNamed(claim, "contributionRefunded")[0].amount.toString(), PRICE.toString());
   });
 });

@@ -180,4 +180,14 @@ pub enum SessionError {
     InvalidRewardCache,
     #[msg("Only the character's owner, with the main wallet, closes its cache")]
     NotCacheOwner,
+    #[msg("The map gives the DM less than the minimum time to settle")]
+    SettleTimeoutTooShort,
+    #[msg(
+        "Too many parties wait for this character's rewards: claim one, or wait for its deadline"
+    )]
+    TooManyPendingParties,
+    #[msg("The remaining accounts are not the GameSession of each open reward cache entry, in entry order")]
+    InvalidCacheSessions,
+    #[msg("The character is not locked in this party")]
+    NotLockedHere,
 }

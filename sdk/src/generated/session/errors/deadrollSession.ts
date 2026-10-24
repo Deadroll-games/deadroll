@@ -184,6 +184,14 @@ export const DEADROLL_SESSION_ERROR__CACHE_NOT_CLAIMED = 0x17c2; // 6082
 export const DEADROLL_SESSION_ERROR__INVALID_REWARD_CACHE = 0x17c3; // 6083
 /** NotCacheOwner: Only the character's owner, with the main wallet, closes its cache */
 export const DEADROLL_SESSION_ERROR__NOT_CACHE_OWNER = 0x17c4; // 6084
+/** SettleTimeoutTooShort: The map gives the DM less than the minimum time to settle */
+export const DEADROLL_SESSION_ERROR__SETTLE_TIMEOUT_TOO_SHORT = 0x17c5; // 6085
+/** TooManyPendingParties: Too many parties wait for this character's rewards: claim one, or wait for its deadline */
+export const DEADROLL_SESSION_ERROR__TOO_MANY_PENDING_PARTIES = 0x17c6; // 6086
+/** InvalidCacheSessions: The remaining accounts are not the GameSession of each open reward cache entry, in entry order */
+export const DEADROLL_SESSION_ERROR__INVALID_CACHE_SESSIONS = 0x17c7; // 6087
+/** NotLockedHere: The character is not locked in this party */
+export const DEADROLL_SESSION_ERROR__NOT_LOCKED_HERE = 0x17c8; // 6088
 
 export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__ALLY_ACCOUNT_MISSING
@@ -203,6 +211,7 @@ export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__DM_MAIN_WALLET_ONLY
   | typeof DEADROLL_SESSION_ERROR__INVALID_ACTION
   | typeof DEADROLL_SESSION_ERROR__INVALID_ALLY_TARGET
+  | typeof DEADROLL_SESSION_ERROR__INVALID_CACHE_SESSIONS
   | typeof DEADROLL_SESSION_ERROR__INVALID_CHARACTER
   | typeof DEADROLL_SESSION_ERROR__INVALID_CHEST
   | typeof DEADROLL_SESSION_ERROR__INVALID_DEATH_ACCOUNTS
@@ -241,6 +250,7 @@ export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__NOT_ENOUGH_PLAYERS
   | typeof DEADROLL_SESSION_ERROR__NOT_FINISHED
   | typeof DEADROLL_SESSION_ERROR__NOT_IN_LOBBY
+  | typeof DEADROLL_SESSION_ERROR__NOT_LOCKED_HERE
   | typeof DEADROLL_SESSION_ERROR__NOT_PLAYER
   | typeof DEADROLL_SESSION_ERROR__NOT_REWARD_OWNER
   | typeof DEADROLL_SESSION_ERROR__NOT_SAME_KIN
@@ -261,10 +271,12 @@ export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__SESSION_TOKEN_MISSING
   | typeof DEADROLL_SESSION_ERROR__SETTLE_DEADLINE_NOT_PASSED
   | typeof DEADROLL_SESSION_ERROR__SETTLE_DEADLINE_PASSED
+  | typeof DEADROLL_SESSION_ERROR__SETTLE_TIMEOUT_TOO_SHORT
   | typeof DEADROLL_SESSION_ERROR__SKILL_NOT_SELECTED
   | typeof DEADROLL_SESSION_ERROR__SKILL_ON_COOLDOWN
   | typeof DEADROLL_SESSION_ERROR__TOO_MANY_LOOT_TABLES
   | typeof DEADROLL_SESSION_ERROR__TOO_MANY_MONSTER_SKILLS
+  | typeof DEADROLL_SESSION_ERROR__TOO_MANY_PENDING_PARTIES
   | typeof DEADROLL_SESSION_ERROR__TURN_ALREADY_STARTED
   | typeof DEADROLL_SESSION_ERROR__TURN_NOT_STARTED
   | typeof DEADROLL_SESSION_ERROR__UNAUTHORIZED
@@ -293,6 +305,7 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__DM_MAIN_WALLET_ONLY]: `The DM settles with the main wallet, not a session key`,
     [DEADROLL_SESSION_ERROR__INVALID_ACTION]: `Unknown monster action`,
     [DEADROLL_SESSION_ERROR__INVALID_ALLY_TARGET]: `Target is not a living ally`,
+    [DEADROLL_SESSION_ERROR__INVALID_CACHE_SESSIONS]: `The remaining accounts are not the GameSession of each open reward cache entry, in entry order`,
     [DEADROLL_SESSION_ERROR__INVALID_CHARACTER]: `Account is not a Deadroll character`,
     [DEADROLL_SESSION_ERROR__INVALID_CHEST]: `No such chest on this map`,
     [DEADROLL_SESSION_ERROR__INVALID_DEATH_ACCOUNTS]: `The remaining accounts are not the character, skill set and bag of each pending death, in slot order`,
@@ -331,6 +344,7 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__NOT_ENOUGH_PLAYERS]: `Fewer players than the map's minimum`,
     [DEADROLL_SESSION_ERROR__NOT_FINISHED]: `Party has not ended`,
     [DEADROLL_SESSION_ERROR__NOT_IN_LOBBY]: `Session is not in the lobby`,
+    [DEADROLL_SESSION_ERROR__NOT_LOCKED_HERE]: `The character is not locked in this party`,
     [DEADROLL_SESSION_ERROR__NOT_PLAYER]: `Only the player who joined with this character can do this`,
     [DEADROLL_SESSION_ERROR__NOT_REWARD_OWNER]: `Only the character's owner or their session key can claim its rewards`,
     [DEADROLL_SESSION_ERROR__NOT_SAME_KIN]: `A kin-only monster skill reaches allies of its own kin only`,
@@ -351,10 +365,12 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__SESSION_TOKEN_MISSING]: `Session key used without a session token`,
     [DEADROLL_SESSION_ERROR__SETTLE_DEADLINE_NOT_PASSED]: `The DM can still settle the party: wait for the deadline`,
     [DEADROLL_SESSION_ERROR__SETTLE_DEADLINE_PASSED]: `The DM's time to settle the party is over: each player claims their own`,
+    [DEADROLL_SESSION_ERROR__SETTLE_TIMEOUT_TOO_SHORT]: `The map gives the DM less than the minimum time to settle`,
     [DEADROLL_SESSION_ERROR__SKILL_NOT_SELECTED]: `This skill was not taken onto the map (set_ready selection)`,
     [DEADROLL_SESSION_ERROR__SKILL_ON_COOLDOWN]: `Skill is on cooldown`,
     [DEADROLL_SESSION_ERROR__TOO_MANY_LOOT_TABLES]: `Too many different reward tables for one party`,
     [DEADROLL_SESSION_ERROR__TOO_MANY_MONSTER_SKILLS]: `Too many different monster skills for one party`,
+    [DEADROLL_SESSION_ERROR__TOO_MANY_PENDING_PARTIES]: `Too many parties wait for this character's rewards: claim one, or wait for its deadline`,
     [DEADROLL_SESSION_ERROR__TURN_ALREADY_STARTED]: `This turn has already started`,
     [DEADROLL_SESSION_ERROR__TURN_NOT_STARTED]: `The turn has not started: call start_turn first`,
     [DEADROLL_SESSION_ERROR__UNAUTHORIZED]: `Caller is not authorized for this instruction`,

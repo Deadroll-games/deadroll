@@ -5,7 +5,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { Address, Instruction, TransactionSigner } from "@solana/kit";
 import { HitCard } from "../components/dice/HitCard";
-import { CHEST_OPEN_AP, cacheRewards, chestsOf, levelsLabel, rewardLabel, rewardTables, settleDeadline } from "../chain/loot";
+import { CHEST_OPEN_AP, cacheRewards, chestsOf, levelsLabel, rewardLabel, rewardTables, settleDeadline, settleLabel } from "../chain/loot";
+
+/** Party statuses after the end (Victory, Fled, Wiped). */
+const PARTY_ENDED = ["victory", "fled", "wiped"];
 import { rollKeyOf } from "../chain/rollKey";
 import type { HitItemSides, HitMods } from "../components/dice/types";
 import { StatsPanel } from "../components/stats/StatsPanel";
@@ -36,6 +39,8 @@ import {
   getAccount,
   joinRent,
   joinSessionIx,
+  leavePartyIx,
+  openCacheSessions,
   openChestIx,
   mapStatus,
   mapsOf,
@@ -277,9 +282,30 @@ function PartyView({ address }: { address: Address }) {
   const skillTable = useMonsterSkillTable();
   const [roll, setRoll] = useState<Roll | null>(null);
   const [myChars, setMyChars] = useState<{ address: Address; data: CharacterAcc }[]>([]);
+  // Patch 11: a character is free once its party ended; joining releases it (`leave_party`) in the
+  // same transaction. Character -> the ended party it is still locked to.
+  const [endedLocks, setEndedLocks] = useState<Record<string, Address>>({});
+  useEffect(() => {
+    if (DATA_SOURCE !== "chain") return;
+    let live = true;
+    const locked = myChars.flatMap((c) => {
+      const at = optional(c.data.core.inSession);
+      return c.data.core.alive && at ? [{ character: c.address, session: at }] : [];
+    });
+    void Promise.all(locked.map(async (l) => ({ ...l, s: await getAccount("GameSession", l.session).catch(() => null) }))).then((rows) => {
+      if (!live) return;
+      const out: Record<string, Address> = {};
+      for (const r of rows) if (r.s && PARTY_ENDED.includes(status(r.s))) out[r.character] = r.session;
+      setEndedLocks(out);
+    });
+    return () => {
+      live = false;
+    };
+  }, [myChars]);
+  const isFree = (c: { address: Address; data: CharacterAcc }) => c.data.core.alive && (!optional(c.data.core.inSession) || endedLocks[c.address] !== undefined);
   // Patch 11: the rent Join pays besides the share, for the first character the lobby offers.
   const [joinRentLamports, setJoinRentLamports] = useState<bigint | undefined>(undefined);
-  const firstFree = myChars.find((c) => c.data.core.alive && !optional(c.data.core.inSession))?.address ?? null;
+  const firstFree = myChars.find(isFree)?.address ?? null;
   useEffect(() => {
     if (!firstFree || DATA_SOURCE !== "chain") return;
     let live = true;
@@ -676,9 +702,15 @@ function PartyView({ address }: { address: Address }) {
     opened: c.opened,
     label: `Chest${c.opened ? " (open)" : ""}: ${levelsLabel(rewardTablesList.find((t) => t.id === c.table))}`,
   }));
+  // A hint only (the program decides): no living monster within the map's radius of the chest or
+  // of any living player.
+  const monsterNear = (cell: { x: number; y: number }) =>
+    !!party && !!s && party.monsters.some((m) => m.alive && cheb(m, cell) <= s.chestRadius);
+  const partyClear =
+    !!s && party?.players.every((pl) => !(s.aliveMask & (1 << pl.slot)) || !monsterNear(s.playerPos[pl.slot]!)) === true;
   const nextChest =
-    myTurn && activePlayer && started && !s?.core.pendingVrf
-      ? chests.find((c) => !c.opened && cheb(c, activePlayer.part.core) === 1)
+    myTurn && activePlayer && started && !s?.core.pendingVrf && partyClear
+      ? chests.find((c) => !c.opened && cheb(c, activePlayer.part.core) === 1 && !monsterNear(c))
       : undefined;
   const openChest = (chest: number) => {
     if (!activePlayer || !s) return;
@@ -894,7 +926,7 @@ function PartyView({ address }: { address: Address }) {
       paid: p.part.contribution,
     }));
     const myJoined = mine[mine.length - 1] ?? null;
-    const joinable = myChars.filter((c) => c.data.core.alive && !optional(c.data.core.inSession)).map((c) => ({ address: c.address, name: bytesText(c.data.name) }));
+    const joinable = myChars.filter(isFree).map((c) => ({ address: c.address, name: bytesText(c.data.name) }));
     const remaining = s.core.priceLamports - (party.escrow?.collected ?? 0n);
     const share = (s.core.priceLamports + 1n) / 2n;
     const contribution = remaining < share ? remaining : share;
@@ -902,8 +934,12 @@ function PartyView({ address }: { address: Address }) {
       const signer = wallet.signer;
       if (!signer) return void (await send("join_session", null, []));
       // Joining pays the share of the price only; the session key and its prepayment come with Ready.
+      const c = character as Address;
+      const ended = endedLocks[c];
       const res = await send(`join_session (pay ${formatSol(contribution)})`, signer, async () => [
-        await joinSessionIx(signer, address, character as Address, contribution, DEFAULT_KEY),
+        // Patch 11: free it from its ended party first; the old rewards wait for their settlement.
+        ...(ended ? [await leavePartyIx(signer, ended, c)] : []),
+        await joinSessionIx(signer, address, c, contribution, DEFAULT_KEY, await openCacheSessions(c)),
       ]);
       if (res) ingest(res.signature, res.events);
       void wallet.refreshBalance();
@@ -963,6 +999,10 @@ function PartyView({ address }: { address: Address }) {
             come with Ready, after you confirm the amount.
           </p>
         )}
+        <p className="muted">
+          This map: no living monster within {s.chestRadius} cells of a chest or of any hero when it opens; after the party the DM has{" "}
+          {settleLabel(s.settleTimeoutSecs)} to hand out the rewards, then each player claims their own and gets their contribution back.
+        </p>
         {isDm && <p className="muted">Share this page's link with the players. Start needs everyone ready and the escrow at the price.</p>}
         <EventLog events={events} label={label} />
       </section>
@@ -1341,7 +1381,7 @@ export function Claims({
     const t = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
     return () => clearInterval(t);
   }, []);
-  const deadline = settleDeadline(s.endedAt);
+  const deadline = settleDeadline(s.endedAt, s.settleTimeoutSecs);
   const left = Math.max(0, deadline - now);
   const dmSettled = party.escrow?.claimed ?? false;
   const run = (what: string, ix: () => Promise<Instruction>) =>

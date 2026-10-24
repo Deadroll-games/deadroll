@@ -126,8 +126,8 @@ u8_enum!(
     RewardSource { Body, Chest, Boss, Stash }
 );
 u8_enum!(
-    /// session `RewardCache.status`: `Open` while the party runs (the rewards are in the
-    /// `Participation`), `Claimed` once they are the player's (issued, or claimed after the
-    /// timeout) and wait for "Done" in the bag screen.
-    CacheStatus { Open, Claimed }
+    /// One party's entry in the session `RewardCache`: `Empty` (free), `Open` while the party runs
+    /// or waits to be settled (the rewards are in its `Participation`), `Claimed` once they are
+    /// the player's (issued, or claimed after the timeout) and wait for "Done" in the bag screen.
+    CacheStatus { Empty, Open, Claimed }
 );

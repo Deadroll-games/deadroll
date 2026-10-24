@@ -170,6 +170,35 @@ pub fn pay_kills(
     Ok(())
 }
 
+/// Compute units a VRF callback keeps before it pays out one more kill: one kill to 4 players
+/// with its boss table, then the party write-back and the end of the callback. Measured: a kill
+/// paid out to 4 players costs about 42k (programs/session/tests/session.test.ts).
+pub const PAYOUT_RESERVE_CU: u64 = 75_000;
+
+/// `pay_kills` for the waiting kills (`GameSession.unpaid_kills`), lowest index first, one at a time
+/// while more than [`PAYOUT_RESERVE_CU`] remain of the callback's budget (the oracle's 256k);
+/// the rest wait. Which VRF value pays a kill changes no rule: a cache counts at the settlement.
+pub fn pay_kills_within_budget(
+    session: &mut GameSession,
+    session_key: Pubkey,
+    monsters: &Monsters,
+    seed: [u8; 32],
+    caches: &mut impl Caches,
+) -> Result<()> {
+    for index in 0..MONSTERS_MAX as u32 {
+        let bit = 1u32 << index;
+        if session.unpaid_kills & bit == 0 {
+            continue;
+        }
+        if solana_program::compute_units::sol_remaining_compute_units() < PAYOUT_RESERVE_CU {
+            break;
+        }
+        pay_kills(session, session_key, monsters, bit, seed, caches)?;
+        session.unpaid_kills &= !bit;
+    }
+    Ok(())
+}
+
 /// Chest `chest` opens for player `slot`: one level for the party, a reward for each living
 /// player whose rewards are rolled (docs/PARTY_AND_TURNS.md 9.3); it no longer occupies its cell.
 pub fn open_chest(

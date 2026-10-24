@@ -212,6 +212,8 @@ pub fn session(players: &[Cell]) -> GameSession {
         loot_mask: 0b1111,
         unpaid_kills: 0,
         ended_at: 0,
+        chest_radius: 3,
+        settle_timeout_secs: 600,
     }
 }
 

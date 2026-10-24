@@ -102,6 +102,10 @@ pub enum MapError {
     OverBudget,
     #[msg("No cell next to a chest can be reached from the entrance")]
     ChestUnreachable,
+    #[msg("The chest radius is outside the limits (LootTuning.chest_radius_min..=max)")]
+    ChestRadiusOutOfRange,
+    #[msg("The time to settle is outside the limits (at most LootTuning.settle_timeout_max_secs)")]
+    SettleTimeoutOutOfRange,
 }
 
 impl From<MapCheckError> for MapError {

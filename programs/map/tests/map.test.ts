@@ -97,9 +97,23 @@ const tableAddress = async (seed: string) => (await findTablePda({ seed }))[0];
 
 type Signer = Awaited<ReturnType<typeof generateKeyPairSigner>>;
 
-async function createMapIx(dm: Signer, index: number, width: number, height: number, tier: number, minPlayers = 1) {
+/** Patch 11: the DM's map settings (minimum players, chest radius, time to settle). */
+type Settings = { minPlayers?: number; chestRadius?: number; settleTimeoutSecs?: number };
+
+async function createMapIx(dm: Signer, index: number, width: number, height: number, tier: number, minPlayers = 1, more: Settings = {}) {
   const map = await mapAddress(dm.address, index);
-  return getCreateMapInstruction({ dm, map, layout: await layoutAddress(map), index, width, height, tier, minPlayers });
+  return getCreateMapInstruction({
+    dm,
+    map,
+    layout: await layoutAddress(map),
+    index,
+    width,
+    height,
+    tier,
+    minPlayers,
+    chestRadius: more.chestRadius ?? 3,
+    settleTimeoutSecs: more.settleTimeoutSecs ?? 3600,
+  });
 }
 
 async function editAccounts(dm: Signer, map: string) {
@@ -202,7 +216,7 @@ async function data(addr: string): Promise<Uint8Array> {
 }
 
 async function readMap(addr: string) {
-  const { core, tier, minPlayers } = getMapDecoder().decode(await data(addr));
+  const { core, tier, minPlayers, chestRadius, settleTimeoutSecs } = getMapDecoder().decode(await data(addr));
   return {
     version: core.version,
     dm: Uint8Array.from(enc.encode(core.dm)),
@@ -214,6 +228,8 @@ async function readMap(addr: string) {
     secretsRoot: Array.from(core.secretsRoot),
     tier,
     minPlayers,
+    chestRadius,
+    settleTimeoutSecs,
   };
 }
 
@@ -330,6 +346,21 @@ describe("map: create_map", () => {
     assert.equal((await readLayout(layout)).bossTable, NO_TABLE);
     for (const bad of [0, 5]) {
       await expectErr(send(dm, [await createMapIx(dm, 1, 16, 16, 1, bad)]), err("MinPlayersOutOfRange"));
+    }
+  });
+
+  it("patch 11: stores the DM's chest radius and time to settle, within the limits", async () => {
+    const dm = await funded();
+    await send(dm, [await createMapIx(dm, 0, 16, 16, 1, 1, { chestRadius: 10, settleTimeoutSecs: 36_000 })]);
+    const map = await readMap(await mapAddress(dm.address, 0));
+    assert.deepEqual([map.chestRadius, map.settleTimeoutSecs], [10, 36_000]);
+    for (const chestRadius of [0, 11]) {
+      await expectErr(send(dm, [await createMapIx(dm, 1, 16, 16, 1, 1, { chestRadius })]), err("ChestRadiusOutOfRange"));
+    }
+    // The map takes seconds (localnet tests); open_session refuses less than 10 minutes on devnet.
+    await send(dm, [await createMapIx(dm, 2, 16, 16, 1, 1, { settleTimeoutSecs: 5 })]);
+    for (const settleTimeoutSecs of [0, 36_001]) {
+      await expectErr(send(dm, [await createMapIx(dm, 3, 16, 16, 1, 1, { settleTimeoutSecs })]), err("SettleTimeoutOutOfRange"));
     }
   });
 

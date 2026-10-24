@@ -11,6 +11,8 @@ pub struct MapCreated {
     pub tier: u8,
     /// Patch 11.
     pub min_players: u8,
+    pub chest_radius: u8,
+    pub settle_timeout_secs: u32,
 }
 
 #[event]

@@ -1449,6 +1449,7 @@ dependencies = [
  "deadroll-types",
  "ephemeral-vrf-sdk",
  "session-keys",
+ "solana-program",
  "solana-sha256-hasher",
 ]
 
@@ -1466,6 +1467,7 @@ dependencies = [
  "deadroll-types",
  "ephemeral-vrf-sdk",
  "session-keys",
+ "solana-program",
  "solana-sha256-hasher",
 ]
 

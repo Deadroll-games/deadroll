@@ -355,7 +355,7 @@ class Demo {
     this.layout = pda([Buffer.from("layout"), this.map.toBuffer()], MAP);
     const edit = { dm: this.dm.publicKey, map: this.map, layout: this.layout };
     await mapProgram.methods
-      .createMap(index, preset.width, preset.height, preset.tier, preset.minPlayers)
+      .createMap(index, preset.width, preset.height, preset.tier, { minPlayers: preset.minPlayers, chestRadius: preset.chestRadius, settleTimeoutSecs: preset.settleTimeoutSecs })
       .accountsStrict({ ...edit, systemProgram: SystemProgram.programId })
       .signers([this.dm])
       .rpc()
@@ -616,6 +616,8 @@ class Demo {
     for (let i = 0; i < this.players.length; i++) {
       if (i !== mover && s.aliveMask & (1 << i)) taken.add(s.playerPos[i].y * MAP_STRIDE + s.playerPos[i].x);
     }
+    // Patch 11: a closed chest occupies its cell.
+    for (let i = 0; i < s.chestCount; i++) if (!(s.chestsOpened & (1 << i))) taken.add(s.chests[i].y * MAP_STRIDE + s.chests[i].x);
     const cost = (x: number, y: number) => {
       if (x < 0 || y < 0 || x >= preset.width || y >= preset.height) return 0;
       const t = preset.tiles[y * MAP_STRIDE + x];

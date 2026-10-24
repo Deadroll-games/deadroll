@@ -62,6 +62,7 @@ import {
   getActInstruction,
   getClaimAfterTimeoutInstruction,
   getCloseCacheInstruction,
+  getLeavePartyInstruction,
   getConsumeRandomnessInstruction,
   getEndTurnInstruction,
   getEscrowDecoder,
@@ -409,6 +410,9 @@ export type MapDraft = {
   height: number;
   tier: number;
   minPlayers: number;
+  /** The DM's chest radius and time to settle (`create_map` settings). */
+  chestRadius: number;
+  settleTimeoutSecs: number;
   tiles: Uint8Array;
   spawns: Spawn[];
   chests: Chest[];
@@ -438,7 +442,7 @@ export async function buildMapIxs(dm: TransactionSigner, d: MapDraft): Promise<{
   const exit = findTile(d, Tile.Exit);
   if (!entrance || !exit) throw new Error("the map needs an entrance and an exit");
   const ixs = [
-    getCreateMapInstruction({ ...edit, systemProgram: SYSTEM_PROGRAM, index, width: d.width, height: d.height, tier: d.tier, minPlayers: d.minPlayers }),
+    getCreateMapInstruction({ ...edit, systemProgram: SYSTEM_PROGRAM, index, width: d.width, height: d.height, tier: d.tier, minPlayers: d.minPlayers, chestRadius: d.chestRadius, settleTimeoutSecs: d.settleTimeoutSecs }),
     getWriteLayoutInstruction({ ...edit, offset: 0, tiles: tiles.slice(0, (d.height - 1) * MAP_MAX + d.width) }),
     getWriteSpawnsInstruction({ ...edit, entrance, exit, spawns: d.spawns }),
     getWriteChestsInstruction({ ...edit, chests: d.chests.map((c) => ({ kind: PointKind.Chest, x: c.x, y: c.y, data: c.table })), bossTable: d.bossTable }),
@@ -527,8 +531,17 @@ export async function openSessionIx(dm: TransactionSigner, map: Address, priceLa
   });
 }
 
-export async function joinSessionIx(player: TransactionSigner, session: Address, character: Address, contribution: bigint, actor: Address): Promise<Instruction> {
-  return getJoinSessionInstruction({
+/** `cacheSessions` (patch 11): the `GameSession` of every `Open` entry of the character's reward
+ * caches, in entry order ([`openCacheSessions`]). */
+export async function joinSessionIx(
+  player: TransactionSigner,
+  session: Address,
+  character: Address,
+  contribution: bigint,
+  actor: Address,
+  cacheSessions: readonly Address[] = [],
+): Promise<Instruction> {
+  const ix = getJoinSessionInstruction({
     player,
     session,
     character,
@@ -538,6 +551,34 @@ export async function joinSessionIx(player: TransactionSigner, session: Address,
     systemProgram: SYSTEM_PROGRAM,
     contribution,
     actor,
+  });
+  return withRemaining(ix, cacheSessions.map((address) => ({ address, writable: false })));
+}
+
+/** `CacheStatus` (crates/types): a reward cache entry. */
+export const CACHE_STATUS = { Empty: 0, Open: 1, Claimed: 2 } as const;
+
+/** Patch 11: the character's reward cache entries (none when it has no cache account yet). */
+export async function rewardCacheEntries(character: Address) {
+  const cache = await getAccount("RewardCache", await rewardCachePda(character));
+  return cache ? cache.entries.filter((e) => e.status !== CACHE_STATUS.Empty) : [];
+}
+
+/** Patch 11: what `join_session` takes after its accounts: the parties of the `Open` entries. */
+export async function openCacheSessions(character: Address): Promise<Address[]> {
+  return (await rewardCacheEntries(character)).filter((e) => e.status === CACHE_STATUS.Open).map((e) => e.session);
+}
+
+/** Patch 11, leave_party: the owner's main wallet frees a living character from its ended party
+ * (before joining another, changing gear or pressing "Done"). */
+export async function leavePartyIx(owner: TransactionSigner, session: Address, character: Address): Promise<Instruction> {
+  return getLeavePartyInstruction({
+    owner,
+    session,
+    character,
+    sessionAuthority: await sessionAuthorityPda(),
+    config: await gameConfigPda(),
+    characterProgram: PROGRAMS.character,
   });
 }
 
@@ -803,10 +844,11 @@ export type BagLayout = { resources: BagSlotIn[]; consumables: BagSlotIn[] };
 type BagSlotIn = { kind: number; id: number; qty: number };
 const slotArgs = (r: BagSlotIn): BagSlotArgs => ({ kind: r.kind as BagSlotArgs["kind"], id: r.id, qty: r.qty });
 
-/** Patch 11, close_cache: "Done" in the bag screen, the owner's main wallet; `layout` is the final
+/** Patch 11, close_cache: "Done" in the bag screen for party `session`, the owner's main wallet; `layout` is the final
  * bag (resources and consumables), checked on chain against the bag and the cache. */
-export async function closeCacheIx(owner: TransactionSigner, character: Address, layout: BagLayout): Promise<Instruction> {
+export async function closeCacheIx(owner: TransactionSigner, character: Address, session: Address, layout: BagLayout): Promise<Instruction> {
   return getCloseCacheInstruction({
+    session,
     owner,
     rewardCache: await rewardCachePda(character),
     character,

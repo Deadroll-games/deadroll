@@ -93,7 +93,6 @@ pub fn handler<'info>(ctx: Context<'info, SettleParty<'info>>) -> Result<()> {
     for (slot, p) in loaded.iter_mut().enumerate().take(count) {
         *p = Some(settlement::load_player(
             session,
-            &key,
             slot as u8,
             &players[slot * 3..slot * 3 + 3],
         )?);

@@ -79,8 +79,8 @@ fn chebyshev(a: Cell, b: Cell) -> u8 {
 
 /// Patch 11 (decisions of patch 11, docs/PARTY_AND_TURNS.md 5.1): on their turn a player opens
 /// visible chest `chest` from a cell next to it (Chebyshev 1) for `LootTuning.chest_open_ap`
-/// action points, if no living monster stands within `chest_monster_radius` of the chest or of
-/// the player. An interaction, not the turn's one action. Each chest opens once a party; the
+/// action points, if no living monster stands within the map's `chest_radius` (set by the DM)
+/// of the chest or of any living player of the party. An interaction, not the turn's one action. Each chest opens once a party; the
 /// rewards are rolled with a VRF value of their own (`consume_randomness`, `crate::loot`).
 #[session_auth_or(
     ctx.accounts.signer.key() == ctx.accounts.participation.player,
@@ -127,12 +127,18 @@ pub fn handler(ctx: Context<OpenChest>, chest: u8) -> Result<()> {
     let cell = point.cell();
     require!(chebyshev(at, cell) == 1, SessionError::ChestNotAdjacent);
     let monsters = Monsters::load(accounts.monsters.as_ref(), &session.key())?;
-    let radius = BALANCE.loot.chest_monster_radius;
+    let radius = session.chest_radius;
     for i in 0..monsters.count()? {
         let m = monsters.get(i)?;
+        if !m.alive {
+            continue;
+        }
         let c = Cell { x: m.x, y: m.y };
+        let near_player = (0..session.core.player_count).any(|p| {
+            session.player_alive(p) && chebyshev(c, session.player_pos[p as usize]) <= radius
+        });
         require!(
-            !m.alive || (chebyshev(c, cell) > radius && chebyshev(c, at) > radius),
+            chebyshev(c, cell) > radius && !near_player,
             SessionError::MonsterNearChest
         );
     }

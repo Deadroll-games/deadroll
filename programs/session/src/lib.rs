@@ -43,7 +43,11 @@ pub mod deadroll_session {
     }
 
     /// Player joins with a character and pays a share of the price into escrow.
-    pub fn join_session(ctx: Context<JoinSession>, contribution: u64, actor: Pubkey) -> Result<()> {
+    pub fn join_session<'info>(
+        ctx: Context<'info, JoinSession<'info>>,
+        contribution: u64,
+        actor: Pubkey,
+    ) -> Result<()> {
         join_session::handler(ctx, contribution, actor)
     }
 
@@ -140,10 +144,16 @@ pub mod deadroll_session {
         claim_after_timeout::handler(ctx)
     }
 
+    /// Patch 11: the owner releases a living character from its ended party (it may join another
+    /// before the party is settled).
+    pub fn leave_party(ctx: Context<LeaveParty>) -> Result<()> {
+        leave_party::handler(ctx)
+    }
+
     /// Patch 11, "Done" in the bag screen: the owner's bag layout from the settled cache (main
     /// wallet), then the cache closes.
-    pub fn close_cache(ctx: Context<CloseCache>, layout: BagLayout) -> Result<()> {
-        close_cache::handler(ctx, layout)
+    pub fn close_cache(ctx: Context<CloseCache>, session: Pubkey, layout: BagLayout) -> Result<()> {
+        close_cache::handler(ctx, session, layout)
     }
 
     /// Patch 10: binds another temporary key to the party, main wallet only (the player's with

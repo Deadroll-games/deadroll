@@ -92,11 +92,9 @@ pub fn read_map(info: &AccountInfo) -> Result<MapData> {
 }
 
 /// A `deadroll_map` `Map` with the fields after its core: the tier and (patch 11) the minimum
-/// players.
-pub fn read_map_full(info: &AccountInfo) -> Result<(MapData, u8, u8)> {
-    let m: deadroll_map::state::Map = decode(info, &deadroll_map::ID, &MAP_DISCRIMINATOR)
-        .ok_or(error!(SessionError::InvalidMap))?;
-    Ok((m.core, m.tier, m.min_players))
+/// players, the chest radius and the time to settle.
+pub fn read_map_full(info: &AccountInfo) -> Result<deadroll_map::state::Map> {
+    decode(info, &deadroll_map::ID, &MAP_DISCRIMINATOR).ok_or(error!(SessionError::InvalidMap))
 }
 
 /// Byte offsets inside a `MapLayout` account (discriminator included).

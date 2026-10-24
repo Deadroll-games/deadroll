@@ -31,7 +31,7 @@ import {
 } from "../chain/items";
 import { useTx } from "../chain/useTx";
 import { heroInputOf, useCombat } from "../chain/combatWasm";
-import { closeCacheIx, spendStatPointsIx } from "../chain/game";
+import { CACHE_STATUS, closeCacheIx, leavePartyIx, spendStatPointsIx } from "../chain/game";
 import { BagPanel } from "../components/bag/BagPanel";
 import {
   checkBagLayout,
@@ -48,6 +48,7 @@ import {
   type BagState,
 } from "../chain/bagLayout";
 import { rewardLabel, type Reward } from "../chain/loot";
+import { shortAddress } from "../components/forms/format";
 import { equipmentOf } from "../chain/items";
 import { HeroSheetPanel } from "../components/stats/HeroSheetPanel";
 import type { HeroSheetPanelProps } from "../components/stats/types";
@@ -131,9 +132,14 @@ export function CharacterDetailPage() {
   const combat = useCombat();
   // Level-up points placed but not saved yet, by Stat; Save sends them all at once.
   const [plan, setPlan] = useState<number[]>([0, 0, 0, 0]);
-  // Patch 11: the bag on chain, the settled cache (null: none waits) and the layout in progress.
+  // Patch 11: the bag on chain, the settled caches by party (one is laid out at a time), the
+  // parties still waiting for their settlement, and the layout in progress.
   const [bagBase, setBagBase] = useState<BagState | null>(null);
-  const [cacheBase, setCacheBase] = useState<Reward[] | null>(null);
+  const [claimed, setClaimed] = useState<{ session: Address; xp: number; slots: Reward[] }[]>([]);
+  const [waiting, setWaiting] = useState<Address[]>([]);
+  const [chosen, setChosen] = useState<Address | null>(null);
+  const [endedLock, setEndedLock] = useState<Address | null>(null);
+  const cacheBase = claimed.find((x) => x.session === chosen)?.slots ?? null;
   const [work, setWork] = useState<BagState | null>(null);
   const [picked, setPicked] = useState<number | null>(null);
   const [locks, setLocks] = useState<Set<string>>(() => (address ? loadLocks(address) : new Set()));
@@ -150,11 +156,16 @@ export function CharacterDetailPage() {
       ]);
       const plain = (x: { kind: number; id: number; qty: number }): Reward => ({ kind: x.kind, id: x.id, qty: x.qty });
       const base: Bag = bag ? { resources: bag.layout.resources.map(plain), consumables: bag.layout.consumables.map(plain) } : { resources: [], consumables: [] };
-      // CacheStatus: Open 0, Claimed 1. An open cache belongs to a party still running.
-      const settled = cache && cache.status === 1 ? cache.slots.map(plain).filter((x) => x.qty > 0) : null;
-      setBagBase({ bag: base, cache: settled ?? [] });
-      setCacheBase(settled);
-      setWork({ bag: base, cache: settled ?? [] });
+      const entries = cache?.entries ?? [];
+      const done = entries
+        .filter((e) => e.status === CACHE_STATUS.Claimed)
+        .map((e) => ({ session: e.session, xp: e.xp, slots: e.slots.map(plain).filter((x) => x.qty > 0) }));
+      const first = done[0] ?? null;
+      setClaimed(done);
+      setWaiting(entries.filter((e) => e.status === CACHE_STATUS.Open).map((e) => e.session));
+      setChosen(first?.session ?? null);
+      setBagBase({ bag: base, cache: first?.slots ?? [] });
+      setWork({ bag: base, cache: first?.slots ?? [] });
       setPicked(null);
       setC(acc ?? "missing");
       setPlan([0, 0, 0, 0]);
@@ -164,8 +175,11 @@ export function CharacterDetailPage() {
         const p = await readParty(session);
         const me = p?.players.find((x) => x.character === addr);
         setParty(p && me ? { session, status: status(p.session), slot: me.slot, hp: me.part.core.hp } : null);
+        // Patch 11: locked to a party that ended: free it (`leave_party`) before "Done".
+        setEndedLock(p && acc?.core.alive && ["victory", "fled", "wiped"].includes(status(p.session)) ? session : null);
       } else {
         setParty(null);
+        setEndedLock(null);
       }
       setError(null);
     } catch (e) {
@@ -251,12 +265,60 @@ export function CharacterDetailPage() {
           })
         }
         onReset={() => bagBase && setWork(bagBase)}
-        // "Done": the owner's main wallet; the rest of the cache burns and its rent comes back.
+        // "Done": the owner's main wallet; the rest of this party's cache burns. A character still
+        // locked to its ended party is freed first, in the same transaction.
         onDone={() =>
-          void send("Done (close_cache)", wallet.signer, async () => [await closeCacheIx(wallet.signer!, addr, layoutArgs(work.bag))]).then((ok) => ok && load())
+          void send("Done (close_cache)", wallet.signer, async () => [
+            ...(endedLock ? [await leavePartyIx(wallet.signer!, endedLock, addr)] : []),
+            await closeCacheIx(wallet.signer!, addr, chosen!, layoutArgs(work.bag)),
+          ]).then((ok) => ok && load())
         }
       />
     ) : null;
+  const choose = (session: Address) => {
+    const slots = claimed.find((x) => x.session === session)?.slots ?? [];
+    setChosen(session);
+    if (bagBase) {
+      setBagBase({ ...bagBase, cache: slots });
+      setWork({ bag: bagBase.bag, cache: slots });
+    }
+    setPicked(null);
+  };
+  const bagSection = (
+    <>
+      {claimed.length > 1 && (
+        <p>
+          Cache of the party{" "}
+          <select value={chosen ?? ""} onChange={(e) => choose(e.target.value as Address)}>
+            {claimed.map((x) => (
+              <option key={x.session} value={x.session}>
+                {shortAddress(x.session)} · {x.xp} xp
+              </option>
+            ))}
+          </select>
+        </p>
+      )}
+      {waiting.length > 0 && (
+        <p className="muted">
+          {waiting.length} {waiting.length === 1 ? "party waits" : "parties wait"} for the DM to hand out the rewards (they do not burn before the DM's deadline).
+        </p>
+      )}
+      {endedLock && owner && (
+        <p>
+          <button
+            type="button"
+            className="btn"
+            disabled={busy !== null}
+            onClick={() => void send("leave_party", wallet.signer, async () => [await leavePartyIx(wallet.signer!, endedLock, addr)]).then((ok) => ok && load())}
+          >
+            Leave the ended party
+          </button>{" "}
+          <span className="muted">frees the character for gear, points and a new party; its rewards still wait.</span>
+        </p>
+      )}
+      {bagPanel}
+    </>
+  );
 
   if (DATA_SOURCE !== "chain") return <p className="muted">Character details need chain mode.</p>;
   return (
@@ -270,7 +332,7 @@ export function CharacterDetailPage() {
       {error && <p className="error">{error}</p>}
       {c === null && !error && <p className="muted">Loading…</p>}
       {c === "missing" && <p className="error">No character at this address.</p>}
-      {c && c !== "missing" && <CharacterDetailView address={address as Address} c={c} skills={skills} party={party} items={items} sheet={sheet} bag={bagPanel} />}
+      {c && c !== "missing" && <CharacterDetailView address={address as Address} c={c} skills={skills} party={party} items={items} sheet={sheet} bag={bagSection} />}
     </section>
   );
 }

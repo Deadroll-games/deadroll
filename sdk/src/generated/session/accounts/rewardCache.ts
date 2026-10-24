@@ -23,8 +23,6 @@ import {
   getBytesEncoder,
   getStructDecoder,
   getStructEncoder,
-  getU32Decoder,
-  getU32Encoder,
   getU8Decoder,
   getU8Encoder,
   transformEncoder,
@@ -41,14 +39,10 @@ import {
   type ReadonlyUint8Array,
 } from "@solana/kit";
 import {
-  getCacheSlotDecoder,
-  getCacheSlotEncoder,
-  getCacheStatusDecoder,
-  getCacheStatusEncoder,
-  type CacheSlot,
-  type CacheSlotArgs,
-  type CacheStatus,
-  type CacheStatusArgs,
+  getCacheEntryDecoder,
+  getCacheEntryEncoder,
+  type CacheEntry,
+  type CacheEntryArgs,
 } from "../types/index.js";
 
 export const REWARD_CACHE_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Array([
@@ -65,32 +59,14 @@ export type RewardCache = {
   discriminator: ReadonlyUint8Array;
   version: number;
   character: Address;
-  /** The party it belongs to. */
-  session: Address;
-  /**
-   * `Open` while the party runs (empty here), `Claimed` once settled: then it is the owner's
-   * to lay out.
-   */
-  status: CacheStatus;
-  /** Experience granted with the settlement (shown on the summary). */
-  xp: number;
-  slots: Array<CacheSlot>;
+  entries: Array<CacheEntry>;
   bump: number;
 };
 
 export type RewardCacheArgs = {
   version: number;
   character: Address;
-  /** The party it belongs to. */
-  session: Address;
-  /**
-   * `Open` while the party runs (empty here), `Claimed` once settled: then it is the owner's
-   * to lay out.
-   */
-  status: CacheStatusArgs;
-  /** Experience granted with the settlement (shown on the summary). */
-  xp: number;
-  slots: Array<CacheSlotArgs>;
+  entries: Array<CacheEntryArgs>;
   bump: number;
 };
 
@@ -101,10 +77,7 @@ export function getRewardCacheEncoder(): FixedSizeEncoder<RewardCacheArgs> {
       ["discriminator", fixEncoderSize(getBytesEncoder(), 8)],
       ["version", getU8Encoder()],
       ["character", getAddressEncoder()],
-      ["session", getAddressEncoder()],
-      ["status", getCacheStatusEncoder()],
-      ["xp", getU32Encoder()],
-      ["slots", getArrayEncoder(getCacheSlotEncoder(), { size: 32 })],
+      ["entries", getArrayEncoder(getCacheEntryEncoder(), { size: 3 })],
       ["bump", getU8Encoder()],
     ]),
     (value) => ({ ...value, discriminator: REWARD_CACHE_DISCRIMINATOR }),
@@ -117,10 +90,7 @@ export function getRewardCacheDecoder(): FixedSizeDecoder<RewardCache> {
     ["discriminator", fixDecoderSize(getBytesDecoder(), 8)],
     ["version", getU8Decoder()],
     ["character", getAddressDecoder()],
-    ["session", getAddressDecoder()],
-    ["status", getCacheStatusDecoder()],
-    ["xp", getU32Decoder()],
-    ["slots", getArrayDecoder(getCacheSlotDecoder(), { size: 32 })],
+    ["entries", getArrayDecoder(getCacheEntryDecoder(), { size: 3 })],
     ["bump", getU8Decoder()],
   ]);
 }
@@ -187,5 +157,5 @@ export async function fetchAllMaybeRewardCache(
 }
 
 export function getRewardCacheSize(): number {
-  return 239;
+  return 633;
 }

@@ -13,6 +13,7 @@ export * from "./aspect.js";
 export * from "./auraData.js";
 export * from "./bagSlot.js";
 export * from "./burningCellData.js";
+export * from "./cacheEntry.js";
 export * from "./cacheSlot.js";
 export * from "./cacheStatus.js";
 export * from "./carrier.js";

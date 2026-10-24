@@ -3,6 +3,7 @@ use deadroll_combat::ResonanceTables;
 use deadroll_registry::state::TableKind;
 use deadroll_rules::{
     aura::{monster_passive_aura, Aura, AURAS_PER_PLAYER, PASSIVE_AURA},
+    loot::settle_timeout_ok,
     monster::{select_skills, NO_SKILL, PASSIVE_SLOT},
     MonsterTemplate,
 };
@@ -94,7 +95,18 @@ pub struct OpenSession<'info> {
 
 pub fn handler(ctx: Context<OpenSession>, price_lamports: u64, dm_actor: Pubkey) -> Result<()> {
     let accounts = ctx.accounts;
-    let (map, tier, min_players) = read_map_full(&accounts.map)?;
+    let full = read_map_full(&accounts.map)?;
+    let map = full.core;
+    // The DM's time to settle: at least 10 minutes outside a localnet test build (the map
+    // program checks the maximum).
+    require!(
+        settle_timeout_ok(
+            full.settle_timeout_secs,
+            &BALANCE.loot,
+            cfg!(feature = "mock-vrf")
+        ),
+        SessionError::SettleTimeoutTooShort
+    );
     require_keys_eq!(map.dm, accounts.dm.key(), SessionError::NotDm);
     require!(
         map.status == MapStatus::Finalized,
@@ -146,8 +158,10 @@ pub fn handler(ctx: Context<OpenSession>, price_lamports: u64, dm_actor: Pubkey)
     session.dm_actor = dm_actor;
     session.tile_cost = read_tile_costs(&accounts.tileset)?;
     // Patch 11: the map's rewards, fixed for the party.
-    session.tier = tier;
-    session.min_players = min_players;
+    session.tier = full.tier;
+    session.min_players = full.min_players;
+    session.chest_radius = full.chest_radius;
+    session.settle_timeout_secs = full.settle_timeout_secs;
     (session.chests, session.chest_count) = layout.chests()?;
     session.boss_table = layout.boss_table();
     session.pending_chest = NO_CHEST;

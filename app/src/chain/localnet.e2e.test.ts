@@ -350,7 +350,7 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
     // "Done" with an empty bag: the cache closes (what was not taken burns).
     const empty = { kind: 0, id: 0, qty: 0 };
     const layout = { resources: Array.from({ length: 40 }, () => empty), consumables: Array.from({ length: 5 }, () => empty) };
-    await send(owner0.wallet, [await closeCacheIx(owner0.wallet, owner0.character, layout)]);
+    await send(owner0.wallet, [await closeCacheIx(owner0.wallet, owner0.character, acc.session, layout)]);
     party = (await readParty(acc.session))!;
     expect(status(party.session)).toBe("victory");
   });

@@ -212,7 +212,8 @@ for (let y = 1; y < 15; y++) for (let x = 1; x < 15; x++) tiles[y * MAP_STRIDE +
 tiles[ENTRANCE.y * MAP_STRIDE + ENTRANCE.x] = Tile.Entrance;
 tiles[EXIT.y * MAP_STRIDE + EXIT.x] = Tile.Exit;
 const spawns = CAMP.map((s) => ({ bestiaryId: s.id, x: s.x, y: s.y, level: 1, skills: s.skills, flags: 0, aspects: 0, pack: s.pack }));
-await mapProgram.methods.createMap(index, 16, 16, 1, 1).accountsStrict({ ...edit, systemProgram: SystemProgram.programId }).signers([dm]).rpc();
+// Patch 11: the DM's settings (devnet takes at least 10 minutes to settle).
+await mapProgram.methods.createMap(index, 16, 16, 1, { minPlayers: 1, chestRadius: 3, settleTimeoutSecs: 600 }).accountsStrict({ ...edit, systemProgram: SystemProgram.programId }).signers([dm]).rpc();
 await mapProgram.methods.writeLayout(0, Buffer.from(tiles)).accountsStrict(edit).signers([dm]).rpc();
 await mapProgram.methods.writeSpawns(ENTRANCE, EXIT, spawns).accountsStrict(edit).signers([dm]).rpc();
 // Patch 11: no chests, the tier 1 boss table of assets/registry/reward_tables.json.
@@ -307,7 +308,7 @@ async function callbackBudget(sig: string, what: string) {
   console.log("computeUnitsConsumed (whole tx):", tx.meta.computeUnitsConsumed);
   const own = `Program ${SESSION.toBase58()} consumed `;
   for (const line of tx.meta.logMessages ?? []) if (line.startsWith(own)) console.log("session program:", line.slice(`Program ${SESSION.toBase58()} `.length));
-  // ComputeBudget instructions the oracle put in front of the callback (none: the 200k default per instruction).
+  // ComputeBudget instructions the oracle put in front of the callback (its budget is 256k).
   const msg = tx.transaction.message;
   const keys = msg.staticAccountKeys;
   let budgets = 0;

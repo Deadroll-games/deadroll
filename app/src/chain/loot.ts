@@ -143,10 +143,23 @@ export function rewardLabel(r: Reward): string {
   return `${REWARD_KINDS[r.kind] ?? "?"} #${r.id} x${r.qty}`;
 }
 
-/** The DM's deadline to settle (`settlement::deadline`): unix seconds. A `mock-vrf` localnet build
- * waits 20 s instead; the site shows the real number. */
-export function settleDeadline(endedAt: bigint | number): number {
-  return Number(endedAt) + balance.loot.settle_timeout_secs;
+/** The DM's deadline to settle (`settlement::deadline`): unix seconds, the map's time after the end. */
+export function settleDeadline(endedAt: bigint | number, settleTimeoutSecs: number): number {
+  return Number(endedAt) + settleTimeoutSecs;
+}
+
+/** The limits of what a DM sets for a map (`LootTuning`): the chest radius and the time to settle. */
+export const CHEST_RADIUS_MIN = balance.loot.chest_radius_min;
+export const CHEST_RADIUS_MAX = balance.loot.chest_radius_max;
+export const SETTLE_TIMEOUT_MIN_SECS = balance.loot.settle_timeout_min_secs;
+export const SETTLE_TIMEOUT_MAX_SECS = balance.loot.settle_timeout_max_secs;
+
+/** `h:mm` (or `m min`) of a time to settle. */
+export function settleLabel(secs: number): string {
+  if (secs < 3600) return `${Math.round(secs / 60)} min`;
+  const h = Math.floor(secs / 3600);
+  const m = Math.round((secs % 3600) / 60);
+  return m ? `${h} h ${m} min` : `${h} h`;
 }
 
 /** `LootTuning.chest_open_ap`: what opening a chest costs. */

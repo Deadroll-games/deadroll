@@ -12,13 +12,18 @@ import { SPAWNS_MAX, Tile, cellIndex, type Cell, type Spawn } from "../chain/typ
 import { buildMapIxs, mapRent, mapStatus, mapsOf, type MapAcc } from "../chain/game";
 import {
   CHESTS_MAX,
+  CHEST_RADIUS_MAX,
+  CHEST_RADIUS_MIN,
   MIN_PLAYERS_MAX,
+  SETTLE_TIMEOUT_MAX_SECS,
+  SETTLE_TIMEOUT_MIN_SECS,
   NO_TABLE,
   TABLE_ERROR_MESSAGES,
   budgetOf,
   checkTables,
   levelsLabel,
   rewardTables,
+  settleLabel,
   spentOf,
   tableAllowed,
   tierLoot,
@@ -338,14 +343,20 @@ function SpawnEditor(p: {
   );
 }
 
+/** What the loot panel edits. */
+type LootValue = { minPlayers: number; chests: Chest[]; bossTable: number; chestRadius: number; settleTimeoutSecs: number };
+
+/** Times to settle the builder offers: 10 minutes to 10 hours (LootTuning limits). */
+const SETTLE_CHOICES = [600, 1800, 3600, 7200, 14_400, 36_000].filter((x) => x >= SETTLE_TIMEOUT_MIN_SECS && x <= SETTLE_TIMEOUT_MAX_SECS);
+
 /** Patch 11: the map's minimum players, the boss table and each chest's table, with the budget
  * (docs/MAP_DESCRIPTION.md 7.1, docs/PARTY_AND_TURNS.md 9.2). Only tables the tier allows. */
 function LootEditor(p: {
   tier: number;
   tables: RewardTable[];
   locked: boolean;
-  value: { minPlayers: number; chests: Chest[]; bossTable: number };
-  onChange: (next: { minPlayers: number; chests: Chest[]; bossTable: number }) => void;
+  value: LootValue;
+  onChange: (next: LootValue) => void;
 }) {
   const { minPlayers, chests, bossTable } = p.value;
   const allowed = p.tables.filter((t) => tableAllowed(t, p.tier));
@@ -383,6 +394,28 @@ function LootEditor(p: {
           <select value={bossTable} onChange={(e) => p.onChange({ ...p.value, bossTable: Number(e.target.value) })}>
             <option value={NO_TABLE}>none</option>
             {bossTables.map(option)}
+          </select>
+        </label>
+      </div>
+      <div className="forms-row">
+        <label title="No living monster this close to a chest or to any hero when a chest opens">
+          Chest radius{" "}
+          <input
+            type="number"
+            min={CHEST_RADIUS_MIN}
+            max={CHEST_RADIUS_MAX}
+            value={p.value.chestRadius}
+            onChange={(e) => p.onChange({ ...p.value, chestRadius: Math.max(CHEST_RADIUS_MIN, Math.min(CHEST_RADIUS_MAX, Number(e.target.value) || CHEST_RADIUS_MIN)) })}
+          />
+        </label>{" "}
+        <label title="After the party, then each player claims their own and gets their contribution back">
+          Time to hand out the rewards{" "}
+          <select value={p.value.settleTimeoutSecs} onChange={(e) => p.onChange({ ...p.value, settleTimeoutSecs: Number(e.target.value) })}>
+            {SETTLE_CHOICES.map((secs) => (
+              <option key={secs} value={secs}>
+                {settleLabel(secs)}
+              </option>
+            ))}
           </select>
         </label>
       </div>

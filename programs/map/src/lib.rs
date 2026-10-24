@@ -11,6 +11,7 @@ pub mod trust;
 
 use deadroll_types::{Cell, MapPoint, MapStatus, Spawn};
 use instructions::*;
+use state::MapSettings;
 
 declare_id!("2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH");
 
@@ -19,15 +20,17 @@ pub mod deadroll_map {
     use super::*;
 
     /// DM creates an empty draft map and its layout.
+    /// Patch 11: `settings` holds the minimum players, the chest radius and the DM's time to
+    /// settle.
     pub fn create_map(
         ctx: Context<CreateMap>,
         index: u32,
         width: u8,
         height: u8,
         tier: u8,
-        min_players: u8,
+        settings: MapSettings,
     ) -> Result<()> {
-        create_map::handler(ctx, index, width, height, tier, min_players)
+        create_map::handler(ctx, index, width, height, tier, settings)
     }
 
     /// DM writes a chunk of tile bytes into a draft layout.

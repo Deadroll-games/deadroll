@@ -235,23 +235,15 @@ pub fn handler<'info>(
             _ => return err!(SessionError::InvalidPendingAccounts),
         }
     }
-    // Patch 11: the kills of this action, and any waiting from `start_turn`, pay out now: the
-    // experience and body rewards into the living players' caches.
-    let kills = session.unpaid_kills;
-    if kills != 0 {
+    // Patch 11: the kills of this action, and any waiting from `start_turn`, pay out now (the
+    // experience and body rewards into the living players' caches), one by one while the oracle's
+    // compute budget lasts; the rest wait for the next callback or the settlement.
+    if session.unpaid_kills != 0 {
         let mut caches = CallbackCaches {
             main,
             party: &mut cb.party,
         };
-        loot::pay_kills(
-            session,
-            session_key,
-            &monsters,
-            kills,
-            randomness,
-            &mut caches,
-        )?;
-        session.unpaid_kills = 0;
+        loot::pay_kills_within_budget(session, session_key, &monsters, randomness, &mut caches)?;
     }
     cb.party.store()?;
 

@@ -72,7 +72,7 @@ pub fn handler<'info>(ctx: Context<'info, ClaimAfterTimeout<'info>>) -> Result<(
         .take(session.core.player_count as usize)
         .position(|p| p == remaining[0].key)
         .ok_or(SessionError::InvalidSettleAccounts)? as u8;
-    let mut player = settlement::load_player(session, &key, slot, &remaining[..3])?;
+    let mut player = settlement::load_player(session, slot, &remaining[..3])?;
     require_keys_eq!(
         player.participation.player,
         accounts.player.key(),

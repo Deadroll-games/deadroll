@@ -110,6 +110,10 @@ export const DEADROLL_MAP_ERROR__BOSS_TABLE_ONE_LEVEL = 0x179d; // 6045
 export const DEADROLL_MAP_ERROR__OVER_BUDGET = 0x179e; // 6046
 /** ChestUnreachable: No cell next to a chest can be reached from the entrance */
 export const DEADROLL_MAP_ERROR__CHEST_UNREACHABLE = 0x179f; // 6047
+/** ChestRadiusOutOfRange: The chest radius is outside the limits (LootTuning.chest_radius_min..=max) */
+export const DEADROLL_MAP_ERROR__CHEST_RADIUS_OUT_OF_RANGE = 0x17a0; // 6048
+/** SettleTimeoutOutOfRange: The time to settle is outside the limits (at most LootTuning.settle_timeout_max_secs) */
+export const DEADROLL_MAP_ERROR__SETTLE_TIMEOUT_OUT_OF_RANGE = 0x17a1; // 6049
 
 export type DeadrollMapError =
   | typeof DEADROLL_MAP_ERROR__BOSS_COUNT
@@ -119,6 +123,7 @@ export type DeadrollMapError =
   | typeof DEADROLL_MAP_ERROR__CHEST_NOT_PASSABLE
   | typeof DEADROLL_MAP_ERROR__CHEST_OUT_OF_BOUNDS
   | typeof DEADROLL_MAP_ERROR__CHEST_OVERLAP
+  | typeof DEADROLL_MAP_ERROR__CHEST_RADIUS_OUT_OF_RANGE
   | typeof DEADROLL_MAP_ERROR__CHEST_UNREACHABLE
   | typeof DEADROLL_MAP_ERROR__CHUNK_OUT_OF_RANGE
   | typeof DEADROLL_MAP_ERROR__ELITE_BOSS
@@ -141,6 +146,7 @@ export type DeadrollMapError =
   | typeof DEADROLL_MAP_ERROR__NOT_DRAFT
   | typeof DEADROLL_MAP_ERROR__OVER_BUDGET
   | typeof DEADROLL_MAP_ERROR__PACK_TOO_SPREAD
+  | typeof DEADROLL_MAP_ERROR__SETTLE_TIMEOUT_OUT_OF_RANGE
   | typeof DEADROLL_MAP_ERROR__SIZE_OUT_OF_RANGE
   | typeof DEADROLL_MAP_ERROR__SPAWN_NOT_PASSABLE
   | typeof DEADROLL_MAP_ERROR__SPAWN_OUT_OF_BOUNDS
@@ -171,6 +177,7 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_MAP_ERROR__CHEST_NOT_PASSABLE]: `Chest stands on a cell that cannot be entered`,
     [DEADROLL_MAP_ERROR__CHEST_OUT_OF_BOUNDS]: `Chest is outside the map`,
     [DEADROLL_MAP_ERROR__CHEST_OVERLAP]: `Chest shares a cell with the entrance, the exit, a spawn or another chest`,
+    [DEADROLL_MAP_ERROR__CHEST_RADIUS_OUT_OF_RANGE]: `The chest radius is outside the limits (LootTuning.chest_radius_min..=max)`,
     [DEADROLL_MAP_ERROR__CHEST_UNREACHABLE]: `No cell next to a chest can be reached from the entrance`,
     [DEADROLL_MAP_ERROR__CHUNK_OUT_OF_RANGE]: `Chunk goes past the end of the tile grid`,
     [DEADROLL_MAP_ERROR__ELITE_BOSS]: `A boss cannot be elite`,
@@ -193,6 +200,7 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_MAP_ERROR__NOT_DRAFT]: `Map is not a draft`,
     [DEADROLL_MAP_ERROR__OVER_BUDGET]: `Chests and boss cost more than the reward budget`,
     [DEADROLL_MAP_ERROR__PACK_TOO_SPREAD]: `Pack monsters stand too far apart`,
+    [DEADROLL_MAP_ERROR__SETTLE_TIMEOUT_OUT_OF_RANGE]: `The time to settle is outside the limits (at most LootTuning.settle_timeout_max_secs)`,
     [DEADROLL_MAP_ERROR__SIZE_OUT_OF_RANGE]: `Map side is outside 8..=32`,
     [DEADROLL_MAP_ERROR__SPAWN_NOT_PASSABLE]: `Spawn is on an impassable tile`,
     [DEADROLL_MAP_ERROR__SPAWN_OUT_OF_BOUNDS]: `Spawn is outside the map`,

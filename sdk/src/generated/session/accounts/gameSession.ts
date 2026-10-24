@@ -209,9 +209,15 @@ export type GameSession = {
   unpaidKills: number;
   /**
    * Unix time the party ended (Victory, Wiped, Fled): the DM settles before
-   * `ended_at + LootTuning.settle_timeout_secs`, the players claim after.
+   * `ended_at + settle_timeout_secs`, the players claim after.
    */
   endedAt: bigint;
+  /**
+   * The map's DM-set numbers: no living monster within `chest_radius` of a chest or of any
+   * living player when it opens; the DM's time to settle after the end.
+   */
+  chestRadius: number;
+  settleTimeoutSecs: number;
 };
 
 export type GameSessionArgs = {
@@ -333,9 +339,15 @@ export type GameSessionArgs = {
   unpaidKills: number;
   /**
    * Unix time the party ended (Victory, Wiped, Fled): the DM settles before
-   * `ended_at + LootTuning.settle_timeout_secs`, the players claim after.
+   * `ended_at + settle_timeout_secs`, the players claim after.
    */
   endedAt: number | bigint;
+  /**
+   * The map's DM-set numbers: no living monster within `chest_radius` of a chest or of any
+   * living player when it opens; the DM's time to settle after the end.
+   */
+  chestRadius: number;
+  settleTimeoutSecs: number;
 };
 
 /** Gets the encoder for {@link GameSessionArgs} account data. */
@@ -395,6 +407,8 @@ export function getGameSessionEncoder(): FixedSizeEncoder<GameSessionArgs> {
       ["lootMask", getU8Encoder()],
       ["unpaidKills", getU32Encoder()],
       ["endedAt", getI64Encoder()],
+      ["chestRadius", getU8Encoder()],
+      ["settleTimeoutSecs", getU32Encoder()],
     ]),
     (value) => ({ ...value, discriminator: GAME_SESSION_DISCRIMINATOR }),
   );
@@ -456,6 +470,8 @@ export function getGameSessionDecoder(): FixedSizeDecoder<GameSession> {
     ["lootMask", getU8Decoder()],
     ["unpaidKills", getU32Decoder()],
     ["endedAt", getI64Decoder()],
+    ["chestRadius", getU8Decoder()],
+    ["settleTimeoutSecs", getU32Decoder()],
   ]);
 }
 
@@ -521,5 +537,5 @@ export async function fetchAllMaybeGameSession(
 }
 
 export function getGameSessionSize(): number {
-  return 1050;
+  return 1055;
 }

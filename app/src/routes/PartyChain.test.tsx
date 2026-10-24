@@ -25,11 +25,11 @@ const player = (slot: number, owner: Address, title: string) => ({
   part: { player: owner, core: { actor: DEFAULT }, cacheXp: 40, cache: Uint8Array.from({ length: 160 }, (_, i) => [0, 3, 0, 2, 0][i] ?? 0) },
 });
 
-/** `endedAt`: seconds ago the party ended (the DM has 24 h, LootTuning.settle_timeout_secs). */
+/** `endedAt`: seconds ago the party ended (the map gives the DM 10 h). */
 function party(settledMask = 0, endedAgo = 60, escrowClaimed = false): Party {
   return {
     address: "Sess111111111111111111111111111111111111111" as Address,
-    session: { core: { status: SessionStatus.Victory, map: DEFAULT }, settledMask, aliveMask: 0b11, endedAt: BigInt(Math.floor(Date.now() / 1000) - endedAgo) },
+    session: { core: { status: SessionStatus.Victory, map: DEFAULT }, settledMask, aliveMask: 0b11, settleTimeoutSecs: 36_000, endedAt: BigInt(Math.floor(Date.now() / 1000) - endedAgo) },
     players: [player(0, ME, "Bran"), player(1, OTHER, "Mira")],
     escrow: { collected: 100_000_000n, claimed: escrowClaimed },
   } as unknown as Party;
@@ -63,7 +63,7 @@ describe("Claims (patch 11)", () => {
   });
 
   it("after the deadline each player claims their own; the DM no longer can", () => {
-    show(party(0, 25 * 3600), true);
+    show(party(0, 11 * 3600), true);
     const buttons = screen.getAllByRole("button", { name: "Claim it myself" });
     expect(buttons).toHaveLength(1);
     expect(buttons[0]!.closest("li")!.textContent).toContain("Bran");

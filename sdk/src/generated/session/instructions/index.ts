@@ -13,6 +13,7 @@ export * from "./consumeRandomness.js";
 export * from "./endTurn.js";
 export * from "./flee.js";
 export * from "./joinSession.js";
+export * from "./leaveParty.js";
 export * from "./monsterAct.js";
 export * from "./monsterMove.js";
 export * from "./moveUnit.js";

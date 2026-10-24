@@ -487,12 +487,15 @@ pub struct LootTuning {
     pub level_step_bp: u16,
     /// Action points to open a chest (docs/PARTY_AND_TURNS.md 5.1).
     pub chest_open_ap: u8,
-    /// No living monster may be this close (Chebyshev distance) to the chest or to the player
-    /// who opens it.
-    pub chest_monster_radius: u8,
-    /// The DM issues the rewards within this many seconds of the party's end; after it, every
-    /// player claims their own cache and gets their contribution back.
-    pub settle_timeout_secs: u32,
+    /// The radius a DM gives a map (`Map.chest_radius`): no living monster may be this close
+    /// (Chebyshev distance) to a chest or to any living player when a chest opens. Inclusive.
+    pub chest_radius_min: u8,
+    pub chest_radius_max: u8,
+    /// The time a DM gives a map (`Map.settle_timeout_secs`) to issue the rewards after a party
+    /// ends; after it every player claims their own cache and gets their contribution back.
+    /// Inclusive; a `mock-vrf` session build (localnet only) accepts from 1 s.
+    pub settle_timeout_min_secs: u32,
+    pub settle_timeout_max_secs: u32,
     /// Experience of a character above the map tier's top level, by levels above (1, then 2 or
     /// more), basis points (docs/PARTY_AND_TURNS.md 9.5).
     pub over_tier_xp_bp: [u16; OVER_TIER_STEPS],
@@ -513,8 +516,11 @@ impl LootTuning {
         allowed_tables: [0b0011, 0b1111],
         level_step_bp: 2_500,
         chest_open_ap: 1,
-        chest_monster_radius: 3,
-        settle_timeout_secs: 24 * 60 * 60,
+        chest_radius_min: 1,
+        chest_radius_max: 10,
+        // 10 minutes to 10 hours.
+        settle_timeout_min_secs: 10 * 60,
+        settle_timeout_max_secs: 10 * 60 * 60,
         over_tier_xp_bp: [5_000, 0],
         over_tier_no_loot: 2,
         resource_stack_max: 10,

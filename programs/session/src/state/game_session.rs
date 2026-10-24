@@ -145,8 +145,12 @@ pub struct GameSession {
     /// settlement.
     pub unpaid_kills: u32,
     /// Unix time the party ended (Victory, Wiped, Fled): the DM settles before
-    /// `ended_at + LootTuning.settle_timeout_secs`, the players claim after.
+    /// `ended_at + settle_timeout_secs`, the players claim after.
     pub ended_at: i64,
+    /// The map's DM-set numbers: no living monster within `chest_radius` of a chest or of any
+    /// living player when it opens; the DM's time to settle after the end.
+    pub chest_radius: u8,
+    pub settle_timeout_secs: u32,
 }
 
 /// `GameSession.pending_chest` when no chest roll is pending.

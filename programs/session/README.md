@@ -32,6 +32,7 @@ All of them are created at `open_session` / `join_session` (the reward cache onc
 | `open_chest` | owner / key | patch 11: opens a visible chest next to the player (AP); requests a VRF value |
 | `settle_party` | DM main wallet | patch 11: every cache becomes its player's, XP and unlock (CPI character), the escrow for the DM, the map Finished |
 | `claim_after_timeout` | player main wallet | patch 11: after the DM's deadline, the same for one character and its contribution back |
+| `leave_party` | owner main wallet | patch 11: frees a living character from its ended party; its rewards keep waiting |
 | `close_cache` | owner main wallet | patch 11: "Done": the bag layout (CPI character `apply_bag`), the cache closes |
 
 The temporary cache fills during the party in `Participation.cache` (`src/loot.rs`: kills pay out at the end of each VRF callback, chests in their own callback); `src/settlement.rs` ends the party for each player.

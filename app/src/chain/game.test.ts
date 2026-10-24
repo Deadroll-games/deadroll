@@ -46,6 +46,7 @@ import {
   buildMapIxs,
   claimAfterTimeoutIx,
   closeCacheIx,
+  leavePartyIx,
   openChestIx,
   settlePartyIx,
   actIx,
@@ -261,6 +262,29 @@ describe("session builders", () => {
     expect(ix.accounts![4]).toEqual({ address: await rewardCachePda(character), role: AccountRole.WRITABLE });
   });
 
+  it("patch 11: join_session passes the GameSession of every open cache entry, read only, after its accounts", async () => {
+    const player = await generateKeyPairSigner();
+    const ix = await joinSessionIx(player, session, character, 1n, addrOf(0), [addrOf(41), addrOf(42)]);
+    expect(ix.accounts!.slice(-2)).toEqual([
+      { address: addrOf(41), role: AccountRole.READONLY },
+      { address: addrOf(42), role: AccountRole.READONLY },
+    ]);
+  });
+
+  it("patch 11: leave_party: no args; the owner signs, the character (w) and the CPI accounts", async () => {
+    const owner = await generateKeyPairSigner();
+    const ix = await leavePartyIx(owner, session, character);
+    expect(toHex(ix.data as Uint8Array)).toBe(toHex(ixDisc("leave_party")));
+    expect(ix.accounts!.map((a) => [a.address, a.role])).toEqual([
+      [owner.address, AccountRole.READONLY_SIGNER],
+      [session, AccountRole.READONLY],
+      [character, AccountRole.WRITABLE],
+      [await sessionAuthorityPda(), AccountRole.READONLY],
+      [await gameConfigPda(), AccountRole.READONLY],
+      [PROGRAMS.character, AccountRole.READONLY],
+    ]);
+  });
+
   it("patch 11: open_chest: the chest index, the VRF accounts after the session token, the map layout last", async () => {
     const signer = await generateKeyPairSigner();
     const ix = await openChestIx({ signer, token: null }, session, character, addrOf(13), 2);
@@ -306,17 +330,17 @@ describe("session builders", () => {
     expect(ix.accounts!.slice(-3).map((a) => a.address)).toEqual([await participationPda(session, addrOf(21)), await rewardCachePda(addrOf(21)), addrOf(21)]);
   });
 
-  it("patch 11: close_cache: the layout as 40 + 5 BagSlots (kind u8, id u16 LE, qty u8)", async () => {
+  it("patch 11: close_cache: the party, then the layout as 40 + 5 BagSlots (kind u8, id u16 LE, qty u8)", async () => {
     const owner = await generateKeyPairSigner();
     const empty = { kind: 0, id: 0, qty: 0 };
     const layout = { resources: Array.from({ length: 40 }, () => empty), consumables: Array.from({ length: 5 }, () => empty) };
     layout.resources[0] = { kind: 1, id: 0x0203, qty: 4 };
     layout.consumables[4] = { kind: 2, id: 7, qty: 5 };
-    const ix = await closeCacheIx(owner, character, layout);
+    const ix = await closeCacheIx(owner, character, addrOf(30), layout);
     const body = new Uint8Array(45 * 4);
     body.set([1, 0x03, 0x02, 4], 0);
     body.set([2, 7, 0, 5], 44 * 4);
-    expect(toHex(ix.data as Uint8Array)).toBe(toHex(concat(ixDisc("close_cache"), body)));
+    expect(toHex(ix.data as Uint8Array)).toBe(toHex(concat(ixDisc("close_cache"), A(30), body)));
     expect(ix.accounts!.map((a) => a.address).slice(0, 4)).toEqual([owner.address, await rewardCachePda(character), character, await bagPda(character)]);
   });
 
@@ -387,12 +411,13 @@ describe("map builders", () => {
       { x: 1, y: 2, table: 0 },
       { x: 3, y: 1, table: 5 },
     ];
-    const b = await buildMapIxs(dm, { width: 4, height: 3, tier: 1, minPlayers: 3, tiles, spawns: [], chests, bossTable: 1 });
+    const b = await buildMapIxs(dm, { width: 4, height: 3, tier: 1, minPlayers: 3, chestRadius: 4, settleTimeoutSecs: 7200, tiles, spawns: [], chests, bossTable: 1 });
     expect(b.ixs.length).toBe(5);
     const [create, , , writeChests, finalize] = b.ixs as [Instruction, Instruction, Instruction, Instruction, Instruction];
     const index = new Uint8Array(4);
     new DataView(index.buffer).setUint32(0, b.index, true);
-    expect(toHex(create.data as Uint8Array)).toBe(toHex(concat(ixDisc("create_map"), index, Uint8Array.of(4, 3, 1, 3))));
+    // MapSettings: min_players, chest_radius, settle_timeout_secs (u32 LE, 7200 = 0x1c20).
+    expect(toHex(create.data as Uint8Array)).toBe(toHex(concat(ixDisc("create_map"), index, Uint8Array.of(4, 3, 1, 3, 4, 0x20, 0x1c, 0, 0))));
     // Vec<MapPoint>: u32 LE count, then (kind = Chest 0, x, y, table) each; boss table u8.
     const points = Uint8Array.of(2, 0, 0, 0, 0, 1, 2, 0, 0, 3, 1, 5);
     expect(toHex(writeChests.data as Uint8Array)).toBe(toHex(concat(ixDisc("write_chests"), points, Uint8Array.of(1))));
@@ -461,11 +486,15 @@ describe("decoders", () => {
       v.pendingDeaths = 0b101;
       v.auraWeights[1][1] = Uint8Array.of(0, 100, 0, 65, 0, 0);
       v.endedAt = 0x0102n;
+      v.chestRadius = 4;
+      v.settleTimeoutSecs = 600;
     });
     // Patch 11 appends tier, min_players, chests (4 x 4), chest_count, boss_table, chests_opened,
-    // pending_chest, xp_bp (4 x u16), loot_mask, unpaid_kills (u32) and ended_at (i64): 43 bytes.
-    const p11 = 43;
-    expect(Array.from(s.bytes.subarray(-8, -6))).toEqual([2, 1]);
+    // pending_chest, xp_bp (4 x u16), loot_mask, unpaid_kills (u32), ended_at (i64), chest_radius
+    // and settle_timeout_secs (u32): 48 bytes.
+    const p11 = 48;
+    expect(Array.from(s.bytes.subarray(-5))).toEqual([4, 0x58, 0x02, 0, 0]);
+    expect(Array.from(s.bytes.subarray(-13, -11))).toEqual([2, 1]);
     expect(s.back.endedAt).toBe(0x0102n);
     s.bytes = s.bytes.subarray(0, -p11);
     // Patch 9 appends aura_weights (4 x 2 x 6); the offsets below count from before them.
@@ -596,15 +625,17 @@ describe("decoders", () => {
     const bag = decodeAccount("Bag", bagBytes);
     expect(bag.layout.consumables[0]).toEqual({ kind: 2, id: 3, qty: 5 });
     const cacheZero = zeroOf(getRewardCacheDecoder());
-    cacheZero.status = 1;
-    cacheZero.xp = 250;
-    cacheZero.slots[0] = { kind: 0, id: 4, qty: 12 };
+    // Entry 1 of 3: session, status (Claimed 2), xp u32, then 32 slots of 5 bytes (kind, id u16, qty u16).
+    cacheZero.entries[1] = { ...cacheZero.entries[1], session: addrOf(31), status: 2, xp: 250 };
+    cacheZero.entries[1].slots[0] = { kind: 0, id: 4, qty: 12 };
     const cacheBytes = Uint8Array.from(getRewardCacheEncoder().encode(cacheZero));
     expect(toHex(cacheBytes.subarray(0, 8))).toBe(sha("account:RewardCache"));
-    // version, character, session, status, xp u32, then 32 slots of 5 bytes (kind, id u16, qty u16).
-    expect(Array.from(cacheBytes.subarray(8 + 1 + 64, 8 + 1 + 64 + 1 + 4 + 5))).toEqual([1, 250, 0, 0, 0, 0, 4, 0, 12, 0]);
+    const entry = 32 + 1 + 4 + 32 * 5;
+    const entryAt = 8 + 1 + 32 + entry;
+    expect(Array.from(cacheBytes.subarray(entryAt, entryAt + 32))).toEqual(Array.from(A(31)));
+    expect(Array.from(cacheBytes.subarray(entryAt + 32, entryAt + 32 + 1 + 4 + 5))).toEqual([2, 250, 0, 0, 0, 0, 4, 0, 12, 0]);
     const cache = decodeAccount("RewardCache", cacheBytes);
-    expect([cache.status, cache.xp, cache.slots[0]]).toEqual([1, 250, { kind: 0, id: 4, qty: 12 }]);
+    expect([cache.entries[1]!.status, cache.entries[1]!.xp, cache.entries[1]!.slots[0]]).toEqual([2, 250, { kind: 0, id: 4, qty: 12 }]);
   });
 
   it("decodes TurnTicked, TurnSkipped and SkillUsed", () => {

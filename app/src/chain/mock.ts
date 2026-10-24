@@ -39,6 +39,9 @@ export type MapPresetData = {
   tier?: number;
   /** Patch 11: the map's minimum players (1 when absent), the boss table and the chests. */
   min_players?: number;
+  /** The DM's chest radius (3 when absent) and time to settle in seconds (1 h when absent). */
+  chest_radius?: number;
+  settle_timeout_secs?: number;
   boss_table?: number;
   chests?: Chest[];
   rows: string[];
@@ -55,7 +58,15 @@ export type MapPresetData = {
 };
 
 /** Converts a preset from assets/registry/maps into MapLayout tiles (stride 32), spawns and chests. */
-export function presetToLayout(p: MapPresetData): { tiles: Uint8Array; spawns: Spawn[]; chests: Chest[]; bossTable: number; minPlayers: number } {
+export function presetToLayout(p: MapPresetData): {
+  tiles: Uint8Array;
+  spawns: Spawn[];
+  chests: Chest[];
+  bossTable: number;
+  minPlayers: number;
+  chestRadius: number;
+  settleTimeoutSecs: number;
+} {
   const tiles = new Uint8Array(MAP_CELLS).fill(Tile.Wall);
   p.rows.forEach((row, y) => {
     for (let x = 0; x < row.length; x++) tiles[cellIndex(x, y)] = TILE_CHARS[row[x] ?? "#"] ?? Tile.Wall;
@@ -71,7 +82,15 @@ export function presetToLayout(p: MapPresetData): { tiles: Uint8Array; spawns: S
     pack: s.pack,
   }));
   const chests = (p.chests ?? []).map((c) => ({ x: c.x, y: c.y, table: c.table }));
-  return { tiles, spawns, chests, bossTable: p.boss_table ?? NO_TABLE, minPlayers: p.min_players ?? 1 };
+  return {
+    tiles,
+    spawns,
+    chests,
+    bossTable: p.boss_table ?? NO_TABLE,
+    minPlayers: p.min_players ?? 1,
+    chestRadius: p.chest_radius ?? 3,
+    settleTimeoutSecs: p.settle_timeout_secs ?? 3600,
+  };
 }
 
 export const MAP_PRESETS: MapPresetData[] = [demoMap as MapPresetData];

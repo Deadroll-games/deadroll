@@ -10,6 +10,8 @@ import {
   combineCodec,
   fixDecoderSize,
   fixEncoderSize,
+  getAddressDecoder,
+  getAddressEncoder,
   getArrayDecoder,
   getArrayEncoder,
   getBytesDecoder,
@@ -100,11 +102,13 @@ export type CloseCacheInstruction<
 
 export type CloseCacheInstructionData = {
   discriminator: ReadonlyUint8Array;
+  session: Address;
   resources: Array<BagSlot>;
   consumables: Array<BagSlot>;
 };
 
 export type CloseCacheInstructionDataArgs = {
+  session: Address;
   resources: Array<BagSlotArgs>;
   consumables: Array<BagSlotArgs>;
 };
@@ -113,6 +117,7 @@ export function getCloseCacheInstructionDataEncoder(): FixedSizeEncoder<CloseCac
   return transformEncoder(
     getStructEncoder([
       ["discriminator", fixEncoderSize(getBytesEncoder(), 8)],
+      ["session", getAddressEncoder()],
       ["resources", getArrayEncoder(getBagSlotEncoder(), { size: 40 })],
       ["consumables", getArrayEncoder(getBagSlotEncoder(), { size: 5 })],
     ]),
@@ -123,6 +128,7 @@ export function getCloseCacheInstructionDataEncoder(): FixedSizeEncoder<CloseCac
 export function getCloseCacheInstructionDataDecoder(): FixedSizeDecoder<CloseCacheInstructionData> {
   return getStructDecoder([
     ["discriminator", fixDecoderSize(getBytesDecoder(), 8)],
+    ["session", getAddressDecoder()],
     ["resources", getArrayDecoder(getBagSlotDecoder(), { size: 40 })],
     ["consumables", getArrayDecoder(getBagSlotDecoder(), { size: 5 })],
   ]);
@@ -157,6 +163,7 @@ export type CloseCacheAsyncInput<
   sessionAuthority?: TAccountSessionAuthority;
   config?: TAccountConfig;
   characterProgram?: TAccountCharacterProgram;
+  session: CloseCacheInstructionDataArgs["session"];
   resources: CloseCacheInstructionDataArgs["resources"];
   consumables: CloseCacheInstructionDataArgs["consumables"];
 };
@@ -341,6 +348,7 @@ export type CloseCacheInput<
   sessionAuthority: TAccountSessionAuthority;
   config: TAccountConfig;
   characterProgram?: TAccountCharacterProgram;
+  session: CloseCacheInstructionDataArgs["session"];
   resources: CloseCacheInstructionDataArgs["resources"];
   consumables: CloseCacheInstructionDataArgs["consumables"];
 };

@@ -33,8 +33,9 @@ pub struct PlayerJoined {
     pub slot: u8,
     pub contribution: u64,
     pub collected: u64,
-    /// Patch 11: the character's cache from an earlier party was still open and burned.
-    pub cache_burned: bool,
+    /// Patch 11: bit per reward cache entry that burned (a settled cache left without "Done", or
+    /// an earlier party's past its DM deadline).
+    pub cache_burned: u8,
 }
 
 #[event]
@@ -303,6 +304,13 @@ pub struct ContributionRefunded {
     pub player: Pubkey,
     pub slot: u8,
     pub amount: u64,
+}
+
+/// Patch 11: the owner released the character from its ended party.
+#[event]
+pub struct PartyLeft {
+    pub session: Pubkey,
+    pub character: Pubkey,
 }
 
 /// Patch 11: "Done" in the bag screen: the cache is closed, `applied` = the bag layout written

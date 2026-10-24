@@ -851,8 +851,10 @@
     ],
     "level_step_bp": 2500,
     "chest_open_ap": 1,
-    "chest_monster_radius": 3,
-    "settle_timeout_secs": 86400,
+    "chest_radius_min": 1,
+    "chest_radius_max": 10,
+    "settle_timeout_min_secs": 600,
+    "settle_timeout_max_secs": 36000,
     "over_tier_xp_bp": [
       5000,
       0

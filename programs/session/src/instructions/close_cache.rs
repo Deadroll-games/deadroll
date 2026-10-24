@@ -5,7 +5,7 @@ use crate::{
     cpi_out::{self, SessionSigner},
     errors::SessionError,
     events::CacheClosed,
-    state::{external::read_character, RewardCache},
+    state::{external::read_character, CacheEntry, RewardCache},
 };
 
 #[derive(Accounts)]
@@ -15,7 +15,6 @@ pub struct CloseCache<'info> {
     pub owner: Signer<'info>,
     #[account(
         mut,
-        close = owner,
         seeds = [seeds::CACHE, reward_cache.character.as_ref()],
         bump = reward_cache.bump,
     )]
@@ -37,11 +36,13 @@ pub struct CloseCache<'info> {
     pub character_program: UncheckedAccount<'info>,
 }
 
-/// Patch 11, "Done" in the bag screen: the owner's final bag `layout` is applied against the
-/// real cache and bag (`character::apply_bag`: every reward of the new bag comes from the old bag
-/// and this cache, stacks and sections hold), what was not taken burns and the cache closes, its
-/// rent back to the owner. A dead character's cache (always empty) just closes.
-pub fn handler(ctx: Context<CloseCache>, layout: BagLayout) -> Result<()> {
+/// Patch 11, "Done" in the bag screen for party `session`: the owner's final bag `layout` is
+/// applied against the real bag and that party's settled entry (`character::apply_bag`: every
+/// reward of the new bag comes from the old bag and this cache, stacks and sections hold); what
+/// was not taken burns and the entry empties. The character must not be locked in a party
+/// (`leave_party` first when its last party ended). Once every entry is empty the account
+/// closes, its rent back to the owner (a dead character's empty cache just closes).
+pub fn handler(ctx: Context<CloseCache>, session: Pubkey, layout: BagLayout) -> Result<()> {
     let accounts = ctx.accounts;
     let character = read_character(&accounts.character)?;
     require_keys_eq!(
@@ -49,13 +50,17 @@ pub fn handler(ctx: Context<CloseCache>, layout: BagLayout) -> Result<()> {
         accounts.owner.key(),
         SessionError::NotCacheOwner
     );
-    let cache = &accounts.reward_cache;
-    require!(
-        cache.status == CacheStatus::Claimed,
-        SessionError::CacheNotClaimed
-    );
-    let applied = character.alive;
-    if applied {
+    let cache = &mut accounts.reward_cache;
+    let all_empty = cache.all_empty();
+    let entry = cache.entry_mut(&session, CacheStatus::Claimed);
+    require!(entry.is_some() || all_empty, SessionError::CacheNotClaimed);
+    let slots = entry.map(|e| {
+        let slots = e.slots;
+        *e = CacheEntry::EMPTY;
+        slots
+    });
+    let applied = character.alive && slots.is_some();
+    if let (true, Some(slots)) = (applied, slots) {
         cpi_out::character::apply_bag(
             &SessionSigner {
                 session_authority: &accounts.session_authority,
@@ -64,14 +69,19 @@ pub fn handler(ctx: Context<CloseCache>, layout: BagLayout) -> Result<()> {
             },
             &accounts.character,
             &accounts.bag,
-            cache.slots,
+            slots,
             layout,
         )?;
     }
     emit!(CacheClosed {
-        character: cache.character,
-        session: cache.session,
+        character: accounts.character.key(),
+        session,
         applied,
     });
+    if accounts.reward_cache.all_empty() {
+        accounts
+            .reward_cache
+            .close(accounts.owner.to_account_info())?;
+    }
     Ok(())
 }

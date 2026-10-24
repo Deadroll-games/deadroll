@@ -318,6 +318,18 @@ pub fn cache_add(slots: &mut [CacheSlot], add: CacheSlot) -> bool {
     }
 }
 
+/// A map's chest radius is within the DM's limits.
+pub fn chest_radius_ok(radius: u8, t: &LootTuning) -> bool {
+    (t.chest_radius_min..=t.chest_radius_max).contains(&radius)
+}
+
+/// A map's time to settle is within the DM's limits; `short` (localnet test builds) accepts
+/// anything from 1 s up to the maximum.
+pub fn settle_timeout_ok(secs: u32, t: &LootTuning, short: bool) -> bool {
+    let min = if short { 1 } else { t.settle_timeout_min_secs };
+    (min..=t.settle_timeout_max_secs).contains(&secs)
+}
+
 /// The chest and budget limits of a map tier for `deadroll_mapcheck::check_map` (default, i.e.
 /// nothing allowed, for a tier without numbers: the check refuses the tier first).
 pub fn map_rules(t: &LootTuning, tier: u8) -> LootRules {
@@ -755,5 +767,18 @@ mod tests {
         let mut after = before;
         after.resources[0] = slot(R, 100, 1);
         assert_eq!(check_bag_layout(&before, &cache, &after, &T), Ok(()));
+    }
+
+    #[test]
+    fn map_settings_within_the_dm_limits() {
+        assert!(!chest_radius_ok(0, &T));
+        assert!(chest_radius_ok(1, &T) && chest_radius_ok(10, &T));
+        assert!(!chest_radius_ok(11, &T));
+        assert!(!settle_timeout_ok(599, &T, false));
+        assert!(settle_timeout_ok(600, &T, false) && settle_timeout_ok(36_000, &T, false));
+        assert!(!settle_timeout_ok(36_001, &T, false));
+        // A localnet test build: seconds, never zero, never past the maximum.
+        assert!(settle_timeout_ok(3, &T, true));
+        assert!(!settle_timeout_ok(0, &T, true) && !settle_timeout_ok(36_001, &T, true));
     }
 }

@@ -59,6 +59,7 @@ import {
   getEndTurnInstruction,
   getFleeInstruction,
   getJoinSessionInstructionAsync,
+  getLeavePartyInstructionAsync,
   getMonsterActInstructionAsync,
   getMonsterMoveInstructionAsync,
   getMoveUnitInstructionAsync,
@@ -76,6 +77,7 @@ import {
   parseEndTurnInstruction,
   parseFleeInstruction,
   parseJoinSessionInstruction,
+  parseLeavePartyInstruction,
   parseMonsterActInstruction,
   parseMonsterMoveInstruction,
   parseMoveUnitInstruction,
@@ -93,6 +95,7 @@ import {
   type EndTurnInput,
   type FleeInput,
   type JoinSessionAsyncInput,
+  type LeavePartyAsyncInput,
   type MonsterActAsyncInput,
   type MonsterMoveAsyncInput,
   type MoveUnitAsyncInput,
@@ -105,6 +108,7 @@ import {
   type ParsedEndTurnInstruction,
   type ParsedFleeInstruction,
   type ParsedJoinSessionInstruction,
+  type ParsedLeavePartyInstruction,
   type ParsedMonsterActInstruction,
   type ParsedMonsterMoveInstruction,
   type ParsedMoveUnitInstruction,
@@ -237,19 +241,20 @@ export const DeadrollSessionEvent = {
   16: "MonsterKilled",
   17: "MonsterReactiveTriggered",
   18: "Moved",
-  19: "PlayerDied",
-  20: "PlayerJoined",
-  21: "PlayerReady",
-  22: "ReactiveTriggered",
-  23: "ResonanceSpread",
-  24: "RewardsRolled",
-  25: "SessionEnded",
-  26: "SessionKeyChanged",
-  27: "SessionOpened",
-  28: "SkillUsed",
-  29: "TurnSkipped",
-  30: "TurnStarted",
-  31: "TurnTicked",
+  19: "PartyLeft",
+  20: "PlayerDied",
+  21: "PlayerJoined",
+  22: "PlayerReady",
+  23: "ReactiveTriggered",
+  24: "ResonanceSpread",
+  25: "RewardsRolled",
+  26: "SessionEnded",
+  27: "SessionKeyChanged",
+  28: "SessionOpened",
+  29: "SkillUsed",
+  30: "TurnSkipped",
+  31: "TurnStarted",
+  32: "TurnTicked",
   ActionRequested: 0,
   AuraChanged: 1,
   CacheClosed: 2,
@@ -269,19 +274,20 @@ export const DeadrollSessionEvent = {
   MonsterKilled: 16,
   MonsterReactiveTriggered: 17,
   Moved: 18,
-  PlayerDied: 19,
-  PlayerJoined: 20,
-  PlayerReady: 21,
-  ReactiveTriggered: 22,
-  ResonanceSpread: 23,
-  RewardsRolled: 24,
-  SessionEnded: 25,
-  SessionKeyChanged: 26,
-  SessionOpened: 27,
-  SkillUsed: 28,
-  TurnSkipped: 29,
-  TurnStarted: 30,
-  TurnTicked: 31,
+  PartyLeft: 19,
+  PlayerDied: 20,
+  PlayerJoined: 21,
+  PlayerReady: 22,
+  ReactiveTriggered: 23,
+  ResonanceSpread: 24,
+  RewardsRolled: 25,
+  SessionEnded: 26,
+  SessionKeyChanged: 27,
+  SessionOpened: 28,
+  SkillUsed: 29,
+  TurnSkipped: 30,
+  TurnStarted: 31,
+  TurnTicked: 32,
 } as const;
 
 export type DeadrollSessionEvent = (typeof DeadrollSessionEvent)[Exclude<
@@ -506,6 +512,17 @@ export function identifyDeadrollSessionEvent(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([34, 166, 133, 39, 139, 208, 84, 178]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionEvent.PartyLeft;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([127, 145, 10, 55, 154, 3, 98, 235]),
       ),
       0,
@@ -658,16 +675,17 @@ export const DeadrollSessionInstruction = {
   4: "EndTurn",
   5: "Flee",
   6: "JoinSession",
-  7: "MonsterAct",
-  8: "MonsterMove",
-  9: "MoveUnit",
-  10: "OpenChest",
-  11: "OpenSession",
-  12: "SetReady",
-  13: "SetSessionKey",
-  14: "SettleParty",
-  15: "StartSession",
-  16: "StartTurn",
+  7: "LeaveParty",
+  8: "MonsterAct",
+  9: "MonsterMove",
+  10: "MoveUnit",
+  11: "OpenChest",
+  12: "OpenSession",
+  13: "SetReady",
+  14: "SetSessionKey",
+  15: "SettleParty",
+  16: "StartSession",
+  17: "StartTurn",
   Act: 0,
   ClaimAfterTimeout: 1,
   CloseCache: 2,
@@ -675,16 +693,17 @@ export const DeadrollSessionInstruction = {
   EndTurn: 4,
   Flee: 5,
   JoinSession: 6,
-  MonsterAct: 7,
-  MonsterMove: 8,
-  MoveUnit: 9,
-  OpenChest: 10,
-  OpenSession: 11,
-  SetReady: 12,
-  SetSessionKey: 13,
-  SettleParty: 14,
-  StartSession: 15,
-  StartTurn: 16,
+  LeaveParty: 7,
+  MonsterAct: 8,
+  MonsterMove: 9,
+  MoveUnit: 10,
+  OpenChest: 11,
+  OpenSession: 12,
+  SetReady: 13,
+  SetSessionKey: 14,
+  SettleParty: 15,
+  StartSession: 16,
+  StartTurn: 17,
 } as const;
 
 export type DeadrollSessionInstruction =
@@ -773,6 +792,17 @@ export function identifyDeadrollSessionInstruction(
     )
   ) {
     return DeadrollSessionInstruction.JoinSession;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([180, 131, 70, 106, 109, 232, 0, 255]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionInstruction.LeaveParty;
   }
   if (
     containsBytes(
@@ -915,6 +945,9 @@ export type ParsedDeadrollSessionInstruction<
       instructionType: typeof DeadrollSessionInstruction.JoinSession;
     } & ParsedJoinSessionInstruction<TProgram>)
   | ({
+      instructionType: typeof DeadrollSessionInstruction.LeaveParty;
+    } & ParsedLeavePartyInstruction<TProgram>)
+  | ({
       instructionType: typeof DeadrollSessionInstruction.MonsterAct;
     } & ParsedMonsterActInstruction<TProgram>)
   | ({
@@ -997,6 +1030,13 @@ export function parseDeadrollSessionInstruction<TProgram extends string>(
       return {
         instructionType: DeadrollSessionInstruction.JoinSession,
         ...parseJoinSessionInstruction(instruction),
+      };
+    }
+    case DeadrollSessionInstruction.LeaveParty: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: DeadrollSessionInstruction.LeaveParty,
+        ...parseLeavePartyInstruction(instruction),
       };
     }
     case DeadrollSessionInstruction.MonsterAct: {
@@ -1128,6 +1168,10 @@ export type DeadrollSessionPluginInstructions = {
     input: JoinSessionAsyncInput,
   ) => ReturnType<typeof getJoinSessionInstructionAsync> &
     SelfPlanAndSendFunctions;
+  leaveParty: (
+    input: LeavePartyAsyncInput,
+  ) => ReturnType<typeof getLeavePartyInstructionAsync> &
+    SelfPlanAndSendFunctions;
   monsterAct: (
     input: MonsterActAsyncInput,
   ) => ReturnType<typeof getMonsterActInstructionAsync> &
@@ -1226,6 +1270,11 @@ export function deadrollSessionProgram() {
             addSelfPlanAndSendFunctions(
               client,
               getJoinSessionInstructionAsync(input),
+            ),
+          leaveParty: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getLeavePartyInstructionAsync(input),
             ),
           monsterAct: (input) =>
             addSelfPlanAndSendFunctions(

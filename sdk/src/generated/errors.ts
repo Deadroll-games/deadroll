@@ -133,6 +133,8 @@ export const PROGRAM_ERRORS = {
     6045: ["BossTableOneLevel", "The boss reward table needs at least two levels"],
     6046: ["OverBudget", "Chests and boss cost more than the reward budget"],
     6047: ["ChestUnreachable", "No cell next to a chest can be reached from the entrance"],
+    6048: ["ChestRadiusOutOfRange", "The chest radius is outside the limits (LootTuning.chest_radius_min..=max)"],
+    6049: ["SettleTimeoutOutOfRange", "The time to settle is outside the limits (at most LootTuning.settle_timeout_max_secs)"],
   },
   session: {
     6000: ["Unauthorized", "Caller is not authorized for this instruction"],
@@ -220,6 +222,10 @@ export const PROGRAM_ERRORS = {
     6082: ["CacheNotClaimed", "This cache is not settled yet"],
     6083: ["InvalidRewardCache", "This cache belongs to another character or party"],
     6084: ["NotCacheOwner", "Only the character's owner, with the main wallet, closes its cache"],
+    6085: ["SettleTimeoutTooShort", "The map gives the DM less than the minimum time to settle"],
+    6086: ["TooManyPendingParties", "Too many parties wait for this character's rewards: claim one, or wait for its deadline"],
+    6087: ["InvalidCacheSessions", "The remaining accounts are not the GameSession of each open reward cache entry, in entry order"],
+    6088: ["NotLockedHere", "The character is not locked in this party"],
   },
   city: {
     6000: ["Unauthorized", "Caller is not authorized for this instruction"],

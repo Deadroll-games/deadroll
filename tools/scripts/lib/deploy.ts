@@ -604,7 +604,7 @@ async function ensureDemoMap(conn: Rpc, opts: DeployOptions, wallet: KeyPairSign
   let data = await fetchData(conn.rpc, map);
   if (!data) {
     await send(conn, wallet, [
-      getCreateMapInstruction({ ...edit, systemProgram: SYSTEM_PROGRAM, index: opts.mapIndex, width: preset.width, height: preset.height, tier: preset.tier, minPlayers: preset.minPlayers }),
+      getCreateMapInstruction({ ...edit, systemProgram: SYSTEM_PROGRAM, index: opts.mapIndex, width: preset.width, height: preset.height, tier: preset.tier, minPlayers: preset.minPlayers, chestRadius: preset.chestRadius, settleTimeoutSecs: preset.settleTimeoutSecs }),
     ]);
     console.log(`create_map: ${map} (index ${opts.mapIndex})`);
     data = (await fetchData(conn.rpc, map))!;

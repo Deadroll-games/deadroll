@@ -16,21 +16,23 @@ import {
 } from "@solana/kit";
 
 /**
- * session `RewardCache.status`: `Open` while the party runs (the rewards are in the
- * `Participation`), `Claimed` once they are the player's (issued, or claimed after the
- * timeout) and wait for "Done" in the bag screen.
+ * One party's entry in the session `RewardCache`: `Empty` (free), `Open` while the party runs
+ * or waits to be settled (the rewards are in its `Participation`), `Claimed` once they are
+ * the player's (issued, or claimed after the timeout) and wait for "Done" in the bag screen.
  */
 export const CacheStatus = {
-  0: "Open",
-  1: "Claimed",
-  Open: 0,
-  Claimed: 1,
+  0: "Empty",
+  1: "Open",
+  2: "Claimed",
+  Empty: 0,
+  Open: 1,
+  Claimed: 2,
 } as const;
 
 /**
- * session `RewardCache.status`: `Open` while the party runs (the rewards are in the
- * `Participation`), `Claimed` once they are the player's (issued, or claimed after the
- * timeout) and wait for "Done" in the bag screen.
+ * One party's entry in the session `RewardCache`: `Empty` (free), `Open` while the party runs
+ * or waits to be settled (the rewards are in its `Participation`), `Claimed` once they are
+ * the player's (issued, or claimed after the timeout) and wait for "Done" in the bag screen.
  */
 export type CacheStatus = (typeof CacheStatus)[Exclude<
   keyof typeof CacheStatus,
