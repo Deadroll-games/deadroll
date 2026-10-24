@@ -132,5 +132,5 @@ export async function fetchAllMaybeMapLayout(
 }
 
 export function getMapLayoutSize(): number {
-  return 1287;
+  return 1305;
 }

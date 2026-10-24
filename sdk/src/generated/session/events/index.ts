@@ -8,7 +8,12 @@
 
 export * from "./actionRequested.js";
 export * from "./auraChanged.js";
+export * from "./cacheClosed.js";
+export * from "./cacheSettled.js";
 export * from "./cellBurned.js";
+export * from "./chestOpened.js";
+export * from "./chestOpenRequested.js";
+export * from "./contributionRefunded.js";
 export * from "./deathFinalized.js";
 export * from "./effectResolved.js";
 export * from "./escrowClaimed.js";
@@ -20,12 +25,13 @@ export * from "./monsterAuraChanged.js";
 export * from "./monsterKilled.js";
 export * from "./monsterReactiveTriggered.js";
 export * from "./moved.js";
+export * from "./partyLeft.js";
 export * from "./playerDied.js";
 export * from "./playerJoined.js";
 export * from "./playerReady.js";
 export * from "./reactiveTriggered.js";
 export * from "./resonanceSpread.js";
-export * from "./rewardsClaimed.js";
+export * from "./rewardsRolled.js";
 export * from "./sessionEnded.js";
 export * from "./sessionKeyChanged.js";
 export * from "./sessionOpened.js";

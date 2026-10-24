@@ -33,7 +33,7 @@ mock-vrf = []
 # `lazy-account`: MonsterState is too big to Borsh-decode on-chain (see state/monster_state.rs).
 # `allow-missing-optionals`: optional accounts appended to an instruction (`act`,
 # `consume_randomness`: `target_participation`) may be left out by older clients.
-anchor-lang = { workspace = true, features = ["lazy-account", "allow-missing-optionals"] }
+anchor-lang = { workspace = true, features = ["lazy-account", "allow-missing-optionals", "init-if-needed"] }
 deadroll-types = { workspace = true, features = ["anchor"] }
 session-keys.workspace = true
 # CPI targets (generated `cpi` modules) and the `SkillRecord` layout.
@@ -51,6 +51,8 @@ deadroll-skillcheck.workspace = true
 ephemeral-vrf-sdk.workspace = true
 # Dice: the SHA-256 syscall gives the same rolls as `deadroll_combat::VrfRoll` for far fewer CU.
 solana-sha256-hasher = { version = "3.1", features = ["sha2"] }
+# Patch 11: the callback pays kills out while its compute budget lasts (`sol_remaining_compute_units`).
+solana-program = "=3.0.0"
 
 [dev-dependencies]
 # Tests read the shipped registry (assets/registry) through the simulator's loader.

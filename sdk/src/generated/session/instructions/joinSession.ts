@@ -47,7 +47,7 @@ import {
 import {
   findEscrowPda,
   findParticipationPda,
-  findStashPda,
+  findRewardCachePda,
 } from "../pdas/index.js";
 import { DEADROLL_SESSION_PROGRAM_ADDRESS } from "../programs/index.js";
 
@@ -67,7 +67,7 @@ export type JoinSessionInstruction<
   TAccountSession extends string | AccountMeta<string> = string,
   TAccountCharacter extends string | AccountMeta<string> = string,
   TAccountParticipation extends string | AccountMeta<string> = string,
-  TAccountStash extends string | AccountMeta<string> = string,
+  TAccountRewardCache extends string | AccountMeta<string> = string,
   TAccountEscrow extends string | AccountMeta<string> = string,
   TAccountSystemProgram extends string | AccountMeta<string> =
     "11111111111111111111111111111111",
@@ -89,9 +89,9 @@ export type JoinSessionInstruction<
       TAccountParticipation extends string
         ? WritableAccount<TAccountParticipation>
         : TAccountParticipation,
-      TAccountStash extends string
-        ? WritableAccount<TAccountStash>
-        : TAccountStash,
+      TAccountRewardCache extends string
+        ? WritableAccount<TAccountRewardCache>
+        : TAccountRewardCache,
       TAccountEscrow extends string
         ? WritableAccount<TAccountEscrow>
         : TAccountEscrow,
@@ -148,7 +148,7 @@ export type JoinSessionAsyncInput<
   TAccountCharacter extends InstructionAccountInput = InstructionAccountInput,
   TAccountParticipation extends InstructionAccountInput =
     InstructionAccountInput,
-  TAccountStash extends InstructionAccountInput = InstructionAccountInput,
+  TAccountRewardCache extends InstructionAccountInput = InstructionAccountInput,
   TAccountEscrow extends InstructionAccountInput = InstructionAccountInput,
   TAccountSystemProgram extends InstructionAccountInput =
     InstructionAccountInput,
@@ -158,7 +158,11 @@ export type JoinSessionAsyncInput<
   session: TAccountSession;
   character: TAccountCharacter;
   participation?: TAccountParticipation;
-  stash?: TAccountStash;
+  /**
+   * Patch 11: the character's reward caches (`RewardCache`), created on its first party; this
+   * party takes a free entry, and what is no longer safe to keep burns (see the handler).
+   */
+  rewardCache?: TAccountRewardCache;
   escrow?: TAccountEscrow;
   systemProgram?: TAccountSystemProgram;
   contribution: JoinSessionInstructionDataArgs["contribution"];
@@ -170,7 +174,7 @@ export async function getJoinSessionInstructionAsync<
   TAccountSession extends InstructionAccountInput,
   TAccountCharacter extends InstructionAccountInput,
   TAccountParticipation extends InstructionAccountInput,
-  TAccountStash extends InstructionAccountInput,
+  TAccountRewardCache extends InstructionAccountInput,
   TAccountEscrow extends InstructionAccountInput,
   TAccountSystemProgram extends InstructionAccountInput,
   TProgramAddress extends Address = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
@@ -180,7 +184,7 @@ export async function getJoinSessionInstructionAsync<
     TAccountSession,
     TAccountCharacter,
     TAccountParticipation,
-    TAccountStash,
+    TAccountRewardCache,
     TAccountEscrow,
     TAccountSystemProgram
   >,
@@ -205,8 +209,8 @@ export async function getJoinSessionInstructionAsync<
       InstructionAccountInputAddress<TAccountParticipation>
     >,
     ResolvedInstructionAccountMeta<
-      TAccountStash,
-      InstructionAccountInputAddress<TAccountStash>
+      TAccountRewardCache,
+      InstructionAccountInputAddress<TAccountRewardCache>
     >,
     ResolvedInstructionAccountMeta<
       TAccountEscrow,
@@ -243,7 +247,11 @@ export async function getJoinSessionInstructionAsync<
       isSigner: false,
       isWritable: true,
     },
-    stash: { value: input.stash ?? null, isSigner: false, isWritable: true },
+    rewardCache: {
+      value: input.rewardCache ?? null,
+      isSigner: false,
+      isWritable: true,
+    },
     escrow: { value: input.escrow ?? null, isSigner: false, isWritable: true },
     systemProgram: {
       value: input.systemProgram ?? null,
@@ -275,13 +283,9 @@ export async function getJoinSessionInstructionAsync<
       { programAddress },
     );
   }
-  if (!accounts.stash.value) {
-    accounts.stash.value = await findStashPda(
+  if (!accounts.rewardCache.value) {
+    accounts.rewardCache.value = await findRewardCachePda(
       {
-        session: getAddressFromResolvedInstructionAccount(
-          "session",
-          accounts.session.value,
-        ),
         character: getAddressFromResolvedInstructionAccount(
           "character",
           accounts.character.value,
@@ -312,7 +316,7 @@ export async function getJoinSessionInstructionAsync<
       getAccountMeta("session", accounts.session),
       getAccountMeta("character", accounts.character),
       getAccountMeta("participation", accounts.participation),
-      getAccountMeta("stash", accounts.stash),
+      getAccountMeta("rewardCache", accounts.rewardCache),
       getAccountMeta("escrow", accounts.escrow),
       getAccountMeta("systemProgram", accounts.systemProgram),
     ],
@@ -339,8 +343,8 @@ export async function getJoinSessionInstructionAsync<
       InstructionAccountInputAddress<TAccountParticipation>
     >,
     ResolvedInstructionAccountMeta<
-      TAccountStash,
-      InstructionAccountInputAddress<TAccountStash>
+      TAccountRewardCache,
+      InstructionAccountInputAddress<TAccountRewardCache>
     >,
     ResolvedInstructionAccountMeta<
       TAccountEscrow,
@@ -359,7 +363,7 @@ export type JoinSessionInput<
   TAccountCharacter extends InstructionAccountInput = InstructionAccountInput,
   TAccountParticipation extends InstructionAccountInput =
     InstructionAccountInput,
-  TAccountStash extends InstructionAccountInput = InstructionAccountInput,
+  TAccountRewardCache extends InstructionAccountInput = InstructionAccountInput,
   TAccountEscrow extends InstructionAccountInput = InstructionAccountInput,
   TAccountSystemProgram extends InstructionAccountInput =
     InstructionAccountInput,
@@ -369,7 +373,11 @@ export type JoinSessionInput<
   session: TAccountSession;
   character: TAccountCharacter;
   participation: TAccountParticipation;
-  stash: TAccountStash;
+  /**
+   * Patch 11: the character's reward caches (`RewardCache`), created on its first party; this
+   * party takes a free entry, and what is no longer safe to keep burns (see the handler).
+   */
+  rewardCache: TAccountRewardCache;
   escrow: TAccountEscrow;
   systemProgram?: TAccountSystemProgram;
   contribution: JoinSessionInstructionDataArgs["contribution"];
@@ -381,7 +389,7 @@ export function getJoinSessionInstruction<
   TAccountSession extends InstructionAccountInput,
   TAccountCharacter extends InstructionAccountInput,
   TAccountParticipation extends InstructionAccountInput,
-  TAccountStash extends InstructionAccountInput,
+  TAccountRewardCache extends InstructionAccountInput,
   TAccountEscrow extends InstructionAccountInput,
   TAccountSystemProgram extends InstructionAccountInput,
   TProgramAddress extends Address = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
@@ -391,7 +399,7 @@ export function getJoinSessionInstruction<
     TAccountSession,
     TAccountCharacter,
     TAccountParticipation,
-    TAccountStash,
+    TAccountRewardCache,
     TAccountEscrow,
     TAccountSystemProgram
   >,
@@ -415,8 +423,8 @@ export function getJoinSessionInstruction<
     InstructionAccountInputAddress<TAccountParticipation>
   >,
   ResolvedInstructionAccountMeta<
-    TAccountStash,
-    InstructionAccountInputAddress<TAccountStash>
+    TAccountRewardCache,
+    InstructionAccountInputAddress<TAccountRewardCache>
   >,
   ResolvedInstructionAccountMeta<
     TAccountEscrow,
@@ -452,7 +460,11 @@ export function getJoinSessionInstruction<
       isSigner: false,
       isWritable: true,
     },
-    stash: { value: input.stash ?? null, isSigner: false, isWritable: true },
+    rewardCache: {
+      value: input.rewardCache ?? null,
+      isSigner: false,
+      isWritable: true,
+    },
     escrow: { value: input.escrow ?? null, isSigner: false, isWritable: true },
     systemProgram: {
       value: input.systemProgram ?? null,
@@ -480,7 +492,7 @@ export function getJoinSessionInstruction<
       getAccountMeta("session", accounts.session),
       getAccountMeta("character", accounts.character),
       getAccountMeta("participation", accounts.participation),
-      getAccountMeta("stash", accounts.stash),
+      getAccountMeta("rewardCache", accounts.rewardCache),
       getAccountMeta("escrow", accounts.escrow),
       getAccountMeta("systemProgram", accounts.systemProgram),
     ],
@@ -507,8 +519,8 @@ export function getJoinSessionInstruction<
       InstructionAccountInputAddress<TAccountParticipation>
     >,
     ResolvedInstructionAccountMeta<
-      TAccountStash,
-      InstructionAccountInputAddress<TAccountStash>
+      TAccountRewardCache,
+      InstructionAccountInputAddress<TAccountRewardCache>
     >,
     ResolvedInstructionAccountMeta<
       TAccountEscrow,
@@ -532,7 +544,11 @@ export type ParsedJoinSessionInstruction<
     session: TAccountMetas[1];
     character: TAccountMetas[2];
     participation: TAccountMetas[3];
-    stash: TAccountMetas[4];
+    /**
+     * Patch 11: the character's reward caches (`RewardCache`), created on its first party; this
+     * party takes a free entry, and what is no longer safe to keep burns (see the handler).
+     */
+    rewardCache: TAccountMetas[4];
     escrow: TAccountMetas[5];
     systemProgram: TAccountMetas[6];
   };
@@ -569,7 +585,7 @@ export function parseJoinSessionInstruction<
       session: getNextAccount(),
       character: getNextAccount(),
       participation: getNextAccount(),
-      stash: getNextAccount(),
+      rewardCache: getNextAccount(),
       escrow: getNextAccount(),
       systemProgram: getNextAccount(),
     },

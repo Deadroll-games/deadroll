@@ -63,7 +63,7 @@ pub fn handler(ctx: Context<Move>, ...) -> Result<()> {
 ```
 
 - The macro checks the token PDA (this program, signer, main wallet) and its expiry; it names `SessionError::InvalidToken`, which is our own appended variant.
-- `#[session_auth_or]` rebuilds the function without generics: a handler with `<'info>` wraps a small `fn authorize(ctx: &Context<X>)` instead (`claim_rewards`).
+- `#[session_auth_or]` rebuilds the function without generics: a handler with `<'info>` wraps a small `fn authorize(ctx: &Context<X>)` instead (`claim_rewards` did, before patch 11 replaced it).
 - DM actions: `authority = session.core.dm`, bound key `GameSession.dm_actor`. The key is replaced only by `set_session_key` (main wallet).
 - `character` (`equip`, `unequip`): the token's target is the session program, so `auth::game_session_token!` implements `SessionV2` instead of the derive.
 - A session key must never be able to move SOL or items out (`docs/GAME_COMMISSIONS.md`). Test it.

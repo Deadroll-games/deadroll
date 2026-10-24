@@ -1,11 +1,19 @@
 use anchor_lang::prelude::*;
-use deadroll_mapcheck::{check_map, roster::SpawnRules};
+use deadroll_mapcheck::{
+    check_map,
+    loot::{MapLoot, TableRules},
+    roster::SpawnRules,
+};
 use deadroll_registry::state::{
-    records::BESTIARY_MAX,
+    records::{BESTIARY_MAX, REWARDS_MAX},
     view::{record, table_body},
     TableKind,
 };
-use deadroll_rules::{config::BalanceConfig, MonsterTemplate};
+use deadroll_rules::{
+    config::BalanceConfig,
+    loot::{map_rules, LootTable},
+    MonsterTemplate,
+};
 use deadroll_skillcheck::monster::MonsterSkill;
 use deadroll_types::{seeds, MapLayoutData, MapStatus};
 use solana_sha256_hasher::hash;
@@ -20,6 +28,8 @@ use crate::{
 /// the tests).
 pub const BESTIARY_TABLE: Pubkey = pubkey!("3uJyWiz7NeVekP4w1iZkKxKnJ5pMbxC6ciz7kxN3MZtM");
 pub const MONSTER_SKILLS_TABLE: Pubkey = pubkey!("NQNEuKDUZhACnTJ9sD3dW49BoiPtJPatp6bpY61r81p");
+/// Patch 11: registry `["rewards"]`.
+pub const REWARDS_TABLE: Pubkey = pubkey!("FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK");
 
 #[derive(Accounts)]
 pub struct FinalizeMap<'info> {
@@ -41,6 +51,9 @@ pub struct FinalizeMap<'info> {
     /// CHECK: registry `["monster_skills"]` table: the categories of the pool skills.
     #[account(address = MONSTER_SKILLS_TABLE @ MapError::InvalidRegistryTable)]
     pub monster_skills: UncheckedAccount<'info>,
+    /// CHECK: registry `["rewards"]` table (patch 11): the chest and boss reward tables.
+    #[account(address = REWARDS_TABLE @ MapError::InvalidRegistryTable)]
+    pub rewards: UncheckedAccount<'info>,
 }
 
 /// The builder rules of every bestiary template a spawn names, from the registry (`None`: no
@@ -80,6 +93,29 @@ fn templates(
     Ok(out)
 }
 
+/// The builder view of every reward table the layout names (`None`: no such table).
+fn reward_tables(
+    rewards: &AccountInfo,
+    layout: &MapLayoutData,
+) -> Result<[Option<TableRules>; REWARDS_MAX]> {
+    let body = table_body(rewards, TableKind::Rewards)
+        .map_err(|_| error!(MapError::InvalidRegistryTable))?;
+    let mut out = [None; REWARDS_MAX];
+    let ids = layout
+        .chest_list()
+        .iter()
+        .map(|c| c.data)
+        .chain([layout.boss_table]);
+    for id in ids {
+        if let Some(slot) = out.get_mut(id as usize) {
+            *slot = record(&body, TableKind::Rewards, id as usize)
+                .and_then(LootTable::from_record)
+                .map(|t| t.rules());
+        }
+    }
+    Ok(out)
+}
+
 /// Runs every builder rule, then freezes the map: `layout_hash` = SHA-256 of the layout core
 /// bytes (account data `[8 .. 8 + MapLayoutData::SIZE]`).
 pub fn handler(ctx: Context<FinalizeMap>, secrets_root: [u8; 32]) -> Result<()> {
@@ -89,13 +125,20 @@ pub fn handler(ctx: Context<FinalizeMap>, secrets_root: [u8; 32]) -> Result<()> 
         &accounts.monster_skills,
         &accounts.layout.core,
     )?;
+    let tables = reward_tables(&accounts.rewards, &accounts.layout.core)?;
     let map = &mut accounts.map;
+    let loot = MapLoot {
+        min_players: map.min_players,
+        rules: map_rules(&BalanceConfig::DEFAULT.loot, map.tier),
+        table_of: |id: u8| tables.get(id as usize).copied().flatten(),
+    };
     check_map(
         map.core.width,
         map.core.height,
         map.tier,
         &accounts.layout.core,
         |id| rules.get(id as usize).copied().flatten(),
+        &loot,
     )
     .map_err(MapError::from)?;
 
@@ -127,6 +170,7 @@ mod tests {
         for (seed, address) in [
             (seeds::BESTIARY, BESTIARY_TABLE),
             (seeds::MONSTER_SKILLS, MONSTER_SKILLS_TABLE),
+            (seeds::REWARDS, REWARDS_TABLE),
         ] {
             let (pda, _) = Pubkey::find_program_address(&[seed], &deadroll_registry::ID);
             assert_eq!(pda, address);

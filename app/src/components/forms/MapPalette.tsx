@@ -20,7 +20,7 @@ function toolPressed(current: BuilderTool, next: BuilderTool): boolean {
   if (current.kind !== next.kind) return false;
   if (current.kind === "tile" && next.kind === "tile") return current.tile === next.tile;
   if (current.kind === "spawn" && next.kind === "spawn") return current.bestiaryId === next.bestiaryId;
-  return current.kind === "erase";
+  return current.kind === "erase" || current.kind === "chest";
 }
 
 export function MapPalette(p: MapPaletteProps) {
@@ -70,6 +70,15 @@ export function MapPalette(p: MapPaletteProps) {
           <button
             type="button"
             className="btn"
+            aria-pressed={p.tool.kind === "chest"}
+            disabled={locked}
+            onClick={() => p.onToolChange({ kind: "chest" })}
+          >
+            Chest
+          </button>
+          <button
+            type="button"
+            className="btn"
             aria-pressed={p.tool.kind === "erase"}
             disabled={locked}
             onClick={() => p.onToolChange({ kind: "erase" })}
@@ -104,6 +113,8 @@ export function MapPalette(p: MapPaletteProps) {
           Load
         </button>
       </div>
+
+      {p.loot}
 
       <p className="muted">
         {p.spawns.length}/{SPAWN_CAP} spawns

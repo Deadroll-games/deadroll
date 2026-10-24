@@ -16,8 +16,6 @@ import {
   getBytesEncoder,
   getStructDecoder,
   getStructEncoder,
-  getU32Decoder,
-  getU32Encoder,
   SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
   SolanaError,
   transformEncoder,
@@ -46,18 +44,26 @@ import {
 } from "@solana/program-client-core";
 import { findBagPda } from "../pdas/index.js";
 import { DEADROLL_CHARACTER_PROGRAM_ADDRESS } from "../programs/index.js";
+import {
+  getBagLayoutDecoder,
+  getBagLayoutEncoder,
+  getCacheSlotDecoder,
+  getCacheSlotEncoder,
+  type BagLayout,
+  type BagLayoutArgs,
+  type CacheSlot,
+  type CacheSlotArgs,
+} from "../types/index.js";
 
-export const GRANT_REWARDS_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Array([
-  168, 49, 33, 137, 253, 107, 112, 24,
+export const APPLY_BAG_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Array([
+  22, 62, 124, 195, 253, 223, 54, 142,
 ]);
 
-export function getGrantRewardsDiscriminatorBytes(): ReadonlyUint8Array {
-  return fixEncoderSize(getBytesEncoder(), 8).encode(
-    GRANT_REWARDS_DISCRIMINATOR,
-  );
+export function getApplyBagDiscriminatorBytes(): ReadonlyUint8Array {
+  return fixEncoderSize(getBytesEncoder(), 8).encode(APPLY_BAG_DISCRIMINATOR);
 }
 
-export type GrantRewardsInstruction<
+export type ApplyBagInstruction<
   TProgram extends string = typeof DEADROLL_CHARACTER_PROGRAM_ADDRESS,
   TAccountCharacter extends string | AccountMeta<string> = string,
   TAccountSessionAuthority extends string | AccountMeta<string> = string,
@@ -69,7 +75,7 @@ export type GrantRewardsInstruction<
   InstructionWithAccounts<
     [
       TAccountCharacter extends string
-        ? WritableAccount<TAccountCharacter>
+        ? ReadonlyAccount<TAccountCharacter>
         : TAccountCharacter,
       TAccountSessionAuthority extends string
         ? ReadonlySignerAccount<TAccountSessionAuthority> &
@@ -83,47 +89,47 @@ export type GrantRewardsInstruction<
     ]
   >;
 
-export type GrantRewardsInstructionData = {
+export type ApplyBagInstructionData = {
   discriminator: ReadonlyUint8Array;
-  xp: number;
-  resources: Array<number>;
+  cache: Array<CacheSlot>;
+  layout: BagLayout;
 };
 
-export type GrantRewardsInstructionDataArgs = {
-  xp: number;
-  resources: Array<number>;
+export type ApplyBagInstructionDataArgs = {
+  cache: Array<CacheSlotArgs>;
+  layout: BagLayoutArgs;
 };
 
-export function getGrantRewardsInstructionDataEncoder(): FixedSizeEncoder<GrantRewardsInstructionDataArgs> {
+export function getApplyBagInstructionDataEncoder(): FixedSizeEncoder<ApplyBagInstructionDataArgs> {
   return transformEncoder(
     getStructEncoder([
       ["discriminator", fixEncoderSize(getBytesEncoder(), 8)],
-      ["xp", getU32Encoder()],
-      ["resources", getArrayEncoder(getU32Encoder(), { size: 8 })],
+      ["cache", getArrayEncoder(getCacheSlotEncoder(), { size: 32 })],
+      ["layout", getBagLayoutEncoder()],
     ]),
-    (value) => ({ ...value, discriminator: GRANT_REWARDS_DISCRIMINATOR }),
+    (value) => ({ ...value, discriminator: APPLY_BAG_DISCRIMINATOR }),
   );
 }
 
-export function getGrantRewardsInstructionDataDecoder(): FixedSizeDecoder<GrantRewardsInstructionData> {
+export function getApplyBagInstructionDataDecoder(): FixedSizeDecoder<ApplyBagInstructionData> {
   return getStructDecoder([
     ["discriminator", fixDecoderSize(getBytesDecoder(), 8)],
-    ["xp", getU32Decoder()],
-    ["resources", getArrayDecoder(getU32Decoder(), { size: 8 })],
+    ["cache", getArrayDecoder(getCacheSlotDecoder(), { size: 32 })],
+    ["layout", getBagLayoutDecoder()],
   ]);
 }
 
-export function getGrantRewardsInstructionDataCodec(): FixedSizeCodec<
-  GrantRewardsInstructionDataArgs,
-  GrantRewardsInstructionData
+export function getApplyBagInstructionDataCodec(): FixedSizeCodec<
+  ApplyBagInstructionDataArgs,
+  ApplyBagInstructionData
 > {
   return combineCodec(
-    getGrantRewardsInstructionDataEncoder(),
-    getGrantRewardsInstructionDataDecoder(),
+    getApplyBagInstructionDataEncoder(),
+    getApplyBagInstructionDataDecoder(),
   );
 }
 
-export type GrantRewardsAsyncInput<
+export type ApplyBagAsyncInput<
   TAccountCharacter extends InstructionAccountInput = InstructionAccountInput,
   TAccountSessionAuthority extends InstructionSignerInput =
     InstructionSignerInput,
@@ -135,18 +141,18 @@ export type GrantRewardsAsyncInput<
   sessionAuthority: TAccountSessionAuthority;
   config: TAccountConfig;
   bag?: TAccountBag;
-  xp: GrantRewardsInstructionDataArgs["xp"];
-  resources: GrantRewardsInstructionDataArgs["resources"];
+  cache: ApplyBagInstructionDataArgs["cache"];
+  layout: ApplyBagInstructionDataArgs["layout"];
 };
 
-export async function getGrantRewardsInstructionAsync<
+export async function getApplyBagInstructionAsync<
   TAccountCharacter extends InstructionAccountInput,
   TAccountSessionAuthority extends InstructionSignerInput,
   TAccountConfig extends InstructionAccountInput,
   TAccountBag extends InstructionAccountInput,
   TProgramAddress extends Address = typeof DEADROLL_CHARACTER_PROGRAM_ADDRESS,
 >(
-  input: GrantRewardsAsyncInput<
+  input: ApplyBagAsyncInput<
     TAccountCharacter,
     TAccountSessionAuthority,
     TAccountConfig,
@@ -154,7 +160,7 @@ export async function getGrantRewardsInstructionAsync<
   >,
   config?: { programAddress?: TProgramAddress },
 ): Promise<
-  GrantRewardsInstruction<
+  ApplyBagInstruction<
     TProgramAddress,
     ResolvedInstructionAccountMeta<
       TAccountCharacter,
@@ -186,7 +192,7 @@ export async function getGrantRewardsInstructionAsync<
     character: {
       value: input.character ?? null,
       isSigner: false,
-      isWritable: true,
+      isWritable: false,
     },
     sessionAuthority: {
       value: input.sessionAuthority ?? null,
@@ -224,11 +230,11 @@ export async function getGrantRewardsInstructionAsync<
       getAccountMeta("config", accounts.config),
       getAccountMeta("bag", accounts.bag),
     ],
-    data: getGrantRewardsInstructionDataEncoder().encode(
-      args as GrantRewardsInstructionDataArgs,
+    data: getApplyBagInstructionDataEncoder().encode(
+      args as ApplyBagInstructionDataArgs,
     ),
     programAddress,
-  } as GrantRewardsInstruction<
+  } as ApplyBagInstruction<
     TProgramAddress,
     ResolvedInstructionAccountMeta<
       TAccountCharacter,
@@ -249,7 +255,7 @@ export async function getGrantRewardsInstructionAsync<
   >);
 }
 
-export type GrantRewardsInput<
+export type ApplyBagInput<
   TAccountCharacter extends InstructionAccountInput = InstructionAccountInput,
   TAccountSessionAuthority extends InstructionSignerInput =
     InstructionSignerInput,
@@ -261,25 +267,25 @@ export type GrantRewardsInput<
   sessionAuthority: TAccountSessionAuthority;
   config: TAccountConfig;
   bag: TAccountBag;
-  xp: GrantRewardsInstructionDataArgs["xp"];
-  resources: GrantRewardsInstructionDataArgs["resources"];
+  cache: ApplyBagInstructionDataArgs["cache"];
+  layout: ApplyBagInstructionDataArgs["layout"];
 };
 
-export function getGrantRewardsInstruction<
+export function getApplyBagInstruction<
   TAccountCharacter extends InstructionAccountInput,
   TAccountSessionAuthority extends InstructionSignerInput,
   TAccountConfig extends InstructionAccountInput,
   TAccountBag extends InstructionAccountInput,
   TProgramAddress extends Address = typeof DEADROLL_CHARACTER_PROGRAM_ADDRESS,
 >(
-  input: GrantRewardsInput<
+  input: ApplyBagInput<
     TAccountCharacter,
     TAccountSessionAuthority,
     TAccountConfig,
     TAccountBag
   >,
   config?: { programAddress?: TProgramAddress },
-): GrantRewardsInstruction<
+): ApplyBagInstruction<
   TProgramAddress,
   ResolvedInstructionAccountMeta<
     TAccountCharacter,
@@ -310,7 +316,7 @@ export function getGrantRewardsInstruction<
     character: {
       value: input.character ?? null,
       isSigner: false,
-      isWritable: true,
+      isWritable: false,
     },
     sessionAuthority: {
       value: input.sessionAuthority ?? null,
@@ -335,11 +341,11 @@ export function getGrantRewardsInstruction<
       getAccountMeta("config", accounts.config),
       getAccountMeta("bag", accounts.bag),
     ],
-    data: getGrantRewardsInstructionDataEncoder().encode(
-      args as GrantRewardsInstructionDataArgs,
+    data: getApplyBagInstructionDataEncoder().encode(
+      args as ApplyBagInstructionDataArgs,
     ),
     programAddress,
-  } as GrantRewardsInstruction<
+  } as ApplyBagInstruction<
     TProgramAddress,
     ResolvedInstructionAccountMeta<
       TAccountCharacter,
@@ -360,7 +366,7 @@ export function getGrantRewardsInstruction<
   >);
 }
 
-export type ParsedGrantRewardsInstruction<
+export type ParsedApplyBagInstruction<
   TProgram extends string = typeof DEADROLL_CHARACTER_PROGRAM_ADDRESS,
   TAccountMetas extends readonly AccountMeta[] = readonly AccountMeta[],
 > = {
@@ -372,17 +378,17 @@ export type ParsedGrantRewardsInstruction<
     config: TAccountMetas[2];
     bag: TAccountMetas[3];
   };
-  data: GrantRewardsInstructionData;
+  data: ApplyBagInstructionData;
 };
 
-export function parseGrantRewardsInstruction<
+export function parseApplyBagInstruction<
   TProgram extends string,
   TAccountMetas extends readonly AccountMeta[],
 >(
   instruction: Instruction<TProgram> &
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
-): ParsedGrantRewardsInstruction<TProgram, TAccountMetas> {
+): ParsedApplyBagInstruction<TProgram, TAccountMetas> {
   if (instruction.accounts.length < 4) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
@@ -406,6 +412,6 @@ export function parseGrantRewardsInstruction<
       config: getNextAccount(),
       bag: getNextAccount(),
     },
-    data: getGrantRewardsInstructionDataDecoder().decode(instruction.data),
+    data: getApplyBagInstructionDataDecoder().decode(instruction.data),
   };
 }

@@ -6,8 +6,8 @@ pub mod game_session;
 pub mod mods;
 pub mod monster_state;
 pub mod participation;
+pub mod reward_cache;
 pub mod skills;
-pub mod temp_stash;
 #[cfg(test)]
 pub(crate) mod test_support;
 
@@ -16,8 +16,8 @@ pub use game_session::*;
 pub use mods::{ModKindData, ModsData, ResistModData, TimedModData, STORED_MODS};
 pub use monster_state::*;
 pub use participation::*;
+pub use reward_cache::*;
 pub use skills::*;
-pub use temp_stash::*;
 
 /// Layout version written into every session account.
 pub const ACCOUNT_VERSION: u8 = 1;

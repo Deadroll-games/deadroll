@@ -79,6 +79,8 @@ const traits = pda([Buffer.from("traits")], REGISTRY);
 const resonances = pda([Buffer.from("resonances")], REGISTRY);
 // Patch 6: the skills of the bestiary pools (finalize_map checks the choice, open_session copies it).
 const monsterSkills = pda([Buffer.from("monster_skills")], REGISTRY);
+// Patch 11: reward tables (the preset's chest and boss table).
+const rewards = pda([Buffer.from("rewards")], REGISTRY);
 
 /** Patch 6: the accounts that finalize the deaths a callback queued (`GameSession.pending_deaths`):
  * each queued slot's Character, SkillSet and Bag, writable, in slot order. */
@@ -285,7 +287,7 @@ interface Player {
   character: PublicKey;
   asset: PublicKey;
   participation: PublicKey;
-  stash: PublicKey;
+  rewardCache: PublicKey;
   skillSet: PublicKey;
   bag: PublicKey;
 }
@@ -353,16 +355,18 @@ class Demo {
     this.layout = pda([Buffer.from("layout"), this.map.toBuffer()], MAP);
     const edit = { dm: this.dm.publicKey, map: this.map, layout: this.layout };
     await mapProgram.methods
-      .createMap(index, preset.width, preset.height, preset.tier)
+      .createMap(index, preset.width, preset.height, preset.tier, { minPlayers: preset.minPlayers, chestRadius: preset.chestRadius, settleTimeoutSecs: preset.settleTimeoutSecs })
       .accountsStrict({ ...edit, systemProgram: SystemProgram.programId })
       .signers([this.dm])
       .rpc()
       .then(track("create_map"));
     await mapProgram.methods.writeLayout(0, Buffer.from(layoutBytes(preset))).accountsStrict(edit).signers([this.dm]).rpc().then(track("write_layout"));
     await mapProgram.methods.writeSpawns(preset.entrance, preset.exit, preset.spawns).accountsStrict(edit).signers([this.dm]).rpc().then(track("write_spawns"));
+    const chests = preset.chests.map((c) => ({ kind: { chest: {} }, x: c.x, y: c.y, data: c.table }));
+    await mapProgram.methods.writeChests(chests, preset.bossTable).accountsStrict(edit).signers([this.dm]).rpc().then(track("write_chests"));
     await mapProgram.methods
       .finalizeMap(new Array(32).fill(0))
-      .accountsStrict({ ...edit, bestiary, monsterSkills })
+      .accountsStrict({ ...edit, bestiary, monsterSkills, rewards })
       .signers([this.dm])
       .rpc()
       .then(track("finalize_map"));
@@ -378,7 +382,7 @@ class Demo {
     const s = this.acc.session;
     return {
       participation: pda([Buffer.from("participation"), s.toBuffer(), character.toBuffer()], SESSION),
-      stash: pda([Buffer.from("stash"), s.toBuffer(), character.toBuffer()], SESSION),
+      rewardCache: pda([Buffer.from("cache"), character.toBuffer()], SESSION),
       skillSet: pda([Buffer.from("skills"), character.toBuffer()], CHARACTER),
       bag: pda([Buffer.from("bag"), character.toBuffer()], CHARACTER),
     };
@@ -612,6 +616,8 @@ class Demo {
     for (let i = 0; i < this.players.length; i++) {
       if (i !== mover && s.aliveMask & (1 << i)) taken.add(s.playerPos[i].y * MAP_STRIDE + s.playerPos[i].x);
     }
+    // Patch 11: a closed chest occupies its cell.
+    for (let i = 0; i < s.chestCount; i++) if (!(s.chestsOpened & (1 << i))) taken.add(s.chests[i].y * MAP_STRIDE + s.chests[i].x);
     const cost = (x: number, y: number) => {
       if (x < 0 || y < 0 || x >= preset.width || y >= preset.height) return 0;
       const t = preset.tiles[y * MAP_STRIDE + x];
@@ -722,7 +728,7 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
       const [weapon, armor] = kind === "warrior" ? ["sword", "leatherArmor"] : ["staff", "robe"];
       assert.ok(c.gear.items[0].base[weapon] !== undefined && c.gear.items[1].base[armor] !== undefined);
       assert.ok(c.gear.equipped[0].source.soulbound !== undefined && c.gear.equipped[3].source.soulbound !== undefined);
-      demo.players.push({ kind, wallet, actor, token: PublicKey.default, character, asset, participation: PublicKey.default, stash: PublicKey.default, skillSet: PublicKey.default, bag: PublicKey.default });
+      demo.players.push({ kind, wallet, actor, token: PublicKey.default, character, asset, participation: PublicKey.default, rewardCache: PublicKey.default, skillSet: PublicKey.default, bag: PublicKey.default });
     }
   });
 
@@ -755,6 +761,7 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
         traits,
         resonances,
         monsterSkills,
+        rewards,
       })
       .signers([demo.dm])
       .rpc({ commitment: "confirmed" })
@@ -773,7 +780,7 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
           session: demo.acc.session,
           character: pl.character,
           participation: pl.participation,
-          stash: pl.stash,
+          rewardCache: pl.rewardCache,
           escrow: demo.acc.escrow,
           systemProgram: SystemProgram.programId,
         })
@@ -1006,67 +1013,48 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
     assert.ok(victory, "boss killed");
     const s = await demo.state();
     assert.ok(s.core.status.victory);
-    assert.ok(s.xpPool > 0);
+    // Patch 11: the kills filled the survivor's cache during the party.
+    assert.ok((await demo.part(WARRIOR)).cacheXp > 0);
   });
 
-  it("rewards: XP and loot for the living, nothing for the tombstone", async () => {
+  it("the DM settles the party: XP for the living, nothing for the tombstone, the price from escrow", async () => {
     const before = await demo.character(WARRIOR);
-    const xpPool = (await demo.state()).xpPool;
-    const claim = async (who: number) => {
-      const pl = demo.players[who];
-      const queue = deathAccounts(await demo.state());
-      return session.methods
-        .claimRewards()
-        .accountsStrict({
-          signer: pl.actor.publicKey, // the owner's session key: still no wallet popup
-          session: demo.acc.session,
-          participation: pl.participation,
-          stash: pl.stash,
-          character: pl.character,
-          bag: pl.bag,
-          sessionAuthority,
-          config,
-          characterProgram: CHARACTER,
-          sessionToken: pl.token,
-        })
-        .remainingAccounts(queue)
-        .preInstructions(finalizeBudget(queue))
-        .signers([pl.actor])
-        .rpc({ commitment: "confirmed" })
-        .then(track(`claim_rewards ${pl.kind}`));
-    };
-    const ev = await eventOf(await claim(WARRIOR), "rewardsClaimed");
-    assert.equal(ev.xp, xpPool);
-    const after = await demo.character(WARRIOR);
-    assert.equal(after.core.xp, before.core.xp + xpPool);
-    assert.equal(after.core.inSession, null, "unlocked");
-    const dead = await eventOf(await claim(MAGE), "rewardsClaimed");
-    assert.equal(dead.xp, 0);
-    assert.ok(!(await demo.character(MAGE)).core.alive);
-  });
-
-  it("the DM gets the price from escrow; the map is finished", async () => {
-    const before = await connection.getBalance(demo.dm.publicKey);
+    const cacheXp = (await demo.part(WARRIOR)).cacheXp;
+    const dmBefore = await connection.getBalance(demo.dm.publicKey);
+    const players = demo.players.flatMap((pl) =>
+      [pl.participation, pl.rewardCache, pl.character].map((pubkey) => ({ pubkey, isSigner: false, isWritable: true })),
+    );
     const sig = await session.methods
-      .claimEscrow()
+      .settleParty()
       .accountsStrict({
-        dm: demo.dm.publicKey,
+        dm: demo.dm.publicKey, // the DM's main wallet: the session key cannot settle
         session: demo.acc.session,
         escrow: demo.acc.escrow,
+        monsters: demo.acc.monsters,
         map: demo.map,
         sessionAuthority,
         config,
         mapProgram: MAP,
         characterProgram: CHARACTER,
       })
-      .remainingAccounts(deathAccounts(await demo.state()))
+      .remainingAccounts([...deathAccounts(await demo.state()), ...players])
+      .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 1_000_000 })])
       .signers([demo.dm])
       .rpc({ commitment: "confirmed" })
-      .then(track("claim_escrow"));
-    const ev = await eventOf(sig, "escrowClaimed");
-    assert.equal(ev.amount.toString(), PRICE.toString());
-    const gained = (await connection.getBalance(demo.dm.publicKey)) - before;
-    assert.ok(gained > PRICE.toNumber() - 10_000, `DM got ${gained}`);
+      .then(track("settle_party"));
+    const settled = await eventsOf(sig);
+    const byName = (name: string) => settled.filter((x) => x.name === name).map((x) => x.data);
+    const [warrior, mage] = byName("cacheSettled");
+    assert.deepEqual([warrior.granted, warrior.xp], [true, cacheXp]);
+    assert.deepEqual([mage.granted, mage.xp], [false, 0]);
+    const after = await demo.character(WARRIOR);
+    assert.equal(after.core.xp, before.core.xp + cacheXp);
+    assert.equal(after.core.inSession, null, "unlocked");
+    assert.ok(!(await demo.character(MAGE)).core.alive);
+    const [escrow] = byName("escrowClaimed");
+    assert.equal(escrow.amount.toString(), PRICE.toString());
+    const gained = (await connection.getBalance(demo.dm.publicKey)) - dmBefore;
+    assert.ok(gained > PRICE.toNumber() - 20_000, `DM got ${gained}`);
     assert.ok((await mapProgram.account.map.fetch(demo.map)).core.status.finished);
   });
 

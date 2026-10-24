@@ -77,6 +77,35 @@ pub enum MapError {
     TooManySessionSkills,
     #[msg("Account is not the registry bestiary or monster skills table")]
     InvalidRegistryTable,
+    // Patch 11, in MapCheckError order.
+    #[msg("Minimum players of the map is outside 1..=4")]
+    MinPlayersOutOfRange,
+    #[msg("Too many visible chests for the map tier")]
+    TooManyChests,
+    #[msg("A map point is not a visible chest")]
+    InvalidPoint,
+    #[msg("Chest is outside the map")]
+    ChestOutOfBounds,
+    #[msg("Chest stands on a cell that cannot be entered")]
+    ChestNotPassable,
+    #[msg("Chest shares a cell with the entrance, the exit, a spawn or another chest")]
+    ChestOverlap,
+    #[msg("Unknown reward table")]
+    UnknownTable,
+    #[msg("Reward table is not allowed on this map tier")]
+    TableNotAllowed,
+    #[msg("The boss needs a reward table")]
+    BossTableMissing,
+    #[msg("The boss reward table needs at least two levels")]
+    BossTableOneLevel,
+    #[msg("Chests and boss cost more than the reward budget")]
+    OverBudget,
+    #[msg("No cell next to a chest can be reached from the entrance")]
+    ChestUnreachable,
+    #[msg("The chest radius is outside the limits (LootTuning.chest_radius_min..=max)")]
+    ChestRadiusOutOfRange,
+    #[msg("The time to settle is outside the limits (at most LootTuning.settle_timeout_max_secs)")]
+    SettleTimeoutOutOfRange,
 }
 
 impl From<MapCheckError> for MapError {
@@ -112,6 +141,18 @@ impl From<MapCheckError> for MapError {
             C::EliteBoss => MapError::EliteBoss,
             C::TooManyElites => MapError::TooManyElites,
             C::TooManySessionSkills => MapError::TooManySessionSkills,
+            C::MinPlayersOutOfRange => MapError::MinPlayersOutOfRange,
+            C::TooManyChests => MapError::TooManyChests,
+            C::InvalidPoint => MapError::InvalidPoint,
+            C::ChestOutOfBounds => MapError::ChestOutOfBounds,
+            C::ChestNotPassable => MapError::ChestNotPassable,
+            C::ChestOverlap => MapError::ChestOverlap,
+            C::UnknownTable => MapError::UnknownTable,
+            C::TableNotAllowed => MapError::TableNotAllowed,
+            C::BossTableMissing => MapError::BossTableMissing,
+            C::BossTableOneLevel => MapError::BossTableOneLevel,
+            C::OverBudget => MapError::OverBudget,
+            C::ChestUnreachable => MapError::ChestUnreachable,
         }
     }
 }

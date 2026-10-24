@@ -52,40 +52,44 @@ import {
   type SkillSetArgs,
 } from "../accounts/index.js";
 import {
+  getApplyBagInstructionAsync,
   getCreateCharacterInstructionAsync,
   getCreateProfileInstructionAsync,
   getEquipInstruction,
   getFreezeTombstoneInstruction,
-  getGrantRewardsInstructionAsync,
+  getGrantXpInstruction,
   getLockForSessionInstructionAsync,
   getMarkDeadInstructionAsync,
   getSetSkillDescriptionInstructionAsync,
   getSpendStatPointsInstruction,
   getUnequipInstruction,
   getUnlockInstruction,
+  parseApplyBagInstruction,
   parseCreateCharacterInstruction,
   parseCreateProfileInstruction,
   parseEquipInstruction,
   parseFreezeTombstoneInstruction,
-  parseGrantRewardsInstruction,
+  parseGrantXpInstruction,
   parseLockForSessionInstruction,
   parseMarkDeadInstruction,
   parseSetSkillDescriptionInstruction,
   parseSpendStatPointsInstruction,
   parseUnequipInstruction,
   parseUnlockInstruction,
+  type ApplyBagAsyncInput,
   type CreateCharacterAsyncInput,
   type CreateProfileAsyncInput,
   type EquipInput,
   type FreezeTombstoneInput,
-  type GrantRewardsAsyncInput,
+  type GrantXpInput,
   type LockForSessionAsyncInput,
   type MarkDeadAsyncInput,
+  type ParsedApplyBagInstruction,
   type ParsedCreateCharacterInstruction,
   type ParsedCreateProfileInstruction,
   type ParsedEquipInstruction,
   type ParsedFreezeTombstoneInstruction,
-  type ParsedGrantRewardsInstruction,
+  type ParsedGrantXpInstruction,
   type ParsedLockForSessionInstruction,
   type ParsedMarkDeadInstruction,
   type ParsedSetSkillDescriptionInstruction,
@@ -192,30 +196,32 @@ export function identifyDeadrollCharacterAccount(
 }
 
 export const DeadrollCharacterEvent = {
-  0: "CharacterCreated",
-  1: "CharacterDied",
-  2: "CharacterLocked",
-  3: "CharacterUnlocked",
-  4: "ItemEquipped",
-  5: "ItemUnequipped",
-  6: "ProfileCreated",
-  7: "RewardsGranted",
+  0: "BagApplied",
+  1: "CharacterCreated",
+  2: "CharacterDied",
+  3: "CharacterLocked",
+  4: "CharacterUnlocked",
+  5: "ItemEquipped",
+  6: "ItemUnequipped",
+  7: "ProfileCreated",
   8: "SkillDescribed",
   9: "SkillsSelected",
   10: "StatPointsSpent",
   11: "TombstoneFrozen",
-  CharacterCreated: 0,
-  CharacterDied: 1,
-  CharacterLocked: 2,
-  CharacterUnlocked: 3,
-  ItemEquipped: 4,
-  ItemUnequipped: 5,
-  ProfileCreated: 6,
-  RewardsGranted: 7,
+  12: "XpGranted",
+  BagApplied: 0,
+  CharacterCreated: 1,
+  CharacterDied: 2,
+  CharacterLocked: 3,
+  CharacterUnlocked: 4,
+  ItemEquipped: 5,
+  ItemUnequipped: 6,
+  ProfileCreated: 7,
   SkillDescribed: 8,
   SkillsSelected: 9,
   StatPointsSpent: 10,
   TombstoneFrozen: 11,
+  XpGranted: 12,
 } as const;
 
 export type DeadrollCharacterEvent = (typeof DeadrollCharacterEvent)[Exclude<
@@ -227,6 +233,17 @@ export function identifyDeadrollCharacterEvent(
   event: { data: ReadonlyUint8Array } | ReadonlyUint8Array,
 ): DeadrollCharacterEvent {
   const data = "data" in event ? event.data : event;
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([102, 37, 14, 99, 133, 163, 99, 77]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollCharacterEvent.BagApplied;
+  }
   if (
     containsBytes(
       data,
@@ -308,17 +325,6 @@ export function identifyDeadrollCharacterEvent(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
-        new Uint8Array([199, 148, 38, 34, 144, 29, 160, 92]),
-      ),
-      0,
-    )
-  ) {
-    return DeadrollCharacterEvent.RewardsGranted;
-  }
-  if (
-    containsBytes(
-      data,
-      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([142, 148, 33, 51, 80, 95, 71, 124]),
       ),
       0,
@@ -359,34 +365,47 @@ export function identifyDeadrollCharacterEvent(
   ) {
     return DeadrollCharacterEvent.TombstoneFrozen;
   }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([109, 109, 222, 212, 176, 77, 92, 252]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollCharacterEvent.XpGranted;
+  }
   throw new Error(
     "The provided event could not be identified as a deadrollCharacter event.",
   );
 }
 
 export const DeadrollCharacterInstruction = {
-  0: "CreateCharacter",
-  1: "CreateProfile",
-  2: "Equip",
-  3: "FreezeTombstone",
-  4: "GrantRewards",
-  5: "LockForSession",
-  6: "MarkDead",
-  7: "SetSkillDescription",
-  8: "SpendStatPoints",
-  9: "Unequip",
-  10: "Unlock",
-  CreateCharacter: 0,
-  CreateProfile: 1,
-  Equip: 2,
-  FreezeTombstone: 3,
-  GrantRewards: 4,
-  LockForSession: 5,
-  MarkDead: 6,
-  SetSkillDescription: 7,
-  SpendStatPoints: 8,
-  Unequip: 9,
-  Unlock: 10,
+  0: "ApplyBag",
+  1: "CreateCharacter",
+  2: "CreateProfile",
+  3: "Equip",
+  4: "FreezeTombstone",
+  5: "GrantXp",
+  6: "LockForSession",
+  7: "MarkDead",
+  8: "SetSkillDescription",
+  9: "SpendStatPoints",
+  10: "Unequip",
+  11: "Unlock",
+  ApplyBag: 0,
+  CreateCharacter: 1,
+  CreateProfile: 2,
+  Equip: 3,
+  FreezeTombstone: 4,
+  GrantXp: 5,
+  LockForSession: 6,
+  MarkDead: 7,
+  SetSkillDescription: 8,
+  SpendStatPoints: 9,
+  Unequip: 10,
+  Unlock: 11,
 } as const;
 
 export type DeadrollCharacterInstruction =
@@ -399,6 +418,17 @@ export function identifyDeadrollCharacterInstruction(
   instruction: { data: ReadonlyUint8Array } | ReadonlyUint8Array,
 ): DeadrollCharacterInstruction {
   const data = "data" in instruction ? instruction.data : instruction;
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([22, 62, 124, 195, 253, 223, 54, 142]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollCharacterInstruction.ApplyBag;
+  }
   if (
     containsBytes(
       data,
@@ -447,12 +477,12 @@ export function identifyDeadrollCharacterInstruction(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
-        new Uint8Array([168, 49, 33, 137, 253, 107, 112, 24]),
+        new Uint8Array([223, 147, 25, 252, 91, 237, 124, 213]),
       ),
       0,
     )
   ) {
-    return DeadrollCharacterInstruction.GrantRewards;
+    return DeadrollCharacterInstruction.GrantXp;
   }
   if (
     containsBytes(
@@ -530,6 +560,9 @@ export type ParsedDeadrollCharacterInstruction<
   TProgram extends string = "9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL",
 > =
   | ({
+      instructionType: typeof DeadrollCharacterInstruction.ApplyBag;
+    } & ParsedApplyBagInstruction<TProgram>)
+  | ({
       instructionType: typeof DeadrollCharacterInstruction.CreateCharacter;
     } & ParsedCreateCharacterInstruction<TProgram>)
   | ({
@@ -542,8 +575,8 @@ export type ParsedDeadrollCharacterInstruction<
       instructionType: typeof DeadrollCharacterInstruction.FreezeTombstone;
     } & ParsedFreezeTombstoneInstruction<TProgram>)
   | ({
-      instructionType: typeof DeadrollCharacterInstruction.GrantRewards;
-    } & ParsedGrantRewardsInstruction<TProgram>)
+      instructionType: typeof DeadrollCharacterInstruction.GrantXp;
+    } & ParsedGrantXpInstruction<TProgram>)
   | ({
       instructionType: typeof DeadrollCharacterInstruction.LockForSession;
     } & ParsedLockForSessionInstruction<TProgram>)
@@ -568,6 +601,13 @@ export function parseDeadrollCharacterInstruction<TProgram extends string>(
 ): ParsedDeadrollCharacterInstruction<TProgram> {
   const instructionType = identifyDeadrollCharacterInstruction(instruction);
   switch (instructionType) {
+    case DeadrollCharacterInstruction.ApplyBag: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: DeadrollCharacterInstruction.ApplyBag,
+        ...parseApplyBagInstruction(instruction),
+      };
+    }
     case DeadrollCharacterInstruction.CreateCharacter: {
       assertIsInstructionWithAccounts(instruction);
       return {
@@ -596,11 +636,11 @@ export function parseDeadrollCharacterInstruction<TProgram extends string>(
         ...parseFreezeTombstoneInstruction(instruction),
       };
     }
-    case DeadrollCharacterInstruction.GrantRewards: {
+    case DeadrollCharacterInstruction.GrantXp: {
       assertIsInstructionWithAccounts(instruction);
       return {
-        instructionType: DeadrollCharacterInstruction.GrantRewards,
-        ...parseGrantRewardsInstruction(instruction),
+        instructionType: DeadrollCharacterInstruction.GrantXp,
+        ...parseGrantXpInstruction(instruction),
       };
     }
     case DeadrollCharacterInstruction.LockForSession: {
@@ -678,6 +718,10 @@ export type DeadrollCharacterPluginAccounts = {
 };
 
 export type DeadrollCharacterPluginInstructions = {
+  applyBag: (
+    input: ApplyBagAsyncInput,
+  ) => ReturnType<typeof getApplyBagInstructionAsync> &
+    SelfPlanAndSendFunctions;
   createCharacter: (
     input: CreateCharacterAsyncInput,
   ) => ReturnType<typeof getCreateCharacterInstructionAsync> &
@@ -693,10 +737,9 @@ export type DeadrollCharacterPluginInstructions = {
     input: MakeOptional<FreezeTombstoneInput, "payer">,
   ) => ReturnType<typeof getFreezeTombstoneInstruction> &
     SelfPlanAndSendFunctions;
-  grantRewards: (
-    input: GrantRewardsAsyncInput,
-  ) => ReturnType<typeof getGrantRewardsInstructionAsync> &
-    SelfPlanAndSendFunctions;
+  grantXp: (
+    input: GrantXpInput,
+  ) => ReturnType<typeof getGrantXpInstruction> & SelfPlanAndSendFunctions;
   lockForSession: (
     input: LockForSessionAsyncInput,
   ) => ReturnType<typeof getLockForSessionInstructionAsync> &
@@ -722,9 +765,9 @@ export type DeadrollCharacterPluginInstructions = {
 };
 
 export type DeadrollCharacterPluginPdas = {
+  bag: typeof findBagPda;
   profile: typeof findProfilePda;
   skillSet: typeof findSkillSetPda;
-  bag: typeof findBagPda;
   skillExtras: typeof findSkillExtrasPda;
 };
 
@@ -749,6 +792,11 @@ export function deadrollCharacterProgram() {
           skillSet: addSelfFetchFunctions(client, getSkillSetCodec()),
         },
         instructions: {
+          applyBag: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getApplyBagInstructionAsync(input),
+            ),
           createCharacter: (input) =>
             addSelfPlanAndSendFunctions(
               client,
@@ -769,11 +817,8 @@ export function deadrollCharacterProgram() {
                 payer: input.payer ?? client.payer,
               }),
             ),
-          grantRewards: (input) =>
-            addSelfPlanAndSendFunctions(
-              client,
-              getGrantRewardsInstructionAsync(input),
-            ),
+          grantXp: (input) =>
+            addSelfPlanAndSendFunctions(client, getGrantXpInstruction(input)),
           lockForSession: (input) =>
             addSelfPlanAndSendFunctions(
               client,
@@ -800,9 +845,9 @@ export function deadrollCharacterProgram() {
             addSelfPlanAndSendFunctions(client, getUnlockInstruction(input)),
         },
         pdas: {
+          bag: findBagPda,
           profile: findProfilePda,
           skillSet: findSkillSetPda,
-          bag: findBagPda,
           skillExtras: findSkillExtrasPda,
         },
         identifyAccount: identifyDeadrollCharacterAccount,

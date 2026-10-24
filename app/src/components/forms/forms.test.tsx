@@ -7,6 +7,7 @@ import { CharacterForm } from "./CharacterForm";
 import { formatSol, formatSolExact, pointsLeft, shortAddress } from "./format";
 import { MapPalette } from "./MapPalette";
 import { PartyLobby } from "./PartyLobby";
+import { PrepayConfirm } from "./PrepayConfirm";
 import type { CharacterDraft, LobbyPlayer, MapPaletteProps, PartyLobbyProps } from "./types";
 
 afterEach(() => {
@@ -116,6 +117,14 @@ describe("MapPalette", () => {
     render(<MapPalette {...paletteProps({ onToolChange })} />);
     fireEvent.click(screen.getByRole("button", { name: "Floor" }));
     expect(onToolChange).toHaveBeenCalledWith({ kind: "tile", tile: Tile.Floor });
+  });
+
+  it("patch 11: selects the chest tool and shows the loot panel", () => {
+    const onToolChange = vi.fn();
+    render(<MapPalette {...paletteProps({ onToolChange, loot: <p>loot panel</p> })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Chest" }));
+    expect(onToolChange).toHaveBeenCalledWith({ kind: "chest" });
+    expect(screen.getByText("loot panel")).toBeTruthy();
   });
 
   it("disables Finalize until the map is valid", () => {
@@ -260,6 +269,27 @@ describe("PartyLobby", () => {
     );
     fireEvent.change(screen.getByLabelText("Character"), { target: { value: ARIA.player } });
     fireEvent.click(screen.getByRole("button", { name: "Join and pay 0.1 SOL" }));
+    // Patch 11: the share and the rent of the party accounts are confirmed first.
+    expect(onJoin).not.toHaveBeenCalled();
+    expect(screen.getByRole("alertdialog").textContent).toContain("rent of your party accounts");
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Join" }));
     expect(onJoin).toHaveBeenCalledWith(ARIA.player);
+  });
+});
+
+describe("PrepayConfirm", () => {
+  it("states the prepayment of a session key by default", () => {
+    render(<PrepayConfirm action="Ready" lamports={5_000_000n} onConfirm={() => {}} onCancel={() => {}} />);
+    expect(screen.getByRole("alertdialog").textContent).toContain("prepayment of this party's session key");
+  });
+
+  it("patch 11: states what else the SOL pays for, then confirms", () => {
+    const onConfirm = vi.fn();
+    render(<PrepayConfirm action="Finalize" lamports={12_000_000n} detail="as rent for the map's two accounts" onConfirm={onConfirm} onCancel={() => {}} />);
+    const text = screen.getByRole("alertdialog").textContent ?? "";
+    expect(text).toContain("as rent for the map's two accounts");
+    expect(text).not.toContain("session key");
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Finalize" }));
+    expect(onConfirm).toHaveBeenCalledTimes(1);
   });
 });

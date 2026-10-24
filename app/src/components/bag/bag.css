@@ -1,0 +1,43 @@
+.bag-panel {
+  display: grid;
+  gap: 12px;
+}
+.bag-grids {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  align-items: flex-start;
+}
+.bag-grid {
+  display: grid;
+  grid-template-columns: repeat(10, 56px);
+  gap: 4px;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.bag-slot {
+  width: 56px;
+  height: 40px;
+  padding: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(0, 0, 0, 0.25);
+  color: inherit;
+  font-size: 10px;
+  overflow: hidden;
+  cursor: pointer;
+}
+.bag-slot.full {
+  background: rgba(139, 90, 43, 0.35);
+}
+.bag-slot.locked {
+  border-color: #d9a441;
+}
+.bag-slot.selected {
+  outline: 2px solid #ffffff;
+}
+.bag-cache ul {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}

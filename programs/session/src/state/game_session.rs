@@ -2,7 +2,9 @@ use anchor_lang::prelude::*;
 use deadroll_rules::aura::{
     Aura, AuraField, MonsterAuraField, PartyAuras, PlayerAuras, AURAS_PER_PLAYER,
 };
-use deadroll_types::{Aspect, Cell, GameSessionData, Tile, MONSTERS_MAX, PARTY_MAX};
+use deadroll_types::{
+    Aspect, Cell, GameSessionData, MapPoint, Tile, CHESTS_MAX, MONSTERS_MAX, PARTY_MAX,
+};
 
 use super::{
     auras_to_rules, AuraData, PendingMonsterReactiveData, PendingReactiveData, ReactiveData,
@@ -73,11 +75,10 @@ pub struct GameSession {
     /// Bit per player slot: chose "Escape" and nobody took another action since
     /// (docs/PARTY_AND_TURNS.md, section 7.3).
     pub flee_mask: u8,
-    /// Bit per player slot: `claim_rewards` done after the party ended.
+    /// Bit per player slot: settled after the party ended (`settle_party` sets every bit,
+    /// `claim_after_timeout` its own).
     pub settled_mask: u8,
-    /// Experience from killed monsters; every living player gets all of it on victory.
-    pub xp_pool: u32,
-    /// VRF value of the boss kill; the reward rolls derive from it.
+    /// VRF value of the boss kill.
     pub victory_seed: [u8; 32],
     // Registry rules, copied when the party opens so they stay fixed for it.
     /// Bestiary speed (action points per turn) of each monster, by monster index.
@@ -121,7 +122,39 @@ pub struct GameSession {
     /// Each player's auras' aspect weights (a Resistance, `deadroll_rules::aura::Aura::weights_pct`),
     /// by aura slot like `auras`.
     pub aura_weights: [[[u8; Aspect::COUNT]; AURAS_PER_PLAYER]; PARTY_MAX],
+    // Patch 11: rewards (docs/PARTY_AND_TURNS.md 8-9, MAP_DESCRIPTION.md 7.1), copied from the map
+    // at `open_session`.
+    /// The map's tier and minimum players (`start_session` needs that many).
+    pub tier: u8,
+    pub min_players: u8,
+    /// The visible chests: cell and reward table id; `0..chest_count` used.
+    pub chests: [MapPoint; CHESTS_MAX],
+    pub chest_count: u8,
+    /// The reward table of the boss event (registry id).
+    pub boss_table: u8,
+    /// Bit per chest: opened (then it no longer occupies its cell).
+    pub chests_opened: u8,
+    /// The chest whose roll is pending (`open_chest`), `NO_CHEST` for every other roll.
+    pub pending_chest: u8,
+    /// Each player's share of the rewards (`deadroll_rules::loot::reward_share`), set at
+    /// `set_ready(true)`: experience in basis points, and a bit per slot whose rewards are rolled.
+    pub xp_bp: [u16; PARTY_MAX],
+    pub loot_mask: u8,
+    /// Bit per monster killed where no party accounts were at hand (over-time damage in
+    /// `start_turn`): its experience and body rewards go out with the next callback, or at the
+    /// settlement.
+    pub unpaid_kills: u32,
+    /// Unix time the party ended (Victory, Wiped, Fled): the DM settles before
+    /// `ended_at + settle_timeout_secs`, the players claim after.
+    pub ended_at: i64,
+    /// The map's DM-set numbers: no living monster within `chest_radius` of a chest or of any
+    /// living player when it opens; the DM's time to settle after the end.
+    pub chest_radius: u8,
+    pub settle_timeout_secs: u32,
 }
+
+/// `GameSession.pending_chest` when no chest roll is pending.
+pub const NO_CHEST: u8 = 0xFF;
 
 impl GameSession {
     /// The unit whose turn it is, or `None` before start or on a corrupt order.
@@ -148,6 +181,24 @@ impl GameSession {
     /// The current unit already used its attack or active skill this turn.
     pub fn acted(&self) -> bool {
         self.acted_seq == self.turn_seq
+    }
+
+    /// A closed chest stands on `c` (patch 11: it occupies its cell until opened).
+    pub fn closed_chest_at(&self, c: Cell) -> bool {
+        self.chest_list()
+            .iter()
+            .enumerate()
+            .any(|(i, p)| p.cell() == c && self.chests_opened & (1 << i) == 0)
+    }
+
+    /// The used chests.
+    pub fn chest_list(&self) -> &[MapPoint] {
+        &self.chests[..(self.chest_count as usize).min(CHESTS_MAX)]
+    }
+
+    /// Living players whose rewards are rolled, bit per slot.
+    pub fn loot_eligible(&self) -> u8 {
+        self.alive_mask & self.loot_mask & self.full_mask()
     }
 
     /// Bits for every joined slot.

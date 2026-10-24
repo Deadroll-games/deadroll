@@ -6,6 +6,7 @@
  * @see https://github.com/codama-idl/codama
  */
 
+export * from "./bagApplied.js";
 export * from "./characterCreated.js";
 export * from "./characterDied.js";
 export * from "./characterLocked.js";
@@ -13,8 +14,8 @@ export * from "./characterUnlocked.js";
 export * from "./itemEquipped.js";
 export * from "./itemUnequipped.js";
 export * from "./profileCreated.js";
-export * from "./rewardsGranted.js";
 export * from "./skillDescribed.js";
 export * from "./skillsSelected.js";
 export * from "./statPointsSpent.js";
 export * from "./tombstoneFrozen.js";
+export * from "./xpGranted.js";

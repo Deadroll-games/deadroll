@@ -34,6 +34,7 @@ TypeScript reads the ids from `@deadroll/sdk` (`PROGRAMS`, generated from the ID
 | `Tileset` | registry | `["tileset"]` |
 | `PrefabBook` | registry | `["prefabs"]` |
 | `TraitTable` | registry | `["traits"]` (patch 4) |
+| `RewardTable` | registry | `["rewards"]` (patch 11, section 20) |
 | program signer | each program | `["authority"]` (used to sign CPI into other game programs) |
 | `RasterizerCode` | render | `["rasterizer", version: u16 LE]` (created by client with SystemProgram, see `rasterizer` skill) |
 | `Palette` | render | `["palette", version: u16 LE]` |
@@ -50,7 +51,8 @@ TypeScript reads the ids from `@deadroll/sdk` (`PROGRAMS`, generated from the ID
 | `Participation` | session | `["participation", session, character]` |
 | `MonsterState` | session | `["monsters", session]` |
 | `Escrow` | session | `["escrow", session]` |
-| `TempStash` | session | `["stash", session, character]` |
+| `TempStash` | session | `["stash", session, character]` (retired in patch 11, see section 20) |
+| `RewardCache` | session | `["cache", character]` (patch 11, section 20) |
 | `City` | city | `["city"]` |
 
 ## 3. Shared types (`crates/types`)
@@ -147,7 +149,9 @@ Borsh adds no bytes for the wrapper, so `version` stays the first byte after the
 | Caller | Callee instruction | Signer check in callee |
 |---|---|---|
 | session | `character::lock_for_session(session)` | session `["authority"]` PDA |
-| session | `character::grant_rewards(xp, resources)` | session PDA |
+| session | `character::grant_rewards(xp, resources)` (retired in patch 11, section 20) | session PDA |
+| session | `character::grant_xp(xp)` (patch 11) | session PDA |
+| session | `character::apply_bag(cache, layout)` (patch 11) | session PDA |
 | session | `character::mark_dead()` (tombstone, freeze NFT, bump `state_version`) | session PDA |
 | session | `character::unlock()` | session PDA |
 | session | `map::set_status(InSession / Finished)` | session PDA |
@@ -686,3 +690,116 @@ so every `deadroll_skillcheck::SkillBlocks` path is unchanged. `crates/skillchec
 `anchor` and `idl-build` features (no Anchor outside `types`, docs/ARCHITECTURE.md 5).
 
 Same borsh bytes and `InitSpace` (pinned in `crates/types/tests/roundtrip.rs`); IDLs unchanged.
+
+## 20. Patch 11: rewards, visible chests, the cache and the bag
+
+Docs: docs/PARTY_AND_TURNS.md 2 (10), 3.2, 5.1, 7-9, 10.2; docs/MAP_DESCRIPTION.md 7.1, 10;
+docs/BESTIARY.md 9; docs/ITEMS_AND_CRAFT.md 2, 6.1. The decisions of patch 11 fill the gaps.
+Every layout below changed: maps, parties and bags made before the patch are not read after the
+upgrade (agreed, no migration).
+
+`crates/types`, added:
+
+```
+consts  CHESTS_MAX = 4, NO_TABLE = 0xFF, CACHE_SLOTS = 32, CACHE_BYTES = CACHE_SLOTS * 5,
+        BAG_RESOURCE_SLOTS = 40, BAG_CONSUMABLE_SLOTS = 5
+enums   PointKind { Chest }, RewardKind { Resource, Recipe, Consumable, Blank, Reagent },
+        RewardSource { Body, Chest, Boss, Stash }, CacheStatus { Empty, Open, Claimed }
+structs MapPoint { kind, x, y, data }                 data: a chest's reward table id
+        CacheSlot { kind, id: u16, qty: u16 }         qty 0 = empty; read_all / write_all on raw bytes
+        BagSlot { kind, id: u16, qty: u8 }            qty 0 = empty (kind and id zero too)
+        BagLayout { resources: [BagSlot; 40], consumables: [BagSlot; 5] }
+MapLayoutData appended: chests: [MapPoint; CHESTS_MAX], chest_count: u8, boss_table: u8
+seeds   REWARDS = "rewards" (registry table), CACHE = "cache" (session RewardCache)
+```
+
+Registry: `TableKind::Rewards` (appended), records of `deadroll_rules::loot::record` (108 bytes:
+present, level_base, level_max, cost u16, up to 4 levels of up to 6 `(kind, id u16, qty)`
+entries), 32 at most. Bestiary record byte 44 (from the reserve) = the body's reward table
+(`NO_TABLE` = none).
+
+`deadroll_rules::BalanceConfig.loot: LootTuning` (appended): chests per tier, budget by tier and
+minimum players, allowed tables per tier (u64 mask), `level_step_bp`, `chest_open_ap`,
+the limits of what a DM sets for a map (`chest_radius_min/max` 1..=10, `settle_timeout_min/max_secs`
+600..=36_000), over-tier experience and loot, stack limits.
+
+Map program:
+
+```
+Map appended: min_players: u8, chest_radius: u8, settle_timeout_secs: u32
+MapSettings { min_players, chest_radius, settle_timeout_secs }
+create_map(index, width, height, tier, settings: MapSettings)   settings appended (the radius
+                                                     within LootTuning limits; the time to settle
+                                                     at most 10 h, its 10 min minimum is open_session's)
+write_chests(chests: Vec<MapPoint>, boss_table)      DM, Draft only (CHESTS_MAX at most)
+finalize_map                                         account rewards (registry table) appended;
+                                                     chest and budget rules (MapCheckError appended)
+```
+
+Character program:
+
+```
+Bag: resources: [u32; 8] removed; layout: BagLayout appended at the end
+grant_xp(xp)                       session PDA; living character (it may be in a later party by
+                                   now); replaces grant_rewards
+apply_bag(cache: [CacheSlot; 32], layout: BagLayout)
+                                   session PDA; living, not in a party; check_bag_layout
+grant_rewards                      retired (removed)
+events  XpGranted { character, xp, level, total_xp }, BagApplied { character }; RewardsGranted retired
+errors  appended: BagDirtySlot, BagWrongSection, BagStackTooBig, BagMoreThanOwned
+```
+
+Session program:
+
+```
+GameSession: xp_pool removed; appended tier, min_players, chests, chest_count, boss_table,
+             chests_opened, pending_chest, xp_bp: [u16; 4], loot_mask, unpaid_kills: u32, ended_at: i64,
+             chest_radius: u8, settle_timeout_secs: u32 (the map's, copied at open_session)
+Participation appended: cache_xp: u32, cache: [u8; CACHE_BYTES]   (raw CacheSlots, last in the account)
+MonsterState appended: loot_ids: [u8; 12], loot_tables: [[u8; 108]; 12]
+RewardCache ["cache", character]: version, character, entries: [CacheEntry; CACHE_PARTIES = 3], bump
+CacheEntry  { session, status: CacheStatus, xp: u32, slots: [CacheSlot; 32] }   one per party
+TempStash   retired (removed)
+
+open_session        account rewards (registry table) appended: copies the bodies', chests' and
+                    boss's tables; tier, minimum players, chests, chest radius and time to
+                    settle from the map; SettleTimeoutTooShort below 10 min (not in mock-vrf)
+join_session        account stash replaced by reward_cache (init_if_needed); remaining accounts:
+                    the GameSession of every Open entry. A Claimed entry burns; an Open one burns
+                    if its party ended and its deadline passed, else it waits; this party takes a
+                    free entry (TooManyPendingParties). PlayerJoined appended cache_burned: u8 mask
+leave_party         owner main wallet: a living character locked to an ended party is unlocked
+                    (CPI unlock); its rewards keep waiting in the Participation
+set_ready(true)     xp_bp and loot_mask from the character's level and the map tier
+start_session       NotEnoughPlayers below the map's minimum
+open_chest(chest)   owner or session key, own turn, next to the chest, AP, no living monster
+                    within the map's chest_radius of the chest or of any living player;
+                    VRF request, the callback rolls the chest
+consume_randomness  the chest roll; the kills pay out at the end (experience and body rewards
+                    into each living player's cache, the boss table with its guarantee), one by one
+                    while sol_remaining_compute_units > PAYOUT_RESERVE_CU of the oracle's 256k;
+                    the rest stay in unpaid_kills for the next callback or the settlement
+settle_party        DM main wallet, before ended_at + settle_timeout_secs: deaths first, then a
+                    (Participation, RewardCache, Character) triple per player: the party's entry
+                    Claimed (or emptied), grant_xp for the living, unlock only if still locked to
+                    this party, escrow to the DM, map Finished
+                    (replaces claim_rewards and claim_escrow, both removed)
+claim_after_timeout after the deadline, the player's main wallet: its own triple first, then the
+                    deaths; the same settlement for its character, its contribution back; the
+                    last claim finishes the map
+close_cache(session, layout) owner main wallet, that party's entry Claimed: apply_bag (living,
+                    not locked), the entry empties; the account closes once every entry is empty
+events  RewardsRolled, ChestOpenRequested, ChestOpened, CacheSettled, ContributionRefunded,
+        CacheClosed, PartyLeft; RewardsClaimed retired
+errors  appended: TooManyLootTables, InvalidRewardTables, NotEnoughPlayers, InvalidChest,
+        ChestOpened, ChestNotAdjacent, MonsterNearChest, ChestInTheWay, SettleDeadlinePassed,
+        SettleDeadlineNotPassed, InvalidSettleAccounts, DmMainWalletOnly, CacheNotClaimed,
+        InvalidRewardCache, NotCacheOwner, SettleTimeoutTooShort, TooManyPendingParties,
+        InvalidCacheSessions, NotLockedHere
+map errors appended: ChestRadiusOutOfRange, SettleTimeoutOutOfRange
+```
+
+A closed chest occupies its cell for movement and knockback; an open one does not. Roll indexes of
+the reward events start at `LOOT_ROLL_BASE` in the paying action's VRF stream, after the combat
+rolls (rule 10). The DM's deadline is `ended_at + GameSession.settle_timeout_secs`; a `mock-vrf`
+session (localnet only) accepts maps with seconds, so the tests reach the claims after it.

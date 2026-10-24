@@ -108,3 +108,26 @@ impl From<Tier> for u8 {
         value.0
     }
 }
+
+// Patch 11: loot (docs/PARTY_AND_TURNS.md 8-9, docs/MAP_DESCRIPTION.md 7.1).
+u8_enum!(
+    /// A map point type (`MapPoint.kind`, docs/MAP_DESCRIPTION.md 7.1). The entrance and the exit
+    /// stay in `MapLayoutData.entrance` / `exit`; only visible chests are points for now.
+    PointKind { Chest }
+);
+u8_enum!(
+    /// What a reward is. All of them are counters by id in the bag (docs/ITEMS_AND_CRAFT.md 2);
+    /// `Consumable` goes to the consumable slots, the rest to the resource slots.
+    RewardKind { Resource, Recipe, Consumable, Blank, Reagent }
+);
+u8_enum!(
+    /// Where a reward event comes from (docs/PARTY_AND_TURNS.md 9.3, docs/BESTIARY.md 9).
+    /// `Stash` (hidden stashes) is reserved: secrets are not in the game yet.
+    RewardSource { Body, Chest, Boss, Stash }
+);
+u8_enum!(
+    /// One party's entry in the session `RewardCache`: `Empty` (free), `Open` while the party runs
+    /// or waits to be settled (the rewards are in its `Participation`), `Claimed` once they are
+    /// the player's (issued, or claimed after the timeout) and wait for "Done" in the bag screen.
+    CacheStatus { Empty, Open, Claimed }
+);

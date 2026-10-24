@@ -3,6 +3,7 @@ use deadroll_character::state::MAP_SKILLS;
 use deadroll_rules::{
     aura::{passive_aura, PASSIVE_AURA},
     input::SkillStats,
+    loot::reward_share,
     HeroStats,
 };
 use deadroll_skillcheck::{ACTIVE_MAX, NO_SKILL, REACTIVE_MAX};
@@ -125,6 +126,15 @@ pub fn handler(ctx: Context<SetReady>, ready: bool, selection: [u8; MAP_SKILLS])
         participation.skills = selection;
         session.player_initiative[slot as usize] = hero_initiative(&hero);
         session.ready_mask |= 1 << slot;
+        // Patch 11: a character well above the map tier gets less experience and no rewards
+        // (docs/PARTY_AND_TURNS.md 9.5); its level is locked with it.
+        let share = reward_share(character.level, session.tier, &BALANCE.loot);
+        session.xp_bp[slot as usize] = share.xp_bp;
+        if share.rolls_loot {
+            session.loot_mask |= 1 << slot;
+        } else {
+            session.loot_mask &= !(1 << slot);
+        }
 
         // The map skills as the rules see them: the SkillSet record with its SkillExtras part.
         // The character program just checked the selection, and the character stays locked.

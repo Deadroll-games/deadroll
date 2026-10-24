@@ -14,13 +14,12 @@ import {
   type ProgramDerivedAddress,
 } from "@solana/kit";
 
-export type StashSeeds = {
-  session: Address;
+export type RewardCacheSeeds = {
   character: Address;
 };
 
-export async function findStashPda(
-  seeds: StashSeeds,
+export async function findRewardCachePda(
+  seeds: RewardCacheSeeds,
   config: { programAddress?: Address | undefined } = {},
 ): Promise<ProgramDerivedAddress> {
   const {
@@ -29,8 +28,7 @@ export async function findStashPda(
   return await getProgramDerivedAddress({
     programAddress,
     seeds: [
-      getBytesEncoder().encode(new Uint8Array([115, 116, 97, 115, 104])),
-      getAddressEncoder().encode(seeds.session),
+      getBytesEncoder().encode(new Uint8Array([99, 97, 99, 104, 101])),
       getAddressEncoder().encode(seeds.character),
     ],
   });

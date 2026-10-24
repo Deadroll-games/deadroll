@@ -7,17 +7,20 @@
  */
 
 export * from "./act.js";
-export * from "./claimEscrow.js";
-export * from "./claimRewards.js";
+export * from "./claimAfterTimeout.js";
+export * from "./closeCache.js";
 export * from "./consumeRandomness.js";
 export * from "./endTurn.js";
 export * from "./flee.js";
 export * from "./joinSession.js";
+export * from "./leaveParty.js";
 export * from "./monsterAct.js";
 export * from "./monsterMove.js";
 export * from "./moveUnit.js";
+export * from "./openChest.js";
 export * from "./openSession.js";
 export * from "./setReady.js";
 export * from "./setSessionKey.js";
+export * from "./settleParty.js";
 export * from "./startSession.js";
 export * from "./startTurn.js";

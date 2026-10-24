@@ -7,13 +7,15 @@ use anchor_lang::{
 use deadroll_combat::{ResonanceTables, TimedMods};
 use deadroll_rules::{
     aura::{Aura, MonsterAuraField, MonsterAuras, MonsterBearer, AURAS_PER_PLAYER},
+    loot::LootTable,
     monster::{record, NO_SKILL},
     spread::{BurningCell, BURNING_CELLS_MAX},
     MonsterDefense, MonsterProfile, MonsterSkillStats, MonsterTemplate,
 };
 use deadroll_skillcheck::monster::{MonsterSkill, SESSION_SIZE};
 use deadroll_types::{
-    seeds, Aspect, Cell, Monster, MonsterStateData, MONSTERS_MAX, MONSTER_SLOTS, SESSION_SKILLS_MAX,
+    seeds, Aspect, Cell, Monster, MonsterStateData, MONSTERS_MAX, MONSTER_SLOTS, NO_TABLE,
+    SESSION_SKILLS_MAX,
 };
 
 use crate::{
@@ -78,7 +80,18 @@ pub struct MonsterState {
     pub resist_mods: [ResistModData; MONSTERS_MAX],
     /// Per monster, per aura slot: a Resistance aura's aspect weights.
     pub aura_weights: [[[u8; Aspect::COUNT]; AURAS_PER_PLAYER]; MONSTERS_MAX],
+    // Patch 11: the registry reward tables of the party (the spawns' bodies, the chests, the
+    // boss), copied at `open_session` and read in place by the reward events.
+    /// Registry id of each copied table, `NO_TABLE` = free.
+    pub loot_ids: [u8; LOOT_TABLES_MAX],
+    /// The copied records (`deadroll_rules::loot::record`), by `loot_ids` position.
+    pub loot_tables: [[u8; LOOT_RECORD_LEN]; LOOT_TABLES_MAX],
 }
+
+/// Distinct reward tables one party copies (bodies, chests and the boss together).
+pub const LOOT_TABLES_MAX: usize = 12;
+/// `deadroll_rules::loot::record::SIZE` (a literal for the IDL; a test pins it).
+pub const LOOT_RECORD_LEN: usize = 108;
 
 /// `deadroll_rules::aura::Aura` of a monster: an aura plus its kin-only flag.
 #[derive(
@@ -226,8 +239,10 @@ mod off {
     pub const RESIST_MODS: usize =
         AURAS + MONSTERS_MAX * AURAS_PER_PLAYER * super::MONSTER_AURA_SIZE;
     pub const AURA_WEIGHTS: usize = RESIST_MODS + MONSTERS_MAX * super::RESIST_MOD_SIZE;
+    pub const LOOT_IDS: usize = AURA_WEIGHTS + MONSTERS_MAX * AURAS_PER_PLAYER * Aspect::COUNT;
+    pub const LOOT_TABLES: usize = LOOT_IDS + super::LOOT_TABLES_MAX;
     #[cfg(test)]
-    pub const END: usize = AURA_WEIGHTS + MONSTERS_MAX * AURAS_PER_PLAYER * Aspect::COUNT;
+    pub const END: usize = LOOT_TABLES + super::LOOT_TABLES_MAX * super::LOOT_RECORD_LEN;
 }
 
 /// Bytes of one monster's `mods`.
@@ -424,6 +439,47 @@ impl<'a, 'info> Monsters<'a, 'info> {
         data[off::RES_TRAITS..off::RES_PAIRS].copy_from_slice(traits);
         data[off::RES_PAIRS..off::BURNING].copy_from_slice(pairs);
         Ok(())
+    }
+
+    /// Patch 11: marks every reward table slot free (`open_session`, before the copies).
+    pub fn clear_loot_tables(&self) -> Result<()> {
+        let mut data = self.info.try_borrow_mut_data()?;
+        data[off::LOOT_IDS..off::LOOT_TABLES].fill(NO_TABLE);
+        Ok(())
+    }
+
+    /// Copies registry reward table `id` once (`record` from the registry); a second copy of
+    /// the same id is a no-op. `TooManyLootTables` when every slot is taken.
+    pub fn add_loot_table(&self, id: u8, record: &[u8; LOOT_RECORD_LEN]) -> Result<()> {
+        let mut data = self.info.try_borrow_mut_data()?;
+        let ids = &data[off::LOOT_IDS..off::LOOT_TABLES];
+        if ids.contains(&id) {
+            return Ok(());
+        }
+        let free = ids
+            .iter()
+            .position(|i| *i == NO_TABLE)
+            .ok_or(SessionError::TooManyLootTables)?;
+        data[off::LOOT_IDS + free] = id;
+        let at = off::LOOT_TABLES + free * LOOT_RECORD_LEN;
+        data[at..at + LOOT_RECORD_LEN].copy_from_slice(record);
+        Ok(())
+    }
+
+    /// The copied reward table with registry id `id`, `None` if the party has none.
+    pub fn loot_table(&self, id: u8) -> Result<Option<LootTable>> {
+        if id == NO_TABLE {
+            return Ok(None);
+        }
+        let data = self.info.try_borrow_data()?;
+        let Some(i) = data[off::LOOT_IDS..off::LOOT_TABLES]
+            .iter()
+            .position(|x| *x == id)
+        else {
+            return Ok(None);
+        };
+        let at = off::LOOT_TABLES + i * LOOT_RECORD_LEN;
+        Ok(LootTable::from_record(&data[at..at + LOOT_RECORD_LEN]))
     }
 
     /// Decodes the copied resonance tables into `out` (kept in a `Box` by the caller).
@@ -675,6 +731,7 @@ mod tests {
         assert_eq!(RES_TRAITS_LEN, deadroll_combat::tables::TRAITS_LEN);
         assert_eq!(RES_PAIRS_LEN, deadroll_combat::tables::PAIRS_LEN);
         assert_eq!(MONSTER_RECORD_LEN, record::SIZE);
+        assert_eq!(LOOT_RECORD_LEN, deadroll_rules::loot::record::SIZE);
         assert_eq!(SKILL_COPY_LEN, SESSION_SIZE);
         assert_eq!(
             borsh::to_vec(&MonsterAuraData::default()).unwrap().len(),

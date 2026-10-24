@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { AccountRole, generateKeyPairSigner, getAddressDecoder, getAddressEncoder, type Address, type Instruction, type ReadonlyUint8Array } from "@solana/kit";
 import { decodeEvent } from "@deadroll/sdk";
-import { getCreateCharacterInstructionDataEncoder } from "@deadroll/sdk/character";
+import { getBagDecoder, getBagEncoder, getCreateCharacterInstructionDataEncoder } from "@deadroll/sdk/character";
 import {
   ItemBase,
   SessionStatus,
@@ -21,6 +21,8 @@ import {
   getMonsterStateEncoder,
   getParticipationDecoder,
   getParticipationEncoder,
+  getRewardCacheDecoder,
+  getRewardCacheEncoder,
   getPendingMonsterReactiveDataEncoder,
   getPendingReactiveDataEncoder,
   getPlayerDiedEventEncoder,
@@ -41,6 +43,12 @@ import { concat, toHex } from "./bytes";
 import { decodeEvents } from "./events";
 import {
   SKILL_PRESETS,
+  buildMapIxs,
+  claimAfterTimeoutIx,
+  closeCacheIx,
+  leavePartyIx,
+  openChestIx,
+  settlePartyIx,
   actIx,
   consumeIx,
   decodeAccount,
@@ -62,7 +70,7 @@ import {
 import { toHitResolved } from "./hit";
 import { toEffectResolved } from "./support";
 import { Effect } from "./skillcheck";
-import { bagPda, gameConfigPda, monstersPda, participationPda, programIdentityPda, sessionAuthorityPda, sessionTokenPda, skillExtrasPda, skillSetPda } from "./pda";
+import { bagPda, bestiaryPda, gameConfigPda, monsterSkillsPda, rewardCachePda, rewardsPda, monstersPda, participationPda, programIdentityPda, sessionAuthorityPda, sessionTokenPda, skillExtrasPda, skillSetPda } from "./pda";
 import { affordable, pathArgs, reachable, route } from "./route";
 import { explainFailure } from "./send";
 import { Applied, Aspect, Class, HitOutcome, JumpMode, MAP_MAX, ModKind, OpKind, StateKind, Tile } from "./types";
@@ -250,6 +258,90 @@ describe("session builders", () => {
     new DataView(amount.buffer).setBigUint64(0, 50_000_000n, true);
     expect(toHex(ix.data as Uint8Array)).toBe(toHex(concat(ixDisc("join_session"), amount, A(11))));
     expect(ix.accounts![0]!.role).toBe(AccountRole.WRITABLE_SIGNER);
+    // Patch 11: the character's reward cache, created or rebound here.
+    expect(ix.accounts![4]).toEqual({ address: await rewardCachePda(character), role: AccountRole.WRITABLE });
+  });
+
+  it("patch 11: join_session passes the GameSession of every open cache entry, read only, after its accounts", async () => {
+    const player = await generateKeyPairSigner();
+    const ix = await joinSessionIx(player, session, character, 1n, addrOf(0), [addrOf(41), addrOf(42)]);
+    expect(ix.accounts!.slice(-2)).toEqual([
+      { address: addrOf(41), role: AccountRole.READONLY },
+      { address: addrOf(42), role: AccountRole.READONLY },
+    ]);
+  });
+
+  it("patch 11: leave_party: no args; the owner signs, the character (w) and the CPI accounts", async () => {
+    const owner = await generateKeyPairSigner();
+    const ix = await leavePartyIx(owner, session, character);
+    expect(toHex(ix.data as Uint8Array)).toBe(toHex(ixDisc("leave_party")));
+    expect(ix.accounts!.map((a) => [a.address, a.role])).toEqual([
+      [owner.address, AccountRole.READONLY_SIGNER],
+      [session, AccountRole.READONLY],
+      [character, AccountRole.WRITABLE],
+      [await sessionAuthorityPda(), AccountRole.READONLY],
+      [await gameConfigPda(), AccountRole.READONLY],
+      [PROGRAMS.character, AccountRole.READONLY],
+    ]);
+  });
+
+  it("patch 11: open_chest: the chest index, the VRF accounts after the session token, the map layout last", async () => {
+    const signer = await generateKeyPairSigner();
+    const ix = await openChestIx({ signer, token: null }, session, character, addrOf(13), 2);
+    expect(toHex(ix.data as Uint8Array)).toBe(toHex(concat(ixDisc("open_chest"), Uint8Array.of(2))));
+    const addrs = ix.accounts!.map((a) => a.address);
+    expect(addrs.slice(0, 6)).toEqual([signer.address, session, await participationPda(session, character), character, await skillSetPda(character), await bagPda(character)]);
+    expect(addrs.at(-1)).toBe(addrOf(13));
+    expect(addrs).toContain(VRF.oracleQueue);
+  });
+
+  it("patch 11: settle_party: the DM signs; the pending deaths, then every player's participation, cache and character", async () => {
+    const dm = await generateKeyPairSigner();
+    const s = zeroOf(getGameSessionDecoder());
+    s.core.playerCount = 2;
+    s.core.players = [addrOf(21), addrOf(22), addrOf(0), addrOf(0)];
+    s.core.map = addrOf(30);
+    s.pendingDeaths = 0b10;
+    const ix = await settlePartyIx(dm, session, s);
+    expect(toHex(ix.data as Uint8Array)).toBe(toHex(ixDisc("settle_party")));
+    expect([ix.accounts![0]!.address, ix.accounts![0]!.role]).toEqual([dm.address, AccountRole.WRITABLE_SIGNER]);
+    const tail = ix.accounts!.slice(-9).map((a) => [a.address, a.role]);
+    const w = AccountRole.WRITABLE;
+    expect(tail).toEqual([
+      [addrOf(22), w],
+      [await skillSetPda(addrOf(22)), w],
+      [await bagPda(addrOf(22)), w],
+      [await participationPda(session, addrOf(21)), w],
+      [await rewardCachePda(addrOf(21)), w],
+      [addrOf(21), w],
+      [await participationPda(session, addrOf(22)), w],
+      [await rewardCachePda(addrOf(22)), w],
+      [addrOf(22), w],
+    ]);
+  });
+
+  it("patch 11: claim_after_timeout: the player signs; its own accounts first, then the pending deaths", async () => {
+    const player = await generateKeyPairSigner();
+    const s = zeroOf(getGameSessionDecoder());
+    s.core.playerCount = 1;
+    s.core.players = [addrOf(21), addrOf(0), addrOf(0), addrOf(0)];
+    const ix = await claimAfterTimeoutIx(player, session, s, addrOf(21));
+    expect(toHex(ix.data as Uint8Array)).toBe(toHex(ixDisc("claim_after_timeout")));
+    expect(ix.accounts!.slice(-3).map((a) => a.address)).toEqual([await participationPda(session, addrOf(21)), await rewardCachePda(addrOf(21)), addrOf(21)]);
+  });
+
+  it("patch 11: close_cache: the party, then the layout as 40 + 5 BagSlots (kind u8, id u16 LE, qty u8)", async () => {
+    const owner = await generateKeyPairSigner();
+    const empty = { kind: 0, id: 0, qty: 0 };
+    const layout = { resources: Array.from({ length: 40 }, () => empty), consumables: Array.from({ length: 5 }, () => empty) };
+    layout.resources[0] = { kind: 1, id: 0x0203, qty: 4 };
+    layout.consumables[4] = { kind: 2, id: 7, qty: 5 };
+    const ix = await closeCacheIx(owner, character, addrOf(30), layout);
+    const body = new Uint8Array(45 * 4);
+    body.set([1, 0x03, 0x02, 4], 0);
+    body.set([2, 7, 0, 5], 44 * 4);
+    expect(toHex(ix.data as Uint8Array)).toBe(toHex(concat(ixDisc("close_cache"), A(30), body)));
+    expect(ix.accounts!.map((a) => a.address).slice(0, 4)).toEqual([owner.address, await rewardCachePda(character), character, await bagPda(character)]);
   });
 
   it("set_ready: the flag and the 6-slot selection; the character (w) and its SkillSet for the lock CPI, its SkillExtras last", async () => {
@@ -309,6 +401,35 @@ describe("session builders", () => {
   });
 });
 
+describe("map builders", () => {
+  it("patch 11: create_map takes min_players, write_chests sends the points and the boss table, finalize_map reads the rewards table", async () => {
+    const dm = await generateKeyPairSigner();
+    const tiles = new Uint8Array(1024);
+    tiles[0] = Tile.Entrance;
+    tiles[3] = Tile.Exit;
+    const chests = [
+      { x: 1, y: 2, table: 0 },
+      { x: 3, y: 1, table: 5 },
+    ];
+    const b = await buildMapIxs(dm, { width: 4, height: 3, tier: 1, minPlayers: 3, chestRadius: 4, settleTimeoutSecs: 7200, tiles, spawns: [], chests, bossTable: 1 });
+    expect(b.ixs.length).toBe(5);
+    const [create, , , writeChests, finalize] = b.ixs as [Instruction, Instruction, Instruction, Instruction, Instruction];
+    const index = new Uint8Array(4);
+    new DataView(index.buffer).setUint32(0, b.index, true);
+    // MapSettings: min_players, chest_radius, settle_timeout_secs (u32 LE, 7200 = 0x1c20).
+    expect(toHex(create.data as Uint8Array)).toBe(toHex(concat(ixDisc("create_map"), index, Uint8Array.of(4, 3, 1, 3, 4, 0x20, 0x1c, 0, 0))));
+    // Vec<MapPoint>: u32 LE count, then (kind = Chest 0, x, y, table) each; boss table u8.
+    const points = Uint8Array.of(2, 0, 0, 0, 0, 1, 2, 0, 0, 3, 1, 5);
+    expect(toHex(writeChests.data as Uint8Array)).toBe(toHex(concat(ixDisc("write_chests"), points, Uint8Array.of(1))));
+    expect(writeChests.accounts!.map((a) => [a.address, a.role])).toEqual([
+      [dm.address, AccountRole.READONLY_SIGNER],
+      [b.map, AccountRole.READONLY],
+      [b.layout, AccountRole.WRITABLE],
+    ]);
+    expect(finalize.accounts!.map((a) => a.address).slice(3)).toEqual([await bestiaryPda(), await monsterSkillsPda(), await rewardsPda()]);
+  });
+});
+
 describe("create_character", () => {
   it("encodes CreateCharacterArgs as the program reads it", () => {
     const data = getCreateCharacterInstructionDataEncoder().encode({
@@ -342,13 +463,13 @@ describe("decoders", () => {
       s.core.priceLamports = 100_000_000n;
       s.core.turnOrder[0] = 6;
       s.aliveMask = 3;
-      s.xpPool = 70;
+      s.unpaidKills = 70;
     });
     expect(toHex(bytes.subarray(0, 8))).toBe(sha("account:GameSession"));
     expect(back.core.status).toBe(SessionStatus.Active);
     expect(back.core.priceLamports).toBe(100_000_000n);
     expect(back.core.turnOrder[0]).toBe(6);
-    expect([back.aliveMask, back.xpPool]).toEqual([3, 70]);
+    expect([back.aliveMask, back.unpaidKills]).toEqual([3, 70]);
     expect(() => decodeAccount("Participation", bytes)).toThrow(/not a Participation account/);
   });
 
@@ -364,7 +485,18 @@ describe("decoders", () => {
       v.pendingReactive.kind = 2;
       v.pendingDeaths = 0b101;
       v.auraWeights[1][1] = Uint8Array.of(0, 100, 0, 65, 0, 0);
+      v.endedAt = 0x0102n;
+      v.chestRadius = 4;
+      v.settleTimeoutSecs = 600;
     });
+    // Patch 11 appends tier, min_players, chests (4 x 4), chest_count, boss_table, chests_opened,
+    // pending_chest, xp_bp (4 x u16), loot_mask, unpaid_kills (u32), ended_at (i64), chest_radius
+    // and settle_timeout_secs (u32): 48 bytes.
+    const p11 = 48;
+    expect(Array.from(s.bytes.subarray(-5))).toEqual([4, 0x58, 0x02, 0, 0]);
+    expect(Array.from(s.bytes.subarray(-13, -11))).toEqual([2, 1]);
+    expect(s.back.endedAt).toBe(0x0102n);
+    s.bytes = s.bytes.subarray(0, -p11);
     // Patch 9 appends aura_weights (4 x 2 x 6); the offsets below count from before them.
     const p9 = 4 * 2 * 6;
     expect(Array.from(s.bytes.subarray(-p9 + 18, -p9 + 24))).toEqual([0, 100, 0, 65, 0, 0]);
@@ -394,7 +526,14 @@ describe("decoders", () => {
       v.accuracy = { aspect: Aspect.Fire, turns: 3, bonus: 4 };
       v.mapSkills[5].apCost = 3;
       v.resistMod = { data: { kind: ModKind.Resistance, aspect: Aspect.Piercing, turns: 2, powerBp: 3_000, source: 1 }, weightsPct: Uint8Array.of(0, 0, 0, 100, 0, 100) };
+      v.cacheXp = 0x0304;
+      v.cache = Uint8Array.from({ length: 160 }, (_, i) => (i < 5 ? [1, 2, 0, 3, 0][i]! : 0));
     });
+    // Patch 11 appends cache_xp (u32) and the raw cache (32 x 5 bytes).
+    expect(Array.from(p.bytes.subarray(-164, -160))).toEqual([4, 3, 0, 0]);
+    expect(Array.from(p.bytes.subarray(-160, -155))).toEqual([1, 2, 0, 3, 0]);
+    expect(p.back.cacheXp).toBe(0x0304);
+    p.bytes = p.bytes.subarray(0, -164);
     // Patch 9 appends resist_mod (TimedModData + 6 weights), patch 5 map_skills (6 x
     // MapSkillData) before it; the offsets below count from before them.
     expect(Array.from(p.bytes.subarray(-14, -11))).toEqual([ModKind.Resistance, Aspect.Piercing, 2]);
@@ -435,7 +574,15 @@ describe("decoders", () => {
       v.auras[1][0].kinOnly = true;
       v.resistMods[3] = { data: { kind: ModKind.Resistance, aspect: Aspect.Cold, turns: 1, powerBp: 2_000, source: 7 }, weightsPct: Uint8Array.of(0, 100, 0, 0, 0, 0) };
       v.auraWeights[1][0] = Uint8Array.of(100, 0, 0, 0, 0, 0);
+      v.lootIds = Uint8Array.from({ length: 12 }, (_, i) => (i === 0 ? 4 : 0xff));
+      v.lootTables[0] = Uint8Array.from({ length: 108 }, (_, i) => (i === 0 ? 1 : 0));
     });
+    // Patch 11 appends loot_ids (12) and loot_tables (12 x 108).
+    const p11m = 12 + 12 * 108;
+    expect(Array.from(m.bytes.subarray(-p11m, -p11m + 2))).toEqual([4, 0xff]);
+    expect(m.bytes[m.bytes.length - 12 * 108]).toBe(1);
+    expect(m.back.lootIds[0]).toBe(4);
+    m.bytes = m.bytes.subarray(0, -p11m);
     // Patch 9 appends resist_mods (24 x 14) and aura_weights (24 x 2 x 6).
     const p9m = 24 * 14 + 24 * 2 * 6;
     expect(m.bytes[m.bytes.length - p9m + 3 * 14]).toBe(ModKind.Resistance);
@@ -464,6 +611,31 @@ describe("decoders", () => {
     expect(m.back.mods[2][ModKind.Slow].turns).toBe(2);
     // A pre-upgrade account (no trailing fields) no longer decodes.
     expect(() => decodeAccount("Participation", p.bytes)).toThrow();
+  });
+
+  it("patch 11: decodes the bag in slots and the reward cache", () => {
+    const bagZero = zeroOf(getBagDecoder());
+    bagZero.layout.resources[2] = { kind: 1, id: 0x0102, qty: 9 };
+    bagZero.layout.consumables[0] = { kind: 2, id: 3, qty: 5 };
+    const bagBytes = Uint8Array.from(getBagEncoder().encode(bagZero));
+    expect(toHex(bagBytes.subarray(0, 8))).toBe(sha("account:Bag"));
+    // version, character, items (20 x 32), item_count, bump, then the layout: 40 + 5 slots of 4 bytes.
+    const at = 8 + 1 + 32 + 20 * 32 + 2;
+    expect(Array.from(bagBytes.subarray(at + 2 * 4, at + 3 * 4))).toEqual([1, 0x02, 0x01, 9]);
+    const bag = decodeAccount("Bag", bagBytes);
+    expect(bag.layout.consumables[0]).toEqual({ kind: 2, id: 3, qty: 5 });
+    const cacheZero = zeroOf(getRewardCacheDecoder());
+    // Entry 1 of 3: session, status (Claimed 2), xp u32, then 32 slots of 5 bytes (kind, id u16, qty u16).
+    cacheZero.entries[1] = { ...cacheZero.entries[1], session: addrOf(31), status: 2, xp: 250 };
+    cacheZero.entries[1].slots[0] = { kind: 0, id: 4, qty: 12 };
+    const cacheBytes = Uint8Array.from(getRewardCacheEncoder().encode(cacheZero));
+    expect(toHex(cacheBytes.subarray(0, 8))).toBe(sha("account:RewardCache"));
+    const entry = 32 + 1 + 4 + 32 * 5;
+    const entryAt = 8 + 1 + 32 + entry;
+    expect(Array.from(cacheBytes.subarray(entryAt, entryAt + 32))).toEqual(Array.from(A(31)));
+    expect(Array.from(cacheBytes.subarray(entryAt + 32, entryAt + 32 + 1 + 4 + 5))).toEqual([2, 250, 0, 0, 0, 0, 4, 0, 12, 0]);
+    const cache = decodeAccount("RewardCache", cacheBytes);
+    expect([cache.entries[1]!.status, cache.entries[1]!.xp, cache.entries[1]!.slots[0]]).toEqual([2, 250, { kind: 0, id: 4, qty: 12 }]);
   });
 
   it("decodes TurnTicked, TurnSkipped and SkillUsed", () => {

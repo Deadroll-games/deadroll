@@ -9,6 +9,7 @@ import "./forms.css";
 
 export function PartyLobby(p: PartyLobbyProps) {
   const [picked, setPicked] = useState(p.myCharacters[0]?.address ?? "");
+  const [joining, setJoining] = useState(false);
   const locked = Boolean(p.busy);
   const full = p.players.length >= p.maxPlayers;
   const allReady = p.players.length > 0 && p.players.every((player) => player.ready);
@@ -100,11 +101,24 @@ export function PartyLobby(p: PartyLobbyProps) {
               type="button"
               className="btn primary"
               disabled={locked || p.myCharacters.length === 0 || full || selected.length === 0}
-              onClick={() => p.onJoin(selected)}
+              onClick={() => setJoining(true)}
             >
               Join and pay {formatSol(p.joinLamports ?? p.priceLamports)} SOL
             </button>
           </div>
+        ) : null}
+        {p.role === "guest" && joining ? (
+          <PrepayConfirm
+            action="Join"
+            lamports={(p.joinLamports ?? p.priceLamports) + (p.joinRentLamports ?? 0n)}
+            detail="for your share of the party price and the rent of your party accounts"
+            busy={locked}
+            onConfirm={() => {
+              setJoining(false);
+              p.onJoin(selected);
+            }}
+            onCancel={() => setJoining(false)}
+          />
         ) : null}
 
         {p.role === "player" ? (

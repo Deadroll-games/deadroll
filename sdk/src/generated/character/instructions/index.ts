@@ -6,11 +6,12 @@
  * @see https://github.com/codama-idl/codama
  */
 
+export * from "./applyBag.js";
 export * from "./createCharacter.js";
 export * from "./createProfile.js";
 export * from "./equip.js";
 export * from "./freezeTombstone.js";
-export * from "./grantRewards.js";
+export * from "./grantXp.js";
 export * from "./lockForSession.js";
 export * from "./markDead.js";
 export * from "./setSkillDescription.js";

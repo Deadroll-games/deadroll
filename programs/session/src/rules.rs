@@ -1,10 +1,10 @@
-//! Session-local game rules: step costs, instruction constants, rewards, and the shared rules of
+//! Session-local game rules: step costs, instruction constants, and the shared rules of
 //! `deadroll-rules` with the program's numbers ([`BALANCE`]).
 //!
 //! Monster templates (every monster number), monster skills and tile costs come from the registry
 //! tables (copied at `open_session` into `MonsterState` / `GameSession`). Every combat number lives in `deadroll_rules::BalanceConfig` (placeholders
 //! until balancing, tuned in `tools/balance`); the wrappers below keep one call per rule.
-use deadroll_combat::{DamageRange, RollSource};
+use deadroll_combat::DamageRange;
 use deadroll_rules::{
     config::BalanceConfig, input::hero, items, monster, player, units, HeroStats,
 };
@@ -15,8 +15,6 @@ pub use deadroll_rules::units::{
     MONSTER_UNIT_BASE,
 };
 pub use deadroll_rules::MonsterProfile;
-
-use crate::state::STASH_RESOURCES;
 
 /// The numbers the program plays with.
 pub const BALANCE: &BalanceConfig = &BalanceConfig::DEFAULT;
@@ -168,30 +166,6 @@ pub fn player_defense(class: Class, stats: &[u16; STATS_COUNT]) -> (u32, u32) {
     player::player_defense(class, stats, &BALANCE.players)
 }
 
-// ---------------------------------------------------------------------------------------------
-// Rewards (L7.5). TODO(post-demo): reward tables and levels from the map (PARTY_AND_TURNS 9).
-
-/// Boss reward rolls per player.
-pub const BOSS_REWARD_ROLLS: u32 = 2;
-/// Most units of one resource from one roll.
-pub const REWARD_AMOUNT_MAX: u64 = 3;
-/// First roll index of slot `s` in the victory seed's stream: `REWARD_ROLL_BASE + s * stride`.
-pub const REWARD_ROLL_BASE: u32 = 1_000;
-pub const REWARD_ROLL_STRIDE: u32 = 16;
-
-/// Resources one living player gets from the boss: `BOSS_REWARD_ROLLS` rolls, each picks a
-/// resource kind and `1..=REWARD_AMOUNT_MAX` units (docs/PARTY_AND_TURNS.md, 9.3: each player's
-/// reward is rolled separately).
-pub fn boss_rewards(src: &mut impl RollSource) -> [u32; STASH_RESOURCES] {
-    let mut out = [0u32; STASH_RESOURCES];
-    for _ in 0..BOSS_REWARD_ROLLS {
-        let kind = (src.next_u64() % STASH_RESOURCES as u64) as usize;
-        let amount = 1 + src.next_u64() % REWARD_AMOUNT_MAX;
-        out[kind] = out[kind].saturating_add(amount as u32);
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -332,16 +306,5 @@ mod tests {
         assert_eq!(heal(Class::Support, u32::MAX).1, 5_153_960);
         assert_eq!(support_increase(Class::Support, 14), 2_000);
         assert_eq!(support_increase(Class::Mage, 14), 0);
-    }
-
-    #[test]
-    fn boss_rewards_are_deterministic_and_bounded() {
-        for seed in 0..200 {
-            let a = boss_rewards(&mut SeededRoll::new(seed));
-            assert_eq!(a, boss_rewards(&mut SeededRoll::new(seed)));
-            let total: u32 = a.iter().sum();
-            assert!(total >= BOSS_REWARD_ROLLS);
-            assert!(total as u64 <= BOSS_REWARD_ROLLS as u64 * REWARD_AMOUNT_MAX);
-        }
     }
 }

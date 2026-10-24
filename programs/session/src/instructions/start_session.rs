@@ -53,6 +53,11 @@ pub fn handler(ctx: Context<StartSession>) -> Result<()> {
         SessionError::NotInLobby
     );
     require!(session.core.player_count > 0, SessionError::NoPlayers);
+    // Patch 11: the reward budget was checked for this many players (docs/MAP_DESCRIPTION.md 10).
+    require!(
+        session.core.player_count >= session.min_players,
+        SessionError::NotEnoughPlayers
+    );
     require!(
         session.ready_mask == session.full_mask(),
         SessionError::NotAllReady

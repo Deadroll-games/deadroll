@@ -30,6 +30,8 @@ deadroll-types = { workspace = true, features = ["anchor"] }
 deadroll-combat.workspace = true
 # The monster skill record and the monster builder rules (`deadroll_skillcheck::monster`).
 deadroll-skillcheck.workspace = true
+# Patch 11: the reward table record (`deadroll_rules::loot`), the decoder every reader uses.
+deadroll-rules.workspace = true
 # Required by `#[account(zero_copy)]` (the table accounts).
 bytemuck = { version = "1", features = ["derive"] }
 

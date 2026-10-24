@@ -86,10 +86,45 @@ export const DEADROLL_MAP_ERROR__TOO_MANY_ELITES = 0x1791; // 6033
 export const DEADROLL_MAP_ERROR__TOO_MANY_SESSION_SKILLS = 0x1792; // 6034
 /** InvalidRegistryTable: Account is not the registry bestiary or monster skills table */
 export const DEADROLL_MAP_ERROR__INVALID_REGISTRY_TABLE = 0x1793; // 6035
+/** MinPlayersOutOfRange: Minimum players of the map is outside 1..=4 */
+export const DEADROLL_MAP_ERROR__MIN_PLAYERS_OUT_OF_RANGE = 0x1794; // 6036
+/** TooManyChests: Too many visible chests for the map tier */
+export const DEADROLL_MAP_ERROR__TOO_MANY_CHESTS = 0x1795; // 6037
+/** InvalidPoint: A map point is not a visible chest */
+export const DEADROLL_MAP_ERROR__INVALID_POINT = 0x1796; // 6038
+/** ChestOutOfBounds: Chest is outside the map */
+export const DEADROLL_MAP_ERROR__CHEST_OUT_OF_BOUNDS = 0x1797; // 6039
+/** ChestNotPassable: Chest stands on a cell that cannot be entered */
+export const DEADROLL_MAP_ERROR__CHEST_NOT_PASSABLE = 0x1798; // 6040
+/** ChestOverlap: Chest shares a cell with the entrance, the exit, a spawn or another chest */
+export const DEADROLL_MAP_ERROR__CHEST_OVERLAP = 0x1799; // 6041
+/** UnknownTable: Unknown reward table */
+export const DEADROLL_MAP_ERROR__UNKNOWN_TABLE = 0x179a; // 6042
+/** TableNotAllowed: Reward table is not allowed on this map tier */
+export const DEADROLL_MAP_ERROR__TABLE_NOT_ALLOWED = 0x179b; // 6043
+/** BossTableMissing: The boss needs a reward table */
+export const DEADROLL_MAP_ERROR__BOSS_TABLE_MISSING = 0x179c; // 6044
+/** BossTableOneLevel: The boss reward table needs at least two levels */
+export const DEADROLL_MAP_ERROR__BOSS_TABLE_ONE_LEVEL = 0x179d; // 6045
+/** OverBudget: Chests and boss cost more than the reward budget */
+export const DEADROLL_MAP_ERROR__OVER_BUDGET = 0x179e; // 6046
+/** ChestUnreachable: No cell next to a chest can be reached from the entrance */
+export const DEADROLL_MAP_ERROR__CHEST_UNREACHABLE = 0x179f; // 6047
+/** ChestRadiusOutOfRange: The chest radius is outside the limits (LootTuning.chest_radius_min..=max) */
+export const DEADROLL_MAP_ERROR__CHEST_RADIUS_OUT_OF_RANGE = 0x17a0; // 6048
+/** SettleTimeoutOutOfRange: The time to settle is outside the limits (at most LootTuning.settle_timeout_max_secs) */
+export const DEADROLL_MAP_ERROR__SETTLE_TIMEOUT_OUT_OF_RANGE = 0x17a1; // 6049
 
 export type DeadrollMapError =
   | typeof DEADROLL_MAP_ERROR__BOSS_COUNT
   | typeof DEADROLL_MAP_ERROR__BOSS_PACK_MIXED
+  | typeof DEADROLL_MAP_ERROR__BOSS_TABLE_MISSING
+  | typeof DEADROLL_MAP_ERROR__BOSS_TABLE_ONE_LEVEL
+  | typeof DEADROLL_MAP_ERROR__CHEST_NOT_PASSABLE
+  | typeof DEADROLL_MAP_ERROR__CHEST_OUT_OF_BOUNDS
+  | typeof DEADROLL_MAP_ERROR__CHEST_OVERLAP
+  | typeof DEADROLL_MAP_ERROR__CHEST_RADIUS_OUT_OF_RANGE
+  | typeof DEADROLL_MAP_ERROR__CHEST_UNREACHABLE
   | typeof DEADROLL_MAP_ERROR__CHUNK_OUT_OF_RANGE
   | typeof DEADROLL_MAP_ERROR__ELITE_BOSS
   | typeof DEADROLL_MAP_ERROR__ENTRANCE_COUNT
@@ -99,22 +134,28 @@ export type DeadrollMapError =
   | typeof DEADROLL_MAP_ERROR__EXIT_UNREACHABLE
   | typeof DEADROLL_MAP_ERROR__HELPER_OUTSIDE_BOSS_PACK
   | typeof DEADROLL_MAP_ERROR__INVALID_CONFIG
+  | typeof DEADROLL_MAP_ERROR__INVALID_POINT
   | typeof DEADROLL_MAP_ERROR__INVALID_REGISTRY_TABLE
   | typeof DEADROLL_MAP_ERROR__INVALID_STATUS_TRANSITION
   | typeof DEADROLL_MAP_ERROR__INVALID_TILE
   | typeof DEADROLL_MAP_ERROR__LEVEL_OUT_OF_TIER
+  | typeof DEADROLL_MAP_ERROR__MIN_PLAYERS_OUT_OF_RANGE
   | typeof DEADROLL_MAP_ERROR__MONSTER_SKILL_COUNT
   | typeof DEADROLL_MAP_ERROR__MONSTER_SKILL_UNKNOWN
   | typeof DEADROLL_MAP_ERROR__NOT_DM
   | typeof DEADROLL_MAP_ERROR__NOT_DRAFT
+  | typeof DEADROLL_MAP_ERROR__OVER_BUDGET
   | typeof DEADROLL_MAP_ERROR__PACK_TOO_SPREAD
+  | typeof DEADROLL_MAP_ERROR__SETTLE_TIMEOUT_OUT_OF_RANGE
   | typeof DEADROLL_MAP_ERROR__SIZE_OUT_OF_RANGE
   | typeof DEADROLL_MAP_ERROR__SPAWN_NOT_PASSABLE
   | typeof DEADROLL_MAP_ERROR__SPAWN_OUT_OF_BOUNDS
   | typeof DEADROLL_MAP_ERROR__SPAWN_OVERLAP
   | typeof DEADROLL_MAP_ERROR__SPAWN_UNREACHABLE
+  | typeof DEADROLL_MAP_ERROR__TABLE_NOT_ALLOWED
   | typeof DEADROLL_MAP_ERROR__TIER_BELOW_TEMPLATE
   | typeof DEADROLL_MAP_ERROR__TIER_OUT_OF_RANGE
+  | typeof DEADROLL_MAP_ERROR__TOO_MANY_CHESTS
   | typeof DEADROLL_MAP_ERROR__TOO_MANY_ELITES
   | typeof DEADROLL_MAP_ERROR__TOO_MANY_HELPERS
   | typeof DEADROLL_MAP_ERROR__TOO_MANY_MONSTERS
@@ -123,6 +164,7 @@ export type DeadrollMapError =
   | typeof DEADROLL_MAP_ERROR__TOO_MANY_SPAWNS
   | typeof DEADROLL_MAP_ERROR__TWO_LONERS
   | typeof DEADROLL_MAP_ERROR__UNKNOWN_MONSTER
+  | typeof DEADROLL_MAP_ERROR__UNKNOWN_TABLE
   | typeof DEADROLL_MAP_ERROR__UNTRUSTED_CALLER;
 
 let deadrollMapErrorMessages: Record<DeadrollMapError, string> | undefined;
@@ -130,6 +172,13 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
   deadrollMapErrorMessages = {
     [DEADROLL_MAP_ERROR__BOSS_COUNT]: `Map needs exactly one boss`,
     [DEADROLL_MAP_ERROR__BOSS_PACK_MIXED]: `Regular monster in the boss pack`,
+    [DEADROLL_MAP_ERROR__BOSS_TABLE_MISSING]: `The boss needs a reward table`,
+    [DEADROLL_MAP_ERROR__BOSS_TABLE_ONE_LEVEL]: `The boss reward table needs at least two levels`,
+    [DEADROLL_MAP_ERROR__CHEST_NOT_PASSABLE]: `Chest stands on a cell that cannot be entered`,
+    [DEADROLL_MAP_ERROR__CHEST_OUT_OF_BOUNDS]: `Chest is outside the map`,
+    [DEADROLL_MAP_ERROR__CHEST_OVERLAP]: `Chest shares a cell with the entrance, the exit, a spawn or another chest`,
+    [DEADROLL_MAP_ERROR__CHEST_RADIUS_OUT_OF_RANGE]: `The chest radius is outside the limits (LootTuning.chest_radius_min..=max)`,
+    [DEADROLL_MAP_ERROR__CHEST_UNREACHABLE]: `No cell next to a chest can be reached from the entrance`,
     [DEADROLL_MAP_ERROR__CHUNK_OUT_OF_RANGE]: `Chunk goes past the end of the tile grid`,
     [DEADROLL_MAP_ERROR__ELITE_BOSS]: `A boss cannot be elite`,
     [DEADROLL_MAP_ERROR__ENTRANCE_COUNT]: `Map needs exactly one entrance tile`,
@@ -139,22 +188,28 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_MAP_ERROR__EXIT_UNREACHABLE]: `No path from the entrance to the exit`,
     [DEADROLL_MAP_ERROR__HELPER_OUTSIDE_BOSS_PACK]: `Boss helper outside the boss pack`,
     [DEADROLL_MAP_ERROR__INVALID_CONFIG]: `Account is not the registry GameConfig`,
+    [DEADROLL_MAP_ERROR__INVALID_POINT]: `A map point is not a visible chest`,
     [DEADROLL_MAP_ERROR__INVALID_REGISTRY_TABLE]: `Account is not the registry bestiary or monster skills table`,
     [DEADROLL_MAP_ERROR__INVALID_STATUS_TRANSITION]: `Map status cannot change this way`,
     [DEADROLL_MAP_ERROR__INVALID_TILE]: `Byte is not a known tile`,
     [DEADROLL_MAP_ERROR__LEVEL_OUT_OF_TIER]: `Monster level is outside the map tier`,
+    [DEADROLL_MAP_ERROR__MIN_PLAYERS_OUT_OF_RANGE]: `Minimum players of the map is outside 1..=4`,
     [DEADROLL_MAP_ERROR__MONSTER_SKILL_COUNT]: `Choose as many skills of each kind as the monster has slots (all if fewer)`,
     [DEADROLL_MAP_ERROR__MONSTER_SKILL_UNKNOWN]: `A chosen skill is not in the monster's pool`,
     [DEADROLL_MAP_ERROR__NOT_DM]: `Only the map's DM can do this`,
     [DEADROLL_MAP_ERROR__NOT_DRAFT]: `Map is not a draft`,
+    [DEADROLL_MAP_ERROR__OVER_BUDGET]: `Chests and boss cost more than the reward budget`,
     [DEADROLL_MAP_ERROR__PACK_TOO_SPREAD]: `Pack monsters stand too far apart`,
+    [DEADROLL_MAP_ERROR__SETTLE_TIMEOUT_OUT_OF_RANGE]: `The time to settle is outside the limits (at most LootTuning.settle_timeout_max_secs)`,
     [DEADROLL_MAP_ERROR__SIZE_OUT_OF_RANGE]: `Map side is outside 8..=32`,
     [DEADROLL_MAP_ERROR__SPAWN_NOT_PASSABLE]: `Spawn is on an impassable tile`,
     [DEADROLL_MAP_ERROR__SPAWN_OUT_OF_BOUNDS]: `Spawn is outside the map`,
     [DEADROLL_MAP_ERROR__SPAWN_OVERLAP]: `Spawn shares a cell with another spawn, the entrance or the exit`,
     [DEADROLL_MAP_ERROR__SPAWN_UNREACHABLE]: `A spawn cannot be reached from the entrance`,
+    [DEADROLL_MAP_ERROR__TABLE_NOT_ALLOWED]: `Reward table is not allowed on this map tier`,
     [DEADROLL_MAP_ERROR__TIER_BELOW_TEMPLATE]: `Map tier is below the monster's minimum tier`,
     [DEADROLL_MAP_ERROR__TIER_OUT_OF_RANGE]: `Map tier has no limits`,
+    [DEADROLL_MAP_ERROR__TOO_MANY_CHESTS]: `Too many visible chests for the map tier`,
     [DEADROLL_MAP_ERROR__TOO_MANY_ELITES]: `Too many elite monsters for the map tier`,
     [DEADROLL_MAP_ERROR__TOO_MANY_HELPERS]: `Too many boss helpers`,
     [DEADROLL_MAP_ERROR__TOO_MANY_MONSTERS]: `Too many monsters for the map tier`,
@@ -163,6 +218,7 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_MAP_ERROR__TOO_MANY_SPAWNS]: `Too many spawns`,
     [DEADROLL_MAP_ERROR__TWO_LONERS]: `Two loners in one pack`,
     [DEADROLL_MAP_ERROR__UNKNOWN_MONSTER]: `Unknown bestiary id`,
+    [DEADROLL_MAP_ERROR__UNKNOWN_TABLE]: `Unknown reward table`,
     [DEADROLL_MAP_ERROR__UNTRUSTED_CALLER]: `Caller is not the trusted game program's authority PDA`,
   };
 }

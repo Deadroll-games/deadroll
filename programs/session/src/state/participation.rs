@@ -1,10 +1,13 @@
 use anchor_lang::prelude::*;
 use deadroll_character::state::{MAP_SKILLS, SKILLS_MAX};
 use deadroll_combat::{chill_slow_bp, speed_ap, AccuracyBuff, TimedMods};
+use deadroll_rules::loot::cache_add;
 use deadroll_rules::{aura::AuraField, input::SkillStats, items::Equipment, HeroStats};
 use deadroll_skillcheck::{ACTIVE_MAX, NO_SKILL};
 use deadroll_types::Aspect;
-use deadroll_types::{Cell, CharacterData, ParticipationData, EQUIP_SLOTS};
+use deadroll_types::{
+    CacheSlot, Cell, CharacterData, ParticipationData, CACHE_BYTES, CACHE_SLOTS, EQUIP_SLOTS,
+};
 
 use super::mods::{self, ResistModData, TimedModData, STORED_MODS};
 use super::MapSkillData;
@@ -55,6 +58,58 @@ pub struct Participation {
     pub map_skills: [MapSkillData; MAP_SKILLS],
     /// Patch 9: the Resistance on this player with its aspect weights (`mods` has the others).
     pub resist_mod: ResistModData,
+    // Patch 11: the temporary cache (docs/PARTY_AND_TURNS.md 8, 10.2), filled during the party.
+    // Last in the account so a callback writes it in place for a participation it never decoded
+    // ([`add_to_cache_raw`]).
+    /// Experience of the kills, the player's share already applied.
+    pub cache_xp: u32,
+    /// The rewards, `CacheSlot`s as raw bytes (`CacheSlot::read_all`): never decoded field by
+    /// field.
+    pub cache: [u8; CACHE_BYTES],
+}
+
+/// Account size, discriminator included.
+pub const PARTICIPATION_SPACE: usize = 8 + Participation::INIT_SPACE;
+/// Offset of `cache_xp` in the account (discriminator included): the last two fields, and
+/// nothing before them has a variable size.
+pub const CACHE_XP_AT: usize = PARTICIPATION_SPACE - 4 - CACHE_BYTES;
+pub const CACHE_AT: usize = CACHE_XP_AT + 4;
+
+/// Adds experience and rewards to a cache. Rewards that do not fit are lost (the event shows
+/// them); returns how many were lost.
+pub fn add_to_cache(
+    cache_xp: &mut u32,
+    cache: &mut [u8; CACHE_BYTES],
+    xp: u32,
+    rewards: &[CacheSlot],
+) -> u8 {
+    *cache_xp = cache_xp.saturating_add(xp);
+    if rewards.iter().all(|r| r.is_empty()) {
+        return 0;
+    }
+    let mut slots = CacheSlot::read_all(cache);
+    let lost = rewards
+        .iter()
+        .filter(|r| !cache_add(&mut slots, **r))
+        .count() as u8;
+    *cache = CacheSlot::write_all(&slots);
+    lost
+}
+
+/// [`add_to_cache`] on the raw bytes of a `Participation` account (`data` from its discriminator).
+pub fn add_to_cache_raw(data: &mut [u8], xp: u32, rewards: &[CacheSlot]) -> Result<u8> {
+    require!(
+        data.len() >= PARTICIPATION_SPACE,
+        crate::errors::SessionError::InvalidPartyAccounts
+    );
+    let mut cache_xp = u32::from_le_bytes(data[CACHE_XP_AT..CACHE_AT].try_into().expect("4 bytes"));
+    let mut cache: [u8; CACHE_BYTES] = data[CACHE_AT..CACHE_AT + CACHE_BYTES]
+        .try_into()
+        .expect("CACHE_BYTES");
+    let lost = add_to_cache(&mut cache_xp, &mut cache, xp, rewards);
+    data[CACHE_XP_AT..CACHE_AT].copy_from_slice(&cache_xp.to_le_bytes());
+    data[CACHE_AT..CACHE_AT + CACHE_BYTES].copy_from_slice(&cache);
+    Ok(lost)
 }
 
 /// `deadroll_combat::AccuracyBuff`.
@@ -138,6 +193,16 @@ impl Participation {
     pub fn set_combat_mods(&mut self, m: &TimedMods) {
         (self.mods, self.resist_mod) = mods::from_combat(m);
     }
+
+    /// [`add_to_cache`] on this participation.
+    pub fn add_to_cache(&mut self, xp: u32, rewards: &[CacheSlot]) -> u8 {
+        add_to_cache(&mut self.cache_xp, &mut self.cache, xp, rewards)
+    }
+
+    /// The cache's rewards.
+    pub fn cache_slots(&self) -> [CacheSlot; CACHE_SLOTS] {
+        CacheSlot::read_all(&self.cache)
+    }
 }
 
 #[cfg(test)]
@@ -175,6 +240,8 @@ mod tests {
             accuracy: Default::default(),
             map_skills: Default::default(),
             resist_mod: Default::default(),
+            cache_xp: 0,
+            cache: [0; CACHE_BYTES],
         };
         for s in [0, 2, 5] {
             assert!(p.active_selected(s), "{s}");
@@ -185,5 +252,72 @@ mod tests {
         }
         p.skills = [NO_SKILL; MAP_SKILLS];
         assert!(!p.active_selected(0));
+    }
+
+    #[test]
+    fn the_cache_is_written_in_place_at_the_end() {
+        use anchor_lang::AccountSerialize;
+        use deadroll_types::RewardKind;
+        let mut p: Participation = zeroed();
+        p.cache_xp = 7;
+        let ore = CacheSlot {
+            kind: RewardKind::Resource,
+            id: 3,
+            qty: 2,
+        };
+        p.add_to_cache(0, &[ore]);
+        let mut data = Vec::new();
+        p.try_serialize(&mut data).unwrap();
+        assert_eq!(
+            data.len(),
+            PARTICIPATION_SPACE,
+            "fixed size: the offsets hold"
+        );
+        // The raw path sees what the struct wrote, and adds onto it.
+        let recipe = CacheSlot {
+            kind: RewardKind::Recipe,
+            id: 1,
+            qty: 1,
+        };
+        assert_eq!(add_to_cache_raw(&mut data, 5, &[ore, recipe]).unwrap(), 0);
+        let back = Participation::try_deserialize(&mut &data[..]).unwrap();
+        assert_eq!(back.cache_xp, 12);
+        let slots = back.cache_slots();
+        assert_eq!(slots[0], CacheSlot { qty: 4, ..ore });
+        assert_eq!(slots[1], recipe);
+        assert!(slots[2..].iter().all(|s| s.is_empty()));
+    }
+
+    #[test]
+    fn a_full_cache_loses_the_rest() {
+        use deadroll_types::RewardKind;
+        let (mut xp, mut cache) = (0, [0u8; CACHE_BYTES]);
+        let all: Vec<CacheSlot> = (0..CACHE_SLOTS as u16)
+            .map(|id| CacheSlot {
+                kind: RewardKind::Resource,
+                id,
+                qty: 1,
+            })
+            .collect();
+        assert_eq!(add_to_cache(&mut xp, &mut cache, 0, &all), 0);
+        let extra = CacheSlot {
+            kind: RewardKind::Blank,
+            id: 0,
+            qty: 1,
+        };
+        assert_eq!(
+            add_to_cache(&mut xp, &mut cache, 0, &[extra, all[0]]),
+            1,
+            "a new kind is lost, a known one merges"
+        );
+        assert_eq!(CacheSlot::read_all(&cache)[0].qty, 2);
+    }
+
+    /// A participation with every field zero (decoded from zero bytes).
+    fn zeroed() -> Participation {
+        use anchor_lang::Discriminator;
+        let mut data = vec![0u8; PARTICIPATION_SPACE];
+        data[..8].copy_from_slice(Participation::DISCRIMINATOR);
+        Participation::try_deserialize(&mut &data[..]).unwrap()
     }
 }

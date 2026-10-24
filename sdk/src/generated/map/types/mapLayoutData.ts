@@ -29,10 +29,14 @@ import {
 import {
   getCellDecoder,
   getCellEncoder,
+  getMapPointDecoder,
+  getMapPointEncoder,
   getSpawnDecoder,
   getSpawnEncoder,
   type Cell,
   type CellArgs,
+  type MapPoint,
+  type MapPointArgs,
   type Spawn,
   type SpawnArgs,
 } from "./index.js";
@@ -48,6 +52,11 @@ export type MapLayoutData = {
   entrance: Cell;
   exit: Cell;
   bump: number;
+  /** Visible chests, `0..chest_count` used: `data` is the reward table id. */
+  chests: Array<MapPoint>;
+  chestCount: number;
+  /** The reward table of the boss (registry `Rewards` id, `NO_TABLE` = none). */
+  bossTable: number;
 };
 
 export type MapLayoutDataArgs = {
@@ -60,6 +69,11 @@ export type MapLayoutDataArgs = {
   entrance: CellArgs;
   exit: CellArgs;
   bump: number;
+  /** Visible chests, `0..chest_count` used: `data` is the reward table id. */
+  chests: Array<MapPointArgs>;
+  chestCount: number;
+  /** The reward table of the boss (registry `Rewards` id, `NO_TABLE` = none). */
+  bossTable: number;
 };
 
 export function getMapLayoutDataEncoder(): FixedSizeEncoder<MapLayoutDataArgs> {
@@ -72,6 +86,9 @@ export function getMapLayoutDataEncoder(): FixedSizeEncoder<MapLayoutDataArgs> {
     ["entrance", getCellEncoder()],
     ["exit", getCellEncoder()],
     ["bump", getU8Encoder()],
+    ["chests", getArrayEncoder(getMapPointEncoder(), { size: 4 })],
+    ["chestCount", getU8Encoder()],
+    ["bossTable", getU8Encoder()],
   ]);
 }
 
@@ -85,6 +102,9 @@ export function getMapLayoutDataDecoder(): FixedSizeDecoder<MapLayoutData> {
     ["entrance", getCellDecoder()],
     ["exit", getCellDecoder()],
     ["bump", getU8Decoder()],
+    ["chests", getArrayDecoder(getMapPointDecoder(), { size: 4 })],
+    ["chestCount", getU8Decoder()],
+    ["bossTable", getU8Decoder()],
   ]);
 }
 

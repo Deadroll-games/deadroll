@@ -46,6 +46,11 @@ export type PlayerJoinedEvent = {
   slot: number;
   contribution: bigint;
   collected: bigint;
+  /**
+   * Patch 11: bit per reward cache entry that burned (a settled cache left without "Done", or
+   * an earlier party's past its DM deadline).
+   */
+  cacheBurned: number;
 };
 
 export type PlayerJoinedEventArgs = {
@@ -55,6 +60,11 @@ export type PlayerJoinedEventArgs = {
   slot: number;
   contribution: number | bigint;
   collected: number | bigint;
+  /**
+   * Patch 11: bit per reward cache entry that burned (a settled cache left without "Done", or
+   * an earlier party's past its DM deadline).
+   */
+  cacheBurned: number;
 };
 
 /** Gets the encoder for {@link PlayerJoinedEventArgs} event data. */
@@ -67,6 +77,7 @@ export function getPlayerJoinedEventEncoder(): FixedSizeEncoder<PlayerJoinedEven
       ["slot", getU8Encoder()],
       ["contribution", getU64Encoder()],
       ["collected", getU64Encoder()],
+      ["cacheBurned", getU8Encoder()],
     ]),
     [getConstantEncoder(PLAYER_JOINED_EVENT_DISCRIMINATOR)],
   );
@@ -82,6 +93,7 @@ export function getPlayerJoinedEventDecoder(): FixedSizeDecoder<PlayerJoinedEven
       ["slot", getU8Decoder()],
       ["contribution", getU64Decoder()],
       ["collected", getU64Decoder()],
+      ["cacheBurned", getU8Decoder()],
     ]),
     [getConstantDecoder(PLAYER_JOINED_EVENT_DISCRIMINATOR)],
   );

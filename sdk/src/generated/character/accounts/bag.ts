@@ -23,8 +23,6 @@ import {
   getBytesEncoder,
   getStructDecoder,
   getStructEncoder,
-  getU32Decoder,
-  getU32Encoder,
   getU8Decoder,
   getU8Encoder,
   transformEncoder,
@@ -40,6 +38,12 @@ import {
   type MaybeEncodedAccount,
   type ReadonlyUint8Array,
 } from "@solana/kit";
+import {
+  getBagLayoutDecoder,
+  getBagLayoutEncoder,
+  type BagLayout,
+  type BagLayoutArgs,
+} from "../types/index.js";
 
 export const BAG_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Array([
   209, 73, 132, 189, 4, 169, 188, 103,
@@ -53,23 +57,29 @@ export type Bag = {
   discriminator: ReadonlyUint8Array;
   version: number;
   character: Address;
-  /** Amount per resource kind. */
-  resources: Array<number>;
   /** Item assets (lane items, P1). Slot `i < item_count` is used. */
   items: Array<Address>;
   itemCount: number;
   bump: number;
+  /**
+   * Resources (recipes, blanks and reagents too), one kind per slot, and consumables. Changed
+   * only by "Done" in the bag screen (`apply_bag`) and by death.
+   */
+  layout: BagLayout;
 };
 
 export type BagArgs = {
   version: number;
   character: Address;
-  /** Amount per resource kind. */
-  resources: Array<number>;
   /** Item assets (lane items, P1). Slot `i < item_count` is used. */
   items: Array<Address>;
   itemCount: number;
   bump: number;
+  /**
+   * Resources (recipes, blanks and reagents too), one kind per slot, and consumables. Changed
+   * only by "Done" in the bag screen (`apply_bag`) and by death.
+   */
+  layout: BagLayoutArgs;
 };
 
 /** Gets the encoder for {@link BagArgs} account data. */
@@ -79,10 +89,10 @@ export function getBagEncoder(): FixedSizeEncoder<BagArgs> {
       ["discriminator", fixEncoderSize(getBytesEncoder(), 8)],
       ["version", getU8Encoder()],
       ["character", getAddressEncoder()],
-      ["resources", getArrayEncoder(getU32Encoder(), { size: 8 })],
       ["items", getArrayEncoder(getAddressEncoder(), { size: 20 })],
       ["itemCount", getU8Encoder()],
       ["bump", getU8Encoder()],
+      ["layout", getBagLayoutEncoder()],
     ]),
     (value) => ({ ...value, discriminator: BAG_DISCRIMINATOR }),
   );
@@ -94,10 +104,10 @@ export function getBagDecoder(): FixedSizeDecoder<Bag> {
     ["discriminator", fixDecoderSize(getBytesDecoder(), 8)],
     ["version", getU8Decoder()],
     ["character", getAddressDecoder()],
-    ["resources", getArrayDecoder(getU32Decoder(), { size: 8 })],
     ["items", getArrayDecoder(getAddressDecoder(), { size: 20 })],
     ["itemCount", getU8Decoder()],
     ["bump", getU8Decoder()],
+    ["layout", getBagLayoutDecoder()],
   ]);
 }
 
@@ -160,5 +170,5 @@ export async function fetchAllMaybeBag(
 }
 
 export function getBagSize(): number {
-  return 715;
+  return 863;
 }

@@ -46,6 +46,10 @@ export type MapCreatedEvent = {
   width: number;
   height: number;
   tier: number;
+  /** Patch 11. */
+  minPlayers: number;
+  chestRadius: number;
+  settleTimeoutSecs: number;
 };
 
 export type MapCreatedEventArgs = MapCreatedEvent;
@@ -60,6 +64,9 @@ export function getMapCreatedEventEncoder(): FixedSizeEncoder<MapCreatedEventArg
       ["width", getU8Encoder()],
       ["height", getU8Encoder()],
       ["tier", getU8Encoder()],
+      ["minPlayers", getU8Encoder()],
+      ["chestRadius", getU8Encoder()],
+      ["settleTimeoutSecs", getU32Encoder()],
     ]),
     [getConstantEncoder(MAP_CREATED_EVENT_DISCRIMINATOR)],
   );
@@ -75,6 +82,9 @@ export function getMapCreatedEventDecoder(): FixedSizeDecoder<MapCreatedEvent> {
       ["width", getU8Decoder()],
       ["height", getU8Decoder()],
       ["tier", getU8Decoder()],
+      ["minPlayers", getU8Decoder()],
+      ["chestRadius", getU8Decoder()],
+      ["settleTimeoutSecs", getU32Decoder()],
     ]),
     [getConstantDecoder(MAP_CREATED_EVENT_DISCRIMINATOR)],
   );

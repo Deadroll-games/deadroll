@@ -3,14 +3,18 @@
 // by the DM, death + freeze_tombstone, victory and claims. The calls mirror tests/demo.test.ts.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import type { Address, TransactionSigner } from "@solana/kit";
+import type { Address, Instruction, TransactionSigner } from "@solana/kit";
 import { HitCard } from "../components/dice/HitCard";
+import { CHEST_OPEN_AP, cacheRewards, chestsOf, levelsLabel, rewardLabel, rewardTables, settleDeadline, settleLabel } from "../chain/loot";
+
+/** Party statuses after the end (Victory, Fled, Wiped). */
+const PARTY_ENDED = ["victory", "fled", "wiped"];
 import { rollKeyOf } from "../chain/rollKey";
 import type { HitItemSides, HitMods } from "../components/dice/types";
 import { StatsPanel } from "../components/stats/StatsPanel";
 import type { StatsUnit } from "../components/stats/types";
 import { Grid } from "../components/grid/Grid";
-import type { GridAura, GridUnit } from "../components/grid/types";
+import type { GridAura, GridChest, GridUnit } from "../components/grid/types";
 import { PartyLobby } from "../components/forms/PartyLobby";
 import { PrepayConfirm } from "../components/forms/PrepayConfirm";
 import type { LobbyPlayer } from "../components/forms/types";
@@ -24,15 +28,20 @@ import {
   optional,
   variantKey,
   bytesText,
-  claimEscrowIx,
-  claimRewardsIx,
+  claimAfterTimeoutIx,
+  settlePartyIx,
+  computeLimitIx,
   deathAccountsOf,
   withDeaths,
   consumeIx,
   currentUnit,
   endTurnIx,
   getAccount,
+  joinRent,
   joinSessionIx,
+  leavePartyIx,
+  openCacheSessions,
+  openChestIx,
   mapStatus,
   mapsOf,
   monsterActIx,
@@ -77,7 +86,7 @@ import {
   type CombatWasm,
   type HitPreview,
 } from "../chain/combatWasm";
-import { ACTIVE_SLOTS, REACTIVE_SLOT, kinOf, monsterBearersOf, monsterSkillName, monsterSkillsOf, skillAction, useMonsterSkillTable, type MonsterSkill } from "../chain/monsters";
+import { ACTIVE_SLOTS, REACTIVE_SLOT, kinOf, monsterBearersOf, monsterSkillName, monsterSkillsOf, skillAction, useBuilderRegistry, useMonsterSkillTable, type MonsterSkill } from "../chain/monsters";
 import { errorName } from "../chain/send";
 import { statusLabel, type SubStatus } from "../chain/subscribe";
 import { cooldownLabel, skillCooldowns, skillUsedText, skipText, startTurnFor, takenOntoMap, tickText, turnActed, turnStarted } from "../chain/turns";
@@ -90,7 +99,7 @@ import { monsterBaseAp, monsterDefense, playerDefense, unitStats } from "../chai
 import { activeMods, combatSkill, effectText, modsAt, modsTickText, toEffectResolved, type CombatSkill, type EffectResolved } from "../chain/support";
 import { useTx } from "../chain/useTx";
 import { MAP_MAX, PARTY_MAX, type Cell, type Class, type HitResult, type Race, type Tile } from "../chain/types";
-import { MOCK_VRF, PROGRAMS, explorerUrl } from "../config";
+import { DATA_SOURCE, MOCK_VRF, PROGRAMS, explorerUrl } from "../config";
 import { useSprites } from "../raster/useSprites";
 import { fetchSessionToken, revokeSessionInstruction } from "../session-key/magicblock";
 import { PartyKeyPanel } from "../session-key/PartyKeyPanel";
@@ -273,6 +282,41 @@ function PartyView({ address }: { address: Address }) {
   const skillTable = useMonsterSkillTable();
   const [roll, setRoll] = useState<Roll | null>(null);
   const [myChars, setMyChars] = useState<{ address: Address; data: CharacterAcc }[]>([]);
+  // Patch 11: a character is free once its party ended; joining releases it (`leave_party`) in the
+  // same transaction. Character -> the ended party it is still locked to.
+  const [endedLocks, setEndedLocks] = useState<Record<string, Address>>({});
+  useEffect(() => {
+    if (DATA_SOURCE !== "chain") return;
+    let live = true;
+    const locked = myChars.flatMap((c) => {
+      const at = optional(c.data.core.inSession);
+      return c.data.core.alive && at ? [{ character: c.address, session: at }] : [];
+    });
+    void Promise.all(locked.map(async (l) => ({ ...l, s: await getAccount("GameSession", l.session).catch(() => null) }))).then((rows) => {
+      if (!live) return;
+      const out: Record<string, Address> = {};
+      for (const r of rows) if (r.s && PARTY_ENDED.includes(status(r.s))) out[r.character] = r.session;
+      setEndedLocks(out);
+    });
+    return () => {
+      live = false;
+    };
+  }, [myChars]);
+  const isFree = (c: { address: Address; data: CharacterAcc }) => c.data.core.alive && (!optional(c.data.core.inSession) || endedLocks[c.address] !== undefined);
+  // Patch 11: the rent Join pays besides the share, for the first character the lobby offers.
+  const [joinRentLamports, setJoinRentLamports] = useState<bigint | undefined>(undefined);
+  const firstFree = myChars.find(isFree)?.address ?? null;
+  useEffect(() => {
+    if (!firstFree || DATA_SOURCE !== "chain") return;
+    let live = true;
+    joinRent(firstFree).then(
+      (r) => live && setJoinRentLamports(r),
+      () => live && setJoinRentLamports(undefined),
+    );
+    return () => {
+      live = false;
+    };
+  }, [firstFree]);
   const [skillNames, setSkillNames] = useState<Record<string, CombatSkill[]>>({});
   /** The skill records of party characters, for the attack preview. */
   const [skillRecords, setSkillRecords] = useState<Record<string, SkillRecordAcc[]>>({});
@@ -547,6 +591,8 @@ function PartyView({ address }: { address: Address }) {
       const t = new Set<number>();
       p.monsters.forEach((m, i) => m.alive && MONSTER_BASE + i !== mover && t.add(m.y * MAP_MAX + m.x));
       p.players.forEach((pl) => p.session.aliveMask & (1 << pl.slot) && pl.slot !== mover && t.add(pl.part.core.y * MAP_MAX + pl.part.core.x));
+      // Patch 11: a closed chest occupies its cell.
+      for (const c of chestsOf(p.session)) if (!c.opened) t.add(c.y * MAP_MAX + c.x);
       return t;
     },
     [],
@@ -645,6 +691,31 @@ function PartyView({ address }: { address: Address }) {
     if (!steps?.length) return;
     const actor = actorFor(activePlayer.part.core.sessionKey);
     void act(`move ${label(activePlayer.slot)}`, actor?.signer ?? null, async () => [await moveIx(actor!, address, activePlayer.character, s.layout, steps)], false);
+  };
+  // Patch 11: the visible chests; a closed one next to the player opens for AP on its turn.
+  const registry = useBuilderRegistry();
+  const rewardTablesList = useMemo(() => (registry ? rewardTables(registry.rewards) : []), [registry]);
+  const chests = useMemo(() => (s ? chestsOf(s) : []), [s]);
+  const gridChests: GridChest[] = chests.map((c) => ({
+    x: c.x,
+    y: c.y,
+    opened: c.opened,
+    label: `Chest${c.opened ? " (open)" : ""}: ${levelsLabel(rewardTablesList.find((t) => t.id === c.table))}`,
+  }));
+  // A hint only (the program decides): no living monster within the map's radius of the chest or
+  // of any living player.
+  const monsterNear = (cell: { x: number; y: number }) =>
+    !!party && !!s && party.monsters.some((m) => m.alive && cheb(m, cell) <= s.chestRadius);
+  const partyClear =
+    !!s && party?.players.every((pl) => !(s.aliveMask & (1 << pl.slot)) || !monsterNear(s.playerPos[pl.slot]!)) === true;
+  const nextChest =
+    myTurn && activePlayer && started && !s?.core.pendingVrf && partyClear
+      ? chests.find((c) => !c.opened && cheb(c, activePlayer.part.core) === 1 && !monsterNear(c))
+      : undefined;
+  const openChest = (chest: number) => {
+    if (!activePlayer || !s) return;
+    const actor = actorFor(activePlayer.part.core.sessionKey);
+    void act(`open chest ${chest}`, actor?.signer ?? null, async () => [await openChestIx(actor!, address, activePlayer.character, s.layout, chest)], true);
   };
   const attack = (monster: number) => {
     if (!activePlayer || !canAttack || chosenSide !== "enemy") return;
@@ -808,7 +879,7 @@ function PartyView({ address }: { address: Address }) {
       height: party.session.height,
       tiles: party.tiles ? Array.from(party.tiles) : [],
       tileCost: Array.from(party.session.tileCost),
-      xpPool: party.session.xpPool,
+      unpaidKills: party.session.unpaidKills,
       players: party.players.map((p) => ({ slot: p.slot, x: p.part.core.x, y: p.part.core.y, hp: p.part.core.hp, ap: playerAp(p.part, party.session), name: bytesText(p.char.name), player: p.part.player, nftFrozen: p.char.nftFrozen, cooldowns: Array.from(p.part.cooldowns), hpMax: p.part.hpMax, mods: activeMods(p.part.mods) })),
       monsters: party.monsters.map((m, i) => ({ i, bestiaryId: m.bestiaryId, x: m.x, y: m.y, hp: m.hp, alive: m.alive, ap: m.actionPoints, mods: activeMods(party.monsterMods[i]) })),
       events: events.map((e) => e.name),
@@ -855,7 +926,7 @@ function PartyView({ address }: { address: Address }) {
       paid: p.part.contribution,
     }));
     const myJoined = mine[mine.length - 1] ?? null;
-    const joinable = myChars.filter((c) => c.data.core.alive && !optional(c.data.core.inSession)).map((c) => ({ address: c.address, name: bytesText(c.data.name) }));
+    const joinable = myChars.filter(isFree).map((c) => ({ address: c.address, name: bytesText(c.data.name) }));
     const remaining = s.core.priceLamports - (party.escrow?.collected ?? 0n);
     const share = (s.core.priceLamports + 1n) / 2n;
     const contribution = remaining < share ? remaining : share;
@@ -863,8 +934,12 @@ function PartyView({ address }: { address: Address }) {
       const signer = wallet.signer;
       if (!signer) return void (await send("join_session", null, []));
       // Joining pays the share of the price only; the session key and its prepayment come with Ready.
+      const c = character as Address;
+      const ended = endedLocks[c];
       const res = await send(`join_session (pay ${formatSol(contribution)})`, signer, async () => [
-        await joinSessionIx(signer, address, character as Address, contribution, DEFAULT_KEY),
+        // Patch 11: free it from its ended party first; the old rewards wait for their settlement.
+        ...(ended ? [await leavePartyIx(signer, ended, c)] : []),
+        await joinSessionIx(signer, address, c, contribution, DEFAULT_KEY, await openCacheSessions(c)),
       ]);
       if (res) ingest(res.signature, res.events);
       void wallet.refreshBalance();
@@ -907,6 +982,7 @@ function PartyView({ address }: { address: Address }) {
           myCharacters={joinable}
           onJoin={(c) => void join(c)}
           joinLamports={contribution}
+          joinRentLamports={joinRentLamports}
           mySkills={myJoined ? (skillNames[myJoined.character] ?? []).map((k) => ({ index: k.slot, name: k.name, category: k.category })) : undefined}
           onReady={(value, selection) => void ready(value, selection)}
           readyPrepayLamports={readyPrepay(pk.readyPlan(myBound))}
@@ -923,6 +999,10 @@ function PartyView({ address }: { address: Address }) {
             come with Ready, after you confirm the amount.
           </p>
         )}
+        <p className="muted">
+          This map: no living monster within {s.chestRadius} cells of a chest or of any hero when it opens; after the party the DM has{" "}
+          {settleLabel(s.settleTimeoutSecs)} to hand out the rewards, then each player claims their own and gets their contribution back.
+        </p>
         {isDm && <p className="muted">Share this page's link with the players. Start needs everyone ready and the escrow at the price.</p>}
         <EventLog events={events} label={label} />
       </section>
@@ -1070,6 +1150,7 @@ function PartyView({ address }: { address: Address }) {
             targets={!ended ? monsterTargets : []}
             path={preview}
             auras={gridAuras}
+            chests={gridChests}
             line={!ended ? lineCells : []}
             burning={party.burningCells.filter((c) => c.untilRound >= s.core.round).map((c) => ({ x: c.x, y: c.y }))}
             cellPx={CELL_PX}
@@ -1108,6 +1189,11 @@ function PartyView({ address }: { address: Address }) {
                 {s.core.pendingVrf && <span className="muted"> · waiting for the VRF roll</span>}
                 {unit !== null && !started && !s.core.pendingVrf && <span className="muted"> · {controls ? "starting the turn..." : "waiting for the turn to start"}</span>}
               </p>
+              {nextChest && (
+                <button className="btn" disabled={busy !== null || moverAp < CHEST_OPEN_AP} onClick={() => openChest(nextChest.index)}>
+                  Open the chest <span className="muted ap"> · {CHEST_OPEN_AP} AP</span>
+                </button>
+              )}
               {myTurn && (
                 <>
                   <div className="skills">
@@ -1265,11 +1351,16 @@ function PartyView({ address }: { address: Address }) {
   );
 }
 
+/**
+ * Patch 11: the summary right after the party: each player's cache (experience and rewards, filled
+ * during the party) and who settled. Before the DM's deadline the DM's main wallet settles everyone
+ * and takes the escrow in one transaction; after it each player claims their own character and
+ * their contribution back (docs/PARTY_AND_TURNS.md 3.2, decisions of patch 11).
+ */
 export function Claims({
   party,
   isDm,
   me,
-  actorFor,
   payer,
   send,
   ingest,
@@ -1285,58 +1376,79 @@ export function Claims({
   busy: string | null;
 }) {
   const s = party.session;
+  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
+  useEffect(() => {
+    const t = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const deadline = settleDeadline(s.endedAt, s.settleTimeoutSecs);
+  const left = Math.max(0, deadline - now);
+  const dmSettled = party.escrow?.claimed ?? false;
+  const run = (what: string, ix: () => Promise<Instruction>) =>
+    void send(what, payer, async () => [computeLimitIx(SETTLE_CU), await ix()]).then((r) => r && ingest(r.signature, r.events as never[]));
   return (
     <div className="panel">
       <h3>{status(s) === "victory" ? "Victory" : "The party is over"}</h3>
-      <p>
-        XP pool {s.xpPool} · every living hero gets all of it; a tombstone gets nothing.
+      <p className="muted">
+        {status(s) === "victory"
+          ? "Each living hero keeps the cache filled during the party; a tombstone's cache burned."
+          : "Nobody won: the caches are lost. The heroes who live are released."}
       </p>
       <ul>
         {party.players.map((p) => {
           const settled = (s.settledMask & (1 << p.slot)) !== 0;
+          const alive = (s.aliveMask & (1 << p.slot)) !== 0;
+          const rewards = cacheRewards(p.part.cache);
           return (
             <li key={p.slot}>
-              {bytesText(p.char.name)} ({(s.aliveMask & (1 << p.slot)) !== 0 ? "alive" : "tombstone"}) · {p.char.core.xp} xp{" "}
+              {bytesText(p.char.name)} ({alive ? "alive" : "tombstone"}) · cache {p.part.cacheXp} xp
+              {rewards.length > 0 && <span className="mono"> · {rewards.map(rewardLabel).join(", ")}</span>}{" "}
               {settled ? (
-                <span className="ok">claimed</span>
-              ) : p.part.player !== me ? (
-                <span className="muted">not claimed yet</span>
-              ) : (
+                <span className="ok">settled</span>
+              ) : !dmSettled && left === 0 && p.part.player === me ? (
                 <button
                   className="btn"
                   disabled={busy !== null}
-                  onClick={() => {
-                    const actor = actorFor(p.part.core.sessionKey);
-                    void send(`claim_rewards ${bytesText(p.char.name)}`, actor?.signer ?? null, async () => {
-                      // Pending deaths of the party are finalized first (patch 6).
-                      const deaths = await deathAccountsOf(s);
-                      return withDeaths(deaths, await claimRewardsIx(actor!, party.address, p.character, deaths));
-                    }).then((r) => r && ingest(r.signature, r.events as never[]));
-                  }}
+                  onClick={() => run(`claim_after_timeout ${bytesText(p.char.name)}`, () => claimAfterTimeoutIx(payer!, party.address, s, p.character))}
                 >
-                  Claim rewards
+                  Claim it myself
                 </button>
+              ) : (
+                <span className="muted">waiting for the DM</span>
               )}
             </li>
           );
         })}
       </ul>
-      {isDm && party.escrow && !party.escrow.claimed && (
+      {!dmSettled && left > 0 && (
+        <p className="muted">
+          The DM has {formatDuration(left)} to hand out the rewards; after that each player claims their own and gets their contribution back.
+        </p>
+      )}
+      {isDm && party.escrow && !dmSettled && left > 0 && (
         <button
           className="btn primary"
           disabled={busy !== null}
-          onClick={() => void send(`claim_escrow ${formatSol(party.escrow!.collected)}`, payer, async () => {
-                const deaths = await deathAccountsOf(s);
-                return withDeaths(deaths, await claimEscrowIx(payer!, party.address, s.core.map, deaths));
-              }).then((r) => r && ingest(r.signature, r.events as never[]))}
+          onClick={() => run(`settle_party ${formatSol(party.escrow!.collected)}`, () => settlePartyIx(payer!, party.address, s))}
         >
-          Claim escrow ({formatSol(party.escrow.collected)})
+          Hand out the rewards and take {formatSol(party.escrow.collected)}
         </button>
       )}
-      {party.escrow?.claimed && <p className="ok">The DM took {formatSol(party.escrow.collected)} from the escrow; the map is finished.</p>}
+      {dmSettled && <p className="ok">The DM handed out the rewards and took {formatSol(party.escrow!.collected)}; the map is finished.</p>}
     </div>
   );
 }
+
+/** `h:mm:ss` of `secs`. */
+function formatDuration(secs: number): string {
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const sec = secs % 60;
+  return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+}
+
+/** Compute limit of a settlement: deaths to finalize and two character CPIs per player. */
+const SETTLE_CU = 1_000_000;
 
 /**
  * This browser's session key for the party (docs/GAME_COMMISSIONS.md 6.2, 8): top up while

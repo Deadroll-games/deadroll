@@ -10,7 +10,9 @@
     {
       "name": "create_map",
       "docs": [
-        "DM creates an empty draft map and its layout."
+        "DM creates an empty draft map and its layout.",
+        "Patch 11: `settings` holds the minimum players, the chest radius and the DM's time to",
+        "settle."
       ],
       "discriminator": [
         119,
@@ -96,6 +98,14 @@
         {
           "name": "tier",
           "type": "u8"
+        },
+        {
+          "name": "settings",
+          "type": {
+            "defined": {
+              "name": "MapSettings"
+            }
+          }
         }
       ]
     },
@@ -177,6 +187,10 @@
         {
           "name": "monster_skills",
           "address": "NQNEuKDUZhACnTJ9sD3dW49BoiPtJPatp6bpY61r81p"
+        },
+        {
+          "name": "rewards",
+          "address": "FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK"
         }
       ],
       "args": [
@@ -304,6 +318,92 @@
               "name": "MapStatus"
             }
           }
+        }
+      ]
+    },
+    {
+      "name": "write_chests",
+      "docs": [
+        "Patch 11: DM replaces the visible chests and the boss reward table of a draft layout."
+      ],
+      "discriminator": [
+        177,
+        205,
+        124,
+        214,
+        126,
+        159,
+        193,
+        17
+      ],
+      "accounts": [
+        {
+          "name": "dm",
+          "signer": true
+        },
+        {
+          "name": "map",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  112
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "map.core.dm",
+                "account": "Map"
+              },
+              {
+                "kind": "account",
+                "path": "map.core.index",
+                "account": "Map"
+              }
+            ]
+          }
+        },
+        {
+          "name": "layout",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  97,
+                  121,
+                  111,
+                  117,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "map"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "chests",
+          "type": {
+            "vec": {
+              "defined": {
+                "name": "MapPoint"
+              }
+            }
+          }
+        },
+        {
+          "name": "boss_table",
+          "type": "u8"
         }
       ]
     },
@@ -515,6 +615,19 @@
     }
   ],
   "events": [
+    {
+      "name": "ChestsWritten",
+      "discriminator": [
+        118,
+        214,
+        152,
+        68,
+        126,
+        226,
+        252,
+        157
+      ]
+    },
     {
       "name": "LayoutWritten",
       "discriminator": [
@@ -761,6 +874,76 @@
       "code": 6035,
       "name": "InvalidRegistryTable",
       "msg": "Account is not the registry bestiary or monster skills table"
+    },
+    {
+      "code": 6036,
+      "name": "MinPlayersOutOfRange",
+      "msg": "Minimum players of the map is outside 1..=4"
+    },
+    {
+      "code": 6037,
+      "name": "TooManyChests",
+      "msg": "Too many visible chests for the map tier"
+    },
+    {
+      "code": 6038,
+      "name": "InvalidPoint",
+      "msg": "A map point is not a visible chest"
+    },
+    {
+      "code": 6039,
+      "name": "ChestOutOfBounds",
+      "msg": "Chest is outside the map"
+    },
+    {
+      "code": 6040,
+      "name": "ChestNotPassable",
+      "msg": "Chest stands on a cell that cannot be entered"
+    },
+    {
+      "code": 6041,
+      "name": "ChestOverlap",
+      "msg": "Chest shares a cell with the entrance, the exit, a spawn or another chest"
+    },
+    {
+      "code": 6042,
+      "name": "UnknownTable",
+      "msg": "Unknown reward table"
+    },
+    {
+      "code": 6043,
+      "name": "TableNotAllowed",
+      "msg": "Reward table is not allowed on this map tier"
+    },
+    {
+      "code": 6044,
+      "name": "BossTableMissing",
+      "msg": "The boss needs a reward table"
+    },
+    {
+      "code": 6045,
+      "name": "BossTableOneLevel",
+      "msg": "The boss reward table needs at least two levels"
+    },
+    {
+      "code": 6046,
+      "name": "OverBudget",
+      "msg": "Chests and boss cost more than the reward budget"
+    },
+    {
+      "code": 6047,
+      "name": "ChestUnreachable",
+      "msg": "No cell next to a chest can be reached from the entrance"
+    },
+    {
+      "code": 6048,
+      "name": "ChestRadiusOutOfRange",
+      "msg": "The chest radius is outside the limits (LootTuning.chest_radius_min..=max)"
+    },
+    {
+      "code": 6049,
+      "name": "SettleTimeoutOutOfRange",
+      "msg": "The time to settle is outside the limits (at most LootTuning.settle_timeout_max_secs)"
     }
   ],
   "types": [
@@ -778,6 +961,29 @@
           },
           {
             "name": "y",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ChestsWritten",
+      "docs": [
+        "Patch 11."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "map",
+            "type": "pubkey"
+          },
+          {
+            "name": "chest_count",
+            "type": "u8"
+          },
+          {
+            "name": "boss_table",
             "type": "u8"
           }
         ]
@@ -825,6 +1031,30 @@
               "Map tier: monster levels and limits (`deadroll_mapcheck::limits`)."
             ],
             "type": "u8"
+          },
+          {
+            "name": "min_players",
+            "docs": [
+              "Patch 11: the party size the reward budget is checked for (docs/PARTY_AND_TURNS.md 3.1,",
+              "9.2): the party does not start with fewer players."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "chest_radius",
+            "docs": [
+              "Patch 11, set by the DM: no living monster within this many cells (Chebyshev) of a chest",
+              "or of any living player when the chest opens."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "settle_timeout_secs",
+            "docs": [
+              "Patch 11, set by the DM: seconds the DM has after a party ends to issue the rewards",
+              "(`settle_party`); then each player claims their own."
+            ],
+            "type": "u32"
           }
         ]
       }
@@ -857,6 +1087,21 @@
           {
             "name": "tier",
             "type": "u8"
+          },
+          {
+            "name": "min_players",
+            "docs": [
+              "Patch 11."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "chest_radius",
+            "type": "u8"
+          },
+          {
+            "name": "settle_timeout_secs",
+            "type": "u32"
           }
         ]
       }
@@ -1039,6 +1284,101 @@
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "chests",
+            "docs": [
+              "Visible chests, `0..chest_count` used: `data` is the reward table id."
+            ],
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "MapPoint"
+                  }
+                },
+                4
+              ]
+            }
+          },
+          {
+            "name": "chest_count",
+            "type": "u8"
+          },
+          {
+            "name": "boss_table",
+            "docs": [
+              "The reward table of the boss (registry `Rewards` id, `NO_TABLE` = none)."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MapPoint",
+      "docs": [
+        "Patch 11: a map point `(type, x, y, data)` (docs/MAP_DESCRIPTION.md 7.1)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "kind",
+            "type": {
+              "defined": {
+                "name": "PointKind"
+              }
+            }
+          },
+          {
+            "name": "x",
+            "type": "u8"
+          },
+          {
+            "name": "y",
+            "type": "u8"
+          },
+          {
+            "name": "data",
+            "docs": [
+              "A visible chest: its reward table id."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MapSettings",
+      "docs": [
+        "Patch 11: what a DM sets for a map at `create_map` besides its size and tier."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "min_players",
+            "docs": [
+              "The party size the reward budget is checked for; the party does not start with fewer."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "chest_radius",
+            "docs": [
+              "No living monster within this many cells (Chebyshev) of a chest or of any living player",
+              "when the chest opens (`LootTuning.chest_radius_min..=max`)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "settle_timeout_secs",
+            "docs": [
+              "Seconds the DM has after a party ends to issue the rewards (`settle_party`); then each",
+              "player claims their own (`LootTuning.settle_timeout_*`)."
+            ],
+            "type": "u32"
           }
         ]
       }
@@ -1090,6 +1430,24 @@
                 "name": "MapStatus"
               }
             }
+          }
+        ]
+      }
+    },
+    {
+      "name": "PointKind",
+      "docs": [
+        "A map point type (`MapPoint.kind`, docs/MAP_DESCRIPTION.md 7.1). The entrance and the exit",
+        "stay in `MapLayoutData.entrance` / `exit`; only visible chests are points for now."
+      ],
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Chest"
           }
         ]
       }

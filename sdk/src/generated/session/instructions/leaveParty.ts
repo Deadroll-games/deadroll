@@ -34,65 +34,47 @@ import {
 } from "@solana/kit";
 import {
   getAccountMetaFactory,
-  getAddressFromResolvedInstructionAccount,
   type InstructionAccountInput,
   type InstructionAccountInputAddress,
   type InstructionSignerInput,
   type ResolvedInstructionAccount,
   type ResolvedInstructionAccountMeta,
 } from "@solana/program-client-core";
-import {
-  findParticipationPda,
-  findSessionAuthorityPda,
-  findStashPda,
-} from "../pdas/index.js";
+import { findSessionAuthorityPda } from "../pdas/index.js";
 import { DEADROLL_SESSION_PROGRAM_ADDRESS } from "../programs/index.js";
 
-export const CLAIM_REWARDS_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Array([
-  4, 144, 132, 71, 116, 23, 151, 80,
+export const LEAVE_PARTY_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Array([
+  180, 131, 70, 106, 109, 232, 0, 255,
 ]);
 
-export function getClaimRewardsDiscriminatorBytes(): ReadonlyUint8Array {
-  return fixEncoderSize(getBytesEncoder(), 8).encode(
-    CLAIM_REWARDS_DISCRIMINATOR,
-  );
+export function getLeavePartyDiscriminatorBytes(): ReadonlyUint8Array {
+  return fixEncoderSize(getBytesEncoder(), 8).encode(LEAVE_PARTY_DISCRIMINATOR);
 }
 
-export type ClaimRewardsInstruction<
+export type LeavePartyInstruction<
   TProgram extends string = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
-  TAccountSigner extends string | AccountMeta<string> = string,
+  TAccountOwner extends string | AccountMeta<string> = string,
   TAccountSession extends string | AccountMeta<string> = string,
-  TAccountParticipation extends string | AccountMeta<string> = string,
-  TAccountStash extends string | AccountMeta<string> = string,
   TAccountCharacter extends string | AccountMeta<string> = string,
-  TAccountBag extends string | AccountMeta<string> = string,
   TAccountSessionAuthority extends string | AccountMeta<string> = string,
   TAccountConfig extends string | AccountMeta<string> = string,
   TAccountCharacterProgram extends string | AccountMeta<string> =
     "9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL",
-  TAccountSessionToken extends string | AccountMeta<string> = string,
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
 > = Instruction<TProgram> &
   InstructionWithData<ReadonlyUint8Array> &
   InstructionWithAccounts<
     [
-      TAccountSigner extends string
-        ? ReadonlySignerAccount<TAccountSigner> &
-            AccountSignerMeta<TAccountSigner>
-        : TAccountSigner,
+      TAccountOwner extends string
+        ? ReadonlySignerAccount<TAccountOwner> &
+            AccountSignerMeta<TAccountOwner>
+        : TAccountOwner,
       TAccountSession extends string
-        ? WritableAccount<TAccountSession>
+        ? ReadonlyAccount<TAccountSession>
         : TAccountSession,
-      TAccountParticipation extends string
-        ? ReadonlyAccount<TAccountParticipation>
-        : TAccountParticipation,
-      TAccountStash extends string
-        ? WritableAccount<TAccountStash>
-        : TAccountStash,
       TAccountCharacter extends string
         ? WritableAccount<TAccountCharacter>
         : TAccountCharacter,
-      TAccountBag extends string ? WritableAccount<TAccountBag> : TAccountBag,
       TAccountSessionAuthority extends string
         ? ReadonlyAccount<TAccountSessionAuthority>
         : TAccountSessionAuthority,
@@ -102,122 +84,89 @@ export type ClaimRewardsInstruction<
       TAccountCharacterProgram extends string
         ? ReadonlyAccount<TAccountCharacterProgram>
         : TAccountCharacterProgram,
-      TAccountSessionToken extends string
-        ? ReadonlyAccount<TAccountSessionToken>
-        : TAccountSessionToken,
       ...TRemainingAccounts,
     ]
   >;
 
-export type ClaimRewardsInstructionData = { discriminator: ReadonlyUint8Array };
+export type LeavePartyInstructionData = { discriminator: ReadonlyUint8Array };
 
-export type ClaimRewardsInstructionDataArgs = {};
+export type LeavePartyInstructionDataArgs = {};
 
-export function getClaimRewardsInstructionDataEncoder(): FixedSizeEncoder<ClaimRewardsInstructionDataArgs> {
+export function getLeavePartyInstructionDataEncoder(): FixedSizeEncoder<LeavePartyInstructionDataArgs> {
   return transformEncoder(
     getStructEncoder([["discriminator", fixEncoderSize(getBytesEncoder(), 8)]]),
-    (value) => ({ ...value, discriminator: CLAIM_REWARDS_DISCRIMINATOR }),
+    (value) => ({ ...value, discriminator: LEAVE_PARTY_DISCRIMINATOR }),
   );
 }
 
-export function getClaimRewardsInstructionDataDecoder(): FixedSizeDecoder<ClaimRewardsInstructionData> {
+export function getLeavePartyInstructionDataDecoder(): FixedSizeDecoder<LeavePartyInstructionData> {
   return getStructDecoder([
     ["discriminator", fixDecoderSize(getBytesDecoder(), 8)],
   ]);
 }
 
-export function getClaimRewardsInstructionDataCodec(): FixedSizeCodec<
-  ClaimRewardsInstructionDataArgs,
-  ClaimRewardsInstructionData
+export function getLeavePartyInstructionDataCodec(): FixedSizeCodec<
+  LeavePartyInstructionDataArgs,
+  LeavePartyInstructionData
 > {
   return combineCodec(
-    getClaimRewardsInstructionDataEncoder(),
-    getClaimRewardsInstructionDataDecoder(),
+    getLeavePartyInstructionDataEncoder(),
+    getLeavePartyInstructionDataDecoder(),
   );
 }
 
-export type ClaimRewardsAsyncInput<
-  TAccountSigner extends InstructionSignerInput = InstructionSignerInput,
+export type LeavePartyAsyncInput<
+  TAccountOwner extends InstructionSignerInput = InstructionSignerInput,
   TAccountSession extends InstructionAccountInput = InstructionAccountInput,
-  TAccountParticipation extends InstructionAccountInput =
-    InstructionAccountInput,
-  TAccountStash extends InstructionAccountInput = InstructionAccountInput,
   TAccountCharacter extends InstructionAccountInput = InstructionAccountInput,
-  TAccountBag extends InstructionAccountInput = InstructionAccountInput,
   TAccountSessionAuthority extends InstructionAccountInput =
     InstructionAccountInput,
   TAccountConfig extends InstructionAccountInput = InstructionAccountInput,
   TAccountCharacterProgram extends InstructionAccountInput =
     InstructionAccountInput,
-  TAccountSessionToken extends InstructionAccountInput =
-    InstructionAccountInput,
 > = {
-  /** The character's owner (the participation's `player`) or its session key. */
-  signer: TAccountSigner;
+  /** The character's owner, main wallet. */
+  owner: TAccountOwner;
   session: TAccountSession;
-  participation?: TAccountParticipation;
-  stash?: TAccountStash;
+  /** written by the unlock CPI. */
   character: TAccountCharacter;
-  bag: TAccountBag;
   sessionAuthority?: TAccountSessionAuthority;
   config?: TAccountConfig;
   characterProgram?: TAccountCharacterProgram;
-  /** MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs. */
-  sessionToken?: TAccountSessionToken;
 };
 
-export async function getClaimRewardsInstructionAsync<
-  TAccountSigner extends InstructionSignerInput,
+export async function getLeavePartyInstructionAsync<
+  TAccountOwner extends InstructionSignerInput,
   TAccountSession extends InstructionAccountInput,
-  TAccountParticipation extends InstructionAccountInput,
-  TAccountStash extends InstructionAccountInput,
   TAccountCharacter extends InstructionAccountInput,
-  TAccountBag extends InstructionAccountInput,
   TAccountSessionAuthority extends InstructionAccountInput,
   TAccountConfig extends InstructionAccountInput,
   TAccountCharacterProgram extends InstructionAccountInput,
-  TAccountSessionToken extends InstructionAccountInput,
   TProgramAddress extends Address = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
 >(
-  input: ClaimRewardsAsyncInput<
-    TAccountSigner,
+  input: LeavePartyAsyncInput<
+    TAccountOwner,
     TAccountSession,
-    TAccountParticipation,
-    TAccountStash,
     TAccountCharacter,
-    TAccountBag,
     TAccountSessionAuthority,
     TAccountConfig,
-    TAccountCharacterProgram,
-    TAccountSessionToken
+    TAccountCharacterProgram
   >,
   config?: { programAddress?: TProgramAddress },
 ): Promise<
-  ClaimRewardsInstruction<
+  LeavePartyInstruction<
     TProgramAddress,
     ResolvedInstructionAccountMeta<
-      TAccountSigner,
-      InstructionAccountInputAddress<TAccountSigner>
+      TAccountOwner,
+      InstructionAccountInputAddress<TAccountOwner>
     >,
     ResolvedInstructionAccountMeta<
       TAccountSession,
       InstructionAccountInputAddress<TAccountSession>
     >,
     ResolvedInstructionAccountMeta<
-      TAccountParticipation,
-      InstructionAccountInputAddress<TAccountParticipation>
-    >,
-    ResolvedInstructionAccountMeta<
-      TAccountStash,
-      InstructionAccountInputAddress<TAccountStash>
-    >,
-    ResolvedInstructionAccountMeta<
       TAccountCharacter,
       InstructionAccountInputAddress<TAccountCharacter>
-    >,
-    ResolvedInstructionAccountMeta<
-      TAccountBag,
-      InstructionAccountInputAddress<TAccountBag>
     >,
     ResolvedInstructionAccountMeta<
       TAccountSessionAuthority,
@@ -230,10 +179,6 @@ export async function getClaimRewardsInstructionAsync<
     ResolvedInstructionAccountMeta<
       TAccountCharacterProgram,
       InstructionAccountInputAddress<TAccountCharacterProgram>
-    >,
-    ResolvedInstructionAccountMeta<
-      TAccountSessionToken,
-      InstructionAccountInputAddress<TAccountSessionToken>
     >
   >
 > {
@@ -246,24 +191,17 @@ export async function getClaimRewardsInstructionAsync<
 
   // Original accounts.
   const originalAccounts = {
-    signer: { value: input.signer ?? null, isSigner: true, isWritable: false },
+    owner: { value: input.owner ?? null, isSigner: true, isWritable: false },
     session: {
       value: input.session ?? null,
       isSigner: false,
-      isWritable: true,
-    },
-    participation: {
-      value: input.participation ?? null,
-      isSigner: false,
       isWritable: false,
     },
-    stash: { value: input.stash ?? null, isSigner: false, isWritable: true },
     character: {
       value: input.character ?? null,
       isSigner: false,
       isWritable: true,
     },
-    bag: { value: input.bag ?? null, isSigner: false, isWritable: true },
     sessionAuthority: {
       value: input.sessionAuthority ?? null,
       isSigner: false,
@@ -275,11 +213,6 @@ export async function getClaimRewardsInstructionAsync<
       isSigner: false,
       isWritable: false,
     },
-    sessionToken: {
-      value: input.sessionToken ?? null,
-      isSigner: false,
-      isWritable: false,
-    },
   };
   const accounts = originalAccounts as Record<
     keyof typeof originalAccounts,
@@ -287,36 +220,6 @@ export async function getClaimRewardsInstructionAsync<
   >;
 
   // Resolve default values.
-  if (!accounts.participation.value) {
-    accounts.participation.value = await findParticipationPda(
-      {
-        session: getAddressFromResolvedInstructionAccount(
-          "session",
-          accounts.session.value,
-        ),
-        character: getAddressFromResolvedInstructionAccount(
-          "character",
-          accounts.character.value,
-        ),
-      },
-      { programAddress },
-    );
-  }
-  if (!accounts.stash.value) {
-    accounts.stash.value = await findStashPda(
-      {
-        session: getAddressFromResolvedInstructionAccount(
-          "session",
-          accounts.session.value,
-        ),
-        character: getAddressFromResolvedInstructionAccount(
-          "character",
-          accounts.character.value,
-        ),
-      },
-      { programAddress },
-    );
-  }
   if (!accounts.sessionAuthority.value) {
     accounts.sessionAuthority.value = await findSessionAuthorityPda({
       programAddress,
@@ -338,44 +241,28 @@ export async function getClaimRewardsInstructionAsync<
 
   return Object.freeze({
     accounts: [
-      getAccountMeta("signer", accounts.signer),
+      getAccountMeta("owner", accounts.owner),
       getAccountMeta("session", accounts.session),
-      getAccountMeta("participation", accounts.participation),
-      getAccountMeta("stash", accounts.stash),
       getAccountMeta("character", accounts.character),
-      getAccountMeta("bag", accounts.bag),
       getAccountMeta("sessionAuthority", accounts.sessionAuthority),
       getAccountMeta("config", accounts.config),
       getAccountMeta("characterProgram", accounts.characterProgram),
-      getAccountMeta("sessionToken", accounts.sessionToken),
     ],
-    data: getClaimRewardsInstructionDataEncoder().encode({}),
+    data: getLeavePartyInstructionDataEncoder().encode({}),
     programAddress,
-  } as ClaimRewardsInstruction<
+  } as LeavePartyInstruction<
     TProgramAddress,
     ResolvedInstructionAccountMeta<
-      TAccountSigner,
-      InstructionAccountInputAddress<TAccountSigner>
+      TAccountOwner,
+      InstructionAccountInputAddress<TAccountOwner>
     >,
     ResolvedInstructionAccountMeta<
       TAccountSession,
       InstructionAccountInputAddress<TAccountSession>
     >,
     ResolvedInstructionAccountMeta<
-      TAccountParticipation,
-      InstructionAccountInputAddress<TAccountParticipation>
-    >,
-    ResolvedInstructionAccountMeta<
-      TAccountStash,
-      InstructionAccountInputAddress<TAccountStash>
-    >,
-    ResolvedInstructionAccountMeta<
       TAccountCharacter,
       InstructionAccountInputAddress<TAccountCharacter>
-    >,
-    ResolvedInstructionAccountMeta<
-      TAccountBag,
-      InstructionAccountInputAddress<TAccountBag>
     >,
     ResolvedInstructionAccountMeta<
       TAccountSessionAuthority,
@@ -388,95 +275,61 @@ export async function getClaimRewardsInstructionAsync<
     ResolvedInstructionAccountMeta<
       TAccountCharacterProgram,
       InstructionAccountInputAddress<TAccountCharacterProgram>
-    >,
-    ResolvedInstructionAccountMeta<
-      TAccountSessionToken,
-      InstructionAccountInputAddress<TAccountSessionToken>
     >
   >);
 }
 
-export type ClaimRewardsInput<
-  TAccountSigner extends InstructionSignerInput = InstructionSignerInput,
+export type LeavePartyInput<
+  TAccountOwner extends InstructionSignerInput = InstructionSignerInput,
   TAccountSession extends InstructionAccountInput = InstructionAccountInput,
-  TAccountParticipation extends InstructionAccountInput =
-    InstructionAccountInput,
-  TAccountStash extends InstructionAccountInput = InstructionAccountInput,
   TAccountCharacter extends InstructionAccountInput = InstructionAccountInput,
-  TAccountBag extends InstructionAccountInput = InstructionAccountInput,
   TAccountSessionAuthority extends InstructionAccountInput =
     InstructionAccountInput,
   TAccountConfig extends InstructionAccountInput = InstructionAccountInput,
   TAccountCharacterProgram extends InstructionAccountInput =
     InstructionAccountInput,
-  TAccountSessionToken extends InstructionAccountInput =
-    InstructionAccountInput,
 > = {
-  /** The character's owner (the participation's `player`) or its session key. */
-  signer: TAccountSigner;
+  /** The character's owner, main wallet. */
+  owner: TAccountOwner;
   session: TAccountSession;
-  participation: TAccountParticipation;
-  stash: TAccountStash;
+  /** written by the unlock CPI. */
   character: TAccountCharacter;
-  bag: TAccountBag;
   sessionAuthority: TAccountSessionAuthority;
   config: TAccountConfig;
   characterProgram?: TAccountCharacterProgram;
-  /** MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs. */
-  sessionToken?: TAccountSessionToken;
 };
 
-export function getClaimRewardsInstruction<
-  TAccountSigner extends InstructionSignerInput,
+export function getLeavePartyInstruction<
+  TAccountOwner extends InstructionSignerInput,
   TAccountSession extends InstructionAccountInput,
-  TAccountParticipation extends InstructionAccountInput,
-  TAccountStash extends InstructionAccountInput,
   TAccountCharacter extends InstructionAccountInput,
-  TAccountBag extends InstructionAccountInput,
   TAccountSessionAuthority extends InstructionAccountInput,
   TAccountConfig extends InstructionAccountInput,
   TAccountCharacterProgram extends InstructionAccountInput,
-  TAccountSessionToken extends InstructionAccountInput,
   TProgramAddress extends Address = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
 >(
-  input: ClaimRewardsInput<
-    TAccountSigner,
+  input: LeavePartyInput<
+    TAccountOwner,
     TAccountSession,
-    TAccountParticipation,
-    TAccountStash,
     TAccountCharacter,
-    TAccountBag,
     TAccountSessionAuthority,
     TAccountConfig,
-    TAccountCharacterProgram,
-    TAccountSessionToken
+    TAccountCharacterProgram
   >,
   config?: { programAddress?: TProgramAddress },
-): ClaimRewardsInstruction<
+): LeavePartyInstruction<
   TProgramAddress,
   ResolvedInstructionAccountMeta<
-    TAccountSigner,
-    InstructionAccountInputAddress<TAccountSigner>
+    TAccountOwner,
+    InstructionAccountInputAddress<TAccountOwner>
   >,
   ResolvedInstructionAccountMeta<
     TAccountSession,
     InstructionAccountInputAddress<TAccountSession>
   >,
   ResolvedInstructionAccountMeta<
-    TAccountParticipation,
-    InstructionAccountInputAddress<TAccountParticipation>
-  >,
-  ResolvedInstructionAccountMeta<
-    TAccountStash,
-    InstructionAccountInputAddress<TAccountStash>
-  >,
-  ResolvedInstructionAccountMeta<
     TAccountCharacter,
     InstructionAccountInputAddress<TAccountCharacter>
-  >,
-  ResolvedInstructionAccountMeta<
-    TAccountBag,
-    InstructionAccountInputAddress<TAccountBag>
   >,
   ResolvedInstructionAccountMeta<
     TAccountSessionAuthority,
@@ -489,10 +342,6 @@ export function getClaimRewardsInstruction<
   ResolvedInstructionAccountMeta<
     TAccountCharacterProgram,
     InstructionAccountInputAddress<TAccountCharacterProgram>
-  >,
-  ResolvedInstructionAccountMeta<
-    TAccountSessionToken,
-    InstructionAccountInputAddress<TAccountSessionToken>
   >
 > {
   // Program address.
@@ -504,24 +353,17 @@ export function getClaimRewardsInstruction<
 
   // Original accounts.
   const originalAccounts = {
-    signer: { value: input.signer ?? null, isSigner: true, isWritable: false },
+    owner: { value: input.owner ?? null, isSigner: true, isWritable: false },
     session: {
       value: input.session ?? null,
       isSigner: false,
-      isWritable: true,
-    },
-    participation: {
-      value: input.participation ?? null,
-      isSigner: false,
       isWritable: false,
     },
-    stash: { value: input.stash ?? null, isSigner: false, isWritable: true },
     character: {
       value: input.character ?? null,
       isSigner: false,
       isWritable: true,
     },
-    bag: { value: input.bag ?? null, isSigner: false, isWritable: true },
     sessionAuthority: {
       value: input.sessionAuthority ?? null,
       isSigner: false,
@@ -530,11 +372,6 @@ export function getClaimRewardsInstruction<
     config: { value: input.config ?? null, isSigner: false, isWritable: false },
     characterProgram: {
       value: input.characterProgram ?? null,
-      isSigner: false,
-      isWritable: false,
-    },
-    sessionToken: {
-      value: input.sessionToken ?? null,
       isSigner: false,
       isWritable: false,
     },
@@ -552,44 +389,28 @@ export function getClaimRewardsInstruction<
 
   return Object.freeze({
     accounts: [
-      getAccountMeta("signer", accounts.signer),
+      getAccountMeta("owner", accounts.owner),
       getAccountMeta("session", accounts.session),
-      getAccountMeta("participation", accounts.participation),
-      getAccountMeta("stash", accounts.stash),
       getAccountMeta("character", accounts.character),
-      getAccountMeta("bag", accounts.bag),
       getAccountMeta("sessionAuthority", accounts.sessionAuthority),
       getAccountMeta("config", accounts.config),
       getAccountMeta("characterProgram", accounts.characterProgram),
-      getAccountMeta("sessionToken", accounts.sessionToken),
     ],
-    data: getClaimRewardsInstructionDataEncoder().encode({}),
+    data: getLeavePartyInstructionDataEncoder().encode({}),
     programAddress,
-  } as ClaimRewardsInstruction<
+  } as LeavePartyInstruction<
     TProgramAddress,
     ResolvedInstructionAccountMeta<
-      TAccountSigner,
-      InstructionAccountInputAddress<TAccountSigner>
+      TAccountOwner,
+      InstructionAccountInputAddress<TAccountOwner>
     >,
     ResolvedInstructionAccountMeta<
       TAccountSession,
       InstructionAccountInputAddress<TAccountSession>
     >,
     ResolvedInstructionAccountMeta<
-      TAccountParticipation,
-      InstructionAccountInputAddress<TAccountParticipation>
-    >,
-    ResolvedInstructionAccountMeta<
-      TAccountStash,
-      InstructionAccountInputAddress<TAccountStash>
-    >,
-    ResolvedInstructionAccountMeta<
       TAccountCharacter,
       InstructionAccountInputAddress<TAccountCharacter>
-    >,
-    ResolvedInstructionAccountMeta<
-      TAccountBag,
-      InstructionAccountInputAddress<TAccountBag>
     >,
     ResolvedInstructionAccountMeta<
       TAccountSessionAuthority,
@@ -602,50 +423,42 @@ export function getClaimRewardsInstruction<
     ResolvedInstructionAccountMeta<
       TAccountCharacterProgram,
       InstructionAccountInputAddress<TAccountCharacterProgram>
-    >,
-    ResolvedInstructionAccountMeta<
-      TAccountSessionToken,
-      InstructionAccountInputAddress<TAccountSessionToken>
     >
   >);
 }
 
-export type ParsedClaimRewardsInstruction<
+export type ParsedLeavePartyInstruction<
   TProgram extends string = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
   TAccountMetas extends readonly AccountMeta[] = readonly AccountMeta[],
 > = {
   programAddress: Address<TProgram>;
   accounts: {
-    /** The character's owner (the participation's `player`) or its session key. */
-    signer: TAccountMetas[0];
+    /** The character's owner, main wallet. */
+    owner: TAccountMetas[0];
     session: TAccountMetas[1];
-    participation: TAccountMetas[2];
-    stash: TAccountMetas[3];
-    character: TAccountMetas[4];
-    bag: TAccountMetas[5];
-    sessionAuthority: TAccountMetas[6];
-    config: TAccountMetas[7];
-    characterProgram: TAccountMetas[8];
-    /** MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs. */
-    sessionToken?: TAccountMetas[9] | undefined;
+    /** written by the unlock CPI. */
+    character: TAccountMetas[2];
+    sessionAuthority: TAccountMetas[3];
+    config: TAccountMetas[4];
+    characterProgram: TAccountMetas[5];
   };
-  data: ClaimRewardsInstructionData;
+  data: LeavePartyInstructionData;
 };
 
-export function parseClaimRewardsInstruction<
+export function parseLeavePartyInstruction<
   TProgram extends string,
   TAccountMetas extends readonly AccountMeta[],
 >(
   instruction: Instruction<TProgram> &
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
-): ParsedClaimRewardsInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 10) {
+): ParsedLeavePartyInstruction<TProgram, TAccountMetas> {
+  if (instruction.accounts.length < 6) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 10,
+        expectedAccountMetas: 6,
       },
     );
   }
@@ -655,26 +468,16 @@ export function parseClaimRewardsInstruction<
     accountIndex += 1;
     return accountMeta;
   };
-  const getNextOptionalAccount = () => {
-    const accountMeta = getNextAccount();
-    return accountMeta.address === DEADROLL_SESSION_PROGRAM_ADDRESS
-      ? undefined
-      : accountMeta;
-  };
   return {
     programAddress: instruction.programAddress,
     accounts: {
-      signer: getNextAccount(),
+      owner: getNextAccount(),
       session: getNextAccount(),
-      participation: getNextAccount(),
-      stash: getNextAccount(),
       character: getNextAccount(),
-      bag: getNextAccount(),
       sessionAuthority: getNextAccount(),
       config: getNextAccount(),
       characterProgram: getNextAccount(),
-      sessionToken: getNextOptionalAccount(),
     },
-    data: getClaimRewardsInstructionDataDecoder().decode(instruction.data),
+    data: getLeavePartyInstructionDataDecoder().decode(instruction.data),
   };
 }

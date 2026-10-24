@@ -5,7 +5,7 @@
 use anchor_lang::prelude::*;
 use deadroll_combat::tables::{self, decode_aspect, decode_pair, decode_trait};
 use deadroll_skillcheck::{monster, SkillTuning};
-use deadroll_types::{seeds, Aspect, Form, Source, StateKind, Tile};
+use deadroll_types::{seeds, Aspect, Form, Source, StateKind, Tile, NO_TABLE};
 
 /// Which table an instruction works on. Discriminants are part of the format: append only.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -20,6 +20,8 @@ pub enum TableKind {
     Traits,
     /// Monster skills (docs/BESTIARY.md 3), patch 6: the records the bestiary pools point at.
     MonsterSkills,
+    /// Reward tables (docs/PARTY_AND_TURNS.md 9.2), patch 11: `deadroll_rules::loot::record`.
+    Rewards,
 }
 
 impl TableKind {
@@ -32,6 +34,7 @@ impl TableKind {
             4 => Self::Prefabs,
             5 => Self::Traits,
             6 => Self::MonsterSkills,
+            7 => Self::Rewards,
             _ => return None,
         })
     }
@@ -46,6 +49,7 @@ impl TableKind {
             Self::Prefabs => seeds::PREFABS,
             Self::Traits => seeds::TRAITS,
             Self::MonsterSkills => seeds::MONSTER_SKILLS,
+            Self::Rewards => seeds::REWARDS,
         }
     }
 
@@ -59,6 +63,7 @@ impl TableKind {
             Self::Prefabs => 1,
             Self::Traits => TRAIT_SIZE,
             Self::MonsterSkills => MONSTER_SKILL_SIZE,
+            Self::Rewards => REWARD_SIZE,
         }
     }
 
@@ -72,6 +77,7 @@ impl TableKind {
             Self::Prefabs => crate::state::TABLE_CAP,
             Self::Traits => tables::TRAITS_LEN,
             Self::MonsterSkills => MONSTER_SKILLS_MAX * MONSTER_SKILL_SIZE,
+            Self::Rewards => REWARDS_MAX * REWARD_SIZE,
         }
     }
 }
@@ -86,6 +92,9 @@ pub const BESTIARY_MAX: usize = 32;
 /// Monster skill records (`deadroll_skillcheck::monster`): 128 x 32 B.
 pub const MONSTER_SKILL_SIZE: usize = monster::RECORD_SIZE;
 pub const MONSTER_SKILLS_MAX: usize = monster::RECORDS_MAX;
+/// Patch 11: reward table records (`deadroll_rules::loot::record`), table id = record index.
+pub const REWARD_SIZE: usize = deadroll_rules::loot::record::SIZE;
+pub const REWARDS_MAX: usize = deadroll_rules::loot::record::RECORDS_MAX;
 
 /// `Role` variants in `crates/mapcheck/src/roster.rs`: Swarm, Fast, Tank, Loner, Boss, Helper.
 const ROLES: u8 = 6;
@@ -121,6 +130,8 @@ pub fn validate_record(kind: TableKind, index: usize, r: &[u8]) -> bool {
         TableKind::MonsterSkills => {
             monster::MonsterSkill::decode_record(r, &SkillTuning::DEFAULT).is_ok()
         }
+        // All zero (no table with this id) or a table the session decodes the same way.
+        TableKind::Rewards => deadroll_rules::loot::validate_record(r),
     }
 }
 
@@ -153,7 +164,9 @@ fn validate_monster(r: &[u8]) -> bool {
         // Patch 9: [42] resisted tags, [43] immune tags (sources, then forms).
         && r[42] & !tag_mask == 0
         && r[43] & !tag_mask == 0
-        && r[44..].iter().all(|&b| b == 0)
+        // Patch 11: [44] the body loot table, a reward table id or 0xFF (none).
+        && (r[44] == NO_TABLE || (r[44] as usize) < REWARDS_MAX)
+        && r[45..].iter().all(|&b| b == 0)
         && u16_at(r, 30) <= u16_at(r, 32)
 }
 
@@ -223,12 +236,14 @@ mod tests {
             TableKind::Prefabs,
             TableKind::Traits,
             TableKind::MonsterSkills,
+            TableKind::Rewards,
         ] {
             assert!(k.max_len() <= crate::state::TABLE_CAP);
             assert_eq!(k.max_len() % k.record_size(), 0);
             assert_eq!(TableKind::from_u8(k as u8), Some(k));
         }
-        assert_eq!(TableKind::from_u8(7), None);
+        assert_eq!(TableKind::from_u8(8), None);
+        assert_eq!(TableKind::Rewards.seed(), b"rewards");
         assert_eq!(TableKind::MonsterSkills.seed(), b"monster_skills");
         assert_eq!(TableKind::Traits.seed(), b"traits");
     }
@@ -380,8 +395,40 @@ mod tests {
         assert!(mutate(|r| r[43] = 0b1000), "immune to projectiles");
         assert!(!mutate(|r| r[42] = 0b1_0000), "tag bit past the forms");
         assert!(!mutate(|r| r[43] = 0b1_0000), "tag bit past the forms");
-        assert!(!mutate(|r| r[44] = 1), "reserved byte");
+        assert!(mutate(|r| r[44] = 6), "body loot table");
+        assert!(mutate(|r| r[44] = NO_TABLE), "no body loot");
+        assert!(
+            !mutate(|r| r[44] = REWARDS_MAX as u8),
+            "loot table past the table"
+        );
+        assert!(!mutate(|r| r[45] = 1), "reserved byte");
         assert!(!mutate(|r| r[30] = 9), "damage min above max");
+    }
+
+    #[test]
+    fn reward_records() {
+        use deadroll_rules::loot::{LootEntry, LootTable};
+        let k = TableKind::Rewards;
+        assert!(validate_record(k, 3, &[0; REWARD_SIZE]), "empty id");
+        let mut t = LootTable {
+            level_base: 1,
+            level_max: 1,
+            cost: 2,
+            ..LootTable::default()
+        };
+        t.levels[0].count = 1;
+        t.levels[0].entries[0] = LootEntry {
+            kind: deadroll_types::RewardKind::Resource,
+            id: 3,
+            qty: 2,
+        };
+        let r = t.to_record();
+        assert!(validate_record(k, 0, &r));
+        let mut bad = r;
+        bad[deadroll_rules::loot::record::LEVELS_AT + 4] = 0;
+        assert!(!validate_record(k, 0, &bad), "qty 0");
+        assert!(!validate_record(k, 0, &r[..REWARD_SIZE - 1]));
+        assert_eq!(check_range(k, 0, REWARD_SIZE * REWARDS_MAX), Ok(3456));
     }
 
     #[test]

@@ -7,6 +7,7 @@
 import { describe, expect, it } from "vitest";
 import { generateKeyPairSigner, lamports, type Address, type KeyPairSigner } from "@solana/kit";
 import demoMap from "../../../assets/registry/maps/demo_16x16.json";
+import { chestsOf } from "./loot";
 import { PROGRAMS } from "../config";
 import { client } from "../wallet/client";
 import { createSessionInstruction } from "../session-key/magicblock";
@@ -19,8 +20,9 @@ import {
   SKILL_PRESETS,
   actIx,
   buildMapIxs,
-  claimEscrowIx,
-  claimRewardsIx,
+  closeCacheIx,
+  computeLimitIx,
+  settlePartyIx,
   deathAccountsOf,
   withDeaths,
   consumeIx,
@@ -178,6 +180,8 @@ const taken = (p: Party, moverUnit: number) => {
   const t = new Set<number>();
   p.monsters.forEach((m, i) => m.alive && MONSTER_BASE + i !== moverUnit && t.add(m.y * MAP_MAX + m.x));
   p.players.forEach((pl) => p.session.aliveMask & (1 << pl.slot) && pl.slot !== moverUnit && t.add(pl.part.core.y * MAP_MAX + pl.part.core.x));
+  // Patch 11: a closed chest occupies its cell.
+  for (const c of chestsOf(p.session)) if (!c.opened) t.add(c.y * MAP_MAX + c.x);
   return t;
 };
 const tileCost = (p: Party) => Array.from(p.session.tileCost);
@@ -193,7 +197,7 @@ const afterMonsterMove = async (session: Address, tiles: Uint8Array, mi: number,
 
 describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
   it("plays create -> map -> party -> fight -> death -> victory -> claims", { timeout: 15 * 60_000 }, async () => {
-    const { preset, dm, dmKey, dmActor, players, built, acc, oracle, finalize, party: first } = await openParty([
+    const { preset, dm, dmKey, dmActor, players, acc, oracle, finalize, party: first } = await openParty([
       { cls: Class.Warrior, race: Race.Human, pred: Aspect.Piercing, stats: [10, 7, 5, 8], name: "Bran" },
       { cls: Class.Mage, race: Race.ForestElf, pred: Aspect.Cold, stats: [5, 7, 13, 5], name: "Ilyra" },
     ]);
@@ -333,15 +337,20 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
     expect(mageDied).toBe(true);
     expect(victory).toBe(true);
 
-    // 8. claims
-    // claim_rewards: only the owner (main wallet or its session key), never someone else.
+    // 8. the settlement (patch 11): the DM's main wallet hands out every cache and takes the
+    // escrow; the DM's session key and a player cannot.
     const [owner0, owner1] = [players[0]!, players[1]!];
-    await expect(send(dm, [await claimRewardsIx({ signer: dm, token: null }, acc.session, owner0.character)])).rejects.toThrow(/NotRewardOwner/);
-    await expect(send(owner1.wallet, [await claimRewardsIx({ signer: owner1.wallet, token: null }, acc.session, owner0.character)])).rejects.toThrow(/NotRewardOwner/);
-    await send(owner0.key, [await claimRewardsIx(owner0.actor, acc.session, owner0.character)]);
-    await send(owner1.wallet, [await claimRewardsIx({ signer: owner1.wallet, token: null }, acc.session, owner1.character)]);
-    const evs = await send(dm, [await claimEscrowIx(dm, acc.session, built.map)]);
+    party = (await readParty(acc.session))!;
+    const settle = async (signer: typeof dm) => [computeLimitIx(1_000_000), await settlePartyIx(signer, acc.session, party!.session)];
+    await expect(send(dmKey, await settle(dmKey))).rejects.toThrow(/DmMainWalletOnly/);
+    await expect(send(owner1.wallet, await settle(owner1.wallet))).rejects.toThrow(/NotDm/);
+    const evs = await send(dm, await settle(dm));
     expect(BigInt(evs.find((e) => e.name === "EscrowClaimed")!.data.amount)).toBe(PRICE);
+    expect(evs.filter((e) => e.name === "CacheSettled").length).toBe(2);
+    // "Done" with an empty bag: the cache closes (what was not taken burns).
+    const empty = { kind: 0, id: 0, qty: 0 };
+    const layout = { resources: Array.from({ length: 40 }, () => empty), consumables: Array.from({ length: 5 }, () => empty) };
+    await send(owner0.wallet, [await closeCacheIx(owner0.wallet, owner0.character, acc.session, layout)]);
     party = (await readParty(acc.session))!;
     expect(status(party.session)).toBe("victory");
   });

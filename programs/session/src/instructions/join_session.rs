@@ -5,16 +5,17 @@ use anchor_lang::{
 use deadroll_character::state::MAP_SKILLS;
 use deadroll_skillcheck::NO_SKILL;
 use deadroll_types::{
-    seeds, ActiveState, ParticipationData, SessionStatus, EMPTY_ITEM, EQUIP_SLOTS, PARTY_MAX,
-    STATES_MAX,
+    seeds, ActiveState, CacheStatus, ParticipationData, SessionStatus, EMPTY_ITEM, EQUIP_SLOTS,
+    PARTY_MAX, STATES_MAX,
 };
 
 use crate::{
     errors::SessionError,
     events::PlayerJoined,
+    settlement,
     state::{
-        external::read_character, Escrow, GameSession, Participation, TempStash, ACCOUNT_VERSION,
-        STASH_RESOURCES,
+        external::read_character, CacheEntry, Escrow, GameSession, Participation, RewardCache,
+        ACCOUNT_VERSION, CACHE_PARTIES,
     },
 };
 
@@ -39,14 +40,16 @@ pub struct JoinSession<'info> {
         bump,
     )]
     pub participation: Box<Account<'info, Participation>>,
+    /// Patch 11: the character's reward caches (`RewardCache`), created on its first party; this
+    /// party takes a free entry, and what is no longer safe to keep burns (see the handler).
     #[account(
-        init,
+        init_if_needed,
         payer = player,
-        space = 8 + TempStash::INIT_SPACE,
-        seeds = [seeds::STASH, session.key().as_ref(), character.key().as_ref()],
+        space = 8 + RewardCache::INIT_SPACE,
+        seeds = [seeds::CACHE, character.key().as_ref()],
         bump,
     )]
-    pub stash: Box<Account<'info, TempStash>>,
+    pub reward_cache: Box<Account<'info, RewardCache>>,
     #[account(
         mut,
         seeds = [seeds::ESCROW, session.key().as_ref()],
@@ -64,7 +67,17 @@ pub struct JoinSession<'info> {
 /// Joining takes a place and pays; the character is not locked yet. `set_ready(true)` takes the
 /// skills onto the map, locks the character (its bag and gear freeze) and copies its stats
 /// (docs/PARTY_AND_TURNS.md, 2.1).
-pub fn handler(ctx: Context<JoinSession>, contribution: u64, actor: Pubkey) -> Result<()> {
+///
+/// Patch 11, the character's reward caches (decisions of patch 11): a `Claimed` entry (the owner
+/// did not press "Done") burns; an `Open` entry burns if its party ended and the DM's deadline
+/// passed (the player could have claimed it), else it waits; then this party takes a free entry
+/// (`TooManyPendingParties` if none). `remaining_accounts`: the `GameSession` of every `Open`
+/// entry, in entry order.
+pub fn handler<'info>(
+    ctx: Context<'info, JoinSession<'info>>,
+    contribution: u64,
+    actor: Pubkey,
+) -> Result<()> {
     require_keys_eq!(actor, Pubkey::default(), SessionError::SessionKeyAtReady);
     let accounts = ctx.accounts;
     let game_session = accounts.session.key();
@@ -140,13 +153,25 @@ pub fn handler(ctx: Context<JoinSession>, contribution: u64, actor: Pubkey) -> R
     participation.class_tier = 0;
     participation.skills = [NO_SKILL; MAP_SKILLS];
 
-    let stash = &mut accounts.stash;
-    stash.version = ACCOUNT_VERSION;
-    stash.session = game_session;
-    stash.character = character_key;
-    stash.xp = 0;
-    stash.resources = [0; STASH_RESOURCES];
-    stash.bump = ctx.bumps.stash;
+    // The cache of the party lives in `participation` (zero from `init`) until the settlement.
+    let cache = &mut accounts.reward_cache;
+    if cache.version == 0 {
+        cache.version = ACCOUNT_VERSION;
+        cache.character = character_key;
+        cache.entries = [CacheEntry::EMPTY; CACHE_PARTIES];
+        cache.bump = ctx.bumps.reward_cache;
+    }
+    let burned = refresh_caches(cache, ctx.remaining_accounts, Clock::get()?.unix_timestamp)?;
+    let free = cache
+        .entries
+        .iter_mut()
+        .find(|e| e.status == CacheStatus::Empty)
+        .ok_or(SessionError::TooManyPendingParties)?;
+    *free = CacheEntry {
+        session: game_session,
+        status: CacheStatus::Open,
+        ..CacheEntry::EMPTY
+    };
 
     emit!(PlayerJoined {
         session: game_session,
@@ -155,6 +180,41 @@ pub fn handler(ctx: Context<JoinSession>, contribution: u64, actor: Pubkey) -> R
         slot,
         contribution: paid,
         collected: accounts.escrow.collected,
+        cache_burned: burned,
     });
     Ok(())
+}
+
+/// Burns the entries that are no longer safe to keep (see [`handler`]); returns them, bit per
+/// entry. `sessions`: the `GameSession` of every `Open` entry, in entry order.
+fn refresh_caches<'info>(
+    cache: &mut RewardCache,
+    sessions: &'info [AccountInfo<'info>],
+    now: i64,
+) -> Result<u8> {
+    let open = cache
+        .entries
+        .iter()
+        .filter(|e| e.status == CacheStatus::Open)
+        .count();
+    require!(sessions.len() == open, SessionError::InvalidCacheSessions);
+    let mut sessions = sessions.iter();
+    let mut burned = 0u8;
+    for (i, e) in cache.entries.iter_mut().enumerate() {
+        let burn = match e.status {
+            CacheStatus::Empty => false,
+            CacheStatus::Claimed => true,
+            CacheStatus::Open => {
+                let info = sessions.next().ok_or(SessionError::InvalidCacheSessions)?;
+                require_keys_eq!(*info.key, e.session, SessionError::InvalidCacheSessions);
+                let party = Box::new(Account::<GameSession>::try_from(info)?);
+                settlement::require_ended(&party).is_ok() && now > settlement::deadline(&party)
+            }
+        };
+        if burn {
+            *e = CacheEntry::EMPTY;
+            burned |= 1 << i;
+        }
+    }
+    Ok(burned)
 }

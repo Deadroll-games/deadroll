@@ -89,6 +89,8 @@ export type OpenSessionInstruction<
     "5wvxCqYJgp3gckLyZeNz3md4g8qmRxd7nenhkqtBNXjG",
   TAccountMonsterSkills extends string | AccountMeta<string> =
     "NQNEuKDUZhACnTJ9sD3dW49BoiPtJPatp6bpY61r81p",
+  TAccountRewards extends string | AccountMeta<string> =
+    "FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK",
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
 > = Instruction<TProgram> &
   InstructionWithData<ReadonlyUint8Array> &
@@ -140,6 +142,9 @@ export type OpenSessionInstruction<
       TAccountMonsterSkills extends string
         ? ReadonlyAccount<TAccountMonsterSkills>
         : TAccountMonsterSkills,
+      TAccountRewards extends string
+        ? ReadonlyAccount<TAccountRewards>
+        : TAccountRewards,
       ...TRemainingAccounts,
     ]
   >;
@@ -204,6 +209,7 @@ export type OpenSessionAsyncInput<
   TAccountResonances extends InstructionAccountInput = InstructionAccountInput,
   TAccountMonsterSkills extends InstructionAccountInput =
     InstructionAccountInput,
+  TAccountRewards extends InstructionAccountInput = InstructionAccountInput,
 > = {
   dm: TAccountDm;
   map: TAccountMap;
@@ -223,6 +229,8 @@ export type OpenSessionAsyncInput<
   resonances?: TAccountResonances;
   /** pools, copied into `MonsterState`. */
   monsterSkills?: TAccountMonsterSkills;
+  /** tables, copied into `MonsterState`. */
+  rewards?: TAccountRewards;
   priceLamports: OpenSessionInstructionDataArgs["priceLamports"];
   dmActor: OpenSessionInstructionDataArgs["dmActor"];
 };
@@ -244,6 +252,7 @@ export async function getOpenSessionInstructionAsync<
   TAccountTraits extends InstructionAccountInput,
   TAccountResonances extends InstructionAccountInput,
   TAccountMonsterSkills extends InstructionAccountInput,
+  TAccountRewards extends InstructionAccountInput,
   TProgramAddress extends Address = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
 >(
   input: OpenSessionAsyncInput<
@@ -262,7 +271,8 @@ export async function getOpenSessionInstructionAsync<
     TAccountAspects,
     TAccountTraits,
     TAccountResonances,
-    TAccountMonsterSkills
+    TAccountMonsterSkills,
+    TAccountRewards
   >,
   config?: { programAddress?: TProgramAddress },
 ): Promise<
@@ -331,6 +341,10 @@ export async function getOpenSessionInstructionAsync<
     ResolvedInstructionAccountMeta<
       TAccountMonsterSkills,
       InstructionAccountInputAddress<TAccountMonsterSkills>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountRewards,
+      InstructionAccountInputAddress<TAccountRewards>
     >
   >
 > {
@@ -396,6 +410,11 @@ export async function getOpenSessionInstructionAsync<
     },
     monsterSkills: {
       value: input.monsterSkills ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    rewards: {
+      value: input.rewards ?? null,
       isSigner: false,
       isWritable: false,
     },
@@ -488,6 +507,10 @@ export async function getOpenSessionInstructionAsync<
     accounts.monsterSkills.value =
       "NQNEuKDUZhACnTJ9sD3dW49BoiPtJPatp6bpY61r81p" as Address<"NQNEuKDUZhACnTJ9sD3dW49BoiPtJPatp6bpY61r81p">;
   }
+  if (!accounts.rewards.value) {
+    accounts.rewards.value =
+      "FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK" as Address<"FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK">;
+  }
 
   return Object.freeze({
     accounts: [
@@ -507,6 +530,7 @@ export async function getOpenSessionInstructionAsync<
       getAccountMeta("traits", accounts.traits),
       getAccountMeta("resonances", accounts.resonances),
       getAccountMeta("monsterSkills", accounts.monsterSkills),
+      getAccountMeta("rewards", accounts.rewards),
     ],
     data: getOpenSessionInstructionDataEncoder().encode(
       args as OpenSessionInstructionDataArgs,
@@ -577,6 +601,10 @@ export async function getOpenSessionInstructionAsync<
     ResolvedInstructionAccountMeta<
       TAccountMonsterSkills,
       InstructionAccountInputAddress<TAccountMonsterSkills>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountRewards,
+      InstructionAccountInputAddress<TAccountRewards>
     >
   >);
 }
@@ -601,6 +629,7 @@ export type OpenSessionInput<
   TAccountResonances extends InstructionAccountInput = InstructionAccountInput,
   TAccountMonsterSkills extends InstructionAccountInput =
     InstructionAccountInput,
+  TAccountRewards extends InstructionAccountInput = InstructionAccountInput,
 > = {
   dm: TAccountDm;
   map: TAccountMap;
@@ -620,6 +649,8 @@ export type OpenSessionInput<
   resonances?: TAccountResonances;
   /** pools, copied into `MonsterState`. */
   monsterSkills?: TAccountMonsterSkills;
+  /** tables, copied into `MonsterState`. */
+  rewards?: TAccountRewards;
   priceLamports: OpenSessionInstructionDataArgs["priceLamports"];
   dmActor: OpenSessionInstructionDataArgs["dmActor"];
 };
@@ -641,6 +672,7 @@ export function getOpenSessionInstruction<
   TAccountTraits extends InstructionAccountInput,
   TAccountResonances extends InstructionAccountInput,
   TAccountMonsterSkills extends InstructionAccountInput,
+  TAccountRewards extends InstructionAccountInput,
   TProgramAddress extends Address = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
 >(
   input: OpenSessionInput<
@@ -659,7 +691,8 @@ export function getOpenSessionInstruction<
     TAccountAspects,
     TAccountTraits,
     TAccountResonances,
-    TAccountMonsterSkills
+    TAccountMonsterSkills,
+    TAccountRewards
   >,
   config?: { programAddress?: TProgramAddress },
 ): OpenSessionInstruction<
@@ -727,6 +760,10 @@ export function getOpenSessionInstruction<
   ResolvedInstructionAccountMeta<
     TAccountMonsterSkills,
     InstructionAccountInputAddress<TAccountMonsterSkills>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountRewards,
+    InstructionAccountInputAddress<TAccountRewards>
   >
 > {
   // Program address.
@@ -794,6 +831,11 @@ export function getOpenSessionInstruction<
       isSigner: false,
       isWritable: false,
     },
+    rewards: {
+      value: input.rewards ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
   };
   const accounts = originalAccounts as Record<
     keyof typeof originalAccounts,
@@ -836,6 +878,10 @@ export function getOpenSessionInstruction<
     accounts.monsterSkills.value =
       "NQNEuKDUZhACnTJ9sD3dW49BoiPtJPatp6bpY61r81p" as Address<"NQNEuKDUZhACnTJ9sD3dW49BoiPtJPatp6bpY61r81p">;
   }
+  if (!accounts.rewards.value) {
+    accounts.rewards.value =
+      "FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK" as Address<"FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK">;
+  }
 
   return Object.freeze({
     accounts: [
@@ -855,6 +901,7 @@ export function getOpenSessionInstruction<
       getAccountMeta("traits", accounts.traits),
       getAccountMeta("resonances", accounts.resonances),
       getAccountMeta("monsterSkills", accounts.monsterSkills),
+      getAccountMeta("rewards", accounts.rewards),
     ],
     data: getOpenSessionInstructionDataEncoder().encode(
       args as OpenSessionInstructionDataArgs,
@@ -925,6 +972,10 @@ export function getOpenSessionInstruction<
     ResolvedInstructionAccountMeta<
       TAccountMonsterSkills,
       InstructionAccountInputAddress<TAccountMonsterSkills>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountRewards,
+      InstructionAccountInputAddress<TAccountRewards>
     >
   >);
 }
@@ -953,6 +1004,8 @@ export type ParsedOpenSessionInstruction<
     resonances: TAccountMetas[14];
     /** pools, copied into `MonsterState`. */
     monsterSkills: TAccountMetas[15];
+    /** tables, copied into `MonsterState`. */
+    rewards: TAccountMetas[16];
   };
   data: OpenSessionInstructionData;
 };
@@ -965,12 +1018,12 @@ export function parseOpenSessionInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
 ): ParsedOpenSessionInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 16) {
+  if (instruction.accounts.length < 17) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 16,
+        expectedAccountMetas: 17,
       },
     );
   }
@@ -999,6 +1052,7 @@ export function parseOpenSessionInstruction<
       traits: getNextAccount(),
       resonances: getNextAccount(),
       monsterSkills: getNextAccount(),
+      rewards: getNextAccount(),
     },
     data: getOpenSessionInstructionDataDecoder().decode(instruction.data),
   };

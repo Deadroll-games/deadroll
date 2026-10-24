@@ -19,6 +19,8 @@ import {
   getBytesEncoder,
   getStructDecoder,
   getStructEncoder,
+  getU32Decoder,
+  getU32Encoder,
   getU8Decoder,
   getU8Encoder,
   transformEncoder,
@@ -54,12 +56,42 @@ export type Map = {
   core: MapData;
   /** Map tier: monster levels and limits (`deadroll_mapcheck::limits`). */
   tier: number;
+  /**
+   * Patch 11: the party size the reward budget is checked for (docs/PARTY_AND_TURNS.md 3.1,
+   * 9.2): the party does not start with fewer players.
+   */
+  minPlayers: number;
+  /**
+   * Patch 11, set by the DM: no living monster within this many cells (Chebyshev) of a chest
+   * or of any living player when the chest opens.
+   */
+  chestRadius: number;
+  /**
+   * Patch 11, set by the DM: seconds the DM has after a party ends to issue the rewards
+   * (`settle_party`); then each player claims their own.
+   */
+  settleTimeoutSecs: number;
 };
 
 export type MapArgs = {
   core: MapDataArgs;
   /** Map tier: monster levels and limits (`deadroll_mapcheck::limits`). */
   tier: number;
+  /**
+   * Patch 11: the party size the reward budget is checked for (docs/PARTY_AND_TURNS.md 3.1,
+   * 9.2): the party does not start with fewer players.
+   */
+  minPlayers: number;
+  /**
+   * Patch 11, set by the DM: no living monster within this many cells (Chebyshev) of a chest
+   * or of any living player when the chest opens.
+   */
+  chestRadius: number;
+  /**
+   * Patch 11, set by the DM: seconds the DM has after a party ends to issue the rewards
+   * (`settle_party`); then each player claims their own.
+   */
+  settleTimeoutSecs: number;
 };
 
 /** Gets the encoder for {@link MapArgs} account data. */
@@ -69,6 +101,9 @@ export function getMapEncoder(): FixedSizeEncoder<MapArgs> {
       ["discriminator", fixEncoderSize(getBytesEncoder(), 8)],
       ["core", getMapDataEncoder()],
       ["tier", getU8Encoder()],
+      ["minPlayers", getU8Encoder()],
+      ["chestRadius", getU8Encoder()],
+      ["settleTimeoutSecs", getU32Encoder()],
     ]),
     (value) => ({ ...value, discriminator: MAP_DISCRIMINATOR }),
   );
@@ -80,6 +115,9 @@ export function getMapDecoder(): FixedSizeDecoder<Map> {
     ["discriminator", fixDecoderSize(getBytesDecoder(), 8)],
     ["core", getMapDataDecoder()],
     ["tier", getU8Decoder()],
+    ["minPlayers", getU8Decoder()],
+    ["chestRadius", getU8Decoder()],
+    ["settleTimeoutSecs", getU32Decoder()],
   ]);
 }
 
@@ -142,5 +180,5 @@ export async function fetchAllMaybeMap(
 }
 
 export function getMapSize(): number {
-  return 114;
+  return 120;
 }

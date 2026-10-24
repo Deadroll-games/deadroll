@@ -3,7 +3,8 @@ use deadroll_skillcheck::{
     check_loadout, derive, validate_starting, SkillBlocks, SkillExt, STARTING_MAX,
 };
 use deadroll_types::{
-    seeds, Aspect, CharacterData, Class, LayerRef, Race, BAG_SLOTS, LAYERS_MAX, STATS_COUNT,
+    seeds, Aspect, BagLayout, CharacterData, Class, LayerRef, Race, BAG_SLOTS, LAYERS_MAX,
+    STATS_COUNT,
 };
 
 #[cfg(feature = "nft")]
@@ -15,7 +16,7 @@ use crate::{
     rules::{self, ACCOUNT_VERSION, CHARACTER_VERSION, CLASS_START_TIER, START_TIER},
     state::{
         Bag, Character, Gear, PlayerProfile, SkillExtra, SkillExtras, SkillRecord, SkillSet,
-        NAME_LEN, RESOURCE_KINDS, SKILLS_MAX, SKILL_NAME_LEN,
+        NAME_LEN, SKILLS_MAX, SKILL_NAME_LEN,
     },
     trust,
 };
@@ -192,10 +193,10 @@ pub fn handler(ctx: Context<CreateCharacter>, args: CreateCharacterArgs) -> Resu
     ctx.accounts.bag.set_inner(Bag {
         version: ACCOUNT_VERSION,
         character: character_key,
-        resources: [0; RESOURCE_KINDS],
         items: [Pubkey::default(); BAG_SLOTS],
         item_count: 0,
         bump: ctx.bumps.bag,
+        layout: BagLayout::EMPTY,
     });
 
     emit!(CharacterCreated {

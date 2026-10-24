@@ -43,7 +43,8 @@ test("generated PDAs follow CONTRACTS.md 2", async () => {
   await same(session.findMonstersPda({ session: a }), PROGRAMS.session, ["monsters", key(a)]);
   await same(session.findEscrowPda({ session: a }), PROGRAMS.session, ["escrow", key(a)]);
   await same(session.findParticipationPda({ session: a, character: b }), PROGRAMS.session, ["participation", key(a), key(b)]);
-  await same(session.findStashPda({ session: a, character: b }), PROGRAMS.session, ["stash", key(a), key(b)]);
+  // Patch 11: the reward cache replaces the per-party stash.
+  await same(session.findRewardCachePda({ character: b }), PROGRAMS.session, ["cache", key(b)]);
   await same(session.findSessionAuthorityPda(), PROGRAMS.session, ["authority"]);
   await same(session.findProgramIdentityPda(), PROGRAMS.session, ["identity"]);
 });

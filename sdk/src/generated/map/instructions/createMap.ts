@@ -88,6 +88,18 @@ export type CreateMapInstructionData = {
   width: number;
   height: number;
   tier: number;
+  /** The party size the reward budget is checked for; the party does not start with fewer. */
+  minPlayers: number;
+  /**
+   * No living monster within this many cells (Chebyshev) of a chest or of any living player
+   * when the chest opens (`LootTuning.chest_radius_min..=max`).
+   */
+  chestRadius: number;
+  /**
+   * Seconds the DM has after a party ends to issue the rewards (`settle_party`); then each
+   * player claims their own (`LootTuning.settle_timeout_*`).
+   */
+  settleTimeoutSecs: number;
 };
 
 export type CreateMapInstructionDataArgs = {
@@ -95,6 +107,18 @@ export type CreateMapInstructionDataArgs = {
   width: number;
   height: number;
   tier: number;
+  /** The party size the reward budget is checked for; the party does not start with fewer. */
+  minPlayers: number;
+  /**
+   * No living monster within this many cells (Chebyshev) of a chest or of any living player
+   * when the chest opens (`LootTuning.chest_radius_min..=max`).
+   */
+  chestRadius: number;
+  /**
+   * Seconds the DM has after a party ends to issue the rewards (`settle_party`); then each
+   * player claims their own (`LootTuning.settle_timeout_*`).
+   */
+  settleTimeoutSecs: number;
 };
 
 export function getCreateMapInstructionDataEncoder(): FixedSizeEncoder<CreateMapInstructionDataArgs> {
@@ -105,6 +129,9 @@ export function getCreateMapInstructionDataEncoder(): FixedSizeEncoder<CreateMap
       ["width", getU8Encoder()],
       ["height", getU8Encoder()],
       ["tier", getU8Encoder()],
+      ["minPlayers", getU8Encoder()],
+      ["chestRadius", getU8Encoder()],
+      ["settleTimeoutSecs", getU32Encoder()],
     ]),
     (value) => ({ ...value, discriminator: CREATE_MAP_DISCRIMINATOR }),
   );
@@ -117,6 +144,9 @@ export function getCreateMapInstructionDataDecoder(): FixedSizeDecoder<CreateMap
     ["width", getU8Decoder()],
     ["height", getU8Decoder()],
     ["tier", getU8Decoder()],
+    ["minPlayers", getU8Decoder()],
+    ["chestRadius", getU8Decoder()],
+    ["settleTimeoutSecs", getU32Decoder()],
   ]);
 }
 
@@ -145,6 +175,9 @@ export type CreateMapAsyncInput<
   width: CreateMapInstructionDataArgs["width"];
   height: CreateMapInstructionDataArgs["height"];
   tier: CreateMapInstructionDataArgs["tier"];
+  minPlayers: CreateMapInstructionDataArgs["minPlayers"];
+  chestRadius: CreateMapInstructionDataArgs["chestRadius"];
+  settleTimeoutSecs: CreateMapInstructionDataArgs["settleTimeoutSecs"];
 };
 
 export async function getCreateMapInstructionAsync<
@@ -280,6 +313,9 @@ export type CreateMapInput<
   width: CreateMapInstructionDataArgs["width"];
   height: CreateMapInstructionDataArgs["height"];
   tier: CreateMapInstructionDataArgs["tier"];
+  minPlayers: CreateMapInstructionDataArgs["minPlayers"];
+  chestRadius: CreateMapInstructionDataArgs["chestRadius"];
+  settleTimeoutSecs: CreateMapInstructionDataArgs["settleTimeoutSecs"];
 };
 
 export function getCreateMapInstruction<

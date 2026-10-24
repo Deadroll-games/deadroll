@@ -16,10 +16,12 @@ import {
   type TransactionSigner,
 } from "@solana/kit";
 import {
+  BAG_DISCRIMINATOR,
   CHARACTER_DISCRIMINATOR,
   PLAYER_PROFILE_DISCRIMINATOR,
   SKILL_EXTRAS_DISCRIMINATOR,
   SKILL_SET_DISCRIMINATOR,
+  getBagDecoder,
   getCharacterDecoder,
   getCreateCharacterInstruction,
   getCreateProfileInstruction,
@@ -41,9 +43,13 @@ import {
   getFinalizeMapInstruction,
   getMapDecoder,
   getMapLayoutDecoder,
+  getMapLayoutSize,
+  getMapSize,
+  getWriteChestsInstruction,
   getWriteLayoutInstruction,
   getWriteSpawnsInstruction,
   MapStatus,
+  PointKind,
   type Map as MapAccount,
 } from "@deadroll/sdk/map";
 import {
@@ -51,10 +57,12 @@ import {
   GAME_SESSION_DISCRIMINATOR,
   MONSTER_STATE_DISCRIMINATOR,
   PARTICIPATION_DISCRIMINATOR,
+  REWARD_CACHE_DISCRIMINATOR,
   SessionStatus,
   getActInstruction,
-  getClaimEscrowInstruction,
-  getClaimRewardsInstruction,
+  getClaimAfterTimeoutInstruction,
+  getCloseCacheInstruction,
+  getLeavePartyInstruction,
   getConsumeRandomnessInstruction,
   getEndTurnInstruction,
   getEscrowDecoder,
@@ -64,14 +72,20 @@ import {
   getMonsterMoveInstruction,
   getMonsterStateDecoder,
   getMoveUnitInstruction,
+  getOpenChestInstruction,
   getOpenSessionInstruction,
   getParticipationDecoder,
+  getRewardCacheDecoder,
+  getParticipationSize,
+  getRewardCacheSize,
   getSetReadyInstruction,
   getSetSessionKeyInstruction,
+  getSettlePartyInstruction,
   getStartSessionInstruction,
   getStartTurnInstruction,
   type ActiveState,
   type AuraData,
+  type BagSlotArgs,
   type BurningCellData,
   type GameSession,
   type MapSkillData,
@@ -104,13 +118,15 @@ import {
   sessionPda,
   skillExtrasPda,
   skillSetPda,
-  stashPda,
+  rewardCachePda,
   tilesetPda,
   aspectsPda,
   traitsPda,
   resonancesPda,
   monsterSkillsPda,
+  rewardsPda,
 } from "./pda";
+import type { Chest } from "./loot";
 import { pathArgs, type Step } from "./route";
 import { PRESETS, SKILL_DESCRIPTION_LEN, SKILL_NAME_LEN, type NamedSkill } from "./skillcheck";
 import { Aspect, Class, MAP_CELLS, MAP_MAX, Race, Tile, type Cell, type Spawn } from "./types";
@@ -215,6 +231,9 @@ const ACCOUNTS = {
   Participation: { program: "session", disc: PARTICIPATION_DISCRIMINATOR, decoder: getParticipationDecoder() },
   MonsterState: { program: "session", disc: MONSTER_STATE_DISCRIMINATOR, decoder: getMonsterStateDecoder() },
   Escrow: { program: "session", disc: ESCROW_DISCRIMINATOR, decoder: getEscrowDecoder() },
+  // Patch 11: the bag in slots and the reward cache after a party.
+  Bag: { program: "character", disc: BAG_DISCRIMINATOR, decoder: getBagDecoder() },
+  RewardCache: { program: "session", disc: REWARD_CACHE_DISCRIMINATOR, decoder: getRewardCacheDecoder() },
 } as const;
 export type AccountName = keyof typeof ACCOUNTS;
 export type AccountOf<K extends AccountName> = ReturnType<(typeof ACCOUNTS)[K]["decoder"]["decode"]>;
@@ -385,7 +404,20 @@ export function freezeTombstoneIx(character: Address, asset: Address, payer: Tra
 // ---------------------------------------------------------------------------------------------
 // maps
 
-export type MapDraft = { width: number; height: number; tier: number; tiles: Uint8Array; spawns: Spawn[] };
+/** Patch 11: `minPlayers` sets the reward budget, `chests` and `bossTable` are reward table ids. */
+export type MapDraft = {
+  width: number;
+  height: number;
+  tier: number;
+  minPlayers: number;
+  /** The DM's chest radius and time to settle (`create_map` settings). */
+  chestRadius: number;
+  settleTimeoutSecs: number;
+  tiles: Uint8Array;
+  spawns: Spawn[];
+  chests: Chest[];
+  bossTable: number;
+};
 
 /** Tiles exactly as the chain stores them: stride 32, cells outside the map Floor (0). */
 export function chainTiles(d: MapDraft): Uint8Array {
@@ -399,7 +431,7 @@ export function findTile(d: MapDraft, tile: Tile): Cell | null {
   return null;
 }
 
-/** create_map, write_layout, write_spawns, finalize_map (one transaction each, as the test). */
+/** create_map, write_layout, write_spawns, write_chests, finalize_map (one transaction each, as the test). */
 export async function buildMapIxs(dm: TransactionSigner, d: MapDraft): Promise<{ map: Address; layout: Address; index: number; ixs: Instruction[] }> {
   const index = crypto.getRandomValues(new Uint32Array(1))[0]!;
   const map = await mapPda(dm.address, index);
@@ -410,13 +442,36 @@ export async function buildMapIxs(dm: TransactionSigner, d: MapDraft): Promise<{
   const exit = findTile(d, Tile.Exit);
   if (!entrance || !exit) throw new Error("the map needs an entrance and an exit");
   const ixs = [
-    getCreateMapInstruction({ ...edit, systemProgram: SYSTEM_PROGRAM, index, width: d.width, height: d.height, tier: d.tier }),
+    getCreateMapInstruction({ ...edit, systemProgram: SYSTEM_PROGRAM, index, width: d.width, height: d.height, tier: d.tier, minPlayers: d.minPlayers, chestRadius: d.chestRadius, settleTimeoutSecs: d.settleTimeoutSecs }),
     getWriteLayoutInstruction({ ...edit, offset: 0, tiles: tiles.slice(0, (d.height - 1) * MAP_MAX + d.width) }),
     getWriteSpawnsInstruction({ ...edit, entrance, exit, spawns: d.spawns }),
-    // The builder rules read the registry bestiary and monster skills (roles, pools, slots).
-    getFinalizeMapInstruction({ ...edit, bestiary: await bestiaryPda(), monsterSkills: await monsterSkillsPda(), secretsRoot: new Uint8Array(32) }),
+    getWriteChestsInstruction({ ...edit, chests: d.chests.map((c) => ({ kind: PointKind.Chest, x: c.x, y: c.y, data: c.table })), bossTable: d.bossTable }),
+    // The builder rules read the registry bestiary, monster skills (roles, pools, slots) and reward tables.
+    getFinalizeMapInstruction({
+      ...edit,
+      bestiary: await bestiaryPda(),
+      monsterSkills: await monsterSkillsPda(),
+      rewards: await rewardsPda(),
+      secretsRoot: new Uint8Array(32),
+    }),
   ];
   return { map, layout, index, ixs };
+}
+
+/** Patch 11: rent of what `join_session` creates: the participation, and the character's reward
+ * cache unless it already exists (a later party rebinds it). */
+export async function joinRent(character: Address): Promise<bigint> {
+  const rent = (size: number) => client.rpc.getMinimumBalanceForRentExemption(BigInt(size)).send();
+  const [cache] = await getAccounts([await rewardCachePda(character)]);
+  const [p, c] = await Promise.all([rent(getParticipationSize()), cache ? Promise.resolve(0n) : rent(getRewardCacheSize())]);
+  return BigInt(p) + BigInt(c);
+}
+
+/** Rent of the two accounts `create_map` makes (Map and MapLayout), in lamports. */
+export async function mapRent(): Promise<bigint> {
+  const rent = (size: number) => client.rpc.getMinimumBalanceForRentExemption(BigInt(size)).send();
+  const [map, layout] = await Promise.all([rent(getMapSize()), rent(getMapLayoutSize())]);
+  return BigInt(map) + BigInt(layout);
 }
 
 /** Maps of `dm` (memcmp on MapData.dm right after version). */
@@ -470,22 +525,60 @@ export async function openSessionIx(dm: TransactionSigner, map: Address, priceLa
     traits: await traitsPda(),
     resonances: await resonancesPda(),
     monsterSkills: await monsterSkillsPda(),
+    rewards: await rewardsPda(),
     priceLamports,
     dmActor,
   });
 }
 
-export async function joinSessionIx(player: TransactionSigner, session: Address, character: Address, contribution: bigint, actor: Address): Promise<Instruction> {
-  return getJoinSessionInstruction({
+/** `cacheSessions` (patch 11): the `GameSession` of every `Open` entry of the character's reward
+ * caches, in entry order ([`openCacheSessions`]). */
+export async function joinSessionIx(
+  player: TransactionSigner,
+  session: Address,
+  character: Address,
+  contribution: bigint,
+  actor: Address,
+  cacheSessions: readonly Address[] = [],
+): Promise<Instruction> {
+  const ix = getJoinSessionInstruction({
     player,
     session,
     character,
     participation: await participationPda(session, character),
-    stash: await stashPda(session, character),
+    rewardCache: await rewardCachePda(character),
     escrow: await escrowPda(session),
     systemProgram: SYSTEM_PROGRAM,
     contribution,
     actor,
+  });
+  return withRemaining(ix, cacheSessions.map((address) => ({ address, writable: false })));
+}
+
+/** `CacheStatus` (crates/types): a reward cache entry. */
+export const CACHE_STATUS = { Empty: 0, Open: 1, Claimed: 2 } as const;
+
+/** Patch 11: the character's reward cache entries (none when it has no cache account yet). */
+export async function rewardCacheEntries(character: Address) {
+  const cache = await getAccount("RewardCache", await rewardCachePda(character));
+  return cache ? cache.entries.filter((e) => e.status !== CACHE_STATUS.Empty) : [];
+}
+
+/** Patch 11: what `join_session` takes after its accounts: the parties of the `Open` entries. */
+export async function openCacheSessions(character: Address): Promise<Address[]> {
+  return (await rewardCacheEntries(character)).filter((e) => e.status === CACHE_STATUS.Open).map((e) => e.session);
+}
+
+/** Patch 11, leave_party: the owner's main wallet frees a living character from its ended party
+ * (before joining another, changing gear or pressing "Done"). */
+export async function leavePartyIx(owner: TransactionSigner, session: Address, character: Address): Promise<Instruction> {
+  return getLeavePartyInstruction({
+    owner,
+    session,
+    character,
+    sessionAuthority: await sessionAuthorityPda(),
+    config: await gameConfigPda(),
+    characterProgram: PROGRAMS.character,
   });
 }
 
@@ -702,37 +795,89 @@ export async function monsterActIx(
   });
 }
 
-/** claim_rewards: only the character's owner, from its main wallet or its session key (+ token).
- * `deaths`: the pending deaths it finalizes first (patch 6). */
-export async function claimRewardsIx(actor: Actor, session: Address, character: Address, deaths: readonly RemainingAccount[] = []): Promise<Instruction> {
-  const ix = getClaimRewardsInstruction({
-    signer: actor.signer,
-    session,
-    participation: await participationPda(session, character),
-    stash: await stashPda(session, character),
-    character,
-    bag: await bagPda(character),
-    sessionAuthority: await sessionAuthorityPda(),
-    config: await gameConfigPda(),
-    characterProgram: PROGRAMS.character,
-    sessionToken: opt(actor.token),
-  });
-  return withRemaining(ix, deaths);
+/** Patch 11: each player's `(Participation, RewardCache, Character)`, writable, in slot order:
+ * what `settle_party` takes after the pending deaths. */
+export async function settleAccountsOf(s: GameSessionAcc, session: Address): Promise<RemainingAccount[]> {
+  const out: RemainingAccount[] = [];
+  for (let slot = 0; slot < s.core.playerCount; slot++) out.push(...(await playerSettleAccounts(session, s.core.players[slot]!)));
+  return out;
 }
 
-/** claim_escrow: the DM's main wallet. `deaths`: the pending deaths it finalizes first (patch 6). */
-export async function claimEscrowIx(dm: TransactionSigner, session: Address, map: Address, deaths: readonly RemainingAccount[] = []): Promise<Instruction> {
-  const ix = getClaimEscrowInstruction({
-    dm,
+async function playerSettleAccounts(session: Address, character: Address): Promise<RemainingAccount[]> {
+  return [
+    { address: await participationPda(session, character), writable: true },
+    { address: await rewardCachePda(character), writable: true },
+    { address: character, writable: true },
+  ];
+}
+
+async function endAccounts(session: Address, map: Address) {
+  return {
     session,
     escrow: await escrowPda(session),
+    monsters: await monstersPda(session),
     map,
     sessionAuthority: await sessionAuthorityPda(),
     config: await gameConfigPda(),
     mapProgram: PROGRAMS.map,
     characterProgram: PROGRAMS.character,
+  };
+}
+
+/** Patch 11, settle_party: the DM's main wallet (never the session key) settles every player and
+ * takes the escrow. Remaining: the pending deaths, then every player's accounts. */
+export async function settlePartyIx(dm: TransactionSigner, session: Address, s: GameSessionAcc): Promise<Instruction> {
+  const ix = getSettlePartyInstruction({ dm, ...(await endAccounts(session, s.core.map)) });
+  return withRemaining(ix, [...(await deathAccountsOf(s)), ...(await settleAccountsOf(s, session))]);
+}
+
+/** Patch 11, claim_after_timeout: after the DM's deadline, the player's main wallet settles its own
+ * character and takes its contribution back. Remaining: its accounts, then the pending deaths. */
+export async function claimAfterTimeoutIx(player: TransactionSigner, session: Address, s: GameSessionAcc, character: Address): Promise<Instruction> {
+  const ix = getClaimAfterTimeoutInstruction({ player, ...(await endAccounts(session, s.core.map)) });
+  return withRemaining(ix, [...(await playerSettleAccounts(session, character)), ...(await deathAccountsOf(s))]);
+}
+
+/** `BagLayout` (crates/types): 40 resource slots, 5 consumable slots. */
+export type BagLayout = { resources: BagSlotIn[]; consumables: BagSlotIn[] };
+/** A bag slot with its `RewardKind` as a number (crates/types order). */
+type BagSlotIn = { kind: number; id: number; qty: number };
+const slotArgs = (r: BagSlotIn): BagSlotArgs => ({ kind: r.kind as BagSlotArgs["kind"], id: r.id, qty: r.qty });
+
+/** Patch 11, close_cache: "Done" in the bag screen for party `session`, the owner's main wallet; `layout` is the final
+ * bag (resources and consumables), checked on chain against the bag and the cache. */
+export async function closeCacheIx(owner: TransactionSigner, character: Address, session: Address, layout: BagLayout): Promise<Instruction> {
+  return getCloseCacheInstruction({
+    session,
+    owner,
+    rewardCache: await rewardCachePda(character),
+    character,
+    bag: await bagPda(character),
+    sessionAuthority: await sessionAuthorityPda(),
+    config: await gameConfigPda(),
+    characterProgram: PROGRAMS.character,
+    // Codama flattens the one struct argument into its fields.
+    resources: layout.resources.map(slotArgs),
+    consumables: layout.consumables.map(slotArgs),
   });
-  return withRemaining(ix, deaths);
+}
+
+/** Patch 11, open_chest: player's main wallet or session key (+ token), on its turn, next to the
+ * chest; the VRF callback rolls the rewards. */
+export async function openChestIx(actor: Actor, session: Address, character: Address, layout: Address, chest: number): Promise<Instruction> {
+  return getOpenChestInstruction({
+    signer: actor.signer,
+    session,
+    participation: await participationPda(session, character),
+    character,
+    skillSet: await skillSetPda(character),
+    bag: await bagPda(character),
+    monsters: await monstersPda(session),
+    sessionToken: opt(actor.token),
+    ...(await vrfAccounts()),
+    layout,
+    chest,
+  });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -773,6 +918,8 @@ async function registryTable(pdaOf: () => Promise<Address>): Promise<Uint8Array 
  * bodies, read straight from the chain: the map builder's pools and the skill names' indices. */
 export const registryBestiary = () => registryTable(bestiaryPda);
 export const registryMonsterSkills = () => registryTable(monsterSkillsPda);
+/** Patch 11: the registry `rewards` body (108-byte reward table records by id). */
+export const registryRewards = () => registryTable(rewardsPda);
 
 /**
  * consume_randomness for the pending action: the callback gets the pending participation's player,

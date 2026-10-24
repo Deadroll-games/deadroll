@@ -88,6 +88,8 @@ const characterEvents = new EventParser(CHARACTER, characterProgram.coder);
 const config = pda([Buffer.from("config")], REGISTRY);
 const bestiary = pda([Buffer.from("bestiary")], REGISTRY);
 const monsterSkills = pda([Buffer.from("monster_skills")], REGISTRY);
+// Patch 11: reward tables (the boss table every map names).
+const rewards = pda([Buffer.from("rewards")], REGISTRY);
 const sessionAuthority = pda([Buffer.from("authority")], SESSION);
 const vrfAccounts = {
   programIdentity: pda([Buffer.from("identity")], SESSION),
@@ -210,10 +212,13 @@ for (let y = 1; y < 15; y++) for (let x = 1; x < 15; x++) tiles[y * MAP_STRIDE +
 tiles[ENTRANCE.y * MAP_STRIDE + ENTRANCE.x] = Tile.Entrance;
 tiles[EXIT.y * MAP_STRIDE + EXIT.x] = Tile.Exit;
 const spawns = CAMP.map((s) => ({ bestiaryId: s.id, x: s.x, y: s.y, level: 1, skills: s.skills, flags: 0, aspects: 0, pack: s.pack }));
-await mapProgram.methods.createMap(index, 16, 16, 1).accountsStrict({ ...edit, systemProgram: SystemProgram.programId }).signers([dm]).rpc();
+// Patch 11: the DM's settings (devnet takes at least 10 minutes to settle).
+await mapProgram.methods.createMap(index, 16, 16, 1, { minPlayers: 1, chestRadius: 3, settleTimeoutSecs: 600 }).accountsStrict({ ...edit, systemProgram: SystemProgram.programId }).signers([dm]).rpc();
 await mapProgram.methods.writeLayout(0, Buffer.from(tiles)).accountsStrict(edit).signers([dm]).rpc();
 await mapProgram.methods.writeSpawns(ENTRANCE, EXIT, spawns).accountsStrict(edit).signers([dm]).rpc();
-await mapProgram.methods.finalizeMap(new Array(32).fill(0)).accountsStrict({ ...edit, bestiary, monsterSkills }).signers([dm]).rpc();
+// Patch 11: no chests, the tier 1 boss table of assets/registry/reward_tables.json.
+await mapProgram.methods.writeChests([], 1).accountsStrict(edit).signers([dm]).rpc();
+await mapProgram.methods.finalizeMap(new Array(32).fill(0)).accountsStrict({ ...edit, bestiary, monsterSkills, rewards }).signers([dm]).rpc();
 
 // session
 const sessionPda = pda([Buffer.from("session"), map.toBuffer()], SESSION);
@@ -226,7 +231,7 @@ await session.methods
     bestiary, tileset: pda([Buffer.from("tileset")], REGISTRY),
     mapProgram: MAP, systemProgram: SystemProgram.programId,
     aspects: pda([Buffer.from("aspects")], REGISTRY), traits: pda([Buffer.from("traits")], REGISTRY),
-    resonances: pda([Buffer.from("resonances")], REGISTRY), monsterSkills,
+    resonances: pda([Buffer.from("resonances")], REGISTRY), monsterSkills, rewards,
   })
   .signers([dm])
   .rpc();
@@ -238,7 +243,7 @@ for (const h of heroes) {
     .joinSession(PRICE, PublicKey.default) // the session key comes with Ready
     .accountsStrict({
       player: h.wallet.publicKey, session: sessionPda, character: h.character, participation: h.participation,
-      stash: pda([Buffer.from("stash"), sessionPda.toBuffer(), h.character.toBuffer()], SESSION),
+      rewardCache: pda([Buffer.from("cache"), h.character.toBuffer()], SESSION),
       escrow, systemProgram: SystemProgram.programId,
     })
     .signers([h.wallet])
@@ -303,7 +308,7 @@ async function callbackBudget(sig: string, what: string) {
   console.log("computeUnitsConsumed (whole tx):", tx.meta.computeUnitsConsumed);
   const own = `Program ${SESSION.toBase58()} consumed `;
   for (const line of tx.meta.logMessages ?? []) if (line.startsWith(own)) console.log("session program:", line.slice(`Program ${SESSION.toBase58()} `.length));
-  // ComputeBudget instructions the oracle put in front of the callback (none: the 200k default per instruction).
+  // ComputeBudget instructions the oracle put in front of the callback (its budget is 256k).
   const msg = tx.transaction.message;
   const keys = msg.staticAccountKeys;
   let budgets = 0;

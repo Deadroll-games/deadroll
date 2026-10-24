@@ -331,7 +331,7 @@ pub fn handler<'info>(ctx: Context<'info, StartTurn<'info>>) -> Result<()> {
         action_points,
         resist_mod,
     });
-    if outcomes::emit_if_ended(session, session_key) {
+    if outcomes::emit_if_ended(session, session_key)? {
         return Ok(());
     }
     if let Some(state) = start.skip {

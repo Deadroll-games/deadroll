@@ -1,5 +1,5 @@
 // Battle map canvas: tiles, units, move highlights, and cell clicks.
-import { useEffect, useRef, type MouseEvent } from "react";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { Tile, cellIndex, type Cell } from "../../chain/types";
 import { TILE_PX } from "../../raster/SpriteCanvas";
 import type { GridProps, GridUnit } from "./types";
@@ -28,6 +28,8 @@ const DEAD = "#7d7786";
 const ACTIVE_RING = "#d9a441";
 const SELECT_RING = "#ffffff";
 const PATH_DOT = "#d9a441";
+const CHEST = "#8b5a2b";
+const CHEST_EDGE = "#d9a441";
 const INK = "#120c16";
 const LETTER = "#f4efe6";
 
@@ -334,6 +336,18 @@ function drawGrid(ctx: CanvasRenderingContext2D, props: GridProps, cell: number)
     ctx.fillRect(spot.x * cell, spot.y * cell, cell, cell);
   }
 
+  // Chests: a brown square while closed, only its outline once opened (placeholder look).
+  const inset = Math.max(2, Math.floor(cell / 5));
+  for (const chest of props.chests ?? []) {
+    if (!inMap(chest, width, height)) continue;
+    const thickness = Math.max(1, Math.floor(cell / 16));
+    if (!chest.opened) {
+      ctx.fillStyle = CHEST;
+      ctx.fillRect(chest.x * cell + inset, chest.y * cell + inset, cell - inset * 2, cell - inset * 2);
+    }
+    paintOutline(ctx, chest.x * cell, chest.y * cell, cell, inset, thickness, CHEST_EDGE);
+  }
+
   ctx.fillStyle = PATH_DOT;
   const dot = Math.max(2, Math.floor(cell / 10));
   for (const spot of path) {
@@ -369,6 +383,8 @@ export function Grid(props: GridProps) {
   const shownCell = pixelArt ? cell : cellPx;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const hoverKey = useRef<string | null>(null);
+  const [hovered, setHovered] = useState<Cell | null>(null);
+  const hoveredChest = hovered ? props.chests?.find((c) => c.x === hovered.x && c.y === hovered.y) : undefined;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -391,11 +407,13 @@ export function Grid(props: GridProps) {
     const key = cellKey(cell);
     if (key === hoverKey.current) return;
     hoverKey.current = key;
+    setHovered(cell);
     onCellHover?.(cell);
   }
 
   function handleLeave() {
     hoverKey.current = null;
+    setHovered(null);
     onCellHover?.(null);
   }
 
@@ -408,6 +426,7 @@ export function Grid(props: GridProps) {
       style={{ width: width * shownCell, height: height * shownCell }}
       role="img"
       aria-label={`Battle map, ${width} by ${height} cells`}
+      title={hoveredChest?.label}
       onClick={handleClick}
       onMouseMove={handleMove}
       onMouseLeave={handleLeave}

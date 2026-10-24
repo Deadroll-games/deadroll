@@ -35,7 +35,8 @@ logic is pure (`src/state/gear.rs`) and runs in the program-vs-simulator parity 
 | `unequip(slot: EquipSlot)` | owner or session key | `signer (s), character (w), session_token (optional)` |
 | `spend_stat_points(points: [u16; 4])` | owner main wallet | `owner (s), character (w)` |
 | `lock_for_session(session: Pubkey, selection: [u8; 6])` | session PDA | `character (w), session_authority (s), config, owner (s), skill_set` |
-| `grant_rewards(xp: u32, resources: [u32; 8])` | session PDA | `character (w), session_authority (s), config, bag (w)` |
+| `grant_xp(xp: u32)` | session PDA | `character (w), session_authority (s), config` |
+| `apply_bag(cache: [CacheSlot; 32], layout: BagLayout)` | session PDA | `character, session_authority (s), config, bag (w)` |
 | `mark_dead()` | session PDA | `character (w), session_authority (s), config, skill_set (w), bag (w)` |
 | `unlock()` | session PDA | `character (w), session_authority (s), config` |
 | `freeze_tombstone()` | anyone | `character (w), asset (w), payer (s, w), mpl_core_program, system_program` |
@@ -63,7 +64,7 @@ logic is pure (`src/state/gear.rs`) and runs in the program-vs-simulator parity 
 - **NFT**: owner = player, update authority = the character PDA, plugin
   `PermanentFreezeDelegate { frozen: false }` (survives transfers), uri
   `<GameConfig.uri_base>/char/<character>/v<state_version>.json`. Never deserialize a Core asset on-chain.
-- **Stat points** (docs/CHARACTER.md 5): `grant_rewards` adds `stat_points_per_level` per level
+- **Stat points** (docs/CHARACTER.md 5): `grant_xp` adds `stat_points_per_level` per level
   gained; `spend_stat_points` places them all at once (`points` by `Stat`, sum in
   `1..=unspent_points`), only from the owner's main wallet, for a living character outside a
   session, and recomputes `hp_max`. Event `StatPointsSpent`.

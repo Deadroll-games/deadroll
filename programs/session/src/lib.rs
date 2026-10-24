@@ -10,17 +10,20 @@ pub mod events;
 pub mod hit_event;
 pub mod instructions;
 pub mod line;
+pub mod loot;
 pub mod monster_cb;
 pub mod movement;
 pub mod outcomes;
 pub mod party;
 pub mod reactions;
 pub mod rules;
+pub mod settlement;
 pub mod state;
 pub mod turns;
 pub mod vrf;
 
 use deadroll_character::state::MAP_SKILLS;
+use deadroll_types::BagLayout;
 use instructions::*;
 use rules::MAX_PATH;
 
@@ -40,7 +43,11 @@ pub mod deadroll_session {
     }
 
     /// Player joins with a character and pays a share of the price into escrow.
-    pub fn join_session(ctx: Context<JoinSession>, contribution: u64, actor: Pubkey) -> Result<()> {
+    pub fn join_session<'info>(
+        ctx: Context<'info, JoinSession<'info>>,
+        contribution: u64,
+        actor: Pubkey,
+    ) -> Result<()> {
         join_session::handler(ctx, contribution, actor)
     }
 
@@ -118,14 +125,35 @@ pub mod deadroll_session {
         flee::handler(ctx)
     }
 
-    /// After the party ended: rewards and unlock for one character (its owner or their session key).
-    pub fn claim_rewards<'info>(ctx: Context<'info, ClaimRewards<'info>>) -> Result<()> {
-        claim_rewards::handler(ctx)
+    /// Patch 11: a player opens a visible chest next to them on their turn (AP); the rewards are
+    /// rolled in the VRF callback into every living player's cache.
+    pub fn open_chest(ctx: Context<OpenChest>, chest: u8) -> Result<()> {
+        open_chest::handler(ctx, chest)
     }
 
-    /// After the party ended: the DM takes the escrow and the map goes `Finished`.
-    pub fn claim_escrow<'info>(ctx: Context<'info, ClaimEscrow<'info>>) -> Result<()> {
-        claim_escrow::handler(ctx)
+    /// Patch 11 (replaces `claim_rewards` and `claim_escrow`): the DM, main wallet only, settles
+    /// every player once the party ended (caches become theirs, experience, unlock) and takes the
+    /// escrow; the map goes `Finished`.
+    pub fn settle_party<'info>(ctx: Context<'info, SettleParty<'info>>) -> Result<()> {
+        settle_party::handler(ctx)
+    }
+
+    /// Patch 11: after the DM's deadline, a player settles their own character and takes their
+    /// contribution back.
+    pub fn claim_after_timeout<'info>(ctx: Context<'info, ClaimAfterTimeout<'info>>) -> Result<()> {
+        claim_after_timeout::handler(ctx)
+    }
+
+    /// Patch 11: the owner releases a living character from its ended party (it may join another
+    /// before the party is settled).
+    pub fn leave_party(ctx: Context<LeaveParty>) -> Result<()> {
+        leave_party::handler(ctx)
+    }
+
+    /// Patch 11, "Done" in the bag screen: the owner's bag layout from the settled cache (main
+    /// wallet), then the cache closes.
+    pub fn close_cache(ctx: Context<CloseCache>, session: Pubkey, layout: BagLayout) -> Result<()> {
+        close_cache::handler(ctx, session, layout)
     }
 
     /// Patch 10: binds another temporary key to the party, main wallet only (the player's with

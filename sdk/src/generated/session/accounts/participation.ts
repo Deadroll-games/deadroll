@@ -125,6 +125,13 @@ export type Participation = {
   mapSkills: Array<MapSkillData>;
   /** Patch 9: the Resistance on this player with its aspect weights (`mods` has the others). */
   resistMod: ResistModData;
+  /** Experience of the kills, the player's share already applied. */
+  cacheXp: number;
+  /**
+   * The rewards, `CacheSlot`s as raw bytes (`CacheSlot::read_all`): never decoded field by
+   * field.
+   */
+  cache: ReadonlyUint8Array;
 };
 
 export type ParticipationArgs = {
@@ -176,6 +183,13 @@ export type ParticipationArgs = {
   mapSkills: Array<MapSkillDataArgs>;
   /** Patch 9: the Resistance on this player with its aspect weights (`mods` has the others). */
   resistMod: ResistModDataArgs;
+  /** Experience of the kills, the player's share already applied. */
+  cacheXp: number;
+  /**
+   * The rewards, `CacheSlot`s as raw bytes (`CacheSlot::read_all`): never decoded field by
+   * field.
+   */
+  cache: ReadonlyUint8Array;
 };
 
 /** Gets the encoder for {@link ParticipationArgs} account data. */
@@ -197,6 +211,8 @@ export function getParticipationEncoder(): FixedSizeEncoder<ParticipationArgs> {
       ["accuracy", getAccuracyBuffDataEncoder()],
       ["mapSkills", getArrayEncoder(getMapSkillDataEncoder(), { size: 6 })],
       ["resistMod", getResistModDataEncoder()],
+      ["cacheXp", getU32Encoder()],
+      ["cache", fixEncoderSize(getBytesEncoder(), 160)],
     ]),
     (value) => ({ ...value, discriminator: PARTICIPATION_DISCRIMINATOR }),
   );
@@ -220,6 +236,8 @@ export function getParticipationDecoder(): FixedSizeDecoder<Participation> {
     ["accuracy", getAccuracyBuffDataDecoder()],
     ["mapSkills", getArrayDecoder(getMapSkillDataDecoder(), { size: 6 })],
     ["resistMod", getResistModDataDecoder()],
+    ["cacheXp", getU32Decoder()],
+    ["cache", fixDecoderSize(getBytesDecoder(), 160)],
   ]);
 }
 
@@ -289,5 +307,5 @@ export async function fetchAllMaybeParticipation(
 }
 
 export function getParticipationSize(): number {
-  return 506;
+  return 670;
 }

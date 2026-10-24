@@ -27,6 +27,7 @@ mod tests {
             &hash(b"account:MapLayout").to_bytes()[..8]
         );
         assert_eq!(MapLayout::INIT_SPACE, MapLayoutData::SIZE);
-        assert_eq!(Map::INIT_SPACE, MapData::SIZE + 1);
+        // tier, then patch 11: min_players, chest_radius, settle_timeout_secs (u32).
+        assert_eq!(Map::INIT_SPACE, MapData::SIZE + 1 + 1 + 1 + 4);
     }
 }

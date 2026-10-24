@@ -34,7 +34,7 @@ custom-panic = []
 mock-vrf = []
 
 [dependencies]
-anchor-lang = { workspace = true, features = ["lazy-account", "allow-missing-optionals"] }
+anchor-lang = { workspace = true, features = ["lazy-account", "allow-missing-optionals", "init-if-needed"] }
 deadroll-types = { workspace = true, features = ["anchor"] }
 session-keys.workspace = true
 deadroll-character.workspace = true
@@ -45,6 +45,8 @@ deadroll-rules.workspace = true
 deadroll-skillcheck.workspace = true
 ephemeral-vrf-sdk.workspace = true
 solana-sha256-hasher = { version = "3.1", features = ["sha2"] }
+# Patch 11: the callback pays kills out while its compute budget lasts (`sol_remaining_compute_units`).
+solana-program = "=3.0.0"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

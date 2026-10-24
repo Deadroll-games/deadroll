@@ -27,7 +27,7 @@ written), then the body at offset 16. Readers take records straight from the bod
 | `init_table(kind)` | authority | creates an empty table |
 | `write_table(kind, offset, bytes)` | authority | whole, aligned, valid records only; tables stay editable |
 
-`TableKind`: 0 Aspects, 1 Resonances, 2 Bestiary, 3 Tileset, 4 Prefabs, 5 Traits, 6 MonsterSkills (append only).
+`TableKind`: 0 Aspects, 1 Resonances, 2 Bestiary, 3 Tileset, 4 Prefabs, 5 Traits, 6 MonsterSkills, 7 Rewards (append only).
 
 ## Record layouts (little-endian, validated by `write_table`, source: `src/state/records.rs`)
 
@@ -76,7 +76,8 @@ Op (6 B): `[0] kind` (`deadroll_combat::tables::OpKind`, 0..=20; bit 7 = only on
 | 41 | kin, `0xFF` = none (0 Wolf, 1 Goblin, 2 Bear, 3 Treant, 4 Fairy, 5 Troll; names in `crates/rules/src/registry.rs`) | u8 |
 | 42 | resisted tags (patch 9), bit 0 Magical, 1 Combat (power sources), 2 Strike, 3 Projectile (forms) | u8 |
 | 43 | immune tags, the same bits | u8 |
-| 44..48 | reserved | |
+| 44 | body loot table (patch 11), a Rewards id, `0xFF` = none | u8 |
+| 45..48 | reserved | |
 
 The registry is the only source of monster numbers: the session copies the record at `open_session`, the simulator and the website decode the same bytes (`deadroll_rules::MonsterTemplate::from_record`).
 
@@ -85,6 +86,8 @@ The registry is the only source of monster numbers: the session copies the recor
 **Tileset** (7 x 8 B in `Tile` order): `[0] passable (0/1)`, `[1] move cost in action points (>= 1 if passable)`, `[2] blocks line of sight (0/1)`, `[3] flags`, `[4..8]` reserved.
 
 **Prefabs**: opaque bytes, 4 KB, length-checked only (P1).
+
+**Rewards** (patch 11, 32 x 108 B, index = table id, names in `assets/registry/reward_tables.json`; an all-zero record is an empty id): `[0] present (1)`, `[1] level_base (>= 1)`, `[2] level_max (base..base+3)`, `[3]` reserved, `[4..6] cost` in budget points (u16), `[6..8]` reserved, then 4 levels of 25 B: `[count 1..=6 for a used level, 0 otherwise]`, 6 entries `(kind, id u16, qty >= 1)` (`RewardKind`: 0 Resource, 1 Recipe, 2 Consumable, 3 Blank, 4 Reagent), unused entries zero. Level `level_base + i` is block `i`. `write_table` runs `deadroll_rules::loot::LootTable::from_record`, the decoder the session uses.
 
 ## Build and test
 

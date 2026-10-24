@@ -23,8 +23,6 @@ import {
   getBytesEncoder,
   getStructDecoder,
   getStructEncoder,
-  getU32Decoder,
-  getU32Encoder,
   getU8Decoder,
   getU8Encoder,
   transformEncoder,
@@ -40,121 +38,124 @@ import {
   type MaybeEncodedAccount,
   type ReadonlyUint8Array,
 } from "@solana/kit";
+import {
+  getCacheEntryDecoder,
+  getCacheEntryEncoder,
+  type CacheEntry,
+  type CacheEntryArgs,
+} from "../types/index.js";
 
-export const TEMP_STASH_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Array([
-  151, 121, 12, 93, 150, 184, 160, 251,
+export const REWARD_CACHE_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Array([
+  81, 38, 221, 114, 44, 42, 107, 152,
 ]);
 
-export function getTempStashDiscriminatorBytes(): ReadonlyUint8Array {
-  return fixEncoderSize(getBytesEncoder(), 8).encode(TEMP_STASH_DISCRIMINATOR);
+export function getRewardCacheDiscriminatorBytes(): ReadonlyUint8Array {
+  return fixEncoderSize(getBytesEncoder(), 8).encode(
+    REWARD_CACHE_DISCRIMINATOR,
+  );
 }
 
-export type TempStash = {
+export type RewardCache = {
   discriminator: ReadonlyUint8Array;
   version: number;
-  session: Address;
   character: Address;
-  xp: number;
-  resources: Array<number>;
+  entries: Array<CacheEntry>;
   bump: number;
 };
 
-export type TempStashArgs = {
+export type RewardCacheArgs = {
   version: number;
-  session: Address;
   character: Address;
-  xp: number;
-  resources: Array<number>;
+  entries: Array<CacheEntryArgs>;
   bump: number;
 };
 
-/** Gets the encoder for {@link TempStashArgs} account data. */
-export function getTempStashEncoder(): FixedSizeEncoder<TempStashArgs> {
+/** Gets the encoder for {@link RewardCacheArgs} account data. */
+export function getRewardCacheEncoder(): FixedSizeEncoder<RewardCacheArgs> {
   return transformEncoder(
     getStructEncoder([
       ["discriminator", fixEncoderSize(getBytesEncoder(), 8)],
       ["version", getU8Encoder()],
-      ["session", getAddressEncoder()],
       ["character", getAddressEncoder()],
-      ["xp", getU32Encoder()],
-      ["resources", getArrayEncoder(getU32Encoder(), { size: 8 })],
+      ["entries", getArrayEncoder(getCacheEntryEncoder(), { size: 3 })],
       ["bump", getU8Encoder()],
     ]),
-    (value) => ({ ...value, discriminator: TEMP_STASH_DISCRIMINATOR }),
+    (value) => ({ ...value, discriminator: REWARD_CACHE_DISCRIMINATOR }),
   );
 }
 
-/** Gets the decoder for {@link TempStash} account data. */
-export function getTempStashDecoder(): FixedSizeDecoder<TempStash> {
+/** Gets the decoder for {@link RewardCache} account data. */
+export function getRewardCacheDecoder(): FixedSizeDecoder<RewardCache> {
   return getStructDecoder([
     ["discriminator", fixDecoderSize(getBytesDecoder(), 8)],
     ["version", getU8Decoder()],
-    ["session", getAddressDecoder()],
     ["character", getAddressDecoder()],
-    ["xp", getU32Decoder()],
-    ["resources", getArrayDecoder(getU32Decoder(), { size: 8 })],
+    ["entries", getArrayDecoder(getCacheEntryDecoder(), { size: 3 })],
     ["bump", getU8Decoder()],
   ]);
 }
 
-/** Gets the codec for {@link TempStash} account data. */
-export function getTempStashCodec(): FixedSizeCodec<TempStashArgs, TempStash> {
-  return combineCodec(getTempStashEncoder(), getTempStashDecoder());
+/** Gets the codec for {@link RewardCache} account data. */
+export function getRewardCacheCodec(): FixedSizeCodec<
+  RewardCacheArgs,
+  RewardCache
+> {
+  return combineCodec(getRewardCacheEncoder(), getRewardCacheDecoder());
 }
 
-export function decodeTempStash<TAddress extends string = string>(
+export function decodeRewardCache<TAddress extends string = string>(
   encodedAccount: EncodedAccount<TAddress>,
-): Account<TempStash, TAddress>;
-export function decodeTempStash<TAddress extends string = string>(
+): Account<RewardCache, TAddress>;
+export function decodeRewardCache<TAddress extends string = string>(
   encodedAccount: MaybeEncodedAccount<TAddress>,
-): MaybeAccount<TempStash, TAddress>;
-export function decodeTempStash<TAddress extends string = string>(
+): MaybeAccount<RewardCache, TAddress>;
+export function decodeRewardCache<TAddress extends string = string>(
   encodedAccount: EncodedAccount<TAddress> | MaybeEncodedAccount<TAddress>,
-): Account<TempStash, TAddress> | MaybeAccount<TempStash, TAddress> {
+): Account<RewardCache, TAddress> | MaybeAccount<RewardCache, TAddress> {
   return decodeAccount(
     encodedAccount as MaybeEncodedAccount<TAddress>,
-    getTempStashDecoder(),
+    getRewardCacheDecoder(),
   );
 }
 
-export async function fetchTempStash<TAddress extends string = string>(
+export async function fetchRewardCache<TAddress extends string = string>(
   rpc: Parameters<typeof fetchEncodedAccount>[0],
   address: Address<TAddress>,
   config?: FetchAccountConfig,
-): Promise<Account<TempStash, TAddress>> {
-  const maybeAccount = await fetchMaybeTempStash(rpc, address, config);
+): Promise<Account<RewardCache, TAddress>> {
+  const maybeAccount = await fetchMaybeRewardCache(rpc, address, config);
   assertAccountExists(maybeAccount);
   return maybeAccount;
 }
 
-export async function fetchMaybeTempStash<TAddress extends string = string>(
+export async function fetchMaybeRewardCache<TAddress extends string = string>(
   rpc: Parameters<typeof fetchEncodedAccount>[0],
   address: Address<TAddress>,
   config?: FetchAccountConfig,
-): Promise<MaybeAccount<TempStash, TAddress>> {
+): Promise<MaybeAccount<RewardCache, TAddress>> {
   const maybeAccount = await fetchEncodedAccount(rpc, address, config);
-  return decodeTempStash(maybeAccount);
+  return decodeRewardCache(maybeAccount);
 }
 
-export async function fetchAllTempStash(
+export async function fetchAllRewardCache(
   rpc: Parameters<typeof fetchEncodedAccounts>[0],
   addresses: Array<Address>,
   config?: FetchAccountsConfig,
-): Promise<Account<TempStash>[]> {
-  const maybeAccounts = await fetchAllMaybeTempStash(rpc, addresses, config);
+): Promise<Account<RewardCache>[]> {
+  const maybeAccounts = await fetchAllMaybeRewardCache(rpc, addresses, config);
   assertAccountsExist(maybeAccounts);
   return maybeAccounts;
 }
 
-export async function fetchAllMaybeTempStash(
+export async function fetchAllMaybeRewardCache(
   rpc: Parameters<typeof fetchEncodedAccounts>[0],
   addresses: Array<Address>,
   config?: FetchAccountsConfig,
-): Promise<MaybeAccount<TempStash>[]> {
+): Promise<MaybeAccount<RewardCache>[]> {
   const maybeAccounts = await fetchEncodedAccounts(rpc, addresses, config);
-  return maybeAccounts.map((maybeAccount) => decodeTempStash(maybeAccount));
+  return maybeAccounts.map((maybeAccount) => decodeRewardCache(maybeAccount));
 }
 
-export function getTempStashSize(): number {
-  return 110;
+export function getRewardCacheSize(): number {
+  return 633;
 }

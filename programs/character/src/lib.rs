@@ -11,9 +11,9 @@ pub mod rules;
 pub mod state;
 pub mod trust;
 
-use deadroll_types::{EquipSlot, STATS_COUNT};
+use deadroll_types::{BagLayout, CacheSlot, EquipSlot, CACHE_SLOTS, STATS_COUNT};
 use instructions::*;
-use state::{MAP_SKILLS, RESOURCE_KINDS, SKILL_DESCRIPTION_LEN};
+use state::{MAP_SKILLS, SKILL_DESCRIPTION_LEN};
 
 declare_id!("9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL");
 
@@ -66,13 +66,19 @@ pub mod deadroll_character {
         lock_for_session::handler(ctx, session, selection)
     }
 
-    /// Session only: adds XP (level-ups) and resources to a locked, living character.
-    pub fn grant_rewards(
-        ctx: Context<GrantRewards>,
-        xp: u32,
-        resources: [u32; RESOURCE_KINDS],
+    /// Session only (patch 11): adds XP (level-ups) to a locked, living character.
+    pub fn grant_xp(ctx: Context<GrantXp>, xp: u32) -> Result<()> {
+        grant_xp::handler(ctx, xp)
+    }
+
+    /// Session only (patch 11, "Done" in the bag screen): writes the owner's new bag layout,
+    /// checked against the bag and the session's real cache.
+    pub fn apply_bag(
+        ctx: Context<ApplyBag>,
+        cache: [CacheSlot; CACHE_SLOTS],
+        layout: BagLayout,
     ) -> Result<()> {
-        grant_rewards::handler(ctx, xp, resources)
+        apply_bag::handler(ctx, cache, layout)
     }
 
     /// Session only: the character dies and becomes a tombstone; its skills, bag and soulbound
