@@ -756,12 +756,18 @@ struct TileJson {
 pub fn encode_tileset(json: &str) -> Result<Vec<u8>, String> {
     let list: Vec<TileJson> = records(json, "tileset")?;
     if list.len() != TileKind::COUNT {
-        return Err(format!("tileset: {} records, one per tile type", TileKind::COUNT));
+        return Err(format!(
+            "tileset: {} records, one per tile type",
+            TileKind::COUNT
+        ));
     }
     let mut out = Vec::new();
     for (i, t) in list.iter().enumerate() {
         if parse(&t.tile, TileKind::ALL, "tile")? as usize != i {
-            return Err(format!("tileset: record {i} must be {:?}", TileKind::ALL[i]));
+            return Err(format!(
+                "tileset: record {i} must be {:?}",
+                TileKind::ALL[i]
+            ));
         }
         let mut r = [0u8; tiles::record::SIZE];
         r[tiles::record::PASSABLE] = t.passable;

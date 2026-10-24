@@ -100,7 +100,12 @@ pub(crate) mod tests {
         assert_eq!(rules.step_cost(byte(TileKind::StoneFloor, 0)), Some(1));
         assert_eq!(rules.step_cost(byte(TileKind::ShallowWater, 0)), Some(2));
         assert_eq!(rules.step_cost(byte(TileKind::Rubble, 7)), Some(2));
-        for kind in [TileKind::Void, TileKind::Wall, TileKind::DeepWater, TileKind::Chasm] {
+        for kind in [
+            TileKind::Void,
+            TileKind::Wall,
+            TileKind::DeepWater,
+            TileKind::Chasm,
+        ] {
             assert_eq!(rules.step_cost(byte(kind, 3)), None, "{kind:?}");
             assert!(rules.knows(byte(kind, 3)));
         }

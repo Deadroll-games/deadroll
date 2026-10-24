@@ -308,7 +308,12 @@ fn cell_bytes() {
 
 #[test]
 fn layout_points() {
-    let point = |kind, x| MapPoint { kind, x, y: 0, data: 0 };
+    let point = |kind, x| MapPoint {
+        kind,
+        x,
+        y: 0,
+        data: 0,
+    };
     let mut layout = map_layout_v2(1);
     layout.points[..4].copy_from_slice(&[
         point(PointKind::Chest, 1),

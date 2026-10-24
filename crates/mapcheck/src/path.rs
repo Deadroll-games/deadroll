@@ -144,7 +144,6 @@ pub fn reachable_avoiding(
     reach
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -235,12 +234,18 @@ mod tests {
         // All 8 neighbors of a middle cell.
         let open = grid(&["...", "...", "..."]);
         let center = Cell { x: 1, y: 1 };
-        let reach = reachable_avoiding(&open, 3, 3, center, &[
-            Cell { x: 0, y: 1 },
-            Cell { x: 2, y: 1 },
-            Cell { x: 1, y: 0 },
-            Cell { x: 1, y: 2 },
-        ]);
+        let reach = reachable_avoiding(
+            &open,
+            3,
+            3,
+            center,
+            &[
+                Cell { x: 0, y: 1 },
+                Cell { x: 2, y: 1 },
+                Cell { x: 1, y: 0 },
+                Cell { x: 1, y: 2 },
+            ],
+        );
         assert_eq!(reach.count(), 5, "the four corners and the start");
     }
 
@@ -400,7 +405,11 @@ mod same_as_bfs {
     /// A plain queue BFS over the 8 neighbors: the reference the row fill must match.
     fn bfs(cells: &[u8; MAP_CELLS], w: u8, h: u8, start: Cell, blocked: &[Cell]) -> Reach {
         let rules = starter();
-        let open = |c: Cell| in_bounds(c, w, h) && rules.is_passable(cells[cell_index(c.x, c.y)]) && !blocked.contains(&c);
+        let open = |c: Cell| {
+            in_bounds(c, w, h)
+                && rules.is_passable(cells[cell_index(c.x, c.y)])
+                && !blocked.contains(&c)
+        };
         let mut reach = Reach::empty();
         if !open(start) {
             return reach;
@@ -418,7 +427,10 @@ mod same_as_bfs {
                     if x < 0 || y < 0 {
                         continue;
                     }
-                    let n = Cell { x: x as u8, y: y as u8 };
+                    let n = Cell {
+                        x: x as u8,
+                        y: y as u8,
+                    };
                     if open(n) && !reach.contains(n) {
                         reach.bits[n.y as usize] |= 1 << n.x;
                         queue[tail] = n;
@@ -446,13 +458,27 @@ mod same_as_bfs {
             for c in cells.iter_mut() {
                 let r = next() % 100;
                 if r < density {
-                    *c = if r % 3 == 0 { TileKind::DeepWater as u8 * 8 } else { TileKind::Wall as u8 * 8 };
+                    *c = if r % 3 == 0 {
+                        TileKind::DeepWater as u8 * 8
+                    } else {
+                        TileKind::Wall as u8 * 8
+                    };
                 }
             }
-            let start = Cell { x: (next() % w as u32) as u8, y: (next() % h as u32) as u8 };
-            let blocked = [Cell { x: (next() % 32) as u8, y: (next() % 32) as u8 }];
+            let start = Cell {
+                x: (next() % w as u32) as u8,
+                y: (next() % h as u32) as u8,
+            };
+            let blocked = [Cell {
+                x: (next() % 32) as u8,
+                y: (next() % 32) as u8,
+            }];
             let fast = reachable_avoiding(&cells, &starter(), w, h, start, &blocked);
-            assert_eq!(fast, bfs(&cells, w, h, start, &blocked), "round {round}: {w}x{h}");
+            assert_eq!(
+                fast,
+                bfs(&cells, w, h, start, &blocked),
+                "round {round}: {w}x{h}"
+            );
         }
     }
 

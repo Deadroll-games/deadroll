@@ -168,8 +168,8 @@ pub fn check_map<R: Fn(u8) -> Option<TableRules>>(
         if !tiles.is_passable(layout.cells[cell_index(cell.x, cell.y)]) {
             return Err(E::SpawnNotPassable);
         }
-        let taken = ends.contains(&cell)
-            || spawns[..i].iter().any(|s| s.x == spawn.x && s.y == spawn.y);
+        let taken =
+            ends.contains(&cell) || spawns[..i].iter().any(|s| s.x == spawn.x && s.y == spawn.y);
         if taken {
             return Err(E::SpawnOverlap);
         }
@@ -291,7 +291,10 @@ fn check_tiles(
 ) -> Result<(), MapCheckError> {
     for y in 0..height {
         let row = cell_index(0, y);
-        if !layout.cells[row..row + width as usize].iter().all(|&b| tiles.knows(b)) {
+        if !layout.cells[row..row + width as usize]
+            .iter()
+            .all(|&b| tiles.knows(b))
+        {
             return Err(MapCheckError::InvalidTile);
         }
     }
@@ -517,7 +520,10 @@ mod tests {
         layout.cells = [FLOOR; MAP_CELLS];
         layout.points[0] = point(PointKind::Entrance, Cell { x: 0, y: 0 }, 0);
         layout.points[1] = point(PointKind::Exit, Cell { x: 31, y: 31 }, 0);
-        assert_eq!(check_map(32, 32, 1, &layout, &tiles(), p0_role, &test_loot()), Ok(()));
+        assert_eq!(
+            check_map(32, 32, 1, &layout, &tiles(), p0_role, &test_loot()),
+            Ok(())
+        );
     }
 
     #[test]
@@ -710,7 +716,10 @@ mod tests {
         for s in layout.spawns.iter_mut() {
             s.level = 3;
         }
-        assert_eq!(check_map(16, 16, 2, &layout, &tiles(), p0_role, &test_loot()), Ok(()));
+        assert_eq!(
+            check_map(16, 16, 2, &layout, &tiles(), p0_role, &test_loot()),
+            Ok(())
+        );
     }
 
     #[test]
@@ -781,14 +790,30 @@ mod tests {
             }
         };
         assert_eq!(
-            check_map(16, 16, 1, &layout, &tiles(), wolves_are_loners, &test_loot()),
+            check_map(
+                16,
+                16,
+                1,
+                &layout,
+                &tiles(),
+                wolves_are_loners,
+                &test_loot()
+            ),
             Err(MapCheckError::TwoLoners)
         );
         // One loner per pack is fine.
         let mut layout = demo();
         layout.spawns[1].bestiary_id = ids::GOBLIN;
         assert_eq!(
-            check_map(16, 16, 1, &layout, &tiles(), wolves_are_loners, &test_loot()),
+            check_map(
+                16,
+                16,
+                1,
+                &layout,
+                &tiles(),
+                wolves_are_loners,
+                &test_loot()
+            ),
             Ok(())
         );
     }
@@ -815,7 +840,16 @@ mod tests {
     fn rejects_unreachable_spawn() {
         let mut layout = demo();
         // Wall in the first wolf.
-        for (x, y) in [(5, 1), (6, 1), (7, 1), (5, 2), (7, 2), (5, 3), (6, 3), (7, 3)] {
+        for (x, y) in [
+            (5, 1),
+            (6, 1),
+            (7, 1),
+            (5, 2),
+            (7, 2),
+            (5, 3),
+            (6, 3),
+            (7, 3),
+        ] {
             set(&mut layout, x, y, TileKind::Wall);
         }
         layout.spawns[1].x = 7;
@@ -866,7 +900,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn map_without_chests_is_valid() {
         let mut layout = demo();
@@ -883,7 +916,10 @@ mod tests {
                 Err(MapCheckError::MinPlayersOutOfRange)
             );
         }
-        assert_eq!(check_map(16, 16, 1, &layout, &tiles(), p0_role, &loot_for(4)), Ok(()));
+        assert_eq!(
+            check_map(16, 16, 1, &layout, &tiles(), p0_role, &loot_for(4)),
+            Ok(())
+        );
     }
 
     #[test]
@@ -898,7 +934,10 @@ mod tests {
         );
         set_chests(&mut layout, &[small(5, 5), small(6, 6), small(7, 7)]);
         assert_eq!(check(&layout), Err(MapCheckError::TooManyChests));
-        set_chests(&mut layout, &[small(5, 5), small(6, 6), small(7, 7), small(8, 8)]);
+        set_chests(
+            &mut layout,
+            &[small(5, 5), small(6, 6), small(7, 7), small(8, 8)],
+        );
         assert_eq!(check(&layout), Err(MapCheckError::TooManyChests));
     }
 
@@ -954,7 +993,10 @@ mod tests {
             check_map(16, 16, 1, &layout, &tiles(), p0_role, &loot_for(1)),
             Err(MapCheckError::OverBudget)
         );
-        assert_eq!(check_map(16, 16, 1, &layout, &tiles(), p0_role, &loot_for(2)), Ok(()));
+        assert_eq!(
+            check_map(16, 16, 1, &layout, &tiles(), p0_role, &loot_for(2)),
+            Ok(())
+        );
     }
 
     #[test]
@@ -1033,7 +1075,10 @@ mod tests {
         );
         layout.spawns[0].skills = 0b1_0111;
         layout.spawns[1].skills = 0b1_1110;
-        assert_eq!(check_map(16, 16, 1, &layout, &tiles(), &roster, &test_loot()), Ok(()));
+        assert_eq!(
+            check_map(16, 16, 1, &layout, &tiles(), &roster, &test_loot()),
+            Ok(())
+        );
         layout.spawns[1].skills = 0b10_0111;
         assert_eq!(
             check_map(16, 16, 1, &layout, &tiles(), &roster, &test_loot()),
@@ -1046,7 +1091,10 @@ mod tests {
             Err(MapCheckError::MonsterSkillCount)
         );
         layout.spawns[1].flags = SPAWN_ELITE;
-        assert_eq!(check_map(16, 16, 1, &layout, &tiles(), &roster, &test_loot()), Ok(()));
+        assert_eq!(
+            check_map(16, 16, 1, &layout, &tiles(), &roster, &test_loot()),
+            Ok(())
+        );
     }
 
     #[test]
@@ -1111,6 +1159,9 @@ mod tests {
             }
             Some(t)
         };
-        assert_eq!(check_map(16, 16, 1, &layout, &tiles(), two, &test_loot()), Ok(()));
+        assert_eq!(
+            check_map(16, 16, 1, &layout, &tiles(), two, &test_loot()),
+            Ok(())
+        );
     }
 }

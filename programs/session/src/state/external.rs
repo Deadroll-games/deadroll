@@ -495,7 +495,9 @@ mod tests {
 
     #[test]
     fn reads_tile_costs() {
-        let tileset = deadroll_rules::registry::Registry::shipped().unwrap().tileset;
+        let tileset = deadroll_rules::registry::Registry::shipped()
+            .unwrap()
+            .tileset;
         let mut account = table(TILESET_TABLE, TableKind::Tileset, &tileset);
         let mut costs = [0; TILE_KINDS_MAX];
         costs[..TileKind::COUNT].copy_from_slice(&[0, 1, 1, 1, 0, 1, 2, 0, 1, 2, 0]);
@@ -505,7 +507,10 @@ mod tests {
         let mut more = tileset.clone();
         more.extend_from_slice(&[1, 3, 0, 0, 0, 0, 0, 0]);
         let mut account = table(TILESET_TABLE, TableKind::Tileset, &more);
-        assert_eq!(read_tile_costs(&account.info()).unwrap()[TileKind::COUNT], 3);
+        assert_eq!(
+            read_tile_costs(&account.info()).unwrap()[TileKind::COUNT],
+            3
+        );
         let body = tileset;
         let mut short = table(
             TILESET_TABLE,

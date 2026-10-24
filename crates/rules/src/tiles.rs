@@ -25,10 +25,7 @@ pub mod record {
 /// A record the registry accepts.
 pub fn validate_record(r: &[u8]) -> bool {
     use record::*;
-    r.len() == SIZE
-        && r[PASSABLE] <= 1
-        && r[BLOCKS_LOS] <= 1
-        && (r[PASSABLE] == 0 || r[COST] >= 1)
+    r.len() == SIZE && r[PASSABLE] <= 1 && r[BLOCKS_LOS] <= 1 && (r[PASSABLE] == 0 || r[COST] >= 1)
 }
 
 /// The `Tileset` table body as [`TileRules`]: every whole record is a known tile type, records
@@ -72,8 +69,14 @@ mod tests {
         assert_eq!(rules.known, 0b1111);
         assert_eq!(rules.blocks_vision, 0b0001);
         assert_eq!(rules.step_cost(cell_byte(TileKind::Void as u8, 0)), None);
-        assert_eq!(rules.step_cost(cell_byte(TileKind::StoneFloor as u8, 2)), Some(1));
-        assert_eq!(rules.step_cost(cell_byte(TileKind::WoodenFloor as u8, 0)), Some(2));
+        assert_eq!(
+            rules.step_cost(cell_byte(TileKind::StoneFloor as u8, 2)),
+            Some(1)
+        );
+        assert_eq!(
+            rules.step_cost(cell_byte(TileKind::WoodenFloor as u8, 0)),
+            Some(2)
+        );
         assert_eq!(rules.step_cost(cell_byte(TileKind::Dirt as u8, 0)), None);
         assert!(!rules.knows(cell_byte(TileKind::Wall as u8, 0)));
     }
