@@ -615,6 +615,8 @@ describe.skipIf(!ON)("localnet: the builder's verdict is finalize_map's", () => 
       ["exit on a chasm", (d) => at(d, d.exit!.x, d.exit!.y, Tile.Chasm)],
       ["corridor in deep water", (d) => at(d, 11, 7, Tile.DeepWater)],
       ["corridor in rubble", (d) => at(d, 11, 7, Tile.Rubble, 3)],
+      // Patch 13: a diagonal never cuts a corner.
+      ["a diagonal past wall corners", (d) => (at(d, 11, 7, Tile.Wall), at(d, 12, 7, Tile.StoneFloor))],
       ["reserved tile type", (d) => at(d, 2, 2, 11)],
       ["spawn on a wall", (d) => at(d, d.spawns[0]!.x, d.spawns[0]!.y, Tile.Wall)],
       ["entrance on the exit", (d) => (d.entrance = d.exit)],
