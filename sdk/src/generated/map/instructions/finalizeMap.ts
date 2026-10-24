@@ -64,6 +64,8 @@ export type FinalizeMapInstruction<
     "NQNEuKDUZhACnTJ9sD3dW49BoiPtJPatp6bpY61r81p",
   TAccountRewards extends string | AccountMeta<string> =
     "FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK",
+  TAccountTileset extends string | AccountMeta<string> =
+    "GqzUadKRKmJNT2RQAhrTz31qdoMfTGmya3Cfz2vAhXHu",
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
 > = Instruction<TProgram> &
   InstructionWithData<ReadonlyUint8Array> &
@@ -85,6 +87,9 @@ export type FinalizeMapInstruction<
       TAccountRewards extends string
         ? ReadonlyAccount<TAccountRewards>
         : TAccountRewards,
+      TAccountTileset extends string
+        ? ReadonlyAccount<TAccountTileset>
+        : TAccountTileset,
       ...TRemainingAccounts,
     ]
   >;
@@ -133,6 +138,7 @@ export type FinalizeMapAsyncInput<
   TAccountMonsterSkills extends InstructionAccountInput =
     InstructionAccountInput,
   TAccountRewards extends InstructionAccountInput = InstructionAccountInput,
+  TAccountTileset extends InstructionAccountInput = InstructionAccountInput,
 > = {
   dm: TAccountDm;
   map: TAccountMap;
@@ -141,6 +147,8 @@ export type FinalizeMapAsyncInput<
   bestiary?: TAccountBestiary;
   monsterSkills?: TAccountMonsterSkills;
   rewards?: TAccountRewards;
+  /** records `open_session` gives movement. */
+  tileset?: TAccountTileset;
   secretsRoot: FinalizeMapInstructionDataArgs["secretsRoot"];
 };
 
@@ -151,6 +159,7 @@ export async function getFinalizeMapInstructionAsync<
   TAccountBestiary extends InstructionAccountInput,
   TAccountMonsterSkills extends InstructionAccountInput,
   TAccountRewards extends InstructionAccountInput,
+  TAccountTileset extends InstructionAccountInput,
   TProgramAddress extends Address = typeof DEADROLL_MAP_PROGRAM_ADDRESS,
 >(
   input: FinalizeMapAsyncInput<
@@ -159,7 +168,8 @@ export async function getFinalizeMapInstructionAsync<
     TAccountLayout,
     TAccountBestiary,
     TAccountMonsterSkills,
-    TAccountRewards
+    TAccountRewards,
+    TAccountTileset
   >,
   config?: { programAddress?: TProgramAddress },
 ): Promise<
@@ -188,6 +198,10 @@ export async function getFinalizeMapInstructionAsync<
     ResolvedInstructionAccountMeta<
       TAccountRewards,
       InstructionAccountInputAddress<TAccountRewards>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountTileset,
+      InstructionAccountInputAddress<TAccountTileset>
     >
   >
 > {
@@ -214,6 +228,11 @@ export async function getFinalizeMapInstructionAsync<
     },
     rewards: {
       value: input.rewards ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    tileset: {
+      value: input.tileset ?? null,
       isSigner: false,
       isWritable: false,
     },
@@ -250,6 +269,10 @@ export async function getFinalizeMapInstructionAsync<
     accounts.rewards.value =
       "FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK" as Address<"FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK">;
   }
+  if (!accounts.tileset.value) {
+    accounts.tileset.value =
+      "GqzUadKRKmJNT2RQAhrTz31qdoMfTGmya3Cfz2vAhXHu" as Address<"GqzUadKRKmJNT2RQAhrTz31qdoMfTGmya3Cfz2vAhXHu">;
+  }
 
   return Object.freeze({
     accounts: [
@@ -259,6 +282,7 @@ export async function getFinalizeMapInstructionAsync<
       getAccountMeta("bestiary", accounts.bestiary),
       getAccountMeta("monsterSkills", accounts.monsterSkills),
       getAccountMeta("rewards", accounts.rewards),
+      getAccountMeta("tileset", accounts.tileset),
     ],
     data: getFinalizeMapInstructionDataEncoder().encode(
       args as FinalizeMapInstructionDataArgs,
@@ -289,6 +313,10 @@ export async function getFinalizeMapInstructionAsync<
     ResolvedInstructionAccountMeta<
       TAccountRewards,
       InstructionAccountInputAddress<TAccountRewards>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountTileset,
+      InstructionAccountInputAddress<TAccountTileset>
     >
   >);
 }
@@ -301,6 +329,7 @@ export type FinalizeMapInput<
   TAccountMonsterSkills extends InstructionAccountInput =
     InstructionAccountInput,
   TAccountRewards extends InstructionAccountInput = InstructionAccountInput,
+  TAccountTileset extends InstructionAccountInput = InstructionAccountInput,
 > = {
   dm: TAccountDm;
   map: TAccountMap;
@@ -309,6 +338,8 @@ export type FinalizeMapInput<
   bestiary?: TAccountBestiary;
   monsterSkills?: TAccountMonsterSkills;
   rewards?: TAccountRewards;
+  /** records `open_session` gives movement. */
+  tileset?: TAccountTileset;
   secretsRoot: FinalizeMapInstructionDataArgs["secretsRoot"];
 };
 
@@ -319,6 +350,7 @@ export function getFinalizeMapInstruction<
   TAccountBestiary extends InstructionAccountInput,
   TAccountMonsterSkills extends InstructionAccountInput,
   TAccountRewards extends InstructionAccountInput,
+  TAccountTileset extends InstructionAccountInput,
   TProgramAddress extends Address = typeof DEADROLL_MAP_PROGRAM_ADDRESS,
 >(
   input: FinalizeMapInput<
@@ -327,7 +359,8 @@ export function getFinalizeMapInstruction<
     TAccountLayout,
     TAccountBestiary,
     TAccountMonsterSkills,
-    TAccountRewards
+    TAccountRewards,
+    TAccountTileset
   >,
   config?: { programAddress?: TProgramAddress },
 ): FinalizeMapInstruction<
@@ -355,6 +388,10 @@ export function getFinalizeMapInstruction<
   ResolvedInstructionAccountMeta<
     TAccountRewards,
     InstructionAccountInputAddress<TAccountRewards>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountTileset,
+    InstructionAccountInputAddress<TAccountTileset>
   >
 > {
   // Program address.
@@ -383,6 +420,11 @@ export function getFinalizeMapInstruction<
       isSigner: false,
       isWritable: false,
     },
+    tileset: {
+      value: input.tileset ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
   };
   const accounts = originalAccounts as Record<
     keyof typeof originalAccounts,
@@ -405,6 +447,10 @@ export function getFinalizeMapInstruction<
     accounts.rewards.value =
       "FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK" as Address<"FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK">;
   }
+  if (!accounts.tileset.value) {
+    accounts.tileset.value =
+      "GqzUadKRKmJNT2RQAhrTz31qdoMfTGmya3Cfz2vAhXHu" as Address<"GqzUadKRKmJNT2RQAhrTz31qdoMfTGmya3Cfz2vAhXHu">;
+  }
 
   return Object.freeze({
     accounts: [
@@ -414,6 +460,7 @@ export function getFinalizeMapInstruction<
       getAccountMeta("bestiary", accounts.bestiary),
       getAccountMeta("monsterSkills", accounts.monsterSkills),
       getAccountMeta("rewards", accounts.rewards),
+      getAccountMeta("tileset", accounts.tileset),
     ],
     data: getFinalizeMapInstructionDataEncoder().encode(
       args as FinalizeMapInstructionDataArgs,
@@ -444,6 +491,10 @@ export function getFinalizeMapInstruction<
     ResolvedInstructionAccountMeta<
       TAccountRewards,
       InstructionAccountInputAddress<TAccountRewards>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountTileset,
+      InstructionAccountInputAddress<TAccountTileset>
     >
   >);
 }
@@ -461,6 +512,8 @@ export type ParsedFinalizeMapInstruction<
     bestiary: TAccountMetas[3];
     monsterSkills: TAccountMetas[4];
     rewards: TAccountMetas[5];
+    /** records `open_session` gives movement. */
+    tileset: TAccountMetas[6];
   };
   data: FinalizeMapInstructionData;
 };
@@ -473,12 +526,12 @@ export function parseFinalizeMapInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
 ): ParsedFinalizeMapInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 6) {
+  if (instruction.accounts.length < 7) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 6,
+        expectedAccountMetas: 7,
       },
     );
   }
@@ -497,6 +550,7 @@ export function parseFinalizeMapInstruction<
       bestiary: getNextAccount(),
       monsterSkills: getNextAccount(),
       rewards: getNextAccount(),
+      tileset: getNextAccount(),
     },
     data: getFinalizeMapInstructionDataDecoder().decode(instruction.data),
   };

@@ -3,6 +3,7 @@
 // 20 ramps and 13 materials are those of palette 1). A character is drawn as its body, its hair and
 // the items it wears (chain/items.ts `characterRequest`); `Character.appearance` holds the body part.
 import { Aspect, LAYERS_MAX, Race, Tile, type LayerRef, type RenderRequest } from "./types";
+import type { GridPointKind } from "../components/grid/types";
 
 /** palette_2.pal `ramp` lines, in order (append only). */
 export const RAMP = {
@@ -88,17 +89,31 @@ export function monsterRequest(bestiaryId: number, dead: boolean): RenderRequest
   return renderRequest(layers([[0, id, mat, RAMP.gold]], RAMP.cold), dead);
 }
 
+/**
+ * Patch 13: the sprite of each tile type. Until the new tiles are drawn they borrow the existing
+ * sprites (the variant does not change the picture yet); void and chasm have none and stay dark.
+ */
 const TILE_SPRITES: Record<number, [number, number]> = {
-  [Tile.Floor]: [500, MATERIAL.tileFloor],
+  [Tile.StoneFloor]: [500, MATERIAL.tileFloor],
+  [Tile.WoodenFloor]: [500, MATERIAL.tileFloor],
+  [Tile.Dirt]: [500, MATERIAL.tileFloor],
+  [Tile.Rubble]: [500, MATERIAL.tileFloor],
   [Tile.Wall]: [501, MATERIAL.tileWall],
-  [Tile.Water]: [502, MATERIAL.tileWater],
+  [Tile.ShallowWater]: [502, MATERIAL.tileWater],
+  [Tile.DeepWater]: [502, MATERIAL.tileWater],
   [Tile.Door]: [503, MATERIAL.tileDoor],
-  [Tile.Entrance]: [504, MATERIAL.tileFloor],
-  [Tile.Exit]: [505, MATERIAL.tileFloor],
-  [Tile.Trap]: [506, MATERIAL.tileFloor],
+  [Tile.Stairs]: [505, MATERIAL.tileFloor],
 };
 
-export function tileRequest(tile: Tile): RenderRequest {
-  const [id, mat] = TILE_SPRITES[tile] ?? [500, MATERIAL.tileFloor];
-  return renderRequest(layers([[0, id, mat, RAMP.stone]], RAMP.cold));
+/** The render request of a tile type, null for one drawn as a flat color. */
+export function tileRequest(tile: Tile): RenderRequest | null {
+  const sprite = TILE_SPRITES[tile];
+  return sprite ? renderRequest(layers([[0, sprite[0], sprite[1], RAMP.stone]], RAMP.cold)) : null;
+}
+
+/** The entrance and the exit points over their cell (the former entrance and exit tiles). */
+const POINT_SPRITES: Record<GridPointKind, number> = { entrance: 504, exit: 505 };
+
+export function pointRequest(kind: GridPointKind): RenderRequest {
+  return renderRequest(layers([[0, POINT_SPRITES[kind], MATERIAL.tileFloor, RAMP.stone]], RAMP.cold));
 }

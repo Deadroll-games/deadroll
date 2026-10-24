@@ -9,7 +9,7 @@ pub mod instructions;
 pub mod state;
 pub mod trust;
 
-use deadroll_types::{Cell, MapPoint, MapStatus, Spawn};
+use deadroll_types::{MapPoint, MapStatus, Spawn};
 use instructions::*;
 use state::MapSettings;
 
@@ -33,28 +33,24 @@ pub mod deadroll_map {
         create_map::handler(ctx, index, width, height, tier, settings)
     }
 
-    /// DM writes a chunk of tile bytes into a draft layout.
-    pub fn write_layout(ctx: Context<WriteLayout>, offset: u16, tiles: Vec<u8>) -> Result<()> {
-        write_layout::handler(ctx, offset, tiles)
+    /// DM writes a chunk of cell bytes (tile type and variant) into a draft layout.
+    pub fn write_layout(ctx: Context<WriteLayout>, offset: u16, cells: Vec<u8>) -> Result<()> {
+        write_layout::handler(ctx, offset, cells)
     }
 
-    /// DM replaces the entrance, the exit and the spawn list of a draft layout.
-    pub fn write_spawns(
-        ctx: Context<WriteLayout>,
-        entrance: Cell,
-        exit: Cell,
-        spawns: Vec<Spawn>,
-    ) -> Result<()> {
-        write_spawns::handler(ctx, entrance, exit, spawns)
+    /// DM replaces the spawn list of a draft layout.
+    pub fn write_spawns(ctx: Context<WriteLayout>, spawns: Vec<Spawn>) -> Result<()> {
+        write_spawns::handler(ctx, spawns)
     }
 
-    /// Patch 11: DM replaces the visible chests and the boss reward table of a draft layout.
-    pub fn write_chests(
+    /// Patch 13: DM replaces the points (entrance, exit, visible chests) and the boss reward
+    /// table of a draft layout.
+    pub fn write_points(
         ctx: Context<WriteLayout>,
-        chests: Vec<MapPoint>,
+        points: Vec<MapPoint>,
         boss_table: u8,
     ) -> Result<()> {
-        write_chests::handler(ctx, chests, boss_table)
+        write_points::handler(ctx, points, boss_table)
     }
 
     /// DM finalizes a draft: builder rules, layout hash, secrets root. The map is immutable after.

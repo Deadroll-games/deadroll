@@ -1,18 +1,23 @@
 // Battle map canvas: tiles, units, move highlights, and cell clicks.
 import { useEffect, useRef, useState, type MouseEvent } from "react";
-import { Tile, cellIndex, type Cell } from "../../chain/types";
+import { TILE_COUNT, Tile, cellIndex, cellKind, type Cell } from "../../chain/types";
 import { TILE_PX } from "../../raster/SpriteCanvas";
-import type { GridProps, GridUnit } from "./types";
+import type { GridPoint, GridProps, GridUnit } from "./types";
 import "./grid.css";
 
 const FLOOR = "#3b3043";
 const WALL = "#17111c";
 const WALL_EDGE = "#3d3450";
 const WATER = "#2b4f7a";
+const DEEP_WATER = "#1b3352";
 const DOOR = "#7a5a2b";
+const WOOD = "#4a3628";
+const DIRT = "#3f3a2a";
+const STAIRS = "#5a4f62";
+const RUBBLE = "#4b4350";
+const VOID = "#07050a";
 const ENTRANCE = "#2f6b3a";
 const EXIT = "#8a6a1f";
-const TRAP = "#6b2f2f";
 const GRID_LINE = "rgba(0,0,0,.25)";
 const REACHABLE = "rgba(79,143,217,.28)";
 const BURNING = "rgba(230,120,40,.45)";
@@ -70,20 +75,23 @@ function context2d(canvas: HTMLCanvasElement): CanvasRenderingContext2D | null {
   }
 }
 
+/** The tile type of a cell byte, null for a type the starter set does not have. */
 function knownTile(value: number | undefined): Tile | null {
-  switch (value) {
-    case Tile.Floor:
-    case Tile.Wall:
-    case Tile.Water:
-    case Tile.Door:
-    case Tile.Entrance:
-    case Tile.Exit:
-    case Tile.Trap:
-      return value;
-    default:
-      return null;
-  }
+  const kind = cellKind(value ?? 0);
+  return kind < TILE_COUNT ? (kind as Tile) : null;
 }
+
+const FLAT: Partial<Record<Tile, string>> = {
+  [Tile.Void]: VOID,
+  [Tile.Chasm]: VOID,
+  [Tile.WoodenFloor]: WOOD,
+  [Tile.Dirt]: DIRT,
+  [Tile.ShallowWater]: WATER,
+  [Tile.DeepWater]: DEEP_WATER,
+  [Tile.Door]: DOOR,
+  [Tile.Stairs]: STAIRS,
+  [Tile.Rubble]: RUBBLE,
+};
 
 function inMap(cell: Cell, width: number, height: number): boolean {
   return cell.x >= 0 && cell.y >= 0 && cell.x < width && cell.y < height;
@@ -186,23 +194,25 @@ function drawTile(
     ctx.fillRect(x, y, cell, Math.max(2, Math.floor(cell / 10)));
     return;
   }
-  if (tile === Tile.Water) ctx.fillStyle = WATER;
-  else if (tile === Tile.Door) ctx.fillStyle = DOOR;
-  else if (tile === Tile.Entrance) ctx.fillStyle = ENTRANCE;
-  else if (tile === Tile.Exit) ctx.fillStyle = EXIT;
-  else ctx.fillStyle = FLOOR;
+  ctx.fillStyle = tile === null ? VOID : (FLAT[tile] ?? FLOOR);
   ctx.fillRect(x, y, cell, cell);
-  if (tile === Tile.Trap) {
-    const pad = Math.floor(cell * 0.3);
-    ctx.strokeStyle = TRAP;
-    ctx.lineWidth = Math.max(2, Math.floor(cell / 14));
-    ctx.beginPath();
-    ctx.moveTo(x + pad, y + pad);
-    ctx.lineTo(x + cell - pad, y + cell - pad);
-    ctx.moveTo(x + cell - pad, y + pad);
-    ctx.lineTo(x + pad, y + cell - pad);
-    ctx.stroke();
+}
+
+/** The entrance or the exit: its sprite over the cell, or a colored frame with a letter. */
+function drawPoint(ctx: CanvasRenderingContext2D, scratch: HTMLCanvasElement, point: GridPoint, sprite: ImageData | null, cell: number) {
+  const x = point.x * cell;
+  const y = point.y * cell;
+  if (sprite) {
+    paintImage(ctx, scratch, sprite, x, y, cell, cell);
+    return;
   }
+  const color = point.kind === "entrance" ? ENTRANCE : EXIT;
+  paintOutline(ctx, x, y, cell, Math.max(1, Math.floor(cell / 10)), Math.max(2, Math.floor(cell / 12)), color);
+  ctx.fillStyle = color;
+  ctx.font = `${Math.max(9, Math.floor(cell * 0.34))}px "Inter", system-ui, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(point.kind === "entrance" ? "E" : "X", x + cell / 2, y + cell / 2 + 1);
 }
 
 function drawMarker(ctx: CanvasRenderingContext2D, unit: GridUnit, cell: number) {
@@ -334,6 +344,11 @@ function drawGrid(ctx: CanvasRenderingContext2D, props: GridProps, cell: number)
   for (const spot of reachable) {
     if (!inMap(spot, width, height)) continue;
     ctx.fillRect(spot.x * cell, spot.y * cell, cell, cell);
+  }
+
+  for (const point of props.points ?? []) {
+    if (!inMap(point, width, height)) continue;
+    drawPoint(ctx, scratch, point, props.pointSprite?.(point.kind) ?? null, cell);
   }
 
   // Chests: a brown square while closed, only its outline once opened (placeholder look).

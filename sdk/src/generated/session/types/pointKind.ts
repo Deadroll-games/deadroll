@@ -16,14 +16,21 @@ import {
 } from "@solana/kit";
 
 /**
- * A map point type (`MapPoint.kind`, docs/MAP_DESCRIPTION.md 7.1). The entrance and the exit
- * stay in `MapLayoutData.entrance` / `exit`; only visible chests are points for now.
+ * A map point type (`MapPoint.kind`, docs/MAP_DESCRIPTION.md 7.1). `Entrance` and `Exit`
+ * appended in patch 13 (`MapLayoutDataV2.points`).
  */
-export const PointKind = { 0: "Chest", Chest: 0 } as const;
+export const PointKind = {
+  0: "Chest",
+  1: "Entrance",
+  2: "Exit",
+  Chest: 0,
+  Entrance: 1,
+  Exit: 2,
+} as const;
 
 /**
- * A map point type (`MapPoint.kind`, docs/MAP_DESCRIPTION.md 7.1). The entrance and the exit
- * stay in `MapLayoutData.entrance` / `exit`; only visible chests are points for now.
+ * A map point type (`MapPoint.kind`, docs/MAP_DESCRIPTION.md 7.1). `Entrance` and `Exit`
+ * appended in patch 13 (`MapLayoutDataV2.points`).
  */
 export type PointKind = (typeof PointKind)[Exclude<
   keyof typeof PointKind,

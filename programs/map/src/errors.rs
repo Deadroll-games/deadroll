@@ -20,15 +20,15 @@ pub enum MapError {
     SizeOutOfRange,
     #[msg("Map tier has no limits")]
     TierOutOfRange,
-    #[msg("Byte is not a known tile")]
+    #[msg("A cell has a tile type the Tileset does not have")]
     InvalidTile,
-    #[msg("Map needs exactly one entrance tile")]
+    #[msg("Map needs exactly one entrance point")]
     EntranceCount,
-    #[msg("Map needs exactly one exit tile")]
+    #[msg("Map needs exactly one exit point")]
     ExitCount,
-    #[msg("Entrance point is not on the entrance tile")]
+    #[msg("Unused since patch 13")]
     EntranceMismatch,
-    #[msg("Exit point is not on the exit tile")]
+    #[msg("Unused since patch 13")]
     ExitMismatch,
     #[msg("Too many spawns")]
     TooManySpawns,
@@ -82,7 +82,7 @@ pub enum MapError {
     MinPlayersOutOfRange,
     #[msg("Too many visible chests for the map tier")]
     TooManyChests,
-    #[msg("A map point is not a visible chest")]
+    #[msg("Unused since patch 13")]
     InvalidPoint,
     #[msg("Chest is outside the map")]
     ChestOutOfBounds,
@@ -106,6 +106,15 @@ pub enum MapError {
     ChestRadiusOutOfRange,
     #[msg("The time to settle is outside the limits (at most LootTuning.settle_timeout_max_secs)")]
     SettleTimeoutOutOfRange,
+    // Patch 13: the entrance and the exit are points.
+    #[msg("Too many points (entrance, exit and chests)")]
+    TooManyPoints,
+    #[msg("The entrance or the exit is outside the map")]
+    PointOutOfBounds,
+    #[msg("The entrance or the exit is on a cell that cannot be entered")]
+    PointNotPassable,
+    #[msg("The entrance and the exit share a cell")]
+    PointOverlap,
 }
 
 impl From<MapCheckError> for MapError {
@@ -153,6 +162,10 @@ impl From<MapCheckError> for MapError {
             C::BossTableOneLevel => MapError::BossTableOneLevel,
             C::OverBudget => MapError::OverBudget,
             C::ChestUnreachable => MapError::ChestUnreachable,
+            C::TooManyPoints => MapError::TooManyPoints,
+            C::PointOutOfBounds => MapError::PointOutOfBounds,
+            C::PointNotPassable => MapError::PointNotPassable,
+            C::PointOverlap => MapError::PointOverlap,
         }
     }
 }

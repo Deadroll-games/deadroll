@@ -1,11 +1,15 @@
 {
   "records": [
-    { "tile": "Floor", "passable": 1, "cost": 1, "blocks_los": 0, "flags": 0 },
+    { "tile": "Void", "passable": 0, "cost": 0, "blocks_los": 1, "flags": 0 },
+    { "tile": "StoneFloor", "passable": 1, "cost": 1, "blocks_los": 0, "flags": 0 },
+    { "tile": "WoodenFloor", "passable": 1, "cost": 1, "blocks_los": 0, "flags": 0 },
+    { "tile": "Dirt", "passable": 1, "cost": 1, "blocks_los": 0, "flags": 0 },
     { "tile": "Wall", "passable": 0, "cost": 0, "blocks_los": 1, "flags": 0 },
-    { "tile": "Water", "passable": 1, "cost": 2, "blocks_los": 0, "flags": 0 },
-    { "tile": "Door", "passable": 1, "cost": 1, "blocks_los": 1, "flags": 0 },
-    { "tile": "Entrance", "passable": 1, "cost": 1, "blocks_los": 0, "flags": 0 },
-    { "tile": "Exit", "passable": 1, "cost": 1, "blocks_los": 0, "flags": 0 },
-    { "tile": "Trap", "passable": 1, "cost": 1, "blocks_los": 0, "flags": 0 }
+    { "tile": "Door", "passable": 1, "cost": 1, "blocks_los": 1, "flags": 1 },
+    { "tile": "ShallowWater", "passable": 1, "cost": 2, "blocks_los": 0, "flags": 0 },
+    { "tile": "DeepWater", "passable": 0, "cost": 0, "blocks_los": 0, "flags": 0 },
+    { "tile": "Stairs", "passable": 1, "cost": 1, "blocks_los": 0, "flags": 0 },
+    { "tile": "Rubble", "passable": 1, "cost": 2, "blocks_los": 0, "flags": 0 },
+    { "tile": "Chasm", "passable": 0, "cost": 0, "blocks_los": 0, "flags": 0 }
   ]
 }

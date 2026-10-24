@@ -45,12 +45,8 @@ import {
 import { findLayoutPda } from "../pdas/index.js";
 import { DEADROLL_MAP_PROGRAM_ADDRESS } from "../programs/index.js";
 import {
-  getCellDecoder,
-  getCellEncoder,
   getSpawnDecoder,
   getSpawnEncoder,
-  type Cell,
-  type CellArgs,
   type Spawn,
   type SpawnArgs,
 } from "../types/index.js";
@@ -88,23 +84,15 @@ export type WriteSpawnsInstruction<
 
 export type WriteSpawnsInstructionData = {
   discriminator: ReadonlyUint8Array;
-  entrance: Cell;
-  exit: Cell;
   spawns: Array<Spawn>;
 };
 
-export type WriteSpawnsInstructionDataArgs = {
-  entrance: CellArgs;
-  exit: CellArgs;
-  spawns: Array<SpawnArgs>;
-};
+export type WriteSpawnsInstructionDataArgs = { spawns: Array<SpawnArgs> };
 
 export function getWriteSpawnsInstructionDataEncoder(): Encoder<WriteSpawnsInstructionDataArgs> {
   return transformEncoder(
     getStructEncoder([
       ["discriminator", fixEncoderSize(getBytesEncoder(), 8)],
-      ["entrance", getCellEncoder()],
-      ["exit", getCellEncoder()],
       ["spawns", getArrayEncoder(getSpawnEncoder())],
     ]),
     (value) => ({ ...value, discriminator: WRITE_SPAWNS_DISCRIMINATOR }),
@@ -114,8 +102,6 @@ export function getWriteSpawnsInstructionDataEncoder(): Encoder<WriteSpawnsInstr
 export function getWriteSpawnsInstructionDataDecoder(): Decoder<WriteSpawnsInstructionData> {
   return getStructDecoder([
     ["discriminator", fixDecoderSize(getBytesDecoder(), 8)],
-    ["entrance", getCellDecoder()],
-    ["exit", getCellDecoder()],
     ["spawns", getArrayDecoder(getSpawnDecoder())],
   ]);
 }
@@ -138,8 +124,6 @@ export type WriteSpawnsAsyncInput<
   dm: TAccountDm;
   map: TAccountMap;
   layout?: TAccountLayout;
-  entrance: WriteSpawnsInstructionDataArgs["entrance"];
-  exit: WriteSpawnsInstructionDataArgs["exit"];
   spawns: WriteSpawnsInstructionDataArgs["spawns"];
 };
 
@@ -236,8 +220,6 @@ export type WriteSpawnsInput<
   dm: TAccountDm;
   map: TAccountMap;
   layout: TAccountLayout;
-  entrance: WriteSpawnsInstructionDataArgs["entrance"];
-  exit: WriteSpawnsInstructionDataArgs["exit"];
   spawns: WriteSpawnsInstructionDataArgs["spawns"];
 };
 

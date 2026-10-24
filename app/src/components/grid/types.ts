@@ -25,6 +25,10 @@ export type GridUnit = {
  */
 export type GridChest = { x: number; y: number; opened: boolean; label: string };
 
+/** Patch 13: the entrance and the exit points (docs/MAP_DESCRIPTION.md 7.1), drawn over their cell. */
+export type GridPointKind = "entrance" | "exit";
+export type GridPoint = { x: number; y: number; kind: GridPointKind };
+
 /** An aura on the map: its bearer's cell, its reach, and a short label for the tooltip. */
 export type GridAura = { center: Cell; radius: number; hostile: boolean; label: string };
 
@@ -32,7 +36,7 @@ export type GridProps = {
   /** Map size in cells, 1..=32 each. */
   width: number;
   height: number;
-  /** MapLayout.tiles: 1024 bytes, index y * 32 + x (always stride 32), values are Tile. */
+  /** MapLayout.cells: 1024 cell bytes (tile type in bits 7-3, `cellKind`), index y * 32 + x (always stride 32). */
   tiles: Uint8Array;
   units: GridUnit[];
   /** Unit whose turn it is; gets a highlight ring. */
@@ -56,6 +60,8 @@ export type GridProps = {
   line?: Cell[];
   /** Patch 11: visible chests, drawn under the units; the canvas title shows the hovered one's label. */
   chests?: GridChest[];
+  /** Patch 13: the entrance and the exit. */
+  points?: GridPoint[];
   /**
    * CSS pixel size of one cell on screen. Default 48. With sprites it is rounded down to a whole
    * multiple of the 64 px tile (minimum 64), so the canvas is never resized by CSS and sprites scale
@@ -67,8 +73,10 @@ export type GridProps = {
    * marker (colored disc + first letter; players blue, monsters red, dead units gray with a cross).
    */
   unitSprite?: (unit: GridUnit) => ImageData | null;
-  /** Rendered tile sprite (32x32 RGBA), or null to draw the flat tile color. */
+  /** Rendered tile sprite of a tile type (64x64 RGBA), or null to draw the flat tile color. */
   tileSprite?: (tile: Tile) => ImageData | null;
+  /** Rendered sprite of a point, or null to draw its flat marker. */
+  pointSprite?: (kind: GridPointKind) => ImageData | null;
   onCellClick?: (cell: Cell) => void;
   onUnitClick?: (unit: GridUnit) => void;
   /** Hover changes, for path previews. null when the pointer leaves the grid. */

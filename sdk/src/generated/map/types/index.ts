@@ -6,9 +6,8 @@
  * @see https://github.com/codama-idl/codama
  */
 
-export * from "./cell.js";
 export * from "./mapData.js";
-export * from "./mapLayoutData.js";
+export * from "./mapLayoutDataV2.js";
 export * from "./mapPoint.js";
 export * from "./mapStatus.js";
 export * from "./pointKind.js";

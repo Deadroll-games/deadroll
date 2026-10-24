@@ -70,10 +70,11 @@ import {
 import { toHitResolved } from "./hit";
 import { toEffectResolved } from "./support";
 import { Effect } from "./skillcheck";
-import { bagPda, bestiaryPda, gameConfigPda, monsterSkillsPda, rewardCachePda, rewardsPda, monstersPda, participationPda, programIdentityPda, sessionAuthorityPda, sessionTokenPda, skillExtrasPda, skillSetPda } from "./pda";
+import { bagPda, bestiaryPda, gameConfigPda, monsterSkillsPda, rewardCachePda, rewardsPda, monstersPda, participationPda, programIdentityPda, sessionAuthorityPda, sessionTokenPda, skillExtrasPda, skillSetPda, tilesetPda } from "./pda";
 import { affordable, pathArgs, reachable, route } from "./route";
 import { explainFailure } from "./send";
-import { Applied, Aspect, Class, HitOutcome, JumpMode, MAP_MAX, ModKind, OpKind, StateKind, Tile } from "./types";
+import { Applied, Aspect, Class, HitOutcome, JumpMode, MAP_MAX, ModKind, OpKind, StateKind, Tile, cellByte } from "./types";
+import { SHIPPED_TILE_COST } from "./tiles";
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex").slice(0, 16);
 const A = (n: number) => new Uint8Array(32).fill(n);
@@ -402,31 +403,39 @@ describe("session builders", () => {
 });
 
 describe("map builders", () => {
-  it("patch 11: create_map takes min_players, write_chests sends the points and the boss table, finalize_map reads the rewards table", async () => {
+  it("patch 13: create_map takes min_players, write_points sends the entrance, the exit, the chests and the boss table, finalize_map reads the rewards and the tileset", async () => {
     const dm = await generateKeyPairSigner();
-    const tiles = new Uint8Array(1024);
-    tiles[0] = Tile.Entrance;
-    tiles[3] = Tile.Exit;
+    const tiles = new Uint8Array(1024).fill(cellByte(Tile.StoneFloor));
+    tiles[1] = cellByte(Tile.Rubble, 6);
     const chests = [
       { x: 1, y: 2, table: 0 },
       { x: 3, y: 1, table: 5 },
     ];
-    const b = await buildMapIxs(dm, { width: 4, height: 3, tier: 1, minPlayers: 3, chestRadius: 4, settleTimeoutSecs: 7200, tiles, spawns: [], chests, bossTable: 1 });
+    const draft = { width: 4, height: 3, tier: 1, minPlayers: 3, chestRadius: 4, settleTimeoutSecs: 7200, tiles, entrance: { x: 0, y: 0 }, exit: { x: 3, y: 0 }, spawns: [], chests, bossTable: 1 };
+    const b = await buildMapIxs(dm, draft);
     expect(b.ixs.length).toBe(5);
-    const [create, , , writeChests, finalize] = b.ixs as [Instruction, Instruction, Instruction, Instruction, Instruction];
+    const [create, layout, spawns, writePoints, finalize] = b.ixs as [Instruction, Instruction, Instruction, Instruction, Instruction];
     const index = new Uint8Array(4);
     new DataView(index.buffer).setUint32(0, b.index, true);
     // MapSettings: min_players, chest_radius, settle_timeout_secs (u32 LE, 7200 = 0x1c20).
     expect(toHex(create.data as Uint8Array)).toBe(toHex(concat(ixDisc("create_map"), index, Uint8Array.of(4, 3, 1, 3, 4, 0x20, 0x1c, 0, 0))));
-    // Vec<MapPoint>: u32 LE count, then (kind = Chest 0, x, y, table) each; boss table u8.
-    const points = Uint8Array.of(2, 0, 0, 0, 0, 1, 2, 0, 0, 3, 1, 5);
-    expect(toHex(writeChests.data as Uint8Array)).toBe(toHex(concat(ixDisc("write_chests"), points, Uint8Array.of(1))));
-    expect(writeChests.accounts!.map((a) => [a.address, a.role])).toEqual([
+    // write_layout: offset u16, Vec<u8> of cell bytes up to the last cell of the map (2 rows of 32 + 4).
+    const cells = (layout.data as Uint8Array).slice(8 + 2 + 4);
+    expect(cells.length).toBe(2 * 32 + 4);
+    expect(cells[1]).toBe((Tile.Rubble << 3) | 6);
+    // write_spawns: only the spawns now (an empty Vec).
+    expect(toHex(spawns.data as Uint8Array)).toBe(toHex(concat(ixDisc("write_spawns"), Uint8Array.of(0, 0, 0, 0))));
+    // Vec<MapPoint>: u32 LE count, then (kind, x, y, data): entrance (1), exit (2), the chests (0) with
+    // their tables; boss table u8.
+    const points = Uint8Array.of(4, 0, 0, 0, 1, 0, 0, 0, 2, 3, 0, 0, 0, 1, 2, 0, 0, 3, 1, 5);
+    expect(toHex(writePoints.data as Uint8Array)).toBe(toHex(concat(ixDisc("write_points"), points, Uint8Array.of(1))));
+    expect(writePoints.accounts!.map((a) => [a.address, a.role])).toEqual([
       [dm.address, AccountRole.READONLY_SIGNER],
       [b.map, AccountRole.READONLY],
       [b.layout, AccountRole.WRITABLE],
     ]);
-    expect(finalize.accounts!.map((a) => a.address).slice(3)).toEqual([await bestiaryPda(), await monsterSkillsPda(), await rewardsPda()]);
+    expect(finalize.accounts!.map((a) => a.address).slice(3)).toEqual([await bestiaryPda(), await monsterSkillsPda(), await rewardsPda(), await tilesetPda()]);
+    await expect(buildMapIxs(dm, { ...draft, exit: null })).rejects.toThrow(/entrance and an exit/);
   });
 });
 
@@ -488,7 +497,12 @@ describe("decoders", () => {
       v.endedAt = 0x0102n;
       v.chestRadius = 4;
       v.settleTimeoutSecs = 600;
+      v.tileCost = Uint8Array.from({ length: 32 }, (_, i) => (i === 10 ? 7 : 0));
     });
+    // Patch 13 appends tile_cost by tile type (32 bytes) and drops the patch 1 `[u8; 7]`.
+    expect(s.bytes[s.bytes.length - 32 + 10]).toBe(7);
+    expect(s.back.tileCost[10]).toBe(7);
+    s.bytes = s.bytes.subarray(0, -32);
     // Patch 11 appends tier, min_players, chests (4 x 4), chest_count, boss_table, chests_opened,
     // pending_chest, xp_bp (4 x u16), loot_mask, unpaid_kills (u32), ended_at (i64), chest_radius
     // and settle_timeout_secs (u32): 48 bytes.
@@ -774,13 +788,13 @@ describe("decoders", () => {
 });
 
 describe("route", () => {
-  // 5x3 room, a wall in the middle column except the bottom row, water costs 2.
-  const tiles = new Uint8Array(MAP_MAX * MAP_MAX).fill(Tile.Wall);
-  for (let y = 0; y < 3; y++) for (let x = 0; x < 5; x++) tiles[y * MAP_MAX + x] = Tile.Floor;
-  tiles[0 * MAP_MAX + 2] = Tile.Wall;
-  tiles[1 * MAP_MAX + 2] = Tile.Wall;
-  tiles[2 * MAP_MAX + 3] = Tile.Water;
-  const tileCost = [1, 0, 2, 1, 1, 1, 1];
+  // 5x3 room, a wall in the middle column except the bottom row, water costs 2 (the shipped tileset).
+  const tiles = new Uint8Array(MAP_MAX * MAP_MAX).fill(cellByte(Tile.Wall));
+  for (let y = 0; y < 3; y++) for (let x = 0; x < 5; x++) tiles[y * MAP_MAX + x] = cellByte(Tile.StoneFloor, x);
+  tiles[0 * MAP_MAX + 2] = cellByte(Tile.Wall);
+  tiles[1 * MAP_MAX + 2] = cellByte(Tile.Wall);
+  tiles[2 * MAP_MAX + 3] = cellByte(Tile.ShallowWater, 7);
+  const tileCost = SHIPPED_TILE_COST;
   const base = { tiles, width: 5, height: 3, tileCost, taken: new Set<number>() };
 
   it("finds the cheapest path around walls and through water", () => {

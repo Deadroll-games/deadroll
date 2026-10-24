@@ -16,7 +16,8 @@ use deadroll_registry::state::{
 use deadroll_rules::{items::Equipment, MonsterTemplate};
 use deadroll_skillcheck::monster::MonsterSkill;
 use deadroll_types::{
-    Cell, CharacterData, MapData, MapPoint, Spawn, Tile, CHESTS_MAX, MAP_CELLS, MAP_MAX, SPAWNS_MAX,
+    Cell, CharacterData, MapData, MapPoint, PointKind, Spawn, TileKind, CHESTS_MAX, MAP_CELLS,
+    MAP_MAX, POINTS_MAX, SPAWNS_MAX, TILE_KINDS_MAX,
 };
 
 use crate::{errors::SessionError, state::LOOT_RECORD_LEN};
@@ -97,20 +98,24 @@ pub fn read_map_full(info: &AccountInfo) -> Result<deadroll_map::state::Map> {
     decode(info, &deadroll_map::ID, &MAP_DISCRIMINATOR).ok_or(error!(SessionError::InvalidMap))
 }
 
-/// Byte offsets inside a `MapLayout` account (discriminator included).
+/// Byte offsets inside a `MapLayout` account (discriminator included), patch 13:
+/// `MapLayoutDataV2`.
 mod layout_off {
     use super::*;
-    pub const MAP: usize = 8 + 1;
-    pub const TILES: usize = MAP + 32;
-    pub const SPAWNS: usize = TILES + MAP_CELLS;
+    pub const VERSION: usize = 8;
+    pub const MAP: usize = VERSION + 1;
+    pub const CELLS: usize = MAP + 32;
+    pub const SPAWNS: usize = CELLS + MAP_CELLS;
     pub const SPAWN_COUNT: usize = SPAWNS + SPAWNS_MAX * Spawn::SIZE;
-    pub const ENTRANCE: usize = SPAWN_COUNT + 1;
-    /// Patch 11: after the exit and the bump.
-    pub const CHESTS: usize = ENTRANCE + 2 * Cell::SIZE + 1;
-    pub const CHEST_COUNT: usize = CHESTS + CHESTS_MAX * MapPoint::SIZE;
-    pub const BOSS_TABLE: usize = CHEST_COUNT + 1;
-    pub const END: usize = BOSS_TABLE + 1;
+    pub const POINTS: usize = SPAWN_COUNT + 1;
+    pub const POINT_COUNT: usize = POINTS + POINTS_MAX * MapPoint::SIZE;
+    pub const BOSS_TABLE: usize = POINT_COUNT + 1;
+    /// After the bump.
+    pub const END: usize = BOSS_TABLE + 2;
 }
+
+/// `MapLayout.core.version` of the `MapLayoutDataV2` format (`deadroll_map::state::LAYOUT_VERSION`).
+pub const LAYOUT_VERSION: u8 = 2;
 
 /// A `deadroll_map` `MapLayout` account, read in place (the account is ~1.3 KB, too big to copy
 /// onto the stack on every move).
@@ -125,7 +130,10 @@ impl<'a> MapLayoutView<'a> {
             SessionError::InvalidLayout
         );
         let data = info.try_borrow_data()?;
-        require!(data.len() >= layout_off::END, SessionError::InvalidLayout);
+        require!(
+            data.len() >= layout_off::END && data[layout_off::VERSION] == LAYOUT_VERSION,
+            SessionError::InvalidLayout
+        );
         Ok(Self { data })
     }
 
@@ -135,12 +143,25 @@ impl<'a> MapLayoutView<'a> {
         Pubkey::new_from_array(key)
     }
 
-    /// Raw tile byte; callers check bounds against the map size first.
-    pub fn tile(&self, x: u8, y: u8) -> Result<Tile> {
+    /// Raw cell byte (tile type and variant, `deadroll_types::cell_kind`); callers check bounds
+    /// against the map size first.
+    pub fn tile(&self, x: u8, y: u8) -> Result<u8> {
         let index = y as usize * MAP_MAX + x as usize;
         require!(index < MAP_CELLS, SessionError::OutOfBounds);
-        Tile::try_from(self.data[layout_off::TILES + index])
-            .map_err(|_| error!(SessionError::InvalidTile))
+        Ok(self.data[layout_off::CELLS + index])
+    }
+
+    /// Patch 13: the points in use (`finalize_map` checked them).
+    fn point(&self, index: usize) -> Result<MapPoint> {
+        let at = layout_off::POINTS + index * MapPoint::SIZE;
+        MapPoint::deserialize(&mut &self.data[at..at + MapPoint::SIZE])
+            .map_err(|_| error!(SessionError::InvalidLayout))
+    }
+
+    fn point_count(&self) -> Result<usize> {
+        let count = self.data[layout_off::POINT_COUNT] as usize;
+        require!(count <= POINTS_MAX, SessionError::InvalidLayout);
+        Ok(count)
     }
 
     pub fn spawn_count(&self) -> u8 {
@@ -154,17 +175,19 @@ impl<'a> MapLayoutView<'a> {
             .map_err(|_| error!(SessionError::InvalidLayout))
     }
 
-    /// Patch 11: the visible chests (`chest_count` used; `finalize_map` checked them).
+    /// Patch 11: the visible chests in point order (`chest_count` used; `finalize_map`
+    /// checked them). Patch 13: the chest points of the layout.
     pub fn chests(&self) -> Result<([MapPoint; CHESTS_MAX], u8)> {
         let mut out = [MapPoint::default(); CHESTS_MAX];
-        for (i, p) in out.iter_mut().enumerate() {
-            let at = layout_off::CHESTS + i * MapPoint::SIZE;
-            *p = MapPoint::deserialize(&mut &self.data[at..at + MapPoint::SIZE])
-                .map_err(|_| error!(SessionError::InvalidLayout))?;
+        let mut count = 0;
+        for i in 0..self.point_count()? {
+            let p = self.point(i)?;
+            if p.kind == PointKind::Chest {
+                *out.get_mut(count).ok_or(SessionError::InvalidLayout)? = p;
+                count += 1;
+            }
         }
-        let count = self.data[layout_off::CHEST_COUNT];
-        require!(count as usize <= CHESTS_MAX, SessionError::InvalidLayout);
-        Ok((out, count))
+        Ok((out, count as u8))
     }
 
     /// Patch 11: the boss's reward table.
@@ -172,11 +195,15 @@ impl<'a> MapLayoutView<'a> {
         self.data[layout_off::BOSS_TABLE]
     }
 
-    pub fn entrance(&self) -> Cell {
-        Cell {
-            x: self.data[layout_off::ENTRANCE],
-            y: self.data[layout_off::ENTRANCE + 1],
+    /// Patch 13: the entrance point.
+    pub fn entrance(&self) -> Result<Cell> {
+        for i in 0..self.point_count()? {
+            let p = self.point(i)?;
+            if p.kind == PointKind::Entrance {
+                return Ok(p.cell());
+            }
         }
+        err!(SessionError::InvalidLayout)
     }
 }
 
@@ -339,17 +366,26 @@ pub fn read_reward_table(info: &AccountInfo, id: u8) -> Result<[u8; LOOT_RECORD_
     Ok(r)
 }
 
-/// Step cost in action points of every tile, in `Tile` order; 0 = cannot be entered. Every
-/// record must be written.
-pub fn read_tile_costs(info: &AccountInfo) -> Result<[u8; Tile::COUNT]> {
-    let mut costs = [0u8; Tile::COUNT];
-    for (index, cost) in costs.iter_mut().enumerate() {
-        let r: [u8; TILE_SIZE] = table_record(info, &TILESET_TABLE, TableKind::Tileset, index)?
-            .ok_or(SessionError::InvalidRegistryTable)?;
-        // [passable, move cost, ...]; `write_table` guarantees cost >= 1 when passable.
-        *cost = if r[0] == 1 { r[1] } else { 0 };
+/// Step cost in action points of every tile type id (`TileKind`, the cell byte's bits 7-3);
+/// 0 = cannot be entered. Patch 13: decoded by `deadroll_rules::tiles`, the same code
+/// `finalize_map` checks the map with. Every starter tile must be written; ids past the written
+/// records cost 0.
+pub fn read_tile_costs(info: &AccountInfo) -> Result<[u8; TILE_KINDS_MAX]> {
+    let mut body = [0u8; TILE_KINDS_MAX * TILE_SIZE];
+    let mut len = 0;
+    for index in 0..TILE_KINDS_MAX {
+        let Some(r) = table_record::<TILE_SIZE>(info, &TILESET_TABLE, TableKind::Tileset, index)?
+        else {
+            break;
+        };
+        body[len..len + TILE_SIZE].copy_from_slice(&r);
+        len += TILE_SIZE;
     }
-    Ok(costs)
+    require!(
+        len >= TileKind::COUNT * TILE_SIZE,
+        SessionError::InvalidRegistryTable
+    );
+    Ok(deadroll_rules::tiles::tile_rules(&body[..len]).cost)
 }
 
 #[cfg(test)]
@@ -459,16 +495,28 @@ mod tests {
 
     #[test]
     fn reads_tile_costs() {
-        let mut body = Vec::new();
-        for (passable, cost) in [(1, 1), (0, 0), (1, 2), (1, 1), (1, 1), (1, 1), (1, 3)] {
-            body.extend_from_slice(&[passable, cost, 0, 0, 0, 0, 0, 0]);
-        }
-        let mut account = table(TILESET_TABLE, TableKind::Tileset, &body);
+        let tileset = deadroll_rules::registry::Registry::shipped()
+            .unwrap()
+            .tileset;
+        let mut account = table(TILESET_TABLE, TableKind::Tileset, &tileset);
+        let mut costs = [0; TILE_KINDS_MAX];
+        costs[..TileKind::COUNT].copy_from_slice(&[0, 1, 1, 1, 0, 1, 2, 0, 1, 2, 0]);
+        assert_eq!(read_tile_costs(&account.info()).unwrap(), costs);
+        assert_eq!(costs, crate::state::test_support::TILE_COST);
+        // A reserved id written later is read too.
+        let mut more = tileset.clone();
+        more.extend_from_slice(&[1, 3, 0, 0, 0, 0, 0, 0]);
+        let mut account = table(TILESET_TABLE, TableKind::Tileset, &more);
         assert_eq!(
-            read_tile_costs(&account.info()).unwrap(),
-            [1, 0, 2, 1, 1, 1, 3]
+            read_tile_costs(&account.info()).unwrap()[TileKind::COUNT],
+            3
         );
-        let mut short = table(TILESET_TABLE, TableKind::Tileset, &body[..6 * TILE_SIZE]);
+        let body = tileset;
+        let mut short = table(
+            TILESET_TABLE,
+            TableKind::Tileset,
+            &body[..(TileKind::COUNT - 1) * TILE_SIZE],
+        );
         assert_eq!(
             code(read_tile_costs(&short.info()).unwrap_err()),
             u32::from(SessionError::InvalidRegistryTable)

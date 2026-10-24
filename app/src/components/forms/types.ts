@@ -41,6 +41,9 @@ export type BuilderTool =
   | { kind: "spawn"; bestiaryId: number }
   /** Patch 11: place a visible chest (docs/MAP_DESCRIPTION.md 7.1); Erase removes it. */
   | { kind: "chest" }
+  /** Patch 13: move the entrance or the exit point (one of each). */
+  | { kind: "entrance" }
+  | { kind: "exit" }
   | { kind: "erase" };
 
 export type BestiaryEntry = { id: number; name: string };

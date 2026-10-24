@@ -2,8 +2,9 @@
 use anchor_lang::prelude::*;
 use anchor_lang::AccountSerialize;
 use deadroll_types::{
-    Cell, GameSessionData, MapLayoutData, Monster, MonsterStateData, SessionStatus, Spawn, Tile,
-    MAP_CELLS, MAP_MAX, MONSTERS_MAX, PARTY_MAX, SPAWNS_MAX, TURN_ORDER_MAX,
+    cell_byte, Cell, GameSessionData, MapLayoutDataV2, MapPoint, Monster, MonsterStateData,
+    PointKind, SessionStatus, Spawn, TileKind, MAP_CELLS, MAP_MAX, MONSTERS_MAX, PARTY_MAX,
+    POINTS_MAX, SPAWNS_MAX, TILE_KINDS_MAX, TURN_ORDER_MAX,
 };
 
 use super::{external::MAP_LAYOUT_DISCRIMINATOR, GameSession, MonsterState};
@@ -47,14 +48,15 @@ pub const WALL: Cell = Cell { x: 0, y: 2 };
 
 /// 8x8 floor (rest of the 32x32 grid is wall), water at (1,0), wall at (0,2).
 pub fn layout_account(map: Pubkey) -> TestAccount {
-    let mut tiles = [Tile::Wall as u8; MAP_CELLS];
+    let byte = |kind: TileKind| cell_byte(kind as u8, 0);
+    let mut cells = [byte(TileKind::Wall); MAP_CELLS];
     for y in 0..HEIGHT as usize {
         for x in 0..WIDTH as usize {
-            tiles[y * MAP_MAX + x] = Tile::Floor as u8;
+            cells[y * MAP_MAX + x] = byte(TileKind::StoneFloor);
         }
     }
-    tiles[WATER.y as usize * MAP_MAX + WATER.x as usize] = Tile::Water as u8;
-    tiles[WALL.y as usize * MAP_MAX + WALL.x as usize] = Tile::Wall as u8;
+    cells[WATER.y as usize * MAP_MAX + WATER.x as usize] = byte(TileKind::ShallowWater);
+    cells[WALL.y as usize * MAP_MAX + WALL.x as usize] = byte(TileKind::Wall);
     let mut spawns = [Spawn::default(); SPAWNS_MAX];
     spawns[0] = Spawn {
         bestiary_id: 1,
@@ -63,18 +65,25 @@ pub fn layout_account(map: Pubkey) -> TestAccount {
         level: 2,
         ..Spawn::default()
     };
-    let layout = MapLayoutData {
-        version: 1,
+    let point = |kind, x, y| MapPoint {
+        kind,
+        x,
+        y,
+        data: 0,
+    };
+    let mut points = [MapPoint::default(); POINTS_MAX];
+    points[0] = point(PointKind::Entrance, 0, 0);
+    points[1] = point(PointKind::Exit, 7, 7);
+    let layout = MapLayoutDataV2 {
+        version: crate::state::external::LAYOUT_VERSION,
         map,
-        tiles,
+        cells,
         spawns,
         spawn_count: 1,
-        entrance: Cell { x: 0, y: 0 },
-        exit: Cell { x: 7, y: 7 },
-        bump: 255,
-        chests: Default::default(),
-        chest_count: 0,
+        points,
+        point_count: 2,
         boss_table: deadroll_types::NO_TABLE,
+        bump: 255,
     };
     let mut data = MAP_LAYOUT_DISCRIMINATOR.to_vec();
     layout.serialize(&mut data).unwrap();
@@ -217,8 +226,19 @@ pub fn session(players: &[Cell]) -> GameSession {
     }
 }
 
-/// `assets/registry/tileset.json` in `Tile` order: Floor, Wall, Water, Door, Entrance, Exit, Trap.
-pub const TILE_COST: [u8; Tile::COUNT] = [1, 0, 2, 1, 1, 1, 1];
+/// `assets/registry/tileset.json` by tile type id (`TileKind` order: void, stone floor, wooden
+/// floor, dirt, wall, door, shallow water, deep water, stairs, rubble, chasm), as
+/// `read_tile_costs` copies it.
+pub const TILE_COST: [u8; TILE_KINDS_MAX] = {
+    let mut costs = [0; TILE_KINDS_MAX];
+    let starter = [0, 1, 1, 1, 0, 1, 2, 0, 1, 2, 0];
+    let mut i = 0;
+    while i < starter.len() {
+        costs[i] = starter[i];
+        i += 1;
+    }
+    costs
+};
 
 /// The shipped registry resonance tables (assets/registry), as `open_session` copies them.
 pub fn tables() -> deadroll_combat::ResonanceTables {

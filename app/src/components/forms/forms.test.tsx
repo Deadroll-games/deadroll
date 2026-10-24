@@ -115,8 +115,17 @@ describe("MapPalette", () => {
   it("selects a tile tool", () => {
     const onToolChange = vi.fn();
     render(<MapPalette {...paletteProps({ onToolChange })} />);
-    fireEvent.click(screen.getByRole("button", { name: "Floor" }));
-    expect(onToolChange).toHaveBeenCalledWith({ kind: "tile", tile: Tile.Floor });
+    fireEvent.click(screen.getByRole("button", { name: "Stone floor" }));
+    expect(onToolChange).toHaveBeenCalledWith({ kind: "tile", tile: Tile.StoneFloor });
+  });
+
+  it("patch 13: selects the entrance and the exit tools", () => {
+    const onToolChange = vi.fn();
+    render(<MapPalette {...paletteProps({ onToolChange })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Entrance" }));
+    expect(onToolChange).toHaveBeenCalledWith({ kind: "entrance" });
+    fireEvent.click(screen.getByRole("button", { name: "Exit" }));
+    expect(onToolChange).toHaveBeenCalledWith({ kind: "exit" });
   });
 
   it("patch 11: selects the chest tool and shows the loot panel", () => {

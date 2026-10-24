@@ -32,7 +32,8 @@ u8_enum!(
     StateKind { Burning, Chill, Freeze, Bleeding, Shock, Stun, Penetration }
 );
 u8_enum!(
-    /// One map cell. `MapLayout.tiles` stores these as raw `u8`.
+    /// One map cell of `MapLayoutData.tiles` (before patch 13). No longer written: a cell byte is
+    /// a `TileKind` and a variant now (`cell_byte`, `MapLayoutDataV2.cells`).
     Tile { Floor, Wall, Water, Door, Entrance, Exit, Trap }
 );
 u8_enum!(SessionStatus {
@@ -111,9 +112,9 @@ impl From<Tier> for u8 {
 
 // Patch 11: loot (docs/PARTY_AND_TURNS.md 8-9, docs/MAP_DESCRIPTION.md 7.1).
 u8_enum!(
-    /// A map point type (`MapPoint.kind`, docs/MAP_DESCRIPTION.md 7.1). The entrance and the exit
-    /// stay in `MapLayoutData.entrance` / `exit`; only visible chests are points for now.
-    PointKind { Chest }
+    /// A map point type (`MapPoint.kind`, docs/MAP_DESCRIPTION.md 7.1). `Entrance` and `Exit`
+    /// appended in patch 13 (`MapLayoutDataV2.points`).
+    PointKind { Chest, Entrance, Exit }
 );
 u8_enum!(
     /// What a reward is. All of them are counters by id in the bag (docs/ITEMS_AND_CRAFT.md 2);
@@ -131,3 +132,39 @@ u8_enum!(
     /// the player's (issued, or claimed after the timeout) and wait for "Done" in the bag screen.
     CacheStatus { Empty, Open, Claimed }
 );
+
+// Patch 13: tiles (docs/MAP_DESCRIPTION.md 4.1, 4.2).
+u8_enum!(
+    /// A tile type, bits 7-3 of a cell byte (`cell_kind`). Its properties (passable, step cost,
+    /// blocks vision) are the registry `Tileset` record with the same id. A cell byte names up
+    /// to `TILE_KINDS_MAX` types; the ones past `COUNT` are reserved.
+    TileKind {
+        Void,
+        StoneFloor,
+        WoodenFloor,
+        Dirt,
+        Wall,
+        Door,
+        ShallowWater,
+        DeepWater,
+        Stairs,
+        Rubble,
+        Chasm
+    }
+);
+
+/// Patch 13: the tile type id of a cell byte (bits 7-3). A raw id, not a `TileKind`: whether
+/// it exists is the `Tileset`'s call.
+pub const fn cell_kind(byte: u8) -> u8 {
+    byte >> 3
+}
+
+/// Patch 13: the variant of a cell byte (bits 2-0), chosen by the DM (docs/MAP_DESCRIPTION.md 4.3).
+pub const fn cell_variant(byte: u8) -> u8 {
+    byte & 0b111
+}
+
+/// Patch 13: a cell byte from a tile type id (`< TILE_KINDS_MAX`) and a variant (`< TILE_VARIANTS`).
+pub const fn cell_byte(kind: u8, variant: u8) -> u8 {
+    (kind << 3) | (variant & 0b111)
+}

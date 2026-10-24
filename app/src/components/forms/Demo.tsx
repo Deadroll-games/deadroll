@@ -60,7 +60,7 @@ export default function Demo() {
     predisposition: Aspect.Piercing,
     stats: [STAT_MIN, STAT_MIN, STAT_MIN, STAT_MIN],
   });
-  const [tool, setTool] = useState<BuilderTool>({ kind: "tile", tile: Tile.Floor });
+  const [tool, setTool] = useState<BuilderTool>({ kind: "tile", tile: Tile.StoneFloor });
   const [spawns, setSpawns] = useState(DEMO_MAP.spawns);
   const [errors, setErrors] = useState<string[]>([]);
   const [canFinalize, setCanFinalize] = useState(false);

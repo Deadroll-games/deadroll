@@ -3,7 +3,7 @@ use deadroll_rules::aura::{
     Aura, AuraField, MonsterAuraField, PartyAuras, PlayerAuras, AURAS_PER_PLAYER,
 };
 use deadroll_types::{
-    Aspect, Cell, GameSessionData, MapPoint, Tile, CHESTS_MAX, MONSTERS_MAX, PARTY_MAX,
+    Aspect, Cell, GameSessionData, MapPoint, CHESTS_MAX, MONSTERS_MAX, PARTY_MAX, TILE_KINDS_MAX,
 };
 
 use super::{
@@ -87,8 +87,6 @@ pub struct GameSession {
     pub monster_initiative: [u16; MONSTERS_MAX],
     /// Initiative of each player slot, set at `join_session`.
     pub player_initiative: [u16; PARTY_MAX],
-    /// Step cost in action points per `Tile`, 0 = cannot be entered (registry `Tileset`).
-    pub tile_cost: [u8; Tile::COUNT],
     /// `turn_seq` in which the current unit used its one attack or active skill
     /// (docs/PARTY_AND_TURNS.md, 5.1). Only the current unit acts, so one field serves all.
     pub acted_seq: u32,
@@ -151,6 +149,10 @@ pub struct GameSession {
     /// living player when it opens; the DM's time to settle after the end.
     pub chest_radius: u8,
     pub settle_timeout_secs: u32,
+    // Patch 13: tiles (docs/MAP_DESCRIPTION.md 4.1, 4.2). Replaces the patch 1 `[u8; 7]` by `Tile`.
+    /// Step cost in action points per tile type id (`TileKind`, a cell byte's bits 7-3), 0 = cannot
+    /// be entered (registry `Tileset`, copied at `open_session`).
+    pub tile_cost: [u8; TILE_KINDS_MAX],
 }
 
 /// `GameSession.pending_chest` when no chest roll is pending.

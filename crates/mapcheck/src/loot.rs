@@ -4,11 +4,11 @@
 //! The numbers come from `deadroll_rules::LootTuning` and the registry `Rewards` table: this crate
 //! holds no balance numbers, the caller builds [`LootRules`] and `table_of`.
 
-use deadroll_types::{Cell, MapLayoutData, PointKind, CHESTS_MAX, NO_TABLE, PARTY_MAX};
+use deadroll_types::{Cell, MapLayoutDataV2, CHESTS_MAX, NO_TABLE, PARTY_MAX};
 
 use crate::{
     path::Reach,
-    tiles::{cell_index, in_bounds, is_passable},
+    tiles::{cell_index, in_bounds, TileRules},
     MapCheckError,
 };
 
@@ -42,14 +42,15 @@ pub struct MapLoot<R: Fn(u8) -> Option<TableRules>> {
 }
 
 /// The cells of the closed chests: they block movement (patch 11), so the path checks treat
-/// them as walls. Cells past `chest_count` are left at the default and ignored by the caller.
-pub fn chest_cells(layout: &MapLayoutData) -> ([Cell; CHESTS_MAX], usize) {
-    let list = layout.chest_list();
+/// them as walls. Cells past the count are left at the default and ignored by the caller.
+pub fn chest_cells(layout: &MapLayoutDataV2) -> ([Cell; CHESTS_MAX], usize) {
     let mut cells = [Cell::default(); CHESTS_MAX];
-    for (c, p) in cells.iter_mut().zip(list) {
+    let mut count = 0;
+    for (c, p) in cells.iter_mut().zip(layout.chests()) {
         *c = p.cell();
+        count += 1;
     }
-    (cells, list.len())
+    (cells, count)
 }
 
 /// The tables part of the chest rules: the counts, every chest table and the boss table allowed
@@ -98,12 +99,14 @@ pub fn check_tables<R: Fn(u8) -> Option<TableRules>>(
     Ok(spent)
 }
 
-/// Chest placement, then [`check_tables`].
+/// Chest placement, then [`check_tables`]. `ends` are the entrance and the exit.
 pub(crate) fn check_chests<R: Fn(u8) -> Option<TableRules>>(
     width: u8,
     height: u8,
     level_cap: u8,
-    layout: &MapLayoutData,
+    layout: &MapLayoutDataV2,
+    tiles: &TileRules,
+    ends: [Cell; 2],
     loot: &MapLoot<R>,
 ) -> Result<(), MapCheckError> {
     use MapCheckError as E;
@@ -111,31 +114,25 @@ pub(crate) fn check_chests<R: Fn(u8) -> Option<TableRules>>(
     if loot.min_players == 0 || loot.min_players as usize > PARTY_MAX {
         return Err(E::MinPlayersOutOfRange);
     }
-    let count = layout.chest_count as usize;
+    let count = layout.chests().count();
     if count > CHESTS_MAX || count > loot.rules.chests as usize {
         return Err(E::TooManyChests);
     }
 
     let spawns = &layout.spawns[..(layout.spawn_count as usize).min(layout.spawns.len())];
-    let chests = &layout.chests[..count];
+    let (cells, _) = chest_cells(layout);
     let mut tables = [NO_TABLE; CHESTS_MAX];
-    for (i, chest) in chests.iter().enumerate() {
-        if chest.kind != PointKind::Chest {
-            return Err(E::InvalidPoint);
-        }
+    for (i, chest) in layout.chests().enumerate() {
         let cell = chest.cell();
         if !in_bounds(cell, width, height) {
             return Err(E::ChestOutOfBounds);
         }
-        let passable = deadroll_types::Tile::try_from(layout.tiles[cell_index(cell.x, cell.y)])
-            .is_ok_and(is_passable);
-        if !passable {
+        if !tiles.is_passable(layout.cells[cell_index(cell.x, cell.y)]) {
             return Err(E::ChestNotPassable);
         }
-        let taken = cell == layout.entrance
-            || cell == layout.exit
+        let taken = ends.contains(&cell)
             || spawns.iter().any(|s| s.x == cell.x && s.y == cell.y)
-            || chests[..i].iter().any(|c| c.cell() == cell);
+            || cells[..i].contains(&cell);
         if taken {
             return Err(E::ChestOverlap);
         }
@@ -148,10 +145,10 @@ pub(crate) fn check_chests<R: Fn(u8) -> Option<TableRules>>(
 pub(crate) fn check_chest_access(
     width: u8,
     height: u8,
-    layout: &MapLayoutData,
+    layout: &MapLayoutDataV2,
     reach: &Reach,
 ) -> Result<(), MapCheckError> {
-    for chest in layout.chest_list() {
+    for chest in layout.chests() {
         let open = neighbors(chest.cell())
             .filter(|c| in_bounds(*c, width, height))
             .any(|c| reach.contains(c));

@@ -27,90 +27,78 @@ import {
   type ReadonlyUint8Array,
 } from "@solana/kit";
 import {
-  getCellDecoder,
-  getCellEncoder,
   getMapPointDecoder,
   getMapPointEncoder,
   getSpawnDecoder,
   getSpawnEncoder,
-  type Cell,
-  type CellArgs,
   type MapPoint,
   type MapPointArgs,
   type Spawn,
   type SpawnArgs,
 } from "./index.js";
 
-/** map `["layout", map]`. */
-export type MapLayoutData = {
+/** map `["layout", map]` (patch 13). */
+export type MapLayoutDataV2 = {
   version: number;
   map: Address;
-  /** Row-major `Tile` bytes, `MAP_MAX` cells per row. */
-  tiles: ReadonlyUint8Array;
+  /** Row-major cell bytes (`cell_byte`: tile type and variant), `MAP_MAX` cells per row. */
+  cells: ReadonlyUint8Array;
   spawns: Array<Spawn>;
   spawnCount: number;
-  entrance: Cell;
-  exit: Cell;
-  bump: number;
-  /** Visible chests, `0..chest_count` used: `data` is the reward table id. */
-  chests: Array<MapPoint>;
-  chestCount: number;
+  /** The entrance, the exit and the visible chests, `0..point_count` used. */
+  points: Array<MapPoint>;
+  pointCount: number;
   /** The reward table of the boss (registry `Rewards` id, `NO_TABLE` = none). */
   bossTable: number;
+  bump: number;
 };
 
-export type MapLayoutDataArgs = {
+export type MapLayoutDataV2Args = {
   version: number;
   map: Address;
-  /** Row-major `Tile` bytes, `MAP_MAX` cells per row. */
-  tiles: ReadonlyUint8Array;
+  /** Row-major cell bytes (`cell_byte`: tile type and variant), `MAP_MAX` cells per row. */
+  cells: ReadonlyUint8Array;
   spawns: Array<SpawnArgs>;
   spawnCount: number;
-  entrance: CellArgs;
-  exit: CellArgs;
-  bump: number;
-  /** Visible chests, `0..chest_count` used: `data` is the reward table id. */
-  chests: Array<MapPointArgs>;
-  chestCount: number;
+  /** The entrance, the exit and the visible chests, `0..point_count` used. */
+  points: Array<MapPointArgs>;
+  pointCount: number;
   /** The reward table of the boss (registry `Rewards` id, `NO_TABLE` = none). */
   bossTable: number;
+  bump: number;
 };
 
-export function getMapLayoutDataEncoder(): FixedSizeEncoder<MapLayoutDataArgs> {
+export function getMapLayoutDataV2Encoder(): FixedSizeEncoder<MapLayoutDataV2Args> {
   return getStructEncoder([
     ["version", getU8Encoder()],
     ["map", getAddressEncoder()],
-    ["tiles", fixEncoderSize(getBytesEncoder(), 1024)],
+    ["cells", fixEncoderSize(getBytesEncoder(), 1024)],
     ["spawns", getArrayEncoder(getSpawnEncoder(), { size: 24 })],
     ["spawnCount", getU8Encoder()],
-    ["entrance", getCellEncoder()],
-    ["exit", getCellEncoder()],
-    ["bump", getU8Encoder()],
-    ["chests", getArrayEncoder(getMapPointEncoder(), { size: 4 })],
-    ["chestCount", getU8Encoder()],
+    ["points", getArrayEncoder(getMapPointEncoder(), { size: 6 })],
+    ["pointCount", getU8Encoder()],
     ["bossTable", getU8Encoder()],
+    ["bump", getU8Encoder()],
   ]);
 }
 
-export function getMapLayoutDataDecoder(): FixedSizeDecoder<MapLayoutData> {
+export function getMapLayoutDataV2Decoder(): FixedSizeDecoder<MapLayoutDataV2> {
   return getStructDecoder([
     ["version", getU8Decoder()],
     ["map", getAddressDecoder()],
-    ["tiles", fixDecoderSize(getBytesDecoder(), 1024)],
+    ["cells", fixDecoderSize(getBytesDecoder(), 1024)],
     ["spawns", getArrayDecoder(getSpawnDecoder(), { size: 24 })],
     ["spawnCount", getU8Decoder()],
-    ["entrance", getCellDecoder()],
-    ["exit", getCellDecoder()],
-    ["bump", getU8Decoder()],
-    ["chests", getArrayDecoder(getMapPointDecoder(), { size: 4 })],
-    ["chestCount", getU8Decoder()],
+    ["points", getArrayDecoder(getMapPointDecoder(), { size: 6 })],
+    ["pointCount", getU8Decoder()],
     ["bossTable", getU8Decoder()],
+    ["bump", getU8Decoder()],
   ]);
 }
 
-export function getMapLayoutDataCodec(): FixedSizeCodec<
-  MapLayoutDataArgs,
-  MapLayoutData
+export function getMapLayoutDataV2Codec(): FixedSizeCodec<
+  MapLayoutDataV2Args,
+  MapLayoutDataV2
 > {
-  return combineCodec(getMapLayoutDataEncoder(), getMapLayoutDataDecoder());
+  return combineCodec(getMapLayoutDataV2Encoder(), getMapLayoutDataV2Decoder());
 }

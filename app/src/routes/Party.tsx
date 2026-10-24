@@ -10,6 +10,7 @@ import { PartyLobby } from "../components/forms/PartyLobby";
 import type { LobbyPlayer } from "../components/forms/types";
 import { freezeTombstoneInstruction } from "../chain/character";
 import { DEMO_MAP, MOCK_CHARACTERS, MOCK_HITS, mockRecord } from "../chain/mock";
+import { draftPoints } from "../chain/game";
 import { useCombat, type CombatWasm } from "../chain/combatWasm";
 import { bestiaryName } from "../chain/names";
 import { useAutoFreezeTombstone } from "../chain/useAutoFreezeTombstone";
@@ -172,6 +173,7 @@ function MockParty() {
             width={16}
             height={16}
             tiles={DEMO_MAP.tiles}
+            points={draftPoints(DEMO_MAP)}
             units={units}
             activeUnitId={active}
             selectedUnitId={target}

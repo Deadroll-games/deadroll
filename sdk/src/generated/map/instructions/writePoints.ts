@@ -53,17 +53,17 @@ import {
   type MapPointArgs,
 } from "../types/index.js";
 
-export const WRITE_CHESTS_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Array([
-  177, 205, 124, 214, 126, 159, 193, 17,
+export const WRITE_POINTS_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Array([
+  147, 129, 159, 139, 93, 145, 38, 229,
 ]);
 
-export function getWriteChestsDiscriminatorBytes(): ReadonlyUint8Array {
+export function getWritePointsDiscriminatorBytes(): ReadonlyUint8Array {
   return fixEncoderSize(getBytesEncoder(), 8).encode(
-    WRITE_CHESTS_DISCRIMINATOR,
+    WRITE_POINTS_DISCRIMINATOR,
   );
 }
 
-export type WriteChestsInstruction<
+export type WritePointsInstruction<
   TProgram extends string = typeof DEADROLL_MAP_PROGRAM_ADDRESS,
   TAccountDm extends string | AccountMeta<string> = string,
   TAccountMap extends string | AccountMeta<string> = string,
@@ -84,47 +84,47 @@ export type WriteChestsInstruction<
     ]
   >;
 
-export type WriteChestsInstructionData = {
+export type WritePointsInstructionData = {
   discriminator: ReadonlyUint8Array;
-  chests: Array<MapPoint>;
+  points: Array<MapPoint>;
   bossTable: number;
 };
 
-export type WriteChestsInstructionDataArgs = {
-  chests: Array<MapPointArgs>;
+export type WritePointsInstructionDataArgs = {
+  points: Array<MapPointArgs>;
   bossTable: number;
 };
 
-export function getWriteChestsInstructionDataEncoder(): Encoder<WriteChestsInstructionDataArgs> {
+export function getWritePointsInstructionDataEncoder(): Encoder<WritePointsInstructionDataArgs> {
   return transformEncoder(
     getStructEncoder([
       ["discriminator", fixEncoderSize(getBytesEncoder(), 8)],
-      ["chests", getArrayEncoder(getMapPointEncoder())],
+      ["points", getArrayEncoder(getMapPointEncoder())],
       ["bossTable", getU8Encoder()],
     ]),
-    (value) => ({ ...value, discriminator: WRITE_CHESTS_DISCRIMINATOR }),
+    (value) => ({ ...value, discriminator: WRITE_POINTS_DISCRIMINATOR }),
   );
 }
 
-export function getWriteChestsInstructionDataDecoder(): Decoder<WriteChestsInstructionData> {
+export function getWritePointsInstructionDataDecoder(): Decoder<WritePointsInstructionData> {
   return getStructDecoder([
     ["discriminator", fixDecoderSize(getBytesDecoder(), 8)],
-    ["chests", getArrayDecoder(getMapPointDecoder())],
+    ["points", getArrayDecoder(getMapPointDecoder())],
     ["bossTable", getU8Decoder()],
   ]);
 }
 
-export function getWriteChestsInstructionDataCodec(): Codec<
-  WriteChestsInstructionDataArgs,
-  WriteChestsInstructionData
+export function getWritePointsInstructionDataCodec(): Codec<
+  WritePointsInstructionDataArgs,
+  WritePointsInstructionData
 > {
   return combineCodec(
-    getWriteChestsInstructionDataEncoder(),
-    getWriteChestsInstructionDataDecoder(),
+    getWritePointsInstructionDataEncoder(),
+    getWritePointsInstructionDataDecoder(),
   );
 }
 
-export type WriteChestsAsyncInput<
+export type WritePointsAsyncInput<
   TAccountDm extends InstructionSignerInput = InstructionSignerInput,
   TAccountMap extends InstructionAccountInput = InstructionAccountInput,
   TAccountLayout extends InstructionAccountInput = InstructionAccountInput,
@@ -132,20 +132,20 @@ export type WriteChestsAsyncInput<
   dm: TAccountDm;
   map: TAccountMap;
   layout?: TAccountLayout;
-  chests: WriteChestsInstructionDataArgs["chests"];
-  bossTable: WriteChestsInstructionDataArgs["bossTable"];
+  points: WritePointsInstructionDataArgs["points"];
+  bossTable: WritePointsInstructionDataArgs["bossTable"];
 };
 
-export async function getWriteChestsInstructionAsync<
+export async function getWritePointsInstructionAsync<
   TAccountDm extends InstructionSignerInput,
   TAccountMap extends InstructionAccountInput,
   TAccountLayout extends InstructionAccountInput,
   TProgramAddress extends Address = typeof DEADROLL_MAP_PROGRAM_ADDRESS,
 >(
-  input: WriteChestsAsyncInput<TAccountDm, TAccountMap, TAccountLayout>,
+  input: WritePointsAsyncInput<TAccountDm, TAccountMap, TAccountLayout>,
   config?: { programAddress?: TProgramAddress },
 ): Promise<
-  WriteChestsInstruction<
+  WritePointsInstruction<
     TProgramAddress,
     ResolvedInstructionAccountMeta<
       TAccountDm,
@@ -200,11 +200,11 @@ export async function getWriteChestsInstructionAsync<
       getAccountMeta("map", accounts.map),
       getAccountMeta("layout", accounts.layout),
     ],
-    data: getWriteChestsInstructionDataEncoder().encode(
-      args as WriteChestsInstructionDataArgs,
+    data: getWritePointsInstructionDataEncoder().encode(
+      args as WritePointsInstructionDataArgs,
     ),
     programAddress,
-  } as WriteChestsInstruction<
+  } as WritePointsInstruction<
     TProgramAddress,
     ResolvedInstructionAccountMeta<
       TAccountDm,
@@ -221,7 +221,7 @@ export async function getWriteChestsInstructionAsync<
   >);
 }
 
-export type WriteChestsInput<
+export type WritePointsInput<
   TAccountDm extends InstructionSignerInput = InstructionSignerInput,
   TAccountMap extends InstructionAccountInput = InstructionAccountInput,
   TAccountLayout extends InstructionAccountInput = InstructionAccountInput,
@@ -229,19 +229,19 @@ export type WriteChestsInput<
   dm: TAccountDm;
   map: TAccountMap;
   layout: TAccountLayout;
-  chests: WriteChestsInstructionDataArgs["chests"];
-  bossTable: WriteChestsInstructionDataArgs["bossTable"];
+  points: WritePointsInstructionDataArgs["points"];
+  bossTable: WritePointsInstructionDataArgs["bossTable"];
 };
 
-export function getWriteChestsInstruction<
+export function getWritePointsInstruction<
   TAccountDm extends InstructionSignerInput,
   TAccountMap extends InstructionAccountInput,
   TAccountLayout extends InstructionAccountInput,
   TProgramAddress extends Address = typeof DEADROLL_MAP_PROGRAM_ADDRESS,
 >(
-  input: WriteChestsInput<TAccountDm, TAccountMap, TAccountLayout>,
+  input: WritePointsInput<TAccountDm, TAccountMap, TAccountLayout>,
   config?: { programAddress?: TProgramAddress },
-): WriteChestsInstruction<
+): WritePointsInstruction<
   TProgramAddress,
   ResolvedInstructionAccountMeta<
     TAccountDm,
@@ -282,11 +282,11 @@ export function getWriteChestsInstruction<
       getAccountMeta("map", accounts.map),
       getAccountMeta("layout", accounts.layout),
     ],
-    data: getWriteChestsInstructionDataEncoder().encode(
-      args as WriteChestsInstructionDataArgs,
+    data: getWritePointsInstructionDataEncoder().encode(
+      args as WritePointsInstructionDataArgs,
     ),
     programAddress,
-  } as WriteChestsInstruction<
+  } as WritePointsInstruction<
     TProgramAddress,
     ResolvedInstructionAccountMeta<
       TAccountDm,
@@ -303,7 +303,7 @@ export function getWriteChestsInstruction<
   >);
 }
 
-export type ParsedWriteChestsInstruction<
+export type ParsedWritePointsInstruction<
   TProgram extends string = typeof DEADROLL_MAP_PROGRAM_ADDRESS,
   TAccountMetas extends readonly AccountMeta[] = readonly AccountMeta[],
 > = {
@@ -313,17 +313,17 @@ export type ParsedWriteChestsInstruction<
     map: TAccountMetas[1];
     layout: TAccountMetas[2];
   };
-  data: WriteChestsInstructionData;
+  data: WritePointsInstructionData;
 };
 
-export function parseWriteChestsInstruction<
+export function parseWritePointsInstruction<
   TProgram extends string,
   TAccountMetas extends readonly AccountMeta[],
 >(
   instruction: Instruction<TProgram> &
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
-): ParsedWriteChestsInstruction<TProgram, TAccountMetas> {
+): ParsedWritePointsInstruction<TProgram, TAccountMetas> {
   if (instruction.accounts.length < 3) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
@@ -346,6 +346,6 @@ export function parseWriteChestsInstruction<
       map: getNextAccount(),
       layout: getNextAccount(),
     },
-    data: getWriteChestsInstructionDataDecoder().decode(instruction.data),
+    data: getWritePointsInstructionDataDecoder().decode(instruction.data),
   };
 }

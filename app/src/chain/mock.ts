@@ -14,21 +14,31 @@ import {
   Race,
   StateKind,
   Tile,
+  cellByte,
   cellIndex,
+  type Cell,
   type HitResult,
   type PacketResult,
   type Spawn,
   type StateRoll,
 } from "./types";
 
+/** Preset row characters (crates/rules/tests/demo_preset.rs): `E` and `X` are a stone floor with the
+ * entrance or the exit point. */
 const TILE_CHARS: Record<string, Tile> = {
+  " ": Tile.Void,
+  ".": Tile.StoneFloor,
+  E: Tile.StoneFloor,
+  X: Tile.StoneFloor,
+  "=": Tile.WoodenFloor,
+  ",": Tile.Dirt,
   "#": Tile.Wall,
-  ".": Tile.Floor,
-  "~": Tile.Water,
   D: Tile.Door,
-  E: Tile.Entrance,
-  X: Tile.Exit,
-  T: Tile.Trap,
+  "~": Tile.ShallowWater,
+  W: Tile.DeepWater,
+  ">": Tile.Stairs,
+  "%": Tile.Rubble,
+  _: Tile.Chasm,
 };
 
 export type MapPresetData = {
@@ -57,9 +67,12 @@ export type MapPresetData = {
   }[];
 };
 
-/** Converts a preset from assets/registry/maps into MapLayout tiles (stride 32), spawns and chests. */
+/** Converts a preset from assets/registry/maps into MapLayout cells (stride 32), the entrance and the
+ * exit, spawns and chests. */
 export function presetToLayout(p: MapPresetData): {
   tiles: Uint8Array;
+  entrance: Cell | null;
+  exit: Cell | null;
   spawns: Spawn[];
   chests: Chest[];
   bossTable: number;
@@ -67,9 +80,16 @@ export function presetToLayout(p: MapPresetData): {
   chestRadius: number;
   settleTimeoutSecs: number;
 } {
-  const tiles = new Uint8Array(MAP_CELLS).fill(Tile.Wall);
+  const tiles = new Uint8Array(MAP_CELLS).fill(cellByte(Tile.Wall));
+  let entrance: Cell | null = null;
+  let exit: Cell | null = null;
   p.rows.forEach((row, y) => {
-    for (let x = 0; x < row.length; x++) tiles[cellIndex(x, y)] = TILE_CHARS[row[x] ?? "#"] ?? Tile.Wall;
+    for (let x = 0; x < row.length; x++) {
+      const ch = row[x] ?? "#";
+      if (ch === "E") entrance = { x, y };
+      if (ch === "X") exit = { x, y };
+      tiles[cellIndex(x, y)] = cellByte(TILE_CHARS[ch] ?? Tile.Wall);
+    }
   });
   const spawns = p.spawns.map((s) => ({
     bestiaryId: s.bestiary_id,
@@ -84,6 +104,8 @@ export function presetToLayout(p: MapPresetData): {
   const chests = (p.chests ?? []).map((c) => ({ x: c.x, y: c.y, table: c.table }));
   return {
     tiles,
+    entrance,
+    exit,
     spawns,
     chests,
     bossTable: p.boss_table ?? NO_TABLE,

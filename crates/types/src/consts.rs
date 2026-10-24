@@ -50,3 +50,10 @@ pub const CACHE_BYTES: usize = CACHE_SLOTS * 5;
 pub const BAG_RESOURCE_SLOTS: usize = 40;
 /// Consumable slots of the bag (docs/ITEMS_AND_CRAFT.md 6.1).
 pub const BAG_CONSUMABLE_SLOTS: usize = 5;
+/// Patch 13: tile types a cell byte can name (bits 7-3, docs/MAP_DESCRIPTION.md 4.1).
+pub const TILE_KINDS_MAX: usize = 32;
+/// Patch 13: variants of one tile type (bits 2-0).
+pub const TILE_VARIANTS: usize = 8;
+/// Patch 13: points of one map layout (`MapLayoutDataV2.points`): the entrance, the exit and
+/// the visible chests.
+pub const POINTS_MAX: usize = 2 + CHESTS_MAX;

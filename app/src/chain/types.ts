@@ -15,8 +15,38 @@ export type Race = (typeof Race)[keyof typeof Race];
 export const Class = { Warrior: 0, Mage: 1, Support: 2 } as const;
 export type Class = (typeof Class)[keyof typeof Class];
 
-export const Tile = { Floor: 0, Wall: 1, Water: 2, Door: 3, Entrance: 4, Exit: 5, Trap: 6 } as const;
+/**
+ * Patch 13: tile types (`TileKind`, docs/MAP_DESCRIPTION.md 4.2), bits 7-3 of a cell byte. Their
+ * properties (passable, step cost) are the registry Tileset, never this file.
+ */
+export const Tile = {
+  Void: 0,
+  StoneFloor: 1,
+  WoodenFloor: 2,
+  Dirt: 3,
+  Wall: 4,
+  Door: 5,
+  ShallowWater: 6,
+  DeepWater: 7,
+  Stairs: 8,
+  Rubble: 9,
+  Chasm: 10,
+} as const;
 export type Tile = (typeof Tile)[keyof typeof Tile];
+export const TILE_COUNT = 11;
+/** Tile types a cell byte can name (`TILE_KINDS_MAX`). */
+export const TILE_KINDS_MAX = 32;
+
+/** The tile type id of a cell byte (bits 7-3, `cell_kind`). */
+export const cellKind = (byte: number): number => (byte >> 3) & 31;
+/** The variant of a cell byte (bits 2-0, `cell_variant`). */
+export const cellVariant = (byte: number): number => byte & 7;
+/** A cell byte from a tile type and a variant (`cell_byte`). */
+export const cellByte = (kind: number, variant = 0): number => ((kind & 31) << 3) | (variant & 7);
+
+/** A map point type (`PointKind`, docs/MAP_DESCRIPTION.md 7.1). */
+export const PointKind = { Chest: 0, Entrance: 1, Exit: 2 } as const;
+export type PointKind = (typeof PointKind)[keyof typeof PointKind];
 
 export const SessionStatus = { Lobby: 0, Active: 1, Victory: 2, Wiped: 3, Fled: 4, Abandoned: 5 } as const;
 export type SessionStatus = (typeof SessionStatus)[keyof typeof SessionStatus];
