@@ -196,6 +196,8 @@ export const DEADROLL_SESSION_ERROR__NOT_LOCKED_HERE = 0x17c8; // 6088
 export const DEADROLL_SESSION_ERROR__PATH_NOT_ADJACENT = 0x17c9; // 6089
 /** ActorMismatch: The unit, the participation and the signer do not match */
 export const DEADROLL_SESSION_ERROR__ACTOR_MISMATCH = 0x17ca; // 6090
+/** CornerBlocked: A diagonal step cuts the corner of a cell that cannot be entered */
+export const DEADROLL_SESSION_ERROR__CORNER_BLOCKED = 0x17cb; // 6091
 
 export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__ACTOR_MISMATCH
@@ -211,6 +213,7 @@ export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__CHEST_IN_THE_WAY
   | typeof DEADROLL_SESSION_ERROR__CHEST_NOT_ADJACENT
   | typeof DEADROLL_SESSION_ERROR__CHEST_OPENED
+  | typeof DEADROLL_SESSION_ERROR__CORNER_BLOCKED
   | typeof DEADROLL_SESSION_ERROR__DEATH_ACCOUNTS_MISSING
   | typeof DEADROLL_SESSION_ERROR__DEATHS_PENDING
   | typeof DEADROLL_SESSION_ERROR__DM_MAIN_WALLET_ONLY
@@ -307,6 +310,7 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__CHEST_IN_THE_WAY]: `A closed chest occupies this cell`,
     [DEADROLL_SESSION_ERROR__CHEST_NOT_ADJACENT]: `Stand next to the chest to open it`,
     [DEADROLL_SESSION_ERROR__CHEST_OPENED]: `This chest is already open`,
+    [DEADROLL_SESSION_ERROR__CORNER_BLOCKED]: `A diagonal step cuts the corner of a cell that cannot be entered`,
     [DEADROLL_SESSION_ERROR__DEATH_ACCOUNTS_MISSING]: `A death needs the character's SkillSet and Bag`,
     [DEADROLL_SESSION_ERROR__DEATHS_PENDING]: `A death is waiting to be finalized: start_turn (or a claim) first`,
     [DEADROLL_SESSION_ERROR__DM_MAIN_WALLET_ONLY]: `The DM settles with the main wallet, not a session key`,

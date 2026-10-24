@@ -80,6 +80,7 @@ pub fn walk_error(e: WalkError) -> Error {
         WalkError::Occupied => error!(SessionError::CellOccupied),
         WalkError::ChestInTheWay => error!(SessionError::ChestInTheWay),
         WalkError::NotEnoughAp => error!(SessionError::NotEnoughActionPoints),
+        WalkError::CornerBlocked => error!(SessionError::CornerBlocked),
     }
 }
 
@@ -270,6 +271,23 @@ mod tests {
         let err = walk(&both, 0, &[], P0, ORIGIN, &path, 5).unwrap_err();
         assert_eq!(code(err), u32::from(SessionError::CellOccupied));
         walk(&both, 0b10, &[], P0, ORIGIN, &path, 5).unwrap();
+    }
+
+    #[test]
+    fn a_diagonal_never_cuts_a_corner() {
+        // The wall at (0, 2): diagonals past it either way are refused.
+        assert_eq!(WALL, c(0, 2));
+        for (from, to) in [(c(0, 1), c(1, 2)), (c(0, 3), c(1, 2)), (c(1, 2), c(0, 1))] {
+            let err = walk_alone(from, &[to], 5).unwrap_err();
+            assert_eq!(
+                code(err),
+                u32::from(SessionError::CornerBlocked),
+                "{from:?} -> {to:?}"
+            );
+        }
+        // An open diagonal passes; a monster beside it does not block it.
+        let w = walk(&[c(2, 2)], 0, &[monster(3, 2)], P0, c(2, 2), &[c(3, 3)], 5).unwrap();
+        assert_eq!(end(w), (c(3, 3), 4));
     }
 
     #[test]

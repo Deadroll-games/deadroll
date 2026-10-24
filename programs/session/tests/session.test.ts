@@ -702,6 +702,8 @@ type MapLoot = {
    * session takes seconds). */
   chestRadius?: number;
   settleTimeoutSecs?: number;
+  /** Patch 13: wall cells inside the room. */
+  walls?: { x: number; y: number }[];
 };
 const T1_CHEST = 0;
 const T1_BOSS = 1;
@@ -722,6 +724,7 @@ async function createFinalizedMap(dm: Keypair, bossLevel = 1, roster: SpawnDef[]
     .rpc();
   const tiles = new Array(15 * 32 + 16).fill(cellByte(TILE.Wall));
   for (let y = 1; y < 15; y++) for (let x = 1; x < 15; x++) tiles[y * 32 + x] = cellByte(TILE.StoneFloor, (x + y) % 8);
+  for (const w of loot.walls ?? []) tiles[w.y * 32 + w.x] = cellByte(TILE.Wall);
   await mapProgram.methods.writeLayout(0, Buffer.from(tiles)).accountsStrict(edit).signers([dm]).rpc();
   const spawns = roster.map((s) => ({
     bestiaryId: s.id,
@@ -3683,5 +3686,29 @@ describe("deadroll_session: what a move_path costs (patch 13)", { skip: SKIP_PAR
       assert.equal((await party.monsters()).core.monsters[wolf].actionPoints, m.actionPoints - steps.length);
     }
     console.log(`    CU, move_path: ${cu.join("; ")}`);
+  });
+});
+
+describe("deadroll_session: a diagonal never cuts a corner (patch 13)", { skip: SKIP_PARTY }, () => {
+  it("move_path refuses a diagonal past one wall or between two, allows an open one", async () => {
+    // A wall at (2, 1) beside the entrance (1, 1); walls at (3, 2) and (2, 3) touch at the corner
+    // between (2, 2) and (3, 3).
+    const party = await Party.create(["warrior", "mage"], { loot: { walls: [{ x: 2, y: 1 }, { x: 3, y: 2 }, { x: 2, y: 3 }] } });
+    await party.startAll();
+    await party.skipTo(0);
+    const p0 = party.players[0];
+    const before = await party.part(0);
+    assert.ok(before.core.actionPoints >= 4, "the warrior walks 4 cells");
+    const move = (cells: Cell[]) => party.movePath(p0.wallet, 0, cells, p0.participation);
+    // Next to a single wall: (1, 1) -> (2, 2) passes (2, 1).
+    await rejects(move([{ x: 2, y: 2 }]), "CornerBlocked");
+    // Between two walls touching at the corner, after two good steps: the whole move fails.
+    await rejects(move([{ x: 1, y: 2 }, { x: 2, y: 2 }, { x: 3, y: 3 }]), "CornerBlocked");
+    assert.equal((await party.part(0)).core.actionPoints, before.core.actionPoints);
+    // An open diagonal passes: down the west side, then (1, 4) -> (2, 5) with (2, 4) and (1, 5) floor.
+    // The mage on the entrance is beside the first step and does not matter.
+    await move([{ x: 1, y: 2 }, { x: 1, y: 3 }, { x: 1, y: 4 }, { x: 2, y: 5 }]);
+    const after = await party.part(0);
+    assert.deepEqual([after.core.x, after.core.y, after.core.actionPoints], [2, 5, before.core.actionPoints - 4]);
   });
 });

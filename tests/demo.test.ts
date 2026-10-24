@@ -647,12 +647,10 @@ class Demo {
     }
     // Patch 11: a closed chest occupies its cell.
     for (let i = 0; i < s.chestCount; i++) if (!(s.chestsOpened & (1 << i))) taken.add(s.chests[i].y * MAP_STRIDE + s.chests[i].x);
-    const cost = (x: number, y: number) => {
-      if (x < 0 || y < 0 || x >= preset.width || y >= preset.height) return 0;
-      // Patch 13: the step cost of the cell's tile type, as the session copied the Tileset.
-      if (taken.has(y * MAP_STRIDE + x)) return 0;
-      return s.tileCost[cellKind(preset.tiles[y * MAP_STRIDE + x])];
-    };
+    // Patch 13: the step cost of the cell's tile type, as the session copied the Tileset.
+    const tile = (x: number, y: number) =>
+      x < 0 || y < 0 || x >= preset.width || y >= preset.height ? 0 : s.tileCost[cellKind(preset.tiles[y * MAP_STRIDE + x])];
+    const cost = (x: number, y: number) => (taken.has(y * MAP_STRIDE + x) ? 0 : tile(x, y));
     const dirs = [N, NE, E, SE, S, SW, W, NW].map((d) => [d, ...DELTA[d]]);
     // Dijkstra on a 32x32 grid: a linear scan for the minimum is plenty.
     const dist = new Map<number, number>([[from.y * MAP_STRIDE + from.x, 0]]);
@@ -671,6 +669,8 @@ class Demo {
         return steps;
       }
       for (const [dir, dx, dy] of dirs) {
+        // A diagonal never cuts a corner: both orthogonal cells must be passable tiles.
+        if (dx && dy && !(tile(x + dx, y) && tile(x, y + dy))) continue;
         const c = cost(x + dx, y + dy);
         if (!c) continue;
         const k = (y + dy) * MAP_STRIDE + x + dx;

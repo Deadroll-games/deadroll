@@ -217,6 +217,16 @@ fn cases() -> Vec<(&'static str, MapCheckRequest, Result<(), MapCheckError>)> {
             edit(&|r| at(r, 11, 7, TileKind::Rubble, 5)),
             Ok(()),
         ),
+        // Patch 13: the corridor cell walled, the cell beside it open. (11, 6) -> (12, 7) ->
+        // (11, 8) would cut the corners of the walls (12, 6), (11, 7) and (12, 8).
+        (
+            "a diagonal past wall corners",
+            edit(&|r| {
+                at(r, 11, 7, TileKind::Wall, 0);
+                at(r, 12, 7, TileKind::StoneFloor, 0);
+            }),
+            Err(E::ExitUnreachable),
+        ),
         (
             "two chests on tier 1",
             edit(&|r| {

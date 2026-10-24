@@ -3935,6 +3935,11 @@
       "code": 6090,
       "name": "ActorMismatch",
       "msg": "The unit, the participation and the signer do not match"
+    },
+    {
+      "code": 6091,
+      "name": "CornerBlocked",
+      "msg": "A diagonal step cuts the corner of a cell that cannot be entered"
     }
   ],
   "types": [

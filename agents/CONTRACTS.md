@@ -833,7 +833,9 @@ starter tiles of docs 4.2.
 
 `deadroll_mapcheck`: `tiles::TileRules { cost: [u8; 32], known: u32, blocks_vision: u32 }` (input,
 built by `tile_rules`); `check_map(width, height, tier, &MapLayoutDataV2, &TileRules, template_of,
-loot)`; reachability over the 8 neighbors (a row-bitset flood fill, the same cells as a BFS).
+loot)`; reachability over the 8 neighbors without cutting corners: a diagonal step needs both
+orthogonal cells to be passable tiles of the Tileset (units and closed chests do not block it); a
+row-bitset flood fill, the same cells as a BFS.
 `MapCheckError` appended: `TooManyPoints`, `PointOutOfBounds`, `PointNotPassable`, `PointOverlap`;
 `EntranceCount` / `ExitCount` now count points, `InvalidTile` is a type the Tileset does not have;
 `EntranceMismatch`, `ExitMismatch`, `InvalidPoint` are unused.
@@ -886,13 +888,15 @@ move_path(unit: u8, path: Vec<Cell>)   actor; unit = Unit::id (player slot, MONS
             player, else session.dm), program_identity, oracle_queue, vrf_program, slot_hashes,
             system_program
   path      1..=MAX_PATH (16) cells, each one of the 8 neighbors of the one before (Chebyshev 1,
-            a diagonal is one step, wall corners can be cut), on the map, a tile type with a cost,
-            no living unit, no closed chest; action points = sum of the tile type costs
+            a diagonal is one step), on the map, a tile type with a cost, no living unit, no closed
+            chest; a diagonal never cuts a corner: both orthogonal cells it passes between must be
+            enterable tiles (units and closed chests beside it do not block it);
+            action points = sum of the tile type costs
   stop      the first cell next to an enemy whose EnemyAdjacent reactive answers: the walk ends there,
             the rest of the path is not walked and its points stay, a VRF roll for the reactions
             (the move itself rolls nothing)
 move_unit, monster_move   retired (removed)
-errors  appended: PathNotAdjacent, ActorMismatch (InvalidDirection no longer used)
+errors  appended: PathNotAdjacent, ActorMismatch, CornerBlocked (InvalidDirection no longer used)
 events  Moved, CellBurned unchanged
 ```
 

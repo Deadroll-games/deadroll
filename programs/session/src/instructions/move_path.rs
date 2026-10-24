@@ -71,7 +71,8 @@ impl MovePath<'_> {
 
 /// Moves `unit` (`Unit::id`: a player slot, or `MONSTER_UNIT_BASE + monster`) along `path`, cells
 /// in order, on its turn (docs/ARCHITECTURE.md 6: "actor; spends action points; no rolls"). Each
-/// cell neighbors the one before (diagonals too) and costs its tile type's step cost; the checks are
+/// cell neighbors the one before (diagonals too, never cutting the corner of an impassable tile) and
+/// costs its tile type's step cost; the checks are
 /// `deadroll_mapcheck::walk`.
 ///
 /// Coming next to an enemy whose `EnemyAdjacent` reactive skill answers (docs/SKILL_BUILDER.md 3.2,

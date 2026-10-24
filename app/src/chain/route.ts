@@ -1,5 +1,6 @@
 // Paths for move_path (patch 13), as tests/demo.test.ts `route`: cells in order over the 8
-// neighbors (a diagonal is one step), passable cells not taken by a living unit or a closed chest,
+// neighbors (a diagonal is one step that never cuts a corner: both orthogonal cells must be passable
+// tiles, units and chests do not count), passable cells not taken by a living unit or a closed chest,
 // step costs from the Tileset (`GameSession.tile_cost` by tile type, a cell byte's bits 7-3). The
 // chain checks the path itself (deadroll_mapcheck::walk); this only plans it.
 import { MAP_MAX, Tile, cellByte, cellKind, type Cell } from "./types";
@@ -33,11 +34,23 @@ export const cheb = (a: Cell, b: Cell) => Math.max(Math.abs(a.x - b.x), Math.abs
 /** `b` is one of the 8 neighbors of `a` (`deadroll_mapcheck::walk::adjacent`). */
 export const adjacent = (a: Cell, b: Cell) => cheb(a, b) === 1;
 
+/** The tile at `(x, y)` can be entered (by the Tileset; units and chests aside). */
+function tileOpen(g: Ground, x: number, y: number): boolean {
+  if (x < 0 || y < 0 || x >= g.width || y >= g.height) return false;
+  return (g.tileCost[cellKind(g.tiles[y * MAP_MAX + x] ?? WALL)] ?? 0) > 0;
+}
+
 /** Action points to step onto `(x, y)`, 0 = cannot. */
 export function costAt(g: Ground, x: number, y: number): number {
-  if (x < 0 || y < 0 || x >= g.width || y >= g.height) return 0;
-  if (g.taken.has(y * MAP_MAX + x)) return 0;
+  if (!tileOpen(g, x, y) || g.taken.has(y * MAP_MAX + x)) return 0;
   return g.tileCost[cellKind(g.tiles[y * MAP_MAX + x] ?? WALL)] ?? 0;
+}
+
+/** Action points of the step `from -> to` (neighbors), 0 = cannot: a diagonal past an impassable
+ * corner cannot (`deadroll_mapcheck::walk`, CornerBlocked). */
+export function stepCost(g: Ground, from: Cell, to: Cell): number {
+  if (from.x !== to.x && from.y !== to.y && !(tileOpen(g, to.x, from.y) && tileOpen(g, from.x, to.y))) return 0;
+  return costAt(g, to.x, to.y);
 }
 
 /** Cheapest steps from `from` to the first cell where `goal` holds. */
@@ -62,7 +75,7 @@ export function route(opts: Ground & { from: Cell; goal: (x: number, y: number) 
       return steps;
     }
     for (const [dx, dy] of DIRS) {
-      const c = costAt(opts, x + dx, y + dy);
+      const c = stepCost(opts, { x, y }, { x: x + dx, y: y + dy });
       if (!c) continue;
       const k = (y + dy) * MAP_MAX + x + dx;
       const d = dist.get(best)! + c;
@@ -100,13 +113,10 @@ export function extendPath(g: Ground, from: Cell, path: Step[], to: Cell, ap: nu
   const back = path.findIndex((s) => s.to.x === to.x && s.to.y === to.y);
   if (back >= 0) return path.slice(0, back + 1);
   if (to.x === from.x && to.y === from.y) return [];
-  let more: Step[] | null;
-  if (adjacent(end, to)) {
-    const cost = costAt(g, to.x, to.y);
-    more = cost ? [{ cost, to }] : null;
-  } else {
-    more = route({ ...g, from: end, goal: (x, y) => x === to.x && y === to.y });
-  }
+  // A neighbor is one step, unless that step is refused (a corner): then, like a far cell, the
+  // cheapest way there.
+  const cost = adjacent(end, to) ? stepCost(g, end, to) : 0;
+  const more = cost ? [{ cost, to }] : route({ ...g, from: end, goal: (x, y) => x === to.x && y === to.y });
   if (!more || more.length === 0) return null;
   const next = [...path, ...more];
   return next.length <= MAX_PATH && pathCost(next) <= ap ? next : null;
@@ -123,7 +133,7 @@ export function reachable(opts: Ground & { from: Cell; ap: number }): Cell[] {
     const x = k % MAP_MAX;
     const y = Math.floor(k / MAP_MAX);
     for (const [dx, dy] of DIRS) {
-      const c = costAt(opts, x + dx, y + dy);
+      const c = stepCost(opts, { x, y }, { x: x + dx, y: y + dy });
       if (!c) continue;
       const nk = (y + dy) * MAP_MAX + x + dx;
       const d = dist.get(k)! + c;

@@ -195,4 +195,6 @@ pub enum SessionError {
     PathNotAdjacent,
     #[msg("The unit, the participation and the signer do not match")]
     ActorMismatch,
+    #[msg("A diagonal step cuts the corner of a cell that cannot be entered")]
+    CornerBlocked,
 }

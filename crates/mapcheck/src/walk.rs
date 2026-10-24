@@ -47,6 +47,9 @@ pub enum WalkError {
     ChestInTheWay,
     /// The steps cost more than the action points.
     NotEnoughAp,
+    /// A diagonal step past a corner: one of the two orthogonal cells it passes between cannot be
+    /// entered (its tile type; units and closed chests do not block a diagonal).
+    CornerBlocked,
 }
 
 /// Where a walk ended.
@@ -66,7 +69,8 @@ pub const fn adjacent(a: Cell, b: Cell) -> bool {
 }
 
 /// Walks `path` from `start` with `ap` action points. Each cell must neighbor the one before, be on
-/// the field, be enterable, be free, and be paid for. `stop(from, to)` is asked after each step:
+/// the field, be enterable, be free, and be paid for. A diagonal step never cuts a corner: both
+/// orthogonal cells it passes between must be enterable tiles (`Field::step_cost`). `stop(from, to)` is asked after each step:
 /// `true` ends the walk on `to` (a reactive skill answers there); the rest of the path is not
 /// walked and its action points stay. No dice: nothing here is random.
 pub fn walk<F: Field>(
@@ -93,6 +97,19 @@ pub fn walk<F: Field>(
             return Err(WalkError::OutOfBounds);
         }
         let cost = field.step_cost(next).ok_or(WalkError::Blocked)?;
+        if from.x != next.x && from.y != next.y {
+            let side = Cell {
+                x: next.x,
+                y: from.y,
+            };
+            let other = Cell {
+                x: from.x,
+                y: next.y,
+            };
+            if field.step_cost(side).is_none() || field.step_cost(other).is_none() {
+                return Err(WalkError::CornerBlocked);
+            }
+        }
         match field.blocker(next) {
             Some(Blocker::Unit) => return Err(WalkError::Occupied),
             Some(Blocker::ClosedChest) => return Err(WalkError::ChestInTheWay),
@@ -182,15 +199,62 @@ mod tests {
         // Shallow water costs 2, diagonal or not.
         let w = go(LONG, c(9, 1), &[c(10, 2), c(11, 2)], 10).unwrap();
         assert_eq!(w.ap_left, 6);
+        // Down past the end of the wall row: (13, 2) -> (14, 3) has (14, 2) open, (13, 3) a wall.
+        assert_eq!(
+            go(LONG, c(13, 2), &[c(14, 3)], 9),
+            Err(WalkError::CornerBlocked)
+        );
         // Far along the long side.
         let path: [Cell; 16] = core::array::from_fn(|i| c(21 + i as u8, 4));
         assert_eq!(go(LONG, c(20, 4), &path, 16).unwrap().end, c(36, 4));
     }
 
     #[test]
-    fn corners_of_walls_can_be_cut() {
+    fn a_diagonal_never_cuts_a_corner() {
+        // Between two walls touching at the corner.
         let rows = &[".#", "#."];
-        assert_eq!(go(rows, c(0, 0), &[c(1, 1)], 1).unwrap().end, c(1, 1));
+        assert_eq!(
+            go(rows, c(0, 0), &[c(1, 1)], 9),
+            Err(WalkError::CornerBlocked)
+        );
+        // Next to a single wall, on either side.
+        assert_eq!(
+            go(&[".#", ".."], c(0, 0), &[c(1, 1)], 9),
+            Err(WalkError::CornerBlocked)
+        );
+        assert_eq!(
+            go(&["..", "#."], c(0, 0), &[c(1, 1)], 9),
+            Err(WalkError::CornerBlocked)
+        );
+        assert_eq!(
+            go(&["#.", ".."], c(1, 0), &[c(0, 1)], 9),
+            Err(WalkError::CornerBlocked)
+        );
+        // An open diagonal passes, and so does one past shallow water (passable, cost 2).
+        assert_eq!(
+            go(&["..", ".."], c(0, 0), &[c(1, 1)], 9).unwrap().end,
+            c(1, 1)
+        );
+        assert_eq!(
+            go(&[".~", ".."], c(0, 0), &[c(1, 1)], 9).unwrap().ap_left,
+            8
+        );
+        // A unit or a closed chest beside a diagonal does not block it.
+        assert_eq!(
+            go(&[".U", "C."], c(0, 0), &[c(1, 1)], 9).unwrap().end,
+            c(1, 1)
+        );
+        // Straight steps never check corners.
+        assert_eq!(
+            go(&["#.#", "#.#"], c(1, 0), &[c(1, 1)], 9).unwrap().end,
+            c(1, 1)
+        );
+        // A later corner fails the whole move.
+        let rows = &["...", "..#", ".#."];
+        assert_eq!(
+            go(rows, c(0, 0), &[c(1, 0), c(1, 1), c(2, 2)], 9),
+            Err(WalkError::CornerBlocked)
+        );
     }
 
     #[test]

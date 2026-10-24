@@ -809,20 +809,44 @@ describe("route", () => {
   const tileCost = SHIPPED_TILE_COST;
   const base = { tiles, width: 5, height: 3, tileCost, taken: new Set<number>() };
 
-  it("finds the cheapest path over the 8 neighbors, around walls and water", () => {
+  it("finds the cheapest path over the 8 neighbors, around walls and water, without cutting corners", () => {
     const steps = route({ ...base, from: { x: 0, y: 0 }, goal: (x, y) => x === 4 && y === 0 })!;
-    // Diagonally around the wall through (2,2), past the water at (3,2).
-    expect(steps.map((s) => s.to)).toEqual([{ x: 1, y: 1 }, { x: 2, y: 2 }, { x: 3, y: 1 }, { x: 4, y: 0 }]);
-    expect(steps.reduce((n, s) => n + s.cost, 0)).toBe(4);
+    // (1,1) -> (2,2) and (2,2) -> (3,1) would cut the wall (2,1): the way goes (1,2), (2,2), then
+    // the water (3,2) for 2, then up: 3 + 2 + 2 = 7.
+    expect(steps.at(-1)!.to).toEqual({ x: 4, y: 0 });
+    expect(steps.reduce((n, s) => n + s.cost, 0)).toBe(7);
+    expect(steps.some((s) => s.to.x === 2 && s.to.y === 2)).toBe(true);
+    expect(steps.find((s) => s.to.x === 3 && s.to.y === 2)?.cost).toBe(2);
+    for (let i = 1; i < steps.length; i++) {
+      const [a, b] = [steps[i - 1]!.to, steps[i]!.to];
+      // No step passes between two cells where one is the wall column.
+      if (a.x !== b.x && a.y !== b.y) expect([a.x, b.x].includes(2) && [a.y, b.y].includes(1)).toBe(false);
+    }
     // With (3,1) taken the only way is the water, which costs 2.
     const around = route({ ...base, taken: new Set([1 * MAP_MAX + 3]), from: { x: 0, y: 0 }, goal: (x, y) => x === 4 && y === 0 })!;
     expect(around.find((s) => s.to.x === 3 && s.to.y === 2)?.cost).toBe(2);
   });
 
+  it("refuses a diagonal past a wall corner, allows an open one", () => {
+    // (1,1) -> (2,2) passes (2,1), a wall: refused; (1,2) -> (2,2) is straight.
+    expect(extendPath(base, { x: 1, y: 1 }, [], { x: 2, y: 2 }, 9)!.map((s) => s.to)).toEqual([{ x: 1, y: 2 }, { x: 2, y: 2 }]);
+    // Between two walls touching at the corner: no way at all.
+    const corner = new Uint8Array(MAP_MAX * MAP_MAX).fill(cellByte(Tile.Wall));
+    corner[0] = cellByte(Tile.StoneFloor);
+    corner[MAP_MAX + 1] = cellByte(Tile.StoneFloor);
+    const g = { tiles: corner, width: 2, height: 2, tileCost, taken: new Set<number>() };
+    expect(extendPath(g, { x: 0, y: 0 }, [], { x: 1, y: 1 }, 9)).toBeNull();
+    expect(reachable({ ...g, from: { x: 0, y: 0 }, ap: 9 })).toEqual([]);
+    // Open on both sides (a unit on one does not matter): one step.
+    const open = new Uint8Array(MAP_MAX * MAP_MAX).fill(cellByte(Tile.StoneFloor));
+    const g2 = { tiles: open, width: 2, height: 2, tileCost, taken: new Set<number>([1]) };
+    expect(extendPath(g2, { x: 0, y: 0 }, [], { x: 1, y: 1 }, 9)).toEqual([{ cost: 1, to: { x: 1, y: 1 } }]);
+  });
+
   it("cuts a path to the action points and to 16 cells", () => {
     const steps = route({ ...base, from: { x: 0, y: 0 }, goal: (x, y) => x === 4 && y === 0 })!;
     const take = affordable(steps, 5, 2);
-    expect(take.map((s) => s.to)).toEqual([{ x: 1, y: 1 }, { x: 2, y: 2 }, { x: 3, y: 1 }]);
+    expect(take.reduce((n, s) => n + s.cost, 0)).toBeLessThanOrEqual(3);
     const long = Array.from({ length: 20 }, () => ({ cost: 1, to: { x: 0, y: 0 } }));
     expect(affordable(long, 99)).toHaveLength(16);
   });
@@ -832,10 +856,13 @@ describe("route", () => {
     let path = extendPath(base, from, [], { x: 1, y: 1 }, 5)!;
     expect(path.map((s) => s.to)).toEqual([{ x: 1, y: 1 }]);
     // A far cell adds the cheapest way to it.
-    path = extendPath(base, from, path, { x: 3, y: 1 }, 5)!;
-    expect(path.map((s) => s.to)).toEqual([{ x: 1, y: 1 }, { x: 2, y: 2 }, { x: 3, y: 1 }]);
+    path = extendPath(base, from, path, { x: 2, y: 2 }, 5)!;
+    expect(path.map((s) => s.to)).toEqual([{ x: 1, y: 1 }, { x: 1, y: 2 }, { x: 2, y: 2 }]);
+    // A neighbor past a corner is reached around it: (2,2) -> (3,2) water -> (3,1).
+    path = extendPath(base, from, path, { x: 3, y: 1 }, 9)!;
+    expect(path.map((s) => s.to)).toEqual([{ x: 1, y: 1 }, { x: 1, y: 2 }, { x: 2, y: 2 }, { x: 3, y: 2 }, { x: 3, y: 1 }]);
     // Not past the action points, not into a wall, not onto the end again.
-    expect(extendPath(base, from, path, { x: 4, y: 0 }, 3)).toBeNull();
+    expect(extendPath(base, from, path, { x: 4, y: 0 }, path.reduce((n, s) => n + s.cost, 0))).toBeNull();
     expect(extendPath(base, from, path, { x: 2, y: 1 }, 5)).toBeNull();
     expect(extendPath(base, from, path, { x: 3, y: 1 }, 5)).toBeNull();
     // A cell on the path cuts it back; the start empties it.
