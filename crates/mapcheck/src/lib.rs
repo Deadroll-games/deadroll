@@ -868,9 +868,9 @@ mod tests {
     }
 
     #[test]
-    fn diagonal_steps_cross_a_staggered_wall() {
-        // Two wall rows across the room, open at (7, 8) and (8, 9): only the diagonal step
-        // (7, 8) -> (8, 9) links the halves.
+    fn diagonals_do_not_cut_corners() {
+        // Two wall rows across the room, open at (7, 8) and (8, 9): the diagonal step
+        // (7, 8) -> (8, 9) passes between the walls (8, 8) and (7, 9), so the halves stay apart.
         let mut layout = demo();
         for x in 1..15 {
             set(&mut layout, x, 8, TileKind::Wall);
@@ -878,9 +878,13 @@ mod tests {
         }
         set(&mut layout, 7, 8, TileKind::StoneFloor);
         set(&mut layout, 8, 9, TileKind::StoneFloor);
-        assert_eq!(check(&layout), Ok(()));
-        set(&mut layout, 8, 9, TileKind::Wall);
         assert_eq!(check(&layout), Err(MapCheckError::ExitUnreachable));
+        // One impassable corner is enough to block: (8, 8) deep water, (7, 9) still a wall.
+        set(&mut layout, 8, 8, TileKind::DeepWater);
+        assert_eq!(check(&layout), Err(MapCheckError::ExitUnreachable));
+        // Both corners passable: the halves link.
+        set(&mut layout, 8, 8, TileKind::Rubble);
+        assert_eq!(check(&layout), Ok(()));
     }
 
     #[test]

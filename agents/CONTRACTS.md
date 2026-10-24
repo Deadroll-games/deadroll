@@ -833,7 +833,9 @@ starter tiles of docs 4.2.
 
 `deadroll_mapcheck`: `tiles::TileRules { cost: [u8; 32], known: u32, blocks_vision: u32 }` (input,
 built by `tile_rules`); `check_map(width, height, tier, &MapLayoutDataV2, &TileRules, template_of,
-loot)`; reachability over the 8 neighbors (a row-bitset flood fill, the same cells as a BFS).
+loot)`; reachability over the 8 neighbors without cutting corners: a diagonal step needs both
+orthogonal cells to be passable tiles of the Tileset (units and closed chests do not block it); a
+row-bitset flood fill, the same cells as a BFS.
 `MapCheckError` appended: `TooManyPoints`, `PointOutOfBounds`, `PointNotPassable`, `PointOverlap`;
 `EntranceCount` / `ExitCount` now count points, `InvalidTile` is a type the Tileset does not have;
 `EntranceMismatch`, `ExitMismatch`, `InvalidPoint` are unused.

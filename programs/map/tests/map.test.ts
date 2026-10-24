@@ -527,15 +527,20 @@ describe("map: finalize_map", () => {
     assert.equal((await readMap(map)).status, STATUS.Finalized);
   });
 
-  it("patch 13: steps go diagonally, through a staggered wall", async () => {
+  it("patch 13: a diagonal never cuts a corner", async () => {
     const dm = await funded();
     const { map } = await demoDraft(dm);
-    // Rows 8 and 9 are walls but (7, 8) and (8, 9): only the diagonal step links the halves.
-    const row = (y: number, open: number) => writeLayoutIx(dm, map, y * MAP_MAX + 1, Array.from({ length: 14 }, (_, i) => (i + 1 === open ? FLOOR : WALL)));
-    await send(dm, [await row(8, 7)]);
-    await send(dm, [await row(9, 9)]);
+    // Rows 8 and 9 are walls but (7, 8) and (8, 9): the diagonal between them passes the walls
+    // (8, 8) and (7, 9), touching at the corner, so the halves stay apart.
+    const row = (y: number, open: number[]) => writeLayoutIx(dm, map, y * MAP_MAX + 1, Array.from({ length: 14 }, (_, i) => (open.includes(i + 1) ? FLOOR : WALL)));
+    await send(dm, [await row(8, [7])]);
+    await send(dm, [await row(9, [8])]);
     await expectErr(send(dm, [await finalizeIx(dm, map, new Array(32).fill(0))]), err("ExitUnreachable"));
-    await send(dm, [await row(9, 8)]);
+    // A single impassable cell at the corner still blocks: (8, 8) deep water, (7, 9) a wall.
+    await send(dm, [await writeLayoutIx(dm, map, 8 * MAP_MAX + 8, [cell(KIND.DeepWater)])]);
+    await expectErr(send(dm, [await finalizeIx(dm, map, new Array(32).fill(0))]), err("ExitUnreachable"));
+    // Both corners passable: the way is open.
+    await send(dm, [await writeLayoutIx(dm, map, 8 * MAP_MAX + 8, [cell(KIND.Rubble)])]);
     await send(dm, [await finalizeIx(dm, map, new Array(32).fill(0))]);
     assert.equal((await readMap(map)).status, STATUS.Finalized);
   });

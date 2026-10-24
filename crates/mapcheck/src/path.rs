@@ -1,7 +1,9 @@
 //! Reachability over passable cells (docs/MAP_DESCRIPTION.md, section 10.1).
 //!
 //! Steps go to the 8 neighbors, the same as `programs/session` movement (patch 13), with the
-//! passability of the registry `Tileset` ([`TileRules`]). The search is a flood fill over row
+//! passability of the registry `Tileset` ([`TileRules`]). A diagonal step does not cut a corner:
+//! both orthogonal cells it passes between must be passable tiles (units and closed chests do not
+//! count, only the `Tileset`). The search is a flood fill over row
 //! bitsets: a row of the layout is one `u32` (`MAP_MAX` = 32), so a whole row grows at once. It
 //! finds the same cells as a breadth-first search, with fixed buffers of 256 bytes.
 
@@ -74,10 +76,13 @@ fn fill_row(row: u32, open: u32) -> u32 {
     up | down
 }
 
-/// A row and its two horizontal neighbors: what a step up or down (straight or diagonal) can enter.
+/// What a step from the cells `from` of one row enters in the next row: straight, or diagonal
+/// when both orthogonal cells are passable tiles (`from_pass`: the source row's, `to_pass`: the
+/// target row's). A diagonal to the right needs the target column in the source row and the source
+/// column in the target row.
 #[inline(always)]
-const fn spread(row: u32) -> u32 {
-    row | (row << 1) | (row >> 1)
+const fn step_rows(from: u32, from_pass: u32, to_pass: u32) -> u32 {
+    from | ((from << 1) & from_pass & (to_pass << 1)) | ((from >> 1) & from_pass & (to_pass >> 1))
 }
 
 /// [`reachable_from`] with `blocked` cells closed as well (patch 11: closed chests occupy their
@@ -101,13 +106,16 @@ pub fn reachable_avoiding(
         return reach;
     }
     let passable = rules.passable_mask();
-    let mut open = [0u32; MAP_MAX];
-    for (y, row) in open.iter_mut().enumerate().take(h) {
+    // `pass`: passable tiles (what a corner needs); `open`: those without a blocked cell (what a
+    // step can enter).
+    let mut pass = [0u32; MAP_MAX];
+    for (y, row) in pass.iter_mut().enumerate().take(h) {
         let line = &cells[y * MAP_MAX..y * MAP_MAX + w];
         for (x, &byte) in line.iter().enumerate() {
             *row |= ((passable >> cell_kind(byte)) & 1) << x;
         }
     }
+    let mut open = pass;
     for c in blocked {
         if in_bounds(*c, width, height) {
             open[c.y as usize] &= !(1 << c.x);
@@ -120,9 +128,17 @@ pub fn reachable_avoiding(
     reach.bits[start.y as usize] = fill_row(first, open[start.y as usize]);
     let rows = &mut reach.bits;
     let grow = |rows: &mut [u32; MAP_MAX], y: usize| -> bool {
-        let above = if y > 0 { rows[y - 1] } else { 0 };
-        let below = if y + 1 < h { rows[y + 1] } else { 0 };
-        let seed = (rows[y] | spread(above | below)) & open[y];
+        let above = if y > 0 {
+            step_rows(rows[y - 1], pass[y - 1], pass[y])
+        } else {
+            0
+        };
+        let below = if y + 1 < h {
+            step_rows(rows[y + 1], pass[y + 1], pass[y])
+        } else {
+            0
+        };
+        let seed = (rows[y] | above | below) & open[y];
         if seed == rows[y] {
             return false;
         }
@@ -226,11 +242,44 @@ mod tests {
     }
 
     #[test]
-    fn diagonal_steps_cut_corners() {
+    fn diagonals_do_not_cut_corners() {
+        // Two walls touching at the corner.
         let tiles = grid(&[".#", "#."]);
         let reach = reachable_from(&tiles, 2, 2, Cell { x: 0, y: 0 });
-        assert_eq!(reach.count(), 2);
-        assert!(reach.contains(Cell { x: 1, y: 1 }));
+        assert_eq!(reach.count(), 1);
+        // A single wall next to the diagonal blocks it too: (0, 0) -> (1, 1) past the wall (1, 0).
+        let tiles = grid(&[".#", "##", "..."]);
+        let reach = reachable_from(&tiles, 3, 3, Cell { x: 0, y: 2 });
+        assert!(!reach.contains(Cell { x: 0, y: 0 }));
+        let tiles = grid(&[".#.", "..#"]);
+        let reach = reachable_from(&tiles, 3, 2, Cell { x: 1, y: 1 });
+        assert!(
+            !reach.contains(Cell { x: 2, y: 0 }),
+            "past (1, 0) and (2, 1)"
+        );
+        // Deep water, a chasm or void at the corner block like a wall.
+        for kind in [TileKind::DeepWater, TileKind::Chasm, TileKind::Void] {
+            let mut tiles = grid(&["..", ".."]);
+            tiles[cell_index(1, 0)] = kind as u8 * 8;
+            tiles[cell_index(0, 1)] = WALL;
+            let reach = reachable_from(&tiles, 2, 2, Cell { x: 0, y: 0 });
+            assert!(!reach.contains(Cell { x: 1, y: 1 }), "{kind:?}");
+        }
+        // An open diagonal passes: shallow water and rubble are passable corners.
+        let mut tiles = grid(&["..", ".."]);
+        tiles[cell_index(1, 0)] = TileKind::ShallowWater as u8 * 8;
+        tiles[cell_index(0, 1)] = TileKind::Rubble as u8 * 8;
+        let reach = reachable_avoiding(
+            &tiles,
+            2,
+            2,
+            Cell { x: 0, y: 0 },
+            &[Cell { x: 1, y: 0 }, Cell { x: 0, y: 1 }],
+        );
+        assert!(
+            reach.contains(Cell { x: 1, y: 1 }),
+            "blocked cells (chests) do not block the corner"
+        );
         // All 8 neighbors of a middle cell.
         let open = grid(&["...", "...", "..."]);
         let center = Cell { x: 1, y: 1 };
@@ -405,11 +454,8 @@ mod same_as_bfs {
     /// A plain queue BFS over the 8 neighbors: the reference the row fill must match.
     fn bfs(cells: &[u8; MAP_CELLS], w: u8, h: u8, start: Cell, blocked: &[Cell]) -> Reach {
         let rules = starter();
-        let open = |c: Cell| {
-            in_bounds(c, w, h)
-                && rules.is_passable(cells[cell_index(c.x, c.y)])
-                && !blocked.contains(&c)
-        };
+        let pass = |c: Cell| in_bounds(c, w, h) && rules.is_passable(cells[cell_index(c.x, c.y)]);
+        let open = |c: Cell| pass(c) && !blocked.contains(&c);
         let mut reach = Reach::empty();
         if !open(start) {
             return reach;
@@ -431,7 +477,11 @@ mod same_as_bfs {
                         x: x as u8,
                         y: y as u8,
                     };
-                    if open(n) && !reach.contains(n) {
+                    // A diagonal needs both orthogonal cells to be passable tiles.
+                    let corner = dx == 0
+                        || dy == 0
+                        || (pass(Cell { x: n.x, y: c.y }) && pass(Cell { x: c.x, y: n.y }));
+                    if corner && open(n) && !reach.contains(n) {
                         reach.bits[n.y as usize] |= 1 << n.x;
                         queue[tail] = n;
                         tail += 1;
