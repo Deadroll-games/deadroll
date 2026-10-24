@@ -10,6 +10,7 @@ import {
   samePrefix,
   uploadBlob,
 } from "./lib/render-program.ts";
+import { maskText } from "./lib/mask-url.ts";
 
 const USAGE = `usage: upload-rasterizer.ts --version <u16> [--wasm <path>] [--url <rpc>] [--wallet <keypair.json>] [--config <pubkey>] [--dry-run]
 
@@ -98,6 +99,6 @@ async function main() {
 }
 
 main().catch((err: unknown) => {
-  console.error(err instanceof Error && err.message ? err.message : "upload failed");
+  console.error(maskText(err instanceof Error && err.message ? err.message : "upload failed"));
   process.exit(1);
 });

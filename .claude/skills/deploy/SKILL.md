@@ -28,7 +28,7 @@ cd ~ && solana-test-validator --bpf-program CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH
 
 Only as a separate task and only with the user's OK.
 
-1. RPC: take the Helius URL from the Solana CLI config and pass it with `--url`. In every output, log and message mask it as `***`. Never print the key.
+1. RPC: take the Helius URL from the Solana CLI config and pass it with `--url`, and run the script as `pnpm --silent deploy:devnet ...` (checked: plain `pnpm` echoes the full command with the `--url` value, `--silent` does not). The scripts mask the URL themselves (`tools/scripts/lib/mask-url.ts`: host kept, path and query values `***`). In every message you write, mask it as `***` too. Never print the key.
 2. Trial run without sending: run `deploy-devnet.ts` without `--yes` and answer no at the cost prompt. Show the cost table (programs, buffers that are refunded, extensions, accounts, fees, total, wallet balance) and wait for the user's OK.
 3. Real deploy with `--skip-build`, so the files of the trial run are the ones sent.
 4. Run `tests/smoke-devnet.ts` as it is (header of the file has the command). If it fails, stop and show the error. Do not rewrite or extend tests or scripts.

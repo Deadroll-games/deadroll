@@ -7,6 +7,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameS
 import { homedir } from "node:os";
 import { delimiter, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { maskText, maskUrl } from "./mask-url.ts";
 import {
   AccountRole,
   address,
@@ -159,7 +160,7 @@ export function resolveBins() {
 }
 
 function run(cmd: string, args: string[], opts: { env?: Record<string, string>; cwd?: string } = {}): void {
-  console.log(`$ ${[cmd, ...args].join(" ")}`);
+  console.log(`$ ${maskText([cmd, ...args].join(" "))}`);
   const res = spawnSync(cmd, args, {
     cwd: opts.cwd ?? ROOT,
     stdio: "inherit",
@@ -323,8 +324,8 @@ function checkArtifacts(opts: DeployOptions): void {
 async function preflight(conn: Rpc, opts: DeployOptions, wallet: KeyPairSigner, bins: ReturnType<typeof resolveBins>) {
   step("preflight");
   const version = await conn.rpc.getVersion().send().catch(() => null);
-  if (!version) throw new Error(`no RPC at ${opts.url}`);
-  console.log(`rpc ${opts.url} (solana-core ${version["solana-core"]})`);
+  if (!version) throw new Error(`no RPC at ${maskUrl(opts.url)}`);
+  console.log(`rpc ${maskUrl(opts.url)} (solana-core ${version["solana-core"]})`);
   const programIds: Record<string, string> = {};
   for (const p of PROGRAMS) {
     if (opts.preloaded) {

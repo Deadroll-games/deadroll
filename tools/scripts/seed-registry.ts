@@ -21,6 +21,7 @@ import {
   seedPlan,
   type EncodedTable,
 } from "./lib/registry-records.ts";
+import { maskText } from "./lib/mask-url.ts";
 
 const USAGE = `usage: seed-registry.ts [--url <rpc>] [--wallet <keypair.json>] [--dry-run]
 
@@ -174,6 +175,6 @@ async function main() {
 }
 
 main().catch((err: unknown) => {
-  console.error(err instanceof Error && err.message ? err.message : "seed failed");
+  console.error(maskText(err instanceof Error && err.message ? err.message : "seed failed"));
   process.exit(1);
 });

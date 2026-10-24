@@ -2,6 +2,7 @@
 // create the demo map. Idempotent: rerun it after any change.
 // node --experimental-strip-types --no-warnings deploy-local.ts [flags]
 import { build, defaultWallet, deploy, intFlag, parseFlags, RASTERIZER_VERSION, resolveBins } from "./lib/deploy.ts";
+import { maskText } from "./lib/mask-url.ts";
 
 const USAGE = `usage: deploy-local.ts [--url <rpc>] [--wallet <keypair.json>] [--skip-build] [--map-index <u32>]
                        [--uri-base <text>] [--rasterizer-version <u16>] [--book-id <u16>]
@@ -53,6 +54,6 @@ deploy({
   mapIndex: intFlag(f["--map-index"], 0, 0xffffffff, "--map-index"),
   preloaded: f["--preloaded"] === true,
 }).catch((err: unknown) => {
-  console.error(`\ndeploy-local failed: ${err instanceof Error ? err.message : String(err)}`);
+  console.error(`\ndeploy-local failed: ${maskText(err instanceof Error ? err.message : String(err))}`);
   process.exit(1);
 });
