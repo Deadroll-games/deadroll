@@ -1,0 +1,23 @@
+[package]
+name = "deadroll-mapcheck-wasm"
+description = "C ABI over deadroll-mapcheck for the website map builder: the verdict of finalize_map on a draft, from the same registry tables."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+deadroll-mapcheck.workspace = true
+# The registry decoders finalize_map uses (tile rules, spawn rules, reward tables, tier loot).
+deadroll-rules.workspace = true
+deadroll-types.workspace = true
+borsh.workspace = true
+
+[dev-dependencies]
+serde_json = "1"
+# Fixtures use the shipped registry (assets/registry), the tables the seed script uploads.
+deadroll-rules = { workspace = true, features = ["serde"] }

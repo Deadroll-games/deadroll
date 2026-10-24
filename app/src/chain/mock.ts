@@ -172,7 +172,7 @@ export function mockRecord(bestiaryId: number): Uint8Array {
 
 /** A mock registry table body (the shared fixture of tools/scripts): the map builder's bestiary
  * pools, monster skills and reward tables without a chain. */
-export function mockTable(table: "bestiary" | "monster_skills" | "rewards"): Uint8Array {
+export function mockTable(table: "bestiary" | "monster_skills" | "rewards" | "tileset"): Uint8Array {
   return Uint8Array.from((registryTables[table].match(/../g) ?? []).map((h) => parseInt(h, 16)));
 }
 

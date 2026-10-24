@@ -18,8 +18,11 @@ The builder rules of docs/MAP_DESCRIPTION.md, section 10, and BFS pathfinding. `
 ```
 cargo test -p deadroll-mapcheck
 cargo clippy -p deadroll-mapcheck --all-targets -- -D warnings
+bash crates/mapcheck/wasm/build.sh                     # the builder WASM (wasm/README.md), commit it
+UPDATE_TS_FIXTURES=1 cargo test -p deadroll-mapcheck-wasm --test ts_fixtures
 ```
 
 ## Done means
 - all tests green, clippy clean
+- a rule change: mapcheck.wasm rebuilt and the fixture refreshed (CI compares both)
 - every rule has a passing case and a rejection test

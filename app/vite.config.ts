@@ -17,6 +17,7 @@ const DEV_ASSETS: Record<string, string> = {
   "palette.bin": "target/render-golden/palette.bin",
   "book.bin": "target/render-golden/book.bin",
   "combat.wasm": "target/wasm32-unknown-unknown/wasm/deadroll_combat_wasm.wasm",
+  "mapcheck.wasm": "target/wasm32-unknown-unknown/wasm/deadroll_mapcheck_wasm.wasm",
 };
 
 function devAssets(): Plugin {
