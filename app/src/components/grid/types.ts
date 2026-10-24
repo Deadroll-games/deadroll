@@ -18,6 +18,13 @@ export type GridUnit = {
   size?: 1 | 2;
 };
 
+/**
+ * Patch 11: a visible chest (docs/MAP_DESCRIPTION.md 7.1). A closed chest occupies its cell; an
+ * opened one is drawn as an outline. `label` is the hover tooltip (e.g. the table's levels).
+ * Placeholder look until the chest sprite exists.
+ */
+export type GridChest = { x: number; y: number; opened: boolean; label: string };
+
 /** An aura on the map: its bearer's cell, its reach, and a short label for the tooltip. */
 export type GridAura = { center: Cell; radius: number; hostile: boolean; label: string };
 
@@ -47,6 +54,8 @@ export type GridProps = {
   auras?: GridAura[];
   /** Patch 5: the cells of a line target under the pointer, tinted. */
   line?: Cell[];
+  /** Patch 11: visible chests, drawn under the units; the canvas title shows the hovered one's label. */
+  chests?: GridChest[];
   /**
    * CSS pixel size of one cell on screen. Default 48. With sprites it is rounded down to a whole
    * multiple of the 64 px tile (minimum 64), so the canvas is never resized by CSS and sprites scale

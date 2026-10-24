@@ -39,6 +39,8 @@ export type CharacterFormProps = {
 export type BuilderTool =
   | { kind: "tile"; tile: Tile }
   | { kind: "spawn"; bestiaryId: number }
+  /** Patch 11: place a visible chest (docs/MAP_DESCRIPTION.md 7.1); Erase removes it. */
+  | { kind: "chest" }
   | { kind: "erase" };
 
 export type BestiaryEntry = { id: number; name: string };
@@ -56,6 +58,8 @@ export type MapPaletteProps = {
   onRemoveSpawn: (index: number) => void;
   /** Optional editor under a spawn (level, elite, skills). */
   renderSpawn?: (spawn: Spawn, index: number) => ReactNode;
+  /** Patch 11: optional loot panel (chest tables, boss table, minimum players, budget). */
+  loot?: ReactNode;
   /** Validation errors from crates/mapcheck (shown as a list); empty = valid. */
   errors: string[];
   onValidate: () => void;

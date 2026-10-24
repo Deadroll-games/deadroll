@@ -41,6 +41,7 @@ import { concat, toHex } from "./bytes";
 import { decodeEvents } from "./events";
 import {
   SKILL_PRESETS,
+  buildMapIxs,
   actIx,
   consumeIx,
   decodeAccount,
@@ -62,7 +63,7 @@ import {
 import { toHitResolved } from "./hit";
 import { toEffectResolved } from "./support";
 import { Effect } from "./skillcheck";
-import { bagPda, gameConfigPda, monstersPda, participationPda, programIdentityPda, sessionAuthorityPda, sessionTokenPda, skillExtrasPda, skillSetPda } from "./pda";
+import { bagPda, bestiaryPda, gameConfigPda, monsterSkillsPda, rewardsPda, monstersPda, participationPda, programIdentityPda, sessionAuthorityPda, sessionTokenPda, skillExtrasPda, skillSetPda } from "./pda";
 import { affordable, pathArgs, reachable, route } from "./route";
 import { explainFailure } from "./send";
 import { Applied, Aspect, Class, HitOutcome, JumpMode, MAP_MAX, ModKind, OpKind, StateKind, Tile } from "./types";
@@ -306,6 +307,34 @@ describe("session builders", () => {
       [parts[3], AccountRole.WRITABLE],
       [chars[3], AccountRole.READONLY],
     ]);
+  });
+});
+
+describe("map builders", () => {
+  it("patch 11: create_map takes min_players, write_chests sends the points and the boss table, finalize_map reads the rewards table", async () => {
+    const dm = await generateKeyPairSigner();
+    const tiles = new Uint8Array(1024);
+    tiles[0] = Tile.Entrance;
+    tiles[3] = Tile.Exit;
+    const chests = [
+      { x: 1, y: 2, table: 0 },
+      { x: 3, y: 1, table: 5 },
+    ];
+    const b = await buildMapIxs(dm, { width: 4, height: 3, tier: 1, minPlayers: 3, tiles, spawns: [], chests, bossTable: 1 });
+    expect(b.ixs.length).toBe(5);
+    const [create, , , writeChests, finalize] = b.ixs as [Instruction, Instruction, Instruction, Instruction, Instruction];
+    const index = new Uint8Array(4);
+    new DataView(index.buffer).setUint32(0, b.index, true);
+    expect(toHex(create.data as Uint8Array)).toBe(toHex(concat(ixDisc("create_map"), index, Uint8Array.of(4, 3, 1, 3))));
+    // Vec<MapPoint>: u32 LE count, then (kind = Chest 0, x, y, table) each; boss table u8.
+    const points = Uint8Array.of(2, 0, 0, 0, 0, 1, 2, 0, 0, 3, 1, 5);
+    expect(toHex(writeChests.data as Uint8Array)).toBe(toHex(concat(ixDisc("write_chests"), points, Uint8Array.of(1))));
+    expect(writeChests.accounts!.map((a) => [a.address, a.role])).toEqual([
+      [dm.address, AccountRole.READONLY_SIGNER],
+      [b.map, AccountRole.READONLY],
+      [b.layout, AccountRole.WRITABLE],
+    ]);
+    expect(finalize.accounts!.map((a) => a.address).slice(3)).toEqual([await bestiaryPda(), await monsterSkillsPda(), await rewardsPda()]);
   });
 });
 

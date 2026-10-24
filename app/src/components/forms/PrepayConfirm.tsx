@@ -8,6 +8,11 @@ export type PrepayConfirmProps = {
   lamports: bigint;
   /** A new key: its token's rent deposit is paid too (false for a top-up of the same key). */
   newKey?: boolean;
+  /**
+   * Patch 11: what the SOL pays for, when it is not a session key prepayment (e.g. "as rent for
+   * the map's two accounts"); replaces the prepayment text.
+   */
+  detail?: string;
   onConfirm: () => void;
   onCancel: () => void;
   busy?: boolean;
@@ -21,11 +26,17 @@ export function PrepayConfirm(p: PrepayConfirmProps) {
   const newKey = p.newKey ?? true;
   return (
     <div className="forms-confirm" role="alertdialog" aria-label={`Confirm ${p.action}`}>
-      <p>
-        {p.action} takes <span className="mono">{formatSolExact(p.lamports)} SOL</span> from your wallet for the fee
-        prepayment of this party's session key{newKey ? ", plus a small deposit for its token" : ""}. What the key does
-        not spend comes back when you leave the party.
-      </p>
+      {p.detail ? (
+        <p>
+          {p.action} takes <span className="mono">{formatSolExact(p.lamports)} SOL</span> from your wallet {p.detail}.
+        </p>
+      ) : (
+        <p>
+          {p.action} takes <span className="mono">{formatSolExact(p.lamports)} SOL</span> from your wallet for the fee
+          prepayment of this party's session key{newKey ? ", plus a small deposit for its token" : ""}. What the key does
+          not spend comes back when you leave the party.
+        </p>
+      )}
       <div className="forms-row">
         <button type="button" className="btn primary" disabled={p.busy} onClick={p.onConfirm}>
           Confirm {p.action}

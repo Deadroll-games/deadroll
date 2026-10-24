@@ -52,8 +52,53 @@ pub fn chest_cells(layout: &MapLayoutData) -> ([Cell; CHESTS_MAX], usize) {
     (cells, list.len())
 }
 
-/// Chest placement, tables and budget. `level_cap` is the tier's top level: a table above it is
-/// not allowed (docs/PARTY_AND_TURNS.md 9.2).
+/// The tables part of the chest rules: the counts, every chest table and the boss table allowed
+/// on the tier, the budget. Returns the budget points spent. `level_cap` is the tier's top level:
+/// a table above it is not allowed (docs/PARTY_AND_TURNS.md 9.2). The website builder mirrors
+/// this function (`app/src/chain/loot.ts`).
+pub fn check_tables<R: Fn(u8) -> Option<TableRules>>(
+    level_cap: u8,
+    chest_tables: &[u8],
+    boss_table: u8,
+    loot: &MapLoot<R>,
+) -> Result<u32, MapCheckError> {
+    use MapCheckError as E;
+
+    if loot.min_players == 0 || loot.min_players as usize > PARTY_MAX {
+        return Err(E::MinPlayersOutOfRange);
+    }
+    let count = chest_tables.len();
+    if count > CHESTS_MAX || count > loot.rules.chests as usize {
+        return Err(E::TooManyChests);
+    }
+    let allowed = |id: u8| -> Result<TableRules, MapCheckError> {
+        let t = (loot.table_of)(id).ok_or(E::UnknownTable)?;
+        let in_mask = id < 64 && loot.rules.allowed & (1 << id) != 0;
+        if !in_mask || t.level_max > level_cap {
+            return Err(E::TableNotAllowed);
+        }
+        Ok(t)
+    };
+    let mut spent = 0u32;
+    for &id in chest_tables {
+        spent += allowed(id)?.cost as u32;
+    }
+    if boss_table == NO_TABLE {
+        return Err(E::BossTableMissing);
+    }
+    let boss = allowed(boss_table)?;
+    // The boss guarantee is "one level higher" (docs/PARTY_AND_TURNS.md 9.4).
+    if boss.level_max <= boss.level_base {
+        return Err(E::BossTableOneLevel);
+    }
+    spent += boss.cost as u32;
+    if spent > loot.rules.budget[loot.min_players as usize - 1] as u32 {
+        return Err(E::OverBudget);
+    }
+    Ok(spent)
+}
+
+/// Chest placement, then [`check_tables`].
 pub(crate) fn check_chests<R: Fn(u8) -> Option<TableRules>>(
     width: u8,
     height: u8,
@@ -70,18 +115,10 @@ pub(crate) fn check_chests<R: Fn(u8) -> Option<TableRules>>(
     if count > CHESTS_MAX || count > loot.rules.chests as usize {
         return Err(E::TooManyChests);
     }
-    let allowed = |id: u8| -> Result<TableRules, MapCheckError> {
-        let t = (loot.table_of)(id).ok_or(E::UnknownTable)?;
-        let in_mask = id < 64 && loot.rules.allowed & (1 << id) != 0;
-        if !in_mask || t.level_max > level_cap {
-            return Err(E::TableNotAllowed);
-        }
-        Ok(t)
-    };
 
     let spawns = &layout.spawns[..(layout.spawn_count as usize).min(layout.spawns.len())];
     let chests = &layout.chests[..count];
-    let mut spent = 0u32;
+    let mut tables = [NO_TABLE; CHESTS_MAX];
     for (i, chest) in chests.iter().enumerate() {
         if chest.kind != PointKind::Chest {
             return Err(E::InvalidPoint);
@@ -102,22 +139,9 @@ pub(crate) fn check_chests<R: Fn(u8) -> Option<TableRules>>(
         if taken {
             return Err(E::ChestOverlap);
         }
-        spent += allowed(chest.data)?.cost as u32;
+        tables[i] = chest.data;
     }
-
-    if layout.boss_table == NO_TABLE {
-        return Err(E::BossTableMissing);
-    }
-    let boss = allowed(layout.boss_table)?;
-    // The boss guarantee is "one level higher" (docs/PARTY_AND_TURNS.md 9.4).
-    if boss.level_max <= boss.level_base {
-        return Err(E::BossTableOneLevel);
-    }
-    spent += boss.cost as u32;
-    if spent > loot.rules.budget[loot.min_players as usize - 1] as u32 {
-        return Err(E::OverBudget);
-    }
-    Ok(())
+    check_tables(level_cap, &tables[..count], layout.boss_table, loot).map(|_| ())
 }
 
 /// Every chest has a neighbor (Chebyshev 1) the party can reach: it is opened from there.

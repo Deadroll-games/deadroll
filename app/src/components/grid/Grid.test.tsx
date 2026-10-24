@@ -46,6 +46,17 @@ describe("Grid", () => {
     expect(canvas.style.width).toBe(`${4 * 48}px`);
   });
 
+  it("patch 11: shows the hovered chest's label as the canvas title", () => {
+    const chests = [{ x: 1, y: 0, opened: false, label: "Chest: levels 1-2" }];
+    render(<Grid width={4} height={3} tiles={tiles} units={[]} cellPx={48} chests={chests} />);
+    const canvas = screen.getByRole("img");
+    canvas.getBoundingClientRect = () => new DOMRect(0, 0, 4 * 48, 3 * 48);
+    fireEvent.mouseMove(canvas, { clientX: 48 + 5, clientY: 5 });
+    expect(canvas.getAttribute("title")).toBe("Chest: levels 1-2");
+    fireEvent.mouseMove(canvas, { clientX: 5, clientY: 5 });
+    expect(canvas.getAttribute("title")).toBeNull();
+  });
+
   it("clicks an empty cell, a live unit, and a dead unit cell as a move", () => {
     const onCellClick = vi.fn();
     const onUnitClick = vi.fn();

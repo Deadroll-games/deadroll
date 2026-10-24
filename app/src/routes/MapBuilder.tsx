@@ -2,13 +2,29 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import type { Address } from "@solana/kit";
 import { Grid } from "../components/grid/Grid";
-import type { GridUnit } from "../components/grid/types";
+import type { GridChest, GridUnit } from "../components/grid/types";
 import { MapPalette } from "../components/forms/MapPalette";
+import { PrepayConfirm } from "../components/forms/PrepayConfirm";
 import type { BuilderTool } from "../components/forms/types";
 import { MAP_PRESETS, presetToLayout } from "../chain/mock";
 import { BESTIARY_NAMES, bestiaryName } from "../chain/names";
 import { SPAWNS_MAX, Tile, cellIndex, type Cell, type Spawn } from "../chain/types";
-import { buildMapIxs, mapStatus, mapsOf, type MapAcc } from "../chain/game";
+import { buildMapIxs, mapRent, mapStatus, mapsOf, type MapAcc } from "../chain/game";
+import {
+  CHESTS_MAX,
+  MIN_PLAYERS_MAX,
+  NO_TABLE,
+  TABLE_ERROR_MESSAGES,
+  budgetOf,
+  checkTables,
+  levelsLabel,
+  rewardTables,
+  spentOf,
+  tableAllowed,
+  tierLoot,
+  type Chest,
+  type RewardTable,
+} from "../chain/loot";
 import { useTx } from "../chain/useTx";
 import { DATA_SOURCE, explorerUrl } from "../config";
 import { useAppWallet } from "../wallet/AppWallet";
@@ -35,7 +51,14 @@ const WALKABLE = new Set<number>([Tile.Floor, Tile.Door, Tile.Entrance, Tile.Exi
  * The authority is crates/mapcheck inside map.finalize_map.
  * TODO(L9.6): run crates/mapcheck through WASM for the exact same verdict.
  */
-export function quickCheck(tiles: Uint8Array, width: number, height: number, spawns: Spawn[], skillError: (s: Spawn) => string | null = () => null): string[] {
+export function quickCheck(
+  tiles: Uint8Array,
+  width: number,
+  height: number,
+  spawns: Spawn[],
+  skillError: (s: Spawn) => string | null = () => null,
+  loot?: { tier: number; minPlayers: number; chests: Chest[]; bossTable: number; tables: RewardTable[] },
+): string[] {
   const errors: string[] = [];
   let entrances = 0;
   let exits = 0;
@@ -53,6 +76,16 @@ export function quickCheck(tiles: Uint8Array, width: number, height: number, spa
     const skills = skillError(s);
     if (skills) errors.push(`Spawn ${i} (${bestiaryName(s.bestiaryId)}): ${skills}`);
   });
+  if (loot) {
+    // Patch 11: a closed chest occupies a free walkable cell (the reachable neighbor is finalize_map's).
+    loot.chests.forEach((c, i) => {
+      const t = tiles[cellIndex(c.x, c.y)] ?? Tile.Wall;
+      if (!WALKABLE.has(t) || t === Tile.Entrance || t === Tile.Exit) errors.push(`Chest ${i} must stand on a free walkable tile`);
+      if (spawns.some((s) => s.x === c.x && s.y === c.y)) errors.push(`Chest ${i} stands on a spawn`);
+    });
+    const verdict = checkTables(loot.tier, loot.minPlayers, loot.chests.map((c) => c.table), loot.bossTable, loot.tables);
+    if ("err" in verdict) errors.push(TABLE_ERROR_MESSAGES[verdict.err]);
+  }
   return errors;
 }
 
@@ -71,6 +104,8 @@ export function MapBuilderPage() {
   // The bestiary pools and monster skills (registry), checked by the combat module.
   const combat = useCombat();
   const registry = useBuilderRegistry();
+  const tables = useMemo(() => (registry ? rewardTables(registry.rewards) : []), [registry]);
+  const [rent, setRent] = useState<bigint | null>(null);
   const viewOf = useCallback((sp: Pick<Spawn, "bestiaryId" | "flags" | "skills">) => (combat && registry ? spawnView(combat, registry, sp) : null), [combat, registry]);
   const [myMaps, setMyMaps] = useState<{ address: Address; data: MapAcc }[]>([]);
   const refreshMaps = useCallback(async () => {
@@ -83,12 +118,14 @@ export function MapBuilderPage() {
   }, [wallet.address]);
   useEffect(() => void refreshMaps(), [refreshMaps]);
 
-  // create_map, write_layout, write_spawns, finalize_map: the chain runs crates/mapcheck in finalize_map.
+  // create_map, write_layout, write_spawns, write_chests, finalize_map: the chain runs
+  // crates/mapcheck in finalize_map.
   const finalizeOnChain = async () => {
+    setRent(null);
     const dm = wallet.signer;
     if (!dm) return void (await send("finalize_map", null, []));
     const b = await buildMapIxs(dm, { width: size.width, height: size.height, tier, ...layout });
-    const names = ["create_map", "write_layout", "write_spawns", "finalize_map"];
+    const names = ["create_map", "write_layout", "write_spawns", "write_chests", "finalize_map"];
     for (const [i, ix] of b.ixs.entries()) {
       if (!(await send(names[i]!, dm, [ix], { quiet: i < b.ixs.length - 1 }))) return;
     }
@@ -98,7 +135,16 @@ export function MapBuilderPage() {
     void wallet.refreshBalance();
   };
 
-  const edit = (next: { tiles: Uint8Array; spawns: Spawn[] }) => {
+  // create_map pays rent for two accounts: show the amount before anything is signed.
+  const askRent = async () => {
+    try {
+      setRent(await mapRent());
+    } catch {
+      setErrors(["Could not read the rent for the map accounts"]);
+    }
+  };
+
+  const edit = (next: typeof layout) => {
     setLayout(next);
     setValidated(false);
     setFinalized(false);
@@ -109,16 +155,29 @@ export function MapBuilderPage() {
       const tiles = layout.tiles.slice();
       tiles[cellIndex(x, y)] = tool.tile;
       edit({ ...layout, tiles });
+    } else if (tool.kind === "chest") {
+      const limit = Math.min(CHESTS_MAX, tierLoot(tier)?.chests ?? 0);
+      const taken = layout.chests.some((c) => c.x === x && c.y === y) || layout.spawns.some((s) => s.x === x && s.y === y);
+      if (taken || layout.chests.length >= limit) return;
+      // The first table the tier allows; the DM picks another in the loot panel.
+      const table = tables.find((t) => t.cost > 0 && tableAllowed(t, tier))?.id ?? NO_TABLE;
+      edit({ ...layout, chests: [...layout.chests, { x, y, table }] });
     } else if (tool.kind === "spawn") {
+      if (layout.chests.some((c) => c.x === x && c.y === y)) return;
       if (layout.spawns.some((s) => s.x === x && s.y === y) || layout.spawns.length >= SPAWNS_MAX) return;
       const pack = Math.max(0, ...layout.spawns.map((s) => s.pack)) + 1;
       // The default choice fills the slots (the first skills of each kind of the pool).
       const skills = viewOf({ bestiaryId: tool.bestiaryId, flags: 0, skills: 0 })?.check?.defaultMask ?? 0;
       edit({ ...layout, spawns: [...layout.spawns, { bestiaryId: tool.bestiaryId, x, y, level: 1, skills, flags: 0, aspects: 0, pack }] });
     } else {
-      edit({ ...layout, spawns: layout.spawns.filter((s) => s.x !== x || s.y !== y) });
+      edit({ ...layout, spawns: layout.spawns.filter((s) => s.x !== x || s.y !== y), chests: layout.chests.filter((c) => c.x !== x || c.y !== y) });
     }
   };
+
+  const chests: GridChest[] = useMemo(
+    () => layout.chests.map((c) => ({ x: c.x, y: c.y, opened: false, label: `Chest: ${levelsLabel(tables.find((t) => t.id === c.table))}` })),
+    [layout.chests, tables],
+  );
 
   const units: GridUnit[] = useMemo(
     () =>
@@ -135,6 +194,7 @@ export function MapBuilderPage() {
           height={size.height}
           tiles={layout.tiles}
           units={units}
+          chests={chests}
           cellPx={32}
           onCellClick={onCell}
           onUnitClick={(u) => onCell({ x: u.x, y: u.y })}
@@ -152,6 +212,7 @@ export function MapBuilderPage() {
               setTier(p.tier ?? 1);
               edit(presetToLayout(p));
             }}
+            loot={<LootEditor tier={tier} tables={tables} locked={busy !== null} value={layout} onChange={(next) => edit({ ...layout, ...next })} />}
             spawns={layout.spawns}
             onRemoveSpawn={(i) => edit({ ...layout, spawns: layout.spawns.filter((_, j) => j !== i) })}
             renderSpawn={(spawn, i) => (
@@ -165,14 +226,25 @@ export function MapBuilderPage() {
             )}
             errors={errors}
             onValidate={() => {
-              const e = quickCheck(layout.tiles, size.width, size.height, layout.spawns, (sp) => spawnSkillError(viewOf(sp)));
+              const loot = { tier, minPlayers: layout.minPlayers, chests: layout.chests, bossTable: layout.bossTable, tables };
+              const e = quickCheck(layout.tiles, size.width, size.height, layout.spawns, (sp) => spawnSkillError(viewOf(sp)), loot);
               setErrors(e);
               setValidated(e.length === 0);
             }}
-            canFinalize={validated && !finalized && busy === null}
-            onFinalize={() => (DATA_SOURCE === "chain" ? void finalizeOnChain() : setFinalized(true))}
+            canFinalize={validated && !finalized && busy === null && rent === null}
+            onFinalize={() => (DATA_SOURCE === "chain" ? void askRent() : setFinalized(true))}
             busy={busy !== null}
           />
+          {rent !== null && (
+            <PrepayConfirm
+              action="Finalize"
+              lamports={rent}
+              detail="as rent for the map's two accounts"
+              busy={busy !== null}
+              onConfirm={() => void finalizeOnChain()}
+              onCancel={() => setRent(null)}
+            />
+          )}
           {busy && <p className="muted">Sending {busy}...</p>}
           {finalized && DATA_SOURCE === "mock" && <p className="ok">Mock: map finalized.</p>}
           {built && (
@@ -263,5 +335,79 @@ function SpawnEditor(p: {
       )}
       {error && <p className="error">{error}</p>}
     </div>
+  );
+}
+
+/** Patch 11: the map's minimum players, the boss table and each chest's table, with the budget
+ * (docs/MAP_DESCRIPTION.md 7.1, docs/PARTY_AND_TURNS.md 9.2). Only tables the tier allows. */
+function LootEditor(p: {
+  tier: number;
+  tables: RewardTable[];
+  locked: boolean;
+  value: { minPlayers: number; chests: Chest[]; bossTable: number };
+  onChange: (next: { minPlayers: number; chests: Chest[]; bossTable: number }) => void;
+}) {
+  const { minPlayers, chests, bossTable } = p.value;
+  const allowed = p.tables.filter((t) => tableAllowed(t, p.tier));
+  // Body tables (cost 0) are dropped by monsters, not put on maps.
+  const chestTables = allowed.filter((t) => t.cost > 0);
+  const bossTables = chestTables.filter((t) => t.levelMax > t.levelBase);
+  const spent = spentOf(
+    chests.map((c) => c.table),
+    bossTable,
+    p.tables,
+  );
+  const budget = budgetOf(p.tier, minPlayers);
+  const limit = Math.min(CHESTS_MAX, tierLoot(p.tier)?.chests ?? 0);
+  const option = (t: RewardTable) => (
+    <option key={t.id} value={t.id}>
+      #{t.id} {levelsLabel(t)}, cost {t.cost}
+    </option>
+  );
+  return (
+    <fieldset className="forms-field" disabled={p.locked}>
+      <legend>Loot</legend>
+      <div className="forms-row">
+        <label>
+          Minimum players{" "}
+          <input
+            type="number"
+            min={1}
+            max={MIN_PLAYERS_MAX}
+            value={minPlayers}
+            onChange={(e) => p.onChange({ ...p.value, minPlayers: Math.max(1, Math.min(MIN_PLAYERS_MAX, Number(e.target.value) || 1)) })}
+          />
+        </label>{" "}
+        <label>
+          Boss table{" "}
+          <select value={bossTable} onChange={(e) => p.onChange({ ...p.value, bossTable: Number(e.target.value) })}>
+            <option value={NO_TABLE}>none</option>
+            {bossTables.map(option)}
+          </select>
+        </label>
+      </div>
+      <p className={spent > budget ? "error" : "muted"}>
+        Budget: {spent} / {budget} · chests {chests.length}/{limit}
+      </p>
+      <ul className="forms-spawns">
+        {chests.map((c, i) => (
+          <li key={`${c.x}-${c.y}`}>
+            <span>
+              Chest at ({c.x}, {c.y})
+            </span>{" "}
+            <select
+              aria-label={`chest ${i} table`}
+              value={c.table}
+              onChange={(e) => p.onChange({ ...p.value, chests: chests.map((x, j) => (j === i ? { ...x, table: Number(e.target.value) } : x)) })}
+            >
+              {chestTables.map(option)}
+            </select>{" "}
+            <button type="button" className="btn" aria-label={`remove chest ${i}`} onClick={() => p.onChange({ ...p.value, chests: chests.filter((_, j) => j !== i) })}>
+              Remove
+            </button>
+          </li>
+        ))}
+      </ul>
+    </fieldset>
   );
 }

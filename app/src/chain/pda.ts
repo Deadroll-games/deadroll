@@ -46,6 +46,8 @@ export const traitsPda = () => at(findTablePda({ seed: "traits" }));
 export const resonancesPda = () => at(findTablePda({ seed: "resonances" }));
 /** Patch 6: the skills of the bestiary pools. */
 export const monsterSkillsPda = () => at(findTablePda({ seed: "monster_skills" }));
+/** Patch 11: reward tables (chests, boss, bodies), read by finalize_map and the builder. */
+export const rewardsPda = () => at(findTablePda({ seed: "rewards" }));
 
 export const mapPda = (dm: Address, index: number) => at(findMapPda({ dm, index }));
 export const layoutPda = (map: Address) => at(findLayoutPda({ map }));

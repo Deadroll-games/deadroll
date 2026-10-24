@@ -41,9 +41,13 @@ import {
   getFinalizeMapInstruction,
   getMapDecoder,
   getMapLayoutDecoder,
+  getMapLayoutSize,
+  getMapSize,
+  getWriteChestsInstruction,
   getWriteLayoutInstruction,
   getWriteSpawnsInstruction,
   MapStatus,
+  PointKind,
   type Map as MapAccount,
 } from "@deadroll/sdk/map";
 import {
@@ -110,7 +114,9 @@ import {
   traitsPda,
   resonancesPda,
   monsterSkillsPda,
+  rewardsPda,
 } from "./pda";
+import type { Chest } from "./loot";
 import { pathArgs, type Step } from "./route";
 import { PRESETS, SKILL_DESCRIPTION_LEN, SKILL_NAME_LEN, type NamedSkill } from "./skillcheck";
 import { Aspect, Class, MAP_CELLS, MAP_MAX, Race, Tile, type Cell, type Spawn } from "./types";
@@ -385,7 +391,17 @@ export function freezeTombstoneIx(character: Address, asset: Address, payer: Tra
 // ---------------------------------------------------------------------------------------------
 // maps
 
-export type MapDraft = { width: number; height: number; tier: number; tiles: Uint8Array; spawns: Spawn[] };
+/** Patch 11: `minPlayers` sets the reward budget, `chests` and `bossTable` are reward table ids. */
+export type MapDraft = {
+  width: number;
+  height: number;
+  tier: number;
+  minPlayers: number;
+  tiles: Uint8Array;
+  spawns: Spawn[];
+  chests: Chest[];
+  bossTable: number;
+};
 
 /** Tiles exactly as the chain stores them: stride 32, cells outside the map Floor (0). */
 export function chainTiles(d: MapDraft): Uint8Array {
@@ -399,7 +415,7 @@ export function findTile(d: MapDraft, tile: Tile): Cell | null {
   return null;
 }
 
-/** create_map, write_layout, write_spawns, finalize_map (one transaction each, as the test). */
+/** create_map, write_layout, write_spawns, write_chests, finalize_map (one transaction each, as the test). */
 export async function buildMapIxs(dm: TransactionSigner, d: MapDraft): Promise<{ map: Address; layout: Address; index: number; ixs: Instruction[] }> {
   const index = crypto.getRandomValues(new Uint32Array(1))[0]!;
   const map = await mapPda(dm.address, index);
@@ -410,13 +426,27 @@ export async function buildMapIxs(dm: TransactionSigner, d: MapDraft): Promise<{
   const exit = findTile(d, Tile.Exit);
   if (!entrance || !exit) throw new Error("the map needs an entrance and an exit");
   const ixs = [
-    getCreateMapInstruction({ ...edit, systemProgram: SYSTEM_PROGRAM, index, width: d.width, height: d.height, tier: d.tier }),
+    getCreateMapInstruction({ ...edit, systemProgram: SYSTEM_PROGRAM, index, width: d.width, height: d.height, tier: d.tier, minPlayers: d.minPlayers }),
     getWriteLayoutInstruction({ ...edit, offset: 0, tiles: tiles.slice(0, (d.height - 1) * MAP_MAX + d.width) }),
     getWriteSpawnsInstruction({ ...edit, entrance, exit, spawns: d.spawns }),
-    // The builder rules read the registry bestiary and monster skills (roles, pools, slots).
-    getFinalizeMapInstruction({ ...edit, bestiary: await bestiaryPda(), monsterSkills: await monsterSkillsPda(), secretsRoot: new Uint8Array(32) }),
+    getWriteChestsInstruction({ ...edit, chests: d.chests.map((c) => ({ kind: PointKind.Chest, x: c.x, y: c.y, data: c.table })), bossTable: d.bossTable }),
+    // The builder rules read the registry bestiary, monster skills (roles, pools, slots) and reward tables.
+    getFinalizeMapInstruction({
+      ...edit,
+      bestiary: await bestiaryPda(),
+      monsterSkills: await monsterSkillsPda(),
+      rewards: await rewardsPda(),
+      secretsRoot: new Uint8Array(32),
+    }),
   ];
   return { map, layout, index, ixs };
+}
+
+/** Rent of the two accounts `create_map` makes (Map and MapLayout), in lamports. */
+export async function mapRent(): Promise<bigint> {
+  const rent = (size: number) => client.rpc.getMinimumBalanceForRentExemption(BigInt(size)).send();
+  const [map, layout] = await Promise.all([rent(getMapSize()), rent(getMapLayoutSize())]);
+  return BigInt(map) + BigInt(layout);
 }
 
 /** Maps of `dm` (memcmp on MapData.dm right after version). */
@@ -773,6 +803,8 @@ async function registryTable(pdaOf: () => Promise<Address>): Promise<Uint8Array 
  * bodies, read straight from the chain: the map builder's pools and the skill names' indices. */
 export const registryBestiary = () => registryTable(bestiaryPda);
 export const registryMonsterSkills = () => registryTable(monsterSkillsPda);
+/** Patch 11: the registry `rewards` body (108-byte reward table records by id). */
+export const registryRewards = () => registryTable(rewardsPda);
 
 /**
  * consume_randomness for the pending action: the callback gets the pending participation's player,
