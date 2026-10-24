@@ -3,6 +3,7 @@
 // node --experimental-strip-types --no-warnings deploy-devnet.ts [flags]
 import { createInterface } from "node:readline/promises";
 import {
+import { maskText } from "./lib/mask-url.ts";
   build,
   defaultWallet,
   deploy,
@@ -91,6 +92,6 @@ async function main() {
 }
 
 main().catch((err: unknown) => {
-  console.error(`\ndeploy-devnet failed: ${err instanceof Error ? err.message : String(err)}`);
+  console.error(`\ndeploy-devnet failed: ${maskText(err instanceof Error ? err.message : String(err))}`);
   process.exit(1);
 });
