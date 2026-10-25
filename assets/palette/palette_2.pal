@@ -52,6 +52,7 @@ ramp blackiron #08090d #12141b #1d2029 #2b2f3a #424754 #6d7280
 ramp ash       #0b0909 #1a1616 #2a2322 #3d3330 #564843 #7a6a62
 ramp ogre      #0f0c08 #241e16 #3b3123 #574833 #7a6648 #a38c68
 ramp fur_pale  #14151a #2c2f36 #4a4f58 #6f7580 #9aa1aa #cfd5d8
+ramp wyrm      #080406 #140709 #1f0a0d #2e0f12 #431719 #6a2a24
 
 dark dark
 curse curse
@@ -95,3 +96,4 @@ material minotaur   fur_brown leather  dither
 material ogre       ogre      rag      dither
 material golem      stone     moss     dither
 material yeti       fur_pale  cloth    dither
+material dragon     wyrm      ash      dither
