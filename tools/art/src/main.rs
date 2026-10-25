@@ -18,6 +18,7 @@ const USAGE: &str = "usage:
   art sheet matrix [files.dsl ...] [--id N] [--scale 4] [--out FILE.png]   items x materials, enchants, runes, sockets
   art sheet scene [--scale 4] [--out FILE.png]        every tile, the probe chest, monsters and classes at one pixel scale
   art sheet join <a.png> <b.png> ... [--out FILE.png]  PNGs side by side (old and new sprites)
+  art compose <layout.txt> [--scale 1] [--out FILE.png]   a picture of many sprites (tools/art/src/compose.rs), site art
   art pack [--out DIR] [--first-book N]         palette.bin + book_<id>.bin (books N.., default 2, 64 KiB each) for upload
   art upscale [files.dsl ...]                  rewrite format 1 sources (16..64 px) for format 2, in place
 options: --palette FILE.pal (default assets/palette/palette_2.pal)";
@@ -379,6 +380,25 @@ fn cmd_sheet(o: &Opts) -> Result<bool, String> {
     Ok(true)
 }
 
+/// Renders a compose layout to one PNG (site art, never packed).
+fn cmd_compose(o: &Opts) -> Result<bool, String> {
+    let file = o.pos.get(1).ok_or("compose needs a layout file")?;
+    let (sprites, _) = load_all(&[])?;
+    let pal = load_pal(o)?;
+    let book = preview::pack_book(&sprites)?;
+    let img = art::compose::compose(&pal, &book, &sprites, &read(Path::new(file))?)?;
+    let k = if o.scale == 0 { 1 } else { o.scale };
+    let img = preview::upscaled(img, k)?;
+    let path = o.out.clone().unwrap_or_else(|| {
+        let name = Path::new(file).with_extension("png");
+        PathBuf::from("target/art").join(name.file_name().unwrap_or_default())
+    });
+    let (w, h) = (img.w, img.h);
+    write(&path, &finish(img, o.bg))?;
+    println!("{} ({w}x{h})", path.display());
+    Ok(true)
+}
+
 /// Writes the upload inputs: the compiled palette and the sprite books (ids `--first-book`..) with every repo
 /// sprite, each at most `BOOK_MAX` bytes: `palette.bin`, `book_<id>.bin`.
 fn cmd_pack(o: &Opts) -> Result<bool, String> {
@@ -475,6 +495,7 @@ fn run() -> Result<bool, String> {
         }),
         Some("sheet") => cmd_sheet(&o),
         Some("pack") => cmd_pack(&o),
+        Some("compose") => cmd_compose(&o),
         Some("upscale") => cmd_upscale(&Opts {
             pos: o.pos[1..].to_vec(),
             ..o

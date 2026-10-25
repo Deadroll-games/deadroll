@@ -1,6 +1,8 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { EquipSource } from "@deadroll/sdk/character";
-import { LAYER, MATERIAL, TOMBSTONE, characterAppearance, isCurrentAppearance } from "./appearance";
+import { LAYER, MATERIAL, RAMP, TOMBSTONE, characterAppearance, isCurrentAppearance } from "./appearance";
 import { EMPTY_ITEM, EQUIP_SLOTS, ITEM_BASES, ITEM_SPRITE_BASE, characterRequest, dressed, starterEquipment } from "./items";
 import type { CharacterAcc } from "./game";
 import { Aspect, Class, Race } from "./types";
@@ -99,5 +101,21 @@ describe("isCurrentAppearance", () => {
     expect(isCurrentAppearance(old)).toBe(false);
     expect(isCurrentAppearance(old.map((l, i) => (i === 2 ? { ...l, spriteId: 20 } : l)))).toBe(false);
     expect(isCurrentAppearance([])).toBe(false);
+  });
+});
+
+describe("palette indices", () => {
+  const pal = readFileSync(resolve(import.meta.dirname, "../../../assets/palette/palette_2.pal"), "utf8");
+  const names = (kind: string) =>
+    pal
+      .split("\n")
+      .filter((l) => l.startsWith(kind + " "))
+      .map((l) => l.split(/\s+/)[1]!.replace(/_(\w)/g, (_, c: string) => c.toUpperCase()));
+
+  it("RAMP and MATERIAL follow the ramp and material lines of palette_2.pal", () => {
+    const ramps = names("ramp");
+    for (const [name, i] of Object.entries(RAMP)) expect(ramps[i], name).toBe(name);
+    const materials = names("material");
+    for (const [name, i] of Object.entries(MATERIAL)) expect(materials[i], name).toBe(name);
   });
 });

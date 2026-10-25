@@ -33,6 +33,19 @@ ramp bone      #15120e #3a332a #5f5546 #8a7e66 #b5a98c #dfd4b6
 ramp blood     #120305 #33070c #5c0f14 #8a1a1d #b5302b #d95b47
 ramp curse     #0a0612 #1e1030 #3a1f50 #5a3470 #7e5a8c #a988a9
 ramp dirt      #120d0a #2a1f19 #45342a #64503f #8a7258 #ae9777
+# appended in ART-3 (monsters)
+ramp fur_dark  #07080d #141822 #232a36 #36404c #525c66 #7d847f
+ramp gob_skin  #070b06 #14200f #243617 #384d1e #56692a #82894a
+ramp rag       #0c0908 #1d1713 #2f251d #443629 #5d4c39 #7b6750
+ramp fur_brown #0d0806 #21140d #372215 #50331e #6d4a2c #8f6a44
+ramp bark      #0a0807 #1b1511 #2c221a #3f3124 #574632 #776247
+ramp skin_pale #120d16 #2c2433 #4a4152 #6e6577 #9a91a0 #cbc3c6
+ramp troll     #090d0e #16201f #24332f #36483f #4f6352 #74846b
+ramp bruise    #0e050c #250b1d #3f1430 #5c1f42 #7d3352 #a35764
+ramp rust      #100806 #2a130b #46200f #683215 #8c4b20 #b26d35
+ramp glow_red  #1a0406 #4d0a0c #8a1410 #c8300f #f26a1c #ffc25a
+ramp glow_toxic #07100a #11290f #1f4a12 #3d7a14 #7bb81e #d4f25a
+ramp glow_soul #050d14 #0b2433 #12445a #1d7383 #3aaeae #a6f0e0
 
 dark dark
 curse curse
@@ -57,3 +70,12 @@ material cloth      cloth    leather  dither
 material moss       moss     dirt     dither
 material bone       bone     wood
 material chest      wood     steel    dither
+# appended in ART-3 (monsters)
+material wolf_dark  fur_dark  fur_dark  dither
+material goblin_dark gob_skin rag      dither
+material bear       fur_brown fur_brown dither
+material treant     bark      moss     dither
+material fairy      skin_pale curse    dither
+material troll      troll     rag      dither
+material demon      bruise    dark     dither
+material rusted     rust      leather  dither

@@ -1,5 +1,6 @@
 //! Sprite tool library: validator (`FORMAT.md` 6) and preview rendering over `deadroll-render`.
 
+pub mod compose;
 pub mod preview;
 pub mod upscale;
 pub mod validate;

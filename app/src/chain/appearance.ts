@@ -9,11 +9,14 @@ import type { GridPointKind } from "../components/grid/types";
 export const RAMP = {
   gray: 0, steel: 1, skin: 2, skinElf: 3, hair: 4, hairElf: 5, robe: 6, green: 7, leather: 8, gold: 9,
   cold: 10, fire: 11, dark: 12, eyes: 13, capeRed: 14, fur: 15, stone: 16, floor: 17, water: 18, wood: 19,
+  cloth: 20, moss: 21, bone: 22, blood: 23, curse: 24, dirt: 25, furDark: 26, gobSkin: 27, rag: 28, furBrown: 29,
+  bark: 30, skinPale: 31, troll: 32, bruise: 33, rust: 34, glowRed: 35, glowToxic: 36, glowSoul: 37,
 } as const;
 /** palette_2.pal `material` lines, in order (append only). */
 export const MATERIAL = {
   steel: 0, human: 1, elf: 2, robe: 3, leather: 4, cape: 5, wolf: 6, goblin: 7, stone: 8,
   tileWall: 9, tileFloor: 10, tileWater: 11, tileDoor: 12, cloth: 13, moss: 14, bone: 15, chest: 16,
+  wolfDark: 17, goblinDark: 18, bear: 19, treant: 20, fairy: 21, troll: 22, demon: 23, rusted: 24,
 } as const;
 
 export const SPRITE = { tombstone: 403 } as const;
@@ -76,17 +79,19 @@ export function renderRequest(appearance: LayerRef[], dead = false): RenderReque
 /** A tombstone in place of a dead character on the grid. */
 export const TOMBSTONE: RenderRequest = renderRequest(layers([[0, SPRITE.tombstone, MATERIAL.stone, RAMP.gray]], RAMP.cold));
 
-const MONSTER_SPRITES: Record<number, [number, number]> = {
-  0: [400, MATERIAL.wolf],
-  1: [401, MATERIAL.goblin],
-  2: [402, MATERIAL.goblin],
-  3: [401, MATERIAL.goblin],
-  4: [401, MATERIAL.goblin],
+/** Bestiary id -> sprite, material, accent (eyes, marks) and element (horns, claws, teeth) ramps.
+ * tools/art keeps the same colors per sprite name (`MONSTER_LOOKS` in tools/art/src/preview.rs). */
+const MONSTER_SPRITES: Record<number, [sprite: number, material: number, accent: number, element: number]> = {
+  0: [400, MATERIAL.wolfDark, RAMP.glowRed, RAMP.fur],
+  1: [401, MATERIAL.goblinDark, RAMP.glowRed, RAMP.steel],
+  2: [402, MATERIAL.goblinDark, RAMP.gold, RAMP.steel],
+  3: [404, MATERIAL.goblinDark, RAMP.glowRed, RAMP.steel],
+  4: [405, MATERIAL.goblinDark, RAMP.glowToxic, RAMP.bone],
 };
 
 export function monsterRequest(bestiaryId: number, dead: boolean): RenderRequest {
-  const [id, mat] = MONSTER_SPRITES[bestiaryId] ?? [401, MATERIAL.goblin];
-  return renderRequest(layers([[0, id, mat, RAMP.gold]], RAMP.cold), dead);
+  const [id, mat, accent, element] = MONSTER_SPRITES[bestiaryId] ?? MONSTER_SPRITES[1]!;
+  return renderRequest(layers([[0, id, mat, accent]], element), dead);
 }
 
 /**
