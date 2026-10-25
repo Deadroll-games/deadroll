@@ -48,6 +48,7 @@ ramp glow_toxic #07100a #11290f #1f4a12 #3d7a14 #7bb81e #d4f25a
 ramp glow_soul #050d14 #0b2433 #12445a #1d7383 #3aaeae #a6f0e0
 ramp rot       #0b0d08 #1d2216 #323a23 #4c5532 #6d7548 #969a6a
 ramp ooze      #050b06 #0c1a0e #152b15 #20401c #335a24 #6f8f3a
+ramp blackiron #08090d #12141b #1d2029 #2b2f3a #424754 #6d7280
 
 dark dark
 curse curse
@@ -85,3 +86,4 @@ material bone_robe  bone      cloth    dither
 material ghoul      rot       rag      dither
 material slime      ooze      bone
 material bat        fur_dark  bruise   dither
+material dark_knight blackiron cape_red dither
