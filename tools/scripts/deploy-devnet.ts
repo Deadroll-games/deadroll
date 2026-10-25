@@ -2,8 +2,8 @@
 // Refuses a mock-vrf session build. Prints the SOL it needs and asks before sending anything.
 // node --experimental-strip-types --no-warnings deploy-devnet.ts [flags]
 import { createInterface } from "node:readline/promises";
-import {
 import { maskText } from "./lib/mask-url.ts";
+import {
   build,
   defaultWallet,
   deploy,
