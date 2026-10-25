@@ -19,7 +19,7 @@ export const MATERIAL = {
   steel: 0, human: 1, elf: 2, robe: 3, leather: 4, cape: 5, wolf: 6, goblin: 7, stone: 8,
   tileWall: 9, tileFloor: 10, tileWater: 11, tileDoor: 12, cloth: 13, moss: 14, bone: 15, chest: 16,
   wolfDark: 17, goblinDark: 18, bear: 19, treant: 20, fairy: 21, troll: 22, demon: 23, rusted: 24,
-  caveWall: 50, caveFloor: 51, caveDoor: 52, murk: 53, planks: 54,
+  caveWall: 50, caveFloor: 51, caveDoor: 52, murk: 53, planks: 54, pelt: 64,
 } as const;
 
 export const SPRITE = { tombstone: 403 } as const;
@@ -97,7 +97,8 @@ export function monsterRequest(bestiaryId: number, dead: boolean): RenderRequest
   return renderRequest(layers([[0, id, mat, accent]], element), dead);
 }
 
-type Look = [sprite: number, material: number, accent: number, element: number];
+/** A single sprite and its colors: sprite id, material, accent ramp, element ramp. */
+export type Look = [sprite: number, material: number, accent: number, element: number];
 
 /**
  * The Caves and Ruins tile set, variant 0 of each tile type (assets/sprites/tiles/caves; tools/art
@@ -118,7 +119,7 @@ const TILE_SPRITES: Record<number, Look> = {
   [Tile.Chasm]: [536, MATERIAL.caveFloor, RAMP.bone, RAMP.cold],
 };
 
-const lookRequest = ([sprite, material, accent, element]: Look) => renderRequest(layers([[0, sprite, material, accent]], element));
+export const lookRequest = ([sprite, material, accent, element]: Look) => renderRequest(layers([[0, sprite, material, accent]], element));
 
 /** The render request of a tile type, null for one drawn as a flat color. */
 export function tileRequest(tile: Tile): RenderRequest | null {

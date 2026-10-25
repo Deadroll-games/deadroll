@@ -8,7 +8,7 @@ import { variantLabel, type CharacterAcc, type GearAcc, type SkillRecordAcc } fr
 import { Aspect, Race } from "../chain/types";
 import { CharacterDetailView, EQUIPMENT_SLOTS, inventoryLock, inventoryView, skillAspects, usableInCombat, type PartyInfo } from "./CharacterDetail";
 
-vi.mock("../raster/RasterizerProvider", () => ({ useRenderImage: () => ({ image: null, error: null }) }));
+vi.mock("../raster/RasterizerProvider", () => ({ useRenderImage: () => ({ image: null, error: null }), useRasterizer: () => ({ status: "loading" }) }));
 
 afterEach(cleanup);
 

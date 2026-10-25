@@ -130,3 +130,7 @@ material forest_door bark      wood     dither
 material crypt_wall crypt     crypt    dither
 material crypt_floor crypt    dirt     dither
 material crypt_door crypt     blackiron dither
+# appended in ART-3 (icons)
+material gold_metal gold      leather
+material food       leather   blood    dither
+material pelt      fur_dark  leather  dither

@@ -61,6 +61,8 @@ import { Aspect, Class, Race } from "../chain/types";
 import { DATA_SOURCE, explorerUrl } from "../config";
 import { OldCharacterLabel } from "../raster/OldCharacter";
 import { useRenderImage } from "../raster/RasterizerProvider";
+import { useSprites } from "../raster/useSprites";
+import { iconRequest } from "../chain/icons";
 import { PREVIEW_SCALE, SpriteCanvas, usePreviewFit } from "../raster/SpriteCanvas";
 
 /** Where this character is right now, read from the party it is in. */
@@ -141,6 +143,7 @@ export function CharacterDetailPage() {
   const [endedLock, setEndedLock] = useState<Address | null>(null);
   const cacheBase = claimed.find((x) => x.session === chosen)?.slots ?? null;
   const [work, setWork] = useState<BagState | null>(null);
+  const draw = useSprites();
   const [picked, setPicked] = useState<number | null>(null);
   const [locks, setLocks] = useState<Set<string>>(() => (address ? loadLocks(address) : new Set()));
 
@@ -248,6 +251,10 @@ export function CharacterDetailPage() {
         error={bagError ? `The chain would refuse this layout (${bagError})` : null}
         busy={busy !== null}
         label={rewardLabel}
+        icon={(r) => {
+          const req = iconRequest(r);
+          return req ? draw(`i:${r.kind}:${r.id}`, req) : null;
+        }}
         onPick={setPicked}
         onTakeAll={(i) => apply(take(work, i, null, undefined, locks))}
         onPlace={(i, to) => apply(replace(work, i, to, locks))}

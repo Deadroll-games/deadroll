@@ -163,6 +163,37 @@ pub const TILE_LOOKS: &[(&str, Look)] = &[
     ("crypt_", lk3("crypt_floor", "bone", "cold")),
 ];
 
+/// Colors of icons by name (the default variant: one ore shape is iron here, copper or gold in the
+/// app by its request); the app keeps the same per resource (`app/src/chain/icons.ts`).
+pub const ICON_LOOKS: &[(&str, Look)] = &[
+    ("icon_pelt", lk3("pelt", "leather", "cold")),
+    ("icon_fang", lk3("bone", "gold", "cold")),
+    ("icon_sinew", lk3("bone", "gold", "cold")),
+    ("icon_claw", lk3("bone", "gold", "cold")),
+    ("icon_fat", lk3("bone", "rust", "cold")),
+    ("icon_log", lk3("planks", "gold", "cold")),
+    ("icon_bark", lk3("treant", "gold", "cold")),
+    ("icon_resin", lk3("planks", "gold", "gold")),
+    ("icon_heartwood", lk3("planks", "gold", "glow_toxic")),
+    ("icon_pollen", lk3("leather", "gold", "glow_soul")),
+    ("icon_stone", lk3("stone", "gold", "fire")),
+    ("icon_wing", lk3("stone", "gold", "glow_soul")),
+    ("icon_scrap", lk3("steel", "rust", "cold")),
+    ("icon_rags", lk3("cloth", "gold", "cold")),
+    ("icon_trinket", lk3("bone", "gold", "cold")),
+    ("icon_bone", lk3("bone", "gold", "cold")),
+    ("icon_vial", lk3("leather", "steel", "blood")),
+    ("icon_ore", lk3("stone", "gold", "rust")),
+    ("icon_ingot", lk3("steel", "gold", "cold")),
+    ("icon_dual_stone", lk3("stone", "cold", "fire")),
+    ("icon_recipe", lk3("bone", "cape_red", "cold")),
+    ("icon_blank", lk3("stone", "gold", "glow_soul")),
+    ("icon_reagent", lk3("tile_door", "steel", "glow_toxic")),
+    ("icon_potion", lk3("leather", "steel", "blood")),
+    ("icon_food", lk3("food", "gold", "cold")),
+    ("icon_torch", lk3("tile_door", "gold", "fire")),
+];
+
 const fn lk3(material: &'static str, accent: &'static str, element: &'static str) -> Look {
     Look {
         material,
@@ -175,6 +206,11 @@ const fn lk3(material: &'static str, accent: &'static str, element: &'static str
 pub fn default_look(name: &str, layer_type: u8) -> Look {
     if layer_type == layer::MONSTER {
         if let Some((_, look)) = MONSTER_LOOKS.iter().find(|(n, _)| *n == name) {
+            return *look;
+        }
+    }
+    if layer_type == layer::ICON {
+        if let Some((_, look)) = ICON_LOOKS.iter().find(|(n, _)| *n == name) {
             return *look;
         }
     }
