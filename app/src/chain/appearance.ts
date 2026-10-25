@@ -11,12 +11,15 @@ export const RAMP = {
   cold: 10, fire: 11, dark: 12, eyes: 13, capeRed: 14, fur: 15, stone: 16, floor: 17, water: 18, wood: 19,
   cloth: 20, moss: 21, bone: 22, blood: 23, curse: 24, dirt: 25, furDark: 26, gobSkin: 27, rag: 28, furBrown: 29,
   bark: 30, skinPale: 31, troll: 32, bruise: 33, rust: 34, glowRed: 35, glowToxic: 36, glowSoul: 37,
+  rot: 38, ooze: 39, blackiron: 40, ash: 41, ogre: 42, furPale: 43, wyrm: 44, hydra: 45, storm: 46,
+  caveRock: 47, murk: 48,
 } as const;
 /** palette_2.pal `material` lines, in order (append only). */
 export const MATERIAL = {
   steel: 0, human: 1, elf: 2, robe: 3, leather: 4, cape: 5, wolf: 6, goblin: 7, stone: 8,
   tileWall: 9, tileFloor: 10, tileWater: 11, tileDoor: 12, cloth: 13, moss: 14, bone: 15, chest: 16,
   wolfDark: 17, goblinDark: 18, bear: 19, treant: 20, fairy: 21, troll: 22, demon: 23, rusted: 24,
+  caveWall: 50, caveFloor: 51, caveDoor: 52, murk: 53, planks: 54,
 } as const;
 
 export const SPRITE = { tombstone: 403 } as const;
@@ -94,31 +97,46 @@ export function monsterRequest(bestiaryId: number, dead: boolean): RenderRequest
   return renderRequest(layers([[0, id, mat, accent]], element), dead);
 }
 
+type Look = [sprite: number, material: number, accent: number, element: number];
+
 /**
- * Patch 13: the sprite of each tile type. Until the new tiles are drawn they borrow the existing
- * sprites (the variant does not change the picture yet); void and chasm have none and stay dark.
+ * The Caves and Ruins tile set, variant 0 of each tile type (assets/sprites/tiles/caves; tools/art
+ * keeps the same colors, `TILE_LOOKS`). The map has no biome yet and the variant does not change
+ * the picture; walls use one shape (east and west neighbors) until autotiling exists.
  */
-const TILE_SPRITES: Record<number, [number, number]> = {
-  [Tile.StoneFloor]: [500, MATERIAL.tileFloor],
-  [Tile.WoodenFloor]: [500, MATERIAL.tileFloor],
-  [Tile.Dirt]: [500, MATERIAL.tileFloor],
-  [Tile.Rubble]: [500, MATERIAL.tileFloor],
-  [Tile.Wall]: [501, MATERIAL.tileWall],
-  [Tile.ShallowWater]: [502, MATERIAL.tileWater],
-  [Tile.DeepWater]: [502, MATERIAL.tileWater],
-  [Tile.Door]: [503, MATERIAL.tileDoor],
-  [Tile.Stairs]: [505, MATERIAL.tileFloor],
+const TILE_SPRITES: Record<number, Look> = {
+  [Tile.Void]: [537, MATERIAL.caveWall, RAMP.steel, RAMP.cold],
+  [Tile.StoneFloor]: [500, MATERIAL.caveFloor, RAMP.bone, RAMP.cold],
+  [Tile.WoodenFloor]: [525, MATERIAL.planks, RAMP.steel, RAMP.cold],
+  [Tile.Dirt]: [528, MATERIAL.caveFloor, RAMP.bone, RAMP.murk],
+  [Tile.Wall]: [501, MATERIAL.caveWall, RAMP.steel, RAMP.cold],
+  [Tile.Door]: [503, MATERIAL.caveDoor, RAMP.steel, RAMP.cold],
+  [Tile.ShallowWater]: [502, MATERIAL.murk, RAMP.murk, RAMP.cold],
+  [Tile.DeepWater]: [532, MATERIAL.murk, RAMP.murk, RAMP.cold],
+  [Tile.Stairs]: [533, MATERIAL.caveFloor, RAMP.bone, RAMP.cold],
+  [Tile.Rubble]: [534, MATERIAL.caveFloor, RAMP.bone, RAMP.cold],
+  [Tile.Chasm]: [536, MATERIAL.caveFloor, RAMP.bone, RAMP.cold],
 };
+
+const lookRequest = ([sprite, material, accent, element]: Look) => renderRequest(layers([[0, sprite, material, accent]], element));
 
 /** The render request of a tile type, null for one drawn as a flat color. */
 export function tileRequest(tile: Tile): RenderRequest | null {
-  const sprite = TILE_SPRITES[tile];
-  return sprite ? renderRequest(layers([[0, sprite[0], sprite[1], RAMP.stone]], RAMP.cold)) : null;
+  const look = TILE_SPRITES[tile];
+  return look ? lookRequest(look) : null;
 }
 
-/** The entrance and the exit points over their cell (the former entrance and exit tiles). */
-const POINT_SPRITES: Record<GridPointKind, number> = { entrance: 504, exit: 505 };
+/** The entrance and the exit points over their cell: the Caves mine adit and the stone portal. */
+const POINT_SPRITES: Record<GridPointKind, Look> = {
+  entrance: [504, MATERIAL.caveDoor, RAMP.steel, RAMP.fire],
+  exit: [505, MATERIAL.caveWall, RAMP.steel, RAMP.glowSoul],
+};
 
 export function pointRequest(kind: GridPointKind): RenderRequest {
-  return renderRequest(layers([[0, POINT_SPRITES[kind], MATERIAL.tileFloor, RAMP.stone]], RAMP.cold));
+  return lookRequest(POINT_SPRITES[kind]);
+}
+
+/** A visible chest over its cell, closed or opened (patch 11). */
+export function chestRequest(opened: boolean): RenderRequest {
+  return lookRequest([opened ? 581 : 580, MATERIAL.chest, RAMP.gold, RAMP.cold]);
 }

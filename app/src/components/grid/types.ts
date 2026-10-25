@@ -21,7 +21,7 @@ export type GridUnit = {
 /**
  * Patch 11: a visible chest (docs/MAP_DESCRIPTION.md 7.1). A closed chest occupies its cell; an
  * opened one is drawn as an outline. `label` is the hover tooltip (e.g. the table's levels).
- * Placeholder look until the chest sprite exists.
+ * Drawn by `chestSprite` when given, otherwise as a flat placeholder.
  */
 export type GridChest = { x: number; y: number; opened: boolean; label: string };
 
@@ -77,6 +77,8 @@ export type GridProps = {
   tileSprite?: (tile: Tile) => ImageData | null;
   /** Rendered sprite of a point, or null to draw its flat marker. */
   pointSprite?: (kind: GridPointKind) => ImageData | null;
+  /** Rendered sprite of a chest, closed or opened, or null to draw its flat placeholder. */
+  chestSprite?: (opened: boolean) => ImageData | null;
   onCellClick?: (cell: Cell) => void;
   onUnitClick?: (unit: GridUnit) => void;
   /** Hover changes, for path previews. null when the pointer leaves the grid. */

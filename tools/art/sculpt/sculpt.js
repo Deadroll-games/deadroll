@@ -10,7 +10,7 @@ const LET = {
 };
 const L = (() => { const v = [-0.55, -0.65, 0.52]; const n = Math.hypot(...v); return v.map((x) => x / n); })();
 
-function sculptor(W, H) {
+function sculptor(W, H, margin = 1) {
   // cell: { slot, c (0..5), z (shape order), sid (shape id), lock }
   const g = Array.from({ length: W * H }, () => null);
   let sid = 0;
@@ -25,7 +25,7 @@ function sculptor(W, H) {
   };
   const put = (x, y, slot, c, id) => {
     x = Math.round(x); y = Math.round(y);
-    if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1) return;
+    if (x < margin || y < margin || x >= W - margin || y >= H - margin) return;
     const cur = g[y * W + x];
     if (cur && cur.lock) return;
     g[y * W + x] = { slot, c, sid: id };
@@ -166,7 +166,7 @@ function sculptor(W, H) {
     },
     px(x, y, slot, c, lock = true) {
       x = Math.round(tx(x)); y = Math.round(ty(y));
-      if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1) return;
+      if (x < margin || y < margin || x >= W - margin || y >= H - margin) return;
       g[y * W + x] = { slot, c, sid: -1, lock };
     },
     // 1 px line (Bresenham) with a fixed color.
@@ -256,7 +256,7 @@ const model = require(path.resolve(process.argv[2]));
 const models = Array.isArray(model) ? model : [model];
 const out = [];
 for (const m of models) {
-  const s = sculptor(m.size, m.size);
+  const s = sculptor(m.size, m.size, /no_outline/.test(m.flags || "") ? 0 : 1);
   m.build(s);
   out.push(emit(m, s));
 }

@@ -351,10 +351,16 @@ function drawGrid(ctx: CanvasRenderingContext2D, props: GridProps, cell: number)
     drawPoint(ctx, scratch, point, props.pointSprite?.(point.kind) ?? null, cell);
   }
 
-  // Chests: a brown square while closed, only its outline once opened (placeholder look).
+  // Chests: the sprite when there is one; otherwise a brown square while closed, only its outline
+  // once opened.
   const inset = Math.max(2, Math.floor(cell / 5));
   for (const chest of props.chests ?? []) {
     if (!inMap(chest, width, height)) continue;
+    const sprite = props.chestSprite?.(chest.opened) ?? null;
+    if (sprite) {
+      paintImage(ctx, scratch, sprite, chest.x * cell, chest.y * cell, cell, cell);
+      continue;
+    }
     const thickness = Math.max(1, Math.floor(cell / 16));
     if (!chest.opened) {
       ctx.fillStyle = CHEST;

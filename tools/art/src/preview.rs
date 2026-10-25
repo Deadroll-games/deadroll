@@ -121,6 +121,26 @@ pub const MONSTER_LOOKS: &[(&str, Look)] = &[
     ("frost_wolf", lk3("frost_wolf", "cold", "cold")),
 ];
 
+/// Colors of tile sprites by name prefix (first match); the app keeps the same per tile
+/// (`app/src/chain/appearance.ts`, `TILE_SPRITES`).
+pub const TILE_LOOKS: &[(&str, Look)] = &[
+    ("cave_wall", lk3("cave_wall", "steel", "cold")),
+    ("tile_wall", lk3("cave_wall", "steel", "cold")),
+    ("cave_floor", lk3("cave_floor", "bone", "cold")),
+    ("tile_floor", lk3("cave_floor", "bone", "cold")),
+    ("tile_door", lk3("cave_door", "steel", "cold")),
+    ("tile_water", lk3("murk", "murk", "cold")),
+    ("cave_water", lk3("murk", "murk", "cold")),
+    ("cave_deep", lk3("murk", "murk", "cold")),
+    ("cave_wood", lk3("planks", "steel", "cold")),
+    ("cave_dirt", lk3("cave_floor", "bone", "murk")),
+    ("cave_void", lk3("cave_wall", "steel", "cold")),
+    ("cave_", lk3("cave_floor", "bone", "cold")),
+    ("tile_entrance", lk3("cave_door", "steel", "fire")),
+    ("tile_exit", lk3("cave_wall", "steel", "glow_soul")),
+    ("chest_", lk3("chest", "gold", "cold")),
+];
+
 const fn lk3(material: &'static str, accent: &'static str, element: &'static str) -> Look {
     Look {
         material,
@@ -133,6 +153,11 @@ const fn lk3(material: &'static str, accent: &'static str, element: &'static str
 pub fn default_look(name: &str, layer_type: u8) -> Look {
     if layer_type == layer::MONSTER {
         if let Some((_, look)) = MONSTER_LOOKS.iter().find(|(n, _)| *n == name) {
+            return *look;
+        }
+    }
+    if layer_type == layer::TILE {
+        if let Some((_, look)) = TILE_LOOKS.iter().find(|(p, _)| name.starts_with(p)) {
             return *look;
         }
     }

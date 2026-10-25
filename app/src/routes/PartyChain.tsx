@@ -18,7 +18,7 @@ import type { GridAura, GridChest, GridPointKind, GridUnit } from "../components
 import { PartyLobby } from "../components/forms/PartyLobby";
 import { PrepayConfirm } from "../components/forms/PrepayConfirm";
 import type { LobbyPlayer } from "../components/forms/types";
-import { isCurrentAppearance, monsterRequest, pointRequest, tileRequest, TOMBSTONE } from "../chain/appearance";
+import { chestRequest, isCurrentAppearance, monsterRequest, pointRequest, tileRequest, TOMBSTONE } from "../chain/appearance";
 import { characterRequest } from "../chain/items";
 import { HitOutcome, ModKindData, ReactionKind, SessionStatus, Trigger } from "@deadroll/sdk/session";
 import {
@@ -916,6 +916,7 @@ function PartyView({ address }: { address: Address }) {
     return request ? draw(`t:${t}`, request) : null;
   };
   const pointSprite = (kind: GridPointKind) => draw(`p:${kind}`, pointRequest(kind));
+  const chestSprite = (opened: boolean) => draw(`chest:${opened}`, chestRequest(opened));
 
   const header = (
     <p className="mono">
@@ -1168,6 +1169,7 @@ function PartyView({ address }: { address: Address }) {
             chests={gridChests}
             points={party.points}
             pointSprite={pointSprite}
+            chestSprite={chestSprite}
             line={!ended ? lineCells : []}
             burning={party.burningCells.filter((c) => c.untilRound >= s.core.round).map((c) => ({ x: c.x, y: c.y }))}
             cellPx={CELL_PX}

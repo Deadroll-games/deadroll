@@ -55,6 +55,8 @@ ramp fur_pale  #14151a #2c2f36 #4a4f58 #6f7580 #9aa1aa #cfd5d8
 ramp wyrm      #080406 #140709 #1f0a0d #2e0f12 #431719 #6a2a24
 ramp hydra     #050c0c #0b1c1b #12302d #1c4740 #2d6556 #5a8f74
 ramp storm     #070a12 #0f1626 #18233d #243458 #3a4f7c #6a86b0
+ramp cave_rock #0d0b0a #1d1916 #2e2824 #433a33 #5d5047 #7e6e60
+ramp murk      #04080c #081218 #0e1f27 #163037 #22474c #3f6a68
 
 dark dark
 curse curse
@@ -113,3 +115,9 @@ material siren      skin_pale hydra    dither
 material lizard     hydra     leather  dither
 material cockatrice hydra     rag      dither
 material frost_wolf fur_pale  fur_pale dither
+# appended in ART-3 (tiles)
+material cave_wall  cave_rock moss     dither
+material cave_floor cave_rock dirt     dither
+material cave_door  wood      cave_rock dither
+material murk       murk      murk
+material planks     bark      leather  dither

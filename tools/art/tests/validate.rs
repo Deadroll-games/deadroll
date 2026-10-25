@@ -270,11 +270,14 @@ fn tiles_use_tile_materials_and_figures_wear_the_starter_kits() {
     let pal =
         Pal::load(&std::fs::read_to_string(root.join("assets/palette/palette_2.pal")).unwrap())
             .unwrap();
+    // The current map's tiles are the Caves and Ruins set (TILE_LOOKS); the old trap keeps its look.
     for (name, want) in [
-        ("tile_wall", "tile_wall"),
-        ("tile_water", "tile_water"),
-        ("tile_door", "tile_door"),
-        ("tile_floor", "tile_floor"),
+        ("tile_wall", "cave_wall"),
+        ("tile_water", "murk"),
+        ("tile_door", "cave_door"),
+        ("tile_floor", "cave_floor"),
+        ("cave_wall_5", "cave_wall"),
+        ("cave_dirt_1", "cave_floor"),
         ("tile_trap", "tile_floor"),
     ] {
         let look = preview::default_look(name, 20);
