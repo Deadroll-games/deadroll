@@ -8,9 +8,10 @@ use deadroll_render::sprite::{layer, Cmd};
 
 const DEFAULT_PALETTE: &str = "assets/palette/palette_2.pal";
 const SPRITES_DIR: &str = "assets/sprites";
+const OFF_CHAIN_ROOTS: [&str; 2] = ["assets/site_sprites", "assets/sprites_pending"];
 
 const USAGE: &str = "usage:
-  art validate [files.dsl ...]                 default: every file in assets/sprites
+  art validate [files.dsl ...]                 default: every file in assets/sprites, site_sprites, sprites_pending
   art <file.dsl> [--id N] [--scale 4] [--out DIR|FILE.png] [--material NAME] [--bg #rrggbb]
   art sheet characters [figures ...] [--scale 4] [--out FILE.png]   bodies, kits on both bodies, alive and dead
   art sheet contact [files.dsl ...] [--scale 2] [--out FILE.png]
@@ -77,23 +78,24 @@ fn norm(p: &Path) -> String {
     p.to_string_lossy().replace('\\', "/")
 }
 
+/// The sprites of the books: every `.dsl` under `assets/sprites`, by category folder.
 fn repo_files() -> Vec<PathBuf> {
-    let mut v: Vec<PathBuf> = fs::read_dir(SPRITES_DIR)
-        .map(|d| {
-            d.filter_map(|e| e.ok())
-                .map(|e| e.path())
-                .filter(|p| p.extension().is_some_and(|x| x == "dsl"))
-                .collect()
-        })
-        .unwrap_or_default();
-    v.sort();
+    art::validate::dsl_files(Path::new(SPRITES_DIR))
+}
+
+/// The book sprites, then the site and pending sprites, which are never packed.
+fn all_files() -> Vec<PathBuf> {
+    let mut v = repo_files();
+    for d in OFF_CHAIN_ROOTS {
+        v.extend(art::validate::dsl_files(Path::new(d)));
+    }
     v
 }
 
 /// Loads `files` and the rest of the repo sprites (for id and name uniqueness).
 fn load_all(files: &[PathBuf]) -> Result<(Vec<Compiled>, Vec<Issue>), String> {
     let mut all: Vec<PathBuf> = files.to_vec();
-    for r in repo_files() {
+    for r in all_files() {
         let same = |a: &Path, b: &Path| match (fs::canonicalize(a), fs::canonicalize(b)) {
             (Ok(x), Ok(y)) => x == y,
             _ => false,
@@ -111,7 +113,7 @@ fn load_all(files: &[PathBuf]) -> Result<(Vec<Compiled>, Vec<Issue>), String> {
 
 fn cmd_validate(o: &Opts) -> Result<bool, String> {
     let files: Vec<PathBuf> = if o.pos.is_empty() {
-        repo_files()
+        all_files()
     } else {
         o.pos.iter().map(PathBuf::from).collect()
     };
@@ -380,13 +382,20 @@ fn cmd_sheet(o: &Opts) -> Result<bool, String> {
 /// Writes the upload inputs: the compiled palette and the sprite books (ids `--first-book`..) with every repo
 /// sprite, each at most `BOOK_MAX` bytes: `palette.bin`, `book_<id>.bin`.
 fn cmd_pack(o: &Opts) -> Result<bool, String> {
-    let (sprites, issues) = load_all(&repo_files())?;
+    let book_files = repo_files();
+    let (sprites, issues) = load_all(&book_files)?;
     if !issues.is_empty() {
         for i in &issues {
             eprintln!("{i}");
         }
         return Err(format!("{} problems, run `art validate`", issues.len()));
     }
+    // Site and pending sprites only take part in the uniqueness check.
+    let in_books: Vec<String> = book_files.iter().map(|p| norm(p)).collect();
+    let sprites: Vec<Compiled> = sprites
+        .into_iter()
+        .filter(|s| in_books.contains(&s.file))
+        .collect();
     let pal = load_pal(o)?;
     let books = preview::pack_books(&sprites, o.first_book)?;
     let dir = o

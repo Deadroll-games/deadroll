@@ -4,7 +4,7 @@ Format version **2** (rasterizer version 2, palette format 2). Format 1 (canvase
 palette 1 with 4-color ramps) is drawn only by rasterizer version 1. Format 2 has character layers
 at 96x96, pixel-by-pixel `BITMAP` sprites, 6-color ramps, a colored outline, dithering and
 overlap shadows. This file is the contract between `crates/render`, `tools/art`, the sprite authors
-(`assets/sprites/*.dsl`), `tools/scripts/upload-sprites.ts` and the app loader.
+(`assets/sprites/**/*.dsl`), `tools/scripts/upload-sprites.ts` and the app loader.
 It is derived from `docs/ART_DESCRIPTION.md` (sections 4-6). Where they differ, this file wins for code.
 Any change to the rules below after sprites ship is a **new rasterizer version**, never a silent fix.
 
@@ -13,7 +13,7 @@ origin top left, `x` to the right, `y` down.
 
 ---
 
-## 1. Text DSL (`assets/sprites/<name>.dsl`)
+## 1. Text DSL (`assets/sprites/<category>/<name>.dsl`)
 
 One file holds one or more sprites. Line based, one statement per line, tokens separated by spaces.
 A comment is a `#` at the start of a token followed by a space or the end of the line; it runs to
@@ -159,8 +159,13 @@ anchors below the neck; races differ in head, ears, hair, face and skin ramp.
 | Ids | Content | Ids | Content |
 |---|---|---|---|
 | 0 | empty layer (never a sprite) | 400-499 | monsters, tombstone |
-| 1-99 | shadow (1), race bodies, hair, the front fist | 500-599 | tiles |
-| 100-399 | items: one sprite per `ItemBase`, id `100 + ItemBase` | 600+ | reserved |
+| 1-99 | shadow (1), race bodies, hair, the front fist | 500-599, 800-999 | tiles and map points |
+| 100-399 | items: one sprite per `ItemBase`, id `100 + ItemBase` | 600-799 | icons (32x32) |
+| 1000+ | never in a book (site art, items without an `ItemBase` yet) | | |
+
+The sources sit in category folders under `assets/sprites/` (`bodies`, `items`, `monsters`,
+`tiles/<biome>`, `points`, `resources`), and the folder sets the id range. Sprites with ids 1000+ live
+in `assets/site_sprites/` and `assets/sprites_pending/`; `art pack` never reads them.
 
 There are no class outfits. A character is drawn as its body, its hair and the items it actually
 wears (`Character.gear`): each worn item's sprite goes into the layer of its equipment slot
@@ -437,7 +442,7 @@ The decoder rejects, with an error code:
 - slots allowed for the layer type (body layers: `K H Y D R O _`), in commands and `BITMAP` rows;
 - socket squares (4x4) inside the `P` mask and not overlapping; `U` inside the `P` mask, at least 12 px for a weapon;
 - a `portrait` with a `U` zone keeps 6 px from every canvas edge (three 2 px glow bands, section 8);
-- id range and unique ids and names across `assets/sprites/`;
+- id range of the category folder and unique ids and names across `assets/sprites/`, `assets/site_sprites/`, `assets/sprites_pending/`;
 - the same sprite rendered twice gives the same bytes.
 
 ## 7. WASM C ABI

@@ -103,7 +103,7 @@ If a checkpoint slips by more than 2 hours, the lead moves the lowest P0 item to
 
 ## L3. Art (mostly Grok, short sessions)
 
-Each task = one fresh Grok session, writes only in `assets/sprites/<name>.dsl`, validated by `tools/art`.
+Each task = one fresh Grok session, writes only in `assets/sprites/<category>/<name>.dsl`, validated by `tools/art`.
 - [x] **L3.1 (G)** Claude (lane L3). Body human, body forest elf (skin and hair ramps). (#6)
 - [x] **L3.2 (G)** Claude (lane L3). Warrior kit: helmet, armor, pants, boots, sword, shield. (#6)
 - [x] **L3.3 (G)** Claude (lane L3). Mage kit: hood, robe, staff with element core. (#6)

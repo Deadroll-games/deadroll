@@ -195,7 +195,7 @@ export function heroDefense(
 }
 
 // ---------------------------------------------------------------------------------------------
-// sprites: one per `ItemBase` (assets/sprites/items.dsl), worn on the body or alone as an icon
+// sprites: one per `ItemBase` (assets/sprites/items/items.dsl), worn on the body or alone as an icon
 
 /** The sprite of item base `i` (`ItemBase` discriminant) is `ITEM_SPRITE_BASE + i`. */
 export const ITEM_SPRITE_BASE = 100;

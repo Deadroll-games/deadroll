@@ -278,7 +278,7 @@ const ELF: [(u8, u16); 3] = [
 ];
 
 /// Item sprites, one per `ItemBase` in discriminant order: sprite id `ITEM_SPRITE_BASE + base`
-/// (assets/sprites/items.dsl), and the material an item without its own is drawn in.
+/// (assets/sprites/items/items.dsl), and the material an item without its own is drawn in.
 pub const ITEM_SPRITE_BASE: u16 = 100;
 pub const ITEM_NAMES: [&str; 6] = [
     "sword",
