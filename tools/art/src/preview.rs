@@ -91,6 +91,10 @@ pub const MONSTER_LOOKS: &[(&str, Look)] = &[
     ("demon", lk3("demon", "glow_red", "bone")),
     ("winged_demon", lk3("demon", "glow_red", "bone")),
     ("behemoth", lk3("behemoth", "fire", "bone")),
+    ("werewolf", lk3("wolf", "glow_red", "bone")),
+    ("cerberus", lk3("wolf_dark", "glow_red", "steel")),
+    ("minotaur", lk3("minotaur", "glow_red", "steel")),
+    ("ogre", lk3("ogre", "glow_red", "stone")),
 ];
 
 const fn lk3(material: &'static str, accent: &'static str, element: &'static str) -> Look {
