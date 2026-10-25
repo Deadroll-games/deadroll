@@ -31,6 +31,7 @@ pub mod reactive;
 pub mod registry;
 pub mod resolve;
 pub mod spread;
+pub mod tiles;
 pub mod turn;
 pub mod units;
 

@@ -7,8 +7,8 @@ The builder rules of docs/MAP_DESCRIPTION.md, section 10, and BFS pathfinding. `
 
 ## Rules for this zone
 - Docs: docs/MAP_DESCRIPTION.md (2.3, 4.2, 7, 10), docs/BESTIARY.md (2.1, 6).
-- `no_std`, integers only, fixed-size buffers. The BFS frame must stay under the 4 KB SBF stack.
-- Tile passability and step cost (`tiles.rs`) must match `programs/session` movement until the registry `Tileset` exists.
+- `no_std`, integers only, fixed-size buffers. The reachability frame must stay under the 4 KB SBF stack.
+- Tile properties are data: `TileRules` from the registry `Tileset` (`deadroll_rules::tiles::tile_rules`), never constants here (patch 13). Steps go to the 8 neighbors, as in movement.
 - Templates come through the `template_of` argument (`roster::SpawnRules`, built by `deadroll_rules` from the registry); this crate holds no bestiary data.
 - `MapCheckError` codes are stable: append variants only, and mirror them in `programs/map` `MapError`.
 - Every preset in `assets/registry/maps/*.json` must pass `crates/rules/tests/demo_preset.rs`.

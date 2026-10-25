@@ -2,7 +2,9 @@
 import { useState } from "react";
 import { DEMO_MAP } from "../../chain/mock";
 import { bestiaryName } from "../../chain/names";
-import { Tile, cellIndex, type Cell } from "../../chain/types";
+import { cellIndex, cellKind, type Cell } from "../../chain/types";
+import { SHIPPED_TILE_COST } from "../../chain/tiles";
+import { draftPoints } from "../../chain/game";
 import { Grid } from "./Grid";
 import type { GridUnit } from "./types";
 import "./grid.css";
@@ -11,7 +13,6 @@ const MAP_W = 16;
 const MAP_H = 16;
 const MOVE = 3;
 
-const WALKABLE: ReadonlySet<number> = new Set([Tile.Floor, Tile.Door, Tile.Entrance, Tile.Exit, Tile.Trap]);
 
 function initialUnits(): GridUnit[] {
   const players: GridUnit[] = [
@@ -38,8 +39,7 @@ function reachableCells(units: readonly GridUnit[], active: GridUnit): Cell[] {
     for (let x = 0; x < MAP_W; x++) {
       const dist = Math.abs(x - active.x) + Math.abs(y - active.y);
       if (dist === 0 || dist > MOVE) continue;
-      const tile = DEMO_MAP.tiles[cellIndex(x, y)] ?? Tile.Wall;
-      if (!WALKABLE.has(tile)) continue;
+      if (!SHIPPED_TILE_COST[cellKind(DEMO_MAP.tiles[cellIndex(x, y)] ?? 0)]) continue;
       if (units.some((unit) => unit.x === x && unit.y === y)) continue;
       cells.push({ x, y });
     }
@@ -100,6 +100,7 @@ export default function Demo() {
           width={MAP_W}
           height={MAP_H}
           tiles={DEMO_MAP.tiles}
+          points={draftPoints(DEMO_MAP)}
           units={units}
           activeUnitId={activeUnitId}
           selectedUnitId={selectedUnitId}

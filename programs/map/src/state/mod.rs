@@ -9,11 +9,13 @@ pub use map_layout::*;
 
 /// Layout version written into every map account.
 pub const ACCOUNT_VERSION: u8 = 1;
+/// Patch 13: `MapLayout.core.version` of the `MapLayoutDataV2` format.
+pub const LAYOUT_VERSION: u8 = 2;
 
 #[cfg(test)]
 mod tests {
     use anchor_lang::{Discriminator, Space};
-    use deadroll_types::{MapData, MapLayoutData};
+    use deadroll_types::{MapData, MapLayoutDataV2};
     use solana_sha256_hasher::hash;
 
     use super::*;
@@ -26,7 +28,7 @@ mod tests {
             MapLayout::DISCRIMINATOR,
             &hash(b"account:MapLayout").to_bytes()[..8]
         );
-        assert_eq!(MapLayout::INIT_SPACE, MapLayoutData::SIZE);
+        assert_eq!(MapLayout::INIT_SPACE, MapLayoutDataV2::SIZE);
         // tier, then patch 11: min_players, chest_radius, settle_timeout_secs (u32).
         assert_eq!(Map::INIT_SPACE, MapData::SIZE + 1 + 1 + 1 + 4);
     }

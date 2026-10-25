@@ -83,7 +83,7 @@ The registry is the only source of monster numbers: the session copies the recor
 
 **MonsterSkills** (128 x 32 B, index = skill id, names in `assets/registry/monster_skills.json`; an all-zero record is an empty slot): `[0] present (1)`, `[1..13] SkillBlocks` (borsh, as a character skill), `[13..16] SkillExt` (range, timing, HP threshold), `[16] flags` (bit 0: a heal or buff reaches allies of the bearer's kin only), `[17..32]` reserved. `write_table` runs `deadroll_skillcheck::validate_monster_skill`: the player builder rules without class limits, Heal allowed as an active or reactive skill on one unit (never passive or an aura).
 
-**Tileset** (7 x 8 B in `Tile` order): `[0] passable (0/1)`, `[1] move cost in action points (>= 1 if passable)`, `[2] blocks line of sight (0/1)`, `[3] flags`, `[4..8]` reserved.
+**Tileset** (patch 13: up to 32 x 8 B, record index = tile type id `TileKind`, the shipped 11 in `assets/registry/tileset.json`; decoded by `deadroll_rules::tiles`): `[0] passable (0/1)`, `[1] move cost in action points (>= 1 if passable)`, `[2] blocks line of sight (0/1)`, `[3] flags` (bit 0 door), `[4..8]` reserved.
 
 **Prefabs**: opaque bytes, 4 KB, length-checked only (P1).
 

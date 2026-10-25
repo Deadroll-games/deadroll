@@ -83,15 +83,22 @@ export const STATE_KIND: Record<string, number> = {
   Stun: 5,
   Penetration: 6,
 };
+/** Patch 13: tile types (`deadroll_types::TileKind`), the record index of the tileset. */
 export const TILE: Record<string, number> = {
-  Floor: 0,
-  Wall: 1,
-  Water: 2,
-  Door: 3,
-  Entrance: 4,
-  Exit: 5,
-  Trap: 6,
+  Void: 0,
+  StoneFloor: 1,
+  WoodenFloor: 2,
+  Dirt: 3,
+  Wall: 4,
+  Door: 5,
+  ShallowWater: 6,
+  DeepWater: 7,
+  Stairs: 8,
+  Rubble: 9,
+  Chasm: 10,
 };
+/** Tile types a cell byte can name (`deadroll_types::TILE_KINDS_MAX`): the tileset's capacity. */
+export const TILE_KINDS_MAX = 32;
 export const ROLE: Record<string, number> = {
   Swarm: 0,
   Fast: 1,
@@ -256,7 +263,7 @@ export function maxLen(kind: TableKind): number {
     case TableKind.Bestiary:
       return BESTIARY_MAX * MONSTER_SIZE;
     case TableKind.Tileset:
-      return Object.keys(TILE).length * TILE_SIZE;
+      return TILE_KINDS_MAX * TILE_SIZE;
     case TableKind.Prefabs:
       return TABLE_CAP;
     case TableKind.Traits:

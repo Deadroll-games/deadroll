@@ -16,7 +16,7 @@ import { readFileSync } from "node:fs";
 import anchor from "@anchor-lang/core";
 import { ComputeBudgetProgram, Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
 import { randomBytes } from "node:crypto";
-import { MAP_STRIDE, Tile } from "../tools/scripts/lib/demo-map.ts";
+import { MAP_STRIDE, Tile, cellByte } from "../tools/scripts/lib/demo-map.ts";
 import { newSkill } from "./skill_ext.ts";
 import { MPL_CORE_PROGRAM, PROGRAMS, VRF } from "@deadroll/sdk";
 
@@ -207,18 +207,22 @@ idx.writeUInt32LE(index);
 const map = pda([Buffer.from("map"), dm.publicKey.toBuffer(), idx], MAP);
 const layout = pda([Buffer.from("layout"), map.toBuffer()], MAP);
 const edit = { dm: dm.publicKey, map, layout };
-const tiles = new Array(15 * MAP_STRIDE + 16).fill(Tile.Wall);
-for (let y = 1; y < 15; y++) for (let x = 1; x < 15; x++) tiles[y * MAP_STRIDE + x] = Tile.Floor;
-tiles[ENTRANCE.y * MAP_STRIDE + ENTRANCE.x] = Tile.Entrance;
-tiles[EXIT.y * MAP_STRIDE + EXIT.x] = Tile.Exit;
+const tiles = new Array(15 * MAP_STRIDE + 16).fill(cellByte(Tile.Wall));
+for (let y = 1; y < 15; y++) for (let x = 1; x < 15; x++) tiles[y * MAP_STRIDE + x] = cellByte(Tile.StoneFloor);
+// Patch 13: the entrance and the exit are points.
+const points = [
+  { kind: { entrance: {} }, ...ENTRANCE, data: 0 },
+  { kind: { exit: {} }, ...EXIT, data: 0 },
+];
 const spawns = CAMP.map((s) => ({ bestiaryId: s.id, x: s.x, y: s.y, level: 1, skills: s.skills, flags: 0, aspects: 0, pack: s.pack }));
 // Patch 11: the DM's settings (devnet takes at least 10 minutes to settle).
 await mapProgram.methods.createMap(index, 16, 16, 1, { minPlayers: 1, chestRadius: 3, settleTimeoutSecs: 600 }).accountsStrict({ ...edit, systemProgram: SystemProgram.programId }).signers([dm]).rpc();
 await mapProgram.methods.writeLayout(0, Buffer.from(tiles)).accountsStrict(edit).signers([dm]).rpc();
-await mapProgram.methods.writeSpawns(ENTRANCE, EXIT, spawns).accountsStrict(edit).signers([dm]).rpc();
+await mapProgram.methods.writeSpawns(spawns).accountsStrict(edit).signers([dm]).rpc();
 // Patch 11: no chests, the tier 1 boss table of assets/registry/reward_tables.json.
-await mapProgram.methods.writeChests([], 1).accountsStrict(edit).signers([dm]).rpc();
-await mapProgram.methods.finalizeMap(new Array(32).fill(0)).accountsStrict({ ...edit, bestiary, monsterSkills, rewards }).signers([dm]).rpc();
+await mapProgram.methods.writePoints(points, 1).accountsStrict(edit).signers([dm]).rpc();
+const tileset = pda([Buffer.from("tileset")], REGISTRY);
+await mapProgram.methods.finalizeMap(new Array(32).fill(0)).accountsStrict({ ...edit, bestiary, monsterSkills, rewards, tileset }).signers([dm]).rpc();
 
 // session
 const sessionPda = pda([Buffer.from("session"), map.toBuffer()], SESSION);
@@ -228,7 +232,7 @@ await session.methods
   .openSession(PRICE, dmActor.publicKey)
   .accountsStrict({
     dm: dm.publicKey, map, layout, session: sessionPda, monsters, escrow, sessionAuthority, config,
-    bestiary, tileset: pda([Buffer.from("tileset")], REGISTRY),
+    bestiary, tileset,
     mapProgram: MAP, systemProgram: SystemProgram.programId,
     aspects: pda([Buffer.from("aspects")], REGISTRY), traits: pda([Buffer.from("traits")], REGISTRY),
     resonances: pda([Buffer.from("resonances")], REGISTRY), monsterSkills, rewards,

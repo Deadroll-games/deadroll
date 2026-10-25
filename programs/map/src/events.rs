@@ -43,10 +43,10 @@ pub struct MapStatusChanged {
     pub to: MapStatus,
 }
 
-/// Patch 11.
+/// Patch 13 (replaces `ChestsWritten` of patch 11).
 #[event]
-pub struct ChestsWritten {
+pub struct PointsWritten {
     pub map: Pubkey,
-    pub chest_count: u8,
+    pub point_count: u8,
     pub boss_table: u8,
 }

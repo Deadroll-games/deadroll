@@ -191,6 +191,13 @@
         {
           "name": "rewards",
           "address": "FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK"
+        },
+        {
+          "name": "tileset",
+          "docs": [
+            "records `open_session` gives movement."
+          ],
+          "address": "GqzUadKRKmJNT2RQAhrTz31qdoMfTGmya3Cfz2vAhXHu"
         }
       ],
       "args": [
@@ -322,95 +329,9 @@
       ]
     },
     {
-      "name": "write_chests",
-      "docs": [
-        "Patch 11: DM replaces the visible chests and the boss reward table of a draft layout."
-      ],
-      "discriminator": [
-        177,
-        205,
-        124,
-        214,
-        126,
-        159,
-        193,
-        17
-      ],
-      "accounts": [
-        {
-          "name": "dm",
-          "signer": true
-        },
-        {
-          "name": "map",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  109,
-                  97,
-                  112
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "map.core.dm",
-                "account": "Map"
-              },
-              {
-                "kind": "account",
-                "path": "map.core.index",
-                "account": "Map"
-              }
-            ]
-          }
-        },
-        {
-          "name": "layout",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  108,
-                  97,
-                  121,
-                  111,
-                  117,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "map"
-              }
-            ]
-          }
-        }
-      ],
-      "args": [
-        {
-          "name": "chests",
-          "type": {
-            "vec": {
-              "defined": {
-                "name": "MapPoint"
-              }
-            }
-          }
-        },
-        {
-          "name": "boss_table",
-          "type": "u8"
-        }
-      ]
-    },
-    {
       "name": "write_layout",
       "docs": [
-        "DM writes a chunk of tile bytes into a draft layout."
+        "DM writes a chunk of cell bytes (tile type and variant) into a draft layout."
       ],
       "discriminator": [
         69,
@@ -482,15 +403,102 @@
           "type": "u16"
         },
         {
-          "name": "tiles",
+          "name": "cells",
           "type": "bytes"
+        }
+      ]
+    },
+    {
+      "name": "write_points",
+      "docs": [
+        "Patch 13: DM replaces the points (entrance, exit, visible chests) and the boss reward",
+        "table of a draft layout."
+      ],
+      "discriminator": [
+        147,
+        129,
+        159,
+        139,
+        93,
+        145,
+        38,
+        229
+      ],
+      "accounts": [
+        {
+          "name": "dm",
+          "signer": true
+        },
+        {
+          "name": "map",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  112
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "map.core.dm",
+                "account": "Map"
+              },
+              {
+                "kind": "account",
+                "path": "map.core.index",
+                "account": "Map"
+              }
+            ]
+          }
+        },
+        {
+          "name": "layout",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  97,
+                  121,
+                  111,
+                  117,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "map"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "points",
+          "type": {
+            "vec": {
+              "defined": {
+                "name": "MapPoint"
+              }
+            }
+          }
+        },
+        {
+          "name": "boss_table",
+          "type": "u8"
         }
       ]
     },
     {
       "name": "write_spawns",
       "docs": [
-        "DM replaces the entrance, the exit and the spawn list of a draft layout."
+        "DM replaces the spawn list of a draft layout."
       ],
       "discriminator": [
         114,
@@ -558,22 +566,6 @@
       ],
       "args": [
         {
-          "name": "entrance",
-          "type": {
-            "defined": {
-              "name": "Cell"
-            }
-          }
-        },
-        {
-          "name": "exit",
-          "type": {
-            "defined": {
-              "name": "Cell"
-            }
-          }
-        },
-        {
           "name": "spawns",
           "type": {
             "vec": {
@@ -615,19 +607,6 @@
     }
   ],
   "events": [
-    {
-      "name": "ChestsWritten",
-      "discriminator": [
-        118,
-        214,
-        152,
-        68,
-        126,
-        226,
-        252,
-        157
-      ]
-    },
     {
       "name": "LayoutWritten",
       "discriminator": [
@@ -678,6 +657,19 @@
         49,
         53,
         2
+      ]
+    },
+    {
+      "name": "PointsWritten",
+      "discriminator": [
+        68,
+        214,
+        248,
+        26,
+        141,
+        229,
+        183,
+        110
       ]
     },
     {
@@ -738,27 +730,27 @@
     {
       "code": 6008,
       "name": "InvalidTile",
-      "msg": "Byte is not a known tile"
+      "msg": "A cell has a tile type the Tileset does not have"
     },
     {
       "code": 6009,
       "name": "EntranceCount",
-      "msg": "Map needs exactly one entrance tile"
+      "msg": "Map needs exactly one entrance point"
     },
     {
       "code": 6010,
       "name": "ExitCount",
-      "msg": "Map needs exactly one exit tile"
+      "msg": "Map needs exactly one exit point"
     },
     {
       "code": 6011,
       "name": "EntranceMismatch",
-      "msg": "Entrance point is not on the entrance tile"
+      "msg": "Unused since patch 13"
     },
     {
       "code": 6012,
       "name": "ExitMismatch",
-      "msg": "Exit point is not on the exit tile"
+      "msg": "Unused since patch 13"
     },
     {
       "code": 6013,
@@ -888,7 +880,7 @@
     {
       "code": 6038,
       "name": "InvalidPoint",
-      "msg": "A map point is not a visible chest"
+      "msg": "Unused since patch 13"
     },
     {
       "code": 6039,
@@ -944,51 +936,29 @@
       "code": 6049,
       "name": "SettleTimeoutOutOfRange",
       "msg": "The time to settle is outside the limits (at most LootTuning.settle_timeout_max_secs)"
+    },
+    {
+      "code": 6050,
+      "name": "TooManyPoints",
+      "msg": "Too many points (entrance, exit and chests)"
+    },
+    {
+      "code": 6051,
+      "name": "PointOutOfBounds",
+      "msg": "The entrance or the exit is outside the map"
+    },
+    {
+      "code": 6052,
+      "name": "PointNotPassable",
+      "msg": "The entrance or the exit is on a cell that cannot be entered"
+    },
+    {
+      "code": 6053,
+      "name": "PointOverlap",
+      "msg": "The entrance and the exit share a cell"
     }
   ],
   "types": [
-    {
-      "name": "Cell",
-      "docs": [
-        "A map cell coordinate."
-      ],
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "x",
-            "type": "u8"
-          },
-          {
-            "name": "y",
-            "type": "u8"
-          }
-        ]
-      }
-    },
-    {
-      "name": "ChestsWritten",
-      "docs": [
-        "Patch 11."
-      ],
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "map",
-            "type": "pubkey"
-          },
-          {
-            "name": "chest_count",
-            "type": "u8"
-          },
-          {
-            "name": "boss_table",
-            "type": "u8"
-          }
-        ]
-      }
-    },
     {
       "name": "LayoutWritten",
       "type": {
@@ -1204,7 +1174,8 @@
     {
       "name": "MapLayout",
       "docs": [
-        "`[\"layout\", map]`. `finalize_map` hashes the core bytes into `Map.layout_hash`."
+        "`[\"layout\", map]`. `finalize_map` hashes the core bytes into `Map.layout_hash`.",
+        "Patch 13: the core is `MapLayoutDataV2` (cells with variants, points), version 2."
       ],
       "type": {
         "kind": "struct",
@@ -1213,7 +1184,7 @@
             "name": "core",
             "type": {
               "defined": {
-                "name": "MapLayoutData"
+                "name": "MapLayoutDataV2"
               }
             }
           }
@@ -1221,9 +1192,9 @@
       }
     },
     {
-      "name": "MapLayoutData",
+      "name": "MapLayoutDataV2",
       "docs": [
-        "map `[\"layout\", map]`."
+        "map `[\"layout\", map]` (patch 13)."
       ],
       "type": {
         "kind": "struct",
@@ -1237,9 +1208,9 @@
             "type": "pubkey"
           },
           {
-            "name": "tiles",
+            "name": "cells",
             "docs": [
-              "Row-major `Tile` bytes, `MAP_MAX` cells per row."
+              "Row-major cell bytes (`cell_byte`: tile type and variant), `MAP_MAX` cells per row."
             ],
             "type": {
               "array": [
@@ -1266,29 +1237,9 @@
             "type": "u8"
           },
           {
-            "name": "entrance",
-            "type": {
-              "defined": {
-                "name": "Cell"
-              }
-            }
-          },
-          {
-            "name": "exit",
-            "type": {
-              "defined": {
-                "name": "Cell"
-              }
-            }
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          },
-          {
-            "name": "chests",
+            "name": "points",
             "docs": [
-              "Visible chests, `0..chest_count` used: `data` is the reward table id."
+              "The entrance, the exit and the visible chests, `0..point_count` used."
             ],
             "type": {
               "array": [
@@ -1297,12 +1248,12 @@
                     "name": "MapPoint"
                   }
                 },
-                4
+                6
               ]
             }
           },
           {
-            "name": "chest_count",
+            "name": "point_count",
             "type": "u8"
           },
           {
@@ -1310,6 +1261,10 @@
             "docs": [
               "The reward table of the boss (registry `Rewards` id, `NO_TABLE` = none)."
             ],
+            "type": "u8"
+          },
+          {
+            "name": "bump",
             "type": "u8"
           }
         ]
@@ -1437,8 +1392,8 @@
     {
       "name": "PointKind",
       "docs": [
-        "A map point type (`MapPoint.kind`, docs/MAP_DESCRIPTION.md 7.1). The entrance and the exit",
-        "stay in `MapLayoutData.entrance` / `exit`; only visible chests are points for now."
+        "A map point type (`MapPoint.kind`, docs/MAP_DESCRIPTION.md 7.1). `Entrance` and `Exit`",
+        "appended in patch 13 (`MapLayoutDataV2.points`)."
       ],
       "repr": {
         "kind": "rust"
@@ -1448,6 +1403,35 @@
         "variants": [
           {
             "name": "Chest"
+          },
+          {
+            "name": "Entrance"
+          },
+          {
+            "name": "Exit"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PointsWritten",
+      "docs": [
+        "Patch 13 (replaces `ChestsWritten` of patch 11)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "map",
+            "type": "pubkey"
+          },
+          {
+            "name": "point_count",
+            "type": "u8"
+          },
+          {
+            "name": "boss_table",
+            "type": "u8"
           }
         ]
       }

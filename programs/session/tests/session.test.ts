@@ -646,7 +646,9 @@ const FULL_SELECTION = [0, 1, 2, 3, 4, 5];
 const NO_SKILL = 0xff;
 
 // The map lane's demo preset (programs/map/tests/map.test.ts): 16x16 room in a wall ring.
-const TILE = { Floor: 0, Wall: 1, Entrance: 4, Exit: 5 };
+/** Patch 13: tile types (`TileKind`); a cell byte is the type in bits 7-3 and a variant in 2-0. */
+const TILE = { StoneFloor: 1, Wall: 4 };
+const cellByte = (kind: number, variant = 0) => (kind << 3) | variant;
 const ENTRANCE = { x: 1, y: 1 };
 const EXIT = { x: 14, y: 14 };
 const [WOLF, GOBLIN, CHIEFTAIN, GOBLIN_WARRIOR, SHAMAN] = [0, 1, 2, 3, 4];
@@ -699,10 +701,8 @@ async function createFinalizedMap(dm: Keypair, bossLevel = 1, roster: SpawnDef[]
     .accountsStrict({ ...edit, systemProgram: SystemProgram.programId })
     .signers([dm])
     .rpc();
-  const tiles = new Array(15 * 32 + 16).fill(TILE.Wall);
-  for (let y = 1; y < 15; y++) for (let x = 1; x < 15; x++) tiles[y * 32 + x] = TILE.Floor;
-  tiles[ENTRANCE.y * 32 + ENTRANCE.x] = TILE.Entrance;
-  tiles[EXIT.y * 32 + EXIT.x] = TILE.Exit;
+  const tiles = new Array(15 * 32 + 16).fill(cellByte(TILE.Wall));
+  for (let y = 1; y < 15; y++) for (let x = 1; x < 15; x++) tiles[y * 32 + x] = cellByte(TILE.StoneFloor, (x + y) % 8);
   await mapProgram.methods.writeLayout(0, Buffer.from(tiles)).accountsStrict(edit).signers([dm]).rpc();
   const spawns = roster.map((s) => ({
     bestiaryId: s.id,
@@ -714,13 +714,19 @@ async function createFinalizedMap(dm: Keypair, bossLevel = 1, roster: SpawnDef[]
     aspects: 0,
     pack: s.pack,
   }));
-  await mapProgram.methods.writeSpawns(ENTRANCE, EXIT, spawns).accountsStrict(edit).signers([dm]).rpc();
-  const chests = (loot.chests ?? []).map((c) => ({ kind: { chest: {} }, x: c.x, y: c.y, data: c.table }));
-  await mapProgram.methods.writeChests(chests, loot.bossTable ?? T1_BOSS).accountsStrict(edit).signers([dm]).rpc();
-  // Patch 6: the builder rules read the registry bestiary and monster skills; patch 11 the rewards.
+  await mapProgram.methods.writeSpawns(spawns).accountsStrict(edit).signers([dm]).rpc();
+  // Patch 13: the entrance, the exit and the chests are points.
+  const points = [
+    { kind: { entrance: {} }, ...ENTRANCE, data: 0 },
+    { kind: { exit: {} }, ...EXIT, data: 0 },
+    ...(loot.chests ?? []).map((c) => ({ kind: { chest: {} }, x: c.x, y: c.y, data: c.table })),
+  ];
+  await mapProgram.methods.writePoints(points, loot.bossTable ?? T1_BOSS).accountsStrict(edit).signers([dm]).rpc();
+  // Patch 6: the builder rules read the registry bestiary and monster skills; patch 11 the rewards,
+  // patch 13 the tileset.
   await mapProgram.methods
     .finalizeMap(new Array(32).fill(7))
-    .accountsStrict({ ...edit, bestiary, monsterSkills, rewards })
+    .accountsStrict({ ...edit, bestiary, monsterSkills, rewards, tileset })
     .signers([dm])
     .rpc();
   return { map, layout };
@@ -1608,9 +1614,9 @@ describe("deadroll_session: lobby, auth and movement on the demo map", { skip: S
     assert.equal(s.turnOrderLen, 0);
     assert.deepEqual([s.pending.attacker, s.pending.target], [EMPTY_UNIT, EMPTY_UNIT]);
     assert.ok(s.pending.participation.equals(party.players[0].participation));
-    // Registry snapshot: speed and initiative per monster, tile costs (Wall impassable).
+    // Registry snapshot: speed and initiative per monster, tile costs by tile type (patch 13).
     assert.ok(s.monsterSpeed.slice(0, DEMO_SPAWNS.length).every((v: number) => v >= 1));
-    assert.equal(s.tileCost[TILE.Wall], 0);
+    assert.deepEqual(Array.from(s.tileCost), [0, 1, 1, 1, 0, 1, 2, 0, 1, 2, 0, ...new Array(21).fill(0)]);
     // Nobody acts before the initiative roll.
     await rejects(party.move(0, party.players[0].wallet, [S]), "RollPending");
     await rejects(party.start(party.dm), "NotInLobby");

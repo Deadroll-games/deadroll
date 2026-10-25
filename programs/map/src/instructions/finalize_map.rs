@@ -12,10 +12,11 @@ use deadroll_registry::state::{
 use deadroll_rules::{
     config::BalanceConfig,
     loot::{map_rules, LootTable},
+    tiles::tile_rules,
     MonsterTemplate,
 };
 use deadroll_skillcheck::monster::MonsterSkill;
-use deadroll_types::{seeds, MapLayoutData, MapStatus};
+use deadroll_types::{seeds, MapLayoutDataV2, MapStatus};
 use solana_sha256_hasher::hash;
 
 use crate::{
@@ -30,6 +31,8 @@ pub const BESTIARY_TABLE: Pubkey = pubkey!("3uJyWiz7NeVekP4w1iZkKxKnJ5pMbxC6ciz7
 pub const MONSTER_SKILLS_TABLE: Pubkey = pubkey!("NQNEuKDUZhACnTJ9sD3dW49BoiPtJPatp6bpY61r81p");
 /// Patch 11: registry `["rewards"]`.
 pub const REWARDS_TABLE: Pubkey = pubkey!("FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK");
+/// Patch 13: registry `["tileset"]`.
+pub const TILESET_TABLE: Pubkey = pubkey!("GqzUadKRKmJNT2RQAhrTz31qdoMfTGmya3Cfz2vAhXHu");
 
 #[derive(Accounts)]
 pub struct FinalizeMap<'info> {
@@ -54,6 +57,10 @@ pub struct FinalizeMap<'info> {
     /// CHECK: registry `["rewards"]` table (patch 11): the chest and boss reward tables.
     #[account(address = REWARDS_TABLE @ MapError::InvalidRegistryTable)]
     pub rewards: UncheckedAccount<'info>,
+    /// CHECK: registry `["tileset"]` table (patch 13): passability of every tile type, the same
+    /// records `open_session` gives movement.
+    #[account(address = TILESET_TABLE @ MapError::InvalidRegistryTable)]
+    pub tileset: UncheckedAccount<'info>,
 }
 
 /// The builder rules of every bestiary template a spawn names, from the registry (`None`: no
@@ -61,7 +68,7 @@ pub struct FinalizeMap<'info> {
 fn templates(
     bestiary: &AccountInfo,
     skills: &AccountInfo,
-    layout: &MapLayoutData,
+    layout: &MapLayoutDataV2,
 ) -> Result<Box<[Option<SpawnRules>; BESTIARY_MAX]>> {
     let beasts = table_body(bestiary, TableKind::Bestiary)
         .map_err(|_| error!(MapError::InvalidRegistryTable))?;
@@ -96,16 +103,12 @@ fn templates(
 /// The builder view of every reward table the layout names (`None`: no such table).
 fn reward_tables(
     rewards: &AccountInfo,
-    layout: &MapLayoutData,
+    layout: &MapLayoutDataV2,
 ) -> Result<[Option<TableRules>; REWARDS_MAX]> {
     let body = table_body(rewards, TableKind::Rewards)
         .map_err(|_| error!(MapError::InvalidRegistryTable))?;
     let mut out = [None; REWARDS_MAX];
-    let ids = layout
-        .chest_list()
-        .iter()
-        .map(|c| c.data)
-        .chain([layout.boss_table]);
+    let ids = layout.chests().map(|c| c.data).chain([layout.boss_table]);
     for id in ids {
         if let Some(slot) = out.get_mut(id as usize) {
             *slot = record(&body, TableKind::Rewards, id as usize)
@@ -117,7 +120,7 @@ fn reward_tables(
 }
 
 /// Runs every builder rule, then freezes the map: `layout_hash` = SHA-256 of the layout core
-/// bytes (account data `[8 .. 8 + MapLayoutData::SIZE]`).
+/// bytes (account data `[8 .. 8 + MapLayoutDataV2::SIZE]`).
 pub fn handler(ctx: Context<FinalizeMap>, secrets_root: [u8; 32]) -> Result<()> {
     let accounts = ctx.accounts;
     let rules = templates(
@@ -126,6 +129,10 @@ pub fn handler(ctx: Context<FinalizeMap>, secrets_root: [u8; 32]) -> Result<()> 
         &accounts.layout.core,
     )?;
     let tables = reward_tables(&accounts.rewards, &accounts.layout.core)?;
+    let tiles = tile_rules(
+        &table_body(&accounts.tileset, TableKind::Tileset)
+            .map_err(|_| error!(MapError::InvalidRegistryTable))?,
+    );
     let map = &mut accounts.map;
     let loot = MapLoot {
         min_players: map.min_players,
@@ -137,6 +144,7 @@ pub fn handler(ctx: Context<FinalizeMap>, secrets_root: [u8; 32]) -> Result<()> 
         map.core.height,
         map.tier,
         &accounts.layout.core,
+        &tiles,
         |id| rules.get(id as usize).copied().flatten(),
         &loot,
     )
@@ -145,7 +153,7 @@ pub fn handler(ctx: Context<FinalizeMap>, secrets_root: [u8; 32]) -> Result<()> 
     let layout_hash: [u8; 32] = {
         let info = accounts.layout.to_account_info();
         let data = info.try_borrow_data()?;
-        hash(&data[8..8 + MapLayoutData::SIZE]).to_bytes()
+        hash(&data[8..8 + MapLayoutDataV2::SIZE]).to_bytes()
     };
     map.core.layout_hash = layout_hash;
     // TODO(post-demo): declared secret counts with the commit-reveal trap (L6.5).
@@ -171,6 +179,7 @@ mod tests {
             (seeds::BESTIARY, BESTIARY_TABLE),
             (seeds::MONSTER_SKILLS, MONSTER_SKILLS_TABLE),
             (seeds::REWARDS, REWARDS_TABLE),
+            (seeds::TILESET, TILESET_TABLE),
         ] {
             let (pda, _) = Pubkey::find_program_address(&[seed], &deadroll_registry::ID);
             assert_eq!(pda, address);

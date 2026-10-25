@@ -1,5 +1,5 @@
 // Map presets (assets/registry/maps/*.json) as the map program stores them.
-// Format and legend: crates/mapcheck/tests/demo_preset.rs (the Rust check of the same files).
+// Format and legend: crates/rules/tests/demo_preset.rs (the Rust check of the same files).
 import { readFileSync } from "node:fs";
 
 /** `MAP_MAX`: tiles are row-major with this stride whatever the map width. */
@@ -10,17 +10,43 @@ export const SPAWNS_MAX = 24;
 export const CHESTS_MAX = 4;
 export const NO_TABLE = 0xff;
 
-/** `Tile` discriminants (crates/types). */
-export const Tile = { Floor: 0, Wall: 1, Water: 2, Door: 3, Entrance: 4, Exit: 5, Trap: 6 } as const;
+/** Patch 13: `TileKind` discriminants (crates/types), bits 7-3 of a cell byte. */
+export const Tile = {
+  Void: 0,
+  StoneFloor: 1,
+  WoodenFloor: 2,
+  Dirt: 3,
+  Wall: 4,
+  Door: 5,
+  ShallowWater: 6,
+  DeepWater: 7,
+  Stairs: 8,
+  Rubble: 9,
+  Chasm: 10,
+} as const;
+/** `PointKind` discriminants (crates/types). */
+export const PointKind = { Chest: 0, Entrance: 1, Exit: 2 } as const;
 
+/** A cell byte (`cell_byte`): tile type and variant. */
+export const cellByte = (kind: number, variant = 0) => ((kind & 31) << 3) | (variant & 7);
+/** The tile type of a cell byte (`cell_kind`). */
+export const cellKind = (byte: number) => (byte >> 3) & 31;
+
+/** Row characters, variant 0; `E` and `X` are a stone floor with the entrance or the exit point. */
 const LEGEND: Record<string, number> = {
+  " ": Tile.Void,
+  ".": Tile.StoneFloor,
+  E: Tile.StoneFloor,
+  X: Tile.StoneFloor,
+  "=": Tile.WoodenFloor,
+  ",": Tile.Dirt,
   "#": Tile.Wall,
-  ".": Tile.Floor,
-  "~": Tile.Water,
   D: Tile.Door,
-  E: Tile.Entrance,
-  X: Tile.Exit,
-  T: Tile.Trap,
+  "~": Tile.ShallowWater,
+  W: Tile.DeepWater,
+  ">": Tile.Stairs,
+  "%": Tile.Rubble,
+  _: Tile.Chasm,
 };
 
 export type Cell = { x: number; y: number };
@@ -50,7 +76,7 @@ export type MapPreset = {
   /** Patch 11: reward table of the boss event. */
   bossTable: number;
   chests: Chest[];
-  /** `MAP_CELLS` bytes, index `y * MAP_STRIDE + x`; cells outside the map stay Floor (0). */
+  /** `MAP_CELLS` cell bytes, index `y * MAP_STRIDE + x`; cells outside the map stay Void (0). */
   tiles: Uint8Array;
   entrance: Cell;
   exit: Cell;
@@ -82,9 +108,15 @@ export function parseMapPreset(json: any): MapPreset {
     [...row].forEach((ch, x) => {
       const tile = LEGEND[ch];
       if (tile === undefined) throw new Error(`unknown tile character ${JSON.stringify(ch)} at ${x},${y}`);
-      tiles[y * MAP_STRIDE + x] = tile;
-      if (tile === Tile.Entrance) entrance = { x, y };
-      if (tile === Tile.Exit) exit = { x, y };
+      tiles[y * MAP_STRIDE + x] = cellByte(tile);
+      if (ch === "E") {
+        if (entrance) throw new Error("preset has two E cells");
+        entrance = { x, y };
+      }
+      if (ch === "X") {
+        if (exit) throw new Error("preset has two X cells");
+        exit = { x, y };
+      }
     });
   });
   if (!entrance || !exit) throw new Error("preset needs one E and one X cell");
@@ -120,7 +152,16 @@ export function loadMapPreset(path: string | URL = DEMO_MAP_PATH): MapPreset {
   return parseMapPreset(JSON.parse(readFileSync(path, "utf8")));
 }
 
-/** The tile bytes `write_layout(0, ...)` needs: rows 0..height at stride 32, last row cut at width. */
+/** `write_points`: the entrance, the exit, then the chests (`MapPoint`, the data of a chest is its table). */
+export function presetPoints(preset: MapPreset): { kind: number; x: number; y: number; data: number }[] {
+  return [
+    { kind: PointKind.Entrance, ...preset.entrance, data: 0 },
+    { kind: PointKind.Exit, ...preset.exit, data: 0 },
+    ...preset.chests.map((c) => ({ kind: PointKind.Chest, x: c.x, y: c.y, data: c.table })),
+  ];
+}
+
+/** The cell bytes `write_layout(0, ...)` needs: rows 0..height at stride 32, last row cut at width. */
 export function layoutBytes(preset: MapPreset): Uint8Array {
   return preset.tiles.slice(0, (preset.height - 1) * MAP_STRIDE + preset.width);
 }

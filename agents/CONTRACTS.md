@@ -68,7 +68,7 @@ Source      Magical, Combat
 Form        Strike, Projectile
 TimeTag     Instant, DoT
 StateKind   Burning, Chill, Freeze, Bleeding, Shock, Stun   (P0 uses Burning, Chill, Freeze, Bleeding)
-Tile        Floor, Wall, Water, Door, Entrance, Exit, Trap
+Tile        Floor, Wall, Water, Door, Entrance, Exit, Trap   (before patch 13; TileKind, section 21)
 Tier        u8 in 1..=14 (1 is best)
 SessionStatus  Lobby, Active, Victory, Wiped, Fled, Abandoned
 MapStatus   Draft, Finalized, InSession, Finished
@@ -113,6 +113,7 @@ Character       { version, owner, index, nft: Option<Pubkey>, race, class, level
 Map             { version, dm, index, width: u8, height: u8, status: Draft|Finalized|InSession|Finished,
                   layout_hash: [u8; 32], secrets_root: [u8; 32], bump }
 MapLayout       { version, map, tiles: [u8; 1024], spawns: [Spawn; 24], spawn_count: u8, entrance: Cell, exit: Cell, bump }
+                (patch 13: core MapLayoutDataV2, section 21)
 Spawn           { bestiary_id: u8, x: u8, y: u8, level: u8, skills: u16, flags: u8, aspects: u8, pack: u8 }
 GameSession     { version, map, dm, status, price_lamports: u64, players: [Pubkey; 4], player_count: u8,
                   turn_order: [u8; 28], turn_index: u8, round: u16, action_counter: u32,
@@ -803,3 +804,62 @@ A closed chest occupies its cell for movement and knockback; an open one does no
 the reward events start at `LOOT_ROLL_BASE` in the paying action's VRF stream, after the combat
 rolls (rule 10). The DM's deadline is `ended_at + GameSession.settle_timeout_secs`; a `mock-vrf`
 session (localnet only) accepts maps with seconds, so the tests reach the claims after it.
+
+## 21. Patch 13a: tile types, cell byte, map points, mapcheck from the Tileset
+
+docs/MAP_DESCRIPTION.md 3, 4.1, 4.2, 7.1, 10. Nothing in `crates/types` is renamed or removed:
+`Tile` and `MapLayoutData` stay (no longer written), the map layout core is the new
+`MapLayoutDataV2`.
+
+`crates/types`, added:
+
+```
+enums   TileKind { Void, StoneFloor, WoodenFloor, Dirt, Wall, Door, ShallowWater, DeepWater,
+                   Stairs, Rubble, Chasm }                      ids 0-10 (docs 4.2), 11-31 reserved
+        PointKind appended: Entrance, Exit                      (Chest = 0, Entrance = 1, Exit = 2)
+fns     cell_kind(byte) = byte >> 3, cell_variant(byte) = byte & 7, cell_byte(kind, variant)
+consts  TILE_KINDS_MAX = 32, TILE_VARIANTS = 8, POINTS_MAX = 2 + CHESTS_MAX
+structs MapLayoutDataV2 { version, map, cells: [u8; 1024], spawns: [Spawn; 24], spawn_count,
+                          points: [MapPoint; POINTS_MAX], point_count, boss_table, bump }
+        (1301 bytes; point_list, point(kind), entrance, exit, chests)
+Tile, MapLayoutData   unchanged, no longer written (before patch 13)
+```
+
+Registry: `Tileset` records stay 8 bytes `[passable, cost, blocks_los, flags, reserved x4]`, the
+record index is the `TileKind` id, `max_len = 32 x 8`; `flags` bit 0 = door.
+`deadroll_rules::tiles::{record, validate_record, tile_rules}` is the one decoder: `write_table`,
+`finalize_map`, `open_session` and the website read it. `assets/registry/tileset.json` has the 11
+starter tiles of docs 4.2.
+
+`deadroll_mapcheck`: `tiles::TileRules { cost: [u8; 32], known: u32, blocks_vision: u32 }` (input,
+built by `tile_rules`); `check_map(width, height, tier, &MapLayoutDataV2, &TileRules, template_of,
+loot)`; reachability over the 8 neighbors without cutting corners: a diagonal step needs both
+orthogonal cells to be passable tiles of the Tileset (units and closed chests do not block it); a
+row-bitset flood fill, the same cells as a BFS.
+`MapCheckError` appended: `TooManyPoints`, `PointOutOfBounds`, `PointNotPassable`, `PointOverlap`;
+`EntranceCount` / `ExitCount` now count points, `InvalidTile` is a type the Tileset does not have;
+`EntranceMismatch`, `ExitMismatch`, `InvalidPoint` are unused.
+
+Map program:
+
+```
+MapLayout             core: MapLayoutDataV2 (account name unchanged), core.version = 2
+create_map            cells start zero = Void
+write_layout(offset, cells: Vec<u8>)     any byte; the tile type is checked at finalize_map
+write_spawns(spawns)                     entrance and exit args removed
+write_points(points: Vec<MapPoint>, boss_table)   DM, Draft; at most POINTS_MAX (replaces write_chests)
+finalize_map          account tileset (registry ["tileset"]) appended
+events  PointsWritten { map, point_count, boss_table } (replaces ChestsWritten)
+errors  appended: TooManyPoints, PointOutOfBounds, PointNotPassable, PointOverlap
+```
+
+Session program:
+
+```
+GameSession   tile_cost: [u8; 7] (by Tile) removed; tile_cost: [u8; TILE_KINDS_MAX] (by tile type)
+              appended at the end
+open_session  entrance and chests from the layout points (chest index = order among the chest
+              points); MapLayout must be version 2
+```
+
+A move costs the tile type of the cell (`cell_kind`); the variant never changes a rule.

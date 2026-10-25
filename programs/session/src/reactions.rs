@@ -121,7 +121,7 @@ struct SessionField<'a> {
     width: u8,
     height: u8,
     layout: &'a MapLayoutView<'a>,
-    tile_cost: &'a [u8; deadroll_types::Tile::COUNT],
+    tile_cost: &'a [u8; deadroll_types::TILE_KINDS_MAX],
     units: [Cell; PARTY_MAX + MONSTERS_MAX + CHESTS_MAX],
     unit_count: usize,
 }

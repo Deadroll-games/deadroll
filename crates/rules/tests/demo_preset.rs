@@ -10,29 +10,36 @@
 //!   "spawns": [{ "bestiary_id": 0, "x": 5, "y": 2, "level": 1, "skills": 0,
 //!                "flags": 0, "aspects": 0, "pack": 1 }] }
 //! ```
-//! Row characters: `#` Wall, `.` Floor, `~` Water, `D` Door, `E` Entrance, `X` Exit, `T` Trap.
-//! The entrance and exit cells come from the `E` and `X` characters. Patch 11: `min_players`,
-//! `boss_table` (`reward_tables.json` id) and the visible `chests`.
+//! Row characters (patch 13, `TileKind`, variant 0): space Void, `.` StoneFloor, `=` WoodenFloor,
+//! `,` Dirt, `#` Wall, `D` Door, `~` ShallowWater, `W` DeepWater, `>` Stairs, `%` Rubble,
+//! `_` Chasm. `E` and `X` are a stone floor with the entrance or the exit point. Patch 11:
+//! `min_players`, `boss_table` (`reward_tables.json` id) and the visible `chests`. The layout's
+//! points are the entrance, the exit, then the chests in order.
 
 use std::path::PathBuf;
 
 use deadroll_mapcheck::{check_map, loot::MapLoot, tiles::cell_index};
-use deadroll_rules::{loot::map_rules, registry::Registry, BalanceConfig};
+use deadroll_rules::{loot::map_rules, registry::Registry, tiles::tile_rules, BalanceConfig};
 use deadroll_types::{
-    Cell, MapLayoutData, MapPoint, PointKind, Pubkey, Spawn, Tile, CHESTS_MAX, MAP_CELLS,
-    SPAWNS_MAX,
+    cell_byte, Cell, MapLayoutDataV2, MapPoint, PointKind, Pubkey, Spawn, TileKind, CHESTS_MAX,
+    MAP_CELLS, POINTS_MAX, SPAWNS_MAX,
 };
 use serde_json::Value;
 
-fn tile(ch: char) -> Tile {
+fn tile(ch: char) -> TileKind {
+    use TileKind as T;
     match ch {
-        '#' => Tile::Wall,
-        '.' => Tile::Floor,
-        '~' => Tile::Water,
-        'D' => Tile::Door,
-        'E' => Tile::Entrance,
-        'X' => Tile::Exit,
-        'T' => Tile::Trap,
+        ' ' => T::Void,
+        '.' | 'E' | 'X' => T::StoneFloor,
+        '=' => T::WoodenFloor,
+        ',' => T::Dirt,
+        '#' => T::Wall,
+        'D' => T::Door,
+        '~' => T::ShallowWater,
+        'W' => T::DeepWater,
+        '>' => T::Stairs,
+        '%' => T::Rubble,
+        '_' => T::Chasm,
         other => panic!("unknown tile character {other:?}"),
     }
 }
@@ -46,7 +53,7 @@ fn u8_field(v: &Value, key: &str) -> u8 {
 }
 
 /// Builds the layout described by a preset, as the seed script writes it on-chain.
-fn load(path: &PathBuf) -> (u8, u8, u8, u8, MapLayoutData) {
+fn load(path: &PathBuf) -> (u8, u8, u8, u8, MapLayoutDataV2) {
     let json: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     let (width, height, tier) = (
         u8_field(&json, "width"),
@@ -56,8 +63,8 @@ fn load(path: &PathBuf) -> (u8, u8, u8, u8, MapLayoutData) {
 
     let rows = json["rows"].as_array().expect("rows");
     assert_eq!(rows.len(), height as usize, "rows count != height");
-    let mut tiles = [Tile::Wall as u8; MAP_CELLS];
-    let (mut entrance, mut exit) = (Cell::default(), Cell::default());
+    let mut cells = [cell_byte(TileKind::Wall as u8, 0); MAP_CELLS];
+    let (mut entrance, mut exit) = (None, None);
     for (y, row) in rows.iter().enumerate() {
         let row = row.as_str().expect("row string");
         assert_eq!(
@@ -66,17 +73,16 @@ fn load(path: &PathBuf) -> (u8, u8, u8, u8, MapLayoutData) {
             "row {y} length != width"
         );
         for (x, ch) in row.chars().enumerate() {
-            let t = tile(ch);
             let cell = Cell {
                 x: x as u8,
                 y: y as u8,
             };
-            match t {
-                Tile::Entrance => entrance = cell,
-                Tile::Exit => exit = cell,
+            match ch {
+                'E' => assert!(entrance.replace(cell).is_none(), "two entrances"),
+                'X' => assert!(exit.replace(cell).is_none(), "two exits"),
                 _ => {}
             }
-            tiles[cell_index(cell.x, cell.y)] = t as u8;
+            cells[cell_index(cell.x, cell.y)] = cell_byte(tile(ch) as u8, 0);
         }
     }
 
@@ -96,10 +102,21 @@ fn load(path: &PathBuf) -> (u8, u8, u8, u8, MapLayoutData) {
         };
     }
 
-    let points = json["chests"].as_array().expect("chests");
-    assert!(points.len() <= CHESTS_MAX);
-    let mut chests = [MapPoint::default(); CHESTS_MAX];
-    for (slot, c) in chests.iter_mut().zip(points) {
+    let chests = json["chests"].as_array().expect("chests");
+    assert!(chests.len() <= CHESTS_MAX);
+    let end = |kind, cell: Option<Cell>| {
+        let cell = cell.expect("an E and an X");
+        MapPoint {
+            kind,
+            x: cell.x,
+            y: cell.y,
+            data: 0,
+        }
+    };
+    let mut points = [MapPoint::default(); POINTS_MAX];
+    points[0] = end(PointKind::Entrance, entrance);
+    points[1] = end(PointKind::Exit, exit);
+    for (slot, c) in points[2..].iter_mut().zip(chests) {
         *slot = MapPoint {
             kind: PointKind::Chest,
             x: u8_field(c, "x"),
@@ -108,18 +125,16 @@ fn load(path: &PathBuf) -> (u8, u8, u8, u8, MapLayoutData) {
         };
     }
 
-    let layout = MapLayoutData {
+    let layout = MapLayoutDataV2 {
         version: 1,
         map: Pubkey::default(),
-        tiles,
+        cells,
         spawns,
         spawn_count: list.len() as u8,
-        entrance,
-        exit,
-        bump: 0,
-        chests,
-        chest_count: points.len() as u8,
+        points,
+        point_count: 2 + chests.len() as u8,
         boss_table: u8_field(&json, "boss_table"),
+        bump: 0,
     };
     (width, height, tier, u8_field(&json, "min_players"), layout)
 }
@@ -129,6 +144,7 @@ fn every_preset_passes_the_builder_rules() {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/registry/maps");
     let reg = Registry::shipped().unwrap();
     let cfg = BalanceConfig::DEFAULT;
+    let tiles = tile_rules(&reg.tileset);
     let mut checked = 0;
     for entry in std::fs::read_dir(&dir).expect("assets/registry/maps") {
         let path = entry.unwrap().path();
@@ -145,6 +161,7 @@ fn every_preset_passes_the_builder_rules() {
                     height,
                     tier,
                     &layout,
+                    &tiles,
                     |id| reg.spawn_rules(id, &cfg.monsters),
                     &loot
                 ),

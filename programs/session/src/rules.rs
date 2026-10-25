@@ -8,7 +8,9 @@ use deadroll_combat::DamageRange;
 use deadroll_rules::{
     config::BalanceConfig, input::hero, items, monster, player, units, HeroStats,
 };
-use deadroll_types::{Aspect, Cell, Class, Form, Race, RangeTag, Source, Tile, STATS_COUNT};
+use deadroll_types::{
+    cell_kind, Aspect, Cell, Class, Form, Race, RangeTag, Source, STATS_COUNT, TILE_KINDS_MAX,
+};
 
 pub use deadroll_rules::units::{
     cooldown_after_use, roll_initiative, tick_cooldowns, Initiative, Unit, EMPTY_UNIT,
@@ -37,10 +39,11 @@ pub fn monster_ap(speed: u8) -> u8 {
     monster::monster_ap(speed, &BALANCE.monsters)
 }
 
-/// Action points to step onto a tile, `None` if it cannot be entered. `costs` is the registry
-/// `Tileset` copied at open (`GameSession.tile_cost`, 0 = impassable).
-pub fn step_cost(tile: Tile, costs: &[u8; Tile::COUNT]) -> Option<u8> {
-    match costs[tile as usize] {
+/// Action points to step onto a cell byte (its tile type, any variant), `None` if it cannot be
+/// entered. `costs` is the registry `Tileset` copied at open (`GameSession.tile_cost`,
+/// 0 = impassable or no such tile type).
+pub fn step_cost(cell: u8, costs: &[u8; TILE_KINDS_MAX]) -> Option<u8> {
+    match costs[cell_kind(cell) as usize] {
         0 => None,
         cost => Some(cost),
     }
@@ -194,11 +197,16 @@ mod tests {
 
     #[test]
     fn step_cost_from_the_tileset() {
+        use deadroll_types::{cell_byte, TileKind};
         let costs = crate::state::test_support::TILE_COST;
-        assert_eq!(step_cost(Tile::Floor, &costs), Some(1));
-        assert_eq!(step_cost(Tile::Water, &costs), Some(2));
-        assert_eq!(step_cost(Tile::Wall, &costs), None);
-        assert_eq!(step_cost(Tile::Trap, &[3; Tile::COUNT]), Some(3));
+        let at = |kind: TileKind, variant| step_cost(cell_byte(kind as u8, variant), &costs);
+        assert_eq!(at(TileKind::StoneFloor, 0), Some(1));
+        assert_eq!(at(TileKind::StoneFloor, 7), Some(1));
+        assert_eq!(at(TileKind::ShallowWater, 3), Some(2));
+        assert_eq!(at(TileKind::Wall, 0), None);
+        assert_eq!(at(TileKind::Chasm, 0), None);
+        assert_eq!(step_cost(u8::MAX, &costs), None, "a reserved id");
+        assert_eq!(step_cost(u8::MAX, &[3; TILE_KINDS_MAX]), Some(3));
     }
 
     #[test]

@@ -5378,18 +5378,6 @@
             }
           },
           {
-            "name": "tile_cost",
-            "docs": [
-              "Step cost in action points per `Tile`, 0 = cannot be entered (registry `Tileset`)."
-            ],
-            "type": {
-              "array": [
-                "u8",
-                7
-              ]
-            }
-          },
-          {
             "name": "acted_seq",
             "docs": [
               "`turn_seq` in which the current unit used its one attack or active skill",
@@ -5617,6 +5605,19 @@
           {
             "name": "settle_timeout_secs",
             "type": "u32"
+          },
+          {
+            "name": "tile_cost",
+            "docs": [
+              "Step cost in action points per tile type id (`TileKind`, a cell byte's bits 7-3), 0 = cannot",
+              "be entered (registry `Tileset`, copied at `open_session`)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
           }
         ]
       }
@@ -7841,8 +7842,8 @@
     {
       "name": "PointKind",
       "docs": [
-        "A map point type (`MapPoint.kind`, docs/MAP_DESCRIPTION.md 7.1). The entrance and the exit",
-        "stay in `MapLayoutData.entrance` / `exit`; only visible chests are points for now."
+        "A map point type (`MapPoint.kind`, docs/MAP_DESCRIPTION.md 7.1). `Entrance` and `Exit`",
+        "appended in patch 13 (`MapLayoutDataV2.points`)."
       ],
       "repr": {
         "kind": "rust"
@@ -7852,6 +7853,12 @@
         "variants": [
           {
             "name": "Chest"
+          },
+          {
+            "name": "Entrance"
+          },
+          {
+            "name": "Exit"
           }
         ]
       }

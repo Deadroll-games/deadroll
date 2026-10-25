@@ -16,12 +16,13 @@ use deadroll_skillcheck::{
     SKILL_ASPECTS_MAX,
 };
 use deadroll_types::{
-    Aspect, Family, Form, RangeTag, RewardKind, Source, StateKind, TimeTag, NO_TABLE,
+    Aspect, Family, Form, RangeTag, RewardKind, Source, StateKind, TileKind, TimeTag, NO_TABLE,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::loot::{self, LootEntry, LootLevel, LootTable};
 use crate::monster::{record, MonsterDefense, MonsterTemplate, NO_KIN};
+use crate::tiles;
 
 /// Bestiary slots (registry `BESTIARY_MAX`).
 pub const BESTIARY_MAX: usize = 32;
@@ -50,6 +51,8 @@ pub struct Registry {
     pub rewards: Vec<u8>,
     pub reward_tables: Vec<Option<LootTable>>,
     pub reward_names: Vec<String>,
+    /// Patch 13: the `tileset` table body (`tiles::tile_rules` decodes it).
+    pub tileset: Vec<u8>,
 }
 
 impl Registry {
@@ -73,6 +76,7 @@ impl Registry {
         let rewards_json = read("reward_tables.json")?;
         r.set_rewards(encode_rewards(&rewards_json)?);
         r.reward_names = names::<RewardTableJson>(&rewards_json, |t| t.name.clone())?;
+        r.tileset = encode_tileset(&read("tileset.json")?)?;
         Ok(r)
     }
 
@@ -132,6 +136,7 @@ impl Registry {
             rewards: Vec::new(),
             reward_tables: Vec::new(),
             reward_names: Vec::new(),
+            tileset: Vec::new(),
         })
     }
 
@@ -732,6 +737,47 @@ pub fn encode_rewards(json: &str) -> Result<Vec<u8>, String> {
         let bytes = table.to_record();
         LootTable::from_record(&bytes).ok_or_else(|| format!("{label}: invalid"))?;
         out.extend_from_slice(&bytes);
+    }
+    Ok(out)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TileJson {
+    tile: String,
+    passable: u8,
+    cost: u8,
+    blocks_los: u8,
+    flags: u8,
+}
+
+/// Patch 13: `tileset.json` as the `tileset` table body (`crate::tiles::record`): one record
+/// per tile type in id order (`TileKind`, docs/MAP_DESCRIPTION.md 4.2).
+pub fn encode_tileset(json: &str) -> Result<Vec<u8>, String> {
+    let list: Vec<TileJson> = records(json, "tileset")?;
+    if list.len() != TileKind::COUNT {
+        return Err(format!(
+            "tileset: {} records, one per tile type",
+            TileKind::COUNT
+        ));
+    }
+    let mut out = Vec::new();
+    for (i, t) in list.iter().enumerate() {
+        if parse(&t.tile, TileKind::ALL, "tile")? as usize != i {
+            return Err(format!(
+                "tileset: record {i} must be {:?}",
+                TileKind::ALL[i]
+            ));
+        }
+        let mut r = [0u8; tiles::record::SIZE];
+        r[tiles::record::PASSABLE] = t.passable;
+        r[tiles::record::COST] = t.cost;
+        r[tiles::record::BLOCKS_LOS] = t.blocks_los;
+        r[tiles::record::FLAGS] = t.flags;
+        if !tiles::validate_record(&r) {
+            return Err(format!("tileset: record {i} ({}) is invalid", t.tile));
+        }
+        out.extend_from_slice(&r);
     }
     Ok(out)
 }

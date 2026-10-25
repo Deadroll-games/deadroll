@@ -9,7 +9,7 @@ use deadroll_types::{seeds, MapStatus, NO_TABLE, PARTY_MAX};
 use crate::{
     errors::MapError,
     events::MapCreated,
-    state::{Map, MapLayout, MapSettings, ACCOUNT_VERSION},
+    state::{Map, MapLayout, MapSettings, ACCOUNT_VERSION, LAYOUT_VERSION},
 };
 
 #[derive(Accounts)]
@@ -84,9 +84,9 @@ pub fn handler(
     map.settle_timeout_secs = settle_timeout_secs;
 
     // Field by field: a full `MapLayoutData` literal would put 1.3 KB on the stack.
-    // Tiles start zeroed, which is `Tile::Floor`; the DM overwrites them with `write_layout`.
+    // Cells start zeroed, which is `TileKind::Void`; the DM overwrites them with `write_layout`.
     let layout = &mut ctx.accounts.layout.core;
-    layout.version = ACCOUNT_VERSION;
+    layout.version = LAYOUT_VERSION;
     layout.map = map_key;
     layout.bump = ctx.bumps.layout;
     layout.boss_table = NO_TABLE;

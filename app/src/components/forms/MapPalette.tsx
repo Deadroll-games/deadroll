@@ -5,13 +5,17 @@ import type { BuilderTool, MapPaletteProps } from "./types";
 import "./forms.css";
 
 const TILE_COLORS: Record<TileId, string> = {
-  [Tile.Floor]: "#3b3043",
+  [Tile.Void]: "#07050a",
+  [Tile.StoneFloor]: "#3b3043",
+  [Tile.WoodenFloor]: "#4a3628",
+  [Tile.Dirt]: "#3f3a2a",
   [Tile.Wall]: "#17111c",
-  [Tile.Water]: "#2b4f7a",
   [Tile.Door]: "#7a5a2b",
-  [Tile.Entrance]: "#2f6b3a",
-  [Tile.Exit]: "#8a6a1f",
-  [Tile.Trap]: "#6b2f2f",
+  [Tile.ShallowWater]: "#2b4f7a",
+  [Tile.DeepWater]: "#1b3352",
+  [Tile.Stairs]: "#5a4f62",
+  [Tile.Rubble]: "#4b4350",
+  [Tile.Chasm]: "#07050a",
 };
 
 const SPAWN_CAP = 24;
@@ -20,7 +24,7 @@ function toolPressed(current: BuilderTool, next: BuilderTool): boolean {
   if (current.kind !== next.kind) return false;
   if (current.kind === "tile" && next.kind === "tile") return current.tile === next.tile;
   if (current.kind === "spawn" && next.kind === "spawn") return current.bestiaryId === next.bestiaryId;
-  return current.kind === "erase" || current.kind === "chest";
+  return current.kind === "erase" || current.kind === "chest" || current.kind === "entrance" || current.kind === "exit";
 }
 
 export function MapPalette(p: MapPaletteProps) {
@@ -67,6 +71,24 @@ export function MapPalette(p: MapPaletteProps) {
               {entry.name}
             </button>
           ))}
+          <button
+            type="button"
+            className="btn"
+            aria-pressed={p.tool.kind === "entrance"}
+            disabled={locked}
+            onClick={() => p.onToolChange({ kind: "entrance" })}
+          >
+            Entrance
+          </button>
+          <button
+            type="button"
+            className="btn"
+            aria-pressed={p.tool.kind === "exit"}
+            disabled={locked}
+            onClick={() => p.onToolChange({ kind: "exit" })}
+          >
+            Exit
+          </button>
           <button
             type="button"
             className="btn"
