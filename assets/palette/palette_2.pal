@@ -54,6 +54,7 @@ ramp ogre      #0f0c08 #241e16 #3b3123 #574833 #7a6648 #a38c68
 ramp fur_pale  #14151a #2c2f36 #4a4f58 #6f7580 #9aa1aa #cfd5d8
 ramp wyrm      #080406 #140709 #1f0a0d #2e0f12 #431719 #6a2a24
 ramp hydra     #050c0c #0b1c1b #12302d #1c4740 #2d6556 #5a8f74
+ramp storm     #070a12 #0f1626 #18233d #243458 #3a4f7c #6a86b0
 
 dark dark
 curse curse
@@ -103,3 +104,8 @@ material griffin    fur_brown hair     dither
 material dragon_turtle hydra   stone    dither
 material centaur    fur_dark  skin_pale dither
 material jackal     fur_dark  gold     dither
+material storm      storm     storm    dither
+material phoenix    ash       fire     dither
+material shadow_horse fur_dark curse   dither
+material nightmare  fur_dark  fire     dither
+material pegasus    fur_pale  cloth    dither
