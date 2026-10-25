@@ -50,7 +50,7 @@ impl Battle<'_> {
                     .any(|f| f.m.alive && f.m.x == c.x && f.m.y == c.y))
     }
 
-    /// Steps from `from` to every cell (4 directions, floor costs 1, living units block).
+    /// Steps from `from` to every cell (8 directions, floor costs 1, living units block).
     pub(crate) fn distances(&self, from: Cell) -> Vec<u16> {
         let (w, h) = (self.width as usize, self.height as usize);
         let mut dist = vec![UNREACHABLE; w * h];
@@ -59,7 +59,17 @@ impl Battle<'_> {
         queue.push_back(from);
         while let Some(at) = queue.pop_front() {
             let d = dist[self.cell_index(at)];
-            let steps = [(0i16, -1i16), (1, 0), (0, 1), (-1, 0)];
+            // Patch 13: the 8 neighbors, a diagonal is one step (move_path).
+            let steps = [
+                (0i16, -1i16),
+                (1, -1),
+                (1, 0),
+                (1, 1),
+                (0, 1),
+                (-1, 1),
+                (-1, 0),
+                (-1, -1),
+            ];
             for (dx, dy) in steps {
                 let (x, y) = (at.x as i16 + dx, at.y as i16 + dy);
                 if x < 0 || y < 0 || x >= w as i16 || y >= h as i16 {

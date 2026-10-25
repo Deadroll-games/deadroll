@@ -55,6 +55,8 @@ const SLOT_HASHES = new PublicKey(VRF.slotHashes);
 
 const PRICE = new BN(LAMPORTS_PER_SOL / 10);
 const [N, E, S, W] = [0, 1, 2, 3];
+// Patch 13: move_path walks the 8 neighbors; a diagonal is one step.
+const [NE, SE, SW, NW] = [4, 5, 6, 7];
 const MAX_PATH = 16;
 const MONSTER_BASE = 4;
 const [WOLF, CHIEFTAIN] = [0, 2];
@@ -137,6 +139,13 @@ const RESONANT = fixedSeed(128);
 const signatures: { what: string; sig: string }[] = [];
 /** Every VRF callback, read back from the chain right after it landed. */
 const publicRolls: { sig: string; ok: boolean }[] = [];
+/** Patch 13: the compute units of a move, for the report (read right after it, while the ledger has it). */
+async function logCu(what: string, sig: string) {
+  const tx = await connection.getTransaction(sig, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
+  const vrf = (tx?.meta?.logMessages ?? []).some((l) => l.includes("invoke [2]"));
+  console.log(`${what}: ${tx?.meta?.computeUnitsConsumed ?? "?"} CU${vrf ? " (with a reactive VRF request)" : ""}`);
+}
+
 function track(what: string) {
   return (sig: string) => {
     signatures.push({ what, sig });
@@ -156,10 +165,26 @@ async function isProgram(id: PublicKey): Promise<boolean> {
   return (await connection.getAccountInfo(id))?.executable ?? false;
 }
 
-function path(steps: number[]): [number[], number] {
-  const padded = [...steps.slice(0, MAX_PATH)];
-  while (padded.length < MAX_PATH) padded.push(0);
-  return [padded, steps.length];
+const DELTA: [number, number][] = [
+  [0, -1],
+  [1, 0],
+  [0, 1],
+  [-1, 0],
+  [1, -1],
+  [1, 1],
+  [-1, 1],
+  [-1, -1],
+];
+
+/** The cells of a move_path: the direction `steps` from `start`. */
+function cellsOf(start: { x: number; y: number }, steps: number[]) {
+  const out: { x: number; y: number }[] = [];
+  let at = start;
+  for (const d of steps) {
+    at = { x: at.x + DELTA[d][0], y: at.y + DELTA[d][1] };
+    out.push(at);
+  }
+  return out;
 }
 
 const e = (name: string) => ({ [name]: {} });
@@ -407,11 +432,11 @@ class Demo {
   }
 
   // --- player moves, all through the session key (no wallet signature)
-  move(who: number, steps: number[]) {
+  async move(who: number, steps: number[]) {
     const pl = this.players[who];
-    const [padded, len] = path(steps);
+    const from = (await this.state()).playerPos[who];
     return session.methods
-      .moveUnit(padded, len)
+      .movePath(who, cellsOf(from, steps))
       .accountsStrict({
         signer: pl.actor.publicKey,
         session: this.acc.session,
@@ -515,13 +540,14 @@ class Demo {
     return this.consume(bearer, seed);
   }
   // --- DM moves through the DM's session key
-  monsterMove(monster: number, steps: number[]) {
-    const [padded, len] = path(steps);
+  async monsterMove(monster: number, steps: number[]) {
+    const m = (await this.monsters())[monster];
     return session.methods
-      .monsterMove(monster, padded, len)
+      .movePath(MONSTER_BASE + monster, cellsOf(m, steps))
       .accountsStrict({
         signer: this.dmActor.publicKey,
         session: this.acc.session,
+        participation: null,
         monsters: this.acc.monsters,
         layout: this.layout,
         sessionToken: this.dmToken,
@@ -529,7 +555,7 @@ class Demo {
       })
       .signers([this.dmActor])
       .rpc()
-      .then(track("monster_move"));
+      .then(track("move_path monster"));
   }
   monsterAct(monster: number, target: number) {
     const pl = this.players[target];
@@ -621,18 +647,11 @@ class Demo {
     }
     // Patch 11: a closed chest occupies its cell.
     for (let i = 0; i < s.chestCount; i++) if (!(s.chestsOpened & (1 << i))) taken.add(s.chests[i].y * MAP_STRIDE + s.chests[i].x);
-    const cost = (x: number, y: number) => {
-      if (x < 0 || y < 0 || x >= preset.width || y >= preset.height) return 0;
-      // Patch 13: the step cost of the cell's tile type, as the session copied the Tileset.
-      if (taken.has(y * MAP_STRIDE + x)) return 0;
-      return s.tileCost[cellKind(preset.tiles[y * MAP_STRIDE + x])];
-    };
-    const dirs = [
-      [N, 0, -1],
-      [E, 1, 0],
-      [S, 0, 1],
-      [W, -1, 0],
-    ];
+    // Patch 13: the step cost of the cell's tile type, as the session copied the Tileset.
+    const tile = (x: number, y: number) =>
+      x < 0 || y < 0 || x >= preset.width || y >= preset.height ? 0 : s.tileCost[cellKind(preset.tiles[y * MAP_STRIDE + x])];
+    const cost = (x: number, y: number) => (taken.has(y * MAP_STRIDE + x) ? 0 : tile(x, y));
+    const dirs = [N, NE, E, SE, S, SW, W, NW].map((d) => [d, ...DELTA[d]]);
     // Dijkstra on a 32x32 grid: a linear scan for the minimum is plenty.
     const dist = new Map<number, number>([[from.y * MAP_STRIDE + from.x, 0]]);
     const prev = new Map<number, [number, number, number]>();
@@ -650,6 +669,8 @@ class Demo {
         return steps;
       }
       for (const [dir, dx, dy] of dirs) {
+        // A diagonal never cuts a corner: both orthogonal cells must be passable tiles.
+        if (dx && dy && !(tile(x + dx, y) && tile(x, y + dy))) continue;
         const c = cost(x + dx, y + dy);
         if (!c) continue;
         const k = (y + dy) * MAP_STRIDE + x + dx;
@@ -673,13 +694,13 @@ class Demo {
     }
     if (take.length === 0) return 0;
     if (who !== null) {
-      await this.move(who, take);
+      await logCu(`move_path player, ${take.length} cells`, await this.move(who, take));
       return spent;
     }
     // A monster's walk stops on the first cell next to a Cold Snap bearer (patch 5): the AP
     // actually spent, after the reactive roll.
     const before = (await this.monsters())[monster!].actionPoints;
-    await this.monsterMove(monster!, take);
+    await logCu(`move_path monster, ${take.length} cells`, await this.monsterMove(monster!, take));
     const after = (await this.monsters())[monster!].actionPoints;
     await this.settle();
     return before - after;

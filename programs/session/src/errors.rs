@@ -190,4 +190,11 @@ pub enum SessionError {
     InvalidCacheSessions,
     #[msg("The character is not locked in this party")]
     NotLockedHere,
+    // Patch 13: move_path.
+    #[msg("A cell of the path is not next to the one before it")]
+    PathNotAdjacent,
+    #[msg("The unit, the participation and the signer do not match")]
+    ActorMismatch,
+    #[msg("A diagonal step cuts the corner of a cell that cannot be entered")]
+    CornerBlocked,
 }

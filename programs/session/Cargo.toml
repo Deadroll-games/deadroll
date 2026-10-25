@@ -46,6 +46,8 @@ deadroll-registry.workspace = true
 deadroll-combat = { workspace = true, features = ["borsh"] }
 # Shared game rules and the balance table (no Anchor), also used by tools/balance.
 deadroll-rules.workspace = true
+# Patch 13: the path of move_path (`walk`).
+deadroll-mapcheck.workspace = true
 # Skill block enums (category, purpose) of the character's `SkillRecord`.
 deadroll-skillcheck.workspace = true
 ephemeral-vrf-sdk.workspace = true

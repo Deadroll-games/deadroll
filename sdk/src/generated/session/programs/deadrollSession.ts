@@ -61,8 +61,7 @@ import {
   getJoinSessionInstructionAsync,
   getLeavePartyInstructionAsync,
   getMonsterActInstructionAsync,
-  getMonsterMoveInstructionAsync,
-  getMoveUnitInstructionAsync,
+  getMovePathInstructionAsync,
   getOpenChestInstructionAsync,
   getOpenSessionInstructionAsync,
   getSetReadyInstructionAsync,
@@ -79,8 +78,7 @@ import {
   parseJoinSessionInstruction,
   parseLeavePartyInstruction,
   parseMonsterActInstruction,
-  parseMonsterMoveInstruction,
-  parseMoveUnitInstruction,
+  parseMovePathInstruction,
   parseOpenChestInstruction,
   parseOpenSessionInstruction,
   parseSetReadyInstruction,
@@ -97,8 +95,7 @@ import {
   type JoinSessionAsyncInput,
   type LeavePartyAsyncInput,
   type MonsterActAsyncInput,
-  type MonsterMoveAsyncInput,
-  type MoveUnitAsyncInput,
+  type MovePathAsyncInput,
   type OpenChestAsyncInput,
   type OpenSessionAsyncInput,
   type ParsedActInstruction,
@@ -110,8 +107,7 @@ import {
   type ParsedJoinSessionInstruction,
   type ParsedLeavePartyInstruction,
   type ParsedMonsterActInstruction,
-  type ParsedMonsterMoveInstruction,
-  type ParsedMoveUnitInstruction,
+  type ParsedMovePathInstruction,
   type ParsedOpenChestInstruction,
   type ParsedOpenSessionInstruction,
   type ParsedSetReadyInstruction,
@@ -677,15 +673,14 @@ export const DeadrollSessionInstruction = {
   6: "JoinSession",
   7: "LeaveParty",
   8: "MonsterAct",
-  9: "MonsterMove",
-  10: "MoveUnit",
-  11: "OpenChest",
-  12: "OpenSession",
-  13: "SetReady",
-  14: "SetSessionKey",
-  15: "SettleParty",
-  16: "StartSession",
-  17: "StartTurn",
+  9: "MovePath",
+  10: "OpenChest",
+  11: "OpenSession",
+  12: "SetReady",
+  13: "SetSessionKey",
+  14: "SettleParty",
+  15: "StartSession",
+  16: "StartTurn",
   Act: 0,
   ClaimAfterTimeout: 1,
   CloseCache: 2,
@@ -695,15 +690,14 @@ export const DeadrollSessionInstruction = {
   JoinSession: 6,
   LeaveParty: 7,
   MonsterAct: 8,
-  MonsterMove: 9,
-  MoveUnit: 10,
-  OpenChest: 11,
-  OpenSession: 12,
-  SetReady: 13,
-  SetSessionKey: 14,
-  SettleParty: 15,
-  StartSession: 16,
-  StartTurn: 17,
+  MovePath: 9,
+  OpenChest: 10,
+  OpenSession: 11,
+  SetReady: 12,
+  SetSessionKey: 13,
+  SettleParty: 14,
+  StartSession: 15,
+  StartTurn: 16,
 } as const;
 
 export type DeadrollSessionInstruction =
@@ -819,23 +813,12 @@ export function identifyDeadrollSessionInstruction(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
-        new Uint8Array([89, 217, 46, 212, 219, 241, 41, 78]),
+        new Uint8Array([158, 240, 177, 126, 150, 198, 158, 225]),
       ),
       0,
     )
   ) {
-    return DeadrollSessionInstruction.MonsterMove;
-  }
-  if (
-    containsBytes(
-      data,
-      fixEncoderSize(getBytesEncoder(), 8).encode(
-        new Uint8Array([145, 126, 36, 232, 217, 195, 127, 23]),
-      ),
-      0,
-    )
-  ) {
-    return DeadrollSessionInstruction.MoveUnit;
+    return DeadrollSessionInstruction.MovePath;
   }
   if (
     containsBytes(
@@ -951,11 +934,8 @@ export type ParsedDeadrollSessionInstruction<
       instructionType: typeof DeadrollSessionInstruction.MonsterAct;
     } & ParsedMonsterActInstruction<TProgram>)
   | ({
-      instructionType: typeof DeadrollSessionInstruction.MonsterMove;
-    } & ParsedMonsterMoveInstruction<TProgram>)
-  | ({
-      instructionType: typeof DeadrollSessionInstruction.MoveUnit;
-    } & ParsedMoveUnitInstruction<TProgram>)
+      instructionType: typeof DeadrollSessionInstruction.MovePath;
+    } & ParsedMovePathInstruction<TProgram>)
   | ({
       instructionType: typeof DeadrollSessionInstruction.OpenChest;
     } & ParsedOpenChestInstruction<TProgram>)
@@ -1046,18 +1026,11 @@ export function parseDeadrollSessionInstruction<TProgram extends string>(
         ...parseMonsterActInstruction(instruction),
       };
     }
-    case DeadrollSessionInstruction.MonsterMove: {
+    case DeadrollSessionInstruction.MovePath: {
       assertIsInstructionWithAccounts(instruction);
       return {
-        instructionType: DeadrollSessionInstruction.MonsterMove,
-        ...parseMonsterMoveInstruction(instruction),
-      };
-    }
-    case DeadrollSessionInstruction.MoveUnit: {
-      assertIsInstructionWithAccounts(instruction);
-      return {
-        instructionType: DeadrollSessionInstruction.MoveUnit,
-        ...parseMoveUnitInstruction(instruction),
+        instructionType: DeadrollSessionInstruction.MovePath,
+        ...parseMovePathInstruction(instruction),
       };
     }
     case DeadrollSessionInstruction.OpenChest: {
@@ -1176,13 +1149,9 @@ export type DeadrollSessionPluginInstructions = {
     input: MonsterActAsyncInput,
   ) => ReturnType<typeof getMonsterActInstructionAsync> &
     SelfPlanAndSendFunctions;
-  monsterMove: (
-    input: MonsterMoveAsyncInput,
-  ) => ReturnType<typeof getMonsterMoveInstructionAsync> &
-    SelfPlanAndSendFunctions;
-  moveUnit: (
-    input: MoveUnitAsyncInput,
-  ) => ReturnType<typeof getMoveUnitInstructionAsync> &
+  movePath: (
+    input: MovePathAsyncInput,
+  ) => ReturnType<typeof getMovePathInstructionAsync> &
     SelfPlanAndSendFunctions;
   openChest: (
     input: OpenChestAsyncInput,
@@ -1281,15 +1250,10 @@ export function deadrollSessionProgram() {
               client,
               getMonsterActInstructionAsync(input),
             ),
-          monsterMove: (input) =>
+          movePath: (input) =>
             addSelfPlanAndSendFunctions(
               client,
-              getMonsterMoveInstructionAsync(input),
-            ),
-          moveUnit: (input) =>
-            addSelfPlanAndSendFunctions(
-              client,
-              getMoveUnitInstructionAsync(input),
+              getMovePathInstructionAsync(input),
             ),
           openChest: (input) =>
             addSelfPlanAndSendFunctions(

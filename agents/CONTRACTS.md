@@ -875,3 +875,31 @@ compares the bytes; fixture `app/src/chain/__fixtures__/mapcheck-wasm.json`.
 
 `deadroll_rules::map_tables::{spawn_rules, table_rules}`: the bestiary, monster skills and rewards
 records as builder rules, used by `finalize_map` and the WASM. No account or instruction changes.
+
+## 23. Patch 13c: one `move_path` for players and monsters
+
+docs/ARCHITECTURE.md 6 ("move(path): actor; spends action points; no rolls"). `move` is a Rust
+keyword, so the instruction is `move_path`.
+
+```
+move_path(unit: u8, path: Vec<Cell>)   actor; unit = Unit::id (player slot, MONSTER_UNIT_BASE + monster)
+  accounts  signer (mut), session (mut), participation: Option (the moving player's, none for a
+            monster), monsters (mut), layout, session_token: Option (authority: the participation's
+            player, else session.dm), program_identity, oracle_queue, vrf_program, slot_hashes,
+            system_program
+  path      1..=MAX_PATH (16) cells, each one of the 8 neighbors of the one before (Chebyshev 1,
+            a diagonal is one step), on the map, a tile type with a cost, no living unit, no closed
+            chest; a diagonal never cuts a corner: both orthogonal cells it passes between must be
+            enterable tiles (units and closed chests beside it do not block it);
+            action points = sum of the tile type costs
+  stop      the first cell next to an enemy whose EnemyAdjacent reactive answers: the walk ends there,
+            the rest of the path is not walked and its points stay, a VRF roll for the reactions
+            (the move itself rolls nothing)
+move_unit, monster_move   retired (removed)
+errors  appended: PathNotAdjacent, ActorMismatch, CornerBlocked (InvalidDirection no longer used)
+events  Moved, CellBurned unchanged
+```
+
+`deadroll_mapcheck::walk::{walk, Field, Blocker, WalkError, Walk, adjacent, MAX_PATH}`: the path
+checks over any `Field` (the session's map layout today, a combat arena later). `crates/sim`
+moves monsters over the 8 neighbors too.

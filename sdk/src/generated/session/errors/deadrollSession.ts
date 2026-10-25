@@ -192,8 +192,15 @@ export const DEADROLL_SESSION_ERROR__TOO_MANY_PENDING_PARTIES = 0x17c6; // 6086
 export const DEADROLL_SESSION_ERROR__INVALID_CACHE_SESSIONS = 0x17c7; // 6087
 /** NotLockedHere: The character is not locked in this party */
 export const DEADROLL_SESSION_ERROR__NOT_LOCKED_HERE = 0x17c8; // 6088
+/** PathNotAdjacent: A cell of the path is not next to the one before it */
+export const DEADROLL_SESSION_ERROR__PATH_NOT_ADJACENT = 0x17c9; // 6089
+/** ActorMismatch: The unit, the participation and the signer do not match */
+export const DEADROLL_SESSION_ERROR__ACTOR_MISMATCH = 0x17ca; // 6090
+/** CornerBlocked: A diagonal step cuts the corner of a cell that cannot be entered */
+export const DEADROLL_SESSION_ERROR__CORNER_BLOCKED = 0x17cb; // 6091
 
 export type DeadrollSessionError =
+  | typeof DEADROLL_SESSION_ERROR__ACTOR_MISMATCH
   | typeof DEADROLL_SESSION_ERROR__ALLY_ACCOUNT_MISSING
   | typeof DEADROLL_SESSION_ERROR__ALREADY_ACTED
   | typeof DEADROLL_SESSION_ERROR__ALREADY_CLAIMED
@@ -206,6 +213,7 @@ export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__CHEST_IN_THE_WAY
   | typeof DEADROLL_SESSION_ERROR__CHEST_NOT_ADJACENT
   | typeof DEADROLL_SESSION_ERROR__CHEST_OPENED
+  | typeof DEADROLL_SESSION_ERROR__CORNER_BLOCKED
   | typeof DEADROLL_SESSION_ERROR__DEATH_ACCOUNTS_MISSING
   | typeof DEADROLL_SESSION_ERROR__DEATHS_PENDING
   | typeof DEADROLL_SESSION_ERROR__DM_MAIN_WALLET_ONLY
@@ -261,6 +269,7 @@ export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__PARTICIPATION_MISSING
   | typeof DEADROLL_SESSION_ERROR__PARTY_ENDED
   | typeof DEADROLL_SESSION_ERROR__PARTY_FULL
+  | typeof DEADROLL_SESSION_ERROR__PATH_NOT_ADJACENT
   | typeof DEADROLL_SESSION_ERROR__PRICE_NOT_COLLECTED
   | typeof DEADROLL_SESSION_ERROR__PRICE_TOO_LOW
   | typeof DEADROLL_SESSION_ERROR__REACTIVE_ACCOUNTS_MISSING
@@ -288,6 +297,7 @@ let deadrollSessionErrorMessages:
   Record<DeadrollSessionError, string> | undefined;
 if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !== "production") {
   deadrollSessionErrorMessages = {
+    [DEADROLL_SESSION_ERROR__ACTOR_MISMATCH]: `The unit, the participation and the signer do not match`,
     [DEADROLL_SESSION_ERROR__ALLY_ACCOUNT_MISSING]: `A heal or buff on another ally needs that ally's participation`,
     [DEADROLL_SESSION_ERROR__ALREADY_ACTED]: `Only one attack or active skill per turn`,
     [DEADROLL_SESSION_ERROR__ALREADY_CLAIMED]: `Escrow is already claimed`,
@@ -300,6 +310,7 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__CHEST_IN_THE_WAY]: `A closed chest occupies this cell`,
     [DEADROLL_SESSION_ERROR__CHEST_NOT_ADJACENT]: `Stand next to the chest to open it`,
     [DEADROLL_SESSION_ERROR__CHEST_OPENED]: `This chest is already open`,
+    [DEADROLL_SESSION_ERROR__CORNER_BLOCKED]: `A diagonal step cuts the corner of a cell that cannot be entered`,
     [DEADROLL_SESSION_ERROR__DEATH_ACCOUNTS_MISSING]: `A death needs the character's SkillSet and Bag`,
     [DEADROLL_SESSION_ERROR__DEATHS_PENDING]: `A death is waiting to be finalized: start_turn (or a claim) first`,
     [DEADROLL_SESSION_ERROR__DM_MAIN_WALLET_ONLY]: `The DM settles with the main wallet, not a session key`,
@@ -355,6 +366,7 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__PARTICIPATION_MISSING]: `Participation account is required on a player's turn`,
     [DEADROLL_SESSION_ERROR__PARTY_ENDED]: `The party is over: its session key can no longer be set`,
     [DEADROLL_SESSION_ERROR__PARTY_FULL]: `Party is full`,
+    [DEADROLL_SESSION_ERROR__PATH_NOT_ADJACENT]: `A cell of the path is not next to the one before it`,
     [DEADROLL_SESSION_ERROR__PRICE_NOT_COLLECTED]: `Party price is not collected yet`,
     [DEADROLL_SESSION_ERROR__PRICE_TOO_LOW]: `Party price is below the minimum`,
     [DEADROLL_SESSION_ERROR__REACTIVE_ACCOUNTS_MISSING]: `A reactive skill triggers here: the VRF accounts and the payer are required`,

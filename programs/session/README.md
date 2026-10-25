@@ -25,7 +25,7 @@ All of them are created at `open_session` / `join_session` (the reward cache onc
 | `set_ready` | player | picks 4 active + 1 reactive + 1 passive, locks the character and its gear (CPI character) |
 | `start_session` | DM | rolls initiative, moves the map to InSession (CPI map) |
 | `start_turn`, `end_turn` | current unit | turn start (ticks, skips, cooldowns), turn end |
-| `move_unit`, `monster_move` | owner / DM | movement on the map |
+| `move_path(unit, path)` | player: owner or its session key; monster: DM or its session key | the cells in order (8 neighbors, diagonal = one step, never past an impassable corner), action points by tile type, no rolls; a reactive skill can stop the walk and roll (patch 13) |
 | `act`, `monster_act` | owner / DM | one action; requests a VRF value |
 | `consume_randomness` | VRF oracle | resolves the action from the VRF value |
 | `flee` | player | flee vote |

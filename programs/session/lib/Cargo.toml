@@ -42,6 +42,8 @@ deadroll-map.workspace = true
 deadroll-registry.workspace = true
 deadroll-combat = { workspace = true, features = ["borsh"] }
 deadroll-rules.workspace = true
+# Patch 13: the path of move_path (`walk`).
+deadroll-mapcheck.workspace = true
 deadroll-skillcheck.workspace = true
 ephemeral-vrf-sdk.workspace = true
 solana-sha256-hasher = { version = "3.1", features = ["sha2"] }
