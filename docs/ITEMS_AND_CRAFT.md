@@ -121,7 +121,7 @@ What the character carries:
 | What         | Limit                                                           |
 | ------------ | --------------------------------------------------------------- |
 | Items        | 20                                                              |
-| Consumables  | 5 slots; identical consumables stack in one slot                |
+| Consumables  | 5 slots; identical consumables stack in one slot, up to 5 units |
 | Resources    | 40 slots; one kind of resource per slot, up to 10 units per slot |
 | Skills       | 50, a separate limit (`SKILL_BUILDER.md`, section 11)           |
 

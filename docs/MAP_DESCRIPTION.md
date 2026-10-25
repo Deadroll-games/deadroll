@@ -82,9 +82,9 @@ bit 2-0: variant (0-7)
 | 8     | stairs down / exit                | yes      | no                           | 1                        |
 | 9     | rubble                            | yes      | no                           | 2                        |
 | 10    | chasm                             | no       | no                           |                          |
-| 11-31 | reserved                          |          |                              |                          |
+| 11-31 | reserved (ids are not used)       |          |                              |                          |
 
-Tile properties (passability, vision, cost) live in the on-chain `Tileset` table, not in the map.
+Tile properties (passability, vision, cost) live in the on-chain `Tileset` table, not in the map. A `Tileset` record is 8 bytes: passable, step cost, blocks vision, flags (bit 0 = door), 4 reserved bytes. The record index is the tile type id. The variant (bits 2-0 of the cell byte) does not affect anything yet.
 
 ### 4.3 What is computed and not stored
 
@@ -156,11 +156,22 @@ Variety without storage: the rasterizer slightly varies a prefab by PRNG (seed =
 
 `Map.points`: a list of `(type u8, x u8, y u8, data u8)`.
 
-| Type          | Required                | `data`          |
-| ------------- | ----------------------- | --------------- |
-| entrance      | exactly 1               |                 |
-| exit          | exactly 1               |                 |
-| visible chest | per map tier limits     | loot table id   |
+| Type (`PointKind`) | Required                | `data`          |
+| ------------------ | ----------------------- | --------------- |
+| chest (0)          | per map tier limits     | loot table id   |
+| entrance (1)       | exactly 1               |                 |
+| exit (2)           | exactly 1               |                 |
+
+Points are stored in the order the DM wrote them. The number of a chest in a party is its place among the chests (in point order).
+
+Besides the points, the map holds the settings the DM gives it at creation:
+
+- the **reward table of the boss** (at least 2 levels, `PARTY_AND_TURNS.md`, section 9.4);
+- the **minimum number of players** of the map: the party does not start with fewer, and the reward budget is checked for it (section 10.2);
+- the **chest radius** (1 to 10 cells): a chest cannot be opened while a living monster is within this distance of the chest or of any living player (`PARTY_AND_TURNS.md`, section 9.3.1);
+- the **issue deadline** (10 minutes to 10 hours) for the rewards after the party ends (`PARTY_AND_TURNS.md`, section 2, step 10).
+
+A closed chest occupies its cell; an open chest is passable. "A chest is reachable" means that a cell adjacent to it is reachable.
 
 ### 7.2 Monsters
 
@@ -239,13 +250,13 @@ Players see: "the map has 3 traps and 1 hidden stash", but do not know where.
 
 ## 10. Builder rules
 
-Checked by the program in the `create_map` instruction. The builder on the website calls the same code from the `deadroll-mapcheck` crate via WASM and shows errors before the transaction is sent.
+Checked by the program in the `finalize_map` instruction (not in `create_map`). The builder on the website calls the same code from the `deadroll-mapcheck` crate via WASM and shows errors before the transaction is sent.
 
 ### 10.1 Structure
 
 - [ ] Each side is from 8 to 32
 - [ ] Exactly one entrance and one exit, both on passable cells
-- [ ] **There is a path from the entrance to the exit** (breadth-first search over passable cells, taking objects into account)
+- [ ] **There is a path from the entrance to the exit** (reachability over the 8 neighbours of passable cells, without cutting corners, taking objects into account)
 - [ ] Every visible chest and every spawn is reachable from the entrance
 - [ ] Monsters, chests, the entrance, and the exit stand on passable cells without objects
 - [ ] Objects do not overlap and do not extend beyond the map
@@ -254,7 +265,7 @@ Checked by the program in the `create_map` instruction. The builder on the websi
 
 ### 10.2 Limits by map tier
 
-The numbers are starter values, tuned at balancing. Object limits depend on map size.
+The numbers are starter values, tuned at balancing. Object limits depend on map size. The reward budget is counted for the map's **minimum number of players**.
 
 | Parameter                  | Map tier 1 (levels 1-2)  | Map tier 2 (levels 3-4)  |
 | -------------------------- | ------------------------ | ------------------------ |
@@ -269,7 +280,7 @@ The numbers are starter values, tuned at balancing. Object limits depend on map 
 
 ### 10.3 Compute
 
-Breadth-first search over 1024 cells fits within the compute limit of a single transaction, but an L map is better created in two steps: `init_map` (allocate the account, write the grid in chunks) and `finalize_map` (rule check; after it the map is immutable).
+Reachability over 1024 cells fits within the compute limit of a single transaction, but a map is written in several steps: `create_map` (allocate the accounts), `write_layout` (the grid in chunks), `write_spawns`, `write_points`, and `finalize_map` (rule check; after it the map is immutable).
 
 ---
 
@@ -329,6 +340,8 @@ Data:
   32                 secrets_root
 ```
 
+This is the target format. In the current build the cells, spawns and points live in a separate `MapLayout` account (`["layout", map]`), and the `Map` account holds the header, the tier, the map settings of section 7.1 (minimum players, chest radius, issue deadline), the layout hash and `secrets_root`.
+
 ---
 
 ## 14. Storage budget
@@ -361,7 +374,7 @@ Data:
 - [ ] `Tileset` table with tile properties
 - [ ] `PrefabBook` with the starter set of prefabs
 - [ ] The `deadroll-mapcheck` crate: all checks of section 10, compiles into both the program and WASM
-- [ ] Instructions `init_map`, `write_map_chunk`, `finalize_map`
+- [ ] Instructions `create_map`, `write_layout`, `write_spawns`, `write_points`, `finalize_map`
 - [ ] DM client: salt generation, Merkle tree, export and import of the secrets file
 - [ ] Reveal instruction with proof verification and counting against the declared counts
 - [ ] DM obligations block the next turn

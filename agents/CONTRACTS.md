@@ -169,6 +169,7 @@ join_session(character, actor)       player; pays price to Escrow; creates Parti
                                      reads the items Loadout (last account) into Participation.equipment
 set_ready / start_session            all ready -> roll initiative (VRF) -> Active
 move(path)                           actor; spends action points; no rolls
+                                     (implemented as move_path(unit, path), same for players and monsters; `move` is a Rust keyword)
 act(skill_slot | base_attack, target) actor; requests VRF -> callback resolves hit via deadroll_combat;
                                      heal / buff skills: target = ally slot (own included), debuffs: monster
                                      index; optional trailing account target_participation = another ally

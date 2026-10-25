@@ -38,7 +38,7 @@ Related documents:
 9. The DM's final audit: reveal of all declared secrets
 10. Issuing rewards from temporary caches, paying the DM,
     refunding the remaining prepayment, closing session keys.
-    For now each player claims their own reward and experience (the owner or the owner's session key). The DM-signed issue is the target design and returns together with loot.
+    The DM issues the rewards to all players and takes the escrow in **one transaction signed by the main wallet** (the DM's session key is refused). The DM gives the map a deadline for this (from 10 minutes to 10 hours, set at map creation). After the deadline each player claims their own rewards and experience with their main wallet and gets their contribution back.
 
 ### 2.1 Party launch
 
@@ -72,7 +72,8 @@ The DM can publish a quest with a **private party code**. Such a quest is not vi
 ### 3.2 When the DM is paid
 
 - Only after the **final audit**: the DM has revealed all declared secrets and the program has verified them (`MAP_DESCRIPTION.md`).
-- If the DM abandons the party (reveal timeouts, no audit), the contributions are **returned to the players** proportionally, and the DM loses reputation.
+- The DM receives the escrow in the same transaction that issues the rewards (section 2, step 10), within the deadline set on the map.
+- If the DM abandons the party (reveal timeouts, no audit, or no issue before the deadline), the contributions are **returned to the players** proportionally, and the DM loses reputation.
 - If the party is never filled, the contributions are returned.
 
 ### 3.3 DM reputation
@@ -97,7 +98,16 @@ What happens to the contribution of a player who left the party early or lost co
 - **Entering combat:** as soon as any monster of a pack comes into the vision of any character, or an ambush trap triggers, the **whole pack** enters combat (`BESTIARY.md`, section 2.1). All characters and the pack's monsters get a time until turn set by initiative.
 - **Other packs** join a combat already in progress the same way: when any of their monsters comes into the party's vision. An incautious party can draw two packs at once.
 - **Leaving combat:** all monsters in combat are dead. The mode returns to exploration, and cooldowns keep counting in turns.
-- Experience is awarded for each defeated pack (`CHARACTER.md`, section 5).
+- Experience is awarded for each defeated pack (`CHARACTER.md`, section 5). Currently it is given for **each killed monster**: the full amount goes at once into the temporary cache of every living character, it is not divided. Awarding it per pack comes later.
+
+### 4.1 Planned: arena combat (big update)
+
+**Planned, not implemented.** The text above (section 4) describes how the game works now and stays valid until this update.
+
+- There are two modes: on the map (outside combat) and in combat.
+- When combat starts, a **mini-arena** opens (about 10×10 cells). Players and monsters are placed on it and move the same way as outside combat.
+- `move_path` is the same instruction on the map and in the arena: the player marks several cells in a row and walks along them.
+- On the map only **one monster per pack** is visible. The whole pack appears in the arena when combat starts.
 
 ---
 
@@ -109,14 +119,18 @@ At the start of its turn a character receives **action points (AP)** according t
 
 | Action                                 | Cost                              | Limit                                                       |
 | -------------------------------------- | --------------------------------- | ----------------------------------------------------------- |
-| Step onto a cell                       | 1 AP (difficult-terrain cell 2)   |                                                             |
+| Step onto a cell                       | 1 AP (difficult-terrain cell 2)   | to any of the 8 neighbours; a diagonal costs the same as a straight step; no corner cutting (section 5.1.1) |
 | Active skill                           | its own AP cost                   | **no more than one per turn**                               |
 | Basic attack                           | its own AP cost                   | **either a basic attack or an active skill** per turn, not both |
-| Interaction (door, chest, search)      | its own AP cost                   |                                                             |
+| Interaction (door, chest, search)      | its own AP cost                   | a chest only from an adjacent cell (section 9.3.1)          |
 | Escape                                 | the whole remaining turn          | combat only, needs unanimity (section 7.3)                  |
 | End turn                               | 0                                 |                                                             |
 
 Unspent AP are lost at the end of the turn.
+
+#### 5.1.1 Diagonal steps
+
+A character may step to any of the 8 neighbouring cells, and a diagonal step costs the same as a straight one. **Cutting a corner is forbidden**: a diagonal step is not allowed if either of the two cells beside it is impassable according to the `Tileset`. The same rule applies to the path checks of the map builder (`MAP_DESCRIPTION.md`, section 10.1).
 
 Haste changes the AP of a turn, not the order of turns.
 
@@ -198,14 +212,41 @@ A character at 0 HP leaves the fight at once: they do not take turns, cannot be 
 
 - A dead character becomes a tombstone (`CHARACTER.md`, section 11), and their temporary cache burns.
 - The party continues without them.
+- If a character dies in a new party before the rewards of an earlier party have been issued, the rewards of the earlier party are lost too.
 
 ---
 
 ## 8. Temporary cache
 
 - Each character in the party has their own **temporary cache** in `Participation`.
-- What accumulates there: experience for each **won combat**, and rewards from chests, hidden stashes and monsters.
+- What accumulates there: experience for each **killed monster**, and rewards from chests, hidden stashes and monsters.
 - The contents become the character's property only on **victory** or **peaceful exit**, after the DM's final audit.
+
+### 8.1 After the party ends
+
+- The character is **free right after the party ends**: the owner can release it from the finished party, join a new one, change gear or lay out the cache. The tombstone of a dead character stays locked.
+- The rewards of the finished party wait in a separate cache record of the character, **one record per party, up to 3 waiting parties** per character. A fourth join is rejected until one of them is issued or its DM deadline has passed. This replaces the earlier rule that the cache of an old party burns when the character enters a new one.
+- Issuing only makes the cache the player's property. **Nothing is put into the bag automatically.**
+
+### 8.2 Laying out the cache ("Done")
+
+The player lays the cache out on the site and signs "Done" with the main wallet in **one transaction**. The site offers:
+
+- take from the cache, also part of a stack, and top up an existing stack up to 10 units;
+- replace: what is taken out of the bag goes into the cache in its place;
+- rearrange slots, split a stack, throw an item out of the bag (with a confirmation).
+
+Rules checked by the program (the rewards are rolled only by the program, with VRF, and written into the cache by the program itself):
+
+- for each resource id: bag after + cache after = bag before + cache before - thrown away;
+- one kind of resource per slot, up to 10 units in a slot, up to 40 resource slots;
+- consumables only in the consumable slots (up to 5 units in a stack), everything else only in the resource slots.
+
+"Done" **closes the cache**: whatever was not taken burns, and the rent of the cache record returns to the owner. There is no timeout for the remainder, but an issued cache that was not closed with "Done" burns when the character joins the next party.
+
+The slot **lock** in the bag exists only on the site (the browser), can be switched on and off at any moment, and is separate from the lock at Ready.
+
+The site shows the summary screen right after victory, and an unclosed cache on the character page.
 
 ---
 
@@ -242,13 +283,22 @@ Each reward event (chest, hidden stash, boss) is rolled as follows:
 
 The peaceful exit penalty (section 7.2) lowers the chance of levels above the base level for that account.
 
+#### 9.3.1 Visible chests
+
+- A visible chest is on the map from the start; its contents are rolled when it is opened. A closed chest occupies its cell, an open one can be walked through.
+- A chest is opened from an adjacent cell (distance 1 in any direction, including diagonals) for AP, **once per party**. The reward is rolled for every living character (section 9.3).
+- A chest cannot be opened if a living monster is within the **chest radius** of the chest or of the character who opens it. The DM sets the radius on the map (1 to 10 cells), and it is checked from the chest and from every living player.
+- On hover the site shows the range of levels of the chest's table.
+
 ### 9.4 Boss guarantee
+
+The boss table has at least 2 levels.
 
 If the **base level** of the table dropped on the boss reward for the party, every participant **additionally** gets one reward **one level higher**. It can be a resource, recipe or blank, not necessarily for a weapon.
 
 ### 9.5 Experience
 
-- Experience is awarded for each **won combat**, accumulates in the cache, and is added to the character at the end.
+- Experience is awarded for each **killed monster**, in full to every living participant (it is not divided), accumulates in the cache, and is added to the character at the end. Awarding it per pack comes later (section 4).
 - A character whose level is noticeably higher than the map tier gets less experience or none, and no rewards are rolled for them.
 - The counterweight to the peaceful exit penalty applies here.
 
