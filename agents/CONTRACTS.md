@@ -863,3 +863,15 @@ open_session  entrance and chests from the layout points (chest index = order am
 ```
 
 A move costs the tile type of the cell (`cell_kind`); the variant never changes a rule.
+
+## 22. Patch 13b: mapcheck through WASM in the map builder
+
+`crates/mapcheck/wasm` (`deadroll-mapcheck-wasm`, ABI 1, README there): `set_table(kind, len)`
+(0 bestiary, 1 monster_skills, 2 rewards, 3 tileset: the registry bodies as written on chain) and
+`check_map(len)` on a borsh `MapCheckRequest { width, height, tier, min_players, layout:
+MapLayoutDataV2 }`: 0 valid, `1 + MapCheckError::code`, or a negative ABI error. Committed as
+`app/src/chain/wasm/mapcheck.wasm`, rebuilt by `bash crates/mapcheck/wasm/build.sh` (docker), CI
+compares the bytes; fixture `app/src/chain/__fixtures__/mapcheck-wasm.json`.
+
+`deadroll_rules::map_tables::{spawn_rules, table_rules}`: the bestiary, monster skills and rewards
+records as builder rules, used by `finalize_map` and the WASM. No account or instruction changes.

@@ -14,3 +14,5 @@ Checks, in order: sides 8..=32, tier limits, every cell a tile type of the Tiles
 Tier limits (starter values): tier 1 = levels 1-2, 4 monsters, 3 packs, 1 elite; tier 2 = levels 3-4, 8 monsters, 4 packs, 2 elites. The boss pack does not count.
 
 Presets: `assets/registry/maps/*.json`, checked with the shipped registry by `crates/rules/tests/demo_preset.rs` (format there).
+
+The website builder runs the same rules through `wasm/` (mapcheck.wasm, README there).

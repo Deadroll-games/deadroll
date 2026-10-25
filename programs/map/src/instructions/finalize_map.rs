@@ -6,16 +6,10 @@ use deadroll_mapcheck::{
 };
 use deadroll_registry::state::{
     records::{BESTIARY_MAX, REWARDS_MAX},
-    view::{record, table_body},
+    view::table_body,
     TableKind,
 };
-use deadroll_rules::{
-    config::BalanceConfig,
-    loot::{map_rules, LootTable},
-    tiles::tile_rules,
-    MonsterTemplate,
-};
-use deadroll_skillcheck::monster::MonsterSkill;
+use deadroll_rules::{config::BalanceConfig, loot::map_rules, map_tables, tiles::tile_rules};
 use deadroll_types::{seeds, MapLayoutDataV2, MapStatus};
 use solana_sha256_hasher::hash;
 
@@ -64,7 +58,8 @@ pub struct FinalizeMap<'info> {
 }
 
 /// The builder rules of every bestiary template a spawn names, from the registry (`None`: no
-/// such template, or a pool skill missing).
+/// such template, or a pool skill missing). Decoded by `deadroll_rules::map_tables`, the code the
+/// website's mapcheck WASM runs.
 fn templates(
     bestiary: &AccountInfo,
     skills: &AccountInfo,
@@ -81,21 +76,7 @@ fn templates(
         if id >= BESTIARY_MAX || out[id].is_some() {
             continue;
         }
-        out[id] = record(&beasts, TableKind::Bestiary, id)
-            .and_then(MonsterTemplate::from_record)
-            .and_then(|t| {
-                t.spawn_rules(
-                    |i| {
-                        let r = record(&pool, TableKind::MonsterSkills, i)?;
-                        // `write_table` validated it; only the category is read.
-                        (r[0] == 1)
-                            .then(|| MonsterSkill::decode_session(&r[1..]))
-                            .flatten()
-                            .map(|k| k.blocks.category)
-                    },
-                    &cfg.monsters,
-                )
-            });
+        out[id] = map_tables::spawn_rules(&beasts, &pool, spawn.bestiary_id, &cfg.monsters);
     }
     Ok(out)
 }
@@ -111,9 +92,7 @@ fn reward_tables(
     let ids = layout.chests().map(|c| c.data).chain([layout.boss_table]);
     for id in ids {
         if let Some(slot) = out.get_mut(id as usize) {
-            *slot = record(&body, TableKind::Rewards, id as usize)
-                .and_then(LootTable::from_record)
-                .map(|t| t.rules());
+            *slot = map_tables::table_rules(&body, id);
         }
     }
     Ok(out)

@@ -1,53 +1,52 @@
-// The builder's quick checks before any transaction (the authority is finalize_map).
-import { describe, expect, it } from "vitest";
+// Patch 13: the builder's verdict is crates/mapcheck through mapcheck.wasm, the code finalize_map
+// runs (crates/mapcheck/wasm), on the registry tables of the mock (the shipped JSON).
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { beforeAll, describe, expect, it } from "vitest";
 import { presetToLayout, MAP_PRESETS, mockTable } from "../chain/mock";
-import { NO_TABLE, TABLE_ERROR_MESSAGES, rewardTables } from "../chain/loot";
+import { MAPCHECK_MESSAGES, MapcheckWasm, type MapCheckDraft } from "../chain/mapcheckWasm";
+import { NO_TABLE } from "../chain/loot";
 import { cellByte, cellIndex, Tile } from "../chain/types";
-import { quickCheck } from "./MapBuilder";
+import { mapVerdict } from "./MapBuilder";
 
 const preset = MAP_PRESETS[0]!;
-const tables = rewardTables(mockTable("rewards"));
-
-function check(edit: (l: ReturnType<typeof presetToLayout>) => void): string[] {
-  const l = presetToLayout(preset);
-  edit(l);
-  const loot = { tier: preset.tier ?? 1, minPlayers: l.minPlayers, chests: l.chests, bossTable: l.bossTable, tables };
-  return quickCheck(l, () => null, loot);
-}
-
-describe("quickCheck: the entrance and the exit are points (patch 13)", () => {
-  it("needs both, on walkable cells, apart", () => {
-    expect(check((l) => (l.entrance = null))).toContain("Place the entrance");
-    expect(check((l) => (l.exit = null))).toContain("Place the exit");
-    expect(check((l) => (l.entrance = { x: 0, y: 0 }))).toContain("The entrance must stand on a walkable tile");
-    expect(check((l) => (l.tiles[cellIndex(l.exit!.x, l.exit!.y)] = cellByte(Tile.Chasm)))).toContain("The exit must stand on a walkable tile");
-    expect(check((l) => (l.exit = l.entrance))).toContain("The entrance and the exit share a cell");
-  });
-
-  it("accepts any walkable tile and variant under them", () => {
-    expect(check((l) => (l.tiles[cellIndex(l.exit!.x, l.exit!.y)] = cellByte(Tile.Stairs, 5)))).toEqual([]);
-  });
-
-  it("refuses a spawn on the entrance", () => {
-    expect(check((l) => (l.spawns[0] = { ...l.spawns[0]!, x: l.entrance!.x, y: l.entrance!.y })).some((e) => e.includes("stands on the entrance or the exit"))).toBe(true);
-  });
+let wasm: MapcheckWasm;
+beforeAll(async () => {
+  wasm = await MapcheckWasm.instantiate(readFileSync(resolve(import.meta.dirname, "../chain/wasm/mapcheck.wasm")));
+  wasm.setTables({ bestiary: mockTable("bestiary"), monsterSkills: mockTable("monster_skills"), rewards: mockTable("rewards"), tileset: mockTable("tileset") });
 });
 
-describe("quickCheck: chests (patch 11)", () => {
-  it("passes the demo preset with its chest and boss table", () => {
-    expect(check(() => {})).toEqual([]);
+function check(edit: (d: MapCheckDraft) => void = () => {}, skillError = () => null as string | null): string[] {
+  const d: MapCheckDraft = { width: preset.width, height: preset.height, tier: preset.tier ?? 1, ...presetToLayout(preset) };
+  edit(d);
+  return mapVerdict(wasm, d, skillError);
+}
+
+describe("mapVerdict", () => {
+  it("passes the demo preset", () => {
+    expect(check()).toEqual([]);
   });
 
-  it("refuses a chest on a wall, on the entrance and on a spawn", () => {
-    expect(check((l) => (l.chests[0] = { ...l.chests[0]!, x: 0, y: 0 }))).toContain("Chest 0 must stand on a free walkable tile");
-    expect(check((l) => (l.chests[0] = { ...l.chests[0]!, x: l.entrance!.x, y: l.entrance!.y }))).toContain("Chest 0 must stand on a free walkable tile");
-    expect(check((l) => (l.tiles[cellIndex(l.chests[0]!.x, l.chests[0]!.y)] = cellByte(Tile.DeepWater)))).toContain("Chest 0 must stand on a free walkable tile");
-    expect(check((l) => (l.chests[0] = { ...l.chests[0]!, x: l.spawns[0]!.x, y: l.spawns[0]!.y }))).toContain("Chest 0 stands on a spawn");
+  it("waits for the module", () => {
+    expect(mapVerdict(null, { width: 16, height: 16, tier: 1, ...presetToLayout(preset) })).toEqual(["The map checker is still loading"]);
   });
 
-  it("reports the table rules", () => {
-    expect(check((l) => (l.bossTable = NO_TABLE))).toContain(TABLE_ERROR_MESSAGES.BossTableMissing);
-    expect(check((l) => l.chests.push({ x: 1, y: 2, table: 0 }))).toContain(TABLE_ERROR_MESSAGES.TooManyChests);
-    expect(check((l) => (l.minPlayers = 0))).toContain(TABLE_ERROR_MESSAGES.MinPlayersOutOfRange);
+  it("the entrance and the exit points", () => {
+    expect(check((d) => (d.entrance = null))).toEqual([MAPCHECK_MESSAGES.EntranceCount]);
+    expect(check((d) => (d.exit = d.entrance))).toEqual([MAPCHECK_MESSAGES.PointOverlap]);
+    expect(check((d) => (d.tiles[cellIndex(d.exit!.x, d.exit!.y)] = cellByte(Tile.DeepWater)))).toEqual([MAPCHECK_MESSAGES.PointNotPassable]);
+  });
+
+  it("chests and the boss table", () => {
+    expect(check((d) => (d.chests[0] = { ...d.chests[0]!, x: 0, y: 0 }))).toEqual([MAPCHECK_MESSAGES.ChestNotPassable]);
+    expect(check((d) => (d.bossTable = NO_TABLE))).toEqual([MAPCHECK_MESSAGES.BossTableMissing]);
+    expect(check((d) => d.chests.push({ x: 1, y: 2, table: 0 }))).toEqual([MAPCHECK_MESSAGES.TooManyChests]);
+    expect(check((d) => (d.minPlayers = 0))).toEqual([MAPCHECK_MESSAGES.MinPlayersOutOfRange]);
+  });
+
+  it("names the spawns whose skills break the rule", () => {
+    const out = check((d) => (d.spawns[0] = { ...d.spawns[0]!, skills: 0 }), () => "pick 3 actives");
+    expect(out[0]).toBe(MAPCHECK_MESSAGES.MonsterSkillCount);
+    expect(out.length).toBe(1 + presetToLayout(preset).spawns.length);
   });
 });

@@ -13,7 +13,7 @@ beforeAll(async () => {
   combat = await CombatWasm.instantiate(readFileSync(resolve(import.meta.dirname, "wasm/combat.wasm")));
 });
 
-const registry = () => ({ bestiary: mockTable("bestiary"), skills: mockTable("monster_skills"), rewards: mockTable("rewards") });
+const registry = () => ({ bestiary: mockTable("bestiary"), skills: mockTable("monster_skills"), rewards: mockTable("rewards"), tileset: mockTable("tileset") });
 /** Bestiary ids in assets/registry/bestiary.json. */
 const WOLF = 0;
 const CHIEFTAIN = 2;

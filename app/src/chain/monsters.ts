@@ -4,7 +4,7 @@
 import { useEffect, useState } from "react";
 import { DATA_SOURCE } from "../config";
 import { auraInputOf, type BearerInput, type CombatWasm, type MonsterSkillSheet, type SpawnSkillsResult } from "./combatWasm";
-import { registryBestiary, registryMonsterSkills, registryRewards, type Party } from "./game";
+import { registryBestiary, registryMonsterSkills, registryRewards, registryTileset, type Party } from "./game";
 import { mockTable } from "./mock";
 import { MONSTER_SKILL_NAMES } from "./names";
 import type { Spawn } from "./types";
@@ -85,15 +85,16 @@ export function monsterBearersOf(party: Party): BearerInput[] {
 /** The registry tables the map builder reads: from the chain, or in mock mode the bundled
  * encoding of the same JSON. */
 /** Patch 11: `rewards` is the registry reward tables body (chests and the boss table). */
-export type BuilderRegistry = { bestiary: Uint8Array; skills: Uint8Array; rewards: Uint8Array };
+/** Patch 13: `tileset` is the registry Tileset body (the map checks). */
+export type BuilderRegistry = { bestiary: Uint8Array; skills: Uint8Array; rewards: Uint8Array; tileset: Uint8Array };
 export function useBuilderRegistry(): BuilderRegistry | null {
   const [reg, setReg] = useState<BuilderRegistry | null>(null);
   useEffect(() => {
     let live = true;
     const load = async (): Promise<BuilderRegistry | null> => {
-      if (DATA_SOURCE !== "chain") return { bestiary: mockTable("bestiary"), skills: mockTable("monster_skills"), rewards: mockTable("rewards") };
-      const [bestiary, skills, rewards] = await Promise.all([registryBestiary(), registryMonsterSkills(), registryRewards()]);
-      return bestiary && skills && rewards ? { bestiary, skills, rewards } : null;
+      if (DATA_SOURCE !== "chain") return { bestiary: mockTable("bestiary"), skills: mockTable("monster_skills"), rewards: mockTable("rewards"), tileset: mockTable("tileset") };
+      const [bestiary, skills, rewards, tileset] = await Promise.all([registryBestiary(), registryMonsterSkills(), registryRewards(), registryTileset()]);
+      return bestiary && skills && rewards && tileset ? { bestiary, skills, rewards, tileset } : null;
     };
     load().then(
       (r) => live && setReg(r),

@@ -23,6 +23,7 @@ pub mod input;
 pub mod items;
 pub mod line;
 pub mod loot;
+pub mod map_tables;
 pub mod monster;
 pub mod monster_ai;
 pub mod player;

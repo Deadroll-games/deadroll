@@ -4,6 +4,8 @@
 // the support skills of PR #25 (buffs on allies, debuffs on monsters).
 // Skipped unless DEADROLL_LOCALNET=1 (needs deploy-local).
 //   DEADROLL_LOCALNET=1 pnpm --filter @deadroll/app exec vitest run src/chain/localnet.e2e.test.ts
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { generateKeyPairSigner, lamports, type Address, type KeyPairSigner } from "@solana/kit";
 import demoMap from "../../../assets/registry/maps/demo_16x16.json";
@@ -20,6 +22,10 @@ import {
   SKILL_PRESETS,
   actIx,
   buildMapIxs,
+  registryBestiary,
+  registryMonsterSkills,
+  registryRewards,
+  registryTileset,
   closeCacheIx,
   computeLimitIx,
   settlePartyIx,
@@ -54,12 +60,13 @@ import { presetToLayout, type MapPresetData } from "./mock";
 import { equipIx, equipmentOf, inventory, unequipIx } from "./items";
 import { skillSetPda } from "./pda";
 import { affordable, cheb, route } from "./route";
-import { sendTx } from "./send";
+import { errorName, sendTx } from "./send";
+import { MapcheckWasm } from "./mapcheckWasm";
 import { toHitResolved } from "./hit";
 import { Category, Effect, defaultMapSelection, type NamedSkill } from "./skillcheck";
 import { activeMods, toEffectResolved } from "./support";
 import { turnStarted } from "./turns";
-import { Applied, Aspect, Class, HitOutcome, MAP_MAX, ModKind, Race } from "./types";
+import { Applied, Aspect, Class, HitOutcome, MAP_MAX, ModKind, Race, Tile, cellByte } from "./types";
 
 const ON = process.env.DEADROLL_LOCALNET === "1";
 const WARRIOR = 0;
@@ -590,5 +597,51 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
       }
     }
     expect(phase).toBe("done");
+  });
+});
+
+// Patch 13: the builder checks a draft with crates/mapcheck through mapcheck.wasm, on the registry
+// tables read from the chain; finalize_map must give the same verdict (docs/MAP_DESCRIPTION.md 1, 10).
+describe.skipIf(!ON)("localnet: the builder's verdict is finalize_map's", () => {
+  it("valid and broken drafts", { timeout: 5 * 60_000 }, async () => {
+    const wasm = await MapcheckWasm.instantiate(readFileSync(resolve(import.meta.dirname, "wasm/mapcheck.wasm")));
+    const [bestiary, monsterSkills, rewards, tileset] = await Promise.all([registryBestiary(), registryMonsterSkills(), registryRewards(), registryTileset()]);
+    wasm.setTables({ bestiary: bestiary!, monsterSkills: monsterSkills!, rewards: rewards!, tileset: tileset! });
+    const preset = demoMap as MapPresetData & { tier: number };
+    const draft = () => ({ width: preset.width, height: preset.height, tier: preset.tier, ...presetToLayout(preset) });
+    const at = (d: ReturnType<typeof draft>, x: number, y: number, kind: number, variant = 0) => (d.tiles[y * MAP_MAX + x] = cellByte(kind, variant));
+    const cases: [string, (d: ReturnType<typeof draft>) => void][] = [
+      ["demo", () => {}],
+      ["exit on a chasm", (d) => at(d, d.exit!.x, d.exit!.y, Tile.Chasm)],
+      ["corridor in deep water", (d) => at(d, 11, 7, Tile.DeepWater)],
+      ["corridor in rubble", (d) => at(d, 11, 7, Tile.Rubble, 3)],
+      // Patch 13: a diagonal never cuts a corner.
+      ["a diagonal past wall corners", (d) => (at(d, 11, 7, Tile.Wall), at(d, 12, 7, Tile.StoneFloor))],
+      ["reserved tile type", (d) => at(d, 2, 2, 11)],
+      ["spawn on a wall", (d) => at(d, d.spawns[0]!.x, d.spawns[0]!.y, Tile.Wall)],
+      ["entrance on the exit", (d) => (d.entrance = d.exit)],
+      ["two chests", (d) => d.chests.push({ x: 2, y: 2, table: d.chests[0]!.table })],
+      ["minimum players 0", (d) => (d.minPlayers = 0)],
+    ];
+    const dm = await funded(20);
+    for (const [name, edit] of cases) {
+      const d = draft();
+      edit(d);
+      const verdict = wasm.check(d);
+      const built = await buildMapIxs(dm, d);
+      const fin = built.ixs.pop()!;
+      // create_map refuses minimum players 0 itself (the same rule, its own error).
+      if (name === "minimum players 0") {
+        expect(verdict, name).toBe("MinPlayersOutOfRange");
+        await expect(send(dm, [built.ixs[0]!])).rejects.toThrow(/MinPlayersOutOfRange/);
+        continue;
+      }
+      for (const ix of built.ixs) await send(dm, [ix]);
+      const chain = await send(dm, [fin]).then(
+        () => null,
+        (e: unknown) => errorName(e instanceof Error ? e.message : String(e)),
+      );
+      expect(chain, name).toBe(verdict);
+    }
   });
 });
