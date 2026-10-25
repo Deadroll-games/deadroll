@@ -72,7 +72,7 @@ function wall(style, mask, seed) {
     if (!S) {
       for (let x = 0; x < 64; x++) { s.px(x, faceTop - 1, P, 4, false); }
       // Front face: masonry, darker toward the floor, with a shadow band at the foot.
-      style.face(s, r, 0, faceTop, 64, 64);
+      style.face(s, r, 0, faceTop, 64, 64, mask);
       if (!W) for (let y = faceTop; y < 64; y++) s.px(0, y, "O", 0, false);
       if (!E) for (let y = faceTop; y < 64; y++) { s.px(63, y, "O", 0, false); }
     }

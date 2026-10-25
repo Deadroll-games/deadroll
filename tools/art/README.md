@@ -44,3 +44,24 @@ colors); the on-chain encoder is the indexed one.
 
 Books are filled in id order, so moving a file between folders does not change the books. Ids and
 names are unique across all three roots.
+
+## Sculpted sources (`tools/art/sculpt`)
+
+Monsters, tiles and points are generated: `node tools/art/sculpt/sculpt.js tools/art/sculpt/<model>.js > assets/sprites/<folder>/<file>.dsl`.
+A model builds the sprite from primitives (ellipsoids, capsules, polygons, smooth masses) with light from the top left
+and writes a BITMAP of explicit ramp colors. Edit the model, not the generated `.dsl`. Colors per sprite name are in
+`MONSTER_LOOKS` and `TILE_LOOKS` (`src/preview.rs`) and must match the app (`app/src/chain/appearance.ts`).
+
+## Tile ids by biome
+
+| Ids | Content |
+|---|---|
+| 500, 501, 502, 503 | Caves: floor, wall (east and west neighbors), shallow water, door: the ids the current map uses |
+| 507-521 | Caves: the other 15 wall shapes, id `507 + mask` (`506 + mask` above mask 10) |
+| 522-537 | Caves: floors 1-3, planks 0-2, dirt 0-2, shallow water 1, deep water, stairs, rubble 0-1, chasm, void |
+| 540-574 | Forest, fixed block (`sculpt/biome.js`): +0..15 walls by mask, +16..19 floor, +20..22 planks, +23..25 ground, +26 door, +27..28 shallow water, +29 deep, +30 stairs, +31..32 rubble, +33 chasm, +34 void |
+| 800-834 | Crypt, the same block |
+| 504, 505, 580-583 | Points: Caves entrance, exit portal (all biomes), chest closed and open, Forest and Crypt entrances |
+
+Wall mask: bit 0 north, 1 east, 2 south, 3 west neighbor is a wall (or a door). Walls have no outline: a connected
+side runs to the cell edge, an open side gets its own rim; with the south open the cell shows the wall's front face.

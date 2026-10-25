@@ -13,11 +13,11 @@ const style = {
     for (let y = y0 + 15; y < y1; y += 20) for (let x = x0; x < x1; x++) s.px(x, y, "P", 0, false);
     T.scatter(s, x0, y0, x1, y1, r, 8, "P", 2, "P");
   },
-  // The face: regular cut blocks, a skull niche in some cells, a plinth at the foot.
-  face(s, r, x0, y0, x1, y1) {
+  // The face: regular cut blocks, a skull niche on wall ends only (straight runs repeat), a plinth.
+  face(s, r, x0, y0, x1, y1, mask = 0) {
     T.stones(s, x0, y0, x1, y1 - 4, r, { rowH: [10, 11], w: [16, 22], cracks: 0.3, tone: -1 });
     for (let y = y1 - 4; y < y1; y++) for (let x = x0; x < x1; x++) s.px(x, y, "P", y === y1 - 4 ? 3 : y === y1 - 1 ? 0 : 1, false);
-    if (r() < 0.5) {
+    if ((mask & 10) !== 10 && r() < 0.7) {
       const nx = x0 + 18 + Math.floor(r() * 18), ny = y0 + 8;
       for (let y = ny; y < ny + 14; y++) for (let x = nx; x < nx + 12; x++) s.px(x, y, "O", 0, false);
       for (let x = nx; x < nx + 12; x++) s.px(x, ny + 14, "P", 3, false);
