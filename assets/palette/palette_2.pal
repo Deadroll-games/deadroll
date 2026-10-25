@@ -51,6 +51,7 @@ ramp ooze      #050b06 #0c1a0e #152b15 #20401c #335a24 #6f8f3a
 ramp blackiron #08090d #12141b #1d2029 #2b2f3a #424754 #6d7280
 ramp ash       #0b0909 #1a1616 #2a2322 #3d3330 #564843 #7a6a62
 ramp ogre      #0f0c08 #241e16 #3b3123 #574833 #7a6648 #a38c68
+ramp fur_pale  #14151a #2c2f36 #4a4f58 #6f7580 #9aa1aa #cfd5d8
 
 dark dark
 curse curse
@@ -92,3 +93,5 @@ material dark_knight blackiron cape_red dither
 material behemoth   ash       dark     dither
 material minotaur   fur_brown leather  dither
 material ogre       ogre      rag      dither
+material golem      stone     moss     dither
+material yeti       fur_pale  cloth    dither
