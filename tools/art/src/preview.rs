@@ -80,7 +80,10 @@ pub const MONSTER_LOOKS: &[(&str, Look)] = &[
     ("skeleton", lk3("bone", "glow_soul", "steel")),
     ("skeleton_warrior", lk3("bone", "glow_soul", "steel")),
     ("skeleton_mage", lk3("bone_robe", "fire", "fire")),
-    ("skeleton_necromancer", lk3("bone_robe", "glow_toxic", "wood")),
+    (
+        "skeleton_necromancer",
+        lk3("bone_robe", "glow_toxic", "wood"),
+    ),
     ("ghoul", lk3("ghoul", "glow_soul", "bone")),
     ("reaper", lk3("bone_robe", "glow_soul", "steel")),
     ("slime", lk3("slime", "glow_toxic", "bone")),
