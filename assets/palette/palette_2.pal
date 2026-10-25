@@ -57,6 +57,8 @@ ramp hydra     #050c0c #0b1c1b #12302d #1c4740 #2d6556 #5a8f74
 ramp storm     #070a12 #0f1626 #18233d #243458 #3a4f7c #6a86b0
 ramp cave_rock #0d0b0a #1d1916 #2e2824 #433a33 #5d5047 #7e6e60
 ramp murk      #04080c #081218 #0e1f27 #163037 #22474c #3f6a68
+ramp leafdark  #050a07 #0c160f #142417 #1e3520 #2f4a2a #4f6a3a
+ramp crypt     #0b0a0f #18161f #262331 #373345 #4d485e #6f6a80
 
 dark dark
 curse curse
@@ -121,3 +123,10 @@ material cave_floor cave_rock dirt     dither
 material cave_door  wood      cave_rock dither
 material murk       murk      murk
 material planks     bark      leather  dither
+material forest_wall bark     leafdark dither
+material forest_floor cave_rock leafdark dither
+material forest_grass cave_rock leafdark dither
+material forest_door bark      wood     dither
+material crypt_wall crypt     crypt    dither
+material crypt_floor crypt    dirt     dither
+material crypt_door crypt     blackiron dither

@@ -139,6 +139,23 @@ pub const TILE_LOOKS: &[(&str, Look)] = &[
     ("tile_entrance", lk3("cave_door", "steel", "fire")),
     ("tile_exit", lk3("cave_wall", "steel", "glow_soul")),
     ("chest_", lk3("chest", "gold", "cold")),
+    ("forest_wall", lk3("forest_wall", "rust", "cold")),
+    ("forest_floor", lk3("forest_floor", "rust", "cold")),
+    ("forest_wood", lk3("planks", "steel", "cold")),
+    ("forest_dirt", lk3("forest_grass", "rust", "bone")),
+    ("forest_door", lk3("forest_wall", "steel", "cold")),
+    ("forest_water", lk3("murk", "moss", "cold")),
+    ("forest_deep", lk3("murk", "murk", "cold")),
+    ("forest_void", lk3("forest_wall", "rust", "cold")),
+    ("forest_", lk3("forest_grass", "rust", "cold")),
+    ("crypt_wall", lk3("crypt_wall", "bone", "cold")),
+    ("crypt_wood", lk3("planks", "steel", "cold")),
+    ("crypt_dirt", lk3("crypt_floor", "bone", "murk")),
+    ("crypt_door", lk3("crypt_door", "steel", "cold")),
+    ("crypt_water", lk3("murk", "murk", "cold")),
+    ("crypt_deep", lk3("murk", "murk", "cold")),
+    ("crypt_void", lk3("crypt_wall", "bone", "cold")),
+    ("crypt_", lk3("crypt_floor", "bone", "cold")),
 ];
 
 const fn lk3(material: &'static str, accent: &'static str, element: &'static str) -> Look {
