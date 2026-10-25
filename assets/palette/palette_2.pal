@@ -46,6 +46,7 @@ ramp rust      #100806 #2a130b #46200f #683215 #8c4b20 #b26d35
 ramp glow_red  #1a0406 #4d0a0c #8a1410 #c8300f #f26a1c #ffc25a
 ramp glow_toxic #07100a #11290f #1f4a12 #3d7a14 #7bb81e #d4f25a
 ramp glow_soul #050d14 #0b2433 #12445a #1d7383 #3aaeae #a6f0e0
+ramp rot       #0b0d08 #1d2216 #323a23 #4c5532 #6d7548 #969a6a
 
 dark dark
 curse curse
@@ -79,3 +80,5 @@ material fairy      skin_pale curse    dither
 material troll      troll     rag      dither
 material demon      bruise    dark     dither
 material rusted     rust      leather  dither
+material bone_robe  bone      cloth    dither
+material ghoul      rot       rag      dither
