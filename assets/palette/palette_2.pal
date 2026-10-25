@@ -109,3 +109,4 @@ material phoenix    ash       fire     dither
 material shadow_horse fur_dark curse   dither
 material nightmare  fur_dark  fire     dither
 material pegasus    fur_pale  cloth    dither
+material siren      skin_pale hydra    dither
