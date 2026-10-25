@@ -139,6 +139,8 @@ pub const TILE_LOOKS: &[(&str, Look)] = &[
     ("tile_entrance", lk3("cave_door", "steel", "fire")),
     ("tile_exit", lk3("cave_wall", "steel", "glow_soul")),
     ("chest_", lk3("chest", "gold", "cold")),
+    ("forest_entrance", lk3("forest_floor", "rust", "dirt")),
+    ("crypt_entrance", lk3("crypt_wall", "bone", "cold")),
     ("forest_wall", lk3("forest_wall", "rust", "cold")),
     ("forest_floor", lk3("forest_floor", "rust", "cold")),
     ("forest_wood", lk3("planks", "steel", "cold")),

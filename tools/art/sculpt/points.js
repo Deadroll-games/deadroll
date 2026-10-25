@@ -72,7 +72,36 @@ const chest = (open) => (s) => {
   }
 };
 
+// 582: the Forest entrance, a path into the thicket under a stone arch overgrown with roots.
+const forestGate = (s) => {
+  // Thicket behind (S dark leaves), the path (P stone) running into the dark.
+  s.ell(32, 24, 28, 18, "S", { ragged: 0.35, tufts: 18 });
+  s.poly([[24, 62], [40, 62], [36, 30], [28, 30]], "O", 0);
+  for (let y = 34; y < 62; y += 5) s.line(30 - (y - 30) / 8, y, 34 + (y - 30) / 8, y, "E", 1, false);
+  // The arch: two pillars and a curved top of stone (P), roots (S) creeping over it.
+  for (const x0 of [14, 42]) s.poly([[x0, 62], [x0, 26], [x0 + 8, 24], [x0 + 8, 62]], "P", T.facet(x0 + 4, 44, 4, 18, x0 > 30 ? -1 : 0));
+  for (let x = 14; x < 50; x++) { const y = Math.round(22 - Math.sin(((x - 14) / 36) * Math.PI) * 8); for (let k = 0; k < 5; k++) s.px(x, y + k, "P", k === 0 ? 4 : k < 3 ? 3 : 1, false); }
+  for (const [a, b] of [[[16, 18], [20, 40]], [[44, 16], [48, 42]], [[30, 14], [26, 22]]]) { s.line(a[0], a[1], b[0], b[1], "S", 3); s.line(a[0] + 1, a[1], b[0] + 1, b[1], "S", 1); }
+};
+
+// 583: the Crypt entrance, stone steps going down to a dark doorway under a pediment.
+const cryptStair = (s) => {
+  s.poly([[8, 62], [8, 20], [32, 8], [56, 20], [56, 62]], "P", T.facet(32, 30, 24, 26, -1));
+  s.poly([[20, 62], [20, 30], [44, 30], [44, 62]], "O", 0);
+  for (let k = 0; k < 5; k++) { const y = 46 + k * 3, inset = 2 + k; for (let x = 20 + inset; x < 44 - inset; x++) { s.px(x, y, "P", Math.max(1, 3 - k), false); s.px(x, y + 1, "P", 0, false); } }
+  for (let x = 8; x < 57; x++) { s.px(x, 28, "P", 4, false); s.px(x, 29, "P", 2, false); }
+  s.patch(28, 14, [
+    ".kkkk.",
+    "kkkkkk",
+    "kmkkmk",
+    ".kmkk.",
+  ]);
+  for (const x of [12, 52]) for (let y = 32; y < 62; y += 6) s.line(x - 2, y, x + 2, y, "P", 0, false);
+};
+
 module.exports = [
+  { ...base, id: 582, name: "forest_entrance", comment: ["Forest entrance: a path into the thicket under a stone arch overgrown with roots."], build: forestGate },
+  { ...base, id: 583, name: "crypt_entrance", comment: ["Crypt entrance: stone steps down to a dark doorway under a pediment with a skull."], build: cryptStair },
   { ...base, id: 504, name: "tile_entrance", comment: ["Caves and Ruins entrance: a timbered mine adit in a rock face, rails, a lantern."], build: mine },
   { ...base, id: 505, name: "tile_exit", comment: ["Exit, all biomes: a portal of standing stones with a glowing spiral (E)."], build: portal },
   { ...base, id: 580, name: "chest_closed", comment: ["Chest: iron-bound wood, closed."], build: chest(false) },
