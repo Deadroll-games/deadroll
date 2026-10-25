@@ -53,6 +53,7 @@ ramp ash       #0b0909 #1a1616 #2a2322 #3d3330 #564843 #7a6a62
 ramp ogre      #0f0c08 #241e16 #3b3123 #574833 #7a6648 #a38c68
 ramp fur_pale  #14151a #2c2f36 #4a4f58 #6f7580 #9aa1aa #cfd5d8
 ramp wyrm      #080406 #140709 #1f0a0d #2e0f12 #431719 #6a2a24
+ramp hydra     #050c0c #0b1c1b #12302d #1c4740 #2d6556 #5a8f74
 
 dark dark
 curse curse
@@ -97,3 +98,5 @@ material ogre       ogre      rag      dither
 material golem      stone     moss     dither
 material yeti       fur_pale  cloth    dither
 material dragon     wyrm      ash      dither
+material hydra      hydra     moss     dither
+material griffin    fur_brown hair     dither
