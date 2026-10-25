@@ -100,3 +100,4 @@ material yeti       fur_pale  cloth    dither
 material dragon     wyrm      ash      dither
 material hydra      hydra     moss     dither
 material griffin    fur_brown hair     dither
+material dragon_turtle hydra   stone    dither
