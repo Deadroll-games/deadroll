@@ -65,3 +65,10 @@ and writes a BITMAP of explicit ramp colors. Edit the model, not the generated `
 
 Wall mask: bit 0 north, 1 east, 2 south, 3 west neighbor is a wall (or a door). Walls have no outline: a connected
 side runs to the cell edge, an open side gets its own rim; with the south open the cell shows the wall's front face.
+
+## Site art
+
+`assets/site_sprites` holds art that is never packed (ids 2000+): city tiles and buildings, interiors
+and furniture, menu icons, crafting benches, the parchment frame and the loading screens. Pictures
+larger than 128 px are drawn whole and cut into pieces; their `.layout` files put them back with
+`art compose`. `bash tools/art/export_site.sh` renders all of it to PNG in `app/assets/` (1x).

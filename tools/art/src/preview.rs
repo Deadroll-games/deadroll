@@ -209,6 +209,17 @@ pub const SITE_LOOKS: &[(&str, Look)] = &[
     ("furniture_forge", lk3("forge", "gold", "fire")),
     ("furniture_anvil", lk3("forge", "gold", "fire")),
     ("furniture_", lk3("chest", "gold", "fire")),
+    ("ui_bag", lk3("leather", "steel", "fire")),
+    ("ui_map", lk3("bone", "gold", "blood")),
+    ("ui_skills", lk3("bone", "gold", "glow_soul")),
+    ("ui_settings", lk3("steel", "gold", "cold")),
+    ("bench_smith", lk3("steel", "gold", "fire")),
+    ("bench_alchemy", lk3("planks", "glow_toxic", "glow_soul")),
+    ("bench_scribe", lk3("cape", "gold", "cold")),
+    ("bench_provisions", lk3("leather", "steel", "cold")),
+    ("item_key", lk3("steel", "gold", "cold")),
+    ("item_scroll", lk3("bone", "cape_red", "cold")),
+    ("parchment", lk3("bone", "gold", "cold")),
 ];
 
 const fn lk3(material: &'static str, accent: &'static str, element: &'static str) -> Look {

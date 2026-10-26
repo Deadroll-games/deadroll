@@ -1,0 +1,7 @@
+canvas 384 256
+put parchment_0 0 0
+put parchment_1 128 0
+put parchment_2 256 0
+put parchment_3 0 128
+put parchment_4 128 128
+put parchment_5 256 128
