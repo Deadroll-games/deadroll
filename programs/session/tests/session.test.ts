@@ -718,7 +718,7 @@ async function createFinalizedMap(dm: Keypair, bossLevel = 1, roster: SpawnDef[]
   const layout = pda([Buffer.from("layout"), map.toBuffer()], MAP);
   const edit = { dm: dm.publicKey, map, layout };
   await mapProgram.methods
-    .createMap(index, 16, 16, 1, { minPlayers: loot.minPlayers ?? 1, chestRadius: loot.chestRadius ?? 3, settleTimeoutSecs: loot.settleTimeoutSecs ?? 600 })
+    .createMap(index, 16, 16, 1, { minPlayers: loot.minPlayers ?? 1, chestRadius: loot.chestRadius ?? 3, settleTimeoutSecs: loot.settleTimeoutSecs ?? 600, biome: 0 })
     .accountsStrict({ ...edit, systemProgram: SystemProgram.programId })
     .signers([dm])
     .rpc();

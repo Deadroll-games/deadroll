@@ -81,6 +81,12 @@
   gap: 6px;
 }
 
+/* A tile variant: its 64 px picture at 1x inside the button. */
+.forms-variant {
+  padding: 2px;
+  line-height: 0;
+}
+
 .forms-swatch {
   display: inline-block;
   width: 12px;

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { BESTIARY_NAMES } from "../../chain/names";
+import { BESTIARY_NAMES, BIOME_NAMES } from "../../chain/names";
+import { tileVariants } from "../../chain/appearance";
 import { DEMO_MAP, MAP_PRESETS, MOCK_CHARACTERS, presetToLayout } from "../../chain/mock";
 import { Aspect, Class, Race, Tile, type Aspect as AspectId } from "../../chain/types";
 import { CharacterForm } from "./CharacterForm";
@@ -60,7 +61,8 @@ export default function Demo() {
     predisposition: Aspect.Piercing,
     stats: [STAT_MIN, STAT_MIN, STAT_MIN, STAT_MIN],
   });
-  const [tool, setTool] = useState<BuilderTool>({ kind: "tile", tile: Tile.StoneFloor });
+  const [tool, setTool] = useState<BuilderTool>({ kind: "tile", tile: Tile.StoneFloor, variant: 0 });
+  const [biome, setBiome] = useState(0);
   const [spawns, setSpawns] = useState(DEMO_MAP.spawns);
   const [errors, setErrors] = useState<string[]>([]);
   const [canFinalize, setCanFinalize] = useState(false);
@@ -114,10 +116,14 @@ export default function Demo() {
           tool={tool}
           onToolChange={(next) => {
             setTool(next);
-            if (next.kind === "tile") setLog(`onToolChange tile ${next.tile}`);
+            if (next.kind === "tile") setLog(`onToolChange tile ${next.tile} variant ${next.variant}`);
             else if (next.kind === "spawn") setLog(`onToolChange spawn ${next.bestiaryId}`);
             else setLog("onToolChange erase");
           }}
+          biome={biome}
+          biomes={BIOME_NAMES}
+          onBiomeChange={setBiome}
+          tileVariants={(tile) => tileVariants(biome, tile)}
           bestiary={BESTIARY}
           presets={PRESETS}
           onLoadPreset={(name) => {

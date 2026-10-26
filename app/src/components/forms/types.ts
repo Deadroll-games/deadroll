@@ -37,7 +37,8 @@ export type CharacterFormProps = {
 // ---- Map builder ----
 
 export type BuilderTool =
-  | { kind: "tile"; tile: Tile }
+  /** A brush: the tile type and the variant (bits 2-0 of the cell byte) it paints; a stroke overwrites the cell. */
+  | { kind: "tile"; tile: Tile; variant: number }
   | { kind: "spawn"; bestiaryId: number }
   /** Patch 11: place a visible chest (docs/MAP_DESCRIPTION.md 7.1); Erase removes it. */
   | { kind: "chest" }
@@ -53,6 +54,14 @@ export type MapPreset = { name: string; width: number; height: number };
 export type MapPaletteProps = {
   tool: BuilderTool;
   onToolChange: (tool: BuilderTool) => void;
+  /** The map's art set (`Biome`), picked by the DM; the names by id. */
+  biome: number;
+  biomes: readonly string[];
+  onBiomeChange: (biome: number) => void;
+  /** Variants the DM can pick for a tile type in the current biome (1 = none to pick). */
+  tileVariants?: (tile: Tile) => number;
+  /** Rendered picture of a tile type and variant in the current biome, null while loading. */
+  tilePreview?: (tile: Tile, variant: number) => ImageData | null;
   bestiary: BestiaryEntry[];
   presets: MapPreset[];
   onLoadPreset: (name: string) => void;

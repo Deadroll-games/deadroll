@@ -1,6 +1,7 @@
 // Battle map canvas: tiles, units, move highlights, and cell clicks.
 import { useEffect, useRef, useState, type MouseEvent } from "react";
-import { TILE_COUNT, Tile, cellIndex, cellKind, type Cell } from "../../chain/types";
+import { TILE_COUNT, Tile, cellIndex, cellKind, cellVariant, type Cell } from "../../chain/types";
+import { wallMask } from "../../chain/tiles";
 import { TILE_PX } from "../../raster/SpriteCanvas";
 import type { GridPoint, GridProps, GridUnit } from "./types";
 import "./grid.css";
@@ -294,8 +295,10 @@ function drawGrid(ctx: CanvasRenderingContext2D, props: GridProps, cell: number)
   const scratch = document.createElement("canvas");
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
-      const tile = knownTile(tiles[cellIndex(x, y)]);
-      const sprite = tile != null ? (props.tileSprite?.(tile) ?? null) : null;
+      const byte = tiles[cellIndex(x, y)];
+      const tile = knownTile(byte);
+      const mask = tile === Tile.Wall ? wallMask(tiles, width, height, x, y) : 0;
+      const sprite = tile != null ? (props.tileSprite?.({ tile, variant: cellVariant(byte ?? 0), mask }) ?? null) : null;
       drawTile(ctx, scratch, tile, sprite, x * cell, y * cell, cell);
     }
   }

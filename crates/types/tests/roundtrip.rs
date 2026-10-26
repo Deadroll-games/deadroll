@@ -249,6 +249,7 @@ enum_tests! {
     reward_kind: RewardKind, 5;
     reward_source: RewardSource, 4;
     cache_status: CacheStatus, 3;
+    biome: Biome, 3;
 }
 
 #[test]
@@ -344,6 +345,9 @@ fn enum_discriminants_match_contract_order() {
     assert_eq!(TileKind::Wall as u8, 4);
     assert_eq!(TileKind::Stairs as u8, 8);
     assert_eq!(TileKind::Chasm as u8, 10);
+    assert_eq!(Biome::Caves as u8, 0);
+    assert_eq!(Biome::Forest as u8, 1);
+    assert_eq!(Biome::Crypt as u8, 2);
     assert_eq!(SessionStatus::Abandoned as u8, 5);
     assert_eq!(MapStatus::Finished as u8, 3);
     assert_eq!(ProgramIdx::Session as usize, 5);

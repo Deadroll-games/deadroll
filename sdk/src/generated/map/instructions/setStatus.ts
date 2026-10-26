@@ -118,6 +118,10 @@ export type SetStatusAsyncInput<
     InstructionSignerInput,
   TAccountConfig extends InstructionAccountInput = InstructionAccountInput,
 > = {
+  /**
+   * A map of this program, also one from before `Map.biome` (one byte shorter, which
+   * `Account<Map>` cannot read); only `core.status` is written.
+   */
   map: TAccountMap;
   /** The session program's `["authority"]` PDA, checked against `GameConfig` in the handler. */
   sessionAuthority: TAccountSessionAuthority;
@@ -222,6 +226,10 @@ export type SetStatusInput<
     InstructionSignerInput,
   TAccountConfig extends InstructionAccountInput = InstructionAccountInput,
 > = {
+  /**
+   * A map of this program, also one from before `Map.biome` (one byte shorter, which
+   * `Account<Map>` cannot read); only `core.status` is written.
+   */
   map: TAccountMap;
   /** The session program's `["authority"]` PDA, checked against `GameConfig` in the handler. */
   sessionAuthority: TAccountSessionAuthority;
@@ -309,6 +317,10 @@ export type ParsedSetStatusInstruction<
 > = {
   programAddress: Address<TProgram>;
   accounts: {
+    /**
+     * A map of this program, also one from before `Map.biome` (one byte shorter, which
+     * `Account<Map>` cannot read); only `core.status` is written.
+     */
     map: TAccountMetas[0];
     /** The session program's `["authority"]` PDA, checked against `GameConfig` in the handler. */
     sessionAuthority: TAccountMetas[1];

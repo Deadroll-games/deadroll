@@ -25,6 +25,12 @@ export type GridUnit = {
  */
 export type GridChest = { x: number; y: number; opened: boolean; label: string };
 
+/**
+ * One cell to draw: its tile type, the variant the DM picked (bits 2-0 of the cell byte) and, for a
+ * wall, which neighbors are walls too (`wallMask`: bit 0 N, 1 E, 2 S, 3 W).
+ */
+export type GridTile = { tile: Tile; variant: number; mask: number };
+
 /** Patch 13: the entrance and the exit points (docs/MAP_DESCRIPTION.md 7.1), drawn over their cell. */
 export type GridPointKind = "entrance" | "exit";
 export type GridPoint = { x: number; y: number; kind: GridPointKind };
@@ -73,8 +79,8 @@ export type GridProps = {
    * marker (colored disc + first letter; players blue, monsters red, dead units gray with a cross).
    */
   unitSprite?: (unit: GridUnit) => ImageData | null;
-  /** Rendered tile sprite of a tile type (64x64 RGBA), or null to draw the flat tile color. */
-  tileSprite?: (tile: Tile) => ImageData | null;
+  /** Rendered sprite of a cell (64x64 RGBA) by its tile, variant and wall mask, or null to draw the flat tile color. */
+  tileSprite?: (cell: GridTile) => ImageData | null;
   /** Rendered sprite of a point, or null to draw its flat marker. */
   pointSprite?: (kind: GridPointKind) => ImageData | null;
   /** Rendered sprite of a chest, closed or opened, or null to draw its flat placeholder. */

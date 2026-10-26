@@ -14,11 +14,13 @@ import type { HitItemSides, HitMods } from "../components/dice/types";
 import { StatsPanel } from "../components/stats/StatsPanel";
 import type { StatsUnit } from "../components/stats/types";
 import { Grid } from "../components/grid/Grid";
-import type { GridAura, GridChest, GridPointKind, GridUnit } from "../components/grid/types";
+import type { GridAura, GridChest, GridPointKind, GridTile, GridUnit } from "../components/grid/types";
 import { PartyLobby } from "../components/forms/PartyLobby";
 import { PrepayConfirm } from "../components/forms/PrepayConfirm";
 import type { LobbyPlayer } from "../components/forms/types";
-import { chestRequest, isCurrentAppearance, monsterRequest, pointRequest, tileRequest, TOMBSTONE } from "../chain/appearance";
+import { chestRequest, isCurrentAppearance, lookRequest, monsterRequest, pointLook, tileLook, TOMBSTONE } from "../chain/appearance";
+import { facesRight, lastTargets } from "../chain/facing";
+import { mirrored } from "../raster/mirror";
 import { characterRequest } from "../chain/items";
 import { HitOutcome, ModKindData, ReactionKind, SessionStatus, Trigger } from "@deadroll/sdk/session";
 import {
@@ -97,7 +99,7 @@ import { BASIC_ATTACK_AP, Purpose, inReach, rangeReach, type RangeTag } from "..
 import { monsterBaseAp, monsterDefense, playerDefense, unitStats } from "../chain/stats";
 import { activeMods, combatSkill, effectText, modsAt, modsTickText, toEffectResolved, type CombatSkill, type EffectResolved } from "../chain/support";
 import { useTx } from "../chain/useTx";
-import { MAP_MAX, PARTY_MAX, type Cell, type Class, type HitResult, type Race, type Tile } from "../chain/types";
+import { MAP_MAX, PARTY_MAX, type Cell, type Class, type HitResult, type Race } from "../chain/types";
 import { DATA_SOURCE, MOCK_VRF, PROGRAMS, explorerUrl } from "../config";
 import { useSprites } from "../raster/useSprites";
 import { fetchSessionToken, revokeSessionInstruction } from "../session-key/magicblock";
@@ -597,6 +599,9 @@ function PartyView({ address }: { address: Address }) {
     [],
   );
 
+  // Monster sprites face left: each turns toward the hero it attacked last (picture only).
+  const targets = useMemo(() => lastTargets(events), [events]);
+
   const units: GridUnit[] = useMemo(() => {
     if (!party) return [];
     return [
@@ -909,13 +914,21 @@ function PartyView({ address }: { address: Address }) {
       return u.alive ? draw(`c:${p.character}`, characterRequest(p.char)) : draw("tomb", TOMBSTONE);
     }
     const m = party.monsters[u.id - MONSTER_BASE];
-    return m ? draw(`m:${m.bestiaryId}:${m.alive}`, monsterRequest(m.bestiaryId, !m.alive)) : null;
+    const img = m ? draw(`m:${m.bestiaryId}:${m.alive}`, monsterRequest(m.bestiaryId, !m.alive)) : null;
+    if (!img) return null;
+    const heroes = units.filter((h) => h.kind === "player").map((h) => ({ slot: h.id, x: h.x, y: h.y, alive: h.alive }));
+    return u.alive && facesRight(u, heroes, targets.get(u.id - MONSTER_BASE)) ? mirrored(img) : img;
   };
-  const tileSprite = (t: Tile) => {
-    const request = tileRequest(t);
-    return request ? draw(`t:${t}`, request) : null;
+  // The map's biome picks the tile set; a map from before the field reads as Caves (0).
+  const biome = party.map?.biome ?? 0;
+  const tileSprite = (cell: GridTile) => {
+    const look = tileLook(biome, cell);
+    return look ? draw(`t:${look.join(",")}`, lookRequest(look)) : null;
   };
-  const pointSprite = (kind: GridPointKind) => draw(`p:${kind}`, pointRequest(kind));
+  const pointSprite = (kind: GridPointKind) => {
+    const look = pointLook(kind, biome);
+    return draw(`p:${look.join(",")}`, lookRequest(look));
+  };
   const chestSprite = (opened: boolean) => draw(`chest:${opened}`, chestRequest(opened));
 
   const header = (

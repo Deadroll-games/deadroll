@@ -139,6 +139,7 @@ export const PROGRAM_ERRORS = {
     6051: ["PointOutOfBounds", "The entrance or the exit is outside the map"],
     6052: ["PointNotPassable", "The entrance or the exit is on a cell that cannot be entered"],
     6053: ["PointOverlap", "The entrance and the exit share a cell"],
+    6054: ["InvalidBiome", "Unknown map biome"],
   },
   session: {
     6000: ["Unauthorized", "Caller is not authorized for this instruction"],

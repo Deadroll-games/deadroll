@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import type { Address } from "@solana/kit";
 import { Grid } from "../components/grid/Grid";
-import type { GridChest, GridUnit } from "../components/grid/types";
+import type { GridChest, GridPointKind, GridTile, GridUnit } from "../components/grid/types";
 import { MapPalette } from "../components/forms/MapPalette";
 import { PrepayConfirm } from "../components/forms/PrepayConfirm";
 import type { BuilderTool } from "../components/forms/types";
 import { MAP_PRESETS, presetToLayout } from "../chain/mock";
-import { BESTIARY_NAMES, bestiaryName } from "../chain/names";
+import { BESTIARY_NAMES, BIOME_NAMES, bestiaryName } from "../chain/names";
+import { chestRequest, lookRequest, pointLook, tileLook, tileVariants } from "../chain/appearance";
+import { useSprites } from "../raster/useSprites";
 import { SPAWNS_MAX, Tile, cellByte, cellIndex, type Cell, type Spawn } from "../chain/types";
 import { MAPCHECK_MESSAGES, useMapcheck, type MapCheckDraft, type MapcheckWasm } from "../chain/mapcheckWasm";
 import { buildMapIxs, draftPoints, mapRent, mapStatus, mapsOf, type MapAcc } from "../chain/game";
@@ -72,7 +74,9 @@ export function MapBuilderPage() {
   const first = MAP_PRESETS[0]!;
   const [size, setSize] = useState({ width: first.width, height: first.height });
   const [layout, setLayout] = useState(() => presetToLayout(first));
-  const [tool, setTool] = useState<BuilderTool>({ kind: "tile", tile: Tile.StoneFloor });
+  const [tool, setTool] = useState<BuilderTool>({ kind: "tile", tile: Tile.StoneFloor, variant: 0 });
+  // The tiles in the map's biome (the on-chain rasterizer), flat colors until it is loaded.
+  const draw = useSprites();
   const [errors, setErrors] = useState<string[]>([]);
   const [validated, setValidated] = useState(false);
   const [finalized, setFinalized] = useState(false);
@@ -141,7 +145,8 @@ export function MapBuilderPage() {
     const onPoint = same(layout.entrance, cell) || same(layout.exit, cell);
     if (tool.kind === "tile") {
       const tiles = layout.tiles.slice();
-      tiles[cellIndex(x, y)] = cellByte(tool.tile);
+      // The brush overwrites the whole cell: its tile type and the variant the DM picked.
+      tiles[cellIndex(x, y)] = cellByte(tool.tile, tool.variant);
       edit({ ...layout, tiles });
     } else if (tool.kind === "entrance" || tool.kind === "exit") {
       const taken = layout.chests.some((c) => c.x === x && c.y === y) || layout.spawns.some((s) => s.x === x && s.y === y) || onPoint;
@@ -176,6 +181,17 @@ export function MapBuilderPage() {
     [layout.chests, tables],
   );
 
+  const tileSprite = (cell: GridTile) => {
+    const look = tileLook(layout.biome, cell);
+    return look ? draw(`t:${look.join(",")}`, lookRequest(look)) : null;
+  };
+  const pointSprite = (kind: GridPointKind) => {
+    const look = pointLook(kind, layout.biome);
+    return draw(`p:${look.join(",")}`, lookRequest(look));
+  };
+  const chestSprite = (opened: boolean) => draw(`chest:${opened}`, chestRequest(opened));
+  const tilePreview = (tile: Tile, variant: number) => tileSprite({ tile, variant, mask: 0 });
+
   const units: GridUnit[] = useMemo(
     () =>
       layout.spawns.map((s, i) => ({ id: 4 + i, kind: "monster", x: s.x, y: s.y, hp: 1, hpMax: 1, alive: true, label: bestiaryName(s.bestiaryId) })),
@@ -194,6 +210,9 @@ export function MapBuilderPage() {
           chests={chests}
           points={draftPoints(layout)}
           cellPx={32}
+          tileSprite={tileSprite}
+          pointSprite={pointSprite}
+          chestSprite={chestSprite}
           onCellClick={onCell}
           onUnitClick={(u) => onCell({ x: u.x, y: u.y })}
         />
@@ -201,6 +220,11 @@ export function MapBuilderPage() {
           <MapPalette
             tool={tool}
             onToolChange={setTool}
+            biome={layout.biome}
+            biomes={BIOME_NAMES}
+            onBiomeChange={(biome) => edit({ ...layout, biome })}
+            tileVariants={(tile) => tileVariants(layout.biome, tile)}
+            tilePreview={tilePreview}
             bestiary={BESTIARY}
             presets={PRESETS}
             onLoadPreset={(name) => {
@@ -259,7 +283,7 @@ export function MapBuilderPage() {
               <ul className="mono">
                 {myMaps.map((m) => (
                   <li key={m.address}>
-                    {m.address.slice(0, 8)}.. {m.data.core.width}x{m.data.core.height} · {mapStatus(m.data)}
+                    {m.address.slice(0, 8)}.. {m.data.core.width}x{m.data.core.height} · {BIOME_NAMES[m.data.biome] ?? BIOME_NAMES[0]} · {mapStatus(m.data)}
                     {mapStatus(m.data) === "finalized" && (
                       <>
                         {" "}

@@ -904,3 +904,29 @@ events  Moved, CellBurned unchanged
 `deadroll_mapcheck::walk::{walk, Field, Blocker, WalkError, Walk, adjacent, MAX_PATH}`: the path
 checks over any `Field` (the session's map layout today, a combat arena later). `crates/sim`
 moves monsters over the 8 neighbors too.
+
+## 24. Map biome
+
+The art set a map is drawn with, picked by the DM at `create_map`. Picture only: no rule reads it,
+and it does not limit which monsters a map may hold.
+
+```
+crates/types   Biome { Caves, Forest, Crypt }   u8 enum (Caves = 0), appended
+Map            appended: biome: u8 (a Biome); ACCOUNT_VERSION 1 -> 2
+               a version 1 map is one byte shorter and reads as Caves (Map::decode_padded)
+MapSettings    appended: biome
+create_map     rejects a biome past Biome::COUNT
+set_status     accounts unchanged; map is an UncheckedAccount (owner checked), the handler checks the
+               discriminator and the ["map", dm, index] address and writes core.status only, so a
+               version 1 map still enters and leaves a party
+events  MapCreated appended: biome
+errors  MapError appended: InvalidBiome
+```
+
+The session reads a map with `deadroll_map::state::Map::decode_padded` (`read_map_full`), so a
+version 1 map opens a party. `Account<Map>` (write_layout, write_spawns, write_points, finalize_map)
+cannot read a version 1 map: a draft from before the field cannot be continued.
+
+The cell variant (bits 2-0) is the DM's pick and only chooses the picture (no PRNG). The site draws
+a wall by its 4-neighbor mask (bit 0 N, 1 E, 2 S, 3 W; walls and doors join, the map edge does
+not) and any other tile by its variant, variant 0 when the biome has no such picture.

@@ -13,6 +13,8 @@ pub struct MapCreated {
     pub min_players: u8,
     pub chest_radius: u8,
     pub settle_timeout_secs: u32,
+    /// The art set (`deadroll_types::Biome`).
+    pub biome: u8,
 }
 
 #[event]

@@ -153,6 +153,12 @@ u8_enum!(
     }
 );
 
+u8_enum!(
+    /// The art set a map is drawn with, chosen by the DM at `create_map` (`Map.biome`). Picture
+    /// only: it does not change any rule. A map from before the field is `Caves`.
+    Biome { Caves, Forest, Crypt }
+);
+
 /// Patch 13: the tile type id of a cell byte (bits 7-3). A raw id, not a `TileKind`: whether
 /// it exists is the `Tileset`'s call.
 pub const fn cell_kind(byte: u8) -> u8 {

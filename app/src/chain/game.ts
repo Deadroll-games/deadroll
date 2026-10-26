@@ -238,10 +238,19 @@ const ACCOUNTS = {
 export type AccountName = keyof typeof ACCOUNTS;
 export type AccountOf<K extends AccountName> = ReturnType<(typeof ACCOUNTS)[K]["decoder"]["decode"]>;
 
-/** Decodes an account by name; throws on another account's discriminator. */
+/** `Map` accounts created before `Map.biome` (version 1) are one byte shorter. */
+const MAP_V1_SIZE = getMapSize() - 1;
+
+/** Decodes an account by name; throws on another account's discriminator. A `Map` from before
+ * `biome` gets its missing byte as zero: it reads as `Biome.Caves`, like `Map::decode_padded`. */
 export function decodeAccount<K extends AccountName>(name: K, raw: ReadonlyUint8Array): AccountOf<K> {
   const { disc, decoder } = ACCOUNTS[name];
   if (raw.length < 8 || disc.some((b, i) => raw[i] !== b)) throw new Error(`not a ${name} account`);
+  if (name === "Map" && raw.length >= MAP_V1_SIZE && raw.length < getMapSize()) {
+    const padded = new Uint8Array(getMapSize());
+    padded.set(raw);
+    return decoder.decode(padded) as AccountOf<K>;
+  }
   return decoder.decode(raw) as AccountOf<K>;
 }
 
@@ -414,6 +423,8 @@ export type MapDraft = {
   /** The DM's chest radius and time to settle (`create_map` settings). */
   chestRadius: number;
   settleTimeoutSecs: number;
+  /** The art set (`Biome`), `create_map` settings. */
+  biome: number;
   tiles: Uint8Array;
   entrance: Cell | null;
   exit: Cell | null;
@@ -454,7 +465,7 @@ export async function buildMapIxs(dm: TransactionSigner, d: MapDraft): Promise<{
   const tiles = chainTiles(d);
   const points = mapPoints(d);
   const ixs = [
-    getCreateMapInstruction({ ...edit, systemProgram: SYSTEM_PROGRAM, index, width: d.width, height: d.height, tier: d.tier, minPlayers: d.minPlayers, chestRadius: d.chestRadius, settleTimeoutSecs: d.settleTimeoutSecs }),
+    getCreateMapInstruction({ ...edit, systemProgram: SYSTEM_PROGRAM, index, width: d.width, height: d.height, tier: d.tier, minPlayers: d.minPlayers, chestRadius: d.chestRadius, settleTimeoutSecs: d.settleTimeoutSecs, biome: d.biome }),
     getWriteLayoutInstruction({ ...edit, offset: 0, cells: tiles.slice(0, (d.height - 1) * MAP_MAX + d.width) }),
     getWriteSpawnsInstruction({ ...edit, spawns: d.spawns }),
     getWritePointsInstruction({ ...edit, points, bossTable: d.bossTable }),

@@ -4,7 +4,7 @@ use deadroll_rules::{
     loot::{chest_radius_ok, settle_timeout_ok},
     BalanceConfig,
 };
-use deadroll_types::{seeds, MapStatus, NO_TABLE, PARTY_MAX};
+use deadroll_types::{seeds, Biome, MapStatus, NO_TABLE, PARTY_MAX};
 
 use crate::{
     errors::MapError,
@@ -48,6 +48,7 @@ pub fn handler(
         min_players,
         chest_radius,
         settle_timeout_secs,
+        biome,
     } = settings;
     let side_ok = |side: u8| (SIDE_MIN..=SIDE_MAX).contains(&side);
     require!(side_ok(width) && side_ok(height), MapError::SizeOutOfRange);
@@ -67,6 +68,7 @@ pub fn handler(
         settle_timeout_ok(settle_timeout_secs, loot, true),
         MapError::SettleTimeoutOutOfRange
     );
+    require!(Biome::try_from(biome).is_ok(), MapError::InvalidBiome);
 
     let map_key = ctx.accounts.map.key();
     let dm = ctx.accounts.dm.key();
@@ -82,6 +84,7 @@ pub fn handler(
     map.min_players = min_players;
     map.chest_radius = chest_radius;
     map.settle_timeout_secs = settle_timeout_secs;
+    map.biome = biome;
 
     // Field by field: a full `MapLayoutData` literal would put 1.3 KB on the stack.
     // Cells start zeroed, which is `TileKind::Void`; the DM overwrites them with `write_layout`.
@@ -101,6 +104,7 @@ pub fn handler(
         min_players,
         chest_radius,
         settle_timeout_secs,
+        biome,
     });
     Ok(())
 }

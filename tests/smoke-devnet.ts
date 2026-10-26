@@ -216,7 +216,7 @@ const points = [
 ];
 const spawns = CAMP.map((s) => ({ bestiaryId: s.id, x: s.x, y: s.y, level: 1, skills: s.skills, flags: 0, aspects: 0, pack: s.pack }));
 // Patch 11: the DM's settings (devnet takes at least 10 minutes to settle).
-await mapProgram.methods.createMap(index, 16, 16, 1, { minPlayers: 1, chestRadius: 3, settleTimeoutSecs: 600 }).accountsStrict({ ...edit, systemProgram: SystemProgram.programId }).signers([dm]).rpc();
+await mapProgram.methods.createMap(index, 16, 16, 1, { minPlayers: 1, chestRadius: 3, settleTimeoutSecs: 600, biome: 0 }).accountsStrict({ ...edit, systemProgram: SystemProgram.programId }).signers([dm]).rpc();
 await mapProgram.methods.writeLayout(0, Buffer.from(tiles)).accountsStrict(edit).signers([dm]).rpc();
 await mapProgram.methods.writeSpawns(spawns).accountsStrict(edit).signers([dm]).rpc();
 // Patch 11: no chests, the tier 1 boss table of assets/registry/reward_tables.json.
