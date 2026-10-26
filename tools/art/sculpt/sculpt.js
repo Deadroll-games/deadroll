@@ -252,12 +252,16 @@ function emit(model, s) {
   return head.concat(rows).join("\n") + "\n";
 }
 
-const model = require(path.resolve(process.argv[2]));
-const models = Array.isArray(model) ? model : [model];
-const out = [];
-for (const m of models) {
-  const s = sculptor(m.size, m.size, /no_outline/.test(m.flags || "") ? 0 : 1);
-  m.build(s);
-  out.push(emit(m, s));
+module.exports = { sculptor, emit };
+
+if (require.main === module) {
+  const model = require(path.resolve(process.argv[2]));
+  const models = Array.isArray(model) ? model : [model];
+  const out = [];
+  for (const m of models) {
+    const s = sculptor(m.size, m.size, /no_outline/.test(m.flags || "") ? 0 : 1);
+    m.build(s);
+    out.push(emit(m, s));
+  }
+  process.stdout.write(out.join("\n"));
 }
-process.stdout.write(out.join("\n"));

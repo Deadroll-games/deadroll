@@ -59,6 +59,8 @@ ramp cave_rock #0d0b0a #1d1916 #2e2824 #433a33 #5d5047 #7e6e60
 ramp murk      #04080c #081218 #0e1f27 #163037 #22474c #3f6a68
 ramp leafdark  #050a07 #0c160f #142417 #1e3520 #2f4a2a #4f6a3a
 ramp crypt     #0b0a0f #18161f #262331 #373345 #4d485e #6f6a80
+ramp plaster   #120f0d #2a2420 #443b33 #645749 #877662 #ad9b82
+ramp slate     #0b0c10 #181a22 #262a35 #363c4b #4b5366 #6b7488
 
 dark dark
 curse curse
@@ -134,3 +136,8 @@ material crypt_door crypt     blackiron dither
 material gold_metal gold      leather
 material food       leather   blood    dither
 material pelt      fur_dark  leather  dither
+# appended in ART-3 (site art)
+material plaster_house plaster wood   dither
+material stone_house cave_rock wood     dither
+material cobble     cave_rock dirt     dither
+material forge      cave_rock blackiron dither

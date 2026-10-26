@@ -1,0 +1,5 @@
+canvas 256 256
+put artisans_guild_0 0 0
+put artisans_guild_1 128 0
+put artisans_guild_2 0 128
+put artisans_guild_3 128 128

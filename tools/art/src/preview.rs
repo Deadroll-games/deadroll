@@ -194,6 +194,23 @@ pub const ICON_LOOKS: &[(&str, Look)] = &[
     ("icon_torch", lk3("tile_door", "gold", "fire")),
 ];
 
+/// Colors of site art (never packed) by name prefix, any layer.
+pub const SITE_LOOKS: &[(&str, Look)] = &[
+    ("tavern", lk3("plaster_house", "slate", "fire")),
+    ("artisans_guild", lk3("stone_house", "slate", "fire")),
+    ("storage", lk3("stone_house", "slate", "fire")),
+    ("city_street", lk3("cobble", "bone", "cold")),
+    ("city_square", lk3("cave_floor", "bone", "cold")),
+    ("city_grass", lk3("forest_grass", "rust", "bone")),
+    ("city_wall", lk3("stone_house", "steel", "cold")),
+    ("interior_floor", lk3("planks", "steel", "cold")),
+    ("interior_wall", lk3("plaster_house", "steel", "cold")),
+    ("furniture_board", lk3("chest", "bone", "fire")),
+    ("furniture_forge", lk3("forge", "gold", "fire")),
+    ("furniture_anvil", lk3("forge", "gold", "fire")),
+    ("furniture_", lk3("chest", "gold", "fire")),
+];
+
 const fn lk3(material: &'static str, accent: &'static str, element: &'static str) -> Look {
     Look {
         material,
@@ -208,6 +225,9 @@ pub fn default_look(name: &str, layer_type: u8) -> Look {
         if let Some((_, look)) = MONSTER_LOOKS.iter().find(|(n, _)| *n == name) {
             return *look;
         }
+    }
+    if let Some((_, look)) = SITE_LOOKS.iter().find(|(p, _)| name.starts_with(p)) {
+        return *look;
     }
     if layer_type == layer::ICON {
         if let Some((_, look)) = ICON_LOOKS.iter().find(|(n, _)| *n == name) {
