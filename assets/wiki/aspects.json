@@ -1,0 +1,9 @@
+{
+  "note": "Short wiki text next to the registry data (app/scripts/wiki.ts). Every Aspect of crates/types needs a line here, or the site build fails.",
+  "Fire": "Elemental damage. Its native state is Burning: damage over time.",
+  "Cold": "Elemental damage. Its native state is Chill, which builds up into Freeze.",
+  "Lightning": "Elemental damage. Its native state is Shock: the target takes more damage.",
+  "Blood": "Physical damage. Its native state is Bleeding: damage over time.",
+  "Blunt": "Physical damage, cut by armor. Its native state is Stun: the target skips a turn.",
+  "Piercing": "Physical damage, cut by armor. Its native state is Penetration: the target's armor counts for less."
+}

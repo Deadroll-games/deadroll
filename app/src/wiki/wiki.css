@@ -1,0 +1,28 @@
+.wiki { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 20px; padding: 20px; max-width: 1300px; margin: 0 auto; }
+.wiki-toc { position: sticky; top: 12px; align-self: start; }
+.wiki-toc h2 { margin-top: 0; }
+.wiki-toc ul { padding-left: 18px; }
+.wiki-body section { margin-bottom: 32px; }
+.wiki-table { border-collapse: collapse; width: 100%; font-size: 14px; }
+.wiki-table th, .wiki-table td { border-bottom: 1px solid var(--border); padding: 6px 8px; text-align: left; vertical-align: top; }
+.wiki-steps li { margin: 4px 0; }
+.wiki-preview h4 { margin: 12px 0 4px; }
+.wiki-body details { margin: 8px 0; }
+.wiki-body summary { cursor: pointer; font-weight: 600; }
+.bestiary { padding: 20px; max-width: 1300px; margin: 0 auto; }
+.bestiary-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(460px, 1fr)); gap: 12px; }
+.bestiary-grid.small { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.bestiary-card { margin: 0; display: grid; justify-items: center; gap: 6px; }
+.bestiary-card.wide { grid-template-columns: 200px 1fr; justify-items: start; align-items: start; }
+.bestiary-card img { width: 192px; height: 192px; image-rendering: pixelated; }
+.bestiary-grid.small .bestiary-card img { width: 128px; height: 128px; }
+.bestiary-card h3 { margin: 0; }
+.bestiary-stats { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 8px 0; font-size: 14px; }
+.bestiary-stats dt { color: var(--muted); }
+.bestiary-stats dd { margin: 0; }
+@media (max-width: 900px) {
+  .wiki { grid-template-columns: 1fr; }
+  .wiki-toc { position: static; }
+  .bestiary-grid { grid-template-columns: 1fr; }
+  .bestiary-card.wide { grid-template-columns: 1fr; }
+}

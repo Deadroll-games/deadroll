@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 import type { Address } from "@solana/kit";
 import { Grid } from "../components/grid/Grid";
 import type { GridChest, GridPointKind, GridTile, GridUnit } from "../components/grid/types";
@@ -70,7 +69,8 @@ export function mapVerdict(mapcheck: MapcheckWasm | null, draft: MapCheckDraft, 
   return [MAPCHECK_MESSAGES[rule], ...spawns];
 }
 
-export function MapBuilderPage() {
+/** The map builder (the DM's table in the Tavern). `onPublish` posts a finalized map as a quest. */
+export function MapBuilder({ onPublish }: { onPublish?: (map: Address) => void }) {
   const first = MAP_PRESETS[0]!;
   const [size, setSize] = useState({ width: first.width, height: first.height });
   const [layout, setLayout] = useState(() => presetToLayout(first));
@@ -274,7 +274,14 @@ export function MapBuilderPage() {
               <a href={explorerUrl("address", built)} target="_blank" rel="noreferrer" className="mono">
                 {built.slice(0, 8)}..
               </a>{" "}
-              · <Link to={`/party?map=${built}`}>Open a party on it</Link>
+              {onPublish && (
+                <>
+                  {" · "}
+                  <button type="button" className="btn primary" onClick={() => onPublish(built)}>
+                    Post it as a quest
+                  </button>
+                </>
+              )}
             </p>
           )}
           {DATA_SOURCE === "chain" && myMaps.length > 0 && (
@@ -284,10 +291,12 @@ export function MapBuilderPage() {
                 {myMaps.map((m) => (
                   <li key={m.address}>
                     {m.address.slice(0, 8)}.. {m.data.core.width}x{m.data.core.height} · {BIOME_NAMES[m.data.biome] ?? BIOME_NAMES[0]} · {mapStatus(m.data)}
-                    {mapStatus(m.data) === "finalized" && (
+                    {mapStatus(m.data) === "finalized" && onPublish && (
                       <>
-                        {" "}
-                        · <Link to={`/party?map=${m.address}`}>open a party</Link>
+                        {" · "}
+                        <button type="button" className="btn" onClick={() => onPublish(m.address)}>
+                          Post as a quest
+                        </button>
                       </>
                     )}
                   </li>

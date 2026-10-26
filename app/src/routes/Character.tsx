@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useState } from "react";
 import type { Address } from "@solana/kit";
 import { CharacterForm } from "../components/forms/CharacterForm";
 import type { CharacterDraft } from "../components/forms/types";
@@ -12,13 +11,12 @@ import {
   optional,
   skillDescriptionIxs,
   SKILL_PRESETS,
-  myCharacters,
   type CharacterAcc,
 } from "../chain/game";
 import { aspectName, className, raceName } from "../chain/names";
 import { Aspect, Class, Race } from "../chain/types";
 import { useTx } from "../chain/useTx";
-import { DATA_SOURCE, DEV_TOOLS } from "../config";
+import { DATA_SOURCE } from "../config";
 import { OldCharacterLabel } from "../raster/OldCharacter";
 import { useRasterizer, useRenderImage } from "../raster/RasterizerProvider";
 import { PREVIEW_SCALE, SpriteCanvas, usePreviewFit } from "../raster/SpriteCanvas";
@@ -28,13 +26,15 @@ import { useAppWallet } from "../wallet/AppWallet";
 const STAT_MIN = 5;
 const STAT_POINTS = 10;
 
-export function CharacterPage() {
+/** Character creation (the characters window): a new character and its Core NFT. */
+export function CharacterCreate({ onCreated, initial }: { onCreated?: (address: Address) => void; initial?: Partial<CharacterDraft> }) {
   const [draft, setDraft] = useState<CharacterDraft>({
     name: "",
     race: Race.Human,
     class: Class.Warrior,
     predisposition: Aspect.Piercing,
     stats: [STAT_MIN, STAT_MIN, STAT_MIN, STAT_MIN],
+    ...initial,
   });
   const [mockCreated, setMockCreated] = useState<CharacterDraft | null>(null);
   const raster = useRasterizer();
@@ -44,17 +44,6 @@ export function CharacterPage() {
   const previewFit = usePreviewFit();
   const wallet = useAppWallet();
   const { send, busy } = useTx();
-  const [mine, setMine] = useState<{ address: Address; data: CharacterAcc }[]>([]);
-
-  const refresh = useCallback(async () => {
-    if (DATA_SOURCE !== "chain" || !wallet.address) return setMine([]);
-    try {
-      setMine(await myCharacters(wallet.address));
-    } catch {
-      // shown as an empty list
-    }
-  }, [wallet.address]);
-  useEffect(() => void refresh(), [refresh]);
 
   const allowed = RACE_PREDISPOSITIONS[draft.race];
   const onChange = (next: CharacterDraft) => {
@@ -85,14 +74,13 @@ export function CharacterPage() {
         if (!(await send(`skill descriptions ${i + 1}/${batches.length}`, owner, ixs))) break;
       }
       setDraft((x) => ({ ...x, name: "" }));
-      await refresh();
       void wallet.refreshBalance();
+      onCreated?.(c.character);
     }
   };
 
   return (
     <section>
-      <h1>Create a character</h1>
       <CharacterForm
         value={draft}
         onChange={onChange}
@@ -108,23 +96,11 @@ export function CharacterPage() {
           Mock: {mockCreated.name}, {raceName(mockCreated.race)} {className(mockCreated.class)} with {aspectName(mockCreated.predisposition)} predisposition.
         </p>
       )}
-      {DATA_SOURCE === "chain" && (
-        <>
-          <h2>My characters</h2>
-          {!wallet.address && <p className="muted">{DEV_TOOLS ? "Connect a wallet, or open the app with ?dev=1 on localnet." : "Connect a wallet."}</p>}
-          {wallet.address && mine.length === 0 && <p className="muted">None yet.</p>}
-          <div className="char-list">
-            {mine.map((c) => (
-              <CharacterCard key={c.address} address={c.address} c={c.data} />
-            ))}
-          </div>
-        </>
-      )}
     </section>
   );
 }
 
-export function CharacterCard({ address, c }: { address: Address; c: CharacterAcc }) {
+export function CharacterCard({ c, active = false, onOpen }: { c: CharacterAcc; active?: boolean; onOpen: () => void }) {
   const dead = !c.core.alive;
   const current = isCurrentAppearance(c.core.appearance);
   const req = current ? characterRequest(c) : null;
@@ -132,9 +108,9 @@ export function CharacterCard({ address, c }: { address: Address; c: CharacterAc
   const race = c.core.race as Race;
   const cls = c.core.class as Class;
   const pred = c.core.predisposition as Aspect;
-  // The whole card opens the detail view; explorer links (PDA, Core NFT) live there.
+  // The whole card opens the character window and makes it active; explorer links live there.
   return (
-    <Link to={`/character/${address}`} className="char-card-link" aria-label={`Open ${bytesText(c.name)}`}>
+    <button type="button" className={`char-card-link${active ? " active" : ""}`} aria-label={`Open ${bytesText(c.name)}`} aria-pressed={active} onClick={onOpen}>
       <figure className={`panel char-card${dead ? " dead" : ""}`}>
         {current ? <SpriteCanvas image={img.image} scale={1} label={bytesText(c.name)} /> : <OldCharacterLabel />}
         <figcaption>
@@ -145,9 +121,9 @@ export function CharacterCard({ address, c }: { address: Address; c: CharacterAc
           <span className={dead ? "error" : "ok"}>
             {dead ? `Tombstone${c.nftFrozen ? " · NFT frozen" : " · freeze pending"}` : optional(c.core.inSession) ? "In a party" : "Alive"}
           </span>
-          <span className="muted">Details →</span>
+          <span className="muted">{active ? "Active · details →" : "Details →"}</span>
         </figcaption>
       </figure>
-    </Link>
+    </button>
   );
 }

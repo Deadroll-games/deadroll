@@ -1,0 +1,17 @@
+{
+  "note": "Every skill of assets/registry/monster_skills.json needs a line here (key: its name), or the site build fails.",
+  "Lunge": "A quick piercing bite at an adjacent enemy.",
+  "Hamstring": "A piercing bite at the legs that slows the target.",
+  "Ragged Bite": "A tearing bite that makes the target bleed.",
+  "Howl": "Hastes the wolf's own kin nearby.",
+  "Dirty Strike": "A piercing stab that weakens the target.",
+  "Thrown Stone": "A blunt stone thrown from range.",
+  "Net Throw": "A net thrown from range that slows the target.",
+  "Spin Strike": "A spinning blade strike at an adjacent enemy.",
+  "Dagger Throw": "A dagger thrown from range.",
+  "Leader": "A passive aura that empowers the leader's kin around it.",
+  "Battle Cry": "When struck, the warrior shouts and protects its kin.",
+  "Spark": "A lightning bolt thrown from range.",
+  "Mending": "Heals one of the shaman's kin.",
+  "Quicken": "Hastes one of the shaman's kin."
+}
