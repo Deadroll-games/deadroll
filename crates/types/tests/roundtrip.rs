@@ -554,3 +554,85 @@ fn loadout_equipment_reads_worn_soulbound_bases() {
     assert_eq!(l.worn_slot(1), Some(EquipSlot::Body));
     assert_eq!(l.worn_slot(2), None);
 }
+
+enum_tests! {
+    building_kind: BuildingKind, 3;
+    building_status: BuildingStatus, 2;
+    requirement: Requirement, 1;
+}
+
+#[test]
+fn city_structs() {
+    let object = CityObject {
+        sprite: u16::MAX,
+        x: u8::MAX,
+        y: u8::MAX,
+    };
+    check(&object, CityObject::SIZE);
+    let city = CityData {
+        version: 0x7E,
+        authority: pk(1),
+        width: CITY_W_MAX as u8,
+        height: CITY_H_MAX as u8,
+        cells: [u8::MAX; CITY_CELLS],
+        objects: [object; CITY_OBJECTS_MAX],
+        object_count: CITY_OBJECTS_MAX as u8,
+        spawn: Cell { x: 1, y: 2 },
+        building_count: u16::MAX,
+        bump: u8::MAX,
+    };
+    let bytes = check(&city, CityData::SIZE);
+    assert_eq!(bytes[0], 0x7E);
+    let building = BuildingData {
+        version: 0x7E,
+        id: u16::MAX,
+        kind: last(BuildingKind::ALL),
+        prefab_id: u16::MAX,
+        x: u8::MAX,
+        y: u8::MAX,
+        door: Cell { x: 3, y: 4 },
+        program: pk(2),
+        target: pk(3),
+        interior_id: u16::MAX,
+        status: last(BuildingStatus::ALL),
+        requirement: last(Requirement::ALL),
+        bump: u8::MAX,
+    };
+    assert_eq!(check(&building, BuildingData::SIZE)[0], 0x7E);
+    let board = TavernBoardData {
+        version: 0x7E,
+        building: pk(4),
+        posted: u32::MAX,
+        open: u16::MAX,
+        bump: u8::MAX,
+    };
+    assert_eq!(check(&board, TavernBoardData::SIZE)[0], 0x7E);
+    let quest = QuestData {
+        version: 0x7E,
+        board: pk(5),
+        session: pk(6),
+        map: pk(7),
+        dm: pk(8),
+        tier: u8::MAX,
+        biome: u8::MAX,
+        min_players: u8::MAX,
+        price_lamports: u64::MAX,
+        posted_at: i64::MIN,
+        bump: u8::MAX,
+    };
+    assert_eq!(check(&quest, QuestData::SIZE)[0], 0x7E);
+    assert_eq!(
+        (
+            seeds::CITY,
+            seeds::BUILDING,
+            seeds::TAVERN_BOARD,
+            seeds::QUEST
+        ),
+        (
+            &b"city"[..],
+            &b"building"[..],
+            &b"tavern_board"[..],
+            &b"quest"[..]
+        )
+    );
+}

@@ -174,3 +174,20 @@ pub const fn cell_variant(byte: u8) -> u8 {
 pub const fn cell_byte(kind: u8, variant: u8) -> u8 {
     (kind << 3) | (variant & 0b111)
 }
+
+// City (docs/CITY_DESCRIPTION.md 3, 4).
+u8_enum!(
+    /// What a city building is (`Building.kind`). It picks the site's interface module
+    /// (docs/CITY_DESCRIPTION.md 4).
+    BuildingKind { Tavern, MastersGuild, Storage }
+);
+u8_enum!(
+    /// Whether a building can be entered (`Building.status`). A `Closed` one is drawn with a
+    /// boarded-up door (docs/CITY_DESCRIPTION.md 8).
+    BuildingStatus { Active, Closed }
+);
+u8_enum!(
+    /// The access condition of a building (`Building.requirement`, docs/CITY_DESCRIPTION.md 5.1).
+    /// Only `None` for now; the other conditions are appended with their checks.
+    Requirement { None }
+);

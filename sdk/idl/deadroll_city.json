@@ -4,14 +4,1943 @@
     "name": "deadroll_city",
     "version": "0.1.0",
     "spec": "0.1.0",
-    "description": "Deadroll city: city, buildings, storage."
+    "description": "Deadroll city: city, buildings, Tavern board and quests."
   },
-  "instructions": [],
+  "instructions": [
+    {
+      "name": "add_building",
+      "docs": [
+        "City authority adds a building calling one of the game programs."
+      ],
+      "discriminator": [
+        134,
+        58,
+        238,
+        111,
+        18,
+        191,
+        44,
+        100
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                9,
+                93,
+                27,
+                37,
+                218,
+                79,
+                221,
+                125,
+                83,
+                7,
+                123,
+                151,
+                252,
+                231,
+                65,
+                177,
+                65,
+                225,
+                242,
+                116,
+                20,
+                215,
+                178,
+                225,
+                173,
+                88,
+                9,
+                192,
+                113,
+                184,
+                209,
+                219
+              ]
+            }
+          }
+        },
+        {
+          "name": "city",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "building",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  117,
+                  105,
+                  108,
+                  100,
+                  105,
+                  110,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "city.core.building_count",
+                "account": "City"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "spec",
+          "type": {
+            "defined": {
+              "name": "BuildingSpec"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "close_building",
+      "docs": [
+        "City authority closes a building (boarded-up door)."
+      ],
+      "discriminator": [
+        69,
+        72,
+        209,
+        36,
+        27,
+        169,
+        57,
+        33
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "city",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "building",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  117,
+                  105,
+                  108,
+                  100,
+                  105,
+                  110,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "building.core.id",
+                "account": "Building"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "close_quest",
+      "docs": [
+        "DM takes a quest off the board."
+      ],
+      "discriminator": [
+        70,
+        85,
+        16,
+        198,
+        37,
+        10,
+        13,
+        122
+      ],
+      "accounts": [
+        {
+          "name": "dm",
+          "docs": [
+            "The quest's DM; gets the rent back."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                9,
+                93,
+                27,
+                37,
+                218,
+                79,
+                221,
+                125,
+                83,
+                7,
+                123,
+                151,
+                252,
+                231,
+                65,
+                177,
+                65,
+                225,
+                242,
+                116,
+                20,
+                215,
+                178,
+                225,
+                173,
+                88,
+                9,
+                192,
+                113,
+                184,
+                209,
+                219
+              ]
+            }
+          }
+        },
+        {
+          "name": "board",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  97,
+                  118,
+                  101,
+                  114,
+                  110,
+                  95,
+                  98,
+                  111,
+                  97,
+                  114,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "board.core.building",
+                "account": "TavernBoard"
+              }
+            ]
+          }
+        },
+        {
+          "name": "quest",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  117,
+                  101,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "quest.core.session",
+                "account": "Quest"
+              }
+            ]
+          }
+        },
+        {
+          "name": "session"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "init_city",
+      "docs": [
+        "The game authority creates the one city."
+      ],
+      "discriminator": [
+        178,
+        113,
+        156,
+        92,
+        100,
+        81,
+        140,
+        222
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "docs": [
+            "The registry `GameConfig.authority`; it becomes the city's authority."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                9,
+                93,
+                27,
+                37,
+                218,
+                79,
+                221,
+                125,
+                83,
+                7,
+                123,
+                151,
+                252,
+                231,
+                65,
+                177,
+                65,
+                225,
+                242,
+                116,
+                20,
+                215,
+                178,
+                225,
+                173,
+                88,
+                9,
+                192,
+                113,
+                184,
+                209,
+                219
+              ]
+            }
+          }
+        },
+        {
+          "name": "city",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "width",
+          "type": "u8"
+        },
+        {
+          "name": "height",
+          "type": "u8"
+        },
+        {
+          "name": "spawn",
+          "type": {
+            "defined": {
+              "name": "Cell"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "init_tavern_board",
+      "docs": [
+        "City authority creates the order board of a Tavern."
+      ],
+      "discriminator": [
+        89,
+        230,
+        8,
+        21,
+        120,
+        235,
+        228,
+        131
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "city",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "building",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  117,
+                  105,
+                  108,
+                  100,
+                  105,
+                  110,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "building.core.id",
+                "account": "Building"
+              }
+            ]
+          }
+        },
+        {
+          "name": "board",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  97,
+                  118,
+                  101,
+                  114,
+                  110,
+                  95,
+                  98,
+                  111,
+                  97,
+                  114,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "building"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "post_quest",
+      "docs": [
+        "DM posts their party in the lobby as a quest on a Tavern board."
+      ],
+      "discriminator": [
+        92,
+        36,
+        122,
+        179,
+        65,
+        79,
+        191,
+        122
+      ],
+      "accounts": [
+        {
+          "name": "dm",
+          "docs": [
+            "The DM's main wallet (docs/CITY_DESCRIPTION.md 2)."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                9,
+                93,
+                27,
+                37,
+                218,
+                79,
+                221,
+                125,
+                83,
+                7,
+                123,
+                151,
+                252,
+                231,
+                65,
+                177,
+                65,
+                225,
+                242,
+                116,
+                20,
+                215,
+                178,
+                225,
+                173,
+                88,
+                9,
+                192,
+                113,
+                184,
+                209,
+                219
+              ]
+            }
+          }
+        },
+        {
+          "name": "building",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  117,
+                  105,
+                  108,
+                  100,
+                  105,
+                  110,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "building.core.id",
+                "account": "Building"
+              }
+            ]
+          }
+        },
+        {
+          "name": "board",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  97,
+                  118,
+                  101,
+                  114,
+                  110,
+                  95,
+                  98,
+                  111,
+                  97,
+                  114,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "building"
+              }
+            ]
+          }
+        },
+        {
+          "name": "map"
+        },
+        {
+          "name": "session"
+        },
+        {
+          "name": "quest",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  117,
+                  101,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "set_city_objects",
+      "docs": [
+        "City authority replaces the decor and the spawn cell."
+      ],
+      "discriminator": [
+        97,
+        93,
+        154,
+        1,
+        37,
+        13,
+        238,
+        9
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "city",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "objects",
+          "type": {
+            "vec": {
+              "defined": {
+                "name": "CityObject"
+              }
+            }
+          }
+        },
+        {
+          "name": "spawn",
+          "type": {
+            "defined": {
+              "name": "Cell"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "update_building",
+      "docs": [
+        "City authority changes a building."
+      ],
+      "discriminator": [
+        34,
+        134,
+        221,
+        222,
+        25,
+        214,
+        115,
+        30
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                9,
+                93,
+                27,
+                37,
+                218,
+                79,
+                221,
+                125,
+                83,
+                7,
+                123,
+                151,
+                252,
+                231,
+                65,
+                177,
+                65,
+                225,
+                242,
+                116,
+                20,
+                215,
+                178,
+                225,
+                173,
+                88,
+                9,
+                192,
+                113,
+                184,
+                209,
+                219
+              ]
+            }
+          }
+        },
+        {
+          "name": "city",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "building",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  117,
+                  105,
+                  108,
+                  100,
+                  105,
+                  110,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "building.core.id",
+                "account": "Building"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "spec",
+          "type": {
+            "defined": {
+              "name": "BuildingSpec"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "write_city",
+      "docs": [
+        "City authority writes a chunk of city cells (site tile ids)."
+      ],
+      "discriminator": [
+        241,
+        254,
+        122,
+        83,
+        138,
+        32,
+        186,
+        209
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "city",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "offset",
+          "type": "u16"
+        },
+        {
+          "name": "cells",
+          "type": "bytes"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Building",
+      "discriminator": [
+        28,
+        228,
+        185,
+        38,
+        142,
+        95,
+        117,
+        211
+      ]
+    },
+    {
+      "name": "City",
+      "discriminator": [
+        3,
+        204,
+        223,
+        157,
+        129,
+        30,
+        45,
+        230
+      ]
+    },
+    {
+      "name": "Quest",
+      "discriminator": [
+        68,
+        78,
+        51,
+        23,
+        204,
+        27,
+        76,
+        132
+      ]
+    },
+    {
+      "name": "TavernBoard",
+      "discriminator": [
+        2,
+        205,
+        122,
+        113,
+        149,
+        103,
+        240,
+        250
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "BuildingChanged",
+      "discriminator": [
+        219,
+        234,
+        171,
+        183,
+        88,
+        244,
+        124,
+        138
+      ]
+    },
+    {
+      "name": "BuildingClosed",
+      "discriminator": [
+        39,
+        119,
+        92,
+        116,
+        96,
+        118,
+        250,
+        127
+      ]
+    },
+    {
+      "name": "CityInitialized",
+      "discriminator": [
+        42,
+        47,
+        128,
+        157,
+        20,
+        113,
+        147,
+        99
+      ]
+    },
+    {
+      "name": "CityObjectsSet",
+      "discriminator": [
+        98,
+        38,
+        30,
+        95,
+        194,
+        206,
+        181,
+        122
+      ]
+    },
+    {
+      "name": "CityWritten",
+      "discriminator": [
+        255,
+        74,
+        53,
+        229,
+        251,
+        15,
+        100,
+        105
+      ]
+    },
+    {
+      "name": "QuestClosed",
+      "discriminator": [
+        196,
+        227,
+        218,
+        136,
+        156,
+        178,
+        67,
+        52
+      ]
+    },
+    {
+      "name": "QuestPosted",
+      "discriminator": [
+        86,
+        57,
+        56,
+        201,
+        66,
+        77,
+        131,
+        245
+      ]
+    },
+    {
+      "name": "TavernBoardInitialized",
+      "discriminator": [
+        195,
+        162,
+        101,
+        228,
+        44,
+        133,
+        160,
+        161
+      ]
+    }
+  ],
   "errors": [
     {
       "code": 6000,
       "name": "Unauthorized",
       "msg": "Caller is not authorized for this instruction"
+    },
+    {
+      "code": 6001,
+      "name": "InvalidConfig",
+      "msg": "GameConfig account is not the registry config"
+    },
+    {
+      "code": 6002,
+      "name": "SizeOutOfRange",
+      "msg": "City size is out of range"
+    },
+    {
+      "code": 6003,
+      "name": "OutOfCity",
+      "msg": "Cell or range is outside the city"
+    },
+    {
+      "code": 6004,
+      "name": "TooManyObjects",
+      "msg": "Too many decor objects"
+    },
+    {
+      "code": 6005,
+      "name": "ProgramNotAllowed",
+      "msg": "Program is not one of the game programs"
+    },
+    {
+      "code": 6006,
+      "name": "BadTarget",
+      "msg": "Building target does not match its kind"
+    },
+    {
+      "code": 6007,
+      "name": "BuildingClosed",
+      "msg": "Building is closed"
+    },
+    {
+      "code": 6008,
+      "name": "NotATavern",
+      "msg": "Building is not a Tavern"
+    },
+    {
+      "code": 6009,
+      "name": "BadBoard",
+      "msg": "Board is not this building's board"
+    },
+    {
+      "code": 6010,
+      "name": "NoAccess",
+      "msg": "Access condition of the building is not met"
+    },
+    {
+      "code": 6011,
+      "name": "InvalidMap",
+      "msg": "Map account is not a map of the map program"
+    },
+    {
+      "code": 6012,
+      "name": "MapNotInSession",
+      "msg": "Map is not in a party"
+    },
+    {
+      "code": 6013,
+      "name": "NotTheDm",
+      "msg": "Signer is not the DM"
+    },
+    {
+      "code": 6014,
+      "name": "InvalidSession",
+      "msg": "Session account is not a party of the session program"
+    },
+    {
+      "code": 6015,
+      "name": "SessionNotInLobby",
+      "msg": "Party is not in the lobby"
+    },
+    {
+      "code": 6016,
+      "name": "SessionMapMismatch",
+      "msg": "Party is not on this map"
+    },
+    {
+      "code": 6017,
+      "name": "QuestStillOpen",
+      "msg": "Party is still gathering players"
+    }
+  ],
+  "types": [
+    {
+      "name": "Building",
+      "docs": [
+        "`[\"building\", id: u16]`: one building of the city (docs/CITY_DESCRIPTION.md 3.2)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "core",
+            "type": {
+              "defined": {
+                "name": "BuildingData"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "BuildingChanged",
+      "docs": [
+        "`add_building` and `update_building`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "building",
+            "type": "pubkey"
+          },
+          {
+            "name": "id",
+            "type": "u16"
+          },
+          {
+            "name": "kind",
+            "type": {
+              "defined": {
+                "name": "BuildingKind"
+              }
+            }
+          },
+          {
+            "name": "program",
+            "type": "pubkey"
+          },
+          {
+            "name": "target",
+            "type": "pubkey"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "BuildingStatus"
+              }
+            }
+          },
+          {
+            "name": "added",
+            "docs": [
+              "`add_building`: true."
+            ],
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BuildingClosed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "building",
+            "type": "pubkey"
+          },
+          {
+            "name": "id",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BuildingData",
+      "docs": [
+        "city `[\"building\", id: u16]`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "id",
+            "type": "u16"
+          },
+          {
+            "name": "kind",
+            "type": {
+              "defined": {
+                "name": "BuildingKind"
+              }
+            }
+          },
+          {
+            "name": "prefab_id",
+            "docs": [
+              "The site picture of the building, its top-left cell on the city map."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "x",
+            "type": "u8"
+          },
+          {
+            "name": "y",
+            "type": "u8"
+          },
+          {
+            "name": "door",
+            "docs": [
+              "The cell that opens the building when clicked."
+            ],
+            "type": {
+              "defined": {
+                "name": "Cell"
+              }
+            }
+          },
+          {
+            "name": "program",
+            "docs": [
+              "The program the building calls: one of `GameConfig.programs`, or none when closed."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "target",
+            "docs": [
+              "The building's main account (a Tavern: its `TavernBoard`)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "interior_id",
+            "docs": [
+              "The site interior drawn inside."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "BuildingStatus"
+              }
+            }
+          },
+          {
+            "name": "requirement",
+            "type": {
+              "defined": {
+                "name": "Requirement"
+              }
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BuildingKind",
+      "docs": [
+        "What a city building is (`Building.kind`). It picks the site's interface module",
+        "(docs/CITY_DESCRIPTION.md 4)."
+      ],
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Tavern"
+          },
+          {
+            "name": "MastersGuild"
+          },
+          {
+            "name": "Storage"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BuildingSpec",
+      "docs": [
+        "What `add_building` and `update_building` set: every field but the id."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "kind",
+            "type": {
+              "defined": {
+                "name": "BuildingKind"
+              }
+            }
+          },
+          {
+            "name": "prefab_id",
+            "type": "u16"
+          },
+          {
+            "name": "x",
+            "type": "u8"
+          },
+          {
+            "name": "y",
+            "type": "u8"
+          },
+          {
+            "name": "door",
+            "type": {
+              "defined": {
+                "name": "Cell"
+              }
+            }
+          },
+          {
+            "name": "program",
+            "type": "pubkey"
+          },
+          {
+            "name": "target",
+            "type": "pubkey"
+          },
+          {
+            "name": "interior_id",
+            "type": "u16"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "BuildingStatus"
+              }
+            }
+          },
+          {
+            "name": "requirement",
+            "type": {
+              "defined": {
+                "name": "Requirement"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "BuildingStatus",
+      "docs": [
+        "Whether a building can be entered (`Building.status`). A `Closed` one is drawn with a",
+        "boarded-up door (docs/CITY_DESCRIPTION.md 8)."
+      ],
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Active"
+          },
+          {
+            "name": "Closed"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Cell",
+      "docs": [
+        "A map cell coordinate."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "x",
+            "type": "u8"
+          },
+          {
+            "name": "y",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "City",
+      "docs": [
+        "`[\"city\"]`: the one city (docs/CITY_DESCRIPTION.md 3.1)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "core",
+            "type": {
+              "defined": {
+                "name": "CityData"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "CityData",
+      "docs": [
+        "city `[\"city\"]`: the one city every player appears in."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "authority",
+            "docs": [
+              "Adds and changes buildings (the registry `GameConfig.authority` at `init_city`)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "width",
+            "type": "u8"
+          },
+          {
+            "name": "height",
+            "type": "u8"
+          },
+          {
+            "name": "cells",
+            "docs": [
+              "Row-major site tile ids, `CITY_W_MAX` cells per row."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                1536
+              ]
+            }
+          },
+          {
+            "name": "objects",
+            "docs": [
+              "Decor, `0..object_count` used."
+            ],
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "CityObject"
+                  }
+                },
+                32
+              ]
+            }
+          },
+          {
+            "name": "object_count",
+            "type": "u8"
+          },
+          {
+            "name": "spawn",
+            "docs": [
+              "The cell a player appears on."
+            ],
+            "type": {
+              "defined": {
+                "name": "Cell"
+              }
+            }
+          },
+          {
+            "name": "building_count",
+            "docs": [
+              "Buildings created so far; the next one gets this id."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CityInitialized",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "city",
+            "type": "pubkey"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "width",
+            "type": "u8"
+          },
+          {
+            "name": "height",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CityObject",
+      "docs": [
+        "A decor object of the city (`CityData.objects`): a site sprite id on a cell."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "sprite",
+            "type": "u16"
+          },
+          {
+            "name": "x",
+            "type": "u8"
+          },
+          {
+            "name": "y",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CityObjectsSet",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "object_count",
+            "type": "u8"
+          },
+          {
+            "name": "spawn_x",
+            "type": "u8"
+          },
+          {
+            "name": "spawn_y",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CityWritten",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "offset",
+            "type": "u16"
+          },
+          {
+            "name": "len",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Quest",
+      "docs": [
+        "`[\"quest\", session]`: a DM's order on a Tavern board (docs/PARTY_AND_TURNS.md 2, step 2)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "core",
+            "type": {
+              "defined": {
+                "name": "QuestData"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "QuestClosed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "quest",
+            "type": "pubkey"
+          },
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "dm",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "QuestData",
+      "docs": [
+        "city `[\"quest\", session]`: a DM's order on a Tavern board for one party. What the party",
+        "is when posted; the live state (players, contributions, status) is the session's."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "board",
+            "type": "pubkey"
+          },
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "map",
+            "type": "pubkey"
+          },
+          {
+            "name": "dm",
+            "type": "pubkey"
+          },
+          {
+            "name": "tier",
+            "type": "u8"
+          },
+          {
+            "name": "biome",
+            "type": "u8"
+          },
+          {
+            "name": "min_players",
+            "type": "u8"
+          },
+          {
+            "name": "price_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "posted_at",
+            "docs": [
+              "Unix time of `post_quest`."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "QuestPosted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "quest",
+            "type": "pubkey"
+          },
+          {
+            "name": "board",
+            "type": "pubkey"
+          },
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "map",
+            "type": "pubkey"
+          },
+          {
+            "name": "dm",
+            "type": "pubkey"
+          },
+          {
+            "name": "tier",
+            "type": "u8"
+          },
+          {
+            "name": "price_lamports",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Requirement",
+      "docs": [
+        "The access condition of a building (`Building.requirement`, docs/CITY_DESCRIPTION.md 5.1).",
+        "Only `None` for now; the other conditions are appended with their checks."
+      ],
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "None"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TavernBoard",
+      "docs": [
+        "`[\"tavern_board\", building]`: the order board of a Tavern (docs/CITY_DESCRIPTION.md 3.3)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "core",
+            "type": {
+              "defined": {
+                "name": "TavernBoardData"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "TavernBoardData",
+      "docs": [
+        "city `[\"tavern_board\", building]`: the order board of a Tavern."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "building",
+            "type": "pubkey"
+          },
+          {
+            "name": "posted",
+            "docs": [
+              "Quests posted on this board, ever."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "open",
+            "docs": [
+              "Quests on the board now (posted and not closed)."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TavernBoardInitialized",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "board",
+            "type": "pubkey"
+          },
+          {
+            "name": "building",
+            "type": "pubkey"
+          }
+        ]
+      }
     }
   ]
 }

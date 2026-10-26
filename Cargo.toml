@@ -41,6 +41,7 @@ deadroll-registry = { path = "programs/registry/lib", package = "deadroll-regist
 deadroll-character = { path = "programs/character/lib", package = "deadroll-character-lib", features = ["cpi"] }
 deadroll-map = { path = "programs/map/lib", package = "deadroll-map-lib", features = ["cpi"] }
 deadroll-session = { path = "programs/session/lib", package = "deadroll-session-lib", features = ["cpi"] }
+deadroll-city = { path = "programs/city/lib", package = "deadroll-city-lib", features = ["cpi"] }
 
 [profile.release]
 overflow-checks = true

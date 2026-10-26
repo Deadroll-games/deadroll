@@ -1,4 +1,4 @@
-// The whole deploy pipeline (programs, GameConfig, registry tables, render blobs, demo map),
+// The whole deploy pipeline (programs, GameConfig, registry tables, render blobs, demo map, city),
 // shared by deploy-local.ts and deploy-devnet.ts. Every step is idempotent: a rerun skips what is
 // already on chain and finishes what is not.
 import { spawnSync } from "node:child_process";
@@ -659,6 +659,8 @@ export async function deploy(opts: DeployOptions): Promise<void> {
   await ensureConfig(conn, opts, wallet, programIds);
   const render = await uploadRender(conn, opts, wallet, programIds);
   const demo = await ensureDemoMap(conn, opts, wallet, programIds);
+  step("city");
+  script("seed-city.ts", [], opts);
 
   step("summary");
   for (const p of PROGRAMS) console.log(`${p.key.padEnd(10)} ${programIds[p.key]}`);

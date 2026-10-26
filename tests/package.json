@@ -14,6 +14,7 @@
     "test:render": "pnpm sdk && node --import tsx --test ../programs/render/tests/render.test.ts",
     "test:map": "pnpm sdk && node --import tsx --test ../programs/map/tests/map.test.ts",
     "test:session": "pnpm sdk && node --import tsx --test ../programs/session/tests/session.test.ts",
+    "test:city": "pnpm sdk && node --import tsx --test ../programs/city/tests/city.test.ts",
     "test:demo": "pnpm sdk && node --import tsx --test demo.test.ts",
     "test:gear": "pnpm sdk && node --import tsx --test gear.test.ts"
   }
