@@ -236,8 +236,8 @@ pub fn handler<'info>(
         }
     }
     // Patch 11: the kills of this action, and any waiting from `start_turn`, pay out now (the
-    // experience and body rewards into the living players' caches), one by one while the oracle's
-    // compute budget lasts; the rest wait for the next callback or the settlement.
+    // experience and body rewards into the living players' caches), `loot::KILLS_PER_CALLBACK` of
+    // them; the rest wait for the next callback or the settlement.
     if session.unpaid_kills != 0 {
         let mut caches = CallbackCaches {
             main,

@@ -170,14 +170,16 @@ pub fn pay_kills(
     Ok(())
 }
 
-/// Compute units a VRF callback keeps before it pays out one more kill: one kill to 4 players
-/// with its boss table, then the party write-back and the end of the callback. Measured: a kill
-/// paid out to 4 players costs about 42k (programs/session/tests/session.test.ts).
-pub const PAYOUT_RESERVE_CU: u64 = 75_000;
+/// Kills one VRF callback pays out. A kill paid to 4 players with its boss table costs about 42k
+/// (programs/session/tests/session.test.ts) and the heaviest callback (a line through three
+/// monsters) about 165k, so one kill fits the oracle's 256k with room and two do not. A fixed
+/// count, not `sol_remaining_compute_units`: that syscall is not active on devnet, and a
+/// callback calling it fails with "unsupported BPF instruction".
+pub const KILLS_PER_CALLBACK: u32 = 1;
 
-/// `pay_kills` for the waiting kills (`GameSession.unpaid_kills`), lowest index first, one at a time
-/// while more than [`PAYOUT_RESERVE_CU`] remain of the callback's budget (the oracle's 256k);
-/// the rest wait. Which VRF value pays a kill changes no rule: a cache counts at the settlement.
+/// `pay_kills` for the waiting kills (`GameSession.unpaid_kills`), lowest index first, at most
+/// [`KILLS_PER_CALLBACK`] of them; the rest wait for the next callback or the settlement. Which
+/// VRF value pays a kill changes no rule: a cache counts at the settlement.
 pub fn pay_kills_within_budget(
     session: &mut GameSession,
     session_key: Pubkey,
@@ -185,16 +187,18 @@ pub fn pay_kills_within_budget(
     seed: [u8; 32],
     caches: &mut impl Caches,
 ) -> Result<()> {
+    let mut paid = 0;
     for index in 0..MONSTERS_MAX as u32 {
         let bit = 1u32 << index;
         if session.unpaid_kills & bit == 0 {
             continue;
         }
-        if solana_program::compute_units::sol_remaining_compute_units() < PAYOUT_RESERVE_CU {
+        if paid == KILLS_PER_CALLBACK {
             break;
         }
         pay_kills(session, session_key, monsters, bit, seed, caches)?;
         session.unpaid_kills &= !bit;
+        paid += 1;
     }
     Ok(())
 }
@@ -304,6 +308,27 @@ mod tests {
         assert_eq!(mem.got[0], vec![ore]);
         assert!(mem.got[1].is_empty());
         assert_eq!(mem.got[2], vec![ore]);
+    }
+
+    #[test]
+    fn a_callback_pays_one_kill_lowest_index_first() {
+        use crate::state::test_support::{monster, monsters_account};
+        let key = Pubkey::new_unique();
+        let mut account = monsters_account(key, &[monster(5, 5), monster(6, 5), monster(7, 5)]);
+        let info = account.info();
+        let monsters = Monsters::load(&info, &key).unwrap();
+        let mut s = crate::state::test_support::session(&[Default::default(); 2]);
+        s.core.player_count = 2;
+        s.unpaid_kills = 0b111;
+        let mut mem = Mem::default();
+        for left in [0b110, 0b100, 0b000] {
+            let xp = mem.xp;
+            pay_kills_within_budget(&mut s, key, &monsters, [7; 32], &mut mem).unwrap();
+            assert_eq!(s.unpaid_kills, left);
+            assert!(mem.xp[0] > xp[0], "each callback pays one kill");
+        }
+        pay_kills_within_budget(&mut s, key, &monsters, [7; 32], &mut mem).unwrap();
+        assert_eq!(s.unpaid_kills, 0);
     }
 
     #[test]
