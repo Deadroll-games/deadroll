@@ -94,8 +94,13 @@ pub fn read_map(info: &AccountInfo) -> Result<MapData> {
 
 /// A `deadroll_map` `Map` with the fields after its core: the tier and (patch 11) the minimum
 /// players, the chest radius and the time to settle.
+/// A map from before `Map.biome` is one byte shorter and reads as Caves (`Map::decode_padded`).
 pub fn read_map_full(info: &AccountInfo) -> Result<deadroll_map::state::Map> {
-    decode(info, &deadroll_map::ID, &MAP_DISCRIMINATOR).ok_or(error!(SessionError::InvalidMap))
+    if !check_header(info, &deadroll_map::ID, &MAP_DISCRIMINATOR) {
+        return err!(SessionError::InvalidMap);
+    }
+    let data = info.try_borrow_data()?;
+    deadroll_map::state::Map::decode_padded(&data).ok_or(error!(SessionError::InvalidMap))
 }
 
 /// Byte offsets inside a `MapLayout` account (discriminator included), patch 13:
@@ -420,6 +425,60 @@ mod tests {
         r[22..26].copy_from_slice(&hp.to_le_bytes());
         r[26..30].copy_from_slice(&per_level.to_le_bytes());
         r
+    }
+
+    /// A map account with `map` written over `len` bytes of data (a short `len` cuts the tail).
+    fn map_account(map: &deadroll_map::state::Map, len: usize) -> TestAccount {
+        let mut full = Vec::new();
+        map.try_serialize(&mut full).unwrap();
+        full.resize(len, 0);
+        TestAccount::new(deadroll_map::ID, full)
+    }
+
+    #[test]
+    fn reads_a_map_with_and_without_biome() {
+        use deadroll_map::state::Map;
+        use deadroll_types::{Biome, MapStatus};
+        let map = Map {
+            core: MapData {
+                version: 2,
+                dm: Pubkey::new_unique(),
+                index: 4,
+                width: 16,
+                height: 12,
+                status: MapStatus::Finalized,
+                layout_hash: [3; 32],
+                secrets_root: [4; 32],
+                bump: 253,
+            },
+            tier: 2,
+            min_players: 3,
+            chest_radius: 4,
+            settle_timeout_secs: 7200,
+            biome: Biome::Crypt as u8,
+        };
+        let mut new = map_account(&map, 8 + Map::INIT_SPACE);
+        let read = read_map_full(&new.info()).unwrap();
+        assert_eq!(
+            (read.core, read.tier, read.biome),
+            (map.core.clone(), 2, Biome::Crypt as u8)
+        );
+        // A map created before the biome: one byte shorter, read as Caves.
+        let mut old = map_account(&map, 8 + Map::V1_SPACE);
+        let read = read_map_full(&old.info()).unwrap();
+        assert_eq!(
+            (read.core, read.settle_timeout_secs),
+            (map.core.clone(), 7200)
+        );
+        assert_eq!(read.biome, Biome::Caves as u8);
+        assert_eq!(read_map(&old.info()).unwrap(), map.core);
+        // Shorter still, or not a map: rejected.
+        let invalid = u32::from(SessionError::InvalidMap);
+        let mut short = map_account(&map, 8 + Map::V1_SPACE - 1);
+        assert_eq!(code(read_map_full(&short.info()).err().unwrap()), invalid);
+        let mut other = map_account(&map, 8 + Map::INIT_SPACE);
+        other.owner = deadroll_registry::ID;
+        assert_eq!(code(read_map_full(&other.info()).err().unwrap()), invalid);
     }
 
     #[test]

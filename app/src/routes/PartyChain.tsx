@@ -1,8 +1,8 @@
-// Party screen on chain (L9.6): open a party on a finalized map, pay and join, session keys,
-// ready, start, initiative, moves, attacks with the dice cascade from HitResolved, monster turns
-// by the DM, death + freeze_tombstone, victory and claims. The calls mirror tests/demo.test.ts.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+// Party screen on chain (L9.6): the lobby (pay and join, session keys, ready, start; shown in the
+// Tavern's quest window), then initiative, moves, attacks with the dice cascade from HitResolved,
+// monster turns by the DM, death + freeze_tombstone, victory and claims (the dungeon screen). A
+// party is opened from the Tavern's DM table (game/tavern). The calls mirror tests/demo.test.ts.
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Address, Instruction, TransactionSigner } from "@solana/kit";
 import { HitCard } from "../components/dice/HitCard";
 import { CHEST_OPEN_AP, cacheRewards, chestsOf, levelsLabel, rewardLabel, rewardTables, settleDeadline, settleLabel } from "../chain/loot";
@@ -14,11 +14,12 @@ import type { HitItemSides, HitMods } from "../components/dice/types";
 import { StatsPanel } from "../components/stats/StatsPanel";
 import type { StatsUnit } from "../components/stats/types";
 import { Grid } from "../components/grid/Grid";
-import type { GridAura, GridChest, GridPointKind, GridUnit } from "../components/grid/types";
+import type { GridAura, GridChest, GridPointKind, GridTile, GridUnit } from "../components/grid/types";
 import { PartyLobby } from "../components/forms/PartyLobby";
-import { PrepayConfirm } from "../components/forms/PrepayConfirm";
 import type { LobbyPlayer } from "../components/forms/types";
-import { chestRequest, isCurrentAppearance, monsterRequest, pointRequest, tileRequest, TOMBSTONE } from "../chain/appearance";
+import { chestRequest, isCurrentAppearance, lookRequest, monsterRequest, pointLook, tileLook, TOMBSTONE } from "../chain/appearance";
+import { facesRight, lastTargets } from "../chain/facing";
+import { mirrored } from "../raster/mirror";
 import { characterRequest } from "../chain/items";
 import { HitOutcome, ModKindData, ReactionKind, SessionStatus, Trigger } from "@deadroll/sdk/session";
 import {
@@ -42,18 +43,13 @@ import {
   leavePartyIx,
   openCacheSessions,
   openChestIx,
-  mapStatus,
-  mapsOf,
   monsterActIx,
   movePathIx,
   myCharacters,
-  openSessionIx,
-  openSessions,
   partyAccountsOf,
   pickSeed,
   playerAp,
   readParty,
-  sessionAccounts,
   setReadyIx,
   setSessionKeyIx,
   DEFAULT_KEY,
@@ -64,8 +60,6 @@ import {
   type AuraAcc,
   type CharacterAcc,
   type SkillRecordAcc,
-  type GameSessionAcc,
-  type MapAcc,
   type Party,
   type SeedKind,
 } from "../chain/game";
@@ -97,151 +91,33 @@ import { BASIC_ATTACK_AP, Purpose, inReach, rangeReach, type RangeTag } from "..
 import { monsterBaseAp, monsterDefense, playerDefense, unitStats } from "../chain/stats";
 import { activeMods, combatSkill, effectText, modsAt, modsTickText, toEffectResolved, type CombatSkill, type EffectResolved } from "../chain/support";
 import { useTx } from "../chain/useTx";
-import { MAP_MAX, PARTY_MAX, type Cell, type Class, type HitResult, type Race, type Tile } from "../chain/types";
+import { MAP_MAX, PARTY_MAX, type Cell, type Class, type HitResult, type Race } from "../chain/types";
 import { DATA_SOURCE, MOCK_VRF, PROGRAMS, explorerUrl } from "../config";
 import { useSprites } from "../raster/useSprites";
 import { fetchSessionToken, revokeSessionInstruction } from "../session-key/magicblock";
 import { PartyKeyPanel } from "../session-key/PartyKeyPanel";
 import { FEES, readyPrepay, topUpRoom } from "../session-key/sessionKey";
-import { commitKey, prepareKey, usePartyKey, type PartyKey, type PreparedKey } from "../session-key/usePartyKey";
+import { prepareKey, usePartyKey, type PartyKey, type PreparedKey } from "../session-key/usePartyKey";
 import { sessionTokenPda } from "../chain/pda";
 import { useAppWallet } from "../wallet/AppWallet";
 import { formatSol, shortAddress } from "../wallet/ConnectButton";
 
 const CELL_PX = 64; // sprites: one whole 64 px tile per cell (grid integerCell)
 
-export function PartyChain() {
-  const [params] = useSearchParams();
-  const s = params.get("s") as Address | null;
-  return s ? <PartyView address={s} /> : <PartyPicker map={params.get("map") as Address | null} />;
+type LiveParty = ReturnType<typeof useParty> & { address: Address };
+const PartyContext = createContext<LiveParty | null>(null);
+
+/** One live read of a party for everything under it (the dungeon screen and the minimap). */
+export function PartyProvider({ address, children }: { address: Address; children: ReactNode }) {
+  const live = useParty(address);
+  const value = useMemo(() => ({ ...live, address }), [live, address]);
+  return <PartyContext.Provider value={value}>{children}</PartyContext.Provider>;
 }
 
-// ---------------------------------------------------------------------------------------------
-// no party selected: open one (DM) or pick one (players)
-
-function PartyPicker({ map }: { map: Address | null }) {
-  const wallet = useAppWallet();
-  const { send, busy } = useTx();
-  const [, setParams] = useSearchParams();
-  const [price, setPrice] = useState("0.1");
-  // Opening moves the DM key's prepayment: the DM confirms the amount before anything is signed.
-  const [confirming, setConfirming] = useState(false);
-  const [mapAcc, setMapAcc] = useState<MapAcc | null | "missing">(null);
-  const [sessions, setSessions] = useState<{ address: Address; data: GameSessionAcc }[]>([]);
-  const [myMaps, setMyMaps] = useState<{ address: Address; data: MapAcc }[]>([]);
-
-  const refresh = useCallback(async () => {
-    try {
-      setSessions(await openSessions());
-      if (wallet.address) setMyMaps((await mapsOf(wallet.address)).filter((m) => mapStatus(m.data) === "finalized"));
-      if (map) setMapAcc((await getAccount("Map", map)) ?? "missing");
-    } catch {
-      // lists stay as they are
-    }
-  }, [map, wallet.address]);
-  useEffect(() => void refresh(), [refresh]);
-
-  const open = async () => {
-    if (!map || !wallet.signer) return void (await send("open_session", wallet.signer, []));
-    // The DM's key for this party moves monsters and ends their turns without popups: its token,
-    // its prepayment and the opening are one wallet signature (docs/GAME_COMMISSIONS.md 7).
-    const signer = wallet.signer;
-    const dmKey = await prepareKey(signer);
-    const lamports = BigInt(Math.round(Number(price) * 1e9));
-    const res = await send("open_session", signer, async () => [dmKey.instruction, await openSessionIx(signer, map, lamports, dmKey.signer.address)]);
-    if (!res) return;
-    const { session } = await sessionAccounts(map);
-    commitKey(signer.address, session, dmKey);
-    setParams({ s: session });
-  };
-
-  const used = mapAcc && mapAcc !== "missing" ? mapStatus(mapAcc) : null;
-  return (
-    <section>
-      <h1>Party</h1>
-      {map && (
-        <div className="panel">
-          <h3>Open a party (DM)</h3>
-          <p className="mono">
-            Map{" "}
-            <a href={explorerUrl("address", map)} target="_blank" rel="noreferrer">
-              {shortAddress(map)}
-            </a>{" "}
-            {mapAcc === "missing" ? "not found" : used ? `· ${used}` : "..."}
-          </p>
-          {used && used !== "finalized" && (
-            <p className="error">
-              This map is already {used}. Build a fresh one in the <Link to="/map">Map builder</Link>. (For the deployed demo map: rerun{" "}
-              <code>deploy-local --map-index N</code>.)
-            </p>
-          )}
-          {mapAcc && mapAcc !== "missing" && wallet.address && mapAcc.core.dm !== wallet.address && (
-            <p className="error">Only the map's DM ({shortAddress(mapAcc.core.dm)}) can open a party on it.</p>
-          )}
-          <div className="row">
-            <label>
-              Price (SOL){" "}
-              <input value={price} onChange={(e) => setPrice(e.target.value)} size={6} inputMode="decimal" />
-            </label>
-            {!confirming && (
-              <button className="btn primary" disabled={busy !== null || used !== "finalized"} onClick={() => setConfirming(true)}>
-                {busy ?? "Open party"}
-              </button>
-            )}
-          </div>
-          {confirming && (
-            <PrepayConfirm
-              action="Open party"
-              lamports={FEES.prepay}
-              busy={busy !== null || used !== "finalized"}
-              onConfirm={() => {
-                setConfirming(false);
-                void open();
-              }}
-              onCancel={() => setConfirming(false)}
-            />
-          )}
-          <p className="muted">
-            One signature: the party, plus a session key with {formatSol(FEES.prepay)} for its fees. The key moves the monsters and ends their turns.
-          </p>
-        </div>
-      )}
-      <div className="panel">
-        <div className="row">
-          <h3 style={{ margin: 0 }}>Parties</h3>
-          <button className="btn" onClick={() => void refresh()}>
-            Refresh
-          </button>
-        </div>
-        {sessions.length === 0 && <p className="muted">No open parties. A DM opens one from a finalized map.</p>}
-        <ul className="mono">
-          {sessions.map((x) => (
-            <li key={x.address}>
-              <Link to={`/party?s=${x.address}`}>{shortAddress(x.address)}</Link> · {status(x.data)} · DM {shortAddress(x.data.core.dm)} · {x.data.core.playerCount}/
-              {PARTY_MAX} players · {formatSol(x.data.core.priceLamports)}
-            </li>
-          ))}
-        </ul>
-      </div>
-      {myMaps.length > 0 && (
-        <div className="panel">
-          <h3>My finalized maps</h3>
-          <ul className="mono">
-            {myMaps.map((m) => (
-              <li key={m.address}>
-                {shortAddress(m.address)} {m.data.core.width}x{m.data.core.height} · <Link to={`/party?map=${m.address}`}>open a party</Link>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {!map && myMaps.length === 0 && (
-        <p className="muted">
-          DM: build and finalize a map in the <Link to="/map">Map builder</Link> first.
-        </p>
-      )}
-    </section>
-  );
+/** The provider's party, or null outside one (or for another party). */
+export function useLiveParty(address: Address | null): LiveParty | null {
+  const ctx = useContext(PartyContext);
+  return ctx && (address === null || ctx.address === address) ? ctx : null;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -252,11 +128,14 @@ type EffectView = { effect: EffectResolved; caster: string; target: string; skil
 /** The dice panel: a hit, a heal / buff / debuff, or a hit followed by its skill's effect. */
 type Roll = { key: string; hit: Hit | null; effect: EffectView | null };
 
-function PartyView({ address }: { address: Address }) {
+export function PartyView({ address }: { address: Address }) {
   const wallet = useAppWallet();
   const pk = usePartyKey(address);
   const { send, busy } = useTx();
-  const { party, error, events, ingest, refresh, live } = useParty(address);
+  // The surrounding PartyProvider's read when it is this party, else an own one.
+  const shared = useLiveParty(address);
+  const own = useParty(shared ? null : address);
+  const { party, error, events, ingest, refresh, live } = shared ?? own;
   const combat = useCombat();
   // The session's resonance tables (copied from the registry at open_session) into the module,
   // so the preview resolves the same pairs as the program.
@@ -317,6 +196,8 @@ function PartyView({ address }: { address: Address }) {
     };
   }, [firstFree]);
   const [skillNames, setSkillNames] = useState<Record<string, CombatSkill[]>>({});
+  /** The lobby's contribution field (SOL); empty = the suggested share. */
+  const [joinSol, setJoinSol] = useState("");
   /** The skill records of party characters, for the attack preview. */
   const [skillRecords, setSkillRecords] = useState<Record<string, SkillRecordAcc[]>>({});
   const lock = useRef(false);
@@ -596,6 +477,9 @@ function PartyView({ address }: { address: Address }) {
     },
     [],
   );
+
+  // Monster sprites face left: each turns toward the hero it attacked last (picture only).
+  const targets = useMemo(() => lastTargets(events), [events]);
 
   const units: GridUnit[] = useMemo(() => {
     if (!party) return [];
@@ -909,13 +793,21 @@ function PartyView({ address }: { address: Address }) {
       return u.alive ? draw(`c:${p.character}`, characterRequest(p.char)) : draw("tomb", TOMBSTONE);
     }
     const m = party.monsters[u.id - MONSTER_BASE];
-    return m ? draw(`m:${m.bestiaryId}:${m.alive}`, monsterRequest(m.bestiaryId, !m.alive)) : null;
+    const img = m ? draw(`m:${m.bestiaryId}:${m.alive}`, monsterRequest(m.bestiaryId, !m.alive)) : null;
+    if (!img) return null;
+    const heroes = units.filter((h) => h.kind === "player").map((h) => ({ slot: h.id, x: h.x, y: h.y, alive: h.alive }));
+    return u.alive && facesRight(u, heroes, targets.get(u.id - MONSTER_BASE)) ? mirrored(img) : img;
   };
-  const tileSprite = (t: Tile) => {
-    const request = tileRequest(t);
-    return request ? draw(`t:${t}`, request) : null;
+  // The map's biome picks the tile set; a map from before the field reads as Caves (0).
+  const biome = party.map?.biome ?? 0;
+  const tileSprite = (cell: GridTile) => {
+    const look = tileLook(biome, cell);
+    return look ? draw(`t:${look.join(",")}`, lookRequest(look)) : null;
   };
-  const pointSprite = (kind: GridPointKind) => draw(`p:${kind}`, pointRequest(kind));
+  const pointSprite = (kind: GridPointKind) => {
+    const look = pointLook(kind, biome);
+    return draw(`p:${look.join(",")}`, lookRequest(look));
+  };
   const chestSprite = (opened: boolean) => draw(`chest:${opened}`, chestRequest(opened));
 
   const header = (
@@ -943,9 +835,13 @@ function PartyView({ address }: { address: Address }) {
     }));
     const myJoined = mine[mine.length - 1] ?? null;
     const joinable = myChars.filter(isFree).map((c) => ({ address: c.address, name: bytesText(c.data.name) }));
+    // Contributions in any shares (docs/PARTY_AND_TURNS.md 3.1): by default what is left of the
+    // price split over the players still missing; the player can pay more, up to what is left.
     const remaining = s.core.priceLamports - (party.escrow?.collected ?? 0n);
-    const share = (s.core.priceLamports + 1n) / 2n;
-    const contribution = remaining < share ? remaining : share;
+    const missing = BigInt(Math.max(1, s.minPlayers - s.core.playerCount));
+    const suggested = (remaining + missing - 1n) / missing;
+    const typed = joinSol.trim() === "" ? null : Math.round(Number(joinSol) * 1e9);
+    const contribution = typed === null || !Number.isFinite(typed) || typed < 0 ? suggested : BigInt(typed) > remaining ? remaining : BigInt(typed);
     const join = async (character: string) => {
       const signer = wallet.signer;
       if (!signer) return void (await send("join_session", null, []));
@@ -1009,6 +905,17 @@ function PartyView({ address }: { address: Address }) {
           error={!isDm && !myJoined && joinable.length === 0 && me ? "No free living character: create one on the Character page." : null}
           mapPreview={<Grid width={s.width} height={s.height} tiles={tiles} units={units} cellPx={12} />}
         />
+        {!isDm && !myJoined && remaining > 0n && (
+          <p className="row">
+            <label>
+              Your contribution (SOL){" "}
+              <input value={joinSol} placeholder={(Number(suggested) / 1e9).toString()} onChange={(e) => setJoinSol(e.target.value)} size={8} inputMode="decimal" />
+            </label>
+            <span className="muted">
+              {formatSol(remaining)} of {formatSol(s.core.priceLamports)} left to pay
+            </span>
+          </p>
+        )}
         {!isDm && !myJoined && (
           <p className="muted">
             Join is one signature: {formatSol(contribution)} into the escrow. The session key for this party and its {formatSol(FEES.prepay)} fee prepayment
@@ -1019,7 +926,7 @@ function PartyView({ address }: { address: Address }) {
           This map: no living monster within {s.chestRadius} cells of a chest or of any hero when it opens; after the party the DM has{" "}
           {settleLabel(s.settleTimeoutSecs)} to hand out the rewards, then each player claims their own and gets their contribution back.
         </p>
-        {isDm && <p className="muted">Share this page's link with the players. Start needs everyone ready and the escrow at the price.</p>}
+        {isDm && <p className="muted">Players find this quest on the Tavern board. Start needs everyone ready and the escrow at the price.</p>}
         <EventLog events={events} label={label} />
       </section>
     );

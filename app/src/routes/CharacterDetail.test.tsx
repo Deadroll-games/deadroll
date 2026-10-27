@@ -74,10 +74,10 @@ function character(over: Partial<CharacterAcc["core"]> = {}, frozen = false): Ch
   };
 }
 
-const view = (c: CharacterAcc, skills: SkillRecordAcc[], party: PartyInfo = null) =>
+const view = (c: CharacterAcc, skills: SkillRecordAcc[], party: PartyInfo = null, onOpenParty?: (s: Address) => void) =>
   render(
     <MemoryRouter>
-      <CharacterDetailView address={ADDR} c={c} skills={skills} party={party} />
+      <CharacterDetailView address={ADDR} c={c} skills={skills} party={party} onOpenParty={onOpenParty} />
     </MemoryRouter>,
   );
 
@@ -117,11 +117,13 @@ describe("CharacterDetailView", () => {
     expect(screen.getByText("Not in a party.")).toBeTruthy();
   });
 
-  it("links the current party with live HP", () => {
-    view(character({ inSession: some(SESSION) }), [], { session: SESSION, status: "active", slot: 1, hp: 17 });
+  it("goes to the current party's dungeon, with live HP", () => {
+    const open = vi.fn();
+    view(character({ inSession: some(SESSION) }), [], { session: SESSION, status: "active", slot: 1, hp: 17 }, open);
     expect(screen.getByText("HP 17 / 30")).toBeTruthy();
     expect(screen.getByText("Alive · in a party")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "open party" }).getAttribute("href")).toBe(`/party?s=${SESSION}`);
+    screen.getByRole("button", { name: "Go to the dungeon" }).click();
+    expect(open).toHaveBeenCalledWith(SESSION);
   });
 
   it("shows a tombstone for a dead character", () => {

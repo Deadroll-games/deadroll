@@ -5,6 +5,7 @@ import { App } from "./App";
 import { RasterizerProvider } from "./raster/RasterizerProvider";
 import { AppWalletProvider } from "./wallet/AppWallet";
 import { ToastProvider } from "./components/toast/Toast";
+import { ActiveCharacterProvider } from "./game/ActiveCharacter";
 import "./styles.css";
 
 createRoot(document.getElementById("root")!).render(
@@ -12,9 +13,11 @@ createRoot(document.getElementById("root")!).render(
     <BrowserRouter>
       <ToastProvider>
         <AppWalletProvider>
-          <RasterizerProvider>
-            <App />
-          </RasterizerProvider>
+          <ActiveCharacterProvider>
+            <RasterizerProvider>
+              <App />
+            </RasterizerProvider>
+          </ActiveCharacterProvider>
         </AppWalletProvider>
       </ToastProvider>
     </BrowserRouter>

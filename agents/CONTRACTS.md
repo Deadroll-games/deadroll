@@ -54,6 +54,9 @@ TypeScript reads the ids from `@deadroll/sdk` (`PROGRAMS`, generated from the ID
 | `TempStash` | session | `["stash", session, character]` (retired in patch 11, see section 20) |
 | `RewardCache` | session | `["cache", character]` (patch 11, section 20) |
 | `City` | city | `["city"]` |
+| `Building` | city | `["building", id: u16]` (section 25) |
+| `TavernBoard` | city | `["tavern_board", building]` (section 25) |
+| `Quest` | city | `["quest", session]` (section 25) |
 
 ## 3. Shared types (`crates/types`)
 
@@ -904,3 +907,85 @@ events  Moved, CellBurned unchanged
 `deadroll_mapcheck::walk::{walk, Field, Blocker, WalkError, Walk, adjacent, MAX_PATH}`: the path
 checks over any `Field` (the session's map layout today, a combat arena later). `crates/sim`
 moves monsters over the 8 neighbors too.
+
+## 24. Map biome
+
+The art set a map is drawn with, picked by the DM at `create_map`. Picture only: no rule reads it,
+and it does not limit which monsters a map may hold.
+
+```
+crates/types   Biome { Caves, Forest, Crypt }   u8 enum (Caves = 0), appended
+Map            appended: biome: u8 (a Biome); ACCOUNT_VERSION 1 -> 2
+               a version 1 map is one byte shorter and reads as Caves (Map::decode_padded)
+MapSettings    appended: biome
+create_map     rejects a biome past Biome::COUNT
+set_status     accounts unchanged; map is an UncheckedAccount (owner checked), the handler checks the
+               discriminator and the ["map", dm, index] address and writes core.status only, so a
+               version 1 map still enters and leaves a party
+events  MapCreated appended: biome
+errors  MapError appended: InvalidBiome
+```
+
+The session reads a map with `deadroll_map::state::Map::decode_padded` (`read_map_full`), so a
+version 1 map opens a party. `Account<Map>` (write_layout, write_spawns, write_points, finalize_map)
+cannot read a version 1 map: a draft from before the field cannot be continued.
+
+The cell variant (bits 2-0) is the DM's pick and only chooses the picture (no PRNG). The site draws
+a wall by its 4-neighbor mask (bit 0 N, 1 E, 2 S, 3 W; walls and doors join, the map edge does
+not) and any other tile by its variant, variant 0 when the biome has no such picture.
+
+## 25. City and the Tavern board
+
+The city, its buildings and the Tavern board with one quest per party (docs/CITY_DESCRIPTION.md 3-4,
+docs/PARTY_AND_TURNS.md 2, steps 1-3). Interiors are site only (no `Interior` account). Only
+`Requirement::None` exists for now; the other conditions come with their checks.
+
+```
+crates/types   BuildingKind { Tavern, MastersGuild, Storage }   u8 enum, appended
+               BuildingStatus { Active, Closed }               u8 enum, appended
+               Requirement { None }                            u8 enum, appended
+               CityObject { sprite: u16, x: u8, y: u8 }
+               CityData, BuildingData, TavernBoardData, QuestData (cores below), SIZE consts
+               consts CITY_W_MAX 48, CITY_H_MAX 32, CITY_CELLS, CITY_OBJECTS_MAX 32
+               seeds BUILDING, TAVERN_BOARD, QUEST (CITY already listed)
+
+City        ["city"]                     version, authority, width, height, cells [u8; 1536]
+                                         (CITY_W_MAX per row, site tile ids), objects [CityObject; 32],
+                                         object_count, spawn: Cell, building_count: u16, bump
+Building    ["building", id: u16 LE]     version, id, kind, prefab_id: u16, x, y, door: Cell,
+                                         program, target, interior_id: u16, status, requirement, bump
+TavernBoard ["tavern_board", building]   version, building, posted: u32, open: u16, bump
+Quest       ["quest", session]           version, board, session, map, dm, tier, biome, min_players,
+                                         price_lamports: u64, posted_at: i64, bump
+
+init_city(width, height, spawn)      signer = GameConfig.authority; it becomes City.authority
+write_city(offset, cells)            City.authority; offset + len <= CITY_CELLS
+set_city_objects(objects, spawn)     City.authority; <= 32 objects, all on the map
+add_building(args) / update_building(args)
+                                     City.authority; args = every Building field but id. program is
+                                     one of GameConfig.programs (the allowlist), or the default key
+                                     only when Closed; an Active Tavern has program = city and
+                                     target = its TavernBoard PDA
+close_building()                     City.authority; status = Closed (the account stays)
+init_tavern_board()                  City.authority; the building is a Tavern
+post_quest()                         the DM's main wallet. Reads, no CPI: the building (Active,
+                                     Tavern, target = board, requirement), the map (owner =
+                                     GameConfig.programs[Map], dm, InSession), the party (owner =
+                                     GameConfig.programs[Session], GameSession discriminator, core.map,
+                                     core.dm, Lobby). Sent after session.open_session in the same
+                                     transaction.
+close_quest()                        the quest's DM; the party is not in Lobby, or has no players,
+                                     or no longer exists. Rent to the DM.
+
+events  CityInitialized, CityWritten, CityObjectsSet, BuildingChanged (added: bool),
+        BuildingClosed, TavernBoardInitialized, QuestPosted, QuestClosed
+errors  CityError: Unauthorized, InvalidConfig, SizeOutOfRange, OutOfCity, TooManyObjects,
+        ProgramNotAllowed, BadTarget, BuildingClosed, NotATavern, BadBoard, NoAccess, InvalidMap,
+        MapNotInSession, NotTheDm, InvalidSession, SessionNotInLobby, SessionMapMismatch,
+        QuestStillOpen
+```
+
+Taking a quest is `session.join_session` (the contribution goes to the party escrow); Ready and the
+start are `set_ready` and `start_session`. The session program does not know about quests: it is
+unchanged, and the city makes no CPI. City depends on the `deadroll-map` and `deadroll-registry`
+lib packages (account types and ids); `programs/city/lib/` is new.

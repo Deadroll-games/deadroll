@@ -115,6 +115,9 @@ pub enum MapError {
     PointNotPassable,
     #[msg("The entrance and the exit share a cell")]
     PointOverlap,
+    // The map's art set, the program's own.
+    #[msg("Unknown map biome")]
+    InvalidBiome,
 }
 
 impl From<MapCheckError> for MapError {

@@ -3,7 +3,7 @@
 # Shadows lean cold (blue, violet), lights lean warm (yellow, orange).
 # Ramps 0-19 and materials 0-12 keep the names and indices of palette 1: devnet characters store
 # these indices. Append only.
-palette 2
+palette 3
 outline #120c16
 
 ramp gray      #141219 #2b2a33 #47464f #6b6a70 #9a978f #cfcbbf

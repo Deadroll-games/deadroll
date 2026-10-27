@@ -1,10 +1,14 @@
 // Mock data for VITE_DATA=mock and the /dev pages. Shapes match chain/types.ts exactly.
 import demoMap from "../../../assets/registry/maps/demo_16x16.json";
+import cavesTemplate from "../../../assets/registry/maps/caves_ruins_16x16.json";
+import forestTemplate from "../../../assets/registry/maps/forest_16x16.json";
+import cryptTemplate from "../../../assets/registry/maps/crypt_16x16.json";
 import registryTables from "../../../tools/scripts/lib/__fixtures__/registry-tables.json";
 import { NO_TABLE, type Chest } from "./loot";
 import {
   Applied,
   Aspect,
+  Biome,
   Carrier,
   Class,
   HitOutcome,
@@ -54,7 +58,11 @@ export type MapPresetData = {
   settle_timeout_secs?: number;
   boss_table?: number;
   chests?: Chest[];
+  /** The art set (`Biome`), Caves when absent. */
+  biome?: number;
   rows: string[];
+  /** One digit 0-7 per cell: the variant the DM picked (bits 2-0 of the cell byte), 0 when absent. */
+  variants?: string[];
   spawns: {
     bestiary_id: number;
     x: number;
@@ -79,6 +87,7 @@ export function presetToLayout(p: MapPresetData): {
   minPlayers: number;
   chestRadius: number;
   settleTimeoutSecs: number;
+  biome: number;
 } {
   const tiles = new Uint8Array(MAP_CELLS).fill(cellByte(Tile.Wall));
   let entrance: Cell | null = null;
@@ -88,7 +97,7 @@ export function presetToLayout(p: MapPresetData): {
       const ch = row[x] ?? "#";
       if (ch === "E") entrance = { x, y };
       if (ch === "X") exit = { x, y };
-      tiles[cellIndex(x, y)] = cellByte(TILE_CHARS[ch] ?? Tile.Wall);
+      tiles[cellIndex(x, y)] = cellByte(TILE_CHARS[ch] ?? Tile.Wall, Number(p.variants?.[y]?.[x] ?? 0));
     }
   });
   const spawns = p.spawns.map((s) => ({
@@ -103,6 +112,7 @@ export function presetToLayout(p: MapPresetData): {
   }));
   const chests = (p.chests ?? []).map((c) => ({ x: c.x, y: c.y, table: c.table }));
   return {
+    biome: p.biome ?? Biome.Caves,
     tiles,
     entrance,
     exit,
@@ -115,7 +125,9 @@ export function presetToLayout(p: MapPresetData): {
   };
 }
 
-export const MAP_PRESETS: MapPresetData[] = [demoMap as MapPresetData];
+/** The demo map, then one builder template per biome (site only, never uploaded): the DM loads one,
+ * edits it and publishes it as their own map. */
+export const MAP_PRESETS: MapPresetData[] = [demoMap, cavesTemplate, forestTemplate, cryptTemplate] as MapPresetData[];
 export const DEMO_MAP = presetToLayout(MAP_PRESETS[0]!);
 
 const NO_STATE: StateRoll = {

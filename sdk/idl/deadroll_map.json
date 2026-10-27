@@ -230,29 +230,11 @@
       "accounts": [
         {
           "name": "map",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  109,
-                  97,
-                  112
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "map.core.dm",
-                "account": "Map"
-              },
-              {
-                "kind": "account",
-                "path": "map.core.index",
-                "account": "Map"
-              }
-            ]
-          }
+          "docs": [
+            "A map of this program, also one from before `Map.biome` (one byte shorter, which",
+            "`Account<Map>` cannot read); only `core.status` is written."
+          ],
+          "writable": true
         },
         {
           "name": "session_authority",
@@ -956,6 +938,11 @@
       "code": 6053,
       "name": "PointOverlap",
       "msg": "The entrance and the exit share a cell"
+    },
+    {
+      "code": 6054,
+      "name": "InvalidBiome",
+      "msg": "Unknown map biome"
     }
   ],
   "types": [
@@ -1025,6 +1012,15 @@
               "(`settle_party`); then each player claims their own."
             ],
             "type": "u32"
+          },
+          {
+            "name": "biome",
+            "docs": [
+              "The art set of the map (`deadroll_types::Biome`), set by the DM at `create_map`. Picture",
+              "only. A map from before the field (`ACCOUNT_VERSION` 1) is one byte shorter and reads as",
+              "`Caves` through `Map::decode_padded`."
+            ],
+            "type": "u8"
           }
         ]
       }
@@ -1072,6 +1068,13 @@
           {
             "name": "settle_timeout_secs",
             "type": "u32"
+          },
+          {
+            "name": "biome",
+            "docs": [
+              "The art set (`deadroll_types::Biome`)."
+            ],
+            "type": "u8"
           }
         ]
       }
@@ -1334,6 +1337,13 @@
               "player claims their own (`LootTuning.settle_timeout_*`)."
             ],
             "type": "u32"
+          },
+          {
+            "name": "biome",
+            "docs": [
+              "The art set of the map (`deadroll_types::Biome`); a value past `Biome::COUNT` is rejected."
+            ],
+            "type": "u8"
           }
         ]
       }

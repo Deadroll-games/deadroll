@@ -16,11 +16,12 @@
 //! discriminator. `SIZE` is the max borsh size (`Option` counted as `Some`).
 
 use crate::{
-    Aspect, Class, EquipSlot, EquipSource, ItemBase, LayerRef, MapStatus, PointKind, Pubkey, Race,
-    RewardKind, SessionStatus, StateKind, BAG_CONSUMABLE_SLOTS, BAG_RESOURCE_SLOTS, CACHE_BYTES,
-    CACHE_SLOTS, CHESTS_MAX, EMPTY_ITEM, EQUIP_SLOTS, LAYERS_MAX, MAP_CELLS, MONSTERS_MAX,
-    PARTY_MAX, POINTS_MAX, PROGRAMS_COUNT, SOULBOUND_MAX, SPAWNS_MAX, STATES_MAX, STATS_COUNT,
-    TURN_ORDER_MAX, URI_BASE_LEN,
+    Aspect, BuildingKind, BuildingStatus, Class, EquipSlot, EquipSource, ItemBase, LayerRef,
+    MapStatus, PointKind, Pubkey, Race, Requirement, RewardKind, SessionStatus, StateKind,
+    BAG_CONSUMABLE_SLOTS, BAG_RESOURCE_SLOTS, CACHE_BYTES, CACHE_SLOTS, CHESTS_MAX, CITY_CELLS,
+    CITY_OBJECTS_MAX, EMPTY_ITEM, EQUIP_SLOTS, LAYERS_MAX, MAP_CELLS, MONSTERS_MAX, PARTY_MAX,
+    POINTS_MAX, PROGRAMS_COUNT, SOULBOUND_MAX, SPAWNS_MAX, STATES_MAX, STATS_COUNT, TURN_ORDER_MAX,
+    URI_BASE_LEN,
 };
 
 const PUBKEY: usize = 32;
@@ -573,4 +574,128 @@ impl MapLayoutDataV2 {
             .iter()
             .filter(|p| p.kind == PointKind::Chest)
     }
+}
+
+// City (docs/CITY_DESCRIPTION.md 3): the city, its buildings, the Tavern board and its orders.
+shared! {
+    /// A decor object of the city (`CityData.objects`): a site sprite id on a cell.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct CityObject {
+        pub sprite: u16,
+        pub x: u8,
+        pub y: u8,
+    }
+
+    /// city `["city"]`: the one city every player appears in.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct CityData {
+        pub version: u8,
+        /// Adds and changes buildings (the registry `GameConfig.authority` at `init_city`).
+        pub authority: Pubkey,
+        pub width: u8,
+        pub height: u8,
+        /// Row-major site tile ids, `CITY_W_MAX` cells per row.
+        pub cells: [u8; CITY_CELLS],
+        /// Decor, `0..object_count` used.
+        pub objects: [CityObject; CITY_OBJECTS_MAX],
+        pub object_count: u8,
+        /// The cell a player appears on.
+        pub spawn: Cell,
+        /// Buildings created so far; the next one gets this id.
+        pub building_count: u16,
+        pub bump: u8,
+    }
+
+    /// city `["building", id: u16]`.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct BuildingData {
+        pub version: u8,
+        pub id: u16,
+        pub kind: BuildingKind,
+        /// The site picture of the building, its top-left cell on the city map.
+        pub prefab_id: u16,
+        pub x: u8,
+        pub y: u8,
+        /// The cell that opens the building when clicked.
+        pub door: Cell,
+        /// The program the building calls: one of `GameConfig.programs`, or none when closed.
+        pub program: Pubkey,
+        /// The building's main account (a Tavern: its `TavernBoard`).
+        pub target: Pubkey,
+        /// The site interior drawn inside.
+        pub interior_id: u16,
+        pub status: BuildingStatus,
+        pub requirement: Requirement,
+        pub bump: u8,
+    }
+
+    /// city `["tavern_board", building]`: the order board of a Tavern.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct TavernBoardData {
+        pub version: u8,
+        pub building: Pubkey,
+        /// Quests posted on this board, ever.
+        pub posted: u32,
+        /// Quests on the board now (posted and not closed).
+        pub open: u16,
+        pub bump: u8,
+    }
+
+    /// city `["quest", session]`: a DM's order on a Tavern board for one party. What the party
+    /// is when posted; the live state (players, contributions, status) is the session's.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct QuestData {
+        pub version: u8,
+        pub board: Pubkey,
+        pub session: Pubkey,
+        pub map: Pubkey,
+        pub dm: Pubkey,
+        pub tier: u8,
+        pub biome: u8,
+        pub min_players: u8,
+        pub price_lamports: u64,
+        /// Unix time of `post_quest`.
+        pub posted_at: i64,
+        pub bump: u8,
+    }
+}
+
+impl CityObject {
+    pub const SIZE: usize = 2 + 1 + 1;
+}
+
+impl CityData {
+    pub const SIZE: usize = 1
+        + PUBKEY
+        + 1
+        + 1
+        + CITY_CELLS
+        + CITY_OBJECTS_MAX * CityObject::SIZE
+        + 1
+        + Cell::SIZE
+        + 2
+        + 1;
+}
+
+impl BuildingData {
+    pub const SIZE: usize = 1
+        + 2
+        + BuildingKind::SIZE
+        + 2
+        + 1
+        + 1
+        + Cell::SIZE
+        + PUBKEY * 2
+        + 2
+        + BuildingStatus::SIZE
+        + Requirement::SIZE
+        + 1;
+}
+
+impl TavernBoardData {
+    pub const SIZE: usize = 1 + PUBKEY + 4 + 2 + 1;
+}
+
+impl QuestData {
+    pub const SIZE: usize = 1 + PUBKEY * 4 + 1 + 1 + 1 + 8 + 8 + 1;
 }

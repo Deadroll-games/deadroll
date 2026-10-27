@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { AccountRole, generateKeyPairSigner, getAddressDecoder, getAddressEncoder, type Address, type Instruction, type ReadonlyUint8Array } from "@solana/kit";
 import { decodeEvent } from "@deadroll/sdk";
 import { getBagDecoder, getBagEncoder, getCreateCharacterInstructionDataEncoder } from "@deadroll/sdk/character";
+import { getMapDecoder, getMapEncoder } from "@deadroll/sdk/map";
 import {
   ItemBase,
   SessionStatus,
@@ -73,7 +74,7 @@ import { Effect } from "./skillcheck";
 import { bagPda, bestiaryPda, gameConfigPda, monsterSkillsPda, rewardCachePda, rewardsPda, monstersPda, participationPda, programIdentityPda, sessionAuthorityPda, sessionTokenPda, skillExtrasPda, skillSetPda, tilesetPda } from "./pda";
 import { affordable, extendPath, reachable, route } from "./route";
 import { explainFailure } from "./send";
-import { Applied, Aspect, Class, HitOutcome, JumpMode, MAP_MAX, ModKind, OpKind, StateKind, Tile, cellByte } from "./types";
+import { Applied, Aspect, Biome, Class, HitOutcome, JumpMode, MAP_MAX, ModKind, OpKind, StateKind, Tile, cellByte } from "./types";
 import { SHIPPED_TILE_COST } from "./tiles";
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex").slice(0, 16);
@@ -91,6 +92,7 @@ function zeroOf(decoder: Fixed, prefix: ReadonlyUint8Array = new Uint8Array()): 
   return decoder.decode(bytes);
 }
 const ACCOUNT_CODECS = {
+  Map: [getMapEncoder(), getMapDecoder()],
   GameSession: [getGameSessionEncoder(), getGameSessionDecoder()],
   Participation: [getParticipationEncoder(), getParticipationDecoder()],
   MonsterState: [getMonsterStateEncoder(), getMonsterStateDecoder()],
@@ -423,14 +425,14 @@ describe("map builders", () => {
       { x: 1, y: 2, table: 0 },
       { x: 3, y: 1, table: 5 },
     ];
-    const draft = { width: 4, height: 3, tier: 1, minPlayers: 3, chestRadius: 4, settleTimeoutSecs: 7200, tiles, entrance: { x: 0, y: 0 }, exit: { x: 3, y: 0 }, spawns: [], chests, bossTable: 1 };
+    const draft = { width: 4, height: 3, tier: 1, minPlayers: 3, chestRadius: 4, settleTimeoutSecs: 7200, biome: Biome.Crypt, tiles, entrance: { x: 0, y: 0 }, exit: { x: 3, y: 0 }, spawns: [], chests, bossTable: 1 };
     const b = await buildMapIxs(dm, draft);
     expect(b.ixs.length).toBe(5);
     const [create, layout, spawns, writePoints, finalize] = b.ixs as [Instruction, Instruction, Instruction, Instruction, Instruction];
     const index = new Uint8Array(4);
     new DataView(index.buffer).setUint32(0, b.index, true);
-    // MapSettings: min_players, chest_radius, settle_timeout_secs (u32 LE, 7200 = 0x1c20).
-    expect(toHex(create.data as Uint8Array)).toBe(toHex(concat(ixDisc("create_map"), index, Uint8Array.of(4, 3, 1, 3, 4, 0x20, 0x1c, 0, 0))));
+    // MapSettings: min_players, chest_radius, settle_timeout_secs (u32 LE, 7200 = 0x1c20), biome (Crypt = 2).
+    expect(toHex(create.data as Uint8Array)).toBe(toHex(concat(ixDisc("create_map"), index, Uint8Array.of(4, 3, 1, 3, 4, 0x20, 0x1c, 0, 0, 2))));
     // write_layout: offset u16, Vec<u8> of cell bytes up to the last cell of the map (2 rows of 32 + 4).
     const cells = (layout.data as Uint8Array).slice(8 + 2 + 4);
     expect(cells.length).toBe(2 * 32 + 4);
@@ -492,6 +494,23 @@ describe("decoders", () => {
     expect(back.core.turnOrder[0]).toBe(6);
     expect([back.aliveMask, back.unpaidKills]).toEqual([3, 70]);
     expect(() => decodeAccount("Participation", bytes)).toThrow(/not a Participation account/);
+  });
+
+  it("reads Map.biome, and a map from before it (one byte shorter) as Caves", () => {
+    const { bytes, back } = roundTrip("Map", (v) => {
+      v.core.version = 2;
+      v.core.width = 16;
+      v.tier = 2;
+      v.settleTimeoutSecs = 3600;
+      v.biome = Biome.Forest;
+    });
+    expect(bytes.length).toBe(8 + 105 + 1 + 1 + 1 + 4 + 1);
+    expect(toHex(bytes.subarray(0, 8))).toBe(sha("account:Map"));
+    expect(bytes[bytes.length - 1]).toBe(Biome.Forest);
+    expect([back.biome, back.tier, back.settleTimeoutSecs]).toEqual([Biome.Forest, 2, 3600]);
+    const old = decodeAccount("Map", bytes.slice(0, -1));
+    expect([old.biome, old.core.width, old.tier, old.settleTimeoutSecs]).toEqual([Biome.Caves, 16, 2, 3600]);
+    expect(() => decodeAccount("Map", bytes.slice(0, -2))).toThrow();
   });
 
   it("reads the turn-rule fields appended to GameSession, Participation and MonsterState", () => {

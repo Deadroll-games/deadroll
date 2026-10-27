@@ -100,6 +100,8 @@ export type CreateMapInstructionData = {
    * player claims their own (`LootTuning.settle_timeout_*`).
    */
   settleTimeoutSecs: number;
+  /** The art set of the map (`deadroll_types::Biome`); a value past `Biome::COUNT` is rejected. */
+  biome: number;
 };
 
 export type CreateMapInstructionDataArgs = {
@@ -119,6 +121,8 @@ export type CreateMapInstructionDataArgs = {
    * player claims their own (`LootTuning.settle_timeout_*`).
    */
   settleTimeoutSecs: number;
+  /** The art set of the map (`deadroll_types::Biome`); a value past `Biome::COUNT` is rejected. */
+  biome: number;
 };
 
 export function getCreateMapInstructionDataEncoder(): FixedSizeEncoder<CreateMapInstructionDataArgs> {
@@ -132,6 +136,7 @@ export function getCreateMapInstructionDataEncoder(): FixedSizeEncoder<CreateMap
       ["minPlayers", getU8Encoder()],
       ["chestRadius", getU8Encoder()],
       ["settleTimeoutSecs", getU32Encoder()],
+      ["biome", getU8Encoder()],
     ]),
     (value) => ({ ...value, discriminator: CREATE_MAP_DISCRIMINATOR }),
   );
@@ -147,6 +152,7 @@ export function getCreateMapInstructionDataDecoder(): FixedSizeDecoder<CreateMap
     ["minPlayers", getU8Decoder()],
     ["chestRadius", getU8Decoder()],
     ["settleTimeoutSecs", getU32Decoder()],
+    ["biome", getU8Decoder()],
   ]);
 }
 
@@ -178,6 +184,7 @@ export type CreateMapAsyncInput<
   minPlayers: CreateMapInstructionDataArgs["minPlayers"];
   chestRadius: CreateMapInstructionDataArgs["chestRadius"];
   settleTimeoutSecs: CreateMapInstructionDataArgs["settleTimeoutSecs"];
+  biome: CreateMapInstructionDataArgs["biome"];
 };
 
 export async function getCreateMapInstructionAsync<
@@ -316,6 +323,7 @@ export type CreateMapInput<
   minPlayers: CreateMapInstructionDataArgs["minPlayers"];
   chestRadius: CreateMapInstructionDataArgs["chestRadius"];
   settleTimeoutSecs: CreateMapInstructionDataArgs["settleTimeoutSecs"];
+  biome: CreateMapInstructionDataArgs["biome"];
 };
 
 export function getCreateMapInstruction<

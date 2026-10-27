@@ -1,4 +1,4 @@
-// The whole deploy pipeline (programs, GameConfig, registry tables, render blobs, demo map),
+// The whole deploy pipeline (programs, GameConfig, registry tables, render blobs, demo map, city),
 // shared by deploy-local.ts and deploy-devnet.ts. Every step is idempotent: a rerun skips what is
 // already on chain and finishes what is not.
 import { spawnSync } from "node:child_process";
@@ -605,7 +605,7 @@ async function ensureDemoMap(conn: Rpc, opts: DeployOptions, wallet: KeyPairSign
   let data = await fetchData(conn.rpc, map);
   if (!data) {
     await send(conn, wallet, [
-      getCreateMapInstruction({ ...edit, systemProgram: SYSTEM_PROGRAM, index: opts.mapIndex, width: preset.width, height: preset.height, tier: preset.tier, minPlayers: preset.minPlayers, chestRadius: preset.chestRadius, settleTimeoutSecs: preset.settleTimeoutSecs }),
+      getCreateMapInstruction({ ...edit, systemProgram: SYSTEM_PROGRAM, index: opts.mapIndex, width: preset.width, height: preset.height, tier: preset.tier, minPlayers: preset.minPlayers, chestRadius: preset.chestRadius, settleTimeoutSecs: preset.settleTimeoutSecs, biome: preset.biome }),
     ]);
     console.log(`create_map: ${map} (index ${opts.mapIndex})`);
     data = (await fetchData(conn.rpc, map))!;
@@ -659,6 +659,8 @@ export async function deploy(opts: DeployOptions): Promise<void> {
   await ensureConfig(conn, opts, wallet, programIds);
   const render = await uploadRender(conn, opts, wallet, programIds);
   const demo = await ensureDemoMap(conn, opts, wallet, programIds);
+  step("city");
+  script("seed-city.ts", [], opts);
 
   step("summary");
   for (const p of PROGRAMS) console.log(`${p.key.padEnd(10)} ${programIds[p.key]}`);

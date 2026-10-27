@@ -153,6 +153,12 @@ u8_enum!(
     }
 );
 
+u8_enum!(
+    /// The art set a map is drawn with, chosen by the DM at `create_map` (`Map.biome`). Picture
+    /// only: it does not change any rule. A map from before the field is `Caves`.
+    Biome { Caves, Forest, Crypt }
+);
+
 /// Patch 13: the tile type id of a cell byte (bits 7-3). A raw id, not a `TileKind`: whether
 /// it exists is the `Tileset`'s call.
 pub const fn cell_kind(byte: u8) -> u8 {
@@ -168,3 +174,20 @@ pub const fn cell_variant(byte: u8) -> u8 {
 pub const fn cell_byte(kind: u8, variant: u8) -> u8 {
     (kind << 3) | (variant & 0b111)
 }
+
+// City (docs/CITY_DESCRIPTION.md 3, 4).
+u8_enum!(
+    /// What a city building is (`Building.kind`). It picks the site's interface module
+    /// (docs/CITY_DESCRIPTION.md 4).
+    BuildingKind { Tavern, MastersGuild, Storage }
+);
+u8_enum!(
+    /// Whether a building can be entered (`Building.status`). A `Closed` one is drawn with a
+    /// boarded-up door (docs/CITY_DESCRIPTION.md 8).
+    BuildingStatus { Active, Closed }
+);
+u8_enum!(
+    /// The access condition of a building (`Building.requirement`, docs/CITY_DESCRIPTION.md 5.1).
+    /// Only `None` for now; the other conditions are appended with their checks.
+    Requirement { None }
+);

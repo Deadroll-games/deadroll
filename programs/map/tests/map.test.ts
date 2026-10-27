@@ -67,6 +67,10 @@ const cell = (kind: number, variant = 0) => (kind << 3) | variant;
 const FLOOR = cell(KIND.StoneFloor);
 const WALL = cell(KIND.Wall);
 const STATUS = { Draft: 0, Finalized: 1, InSession: 2, Finished: 3 };
+/** `Biome` (crates/types): the art set of a map. */
+const BIOME = { Caves: 0, Forest: 1, Crypt: 2 };
+/** `Map` account size: discriminator, `MapData` (105), tier, min_players, chest_radius, settle_timeout_secs (u32), biome. */
+const MAP_SIZE = 8 + 105 + 1 + 1 + 1 + 4 + 1;
 const WOLF = 0, GOBLIN = 1, CHIEFTAIN = 2, WARRIOR = 3, SHAMAN = 4;
 /** `MapLayoutDataV2::SIZE`: the bytes `layout_hash` covers, after the discriminator. */
 const LAYOUT_CORE_SIZE = 1 + 32 + MAP_CELLS + SPAWNS_MAX * 9 + 1 + POINTS_MAX * 4 + 1 + 1 + 1;
@@ -106,8 +110,8 @@ const tableAddress = async (seed: string) => (await findTablePda({ seed }))[0];
 
 type Signer = Awaited<ReturnType<typeof generateKeyPairSigner>>;
 
-/** Patch 11: the DM's map settings (minimum players, chest radius, time to settle). */
-type Settings = { minPlayers?: number; chestRadius?: number; settleTimeoutSecs?: number };
+/** Patch 11: the DM's map settings (minimum players, chest radius, time to settle), then the biome. */
+type Settings = { minPlayers?: number; chestRadius?: number; settleTimeoutSecs?: number; biome?: number };
 
 async function createMapIx(dm: Signer, index: number, width: number, height: number, tier: number, minPlayers = 1, more: Settings = {}) {
   const map = await mapAddress(dm.address, index);
@@ -122,6 +126,7 @@ async function createMapIx(dm: Signer, index: number, width: number, height: num
     minPlayers,
     chestRadius: more.chestRadius ?? 3,
     settleTimeoutSecs: more.settleTimeoutSecs ?? 3600,
+    biome: more.biome ?? BIOME.Caves,
   });
 }
 
@@ -241,7 +246,7 @@ async function data(addr: string): Promise<Uint8Array> {
 }
 
 async function readMap(addr: string) {
-  const { core, tier, minPlayers, chestRadius, settleTimeoutSecs } = getMapDecoder().decode(await data(addr));
+  const { core, tier, minPlayers, chestRadius, settleTimeoutSecs, biome } = getMapDecoder().decode(await data(addr));
   return {
     version: core.version,
     dm: Uint8Array.from(enc.encode(core.dm)),
@@ -255,6 +260,7 @@ async function readMap(addr: string) {
     minPlayers,
     chestRadius,
     settleTimeoutSecs,
+    biome,
   };
 }
 
@@ -324,7 +330,8 @@ describe("map: create_map", () => {
     const dm = await funded();
     const { map, layout } = await create(dm, 7, 16, 24, 2);
     const m = await readMap(map);
-    assert.equal(m.version, 1);
+    // Version 2: `biome` appended.
+    assert.equal(m.version, 2);
     assert.deepEqual(m.dm, Uint8Array.from(enc.encode(dm.address)));
     assert.equal(m.index, 7);
     assert.equal(m.width, 16);
@@ -384,6 +391,24 @@ describe("map: create_map", () => {
     await send(dm, [await createMapIx(dm, 2, 16, 16, 1, 1, { settleTimeoutSecs: 5 })]);
     for (const settleTimeoutSecs of [0, 36_001]) {
       await expectErr(send(dm, [await createMapIx(dm, 3, 16, 16, 1, 1, { settleTimeoutSecs })]), err("SettleTimeoutOutOfRange"));
+    }
+  });
+
+  it("stores the biome the DM picks, and its size has room for it", async () => {
+    const dm = await funded();
+    for (const [i, biome] of [BIOME.Caves, BIOME.Forest, BIOME.Crypt].entries()) {
+      const cu = await send(dm, [await createMapIx(dm, i, 16, 16, 1, 1, { biome })]);
+      if (biome === BIOME.Forest) console.log(`create_map: ${cu} CU`);
+      const addr = await mapAddress(dm.address, i);
+      assert.equal((await readMap(addr)).biome, biome);
+      assert.equal((await data(addr)).length, MAP_SIZE);
+    }
+  });
+
+  it("rejects a biome past Crypt", async () => {
+    const dm = await funded();
+    for (const biome of [3, 255]) {
+      await expectErr(send(dm, [await createMapIx(dm, 0, 16, 16, 1, 1, { biome })]), err("InvalidBiome"));
     }
   });
 

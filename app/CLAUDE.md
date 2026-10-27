@@ -3,7 +3,7 @@
 Owner lane: L9. Read the root CLAUDE.md first.
 
 ## What lives here
-The Vite + React + TypeScript website: wallet, session key, rasterizer loader, Character / Map builder / Party screens and the battle UI (grid, dice cascade, hit breakdown). It reads the chain directly; there is no backend.
+The Vite + React + TypeScript website: wallet, session key, rasterizer loader and one game screen (`src/game/`): the city, building interiors (the Tavern's board and DM table), the dungeon (battle UI: grid, dice cascade, hit breakdown) and the side panel with its windows (bag, skills, characters, settings). `/wiki` and `/bestiary` are built from the repo at build time (`scripts/wiki.ts`, texts in `assets/wiki/`). It reads the chain directly; there is no backend.
 
 ## Rules for this zone
 - Docs: CLAUDE.md section 8 (demo script), crates/render/FORMAT.md section 7 (WASM ABI), crates/combat/wasm/README.md (HitResult), docs/STORAGE_AND_DELIVERY.md, docs/GAME_COMMISSIONS.md (session keys).
@@ -14,6 +14,8 @@ The Vite + React + TypeScript website: wallet, session key, rasterizer loader, C
 - After `CharacterDied` the app sends `character.freeze_tombstone` (`src/chain/tombstone.ts`).
 - Instruction builders call the generated `get*Instruction` (remaining accounts through `withRemaining`); mirror `tests/demo.test.ts` account lists. Enums are numbers (`variantKey` for names) and Rust options are kit `Option`s (`optional`). After an IDL change, run `pnpm --filter @deadroll/sdk generate`, then the tests.
 - The mock VRF oracle (`MOCK_VRF`) and the dev wallet (`?dev=1`) are gated on a localhost RPC. Never relax that gate.
+- There are no separate pages: everything opens from the city, the Tavern and the side panel. The main area lives in the URL (`?view=city|inside|dungeon`), windows in state.
+- Site art comes from `app/assets` (exported by `tools/art/export_site.sh`, never game state). A new monster sprite, aspect, state, named resonance, bestiary monster or monster skill needs its line in `assets/wiki/` and its exported picture, or the build fails.
 - Forbidden: editing other zones, crates/types, agents/CONTRACTS.md, sdk/ by hand.
 
 ## Commands

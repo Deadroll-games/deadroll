@@ -19,7 +19,7 @@ import { monsterDefense, playerDefense, unitStats } from "../chain/stats";
 import { Aspect, Class, ModKind, PARTY_MAX, type HitResult, type TimedMod } from "../chain/types";
 import { DATA_SOURCE } from "../config";
 import { client } from "../wallet/client";
-import { PartyChain } from "./PartyChain";
+import { PartyView } from "./PartyChain";
 
 const PRICE = 100_000_000n;
 const DM = "DMw4Ns7ZqX5o8b2bJm1yQe3kV9tRgHc6uLpAa1dF2sKe";
@@ -66,8 +66,9 @@ function mockStats(units: GridUnit[], active: number, combat: CombatWasm | null)
     });
 }
 
-export function PartyPage() {
-  return DATA_SOURCE === "chain" ? <PartyChain /> : <MockParty />;
+/** The dungeon screen of one party; mock data without a validator. */
+export function PartyScreen({ address }: { address: Address | null }) {
+  return DATA_SOURCE === "chain" && address ? <PartyView address={address} /> : <MockParty />;
 }
 
 /** Mock mode (VITE_DATA=mock): the lobby and battle on synthetic data. */

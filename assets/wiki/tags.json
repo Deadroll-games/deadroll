@@ -1,0 +1,32 @@
+{
+  "note": "Short text for the skill tags of crates/types (Source, Form, TimeTag, RangeTag, Target, Category, Purpose, Effect, Trigger). Missing ones show the code's own doc comment.",
+  "Source": { "Magical": "Power from Intelligence: spells.", "Combat": "Power from Strength: weapons and fists." },
+  "Form": { "Strike": "A blow in close combat.", "Projectile": "Something thrown or shot." },
+  "TimeTag": { "Instant": "All the damage at once.", "DoT": "Damage over time." },
+  "RangeTag": { "Melee": "Reaches adjacent cells.", "Ranged": "Reaches far." },
+  "Target": { "Single": "One target.", "Line": "Every unit along a line through the target." },
+  "Category": { "Active": "Used on your turn for action points.", "Reactive": "Fires by itself when its trigger happens.", "Passive": "Always on: an aura around its bearer." },
+  "Purpose": { "Damage": "Hurts an enemy.", "Buff": "Helps yourself or an ally.", "Debuff": "Hinders an enemy." },
+  "Effect": {
+    "None": "Pure damage.",
+    "Weakening": "The target deals less damage.",
+    "Slow": "The target gets fewer action points.",
+    "Vulnerability": "The target takes more damage.",
+    "Stun": "The target skips its next turn.",
+    "Freeze": "The target skips its next turn.",
+    "Haste": "More action points.",
+    "Empowerment": "More damage.",
+    "Protection": "Less damage taken.",
+    "Heal": "Restores HP up to the maximum.",
+    "Resistance": "More resistance to the skill's aspects."
+  },
+  "Trigger": {
+    "None": "No trigger.",
+    "Hit": "When the bearer is hit.",
+    "CritHit": "When the bearer takes a critical hit.",
+    "HpBelow": "When the bearer's HP falls below a threshold.",
+    "AllyHpBelow": "When a nearby ally's HP falls below a threshold.",
+    "Controlled": "When the bearer is stunned or frozen.",
+    "EnemyAdjacent": "When an enemy steps next to the bearer."
+  }
+}

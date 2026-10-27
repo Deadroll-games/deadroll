@@ -50,6 +50,8 @@ export type MapCreatedEvent = {
   minPlayers: number;
   chestRadius: number;
   settleTimeoutSecs: number;
+  /** The art set (`deadroll_types::Biome`). */
+  biome: number;
 };
 
 export type MapCreatedEventArgs = MapCreatedEvent;
@@ -67,6 +69,7 @@ export function getMapCreatedEventEncoder(): FixedSizeEncoder<MapCreatedEventArg
       ["minPlayers", getU8Encoder()],
       ["chestRadius", getU8Encoder()],
       ["settleTimeoutSecs", getU32Encoder()],
+      ["biome", getU8Encoder()],
     ]),
     [getConstantEncoder(MAP_CREATED_EVENT_DISCRIMINATOR)],
   );
@@ -85,6 +88,7 @@ export function getMapCreatedEventDecoder(): FixedSizeDecoder<MapCreatedEvent> {
       ["minPlayers", getU8Decoder()],
       ["chestRadius", getU8Decoder()],
       ["settleTimeoutSecs", getU32Decoder()],
+      ["biome", getU8Decoder()],
     ]),
     [getConstantDecoder(MAP_CREATED_EVENT_DISCRIMINATOR)],
   );
