@@ -98,6 +98,9 @@ function paletteProps(overrides: Partial<MapPaletteProps> = {}): MapPaletteProps
   return {
     tool: { kind: "erase" },
     onToolChange: () => {},
+    biome: 0,
+    biomes: ["Caves and Ruins", "Forest", "Crypt"],
+    onBiomeChange: () => {},
     bestiary: [{ id: 0, name: "Wolf" }],
     presets: [{ name: "demo_16x16", width: 16, height: 16 }],
     onLoadPreset: () => {},
@@ -116,7 +119,29 @@ describe("MapPalette", () => {
     const onToolChange = vi.fn();
     render(<MapPalette {...paletteProps({ onToolChange })} />);
     fireEvent.click(screen.getByRole("button", { name: "Stone floor" }));
-    expect(onToolChange).toHaveBeenCalledWith({ kind: "tile", tile: Tile.StoneFloor });
+    expect(onToolChange).toHaveBeenCalledWith({ kind: "tile", tile: Tile.StoneFloor, variant: 0 });
+  });
+
+  it("offers the variants of the brush's tile and picks one", () => {
+    const onToolChange = vi.fn();
+    const tileVariants = (tile: number) => (tile === Tile.StoneFloor ? 4 : 1);
+    const { rerender } = render(<MapPalette {...paletteProps({ onToolChange, tileVariants, tool: { kind: "tile", tile: Tile.StoneFloor, variant: 0 } })} />);
+    expect(screen.getAllByRole("button", { name: /^variant / })).toHaveLength(4);
+    expect(screen.getByRole("button", { name: "variant 1" }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "variant 3" }));
+    expect(onToolChange).toHaveBeenCalledWith({ kind: "tile", tile: Tile.StoneFloor, variant: 2 });
+    // A tile type with one picture (a wall: its shape comes from the neighbors) has no choice.
+    rerender(<MapPalette {...paletteProps({ onToolChange, tileVariants, tool: { kind: "tile", tile: Tile.Wall, variant: 0 } })} />);
+    expect(screen.queryAllByRole("button", { name: /^variant / })).toHaveLength(0);
+  });
+
+  it("picks the biome", () => {
+    const onBiomeChange = vi.fn();
+    render(<MapPalette {...paletteProps({ onBiomeChange, biome: 1 })} />);
+    const select = screen.getByLabelText("Biome") as HTMLSelectElement;
+    expect(select.value).toBe("1");
+    fireEvent.change(select, { target: { value: "2" } });
+    expect(onBiomeChange).toHaveBeenCalledWith(2);
   });
 
   it("patch 13: selects the entrance and the exit tools", () => {

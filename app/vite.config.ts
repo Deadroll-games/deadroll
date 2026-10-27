@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { defineConfig, loadEnv, type Plugin } from "vite";
 import { findBundledRpcKey, isBundleSafeRpc } from "./src/rpcSettings";
 import react from "@vitejs/plugin-react";
+import { wikiPlugin } from "./scripts/wiki";
 
 const root = resolve(import.meta.dirname, "..");
 
@@ -74,7 +75,7 @@ function noBundledRpcKey(mode: string): Plugin {
 }
 
 export default defineConfig(({ mode }) => ({
-  plugins: [react(), devAssets(), noBundledRpcKey(mode)],
+  plugins: [react(), devAssets(), noBundledRpcKey(mode), wikiPlugin(root)],
   test: {
     environment: "jsdom",
     setupFiles: ["./src/test-setup.ts"],

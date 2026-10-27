@@ -17,6 +17,8 @@ export type BagPanelProps = {
   error: string | null;
   busy?: boolean;
   label: (r: Reward) => string;
+  /** The reward's icon (32x32 RGBA from the rasterizer), or null to show the label as text. */
+  icon?: (r: Reward) => ImageData | null;
   onPick: (cacheIndex: number | null) => void;
   /** Shift + click on a cache reward: into the first fitting slots. */
   onTakeAll: (cacheIndex: number) => void;

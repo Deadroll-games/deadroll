@@ -1,0 +1,10 @@
+{
+  "note": "Every StateKind of crates/types needs a line here, or the site build fails.",
+  "Burning": "Deals a share of the hit's damage at the start of each of the target's turns.",
+  "Chill": "Slows the target; enough Chill turns into Freeze.",
+  "Freeze": "Hard control: the target skips its turn.",
+  "Bleeding": "Deals a share of the hit's damage at the start of each of the target's turns.",
+  "Shock": "The target takes more damage from the next hits while it lasts.",
+  "Stun": "Hard control: the target skips its turn.",
+  "Penetration": "Lowers the target's effective armor against physical packets."
+}

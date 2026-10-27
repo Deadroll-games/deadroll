@@ -9,7 +9,7 @@ description: Use when drawing characters, monsters, items or tiles as sprite DSL
 validator rules, crafted look). Design background: `docs/ART_DESCRIPTION.md` (its sizes are still
 the 32 px ones; the numbers below are the current ones: characters 96 px, tiles 64 px). If this skill and
 FORMAT.md ever disagree, FORMAT.md wins.
-You write sprites as text in `assets/sprites/<name>.dsl`. `tools/art` compiles and renders them,
+You write sprites as text in `assets/sprites/<category>/<name>.dsl`. `tools/art` compiles and renders them,
 `art pack` builds the on-chain sprite book 2. Each pixel keeps its slot, so materials, enchantments, runes,
 sockets, death and curse work on it. Draw the look pixel by pixel with `BITMAP` and explicit
 ramp colors where you want control; let the rasterizer shade (2.8), outline (colored, 2.9),
@@ -17,15 +17,15 @@ dither (2.10) and drop overlap shadows (2.11) where you do not.
 
 ## Workflow
 
-1. Take your id range (below) and the current bodies in `assets/sprites/bodies.dsl` as the pose.
+1. Take your id range (below) and the current bodies in `assets/sprites/bodies/bodies.dsl` as the pose.
 2. Write the `.dsl` file. One file holds several sprites. Touch only your own file.
 3. Look at it:
-   - `cargo run -p art -- assets/sprites/<name>.dsl --scale 8 --out target/art/<name>` (one PNG per sprite);
+   - `cargo run -p art -- assets/sprites/<category>/<name>.dsl --scale 8 --out target/art/<name>` (one PNG per sprite);
    - `cargo run -p art -- sheet characters` (bare bodies and each class starter kit worn on both bodies, alive and dead);
-   - `cargo run -p art -- sheet matrix assets/sprites/<name>.dsl` (each item: 3 materials,
+   - `cargo run -p art -- sheet matrix assets/sprites/<category>/<name>.dsl` (each item: 3 materials,
      2 enchantments, 3 runes, empty and filled sockets, a debug slot view, on the body).
    All previews go to `target/`, never to `/tmp` or the disk root.
-4. `cargo run -p art -- validate assets/sprites/<name>.dsl` must pass.
+4. `cargo run -p art -- validate assets/sprites/<category>/<name>.dsl` must pass.
 5. Fix until the checklist passes.
 
 ## File syntax
@@ -133,15 +133,19 @@ Must have `flags no_outline`: `shadow`, `necklace`, `fist_front`, `overlay_eleme
 
 ## Sprite id ranges
 
-| Ids | Content |
-|---|---|
-| 1-99 | shadow, race bodies, hair, the front fist |
-| 100-399 | items: one sprite per `ItemBase`, id `100 + ItemBase` (`items.dsl`) |
-| 400-499 | monsters, tombstone |
-| 500-599 | tiles |
+| Ids | Content | Folder |
+|---|---|---|
+| 1-99 | shadow, race bodies, hair, the front fist | `assets/sprites/bodies/` |
+| 100-399 | items: one sprite per `ItemBase`, id `100 + ItemBase` | `assets/sprites/items/` |
+| 400-499 | monsters, tombstone | `assets/sprites/monsters/` |
+| 500-599, 800-999 | tiles, map points (entrance, exit, chest) | `assets/sprites/tiles/<biome>/`, `assets/sprites/points/` |
+| 600-799 | icons 32x32 (resources, rewards, consumables, items) | `assets/sprites/resources/` |
+| 1000+ | never packed: site art, items waiting for an `ItemBase` | `assets/site_sprites/<category>/`, `assets/sprites_pending/` |
 
-0 is the empty layer. Never reuse an id or a name that already exists in `assets/sprites/`, and
-never change the id or layer of an existing sprite (characters store them on-chain).
+`art pack` takes every `.dsl` under `assets/sprites/` (subfolders too) and nothing else. The folder
+sets the id range the validator checks. 0 is the empty layer. Never reuse an id or a name that
+already exists in `assets/`, and never change the id or layer of an existing sprite (characters
+store them on-chain).
 
 ## Canvas, pose and anchors (96x96)
 

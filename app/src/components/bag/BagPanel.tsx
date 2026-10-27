@@ -1,10 +1,11 @@
 // The bag and the settled cache side by side (patch 11): drag a reward onto a slot, Shift + click
 // to send it to the first fitting slots, click a cache reward then a bag slot to replace, split a
-// stack, throw a slot away (asked first), lock a slot in this browser. Placeholder look until the
-// item icons exist.
+// stack, throw a slot away (asked first), lock a slot in this browser. A reward shows its icon and
+// count when `icon` gives one, its label as text otherwise.
 import { useState, type DragEvent } from "react";
 import { slotKey, type SlotRef } from "../../chain/bagLayout";
 import type { Reward } from "../../chain/loot";
+import { SpriteCanvas } from "../../raster/SpriteCanvas";
 import type { BagPanelProps } from "./types";
 import "./bag.css";
 
@@ -32,6 +33,16 @@ export function BagPanel(p: BagPanelProps) {
       setSelected(selected && selected.section === at.section && selected.index === at.index ? null : at);
     }
   };
+  const face = (r: Reward) => {
+    const img = p.icon?.(r) ?? null;
+    if (!img) return <span className="mono">{p.label(r)}</span>;
+    return (
+      <span className="bag-icon">
+        <SpriteCanvas image={img} scale={1} label={p.label(r)} />
+        <span className="bag-qty mono">{r.qty}</span>
+      </span>
+    );
+  };
   const slot = (r: Reward, at: SlotRef) => (
     <button
       key={slotKey(at)}
@@ -45,7 +56,7 @@ export function BagPanel(p: BagPanelProps) {
       onDrop={drop(at)}
       onClick={() => clickSlot(at)}
     >
-      {r.qty > 0 ? <span className="mono">{p.label(r)}</span> : null}
+      {r.qty > 0 ? face(r) : null}
     </button>
   );
   return (
@@ -73,7 +84,7 @@ export function BagPanel(p: BagPanelProps) {
                     disabled={!p.editable || p.busy}
                     onClick={(e) => (e.shiftKey ? p.onTakeAll(i) : p.onPick(p.picked === i ? null : i))}
                   >
-                    {p.label(r)}
+                    {face(r)}
                   </button>
                 </li>
               ))}

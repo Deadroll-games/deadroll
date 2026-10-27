@@ -3,7 +3,7 @@
 # Shadows lean cold (blue, violet), lights lean warm (yellow, orange).
 # Ramps 0-19 and materials 0-12 keep the names and indices of palette 1: devnet characters store
 # these indices. Append only.
-palette 2
+palette 3
 outline #120c16
 
 ramp gray      #141219 #2b2a33 #47464f #6b6a70 #9a978f #cfcbbf
@@ -33,6 +33,34 @@ ramp bone      #15120e #3a332a #5f5546 #8a7e66 #b5a98c #dfd4b6
 ramp blood     #120305 #33070c #5c0f14 #8a1a1d #b5302b #d95b47
 ramp curse     #0a0612 #1e1030 #3a1f50 #5a3470 #7e5a8c #a988a9
 ramp dirt      #120d0a #2a1f19 #45342a #64503f #8a7258 #ae9777
+# appended in ART-3 (monsters)
+ramp fur_dark  #07080d #141822 #232a36 #36404c #525c66 #7d847f
+ramp gob_skin  #070b06 #14200f #243617 #384d1e #56692a #82894a
+ramp rag       #0c0908 #1d1713 #2f251d #443629 #5d4c39 #7b6750
+ramp fur_brown #0d0806 #21140d #372215 #50331e #6d4a2c #8f6a44
+ramp bark      #0a0807 #1b1511 #2c221a #3f3124 #574632 #776247
+ramp skin_pale #120d16 #2c2433 #4a4152 #6e6577 #9a91a0 #cbc3c6
+ramp troll     #090d0e #16201f #24332f #36483f #4f6352 #74846b
+ramp bruise    #0e050c #250b1d #3f1430 #5c1f42 #7d3352 #a35764
+ramp rust      #100806 #2a130b #46200f #683215 #8c4b20 #b26d35
+ramp glow_red  #1a0406 #4d0a0c #8a1410 #c8300f #f26a1c #ffc25a
+ramp glow_toxic #07100a #11290f #1f4a12 #3d7a14 #7bb81e #d4f25a
+ramp glow_soul #050d14 #0b2433 #12445a #1d7383 #3aaeae #a6f0e0
+ramp rot       #0b0d08 #1d2216 #323a23 #4c5532 #6d7548 #969a6a
+ramp ooze      #050b06 #0c1a0e #152b15 #20401c #335a24 #6f8f3a
+ramp blackiron #08090d #12141b #1d2029 #2b2f3a #424754 #6d7280
+ramp ash       #0b0909 #1a1616 #2a2322 #3d3330 #564843 #7a6a62
+ramp ogre      #0f0c08 #241e16 #3b3123 #574833 #7a6648 #a38c68
+ramp fur_pale  #14151a #2c2f36 #4a4f58 #6f7580 #9aa1aa #cfd5d8
+ramp wyrm      #080406 #140709 #1f0a0d #2e0f12 #431719 #6a2a24
+ramp hydra     #050c0c #0b1c1b #12302d #1c4740 #2d6556 #5a8f74
+ramp storm     #070a12 #0f1626 #18233d #243458 #3a4f7c #6a86b0
+ramp cave_rock #0d0b0a #1d1916 #2e2824 #433a33 #5d5047 #7e6e60
+ramp murk      #04080c #081218 #0e1f27 #163037 #22474c #3f6a68
+ramp leafdark  #050a07 #0c160f #142417 #1e3520 #2f4a2a #4f6a3a
+ramp crypt     #0b0a0f #18161f #262331 #373345 #4d485e #6f6a80
+ramp plaster   #120f0d #2a2420 #443b33 #645749 #877662 #ad9b82
+ramp slate     #0b0c10 #181a22 #262a35 #363c4b #4b5366 #6b7488
 
 dark dark
 curse curse
@@ -57,3 +85,59 @@ material cloth      cloth    leather  dither
 material moss       moss     dirt     dither
 material bone       bone     wood
 material chest      wood     steel    dither
+# appended in ART-3 (monsters)
+material wolf_dark  fur_dark  fur_dark  dither
+material goblin_dark gob_skin rag      dither
+material bear       fur_brown fur_brown dither
+material treant     bark      moss     dither
+material fairy      skin_pale curse    dither
+material troll      troll     rag      dither
+material demon      bruise    dark     dither
+material rusted     rust      leather  dither
+material bone_robe  bone      cloth    dither
+material ghoul      rot       rag      dither
+material slime      ooze      bone
+material bat        fur_dark  bruise   dither
+material dark_knight blackiron cape_red dither
+material behemoth   ash       dark     dither
+material minotaur   fur_brown leather  dither
+material ogre       ogre      rag      dither
+material golem      stone     moss     dither
+material yeti       fur_pale  cloth    dither
+material dragon     wyrm      ash      dither
+material hydra      hydra     moss     dither
+material griffin    fur_brown hair     dither
+material dragon_turtle hydra   stone    dither
+material centaur    fur_dark  skin_pale dither
+material jackal     fur_dark  gold     dither
+material storm      storm     storm    dither
+material phoenix    ash       fire     dither
+material shadow_horse fur_dark curse   dither
+material nightmare  fur_dark  fire     dither
+material pegasus    fur_pale  cloth    dither
+material siren      skin_pale hydra    dither
+material lizard     hydra     leather  dither
+material cockatrice hydra     rag      dither
+material frost_wolf fur_pale  fur_pale dither
+# appended in ART-3 (tiles)
+material cave_wall  cave_rock moss     dither
+material cave_floor cave_rock dirt     dither
+material cave_door  wood      cave_rock dither
+material murk       murk      murk
+material planks     bark      leather  dither
+material forest_wall bark     leafdark dither
+material forest_floor cave_rock leafdark dither
+material forest_grass cave_rock leafdark dither
+material forest_door bark      wood     dither
+material crypt_wall crypt     crypt    dither
+material crypt_floor crypt    dirt     dither
+material crypt_door crypt     blackiron dither
+# appended in ART-3 (icons)
+material gold_metal gold      leather
+material food       leather   blood    dither
+material pelt      fur_dark  leather  dither
+# appended in ART-3 (site art)
+material plaster_house plaster wood   dither
+material stone_house cave_rock wood     dither
+material cobble     cave_rock dirt     dither
+material forge      cave_rock blackiron dither

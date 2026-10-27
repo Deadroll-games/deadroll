@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { bestiaryName, TILE_NAMES } from "../../chain/names";
 import { Tile, type Tile as TileId } from "../../chain/types";
+import { SpriteCanvas } from "../../raster/SpriteCanvas";
 import type { BuilderTool, MapPaletteProps } from "./types";
 import "./forms.css";
 
@@ -22,7 +23,7 @@ const SPAWN_CAP = 24;
 
 function toolPressed(current: BuilderTool, next: BuilderTool): boolean {
   if (current.kind !== next.kind) return false;
-  if (current.kind === "tile" && next.kind === "tile") return current.tile === next.tile;
+  if (current.kind === "tile" && next.kind === "tile") return current.tile === next.tile && current.variant === next.variant;
   if (current.kind === "spawn" && next.kind === "spawn") return current.bestiaryId === next.bestiaryId;
   return current.kind === "erase" || current.kind === "chest" || current.kind === "entrance" || current.kind === "exit";
 }
@@ -31,9 +32,22 @@ export function MapPalette(p: MapPaletteProps) {
   const [preset, setPreset] = useState(p.presets[0]?.name ?? "");
   const locked = Boolean(p.busy);
   const chosen = p.presets.some((item) => item.name === preset) ? preset : (p.presets[0]?.name ?? "");
+  const brush = p.tool.kind === "tile" ? p.tool : null;
+  const variants = brush ? (p.tileVariants?.(brush.tile) ?? 1) : 1;
 
   return (
     <div className="forms-root panel">
+      <label className="forms-field" htmlFor="forms-biome">
+        Biome
+        <select id="forms-biome" value={p.biome} disabled={locked} onChange={(event) => p.onBiomeChange(Number(event.target.value))}>
+          {p.biomes.map((name, id) => (
+            <option key={name} value={id}>
+              {name}
+            </option>
+          ))}
+        </select>
+      </label>
+
       <div className="forms-field">
         <span>Tiles</span>
         <div className="forms-tools" role="group" aria-label="Tile tools">
@@ -44,9 +58,9 @@ export function MapPalette(p: MapPaletteProps) {
                 key={label}
                 type="button"
                 className="btn"
-                aria-pressed={toolPressed(p.tool, { kind: "tile", tile })}
+                aria-pressed={brush?.tile === tile}
                 disabled={locked}
-                onClick={() => p.onToolChange({ kind: "tile", tile })}
+                onClick={() => p.onToolChange({ kind: "tile", tile, variant: 0 })}
               >
                 <span className="forms-swatch" style={{ background: TILE_COLORS[tile] }} />
                 {label}
@@ -54,6 +68,27 @@ export function MapPalette(p: MapPaletteProps) {
             );
           })}
         </div>
+        {brush && variants > 1 && (
+          <div className="forms-tools" role="group" aria-label="Tile variants">
+            {Array.from({ length: variants }, (_, variant) => {
+              const next = { kind: "tile" as const, tile: brush.tile, variant };
+              const image = p.tilePreview?.(brush.tile, variant) ?? null;
+              return (
+                <button
+                  key={variant}
+                  type="button"
+                  className="btn forms-variant"
+                  aria-label={`variant ${variant + 1}`}
+                  aria-pressed={toolPressed(p.tool, next)}
+                  disabled={locked}
+                  onClick={() => p.onToolChange(next)}
+                >
+                  {image ? <SpriteCanvas image={image} scale={1} label={`variant ${variant + 1}`} /> : variant + 1}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <div className="forms-field">

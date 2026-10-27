@@ -57,3 +57,10 @@ pub const TILE_VARIANTS: usize = 8;
 /// Patch 13: points of one map layout (`MapLayoutDataV2.points`): the entrance, the exit and
 /// the visible chests.
 pub const POINTS_MAX: usize = 2 + CHESTS_MAX;
+/// City map size limits (docs/CITY_DESCRIPTION.md 3.1, 9): row-major cells, `CITY_W_MAX` per row.
+pub const CITY_W_MAX: usize = 48;
+pub const CITY_H_MAX: usize = 32;
+/// Cells of the full city layout (`CITY_W_MAX * CITY_H_MAX`).
+pub const CITY_CELLS: usize = CITY_W_MAX * CITY_H_MAX;
+/// Decor objects of the city (`CityData.objects`).
+pub const CITY_OBJECTS_MAX: usize = 32;

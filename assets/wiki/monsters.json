@@ -1,0 +1,8 @@
+{
+  "note": "Every monster of assets/registry/bestiary.json needs a line here (key: its name), or the site build fails. Sprites without a bestiary record show only their picture and name.",
+  "wolf": "A fast forest hunter that comes in packs and goes for the legs.",
+  "goblin": "A small cave raider. Weak alone, dangerous in a swarm.",
+  "goblin chieftain": "The boss of a goblin band. Its presence makes the goblins around it hit harder.",
+  "goblin warrior": "A goblin with a knife and a pocket of stones, the backbone of a band.",
+  "goblin shaman": "A goblin that throws sparks and keeps its kin on their feet."
+}

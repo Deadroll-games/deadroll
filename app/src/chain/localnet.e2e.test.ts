@@ -22,6 +22,9 @@ import {
   SKILL_PRESETS,
   actIx,
   buildMapIxs,
+  chainTiles,
+  mapStatus,
+  mapTiles,
   registryBestiary,
   registryMonsterSkills,
   registryRewards,
@@ -55,7 +58,7 @@ import {
   type Actor,
   type Party,
 } from "./game";
-import { presetToLayout, type MapPresetData } from "./mock";
+import { MAP_PRESETS, presetToLayout, type MapPresetData } from "./mock";
 import { equipIx, equipmentOf, inventory, unequipIx } from "./items";
 import { skillSetPda } from "./pda";
 import { affordable, cheb, route } from "./route";
@@ -641,6 +644,21 @@ describe.skipIf(!ON)("localnet: the builder's verdict is finalize_map's", () => 
         (e: unknown) => errorName(e instanceof Error ? e.message : String(e)),
       );
       expect(chain, name).toBe(verdict);
+    }
+  });
+});
+
+describe.skipIf(!ON)("localnet: the builder templates", () => {
+  it("each biome's template is published as the DM's map, with its biome and variants", { timeout: 5 * 60_000 }, async () => {
+    const dm = await funded(20);
+    for (const p of MAP_PRESETS.filter((m) => m.biome !== undefined)) {
+      const layout = presetToLayout(p);
+      const built = await buildMapIxs(dm, { width: p.width, height: p.height, tier: p.tier ?? 1, ...layout });
+      for (const ix of built.ixs) await send(dm, [ix]);
+      const map = (await getAccount("Map", built.map))!;
+      expect([map.biome, map.core.version, mapStatus(map)], p.name).toEqual([p.biome, 2, "finalized"]);
+      // The cells keep the variants the template picked.
+      expect(Array.from((await mapTiles(built.layout))!), p.name).toEqual(Array.from(chainTiles({ ...layout, width: p.width, height: p.height, tier: 1 })));
     }
   });
 });

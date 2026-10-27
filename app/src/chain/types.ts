@@ -54,6 +54,11 @@ export type SessionStatus = (typeof SessionStatus)[keyof typeof SessionStatus];
 export const MapStatus = { Draft: 0, Finalized: 1, InSession: 2, Finished: 3 } as const;
 export type MapStatus = (typeof MapStatus)[keyof typeof MapStatus];
 
+/** The art set of a map (`Biome`, `Map.biome`), chosen by the DM at create_map; picture only. */
+export const Biome = { Caves: 0, Forest: 1, Crypt: 2 } as const;
+export type Biome = (typeof Biome)[keyof typeof Biome];
+export const BIOME_COUNT = 3;
+
 export const Carrier = { Race: 0, Class: 1, Item: 2 } as const;
 export type Carrier = (typeof Carrier)[keyof typeof Carrier];
 

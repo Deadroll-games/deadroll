@@ -60,9 +60,9 @@ Everything marked **(G)** in `agents/TASKS.md`: sprite DSL files, presets and re
 ```
 grok --no-auto-update --no-alt-screen --cwd "$PWD" --always-approve --sandbox workspace \
   --effort medium --max-turns 20 --disable-web-search \
-  --allow 'Read' --allow 'Grep' --allow 'Write(assets/sprites/wolf.dsl)' --allow 'Edit(assets/sprites/wolf.dsl)' \
+  --allow 'Read' --allow 'Grep' --allow 'Write(assets/sprites/monsters/wolf.dsl)' --allow 'Edit(assets/sprites/monsters/wolf.dsl)' \
   --allow 'Bash(cargo run -p art*)' --deny 'Bash(rm *)' --deny 'Bash(git *)' \
   --prompt-file /tmp/grok-wolf.md
 ```
 
-Then Claude runs `cargo run -p art -- assets/sprites/wolf.dsl --scale 8 --out /tmp/wolf.png`, looks at the PNG, and keeps or rejects.
+Then Claude runs `cargo run -p art -- assets/sprites/monsters/wolf.dsl --scale 8 --out /tmp/wolf.png`, looks at the PNG, and keeps or rejects.

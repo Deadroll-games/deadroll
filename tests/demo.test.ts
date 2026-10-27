@@ -383,7 +383,7 @@ class Demo {
     this.layout = pda([Buffer.from("layout"), this.map.toBuffer()], MAP);
     const edit = { dm: this.dm.publicKey, map: this.map, layout: this.layout };
     await mapProgram.methods
-      .createMap(index, preset.width, preset.height, preset.tier, { minPlayers: preset.minPlayers, chestRadius: preset.chestRadius, settleTimeoutSecs: preset.settleTimeoutSecs })
+      .createMap(index, preset.width, preset.height, preset.tier, { minPlayers: preset.minPlayers, chestRadius: preset.chestRadius, settleTimeoutSecs: preset.settleTimeoutSecs, biome: preset.biome })
       .accountsStrict({ ...edit, systemProgram: SystemProgram.programId })
       .signers([this.dm])
       .rpc()

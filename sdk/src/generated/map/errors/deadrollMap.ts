@@ -122,6 +122,8 @@ export const DEADROLL_MAP_ERROR__POINT_OUT_OF_BOUNDS = 0x17a3; // 6051
 export const DEADROLL_MAP_ERROR__POINT_NOT_PASSABLE = 0x17a4; // 6052
 /** PointOverlap: The entrance and the exit share a cell */
 export const DEADROLL_MAP_ERROR__POINT_OVERLAP = 0x17a5; // 6053
+/** InvalidBiome: Unknown map biome */
+export const DEADROLL_MAP_ERROR__INVALID_BIOME = 0x17a6; // 6054
 
 export type DeadrollMapError =
   | typeof DEADROLL_MAP_ERROR__BOSS_COUNT
@@ -141,6 +143,7 @@ export type DeadrollMapError =
   | typeof DEADROLL_MAP_ERROR__EXIT_MISMATCH
   | typeof DEADROLL_MAP_ERROR__EXIT_UNREACHABLE
   | typeof DEADROLL_MAP_ERROR__HELPER_OUTSIDE_BOSS_PACK
+  | typeof DEADROLL_MAP_ERROR__INVALID_BIOME
   | typeof DEADROLL_MAP_ERROR__INVALID_CONFIG
   | typeof DEADROLL_MAP_ERROR__INVALID_POINT
   | typeof DEADROLL_MAP_ERROR__INVALID_REGISTRY_TABLE
@@ -199,6 +202,7 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_MAP_ERROR__EXIT_MISMATCH]: `Unused since patch 13`,
     [DEADROLL_MAP_ERROR__EXIT_UNREACHABLE]: `No path from the entrance to the exit`,
     [DEADROLL_MAP_ERROR__HELPER_OUTSIDE_BOSS_PACK]: `Boss helper outside the boss pack`,
+    [DEADROLL_MAP_ERROR__INVALID_BIOME]: `Unknown map biome`,
     [DEADROLL_MAP_ERROR__INVALID_CONFIG]: `Account is not the registry GameConfig`,
     [DEADROLL_MAP_ERROR__INVALID_POINT]: `Unused since patch 13`,
     [DEADROLL_MAP_ERROR__INVALID_REGISTRY_TABLE]: `Account is not the registry bestiary or monster skills table`,

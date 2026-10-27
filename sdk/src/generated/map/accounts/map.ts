@@ -71,6 +71,12 @@ export type Map = {
    * (`settle_party`); then each player claims their own.
    */
   settleTimeoutSecs: number;
+  /**
+   * The art set of the map (`deadroll_types::Biome`), set by the DM at `create_map`. Picture
+   * only. A map from before the field (`ACCOUNT_VERSION` 1) is one byte shorter and reads as
+   * `Caves` through `Map::decode_padded`.
+   */
+  biome: number;
 };
 
 export type MapArgs = {
@@ -92,6 +98,12 @@ export type MapArgs = {
    * (`settle_party`); then each player claims their own.
    */
   settleTimeoutSecs: number;
+  /**
+   * The art set of the map (`deadroll_types::Biome`), set by the DM at `create_map`. Picture
+   * only. A map from before the field (`ACCOUNT_VERSION` 1) is one byte shorter and reads as
+   * `Caves` through `Map::decode_padded`.
+   */
+  biome: number;
 };
 
 /** Gets the encoder for {@link MapArgs} account data. */
@@ -104,6 +116,7 @@ export function getMapEncoder(): FixedSizeEncoder<MapArgs> {
       ["minPlayers", getU8Encoder()],
       ["chestRadius", getU8Encoder()],
       ["settleTimeoutSecs", getU32Encoder()],
+      ["biome", getU8Encoder()],
     ]),
     (value) => ({ ...value, discriminator: MAP_DISCRIMINATOR }),
   );
@@ -118,6 +131,7 @@ export function getMapDecoder(): FixedSizeDecoder<Map> {
     ["minPlayers", getU8Decoder()],
     ["chestRadius", getU8Decoder()],
     ["settleTimeoutSecs", getU32Decoder()],
+    ["biome", getU8Decoder()],
   ]);
 }
 
@@ -180,5 +194,5 @@ export async function fetchAllMaybeMap(
 }
 
 export function getMapSize(): number {
-  return 120;
+  return 121;
 }

@@ -8,15 +8,17 @@ use deadroll_render::sprite::{layer, Cmd};
 
 const DEFAULT_PALETTE: &str = "assets/palette/palette_2.pal";
 const SPRITES_DIR: &str = "assets/sprites";
+const OFF_CHAIN_ROOTS: [&str; 2] = ["assets/site_sprites", "assets/sprites_pending"];
 
 const USAGE: &str = "usage:
-  art validate [files.dsl ...]                 default: every file in assets/sprites
+  art validate [files.dsl ...]                 default: every file in assets/sprites, site_sprites, sprites_pending
   art <file.dsl> [--id N] [--scale 4] [--out DIR|FILE.png] [--material NAME] [--bg #rrggbb]
   art sheet characters [figures ...] [--scale 4] [--out FILE.png]   bodies, kits on both bodies, alive and dead
   art sheet contact [files.dsl ...] [--scale 2] [--out FILE.png]
   art sheet matrix [files.dsl ...] [--id N] [--scale 4] [--out FILE.png]   items x materials, enchants, runes, sockets
   art sheet scene [--scale 4] [--out FILE.png]        every tile, the probe chest, monsters and classes at one pixel scale
   art sheet join <a.png> <b.png> ... [--out FILE.png]  PNGs side by side (old and new sprites)
+  art compose <layout.txt> [--scale 1] [--out FILE.png]   a picture of many sprites (tools/art/src/compose.rs), site art
   art pack [--out DIR] [--first-book N]         palette.bin + book_<id>.bin (books N.., default 2, 64 KiB each) for upload
   art upscale [files.dsl ...]                  rewrite format 1 sources (16..64 px) for format 2, in place
 options: --palette FILE.pal (default assets/palette/palette_2.pal)";
@@ -77,23 +79,24 @@ fn norm(p: &Path) -> String {
     p.to_string_lossy().replace('\\', "/")
 }
 
+/// The sprites of the books: every `.dsl` under `assets/sprites`, by category folder.
 fn repo_files() -> Vec<PathBuf> {
-    let mut v: Vec<PathBuf> = fs::read_dir(SPRITES_DIR)
-        .map(|d| {
-            d.filter_map(|e| e.ok())
-                .map(|e| e.path())
-                .filter(|p| p.extension().is_some_and(|x| x == "dsl"))
-                .collect()
-        })
-        .unwrap_or_default();
-    v.sort();
+    art::validate::dsl_files(Path::new(SPRITES_DIR))
+}
+
+/// The book sprites, then the site and pending sprites, which are never packed.
+fn all_files() -> Vec<PathBuf> {
+    let mut v = repo_files();
+    for d in OFF_CHAIN_ROOTS {
+        v.extend(art::validate::dsl_files(Path::new(d)));
+    }
     v
 }
 
 /// Loads `files` and the rest of the repo sprites (for id and name uniqueness).
 fn load_all(files: &[PathBuf]) -> Result<(Vec<Compiled>, Vec<Issue>), String> {
     let mut all: Vec<PathBuf> = files.to_vec();
-    for r in repo_files() {
+    for r in all_files() {
         let same = |a: &Path, b: &Path| match (fs::canonicalize(a), fs::canonicalize(b)) {
             (Ok(x), Ok(y)) => x == y,
             _ => false,
@@ -111,7 +114,7 @@ fn load_all(files: &[PathBuf]) -> Result<(Vec<Compiled>, Vec<Issue>), String> {
 
 fn cmd_validate(o: &Opts) -> Result<bool, String> {
     let files: Vec<PathBuf> = if o.pos.is_empty() {
-        repo_files()
+        all_files()
     } else {
         o.pos.iter().map(PathBuf::from).collect()
     };
@@ -377,16 +380,42 @@ fn cmd_sheet(o: &Opts) -> Result<bool, String> {
     Ok(true)
 }
 
+/// Renders a compose layout to one PNG (site art, never packed).
+fn cmd_compose(o: &Opts) -> Result<bool, String> {
+    let file = o.pos.get(1).ok_or("compose needs a layout file")?;
+    let (sprites, _) = load_all(&[])?;
+    let pal = load_pal(o)?;
+    let book = preview::pack_book(&sprites)?;
+    let img = art::compose::compose(&pal, &book, &sprites, &read(Path::new(file))?)?;
+    let k = if o.scale == 0 { 1 } else { o.scale };
+    let img = preview::upscaled(img, k)?;
+    let path = o.out.clone().unwrap_or_else(|| {
+        let name = Path::new(file).with_extension("png");
+        PathBuf::from("target/art").join(name.file_name().unwrap_or_default())
+    });
+    let (w, h) = (img.w, img.h);
+    write(&path, &finish(img, o.bg))?;
+    println!("{} ({w}x{h})", path.display());
+    Ok(true)
+}
+
 /// Writes the upload inputs: the compiled palette and the sprite books (ids `--first-book`..) with every repo
 /// sprite, each at most `BOOK_MAX` bytes: `palette.bin`, `book_<id>.bin`.
 fn cmd_pack(o: &Opts) -> Result<bool, String> {
-    let (sprites, issues) = load_all(&repo_files())?;
+    let book_files = repo_files();
+    let (sprites, issues) = load_all(&book_files)?;
     if !issues.is_empty() {
         for i in &issues {
             eprintln!("{i}");
         }
         return Err(format!("{} problems, run `art validate`", issues.len()));
     }
+    // Site and pending sprites only take part in the uniqueness check.
+    let in_books: Vec<String> = book_files.iter().map(|p| norm(p)).collect();
+    let sprites: Vec<Compiled> = sprites
+        .into_iter()
+        .filter(|s| in_books.contains(&s.file))
+        .collect();
     let pal = load_pal(o)?;
     let books = preview::pack_books(&sprites, o.first_book)?;
     let dir = o
@@ -466,6 +495,7 @@ fn run() -> Result<bool, String> {
         }),
         Some("sheet") => cmd_sheet(&o),
         Some("pack") => cmd_pack(&o),
+        Some("compose") => cmd_compose(&o),
         Some("upscale") => cmd_upscale(&Opts {
             pos: o.pos[1..].to_vec(),
             ..o

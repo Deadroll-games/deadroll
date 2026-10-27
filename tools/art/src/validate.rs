@@ -2,6 +2,7 @@
 //! malformed sprites; this adds the authoring rules.
 
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
 use deadroll_render::raster::{rasterize, Grid};
 use deadroll_render::sprite::{self, layer, slot, Cmd, Sprite, SOCKET_SIZE};
@@ -43,16 +44,59 @@ pub struct Compiled {
     pub sprite: Sprite,
 }
 
-/// Id range of a known sprite file (`FORMAT.md` 1.5). Unknown files only get the global range.
-pub fn file_range(file: &str) -> Option<(u16, u16)> {
-    let base = file.rsplit(['/', '\\']).next()?;
-    Some(match base.strip_suffix(".dsl")? {
-        "bodies" => (1, 99),
-        "items" => (100, 399),
-        "monsters" => (400, 499),
-        "tiles" => (500, 599),
-        _ => return None,
+/// Ids of the sprites in the books (`FORMAT.md` 1.5).
+pub const ON_CHAIN_IDS: (u16, u16) = (1, 999);
+/// Ids of the sprites that never go into a book: site art (`assets/site_sprites`) and drawn items
+/// waiting for an `ItemBase` (`assets/sprites_pending`).
+pub const OFF_CHAIN_IDS: (u16, u16) = (1000, u16::MAX);
+/// Folders whose sprites are never packed.
+pub const OFF_CHAIN_DIRS: [&str; 2] = ["site_sprites", "sprites_pending"];
+
+const TILE_IDS: &[(u16, u16)] = &[(500, 599), (800, 999)];
+
+/// Id ranges of a sprite file by its category folder under `assets/sprites` (or its file name, as
+/// `items.dsl`), `FORMAT.md` 1.5. Files outside a category only get the global range.
+pub fn file_range(file: &str) -> Option<&'static [(u16, u16)]> {
+    let parts: Vec<&str> = file.split(['/', '\\']).collect();
+    if parts.iter().any(|p| OFF_CHAIN_DIRS.contains(p)) {
+        return Some(&[OFF_CHAIN_IDS]);
+    }
+    let last = parts.len() - 1;
+    parts.iter().enumerate().find_map(|(i, p)| {
+        let name = if i == last {
+            p.strip_suffix(".dsl")?
+        } else {
+            p
+        };
+        Some(match name {
+            "bodies" => &[(1, 99)][..],
+            "items" => &[(100, 399)],
+            "monsters" => &[(400, 499)],
+            "tiles" | "points" => TILE_IDS,
+            "resources" => &[(600, 799)],
+            _ => return None,
+        })
     })
+}
+
+/// Every `.dsl` file under `dir`, in subfolders too, sorted by path.
+pub fn dsl_files(dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&d) else {
+            continue;
+        };
+        for p in entries.flatten().map(|e| e.path()) {
+            if p.is_dir() {
+                stack.push(p);
+            } else if p.extension().is_some_and(|x| x == "dsl") {
+                out.push(p);
+            }
+        }
+    }
+    out.sort();
+    out
 }
 
 /// Cuts a comment: `#` at the start of a token followed by whitespace or the end of the line.
@@ -340,12 +384,20 @@ pub fn validate_text(file: &str, text: &str) -> (Vec<Compiled>, Vec<Issue>) {
             sprite,
         };
         let id = c.src.id;
-        let range_msg = if !(1..=599).contains(&id) {
-            Some(format!("id {id} outside 1..=599 (600+ is reserved)"))
-        } else {
-            range
-                .filter(|&(lo, hi)| id < lo || id > hi)
-                .map(|(lo, hi)| format!("id {id} outside the range {lo}-{hi} of this file"))
+        let (lo, hi) = ON_CHAIN_IDS;
+        let range_msg = match range {
+            None if !(lo..=hi).contains(&id) => Some(format!(
+                "id {id} outside {lo}..={hi} (1000+ only in assets/site_sprites, assets/sprites_pending)"
+            )),
+            None => None,
+            Some(r) if !r.iter().any(|&(lo, hi)| (lo..=hi).contains(&id)) => {
+                let list: Vec<String> = r.iter().map(|(lo, hi)| format!("{lo}-{hi}")).collect();
+                Some(format!(
+                    "id {id} outside the range {} of this file",
+                    list.join(", ")
+                ))
+            }
+            Some(_) => None,
         };
         if let Some(msg) = range_msg {
             issues.push(Issue {

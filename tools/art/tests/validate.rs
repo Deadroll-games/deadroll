@@ -151,9 +151,14 @@ fn rejects_ids_out_of_range_and_duplicates() {
         "outside the range 100-399",
     );
     rejects(
-        "sprite 700 a\nsize 96 96\nlayer boots\nRECT 2 2 3 3 P\n",
-        "1..=599",
+        "sprite 1200 a\nsize 96 96\nlayer boots\nRECT 2 2 3 3 P\n",
+        "outside the range 100-399",
     );
+    let (_, i) = validate_text(
+        "x.dsl",
+        "sprite 1200 a\nsize 96 96\nlayer boots\nRECT 2 2 3 3 P\n",
+    );
+    assert!(i.iter().any(|i| i.msg.contains("1..=999")), "{i:?}");
     let files = vec![
         ("items.dsl".to_string(), OK.to_string()),
         ("other.dsl".to_string(), OK.to_string()),
@@ -165,6 +170,34 @@ fn rejects_ids_out_of_range_and_duplicates() {
         .collect();
     assert!(m.iter().any(|s| s.contains("id 100 already used")), "{m:?}");
     assert!(m.iter().any(|s| s.contains("name already used")), "{m:?}");
+}
+
+#[test]
+fn id_ranges_follow_the_category_folder() {
+    use art::validate::file_range;
+    let tile = "sprite {id} a\nsize 64 64\nlayer tile\nRECT 2 2 3 3 P\n";
+    let ok = |file: &str, id: u16| {
+        validate_text(file, &tile.replace("{id}", &id.to_string()))
+            .1
+            .iter()
+            .all(|i| !i.msg.contains("outside"))
+    };
+    assert!(ok("assets/sprites/tiles/caves/walls.dsl", 520));
+    assert!(ok("assets/sprites/tiles/crypt/floor.dsl", 810));
+    assert!(ok("assets/sprites/points/chest.dsl", 580));
+    assert!(!ok("assets/sprites/tiles/forest/floor.dsl", 700));
+    assert!(!ok("assets/sprites/points/chest.dsl", 1000));
+    assert!(ok("assets/site_sprites/buildings/tavern.dsl", 1000));
+    assert!(!ok("assets/site_sprites/buildings/tavern.dsl", 999));
+    assert_eq!(
+        file_range("assets/sprites/resources/ores.dsl"),
+        Some(&[(600, 799)][..])
+    );
+    assert_eq!(
+        file_range("assets/sprites/monsters/monsters.dsl"),
+        Some(&[(400, 499)][..])
+    );
+    assert_eq!(file_range("x.dsl"), None);
 }
 
 #[test]
@@ -187,12 +220,7 @@ fn inline_comment_is_not_a_comment() {
 fn all_repo_sprites_are_valid_and_render_deterministically() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut files = Vec::new();
-    let mut paths: Vec<_> = std::fs::read_dir(root.join("assets/sprites"))
-        .unwrap()
-        .map(|e| e.unwrap().path())
-        .filter(|p| p.extension().is_some_and(|x| x == "dsl"))
-        .collect();
-    paths.sort();
+    let paths = art::validate::dsl_files(&root.join("assets/sprites"));
     for p in &paths {
         files.push((
             p.to_string_lossy().replace('\\', "/"),
@@ -242,11 +270,14 @@ fn tiles_use_tile_materials_and_figures_wear_the_starter_kits() {
     let pal =
         Pal::load(&std::fs::read_to_string(root.join("assets/palette/palette_2.pal")).unwrap())
             .unwrap();
+    // The current map's tiles are the Caves and Ruins set (TILE_LOOKS); the old trap keeps its look.
     for (name, want) in [
-        ("tile_wall", "tile_wall"),
-        ("tile_water", "tile_water"),
-        ("tile_door", "tile_door"),
-        ("tile_floor", "tile_floor"),
+        ("tile_wall", "cave_wall"),
+        ("tile_water", "murk"),
+        ("tile_door", "cave_door"),
+        ("tile_floor", "cave_floor"),
+        ("cave_wall_5", "cave_wall"),
+        ("cave_dirt_1", "cave_floor"),
         ("tile_trap", "tile_floor"),
     ] {
         let look = preview::default_look(name, 20);
@@ -419,14 +450,11 @@ fn every_frame_fits_an_indexed_png() {
     // and every crafted item column on its own canvas.
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut files = Vec::new();
-    for e in std::fs::read_dir(root.join("assets/sprites")).unwrap() {
-        let p = e.unwrap().path();
-        if p.extension().is_some_and(|x| x == "dsl") {
-            files.push((
-                p.to_string_lossy().replace('\\', "/"),
-                std::fs::read_to_string(&p).unwrap(),
-            ));
-        }
+    for p in art::validate::dsl_files(&root.join("assets/sprites")) {
+        files.push((
+            p.to_string_lossy().replace('\\', "/"),
+            std::fs::read_to_string(&p).unwrap(),
+        ));
     }
     let (sprites, _) = validate_files(&files);
     let pal =
@@ -473,7 +501,7 @@ fn every_frame_fits_an_indexed_png() {
 #[test]
 fn front_fist_repeats_the_fist_of_every_body() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let text = std::fs::read_to_string(root.join("assets/sprites/bodies.dsl")).unwrap();
+    let text = std::fs::read_to_string(root.join("assets/sprites/bodies/bodies.dsl")).unwrap();
     let (sprites, issues) = validate_text("bodies.dsl", &text);
     assert!(issues.is_empty(), "{issues:?}");
     let grid = |name: &str| {

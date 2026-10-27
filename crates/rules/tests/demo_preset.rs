@@ -15,14 +15,18 @@
 //! `_` Chasm. `E` and `X` are a stone floor with the entrance or the exit point. Patch 11:
 //! `min_players`, `boss_table` (`reward_tables.json` id) and the visible `chests`. The layout's
 //! points are the entrance, the exit, then the chests in order.
+//!
+//! Optional, for the builder templates: `"biome"` (`Biome`, 0 Caves when absent) and `"variants"`,
+//! one row of digits 0-7 per map row: the variant (bits 2-0) of each cell, 0 when absent. The
+//! variant only picks the picture, the rules ignore it.
 
 use std::path::PathBuf;
 
 use deadroll_mapcheck::{check_map, loot::MapLoot, tiles::cell_index};
 use deadroll_rules::{loot::map_rules, registry::Registry, tiles::tile_rules, BalanceConfig};
 use deadroll_types::{
-    cell_byte, Cell, MapLayoutDataV2, MapPoint, PointKind, Pubkey, Spawn, TileKind, CHESTS_MAX,
-    MAP_CELLS, POINTS_MAX, SPAWNS_MAX,
+    cell_byte, Biome, Cell, MapLayoutDataV2, MapPoint, PointKind, Pubkey, Spawn, TileKind,
+    CHESTS_MAX, MAP_CELLS, POINTS_MAX, SPAWNS_MAX,
 };
 use serde_json::Value;
 
@@ -61,8 +65,25 @@ fn load(path: &PathBuf) -> (u8, u8, u8, u8, MapLayoutDataV2) {
         u8_field(&json, "tier"),
     );
 
+    let biome = json.get("biome").map_or(0, |_| u8_field(&json, "biome"));
+    assert!(Biome::try_from(biome).is_ok(), "unknown biome {biome}");
     let rows = json["rows"].as_array().expect("rows");
     assert_eq!(rows.len(), height as usize, "rows count != height");
+    let variants: Vec<Vec<u8>> = match json.get("variants") {
+        None => rows.iter().map(|_| vec![0; width as usize]).collect(),
+        Some(v) => v
+            .as_array()
+            .expect("variants")
+            .iter()
+            .map(|row| {
+                let row = row.as_str().expect("variant row string");
+                row.chars()
+                    .map(|c| c.to_digit(8).expect("variant digit 0-7") as u8)
+                    .collect()
+            })
+            .collect(),
+    };
+    assert_eq!(variants.len(), height as usize, "variants count != height");
     let mut cells = [cell_byte(TileKind::Wall as u8, 0); MAP_CELLS];
     let (mut entrance, mut exit) = (None, None);
     for (y, row) in rows.iter().enumerate() {
@@ -82,7 +103,12 @@ fn load(path: &PathBuf) -> (u8, u8, u8, u8, MapLayoutDataV2) {
                 'X' => assert!(exit.replace(cell).is_none(), "two exits"),
                 _ => {}
             }
-            cells[cell_index(cell.x, cell.y)] = cell_byte(tile(ch) as u8, 0);
+            assert_eq!(
+                variants[y].len(),
+                width as usize,
+                "variant row {y} length != width"
+            );
+            cells[cell_index(cell.x, cell.y)] = cell_byte(tile(ch) as u8, variants[y][x]);
         }
     }
 

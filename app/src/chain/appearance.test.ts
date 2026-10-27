@@ -1,9 +1,11 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { EquipSource } from "@deadroll/sdk/character";
-import { LAYER, MATERIAL, TOMBSTONE, characterAppearance, isCurrentAppearance } from "./appearance";
+import { LAYER, MATERIAL, RAMP, TOMBSTONE, characterAppearance, isCurrentAppearance, pointLook, tileLook, tileVariants } from "./appearance";
 import { EMPTY_ITEM, EQUIP_SLOTS, ITEM_BASES, ITEM_SPRITE_BASE, characterRequest, dressed, starterEquipment } from "./items";
 import type { CharacterAcc } from "./game";
-import { Aspect, Class, Race } from "./types";
+import { Aspect, Biome, Class, Race, TILE_COUNT, Tile } from "./types";
 
 const slot = (name: string) => EQUIP_SLOTS.indexOf(name);
 const base = (name: string) => ITEM_BASES.indexOf(name);
@@ -99,5 +101,79 @@ describe("isCurrentAppearance", () => {
     expect(isCurrentAppearance(old)).toBe(false);
     expect(isCurrentAppearance(old.map((l, i) => (i === 2 ? { ...l, spriteId: 20 } : l)))).toBe(false);
     expect(isCurrentAppearance([])).toBe(false);
+  });
+});
+
+describe("palette indices", () => {
+  const pal = readFileSync(resolve(import.meta.dirname, "../../../assets/palette/palette_2.pal"), "utf8");
+  const names = (kind: string) =>
+    pal
+      .split("\n")
+      .filter((l) => l.startsWith(kind + " "))
+      .map((l) => l.split(/\s+/)[1]!.replace(/_(\w)/g, (_, c: string) => c.toUpperCase()));
+
+  it("RAMP and MATERIAL follow the ramp and material lines of palette_2.pal", () => {
+    const ramps = names("ramp");
+    for (const [name, i] of Object.entries(RAMP)) expect(ramps[i], name).toBe(name);
+    const materials = names("material");
+    for (const [name, i] of Object.entries(MATERIAL)) expect(materials[i], name).toBe(name);
+  });
+});
+
+describe("tiles by biome", () => {
+  /** `sprite <id> <name>` lines of a DSL file in assets/sprites. */
+  const spritesOf = (file: string) =>
+    new Map(
+      [...readFileSync(resolve(import.meta.dirname, "../../../assets/sprites", file), "utf8").matchAll(/^sprite (\d+) (\w+)/gm)].map((m) => [Number(m[1]), m[2]!]),
+    );
+  const books = { [Biome.Caves]: spritesOf("tiles/caves/caves.dsl"), [Biome.Forest]: spritesOf("tiles/forest/forest.dsl"), [Biome.Crypt]: spritesOf("tiles/crypt/crypt.dsl") };
+  const points = spritesOf("points/points.dsl");
+  const cell = (tile: Tile, variant = 0, mask = 0) => ({ tile, variant, mask });
+
+  it("every cell of every biome is a sprite of that biome's set", () => {
+    for (const biome of [Biome.Caves, Biome.Forest, Biome.Crypt]) {
+      for (let tile = 0; tile < TILE_COUNT; tile++) {
+        const masks = tile === Tile.Wall ? 16 : 1;
+        for (let variant = 0; variant < 8; variant++) {
+          for (let mask = 0; mask < masks; mask++) {
+            const look = tileLook(biome, cell(tile as Tile, variant, mask));
+            expect(look && books[biome].has(look[0]), `biome ${biome} tile ${tile} v${variant} m${mask}`).toBe(true);
+          }
+        }
+      }
+    }
+  });
+
+  it("walls by the neighbor mask: the 16 shapes in order", () => {
+    expect(Array.from({ length: 16 }, (_, m) => books[Biome.Forest].get(tileLook(Biome.Forest, cell(Tile.Wall, 0, m))![0]))).toEqual(
+      Array.from({ length: 16 }, (_, m) => `forest_wall_${m}`),
+    );
+    // Caves: mask 10 (east and west) is the older straight wall, the rest follow the comments.
+    expect(tileLook(Biome.Caves, cell(Tile.Wall, 0, 10))![0]).toBe(501);
+    expect(books[Biome.Caves].get(tileLook(Biome.Caves, cell(Tile.Wall, 0, 11))![0])).toBe("cave_wall_11");
+    expect(tileLook(Biome.Crypt, cell(Tile.Wall, 0, 15))![0]).toBe(815);
+    // The variant does not change a wall.
+    expect(tileLook(Biome.Crypt, cell(Tile.Wall, 5, 3))).toEqual(tileLook(Biome.Crypt, cell(Tile.Wall, 0, 3)));
+  });
+
+  it("the variant picks the picture; one the biome lacks draws variant 0", () => {
+    expect(tileVariants(Biome.Caves, Tile.StoneFloor)).toBe(4);
+    expect([0, 1, 2, 3].map((v) => tileLook(Biome.Caves, cell(Tile.StoneFloor, v))![0])).toEqual([500, 522, 523, 524]);
+    expect(tileLook(Biome.Forest, cell(Tile.WoodenFloor, 2))![0]).toBe(562);
+    expect(tileLook(Biome.Forest, cell(Tile.WoodenFloor, 7))).toEqual(tileLook(Biome.Forest, cell(Tile.WoodenFloor, 0)));
+    expect([tileVariants(Biome.Crypt, Tile.Wall), tileVariants(Biome.Crypt, Tile.Door), tileVariants(Biome.Crypt, Tile.ShallowWater)]).toEqual([1, 1, 2]);
+  });
+
+  it("colors follow tools/art TILE_LOOKS", () => {
+    expect(tileLook(Biome.Caves, cell(Tile.Dirt))).toEqual([528, MATERIAL.caveFloor, RAMP.bone, RAMP.murk]);
+    expect(tileLook(Biome.Forest, cell(Tile.Dirt, 1))).toEqual([564, MATERIAL.forestGrass, RAMP.rust, RAMP.bone]);
+    expect(tileLook(Biome.Forest, cell(Tile.ShallowWater))).toEqual([567, MATERIAL.murk, RAMP.moss, RAMP.cold]);
+    expect(tileLook(Biome.Crypt, cell(Tile.Door))).toEqual([826, MATERIAL.cryptDoor, RAMP.steel, RAMP.cold]);
+  });
+
+  it("the entrance by biome, the portal exit everywhere; an unknown biome draws Caves", () => {
+    expect([Biome.Caves, Biome.Forest, Biome.Crypt].map((b) => points.get(pointLook("entrance", b)[0]))).toEqual(["tile_entrance", "forest_entrance", "crypt_entrance"]);
+    expect(points.get(pointLook("exit", Biome.Crypt)[0])).toBe("tile_exit");
+    expect(tileLook(9, cell(Tile.StoneFloor, 1))).toEqual(tileLook(Biome.Caves, cell(Tile.StoneFloor, 1)));
   });
 });

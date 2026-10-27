@@ -64,8 +64,195 @@ const EYES: &str = "eyes";
 const GOLD: &str = "gold";
 const COLD: &str = "cold";
 
+/// Colors of each monster sprite (material, accent for `Y`, element for `R`); the app keeps the
+/// same table (`app/src/chain/appearance.ts`, `MONSTER_SPRITES`).
+pub const MONSTER_LOOKS: &[(&str, Look)] = &[
+    ("wolf", lk3("wolf_dark", "glow_red", "fur")),
+    ("goblin", lk3("goblin_dark", "glow_red", "steel")),
+    ("goblin_chief", lk3("goblin_dark", "gold", "steel")),
+    ("goblin_warrior", lk3("goblin_dark", "glow_red", "steel")),
+    ("goblin_shaman", lk3("goblin_dark", "glow_toxic", "bone")),
+    ("bear", lk3("bear", "glow_red", "bone")),
+    ("treant", lk3("treant", "glow_toxic", "bone")),
+    ("wood_fairy", lk3("fairy", "glow_soul", "glow_soul")),
+    ("troll", lk3("troll", "glow_red", "bone")),
+    ("wood_fairy_king", lk3("fairy", "glow_soul", "glow_soul")),
+    ("skeleton", lk3("bone", "glow_soul", "steel")),
+    ("skeleton_warrior", lk3("bone", "glow_soul", "steel")),
+    ("skeleton_mage", lk3("bone_robe", "fire", "fire")),
+    (
+        "skeleton_necromancer",
+        lk3("bone_robe", "glow_toxic", "wood"),
+    ),
+    ("ghoul", lk3("ghoul", "glow_soul", "bone")),
+    ("reaper", lk3("bone_robe", "glow_soul", "steel")),
+    ("slime", lk3("slime", "glow_toxic", "bone")),
+    ("bat", lk3("bat", "glow_red", "bone")),
+    ("mimic", lk3("chest", "bone", "bruise")),
+    ("gargoyle", lk3("stone", "glow_red", "gray")),
+    ("dark_knight", lk3("dark_knight", "glow_red", "steel")),
+    ("demon", lk3("demon", "glow_red", "bone")),
+    ("winged_demon", lk3("demon", "glow_red", "bone")),
+    ("behemoth", lk3("behemoth", "fire", "bone")),
+    ("werewolf", lk3("wolf", "glow_red", "bone")),
+    ("cerberus", lk3("wolf_dark", "glow_red", "steel")),
+    ("minotaur", lk3("minotaur", "glow_red", "steel")),
+    ("ogre", lk3("ogre", "glow_red", "stone")),
+    ("golem", lk3("golem", "glow_soul", "stone")),
+    ("yeti", lk3("yeti", "glow_soul", "bone")),
+    ("dragon", lk3("dragon", "fire", "bone")),
+    ("wyvern", lk3("dragon", "glow_toxic", "bone")),
+    ("hydra", lk3("hydra", "glow_toxic", "bone")),
+    ("griffin", lk3("griffin", "glow_red", "gold")),
+    ("manticore", lk3("minotaur", "glow_red", "bone")),
+    ("dragon_turtle", lk3("dragon_turtle", "glow_red", "bone")),
+    ("kraken", lk3("demon", "gold", "bone")),
+    ("centaur", lk3("centaur", "glow_red", "wood")),
+    ("jackal_lord", lk3("jackal", "glow_soul", "steel")),
+    ("thunderbird", lk3("storm", "cold", "gold")),
+    ("phoenix", lk3("phoenix", "fire", "gold")),
+    ("unicorn", lk3("shadow_horse", "glow_red", "bone")),
+    ("nightmare", lk3("nightmare", "fire", "fire")),
+    ("pegasus", lk3("pegasus", "glow_soul", "bone")),
+    ("kitsune", lk3("yeti", "glow_red", "glow_soul")),
+    ("siren", lk3("siren", "glow_soul", "cloth")),
+    ("lizardman", lk3("lizard", "gold", "bone")),
+    ("cockatrice", lk3("cockatrice", "gold", "cape_red")),
+    ("owl", lk3("griffin", "glow_red", "bone")),
+    ("war_dog", lk3("minotaur", "glow_red", "steel")),
+    ("wolpertinger", lk3("wolf", "glow_red", "bone")),
+    ("frost_wolf", lk3("frost_wolf", "cold", "cold")),
+];
+
+/// Colors of tile sprites by name prefix (first match); the app keeps the same per tile
+/// (`app/src/chain/appearance.ts`, `TILE_SPRITES`).
+pub const TILE_LOOKS: &[(&str, Look)] = &[
+    ("cave_wall", lk3("cave_wall", "steel", "cold")),
+    ("tile_wall", lk3("cave_wall", "steel", "cold")),
+    ("cave_floor", lk3("cave_floor", "bone", "cold")),
+    ("tile_floor", lk3("cave_floor", "bone", "cold")),
+    ("tile_door", lk3("cave_door", "steel", "cold")),
+    ("tile_water", lk3("murk", "murk", "cold")),
+    ("cave_water", lk3("murk", "murk", "cold")),
+    ("cave_deep", lk3("murk", "murk", "cold")),
+    ("cave_wood", lk3("planks", "steel", "cold")),
+    ("cave_dirt", lk3("cave_floor", "bone", "murk")),
+    ("cave_void", lk3("cave_wall", "steel", "cold")),
+    ("cave_", lk3("cave_floor", "bone", "cold")),
+    ("tile_entrance", lk3("cave_door", "steel", "fire")),
+    ("tile_exit", lk3("cave_wall", "steel", "glow_soul")),
+    ("chest_", lk3("chest", "gold", "cold")),
+    ("forest_entrance", lk3("forest_floor", "rust", "dirt")),
+    ("crypt_entrance", lk3("crypt_wall", "bone", "cold")),
+    ("forest_wall", lk3("forest_wall", "rust", "cold")),
+    ("forest_floor", lk3("forest_floor", "rust", "cold")),
+    ("forest_wood", lk3("planks", "steel", "cold")),
+    ("forest_dirt", lk3("forest_grass", "rust", "bone")),
+    ("forest_door", lk3("forest_wall", "steel", "cold")),
+    ("forest_water", lk3("murk", "moss", "cold")),
+    ("forest_deep", lk3("murk", "murk", "cold")),
+    ("forest_void", lk3("forest_wall", "rust", "cold")),
+    ("forest_", lk3("forest_grass", "rust", "cold")),
+    ("crypt_wall", lk3("crypt_wall", "bone", "cold")),
+    ("crypt_wood", lk3("planks", "steel", "cold")),
+    ("crypt_dirt", lk3("crypt_floor", "bone", "murk")),
+    ("crypt_door", lk3("crypt_door", "steel", "cold")),
+    ("crypt_water", lk3("murk", "murk", "cold")),
+    ("crypt_deep", lk3("murk", "murk", "cold")),
+    ("crypt_void", lk3("crypt_wall", "bone", "cold")),
+    ("crypt_", lk3("crypt_floor", "bone", "cold")),
+];
+
+/// Colors of icons by name (the default variant: one ore shape is iron here, copper or gold in the
+/// app by its request); the app keeps the same per resource (`app/src/chain/icons.ts`).
+pub const ICON_LOOKS: &[(&str, Look)] = &[
+    ("icon_pelt", lk3("pelt", "leather", "cold")),
+    ("icon_fang", lk3("bone", "gold", "cold")),
+    ("icon_sinew", lk3("bone", "gold", "cold")),
+    ("icon_claw", lk3("bone", "gold", "cold")),
+    ("icon_fat", lk3("bone", "rust", "cold")),
+    ("icon_log", lk3("planks", "gold", "cold")),
+    ("icon_bark", lk3("treant", "gold", "cold")),
+    ("icon_resin", lk3("planks", "gold", "gold")),
+    ("icon_heartwood", lk3("planks", "gold", "glow_toxic")),
+    ("icon_pollen", lk3("leather", "gold", "glow_soul")),
+    ("icon_stone", lk3("stone", "gold", "fire")),
+    ("icon_wing", lk3("stone", "gold", "glow_soul")),
+    ("icon_scrap", lk3("steel", "rust", "cold")),
+    ("icon_rags", lk3("cloth", "gold", "cold")),
+    ("icon_trinket", lk3("bone", "gold", "cold")),
+    ("icon_bone", lk3("bone", "gold", "cold")),
+    ("icon_vial", lk3("leather", "steel", "blood")),
+    ("icon_ore", lk3("stone", "gold", "rust")),
+    ("icon_ingot", lk3("steel", "gold", "cold")),
+    ("icon_dual_stone", lk3("stone", "cold", "fire")),
+    ("icon_recipe", lk3("bone", "cape_red", "cold")),
+    ("icon_blank", lk3("stone", "gold", "glow_soul")),
+    ("icon_reagent", lk3("tile_door", "steel", "glow_toxic")),
+    ("icon_potion", lk3("leather", "steel", "blood")),
+    ("icon_food", lk3("food", "gold", "cold")),
+    ("icon_torch", lk3("tile_door", "gold", "fire")),
+];
+
+/// Colors of site art (never packed) by name prefix, any layer.
+pub const SITE_LOOKS: &[(&str, Look)] = &[
+    ("tavern", lk3("plaster_house", "slate", "fire")),
+    ("artisans_guild", lk3("stone_house", "slate", "fire")),
+    ("storage", lk3("stone_house", "slate", "fire")),
+    ("city_street", lk3("cobble", "bone", "cold")),
+    ("city_square", lk3("cave_floor", "bone", "cold")),
+    ("city_grass", lk3("forest_grass", "rust", "bone")),
+    ("city_wall", lk3("stone_house", "steel", "cold")),
+    ("city_boards", lk3("tile_door", "steel", "cold")),
+    ("interior_floor", lk3("planks", "steel", "cold")),
+    ("interior_wall", lk3("plaster_house", "steel", "cold")),
+    ("furniture_board", lk3("chest", "bone", "fire")),
+    ("furniture_forge", lk3("forge", "gold", "fire")),
+    ("furniture_anvil", lk3("forge", "gold", "fire")),
+    ("furniture_", lk3("chest", "gold", "fire")),
+    ("ui_bag", lk3("leather", "steel", "fire")),
+    ("ui_map", lk3("bone", "gold", "blood")),
+    ("ui_skills", lk3("bone", "gold", "glow_soul")),
+    ("ui_settings", lk3("steel", "gold", "cold")),
+    ("ui_helmet", lk3("steel", "gold", "cold")),
+    ("ui_castle", lk3("stone_house", "cape_red", "cold")),
+    ("bench_smith", lk3("steel", "gold", "fire")),
+    ("bench_alchemy", lk3("planks", "glow_toxic", "glow_soul")),
+    ("bench_scribe", lk3("cape", "gold", "cold")),
+    ("bench_provisions", lk3("leather", "steel", "cold")),
+    ("item_key", lk3("steel", "gold", "cold")),
+    ("item_scroll", lk3("bone", "cape_red", "cold")),
+    ("parchment", lk3("bone", "gold", "cold")),
+];
+
+const fn lk3(material: &'static str, accent: &'static str, element: &'static str) -> Look {
+    Look {
+        material,
+        accent,
+        element,
+    }
+}
+
 /// Default colors for a lone sprite, chosen from its name and layer type.
 pub fn default_look(name: &str, layer_type: u8) -> Look {
+    if layer_type == layer::MONSTER {
+        if let Some((_, look)) = MONSTER_LOOKS.iter().find(|(n, _)| *n == name) {
+            return *look;
+        }
+    }
+    if let Some((_, look)) = SITE_LOOKS.iter().find(|(p, _)| name.starts_with(p)) {
+        return *look;
+    }
+    if layer_type == layer::ICON {
+        if let Some((_, look)) = ICON_LOOKS.iter().find(|(n, _)| *n == name) {
+            return *look;
+        }
+    }
+    if layer_type == layer::TILE {
+        if let Some((_, look)) = TILE_LOOKS.iter().find(|(p, _)| name.starts_with(p)) {
+            return *look;
+        }
+    }
     let material = if name.contains("elf") {
         "elf"
     } else if name.contains("wolf") {
@@ -235,11 +422,47 @@ pub fn render_sprite(
     scale: u32,
     material: Option<&'static str>,
 ) -> Result<Img, String> {
-    let lt = c.sprite.header.layer_type;
-    let mut look = default_look(&c.src.name, lt);
+    let mut look = default_look(&c.src.name, c.sprite.header.layer_type);
     if let Some(m) = material {
         look.material = m;
     }
+    render_scaled(pal, book_bytes, c, look, scale)
+}
+
+/// Enlarges a picture `k` times, pixel for pixel.
+pub fn upscaled(img: Img, k: u32) -> Result<Img, String> {
+    if k == 1 {
+        return Ok(img);
+    }
+    let big = scale(
+        &Image {
+            width: img.w,
+            height: img.h,
+            rgba: img.rgba,
+        },
+        k,
+    )
+    .map_err(|e| format!("scale {k}: {e:?}"))?;
+    Ok(Img {
+        w: big.width,
+        h: big.height,
+        rgba: big.rgba,
+    })
+}
+
+/// Renders one sprite alone in the given colors, at one pixel scale.
+pub fn render_look(pal: &Pal, book_bytes: &[u8], c: &Compiled, look: Look) -> Result<Img, String> {
+    render_scaled(pal, book_bytes, c, look, 1)
+}
+
+fn render_scaled(
+    pal: &Pal,
+    book_bytes: &[u8],
+    c: &Compiled,
+    look: Look,
+    scale: u32,
+) -> Result<Img, String> {
+    let lt = c.sprite.header.layer_type;
     let idx = if lt <= layer::CHARACTER_MAX {
         lt as usize
     } else {
@@ -278,7 +501,7 @@ const ELF: [(u8, u16); 3] = [
 ];
 
 /// Item sprites, one per `ItemBase` in discriminant order: sprite id `ITEM_SPRITE_BASE + base`
-/// (assets/sprites/items.dsl), and the material an item without its own is drawn in.
+/// (assets/sprites/items/items.dsl), and the material an item without its own is drawn in.
 pub const ITEM_SPRITE_BASE: u16 = 100;
 pub const ITEM_NAMES: [&str; 6] = [
     "sword",
@@ -604,7 +827,7 @@ pub fn from_png(bytes: &[u8]) -> Result<Img, String> {
 }
 
 /// Draws `top` over `dst` at `(x, y)` with alpha (source over), clipped.
-fn over(dst: &mut Img, top: &Img, x: i32, y: i32) {
+pub(crate) fn over(dst: &mut Img, top: &Img, x: i32, y: i32) {
     for ty in 0..top.h as i32 {
         for tx in 0..top.w as i32 {
             let (dx, dy) = (x + tx, y + ty);

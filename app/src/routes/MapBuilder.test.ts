@@ -6,7 +6,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { presetToLayout, MAP_PRESETS, mockTable } from "../chain/mock";
 import { MAPCHECK_MESSAGES, MapcheckWasm, type MapCheckDraft } from "../chain/mapcheckWasm";
 import { NO_TABLE } from "../chain/loot";
-import { cellByte, cellIndex, Tile } from "../chain/types";
+import { Biome, cellByte, cellIndex, cellKind, cellVariant, Tile } from "../chain/types";
 import { mapVerdict } from "./MapBuilder";
 
 const preset = MAP_PRESETS[0]!;
@@ -25,6 +25,22 @@ function check(edit: (d: MapCheckDraft) => void = () => {}, skillError = () => n
 describe("mapVerdict", () => {
   it("passes the demo preset", () => {
     expect(check()).toEqual([]);
+  });
+
+  it("passes every builder template, one per biome, with the variants the DM picked", () => {
+    const templates = MAP_PRESETS.filter((p) => p.biome !== undefined);
+    expect(templates.map((p) => p.biome).sort()).toEqual([Biome.Caves, Biome.Forest, Biome.Crypt]);
+    for (const p of templates) {
+      const layout = presetToLayout(p);
+      expect(layout.biome, p.name).toBe(p.biome);
+      const d: MapCheckDraft = { width: p.width, height: p.height, tier: p.tier ?? 1, ...layout };
+      expect(mapVerdict(wasm, d), p.name).toEqual([]);
+      // The variants land in bits 2-0, the tile type stays in bits 7-3.
+      const cells = p.rows.flatMap((row, y) => [...row].map((_, x) => layout.tiles[cellIndex(x, y)]!));
+      expect(cells.map(cellVariant).join(""), p.name).toBe(p.variants!.join(""));
+      expect(cells.some((c) => cellVariant(c) > 0), p.name).toBe(true);
+      expect(cellKind(layout.tiles[cellIndex(0, 0)]!)).toBe(Tile.Wall);
+    }
   });
 
   it("waits for the module", () => {

@@ -26,13 +26,16 @@ export const Tile = {
 } as const;
 /** `PointKind` discriminants (crates/types). */
 export const PointKind = { Chest: 0, Entrance: 1, Exit: 2 } as const;
+/** `Biome` discriminants (crates/types): the art set of a map, `Map.biome`. */
+export const Biome = { Caves: 0, Forest: 1, Crypt: 2 } as const;
+export const BIOME_COUNT = 3;
 
 /** A cell byte (`cell_byte`): tile type and variant. */
 export const cellByte = (kind: number, variant = 0) => ((kind & 31) << 3) | (variant & 7);
 /** The tile type of a cell byte (`cell_kind`). */
 export const cellKind = (byte: number) => (byte >> 3) & 31;
 
-/** Row characters, variant 0; `E` and `X` are a stone floor with the entrance or the exit point. */
+/** Row characters (the variant comes from `variants`, 0 without it); `E` and `X` are a stone floor with the entrance or the exit point. */
 const LEGEND: Record<string, number> = {
   " ": Tile.Void,
   ".": Tile.StoneFloor,
@@ -67,6 +70,8 @@ export type MapPreset = {
   width: number;
   height: number;
   tier: number;
+  /** The art set (`Biome`), `Caves` when the preset has none. */
+  biome: number;
   /** Patch 11: the reward budget counts from this party size. */
   minPlayers: number;
   /** Patch 11, set by the DM: no monster this close to a chest or a player when it opens. */
@@ -99,6 +104,11 @@ export function parseMapPreset(json: any): MapPreset {
   if (width > MAP_STRIDE || height > MAP_STRIDE) throw new Error("map larger than 32x32");
   const rows: unknown = json.rows;
   if (!Array.isArray(rows) || rows.length !== height) throw new Error("rows count != height");
+  const biome = u8(json.biome ?? Biome.Caves, "biome");
+  if (biome >= BIOME_COUNT) throw new Error(`unknown biome ${biome}`);
+  // Optional: one digit 0-7 per cell, the variant (bits 2-0 of the cell byte) the DM picked.
+  const variants: unknown = json.variants ?? rows.map((r: string) => "0".repeat([...r].length));
+  if (!Array.isArray(variants) || variants.length !== height) throw new Error("variants count != height");
 
   const tiles = new Uint8Array(MAP_CELLS);
   let entrance: Cell | null = null;
@@ -108,7 +118,9 @@ export function parseMapPreset(json: any): MapPreset {
     [...row].forEach((ch, x) => {
       const tile = LEGEND[ch];
       if (tile === undefined) throw new Error(`unknown tile character ${JSON.stringify(ch)} at ${x},${y}`);
-      tiles[y * MAP_STRIDE + x] = cellByte(tile);
+      const variant = Number([...String(variants[y])][x]);
+      if (!Number.isInteger(variant) || variant > 7) throw new Error(`variant at ${x},${y} must be a digit 0-7`);
+      tiles[y * MAP_STRIDE + x] = cellByte(tile, variant);
       if (ch === "E") {
         if (entrance) throw new Error("preset has two E cells");
         entrance = { x, y };
@@ -145,7 +157,7 @@ export function parseMapPreset(json: any): MapPreset {
   const chestRadius = u8(json.chest_radius ?? 3, "chest_radius");
   const settleTimeoutSecs = Number(json.settle_timeout_secs ?? 3600);
   if (!Number.isInteger(settleTimeoutSecs) || settleTimeoutSecs < 1) throw new Error("settle_timeout_secs must be a positive integer");
-  return { name: String(json.name ?? ""), width, height, tier, minPlayers, chestRadius, settleTimeoutSecs, bossTable, chests, tiles, entrance, exit, spawns };
+  return { name: String(json.name ?? ""), width, height, tier, biome, minPlayers, chestRadius, settleTimeoutSecs, bossTable, chests, tiles, entrance, exit, spawns };
 }
 
 export function loadMapPreset(path: string | URL = DEMO_MAP_PATH): MapPreset {

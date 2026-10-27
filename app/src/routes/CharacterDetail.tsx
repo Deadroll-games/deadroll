@@ -2,7 +2,6 @@
 // worn by slot, the soulbound items, Wear / Take off (the owner's wallet or session key). Patch 11:
 // the bag next to the settled cache, laid out freely and sent once with "Done".
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link, useParams } from "react-router-dom";
 import type { Address } from "@solana/kit";
 import { isCurrentAppearance } from "../chain/appearance";
 import { Category, Effect, Form, Purpose, Source, Target, Trigger } from "@deadroll/sdk/character";
@@ -61,6 +60,8 @@ import { Aspect, Class, Race } from "../chain/types";
 import { DATA_SOURCE, explorerUrl } from "../config";
 import { OldCharacterLabel } from "../raster/OldCharacter";
 import { useRenderImage } from "../raster/RasterizerProvider";
+import { useSprites } from "../raster/useSprites";
+import { iconRequest } from "../chain/icons";
 import { PREVIEW_SCALE, SpriteCanvas, usePreviewFit } from "../raster/SpriteCanvas";
 
 /** Where this character is right now, read from the party it is in. */
@@ -121,8 +122,11 @@ export function skillAspects(s: SkillRecordAcc): string {
 export const usableInCombat = (s: SkillRecordAcc): boolean =>
   s.blocks.category === Category.Active && (s.blocks.purpose === Purpose.Damage || s.blocks.effect !== Effect.None);
 
-export function CharacterDetailPage() {
-  const { address } = useParams<{ address: string }>();
+/**
+ * One character (the characters window), or only its bag (the side panel's bag). `onOpenParty`
+ * goes to the dungeon of the party it is in.
+ */
+export function CharacterScreen({ address, only, onOpenParty }: { address: Address; only?: "bag"; onOpenParty?: (session: Address) => void }) {
   const [c, setC] = useState<CharacterAcc | null | "missing">(null);
   const [skills, setSkills] = useState<SkillRecordAcc[]>([]);
   const [party, setParty] = useState<PartyInfo>(null);
@@ -141,6 +145,7 @@ export function CharacterDetailPage() {
   const [endedLock, setEndedLock] = useState<Address | null>(null);
   const cacheBase = claimed.find((x) => x.session === chosen)?.slots ?? null;
   const [work, setWork] = useState<BagState | null>(null);
+  const draw = useSprites();
   const [picked, setPicked] = useState<number | null>(null);
   const [locks, setLocks] = useState<Set<string>>(() => (address ? loadLocks(address) : new Set()));
 
@@ -248,6 +253,10 @@ export function CharacterDetailPage() {
         error={bagError ? `The chain would refuse this layout (${bagError})` : null}
         busy={busy !== null}
         label={rewardLabel}
+        icon={(r) => {
+          const req = iconRequest(r);
+          return req ? draw(`i:${r.kind}:${r.id}`, req) : null;
+        }}
         onPick={setPicked}
         onTakeAll={(i) => apply(take(work, i, null, undefined, locks))}
         onPlace={(i, to) => apply(replace(work, i, to, locks))}
@@ -321,18 +330,27 @@ export function CharacterDetailPage() {
   );
 
   if (DATA_SOURCE !== "chain") return <p className="muted">Character details need chain mode.</p>;
+  if (only === "bag") {
+    return (
+      <section>
+        {error && <p className="error">{error}</p>}
+        {c === null && !error ? <p className="muted">Loading…</p> : bagSection}
+      </section>
+    );
+  }
   return (
     <section>
       <p>
-        <Link to="/character">← My characters</Link>{" "}
-        <button type="button" onClick={() => void load()}>
+        <button type="button" className="btn" onClick={() => void load()}>
           Refresh
         </button>
       </p>
       {error && <p className="error">{error}</p>}
       {c === null && !error && <p className="muted">Loading…</p>}
       {c === "missing" && <p className="error">No character at this address.</p>}
-      {c && c !== "missing" && <CharacterDetailView address={address as Address} c={c} skills={skills} party={party} items={items} sheet={sheet} bag={bagSection} />}
+      {c && c !== "missing" && (
+        <CharacterDetailView address={address} c={c} skills={skills} party={party} items={items} sheet={sheet} bag={bagSection} onOpenParty={onOpenParty} />
+      )}
     </section>
   );
 }
@@ -345,6 +363,7 @@ export function CharacterDetailView({
   items = null,
   sheet = null,
   bag = null,
+  onOpenParty,
 }: {
   address: Address;
   c: CharacterAcc;
@@ -356,6 +375,7 @@ export function CharacterDetailView({
   sheet?: HeroSheetPanelProps | null;
   /** Patch 11: the bag screen (with the settled cache); null while it loads. */
   bag?: ReactNode;
+  onOpenParty?: (session: Address) => void;
 }) {
   const dead = !c.core.alive;
   const current = isCurrentAppearance(c.core.appearance);
@@ -423,7 +443,15 @@ export function CharacterDetailView({
         <h2>Current party</h2>
         {party ? (
           <p>
-            {party.status} · slot {party.slot} · HP {party.hp} · <Link to={`/party?s=${party.session}`}>open party</Link>
+            {party.status} · slot {party.slot} · HP {party.hp}
+            {onOpenParty && (
+              <>
+                {" · "}
+                <button type="button" className="btn" onClick={() => onOpenParty(party.session)}>
+                  Go to the dungeon
+                </button>
+              </>
+            )}
           </p>
         ) : optional(c.core.inSession) ? (
           <p className="muted">
@@ -436,52 +464,7 @@ export function CharacterDetailView({
 
       <section className="panel char-detail-wide">
         <h2>Skills</h2>
-        {skills.length === 0 ? (
-          <p className="muted">No skills.</p>
-        ) : (
-          <div className="table-scroll">
-            <table className="char-skills">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Kind</th>
-                  <th>Aspects</th>
-                  <th>Form</th>
-                  <th>Target</th>
-                  <th>Power</th>
-                  <th>Effect</th>
-                  <th>Trigger</th>
-                  <th>Cooldown</th>
-                </tr>
-              </thead>
-              <tbody>
-                {skills.map((s, i) => (
-                  <tr key={i}>
-                    <td>
-                      {bytesText(s.name)}
-                      {!usableInCombat(s) && <span className="muted"> · not usable in combat</span>}
-                    </td>
-                    <td>
-                      {variantLabel(Category, s.blocks.category)} {variantLabel(Purpose, s.blocks.purpose).toLowerCase()} · {variantLabel(Source, s.blocks.source)}
-                    </td>
-                    <td>{skillAspects(s)}</td>
-                    <td>
-                      {variantLabel(Form, s.blocks.form)} (range {RANGE[variantKey(Form, s.blocks.form)] ?? "?"})
-                    </td>
-                    <td>
-                      {variantLabel(Target, s.blocks.target)}
-                      {s.blocks.auraRadius > 0 ? ` · aura ${s.blocks.auraRadius}` : ""}
-                    </td>
-                    <td>{formatBp(s.powerBp)}</td>
-                    <td>{variantLabel(Effect, s.blocks.effect)}</td>
-                    <td>{variantLabel(Trigger, s.blocks.trigger)}</td>
-                    <td>{s.cooldown}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <SkillsTable skills={skills} />
       </section>
 
       <section className="panel char-detail-wide">
@@ -494,5 +477,59 @@ export function CharacterDetailView({
         {items ? <Inventory {...items} icon={itemIcon} /> : <p className="muted">Loading items…</p>}
       </section>
     </div>
+  );
+}
+
+/** A character's skills (the character window and the side panel's skills). */
+export function SkillsTable({ skills }: { skills: SkillRecordAcc[] }) {
+  return (
+    <>
+    {skills.length === 0 ? (
+      <p className="muted">No skills.</p>
+    ) : (
+      <div className="table-scroll">
+        <table className="char-skills">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Kind</th>
+              <th>Aspects</th>
+              <th>Form</th>
+              <th>Target</th>
+              <th>Power</th>
+              <th>Effect</th>
+              <th>Trigger</th>
+              <th>Cooldown</th>
+            </tr>
+          </thead>
+          <tbody>
+            {skills.map((s, i) => (
+              <tr key={i}>
+                <td>
+                  {bytesText(s.name)}
+                  {!usableInCombat(s) && <span className="muted"> · not usable in combat</span>}
+                </td>
+                <td>
+                  {variantLabel(Category, s.blocks.category)} {variantLabel(Purpose, s.blocks.purpose).toLowerCase()} · {variantLabel(Source, s.blocks.source)}
+                </td>
+                <td>{skillAspects(s)}</td>
+                <td>
+                  {variantLabel(Form, s.blocks.form)} (range {RANGE[variantKey(Form, s.blocks.form)] ?? "?"})
+                </td>
+                <td>
+                  {variantLabel(Target, s.blocks.target)}
+                  {s.blocks.auraRadius > 0 ? ` · aura ${s.blocks.auraRadius}` : ""}
+                </td>
+                <td>{formatBp(s.powerBp)}</td>
+                <td>{variantLabel(Effect, s.blocks.effect)}</td>
+                <td>{variantLabel(Trigger, s.blocks.trigger)}</td>
+                <td>{s.cooldown}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+    </>
   );
 }

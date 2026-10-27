@@ -1,0 +1,5 @@
+canvas 256 192
+put storage_0 0 0
+put storage_1 128 0
+put storage_2 0 128
+put storage_3 128 128

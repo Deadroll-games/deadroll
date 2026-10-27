@@ -249,6 +249,7 @@ enum_tests! {
     reward_kind: RewardKind, 5;
     reward_source: RewardSource, 4;
     cache_status: CacheStatus, 3;
+    biome: Biome, 3;
 }
 
 #[test]
@@ -344,6 +345,9 @@ fn enum_discriminants_match_contract_order() {
     assert_eq!(TileKind::Wall as u8, 4);
     assert_eq!(TileKind::Stairs as u8, 8);
     assert_eq!(TileKind::Chasm as u8, 10);
+    assert_eq!(Biome::Caves as u8, 0);
+    assert_eq!(Biome::Forest as u8, 1);
+    assert_eq!(Biome::Crypt as u8, 2);
     assert_eq!(SessionStatus::Abandoned as u8, 5);
     assert_eq!(MapStatus::Finished as u8, 3);
     assert_eq!(ProgramIdx::Session as usize, 5);
@@ -549,4 +553,86 @@ fn loadout_equipment_reads_worn_soulbound_bases() {
     assert_eq!(eq.iter().filter(|b| **b != EMPTY_ITEM).count(), 2);
     assert_eq!(l.worn_slot(1), Some(EquipSlot::Body));
     assert_eq!(l.worn_slot(2), None);
+}
+
+enum_tests! {
+    building_kind: BuildingKind, 3;
+    building_status: BuildingStatus, 2;
+    requirement: Requirement, 1;
+}
+
+#[test]
+fn city_structs() {
+    let object = CityObject {
+        sprite: u16::MAX,
+        x: u8::MAX,
+        y: u8::MAX,
+    };
+    check(&object, CityObject::SIZE);
+    let city = CityData {
+        version: 0x7E,
+        authority: pk(1),
+        width: CITY_W_MAX as u8,
+        height: CITY_H_MAX as u8,
+        cells: [u8::MAX; CITY_CELLS],
+        objects: [object; CITY_OBJECTS_MAX],
+        object_count: CITY_OBJECTS_MAX as u8,
+        spawn: Cell { x: 1, y: 2 },
+        building_count: u16::MAX,
+        bump: u8::MAX,
+    };
+    let bytes = check(&city, CityData::SIZE);
+    assert_eq!(bytes[0], 0x7E);
+    let building = BuildingData {
+        version: 0x7E,
+        id: u16::MAX,
+        kind: last(BuildingKind::ALL),
+        prefab_id: u16::MAX,
+        x: u8::MAX,
+        y: u8::MAX,
+        door: Cell { x: 3, y: 4 },
+        program: pk(2),
+        target: pk(3),
+        interior_id: u16::MAX,
+        status: last(BuildingStatus::ALL),
+        requirement: last(Requirement::ALL),
+        bump: u8::MAX,
+    };
+    assert_eq!(check(&building, BuildingData::SIZE)[0], 0x7E);
+    let board = TavernBoardData {
+        version: 0x7E,
+        building: pk(4),
+        posted: u32::MAX,
+        open: u16::MAX,
+        bump: u8::MAX,
+    };
+    assert_eq!(check(&board, TavernBoardData::SIZE)[0], 0x7E);
+    let quest = QuestData {
+        version: 0x7E,
+        board: pk(5),
+        session: pk(6),
+        map: pk(7),
+        dm: pk(8),
+        tier: u8::MAX,
+        biome: u8::MAX,
+        min_players: u8::MAX,
+        price_lamports: u64::MAX,
+        posted_at: i64::MIN,
+        bump: u8::MAX,
+    };
+    assert_eq!(check(&quest, QuestData::SIZE)[0], 0x7E);
+    assert_eq!(
+        (
+            seeds::CITY,
+            seeds::BUILDING,
+            seeds::TAVERN_BOARD,
+            seeds::QUEST
+        ),
+        (
+            &b"city"[..],
+            &b"building"[..],
+            &b"tavern_board"[..],
+            &b"quest"[..]
+        )
+    );
 }
