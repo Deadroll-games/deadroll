@@ -1,0 +1,30 @@
+{
+  "note": "The city (docs/CITY_DESCRIPTION.md 3), seeded by tools/scripts/seed-city.ts. A cell byte is a site city tile: sprite id 2000 + byte (assets/site_sprites/buildings/city_tiles.dsl); rows use the legend. Buildings get ids in list order; prefab and interior ids are the site's (app/src/city/prefabs.ts, interiors.ts). Objects are site sprite ids.",
+  "legend": { ".": 0, ",": 1, "s": 2, "S": 3, "g": 4, "G": 5, "-": 6, "|": 7, "+": 8 },
+  "rows": [
+    "+--------------+",
+    "|gGggGggGgggGgg|",
+    "|gggggGgggggggG|",
+    "|GggggggggGgggg|",
+    "|gggGgggggggggg|",
+    "|.,..,...,..,..|",
+    "|gg,sSsSsSsSs.g|",
+    "|Gg.SsSsSsSsS,G|",
+    "|gg,sSsSsSsSs.g|",
+    "|ggg,..,..,.ggg|",
+    "+------..------+"
+  ],
+  "spawn": { "x": 7, "y": 9 },
+  "objects": [
+    { "sprite": 2023, "x": 5, "y": 4 },
+    { "sprite": 2023, "x": 1, "y": 5 },
+    { "sprite": 2213, "x": 12, "y": 6 },
+    { "sprite": 2021, "x": 2, "y": 7 },
+    { "sprite": 2210, "x": 10, "y": 4 }
+  ],
+  "buildings": [
+    { "name": "Tavern", "kind": "Tavern", "prefab": 1, "x": 1, "y": 1, "door": { "x": 2, "y": 4 }, "interior": 1, "status": "Active" },
+    { "name": "Artisans' Guild", "kind": "MastersGuild", "prefab": 2, "x": 6, "y": 1, "door": { "x": 8, "y": 4 }, "interior": 2, "status": "Closed" },
+    { "name": "Storage", "kind": "Storage", "prefab": 3, "x": 11, "y": 2, "door": { "x": 12, "y": 4 }, "interior": 3, "status": "Closed" }
+  ]
+}

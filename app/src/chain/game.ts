@@ -96,6 +96,16 @@ import {
   type ResistModData,
   type TimedModData,
 } from "@deadroll/sdk/session";
+import {
+  BUILDING_DISCRIMINATOR,
+  CITY_DISCRIMINATOR,
+  QUEST_DISCRIMINATOR,
+  TAVERN_BOARD_DISCRIMINATOR,
+  getBuildingDecoder,
+  getCityDecoder,
+  getQuestDecoder,
+  getTavernBoardDecoder,
+} from "@deadroll/sdk/city";
 import { COMPUTE_BUDGET_PROGRAM } from "@deadroll/sdk";
 import { MPL_CORE_PROGRAM, PROGRAMS, SYSTEM_PROGRAM, VRF } from "../config";
 import { client } from "../wallet/client";
@@ -173,6 +183,7 @@ export type CharacterAcc = Character;
 export type SkillRecordAcc = SkillRecord;
 export type SkillSetAcc = SkillSet;
 export type MapAcc = MapAccount;
+export type EscrowAcc = ReturnType<ReturnType<typeof getEscrowDecoder>["decode"]>;
 
 /** A generated enum object (`{ Human: 0, ForestElf: 1, 0: "Human", 1: "ForestElf" }`). */
 export type EnumObject = Readonly<Record<string | number, string | number>>;
@@ -234,6 +245,11 @@ const ACCOUNTS = {
   // Patch 11: the bag in slots and the reward cache after a party.
   Bag: { program: "character", disc: BAG_DISCRIMINATOR, decoder: getBagDecoder() },
   RewardCache: { program: "session", disc: REWARD_CACHE_DISCRIMINATOR, decoder: getRewardCacheDecoder() },
+  // The city and the Tavern board (agents/CONTRACTS.md 25).
+  City: { program: "city", disc: CITY_DISCRIMINATOR, decoder: getCityDecoder() },
+  Building: { program: "city", disc: BUILDING_DISCRIMINATOR, decoder: getBuildingDecoder() },
+  TavernBoard: { program: "city", disc: TAVERN_BOARD_DISCRIMINATOR, decoder: getTavernBoardDecoder() },
+  Quest: { program: "city", disc: QUEST_DISCRIMINATOR, decoder: getQuestDecoder() },
 } as const;
 export type AccountName = keyof typeof ACCOUNTS;
 export type AccountOf<K extends AccountName> = ReturnType<(typeof ACCOUNTS)[K]["decoder"]["decode"]>;

@@ -6,7 +6,660 @@
  * @see https://github.com/codama-idl/codama
  */
 
-import type { Address } from "@solana/kit";
+import {
+  assertIsInstructionWithAccounts,
+  containsBytes,
+  extendClient,
+  fixEncoderSize,
+  getBytesEncoder,
+  SOLANA_ERROR__PROGRAM_CLIENTS__FAILED_TO_IDENTIFY_ACCOUNT,
+  SOLANA_ERROR__PROGRAM_CLIENTS__FAILED_TO_IDENTIFY_INSTRUCTION,
+  SOLANA_ERROR__PROGRAM_CLIENTS__UNRECOGNIZED_INSTRUCTION_TYPE,
+  SolanaError,
+  type Address,
+  type ClientWithRpc,
+  type ClientWithTransactionPlanning,
+  type ClientWithTransactionSending,
+  type ExtendedClient,
+  type GetAccountInfoApi,
+  type GetMultipleAccountsApi,
+  type Instruction,
+  type InstructionWithData,
+  type ReadonlyUint8Array,
+} from "@solana/kit";
+import {
+  addSelfFetchFunctions,
+  addSelfPlanAndSendFunctions,
+  type SelfFetchFunctions,
+  type SelfPlanAndSendFunctions,
+} from "@solana/program-client-core";
+import {
+  getBuildingCodec,
+  getCityCodec,
+  getQuestCodec,
+  getTavernBoardCodec,
+  type Building,
+  type BuildingArgs,
+  type City,
+  type CityArgs,
+  type Quest,
+  type QuestArgs,
+  type TavernBoard,
+  type TavernBoardArgs,
+} from "../accounts/index.js";
+import {
+  getAddBuildingInstructionAsync,
+  getCloseBuildingInstructionAsync,
+  getCloseQuestInstructionAsync,
+  getInitCityInstructionAsync,
+  getInitTavernBoardInstructionAsync,
+  getPostQuestInstructionAsync,
+  getSetCityObjectsInstructionAsync,
+  getUpdateBuildingInstructionAsync,
+  getWriteCityInstructionAsync,
+  parseAddBuildingInstruction,
+  parseCloseBuildingInstruction,
+  parseCloseQuestInstruction,
+  parseInitCityInstruction,
+  parseInitTavernBoardInstruction,
+  parsePostQuestInstruction,
+  parseSetCityObjectsInstruction,
+  parseUpdateBuildingInstruction,
+  parseWriteCityInstruction,
+  type AddBuildingAsyncInput,
+  type CloseBuildingAsyncInput,
+  type CloseQuestAsyncInput,
+  type InitCityAsyncInput,
+  type InitTavernBoardAsyncInput,
+  type ParsedAddBuildingInstruction,
+  type ParsedCloseBuildingInstruction,
+  type ParsedCloseQuestInstruction,
+  type ParsedInitCityInstruction,
+  type ParsedInitTavernBoardInstruction,
+  type ParsedPostQuestInstruction,
+  type ParsedSetCityObjectsInstruction,
+  type ParsedUpdateBuildingInstruction,
+  type ParsedWriteCityInstruction,
+  type PostQuestAsyncInput,
+  type SetCityObjectsAsyncInput,
+  type UpdateBuildingAsyncInput,
+  type WriteCityAsyncInput,
+} from "../instructions/index.js";
+import { findBoardPda, findCityPda, findQuestPda } from "../pdas/index.js";
 
 export const DEADROLL_CITY_PROGRAM_ADDRESS =
   "2Cr5vB5awqDVx6XRcxtFFYQEG6Zy3aSAcKcqzh1xbVjS" as Address<"2Cr5vB5awqDVx6XRcxtFFYQEG6Zy3aSAcKcqzh1xbVjS">;
+
+export const DeadrollCityAccount = {
+  0: "Building",
+  1: "City",
+  2: "Quest",
+  3: "TavernBoard",
+  Building: 0,
+  City: 1,
+  Quest: 2,
+  TavernBoard: 3,
+} as const;
+
+export type DeadrollCityAccount = (typeof DeadrollCityAccount)[Exclude<
+  keyof typeof DeadrollCityAccount,
+  number
+>];
+
+export function identifyDeadrollCityAccount(
+  account: { data: ReadonlyUint8Array } | ReadonlyUint8Array,
+): DeadrollCityAccount {
+  const data = "data" in account ? account.data : account;
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([28, 228, 185, 38, 142, 95, 117, 211]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollCityAccount.Building;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([3, 204, 223, 157, 129, 30, 45, 230]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollCityAccount.City;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([68, 78, 51, 23, 204, 27, 76, 132]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollCityAccount.Quest;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([2, 205, 122, 113, 149, 103, 240, 250]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollCityAccount.TavernBoard;
+  }
+  throw new SolanaError(
+    SOLANA_ERROR__PROGRAM_CLIENTS__FAILED_TO_IDENTIFY_ACCOUNT,
+    { accountData: data, programName: "deadrollCity" },
+  );
+}
+
+export const DeadrollCityEvent = {
+  0: "BuildingChanged",
+  1: "BuildingClosed",
+  2: "CityInitialized",
+  3: "CityObjectsSet",
+  4: "CityWritten",
+  5: "QuestClosed",
+  6: "QuestPosted",
+  7: "TavernBoardInitialized",
+  BuildingChanged: 0,
+  BuildingClosed: 1,
+  CityInitialized: 2,
+  CityObjectsSet: 3,
+  CityWritten: 4,
+  QuestClosed: 5,
+  QuestPosted: 6,
+  TavernBoardInitialized: 7,
+} as const;
+
+export type DeadrollCityEvent = (typeof DeadrollCityEvent)[Exclude<
+  keyof typeof DeadrollCityEvent,
+  number
+>];
+
+export function identifyDeadrollCityEvent(
+  event: { data: ReadonlyUint8Array } | ReadonlyUint8Array,
+): DeadrollCityEvent {
+  const data = "data" in event ? event.data : event;
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([219, 234, 171, 183, 88, 244, 124, 138]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollCityEvent.BuildingChanged;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([39, 119, 92, 116, 96, 118, 250, 127]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollCityEvent.BuildingClosed;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([42, 47, 128, 157, 20, 113, 147, 99]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollCityEvent.CityInitialized;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([98, 38, 30, 95, 194, 206, 181, 122]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollCityEvent.CityObjectsSet;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([255, 74, 53, 229, 251, 15, 100, 105]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollCityEvent.CityWritten;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([196, 227, 218, 136, 156, 178, 67, 52]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollCityEvent.QuestClosed;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([86, 57, 56, 201, 66, 77, 131, 245]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollCityEvent.QuestPosted;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([195, 162, 101, 228, 44, 133, 160, 161]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollCityEvent.TavernBoardInitialized;
+  }
+  throw new Error(
+    "The provided event could not be identified as a deadrollCity event.",
+  );
+}
+
+export const DeadrollCityInstruction = {
+  0: "AddBuilding",
+  1: "CloseBuilding",
+  2: "CloseQuest",
+  3: "InitCity",
+  4: "InitTavernBoard",
+  5: "PostQuest",
+  6: "SetCityObjects",
+  7: "UpdateBuilding",
+  8: "WriteCity",
+  AddBuilding: 0,
+  CloseBuilding: 1,
+  CloseQuest: 2,
+  InitCity: 3,
+  InitTavernBoard: 4,
+  PostQuest: 5,
+  SetCityObjects: 6,
+  UpdateBuilding: 7,
+  WriteCity: 8,
+} as const;
+
+export type DeadrollCityInstruction = (typeof DeadrollCityInstruction)[Exclude<
+  keyof typeof DeadrollCityInstruction,
+  number
+>];
+
+export function identifyDeadrollCityInstruction(
+  instruction: { data: ReadonlyUint8Array } | ReadonlyUint8Array,
+): DeadrollCityInstruction {
+  const data = "data" in instruction ? instruction.data : instruction;
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([134, 58, 238, 111, 18, 191, 44, 100]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollCityInstruction.AddBuilding;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([69, 72, 209, 36, 27, 169, 57, 33]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollCityInstruction.CloseBuilding;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([70, 85, 16, 198, 37, 10, 13, 122]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollCityInstruction.CloseQuest;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([178, 113, 156, 92, 100, 81, 140, 222]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollCityInstruction.InitCity;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([89, 230, 8, 21, 120, 235, 228, 131]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollCityInstruction.InitTavernBoard;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([92, 36, 122, 179, 65, 79, 191, 122]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollCityInstruction.PostQuest;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([97, 93, 154, 1, 37, 13, 238, 9]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollCityInstruction.SetCityObjects;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([34, 134, 221, 222, 25, 214, 115, 30]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollCityInstruction.UpdateBuilding;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([241, 254, 122, 83, 138, 32, 186, 209]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollCityInstruction.WriteCity;
+  }
+  throw new SolanaError(
+    SOLANA_ERROR__PROGRAM_CLIENTS__FAILED_TO_IDENTIFY_INSTRUCTION,
+    { instructionData: data, programName: "deadrollCity" },
+  );
+}
+
+export type ParsedDeadrollCityInstruction<
+  TProgram extends string = "2Cr5vB5awqDVx6XRcxtFFYQEG6Zy3aSAcKcqzh1xbVjS",
+> =
+  | ({
+      instructionType: typeof DeadrollCityInstruction.AddBuilding;
+    } & ParsedAddBuildingInstruction<TProgram>)
+  | ({
+      instructionType: typeof DeadrollCityInstruction.CloseBuilding;
+    } & ParsedCloseBuildingInstruction<TProgram>)
+  | ({
+      instructionType: typeof DeadrollCityInstruction.CloseQuest;
+    } & ParsedCloseQuestInstruction<TProgram>)
+  | ({
+      instructionType: typeof DeadrollCityInstruction.InitCity;
+    } & ParsedInitCityInstruction<TProgram>)
+  | ({
+      instructionType: typeof DeadrollCityInstruction.InitTavernBoard;
+    } & ParsedInitTavernBoardInstruction<TProgram>)
+  | ({
+      instructionType: typeof DeadrollCityInstruction.PostQuest;
+    } & ParsedPostQuestInstruction<TProgram>)
+  | ({
+      instructionType: typeof DeadrollCityInstruction.SetCityObjects;
+    } & ParsedSetCityObjectsInstruction<TProgram>)
+  | ({
+      instructionType: typeof DeadrollCityInstruction.UpdateBuilding;
+    } & ParsedUpdateBuildingInstruction<TProgram>)
+  | ({
+      instructionType: typeof DeadrollCityInstruction.WriteCity;
+    } & ParsedWriteCityInstruction<TProgram>);
+
+export function parseDeadrollCityInstruction<TProgram extends string>(
+  instruction: Instruction<TProgram> & InstructionWithData<ReadonlyUint8Array>,
+): ParsedDeadrollCityInstruction<TProgram> {
+  const instructionType = identifyDeadrollCityInstruction(instruction);
+  switch (instructionType) {
+    case DeadrollCityInstruction.AddBuilding: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: DeadrollCityInstruction.AddBuilding,
+        ...parseAddBuildingInstruction(instruction),
+      };
+    }
+    case DeadrollCityInstruction.CloseBuilding: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: DeadrollCityInstruction.CloseBuilding,
+        ...parseCloseBuildingInstruction(instruction),
+      };
+    }
+    case DeadrollCityInstruction.CloseQuest: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: DeadrollCityInstruction.CloseQuest,
+        ...parseCloseQuestInstruction(instruction),
+      };
+    }
+    case DeadrollCityInstruction.InitCity: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: DeadrollCityInstruction.InitCity,
+        ...parseInitCityInstruction(instruction),
+      };
+    }
+    case DeadrollCityInstruction.InitTavernBoard: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: DeadrollCityInstruction.InitTavernBoard,
+        ...parseInitTavernBoardInstruction(instruction),
+      };
+    }
+    case DeadrollCityInstruction.PostQuest: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: DeadrollCityInstruction.PostQuest,
+        ...parsePostQuestInstruction(instruction),
+      };
+    }
+    case DeadrollCityInstruction.SetCityObjects: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: DeadrollCityInstruction.SetCityObjects,
+        ...parseSetCityObjectsInstruction(instruction),
+      };
+    }
+    case DeadrollCityInstruction.UpdateBuilding: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: DeadrollCityInstruction.UpdateBuilding,
+        ...parseUpdateBuildingInstruction(instruction),
+      };
+    }
+    case DeadrollCityInstruction.WriteCity: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: DeadrollCityInstruction.WriteCity,
+        ...parseWriteCityInstruction(instruction),
+      };
+    }
+    default:
+      throw new SolanaError(
+        SOLANA_ERROR__PROGRAM_CLIENTS__UNRECOGNIZED_INSTRUCTION_TYPE,
+        {
+          instructionType: instructionType as string,
+          programName: "deadrollCity",
+        },
+      );
+  }
+}
+
+export type DeadrollCityPlugin = {
+  accounts: DeadrollCityPluginAccounts;
+  instructions: DeadrollCityPluginInstructions;
+  pdas: DeadrollCityPluginPdas;
+  identifyAccount: typeof identifyDeadrollCityAccount;
+  identifyInstruction: typeof identifyDeadrollCityInstruction;
+  parseInstruction: typeof parseDeadrollCityInstruction;
+};
+
+export type DeadrollCityPluginAccounts = {
+  building: ReturnType<typeof getBuildingCodec> &
+    SelfFetchFunctions<BuildingArgs, Building>;
+  city: ReturnType<typeof getCityCodec> & SelfFetchFunctions<CityArgs, City>;
+  quest: ReturnType<typeof getQuestCodec> &
+    SelfFetchFunctions<QuestArgs, Quest>;
+  tavernBoard: ReturnType<typeof getTavernBoardCodec> &
+    SelfFetchFunctions<TavernBoardArgs, TavernBoard>;
+};
+
+export type DeadrollCityPluginInstructions = {
+  addBuilding: (
+    input: AddBuildingAsyncInput,
+  ) => ReturnType<typeof getAddBuildingInstructionAsync> &
+    SelfPlanAndSendFunctions;
+  closeBuilding: (
+    input: CloseBuildingAsyncInput,
+  ) => ReturnType<typeof getCloseBuildingInstructionAsync> &
+    SelfPlanAndSendFunctions;
+  closeQuest: (
+    input: CloseQuestAsyncInput,
+  ) => ReturnType<typeof getCloseQuestInstructionAsync> &
+    SelfPlanAndSendFunctions;
+  initCity: (
+    input: InitCityAsyncInput,
+  ) => ReturnType<typeof getInitCityInstructionAsync> &
+    SelfPlanAndSendFunctions;
+  initTavernBoard: (
+    input: InitTavernBoardAsyncInput,
+  ) => ReturnType<typeof getInitTavernBoardInstructionAsync> &
+    SelfPlanAndSendFunctions;
+  postQuest: (
+    input: PostQuestAsyncInput,
+  ) => ReturnType<typeof getPostQuestInstructionAsync> &
+    SelfPlanAndSendFunctions;
+  setCityObjects: (
+    input: SetCityObjectsAsyncInput,
+  ) => ReturnType<typeof getSetCityObjectsInstructionAsync> &
+    SelfPlanAndSendFunctions;
+  updateBuilding: (
+    input: UpdateBuildingAsyncInput,
+  ) => ReturnType<typeof getUpdateBuildingInstructionAsync> &
+    SelfPlanAndSendFunctions;
+  writeCity: (
+    input: WriteCityAsyncInput,
+  ) => ReturnType<typeof getWriteCityInstructionAsync> &
+    SelfPlanAndSendFunctions;
+};
+
+export type DeadrollCityPluginPdas = {
+  city: typeof findCityPda;
+  board: typeof findBoardPda;
+  quest: typeof findQuestPda;
+};
+
+export type DeadrollCityPluginRequirements = ClientWithRpc<
+  GetAccountInfoApi & GetMultipleAccountsApi
+> &
+  ClientWithTransactionPlanning &
+  ClientWithTransactionSending;
+
+export function deadrollCityProgram() {
+  return <T extends DeadrollCityPluginRequirements>(
+    client: T,
+  ): ExtendedClient<T, { deadrollCity: DeadrollCityPlugin }> => {
+    return extendClient(client, {
+      deadrollCity: {
+        accounts: {
+          building: addSelfFetchFunctions(client, getBuildingCodec()),
+          city: addSelfFetchFunctions(client, getCityCodec()),
+          quest: addSelfFetchFunctions(client, getQuestCodec()),
+          tavernBoard: addSelfFetchFunctions(client, getTavernBoardCodec()),
+        },
+        instructions: {
+          addBuilding: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getAddBuildingInstructionAsync(input),
+            ),
+          closeBuilding: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getCloseBuildingInstructionAsync(input),
+            ),
+          closeQuest: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getCloseQuestInstructionAsync(input),
+            ),
+          initCity: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getInitCityInstructionAsync(input),
+            ),
+          initTavernBoard: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getInitTavernBoardInstructionAsync(input),
+            ),
+          postQuest: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getPostQuestInstructionAsync(input),
+            ),
+          setCityObjects: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getSetCityObjectsInstructionAsync(input),
+            ),
+          updateBuilding: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getUpdateBuildingInstructionAsync(input),
+            ),
+          writeCity: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getWriteCityInstructionAsync(input),
+            ),
+        },
+        pdas: { city: findCityPda, board: findBoardPda, quest: findQuestPda },
+        identifyAccount: identifyDeadrollCityAccount,
+        identifyInstruction: identifyDeadrollCityInstruction,
+        parseInstruction: parseDeadrollCityInstruction,
+      } as DeadrollCityPlugin,
+    });
+  };
+}

@@ -60,3 +60,9 @@ pub const REWARDS: &[u8] = b"rewards";
 /// `["cache", character]` in session (patch 11): the temporary cache once the party is over,
 /// until the player lays it out into the bag.
 pub const CACHE: &[u8] = b"cache";
+/// `["building", id: u16]` in city.
+pub const BUILDING: &[u8] = b"building";
+/// `["tavern_board", building]` in city: the order board of a Tavern (`Building.target`).
+pub const TAVERN_BOARD: &[u8] = b"tavern_board";
+/// `["quest", session]` in city: one order on a Tavern board, for one party.
+pub const QUEST: &[u8] = b"quest";

@@ -1,0 +1,67 @@
+/* The game screen: the main area (city, interior, dungeon) with the side panel on its right. */
+.game { display: flex; align-items: stretch; min-height: calc(100vh - 53px); }
+.game-main { position: relative; flex: 1 1 auto; min-width: 0; max-width: none; margin: 0; padding: 16px; overflow: auto; }
+.game-main > section, .game-main > div:not(.game-window-backdrop) { max-width: 1400px; margin: 0 auto; }
+
+/* City and interiors: site art at one pixel per pixel, 64 px cells. */
+.city-scroll { overflow: auto; }
+.city { position: relative; margin: 0 auto; image-rendering: pixelated; }
+.city img.pixel { image-rendering: pixelated; user-select: none; }
+.city-cell { position: absolute; width: 64px; height: 64px; }
+.city-building { position: absolute; padding: 0; border: 0; background: none; cursor: pointer; }
+.city-building > img { position: absolute; left: 0; bottom: 0; }
+.city-building:hover > img:first-child, .city-building:focus-visible > img:first-child { filter: drop-shadow(0 0 6px #d9a44199) brightness(1.08); }
+.city-building.closed { cursor: not-allowed; }
+.city-building.closed:hover > img:first-child { filter: grayscale(0.4); }
+.city-boards { position: absolute; width: 64px; height: 64px; }
+.city-note { text-align: center; min-height: 1.4em; }
+.interior-title { text-align: center; margin: 0 0 8px; }
+.interior-point { position: absolute; padding: 0; border: 0; background: none; cursor: pointer; z-index: 50; }
+.interior-point img { width: 64px; height: 64px; animation: point-glow 2s ease-in-out infinite; }
+.interior-point:hover img { filter: drop-shadow(0 0 8px #ffd27a) brightness(1.15); animation: none; }
+.interior-exit { display: grid; place-items: center; width: 100%; height: 100%; border: 2px dashed var(--accent); border-radius: 6px; color: var(--accent); font-weight: 700; background: #120c1688; }
+@keyframes point-glow { 50% { filter: drop-shadow(0 0 5px #d9a441cc); } }
+
+/* Side panel: the minimap, then one button per row. */
+.side-panel { position: sticky; top: 0; align-self: flex-start; max-height: 100vh; overflow: auto; flex: 0 0 auto; width: 400px; padding: 8px; border-left: 1px solid var(--border); background: var(--panel); display: flex; flex-direction: column; gap: 6px; }
+.minimap { position: relative; width: 384px; height: 256px; padding: 0; border: 0; background: none no-repeat; background-size: 384px 256px; image-rendering: pixelated; cursor: pointer; }
+.minimap canvas { position: absolute; image-rendering: pixelated; }
+.minimap.inactive { cursor: default; filter: grayscale(0.7) brightness(0.75); }
+.minimap-empty { position: absolute; inset: 0; display: grid; place-items: center; color: #4a3a28; font-weight: 600; }
+.side-active { margin: 0; text-align: center; }
+.side-buttons { display: flex; flex-direction: column; gap: 4px; }
+.side-button { display: flex; align-items: center; gap: 12px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); color: var(--text); font: inherit; cursor: pointer; text-align: left; }
+.side-button img { image-rendering: pixelated; }
+.side-button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.side-button:disabled { opacity: 0.45; cursor: default; }
+.side-button:not(:disabled):hover { border-color: var(--accent); }
+
+/* Windows over the main area. */
+/* Fixed over the main area (not the panel), so a window opens in view however far a battle is scrolled. */
+.game-window-backdrop { position: fixed; top: 0; left: 0; right: 400px; bottom: 0; z-index: 200; background: #0b070dcc; display: flex; align-items: flex-start; justify-content: center; padding: 24px 16px; overflow: auto; }
+.game-window { width: min(640px, 100%); background: var(--panel); border: 1px solid var(--accent); border-radius: 8px; box-shadow: 0 8px 32px #000a; }
+.game-window.wide { width: min(1200px, 100%); }
+.game-window-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; border-bottom: 1px solid var(--border); }
+.game-window-head h2 { margin: 0; font-size: 18px; }
+.game-window-body { padding: 16px; }
+
+/* The Tavern board. */
+.quest-list { list-style: none; padding: 0; margin: 12px 0 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.quest-card { width: 100%; display: grid; gap: 4px; text-align: left; color: var(--text); font: inherit; cursor: pointer; background: #2a1f33; border-color: #6b5236; }
+.quest-card:hover { border-color: var(--accent); }
+.quest-card.ended, .quest-card.gone { opacity: 0.6; }
+.quest-title { font-weight: 700; color: var(--accent); }
+.char-card-link { padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.char-card-link.active .char-card { border-color: var(--accent); }
+
+/* Dungeon loading. */
+.loading-screen { display: grid; justify-items: center; gap: 12px; padding-top: 24px; }
+.loading-screen img { width: 768px; max-width: 100%; height: auto; image-rendering: pixelated; }
+.loading-blank { width: 768px; max-width: 100%; aspect-ratio: 3 / 2; background: #0b070d; }
+
+@media (max-width: 1000px) {
+  .game { flex-direction: column; }
+  .game-window-backdrop { right: 0; }
+  .side-panel { position: static; max-height: none; width: 100%; border-left: 0; border-top: 1px solid var(--border); align-items: center; }
+  .side-buttons { flex-direction: row; flex-wrap: wrap; justify-content: center; }
+}

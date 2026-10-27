@@ -16,12 +16,81 @@ import { DEADROLL_CITY_PROGRAM_ADDRESS } from "../programs/index.js";
 
 /** Unauthorized: Caller is not authorized for this instruction */
 export const DEADROLL_CITY_ERROR__UNAUTHORIZED = 0x1770; // 6000
+/** InvalidConfig: GameConfig account is not the registry config */
+export const DEADROLL_CITY_ERROR__INVALID_CONFIG = 0x1771; // 6001
+/** SizeOutOfRange: City size is out of range */
+export const DEADROLL_CITY_ERROR__SIZE_OUT_OF_RANGE = 0x1772; // 6002
+/** OutOfCity: Cell or range is outside the city */
+export const DEADROLL_CITY_ERROR__OUT_OF_CITY = 0x1773; // 6003
+/** TooManyObjects: Too many decor objects */
+export const DEADROLL_CITY_ERROR__TOO_MANY_OBJECTS = 0x1774; // 6004
+/** ProgramNotAllowed: Program is not one of the game programs */
+export const DEADROLL_CITY_ERROR__PROGRAM_NOT_ALLOWED = 0x1775; // 6005
+/** BadTarget: Building target does not match its kind */
+export const DEADROLL_CITY_ERROR__BAD_TARGET = 0x1776; // 6006
+/** BuildingClosed: Building is closed */
+export const DEADROLL_CITY_ERROR__BUILDING_CLOSED = 0x1777; // 6007
+/** NotATavern: Building is not a Tavern */
+export const DEADROLL_CITY_ERROR__NOT_A_TAVERN = 0x1778; // 6008
+/** BadBoard: Board is not this building's board */
+export const DEADROLL_CITY_ERROR__BAD_BOARD = 0x1779; // 6009
+/** NoAccess: Access condition of the building is not met */
+export const DEADROLL_CITY_ERROR__NO_ACCESS = 0x177a; // 6010
+/** InvalidMap: Map account is not a map of the map program */
+export const DEADROLL_CITY_ERROR__INVALID_MAP = 0x177b; // 6011
+/** MapNotInSession: Map is not in a party */
+export const DEADROLL_CITY_ERROR__MAP_NOT_IN_SESSION = 0x177c; // 6012
+/** NotTheDm: Signer is not the DM */
+export const DEADROLL_CITY_ERROR__NOT_THE_DM = 0x177d; // 6013
+/** InvalidSession: Session account is not a party of the session program */
+export const DEADROLL_CITY_ERROR__INVALID_SESSION = 0x177e; // 6014
+/** SessionNotInLobby: Party is not in the lobby */
+export const DEADROLL_CITY_ERROR__SESSION_NOT_IN_LOBBY = 0x177f; // 6015
+/** SessionMapMismatch: Party is not on this map */
+export const DEADROLL_CITY_ERROR__SESSION_MAP_MISMATCH = 0x1780; // 6016
+/** QuestStillOpen: Party is still gathering players */
+export const DEADROLL_CITY_ERROR__QUEST_STILL_OPEN = 0x1781; // 6017
 
-export type DeadrollCityError = typeof DEADROLL_CITY_ERROR__UNAUTHORIZED;
+export type DeadrollCityError =
+  | typeof DEADROLL_CITY_ERROR__BAD_BOARD
+  | typeof DEADROLL_CITY_ERROR__BAD_TARGET
+  | typeof DEADROLL_CITY_ERROR__BUILDING_CLOSED
+  | typeof DEADROLL_CITY_ERROR__INVALID_CONFIG
+  | typeof DEADROLL_CITY_ERROR__INVALID_MAP
+  | typeof DEADROLL_CITY_ERROR__INVALID_SESSION
+  | typeof DEADROLL_CITY_ERROR__MAP_NOT_IN_SESSION
+  | typeof DEADROLL_CITY_ERROR__NO_ACCESS
+  | typeof DEADROLL_CITY_ERROR__NOT_A_TAVERN
+  | typeof DEADROLL_CITY_ERROR__NOT_THE_DM
+  | typeof DEADROLL_CITY_ERROR__OUT_OF_CITY
+  | typeof DEADROLL_CITY_ERROR__PROGRAM_NOT_ALLOWED
+  | typeof DEADROLL_CITY_ERROR__QUEST_STILL_OPEN
+  | typeof DEADROLL_CITY_ERROR__SESSION_MAP_MISMATCH
+  | typeof DEADROLL_CITY_ERROR__SESSION_NOT_IN_LOBBY
+  | typeof DEADROLL_CITY_ERROR__SIZE_OUT_OF_RANGE
+  | typeof DEADROLL_CITY_ERROR__TOO_MANY_OBJECTS
+  | typeof DEADROLL_CITY_ERROR__UNAUTHORIZED;
 
 let deadrollCityErrorMessages: Record<DeadrollCityError, string> | undefined;
 if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !== "production") {
   deadrollCityErrorMessages = {
+    [DEADROLL_CITY_ERROR__BAD_BOARD]: `Board is not this building's board`,
+    [DEADROLL_CITY_ERROR__BAD_TARGET]: `Building target does not match its kind`,
+    [DEADROLL_CITY_ERROR__BUILDING_CLOSED]: `Building is closed`,
+    [DEADROLL_CITY_ERROR__INVALID_CONFIG]: `GameConfig account is not the registry config`,
+    [DEADROLL_CITY_ERROR__INVALID_MAP]: `Map account is not a map of the map program`,
+    [DEADROLL_CITY_ERROR__INVALID_SESSION]: `Session account is not a party of the session program`,
+    [DEADROLL_CITY_ERROR__MAP_NOT_IN_SESSION]: `Map is not in a party`,
+    [DEADROLL_CITY_ERROR__NO_ACCESS]: `Access condition of the building is not met`,
+    [DEADROLL_CITY_ERROR__NOT_A_TAVERN]: `Building is not a Tavern`,
+    [DEADROLL_CITY_ERROR__NOT_THE_DM]: `Signer is not the DM`,
+    [DEADROLL_CITY_ERROR__OUT_OF_CITY]: `Cell or range is outside the city`,
+    [DEADROLL_CITY_ERROR__PROGRAM_NOT_ALLOWED]: `Program is not one of the game programs`,
+    [DEADROLL_CITY_ERROR__QUEST_STILL_OPEN]: `Party is still gathering players`,
+    [DEADROLL_CITY_ERROR__SESSION_MAP_MISMATCH]: `Party is not on this map`,
+    [DEADROLL_CITY_ERROR__SESSION_NOT_IN_LOBBY]: `Party is not in the lobby`,
+    [DEADROLL_CITY_ERROR__SIZE_OUT_OF_RANGE]: `City size is out of range`,
+    [DEADROLL_CITY_ERROR__TOO_MANY_OBJECTS]: `Too many decor objects`,
     [DEADROLL_CITY_ERROR__UNAUTHORIZED]: `Caller is not authorized for this instruction`,
   };
 }

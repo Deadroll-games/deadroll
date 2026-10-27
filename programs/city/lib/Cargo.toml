@@ -1,0 +1,38 @@
+# The city program as a library for other crates (`[workspace.dependencies] deadroll-city`).
+# Same source as the program (../src), rlib only: a cdylib output has no hash in its file name, so
+# the program build and its `cpi` build would share one file in target/ (root Cargo.toml).
+# Keep [features] and [dependencies] in sync with ../Cargo.toml.
+[package]
+name = "deadroll-city-lib"
+description = "Deadroll city as an rlib for other crates (CPI, account layouts)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "deadroll_city"
+path = "../src/lib.rs"
+crate-type = ["rlib"]
+test = false
+doctest = false
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "deadroll-types/idl-build"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+anchor-lang.workspace = true
+deadroll-types = { workspace = true, features = ["anchor"] }
+deadroll-registry.workspace = true
+deadroll-map.workspace = true
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

@@ -1300,6 +1300,19 @@ name = "deadroll-city"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
+ "deadroll-map-lib",
+ "deadroll-registry-lib",
+ "deadroll-types",
+ "solana-sha256-hasher",
+]
+
+[[package]]
+name = "deadroll-city-lib"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "deadroll-map-lib",
+ "deadroll-registry-lib",
  "deadroll-types",
 ]
 

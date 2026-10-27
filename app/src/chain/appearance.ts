@@ -85,7 +85,7 @@ export const TOMBSTONE: RenderRequest = renderRequest(layers([[0, SPRITE.tombsto
 
 /** Bestiary id -> sprite, material, accent (eyes, marks) and element (horns, claws, teeth) ramps.
  * tools/art keeps the same colors per sprite name (`MONSTER_LOOKS` in tools/art/src/preview.rs). */
-const MONSTER_SPRITES: Record<number, [sprite: number, material: number, accent: number, element: number]> = {
+export const MONSTER_SPRITES: Record<number, [sprite: number, material: number, accent: number, element: number]> = {
   0: [400, MATERIAL.wolfDark, RAMP.glowRed, RAMP.fur],
   1: [401, MATERIAL.goblinDark, RAMP.glowRed, RAMP.steel],
   2: [402, MATERIAL.goblinDark, RAMP.gold, RAMP.steel],
