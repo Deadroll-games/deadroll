@@ -19,7 +19,6 @@ import {
   BASE_ATTACK,
   DEFAULT_KEY,
   MONSTER_BASE,
-  SKILL_PRESETS,
   actIx,
   buildMapIxs,
   chainTiles,
@@ -35,7 +34,9 @@ import {
   deathAccountsOf,
   withDeaths,
   consumeIx,
-  createCharacterIxs,
+  characterSteps,
+  skillExtrasOf,
+  SKILL_PRESETS,
   currentUnit,
   endTurnIx,
   freezeTombstoneIx,
@@ -62,7 +63,7 @@ import { MAP_PRESETS, presetToLayout, type MapPresetData } from "./mock";
 import { equipIx, equipmentOf, inventory, unequipIx } from "./items";
 import { skillSetPda } from "./pda";
 import { affordable, cheb, route } from "./route";
-import { errorName, sendTx } from "./send";
+import { batchCost, errorName, sendBatch, sendTx } from "./send";
 import { MapcheckWasm } from "./mapcheckWasm";
 import { toHitResolved } from "./hit";
 import { Category, Effect, defaultMapSelection, type NamedSkill } from "./skillcheck";
@@ -114,10 +115,18 @@ async function openParty(specs: Spec[]) {
     // 1. characters (Core NFT)
     for (const { cls, race, pred, stats, name, skills } of specs) {
       const [wallet, key] = await Promise.all([funded(), funded(1)]);
-      const c = await createCharacterIxs(wallet, { name, race, class: cls, predisposition: pred, stats: [...stats], skills });
-      if (c.profileIx) await send(wallet, [c.profileIx]);
-      const evs = await send(wallet, [c.ix]);
+      // One user action, one signature: profile, character and descriptions in one batch, at the
+      // price the site shows before signing.
+      const c = await characterSteps(wallet, { name, race, class: cls, predisposition: pred, stats: [...stats], skills });
+      const price = await batchCost(wallet, c.steps);
+      const before = (await client.rpc.getBalance(wallet.address, { commitment: "confirmed" }).send()).value;
+      const sentSteps = await sendBatch(wallet, c.steps);
+      const after = (await client.rpc.getBalance(wallet.address, { commitment: "confirmed" }).send()).value;
+      expect(before - after).toBe(price);
+      const evs = sentSteps.flatMap((x) => decodeEvents(x.logs));
       const created = evs.find((e) => e.name === "CharacterCreated")!.data;
+      const named = skills ?? SKILL_PRESETS[cls];
+      expect((await skillExtrasOf(c.character, named.length))!.map((x) => x.description)).toEqual(named.map((k) => k.description));
       expect(optional(created.nft)).toBe(c.asset.address);
       // The class starter items come with the character, worn; the owner takes one off and back on.
       expect(created.itemCount).toBe(2);
@@ -131,7 +140,8 @@ async function openParty(specs: Spec[]) {
     // 2. map from the preset
     const layout = presetToLayout(preset);
     const built = await buildMapIxs(dm, { width: preset.width, height: preset.height, tier: preset.tier, ...layout });
-    for (const ix of built.ixs) await send(dm, [ix]);
+    // Five transactions, one signature, sent in order (MapBuilder's publish).
+    await sendBatch(dm, built.ixs.map((ix) => [ix]));
     const acc = await sessionAccounts(built.map);
 
     // 3. party: open with price, pay half each, session keys, ready, start

@@ -4,6 +4,7 @@ import { Grid } from "../components/grid/Grid";
 import type { GridChest, GridPointKind, GridTile, GridUnit } from "../components/grid/types";
 import { MapPalette } from "../components/forms/MapPalette";
 import { PrepayConfirm } from "../components/forms/PrepayConfirm";
+import { StalledAction } from "../components/forms/StalledAction";
 import type { BuilderTool } from "../components/forms/types";
 import { MAP_PRESETS, presetToLayout } from "../chain/mock";
 import { BESTIARY_NAMES, BIOME_NAMES, bestiaryName } from "../chain/names";
@@ -49,6 +50,8 @@ export function spawnSkillError(view: SpawnView | null): string | null {
 
 const BESTIARY = Object.entries(BESTIARY_NAMES).map(([id, name]) => ({ id: Number(id), name }));
 const PRESETS = MAP_PRESETS.map((p) => ({ name: p.name, width: p.width, height: p.height }));
+/** One user action, five transactions: create_map, write_layout, write_spawns, write_points, finalize_map. */
+const PUBLISH = "Publish the map";
 const same = (a: Cell | null, b: Cell) => a !== null && a.x === b.x && a.y === b.y;
 
 /**
@@ -82,8 +85,10 @@ export function MapBuilder({ onPublish }: { onPublish?: (map: Address) => void }
   const [finalized, setFinalized] = useState(false);
   const [tier, setTier] = useState(first.tier ?? 1);
   const wallet = useAppWallet();
-  const { send, busy } = useTx();
+  const { sendSteps, stalled, dismissStalled, busy } = useTx();
   const [built, setBuilt] = useState<Address | null>(null);
+  // The map a stalled publish was creating: a retry finishes it.
+  const [publishing, setPublishing] = useState<Address | null>(null);
   // The bestiary pools and monster skills (registry), checked by the combat module.
   const combat = useCombat();
   const registry = useBuilderRegistry();
@@ -113,13 +118,15 @@ export function MapBuilder({ onPublish }: { onPublish?: (map: Address) => void }
   const finalizeOnChain = async () => {
     setRent(null);
     const dm = wallet.signer;
-    if (!dm) return void (await send("finalize_map", null, []));
+    if (!dm) return void (await sendSteps(PUBLISH, null, []));
     const b = await buildMapIxs(dm, { width: size.width, height: size.height, tier, ...layout });
-    const names = ["create_map", "write_layout", "write_spawns", "write_points", "finalize_map"];
-    for (const [i, ix] of b.ixs.entries()) {
-      if (!(await send(names[i]!, dm, [ix], { quiet: i < b.ixs.length - 1 }))) return;
-    }
-    setBuilt(b.map);
+    // Five transactions in order, one wallet confirmation (a retry resumes at the failed one).
+    setPublishing(b.map);
+    if (await sendSteps(PUBLISH, dm, b.ixs.map((ix) => [ix]))) await published(b.map);
+  };
+  const published = async (map: Address) => {
+    setPublishing(null);
+    setBuilt(map);
     setFinalized(true);
     await refreshMaps();
     void wallet.refreshBalance();
@@ -252,7 +259,7 @@ export function MapBuilder({ onPublish }: { onPublish?: (map: Address) => void }
               setErrors(e);
               setValidated(e.length === 0);
             }}
-            canFinalize={validated && !finalized && busy === null && rent === null}
+            canFinalize={validated && !finalized && busy === null && rent === null && !stalled}
             onFinalize={() => (DATA_SOURCE === "chain" ? void askRent() : setFinalized(true))}
             busy={busy !== null}
           />
@@ -266,7 +273,20 @@ export function MapBuilder({ onPublish }: { onPublish?: (map: Address) => void }
               onCancel={() => setRent(null)}
             />
           )}
-          {busy && <p className="muted">Sending {busy}...</p>}
+          {stalled && publishing && (
+            <StalledAction
+              what={stalled.what}
+              step={stalled.step}
+              total={stalled.total}
+              busy={busy !== null}
+              onRetry={() => void stalled.retry().then((r) => r && published(publishing))}
+              onDismiss={() => {
+                dismissStalled();
+                setPublishing(null);
+              }}
+            />
+          )}
+          {busy && <p className="muted">{busy}...</p>}
           {finalized && DATA_SOURCE === "mock" && <p className="ok">Mock: map finalized.</p>}
           {built && (
             <p className="ok">

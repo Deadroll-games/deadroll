@@ -1,20 +1,21 @@
 import { useState } from "react";
-import type { Address } from "@solana/kit";
+import type { Address, Instruction } from "@solana/kit";
 import { CharacterForm } from "../components/forms/CharacterForm";
+import { PrepayConfirm } from "../components/forms/PrepayConfirm";
+import { StalledAction } from "../components/forms/StalledAction";
 import type { CharacterDraft } from "../components/forms/types";
 import { characterAppearance, isCurrentAppearance, renderRequest } from "../chain/appearance";
 import { characterRequest, dressed, starterEquipment } from "../chain/items";
 import {
   RACE_PREDISPOSITIONS,
   bytesText,
-  createCharacterIxs,
+  characterSteps,
   optional,
-  skillDescriptionIxs,
-  SKILL_PRESETS,
   type CharacterAcc,
 } from "../chain/game";
 import { aspectName, className, raceName } from "../chain/names";
 import { Aspect, Class, Race } from "../chain/types";
+import { batchCost } from "../chain/send";
 import { useTx } from "../chain/useTx";
 import { DATA_SOURCE } from "../config";
 import { OldCharacterLabel } from "../raster/OldCharacter";
@@ -25,6 +26,12 @@ import { useAppWallet } from "../wallet/AppWallet";
 /** programs/character rules.rs: STAT_BASE and STAT_POINTS_START. */
 const STAT_MIN = 5;
 const STAT_POINTS = 10;
+
+/** One user action: profile (first time), character, Core NFT and skill descriptions. */
+const CREATE = "Create the character";
+
+/** A creation built and priced, waiting for the player's yes; the same steps are then signed. */
+type Pending = { name: string; character: Address; steps: Instruction[][]; lamports: bigint };
 
 /** Character creation (the characters window): a new character and its Core NFT. */
 export function CharacterCreate({ onCreated, initial }: { onCreated?: (address: Address) => void; initial?: Partial<CharacterDraft> }) {
@@ -43,7 +50,9 @@ export function CharacterCreate({ onCreated, initial }: { onCreated?: (address: 
   const preview = useRenderImage(chainPreview ?? (raster.status === "ready" ? raster.sample : null));
   const previewFit = usePreviewFit();
   const wallet = useAppWallet();
-  const { send, busy } = useTx();
+  const { sendSteps, stalled, dismissStalled, busy } = useTx();
+  const [pending, setPending] = useState<Pending | null>(null);
+  const [priceError, setPriceError] = useState<string | null>(null);
 
   const allowed = RACE_PREDISPOSITIONS[draft.race];
   const onChange = (next: CharacterDraft) => {
@@ -51,32 +60,36 @@ export function CharacterCreate({ onCreated, initial }: { onCreated?: (address: 
     setDraft(ok.includes(next.predisposition) ? next : { ...next, predisposition: ok[0]! });
   };
 
+  // Build the transactions and show what they take (rent of the new accounts and the Core NFT,
+  // network fees) before anything is signed (docs/GAME_COMMISSIONS.md 6.2).
   const create = async (d: CharacterDraft) => {
     if (DATA_SOURCE === "mock") return setMockCreated(d);
     const owner = wallet.signer;
-    if (!owner) return void (await send("create_character", null, []));
-    const c = await createCharacterIxs(owner, {
-      name: d.name,
-      race: d.race,
-      class: d.class,
-      predisposition: d.predisposition,
-      stats: [...d.stats],
-      ...(d.skills ? { skills: d.skills } : {}),
-    });
-    if (c.profileIx && !(await send("create_profile", owner, [c.profileIx]))) return;
-    // The class starter items come with the character (create_character), worn.
-    const res = await send(`create_character ${d.name} (Core NFT + starter items)`, owner, [c.ix]);
-    if (res) {
-      // The skill descriptions follow in their own transactions (six of 200 bytes do not fit
-      // the creation one); each is written once.
-      const batches = await skillDescriptionIxs(owner, c.character, d.skills ?? SKILL_PRESETS[d.class]);
-      for (const [i, ixs] of batches.entries()) {
-        if (!(await send(`skill descriptions ${i + 1}/${batches.length}`, owner, ixs))) break;
-      }
-      setDraft((x) => ({ ...x, name: "" }));
-      void wallet.refreshBalance();
-      onCreated?.(c.character);
+    if (!owner) return void (await sendSteps(CREATE, null, []));
+    setPriceError(null);
+    try {
+      const c = await characterSteps(owner, {
+        name: d.name,
+        race: d.race,
+        class: d.class,
+        predisposition: d.predisposition,
+        stats: [...d.stats],
+        ...(d.skills ? { skills: d.skills } : {}),
+      });
+      setPending({ name: d.name, character: c.character, steps: c.steps, lamports: await batchCost(owner, c.steps) });
+    } catch (e) {
+      setPriceError(`Could not price the character: ${e instanceof Error ? e.message : String(e)}`);
     }
+  };
+  const confirm = async (p: Pending) => {
+    // One wallet confirmation for every transaction, sent in order (a retry resumes).
+    if (await sendSteps(CREATE, wallet.signer, p.steps)) created(p);
+  };
+  const created = (p: Pending) => {
+    setPending(null);
+    setDraft((x) => ({ ...x, name: "" }));
+    void wallet.refreshBalance();
+    onCreated?.(p.character);
   };
 
   return (
@@ -88,9 +101,36 @@ export function CharacterCreate({ onCreated, initial }: { onCreated?: (address: 
         statPoints={STAT_POINTS}
         statMin={STAT_MIN}
         allowedPredispositions={allowed}
-        busy={busy !== null}
+        busy={busy !== null || pending !== null}
         preview={<SpriteCanvas image={preview.image} scale={PREVIEW_SCALE} fit={previewFit} label="character preview" />}
       />
+      {pending && !stalled && (
+        <PrepayConfirm
+          action={`Create ${pending.name}`}
+          lamports={pending.lamports}
+          detail={`as rent for the character, its skills, bag and Core NFT, and the network fees of ${pending.steps.length} transaction${pending.steps.length > 1 ? "s" : ""} (one wallet confirmation)`}
+          busy={busy !== null}
+          onConfirm={() => void confirm(pending)}
+          onCancel={() => setPending(null)}
+        />
+      )}
+      {stalled && pending && (
+        <StalledAction
+          what={stalled.what}
+          step={stalled.step}
+          total={stalled.total}
+          busy={busy !== null}
+          onRetry={() => void stalled.retry().then((r) => r && created(pending))}
+          onDismiss={() => {
+            dismissStalled();
+            // Past step 1 the character exists (only descriptions are missing): show it.
+            if (stalled.step > 1) created(pending);
+            else setPending(null);
+          }}
+        />
+      )}
+      {busy && <p className="muted">{busy}...</p>}
+      {priceError && <p className="error">{priceError}</p>}
       {mockCreated && (
         <p className="ok">
           Mock: {mockCreated.name}, {raceName(mockCreated.race)} {className(mockCreated.class)} with {aspectName(mockCreated.predisposition)} predisposition.
