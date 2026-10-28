@@ -2,7 +2,8 @@
 //!
 //! Roll order (the website replays it from the VRF seed, keep it stable):
 //! 1. `d20` hit roll (none if the target is immune to every packet);
-//! 2. crit chance roll, only on a hit that is not a natural 20 and with `crit_chance_pct > 0`;
+//! 2. crit chance roll, only on a hit that is not a natural 20 and with a crit chance (the
+//!    attacker's `crit_chance_pct` plus the target's `crit_taken_pct`) above 0;
 //! 3. tint rolls: bases in skill order, tints in slot order ([`crate::resonance::roll_tints`]);
 //! 4. one `d100` for the point in every packet's range;
 //! 5. native state rolls, one per packet in packet order (only where a roll is needed);
@@ -104,6 +105,8 @@ pub struct Defender {
     /// Immunity per defense tag, bits [`source_bit`] / [`form_bit`]: every packet of a skill
     /// with that source or form is immune.
     pub immune_tags: u8,
+    /// Crit chance every attacker gets against this target, percent (Exposed).
+    pub crit_taken_pct: u32,
 }
 
 impl Defender {
@@ -283,6 +286,28 @@ pub struct Jump {
     pub base: Aspect,
 }
 
+/// Damage the caller deals to every enemy adjacent to the target (it knows the map). `damage == 0`
+/// is none.
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Splash {
+    /// Each neighbour takes this much (a share of the hit's damage, rounded down once).
+    pub damage: u32,
+    /// The base of the resonance: a neighbour immune to it takes nothing.
+    pub aspect: Aspect,
+}
+
+/// A state and a timed modifier the caller lands on every enemy within `radius` cells of the
+/// target. `radius == 0` is none.
+#[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Nova {
+    pub radius: u8,
+    /// What lands on each enemy it reaches (the native state as it landed on the target).
+    pub state: ActiveState,
+    pub modifier: TimedMod,
+}
+
 /// The full hit breakdown (docs/COMBAT_MATH.md, section 12).
 #[cfg_attr(feature = "borsh", derive(BorshSerialize, BorshDeserialize))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -328,6 +353,12 @@ pub struct HitResult {
     pub accuracy_buff: AccuracyBuff,
     /// `state_bit`s of the states that landed on the target in this hit.
     pub landed: u8,
+    /// Damage to the enemies adjacent to the target.
+    pub splash: Splash,
+    /// A state and a modifier on the enemies around the target.
+    pub nova: Nova,
+    /// A timed modifier on every enemy this hit's jumps reach (empty when `turns == 0`).
+    pub jump_mod: TimedMod,
 }
 
 impl HitResult {
@@ -533,12 +564,12 @@ pub fn resolve_hit_into(
     }
     out.outcome = Outcome::Hit;
     out.crit = out.d20 == 20;
-    if !out.crit && a.crit_chance_pct > 0 {
-        let (crit, roll) = chance(&mut src, balance.clamp_chance(a.crit_chance_pct));
+    let crit_chance = a.crit_chance_pct.saturating_add(d.crit_taken_pct);
+    if !out.crit && crit_chance > 0 {
+        let (crit, roll) = chance(&mut src, balance.clamp_chance(crit_chance));
         out.crit = crit;
         out.crit_roll = Some(roll);
     }
-    let crit = out.crit;
 
     // Steps 6-8: resonance.
     let (bases, base_count) = a.skill.bases(a.weapon.aspect);
@@ -579,6 +610,16 @@ pub fn resolve_hit_into(
             };
         }
     }
+    // A resonance that forces the crit acts before every crit-only op and the multipliers.
+    for (slot, plan) in plans.iter().enumerate() {
+        for (k, p) in plan.as_slice().iter().enumerate() {
+            if p.op.kind == OpKind::ForceCrit {
+                out.crit = true;
+                out.res_ops[slot][k].acted = true;
+            }
+        }
+    }
+    let crit = out.crit;
     let acts = |op: &Op| !op.crit_only || crit;
 
     // Step 9: Addition from tint traits (Fury).
@@ -881,22 +922,106 @@ pub fn resolve_hit_into(
                     if !native_landed || out.target_mod_count as usize >= TARGET_MODS_MAX {
                         continue;
                     }
-                    let stat = match kind {
-                        ModKind::Haste | ModKind::Slow => a.tempo_bonus_bp,
-                        _ => a.state_chance_bonus_bp,
-                    };
-                    let power = more(scale(balance.res_mod(tier), p.op.value) as u64, stat)
-                        .clamp(1, u32::MAX as u64) as u32;
-                    out.target_mods[out.target_mod_count as usize] = TimedMod {
+                    let m = res_mod(
                         kind,
-                        aspect: res.base,
-                        turns: mod_turns(balance.res_mod_turns),
-                        power_bp: power,
-                        source: a.slot,
-                        ..TimedMod::default()
-                    };
+                        res.base,
+                        tier,
+                        p.op.value,
+                        balance.res_mod_turns,
+                        a,
+                        balance,
+                    );
+                    out.target_mods[out.target_mod_count as usize] = m;
                     out.target_mod_count += 1;
-                    (o.acted, o.amount) = (true, power);
+                    (o.acted, o.amount) = (true, m.power_bp);
+                }
+                OpKind::ApplyMod | OpKind::ModAfterNative => {
+                    let Some(kind) = ModKind::ALL.get(p.op.arg as usize).copied() else {
+                        continue;
+                    };
+                    if out.target_mod_count as usize >= TARGET_MODS_MAX {
+                        continue;
+                    }
+                    // "Then Slow": it lasts its own turns beyond the native state that landed.
+                    let duration = if p.op.kind == OpKind::ApplyMod {
+                        balance.res_mod_turns
+                    } else {
+                        match native.filter(|_| native_landed) {
+                            Some(n) => balance
+                                .res_mod_turns
+                                .saturating_add(lands.now[n as usize].turns),
+                            None => continue,
+                        }
+                    };
+                    let m = res_mod(kind, res.base, tier, p.op.value, duration, a, balance);
+                    out.target_mods[out.target_mod_count as usize] = m;
+                    out.target_mod_count += 1;
+                    if p.op.kind == OpKind::ApplyMod {
+                        out.jump_mod = m;
+                    }
+                    (o.acted, o.amount) = (true, m.power_bp);
+                }
+                OpKind::ApplyState | OpKind::StateIfHad => {
+                    let had =
+                        p.op.kind == OpKind::ApplyState || native.is_some_and(|n| view.has(n));
+                    let Some(kind) = state.filter(|k| had && can(*k)) else {
+                        continue;
+                    };
+                    let damage = (base_damage as u128 * p.op.value as u128 / BP as u128)
+                        .min(u64::MAX as u128) as u64;
+                    let applied = lands.apply(kind, apply_of(kind, damage), balance);
+                    o.acted = true;
+                    o.state = StateRoll {
+                        kind,
+                        rolled: false,
+                        chance_pct: 100,
+                        roll: 0,
+                        success: true,
+                        applied,
+                        resist_bp: 0,
+                    };
+                }
+                OpKind::Splash => {
+                    let required = p.op.arg == ANY_STATE
+                        || StateKind::try_from(p.op.arg).is_ok_and(|kind| view.has(kind));
+                    let damage = (out.damage as u64 * p.op.value as u64 / BP as u64)
+                        .min(u32::MAX as u64) as u32;
+                    if !required || damage == 0 {
+                        continue;
+                    }
+                    if damage > out.splash.damage {
+                        out.splash = Splash {
+                            damage,
+                            aspect: res.base,
+                        };
+                    }
+                    (o.acted, o.amount) = (true, damage);
+                }
+                OpKind::Nova => {
+                    let (Some(n), Some(kind)) = (
+                        native.filter(|_| native_landed),
+                        ModKind::ALL.get(p.op.arg as usize).copied(),
+                    ) else {
+                        continue;
+                    };
+                    let radius = p.op.value.min(u8::MAX as u32) as u8;
+                    if radius == 0 {
+                        continue;
+                    }
+                    out.nova = Nova {
+                        radius,
+                        state: lands.now[n as usize],
+                        modifier: res_mod(
+                            kind,
+                            res.base,
+                            tier,
+                            BP,
+                            balance.res_mod_turns,
+                            a,
+                            balance,
+                        ),
+                    };
+                    (o.acted, o.amount) = (true, radius as u32);
                 }
                 OpKind::ThawDamage => {
                     if lands.landed & state_bit(StateKind::Freeze) == 0 {
@@ -982,7 +1107,8 @@ pub fn resolve_hit_into(
                 | OpKind::NativeFaster
                 | OpKind::NativePowerArmor
                 | OpKind::AddPacket
-                | OpKind::Penetrate => {}
+                | OpKind::Penetrate
+                | OpKind::ForceCrit => {}
             }
         }
         // "Removes Freeze" comes after the hit's own states (Cleaving Ice).
@@ -1003,6 +1129,43 @@ pub fn resolve_hit_into(
     out.states = lands.states;
     out.landed = lands.landed;
     out.rolls_used = src.used;
+}
+
+/// A resonance's timed modifier on the target: `kind` at the tint's `tier`, scaled by `value`,
+/// for `duration` of the bearer's own turns. Exposed is a crit chance (percent x 100), Root has
+/// no strength; the rest scale with the attacker's stat like the skill effects.
+fn res_mod(
+    kind: ModKind,
+    base: Aspect,
+    tier: Tier,
+    value: u32,
+    duration: u8,
+    a: &Attacker,
+    balance: &Balance,
+) -> TimedMod {
+    let power = match kind {
+        ModKind::Exposed => scale(balance.res_exposed(tier).saturating_mul(100), value) as u64,
+        ModKind::Root => BP as u64,
+        ModKind::Haste | ModKind::Slow => {
+            more(scale(balance.res_mod(tier), value) as u64, a.tempo_bonus_bp)
+        }
+        ModKind::Empowerment
+        | ModKind::Weakening
+        | ModKind::Protection
+        | ModKind::Vulnerability
+        | ModKind::Resistance => more(
+            scale(balance.res_mod(tier), value) as u64,
+            a.state_chance_bonus_bp,
+        ),
+    };
+    TimedMod {
+        kind,
+        aspect: base,
+        turns: mod_turns(duration),
+        power_bp: power.clamp(1, u32::MAX as u64) as u32,
+        source: a.slot,
+        ..TimedMod::default()
+    }
 }
 
 /// Step 9 numbers of every packet (the added ones included).
@@ -1208,8 +1371,9 @@ pub fn preview_hit(input: &HitInput, balance: &Balance, tables: &ResonanceTables
     let plain_hits = (2u32..=19)
         .filter(|face| face.saturating_add(a.attack_bonus) >= d.defense)
         .count() as u32;
-    let crit_roll = if a.crit_chance_pct > 0 {
-        balance.clamp_chance(a.crit_chance_pct).saturating_mul(100)
+    let crit_chance = a.crit_chance_pct.saturating_add(d.crit_taken_pct);
+    let crit_roll = if crit_chance > 0 {
+        balance.clamp_chance(crit_chance).saturating_mul(100)
     } else {
         0
     };
@@ -1249,6 +1413,7 @@ pub fn preview_hit(input: &HitInput, balance: &Balance, tables: &ResonanceTables
                 (min, max)
             } else {
                 let mut extra = Extra::NONE;
+                let mut force_crit = false;
                 let ops = mechanics
                     .ops
                     .iter()
@@ -1278,10 +1443,11 @@ pub fn preview_hit(input: &HitInput, balance: &Balance, tables: &ResonanceTables
                                 .pen_bp
                                 .saturating_add(scale(balance.keenness_pen(tier), op.value));
                         }
+                        OpKind::ForceCrit => force_crit = true,
                         _ => {}
                     }
                 }
-                damage_range(input, balance, false, &extra)
+                damage_range(input, balance, force_crit, &extra)
             };
             out.tints[out.tint_count as usize] = PreviewTint {
                 base,

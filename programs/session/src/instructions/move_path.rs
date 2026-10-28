@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use deadroll_combat::rooted;
 use deadroll_mapcheck::walk::walk;
 use deadroll_rules::reactive::{entered_next_to, Event};
 use deadroll_types::{seeds, Cell, SessionStatus};
@@ -142,6 +143,7 @@ pub fn handler(ctx: Context<MovePath>, unit: u8, path: Vec<Cell>) -> Result<()> 
             );
             let field = Field::load(session, &monsters)?;
             p.refresh_ap(session.turn_seq, &field.view());
+            require!(!rooted(&p.combat_mods()), SessionError::Rooted);
             let start = Cell {
                 x: p.core.x,
                 y: p.core.y,
@@ -230,6 +232,7 @@ pub fn handler(ctx: Context<MovePath>, unit: u8, path: Vec<Cell>) -> Result<()> 
         Unit::Monster(index) => {
             let mut state = monsters.get(index)?;
             require!(state.alive, SessionError::UnitDead);
+            require!(!rooted(&monsters.mods(index)?), SessionError::Rooted);
             let start = Cell {
                 x: state.x,
                 y: state.y,

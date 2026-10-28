@@ -26,8 +26,8 @@ pub mod tables;
 pub use balance::Balance;
 pub use hit::{
     preview_hit, preview_range, resolve_hit, resolve_hit_into, Attacker, Defender, HitInput,
-    HitPreview, HitResult, Jump, JumpMode, OpOrigin, OpResult, Outcome, PacketResult, PreviewTint,
-    StateRoll, JUMPS_MAX, RES_OPS_MAX, TARGET_MODS_MAX,
+    HitPreview, HitResult, Jump, JumpMode, Nova, OpOrigin, OpResult, Outcome, PacketResult,
+    PreviewTint, Splash, StateRoll, JUMPS_MAX, RES_OPS_MAX, TARGET_MODS_MAX,
 };
 pub use modifiers::{family_of, is_physical, Mod, ModFilter};
 pub use packet::{build_packets, DamageRange, Packet, Packets, Skill};
@@ -39,7 +39,7 @@ pub use states::{
 };
 pub use support::{
     apply_mod, apply_to_attacker, apply_to_defender, free_slot, mod_range, mod_turns,
-    resistance_share, resolve_rider, resolve_support, speed_ap, tick_mods, AccuracyBuff,
+    resistance_share, resolve_rider, resolve_support, rooted, speed_ap, tick_mods, AccuracyBuff,
     EffectRoll, ModKind, SupportBalance, SupportInput, TimedMod, TimedMods, MODS_MAX,
 };
 pub use tables::{Op, OpKind, ResonanceTables, TableError};

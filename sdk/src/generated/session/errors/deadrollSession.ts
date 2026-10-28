@@ -198,6 +198,8 @@ export const DEADROLL_SESSION_ERROR__PATH_NOT_ADJACENT = 0x17c9; // 6089
 export const DEADROLL_SESSION_ERROR__ACTOR_MISMATCH = 0x17ca; // 6090
 /** CornerBlocked: A diagonal step cuts the corner of a cell that cannot be entered */
 export const DEADROLL_SESSION_ERROR__CORNER_BLOCKED = 0x17cb; // 6091
+/** Rooted: The unit is rooted and cannot move */
+export const DEADROLL_SESSION_ERROR__ROOTED = 0x17cc; // 6092
 
 export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__ACTOR_MISMATCH
@@ -275,6 +277,7 @@ export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__REACTIVE_ACCOUNTS_MISSING
   | typeof DEADROLL_SESSION_ERROR__READY_UNCHANGED
   | typeof DEADROLL_SESSION_ERROR__ROLL_PENDING
+  | typeof DEADROLL_SESSION_ERROR__ROOTED
   | typeof DEADROLL_SESSION_ERROR__SESSION_KEY_AT_READY
   | typeof DEADROLL_SESSION_ERROR__SESSION_TOKEN_EXPIRED
   | typeof DEADROLL_SESSION_ERROR__SESSION_TOKEN_MISSING
@@ -372,6 +375,7 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__REACTIVE_ACCOUNTS_MISSING]: `A reactive skill triggers here: the VRF accounts and the payer are required`,
     [DEADROLL_SESSION_ERROR__READY_UNCHANGED]: `Already in that ready state`,
     [DEADROLL_SESSION_ERROR__ROLL_PENDING]: `Waiting for a dice roll`,
+    [DEADROLL_SESSION_ERROR__ROOTED]: `The unit is rooted and cannot move`,
     [DEADROLL_SESSION_ERROR__SESSION_KEY_AT_READY]: `Joining binds no session key: the key and its prepayment come with Ready`,
     [DEADROLL_SESSION_ERROR__SESSION_TOKEN_EXPIRED]: `Session token has expired`,
     [DEADROLL_SESSION_ERROR__SESSION_TOKEN_MISSING]: `Session key used without a session token`,

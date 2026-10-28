@@ -17,7 +17,7 @@
 //! Ends: a boss dies (or every monster, when there is no boss) = victory, every hero dead =
 //! defeat, `max_rounds` = draw.
 use deadroll_combat::{
-    chill_slow_bp, speed_ap, AccuracyBuff, Applied, HitInput, HitResult, OpKind,
+    apply_mod, chill_slow_bp, speed_ap, AccuracyBuff, Applied, HitInput, HitResult, OpKind,
     Outcome as HitOutcome, ResonanceTables, RollSource, SeededRoll, StateRoll, States, TimedMods,
 };
 use deadroll_rules::{
@@ -32,7 +32,7 @@ use deadroll_rules::{
     monster_ai::{AiChoice, AiTarget},
     reactive::{entered_next_to, hit_events, nearby, reaction, Event, Reaction},
     resolve,
-    spread::{spread, step_into, BurningCell, Field, BURNING_CELLS_MAX},
+    spread::{spread, spreads, step_into, BurningCell, Field, BURNING_CELLS_MAX},
     units::{cooldown_after_use, roll_initiative},
     BalanceConfig, MonsterDefense, MonsterProfile, MonsterSkillStats, Unit,
 };
@@ -1363,7 +1363,7 @@ impl<'a> Battle<'a> {
     /// (`deadroll_rules::spread`, the code the program runs). Returns the knockback.
     fn spread(&mut self, s: usize, target: usize, caster: u8) -> Option<(Cell, Cell)> {
         let r = &self.result;
-        if r.jump_count == 0 && r.knockback == 0 && r.ignite_power == 0 {
+        if !spreads(r) {
             return None;
         }
         let mut monsters: Vec<Monster> = self.foes.iter().map(|f| f.m).collect();
@@ -1402,6 +1402,13 @@ impl<'a> Battle<'a> {
         for h in out.hits() {
             if h.applied != Applied::None {
                 self.stats.states_landed[h.kind as usize] += 1;
+            }
+            apply_mod(&mut self.foes[h.monster as usize].mods, h.modifier);
+        }
+        for h in out.splashes() {
+            self.stats.slots[s].damage += h.damage as u64;
+            if h.died {
+                self.foe_died(h.monster as usize);
             }
         }
         self.stats.jumps += out.hit_count as u32;

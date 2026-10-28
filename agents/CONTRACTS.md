@@ -989,3 +989,41 @@ Taking a quest is `session.join_session` (the contribution goes to the party esc
 start are `set_ready` and `start_session`. The session program does not know about quests: it is
 unchanged, and the city makes no CPI. City depends on the `deadroll-map` and `deadroll-registry`
 lib packages (account types and ids); `programs/city/lib/` is new.
+
+## 26. Resonance pass: the pair table
+
+Combat (`deadroll_combat`), appended; nothing renamed or removed:
+
+```
+OpKind:              21 ForceCrit, 22 ApplyState, 23 ApplyMod, 24 StateIfHad, 25 Splash, 26 Nova,
+                     27 ModAfterNative (OpKind::COUNT = 28)
+ResonanceCondition:  9 IsBleeding
+ModKind:             7 Exposed (crit chance against the bearer, power_bp = percent x 100),
+                     8 Root (cannot move); MODS_MAX = ModKind::COUNT = 9
+mod_bit / tick_mods: u16 (was u8)
+Defender:            ... immune_tags, crit_taken_pct: u32
+HitResult:           ... landed, splash: Splash { damage, aspect }, nova: Nova { radius, state,
+                     modifier: TimedMod }, jump_mod: TimedMod
+Balance:             ... aspect_state_resist_share_bp, res_exposed_pct: [u32; 14]
+SupportBalance:      mod_min_bp / mod_max_bp / mod_duration grow to 9 (0 for Exposed and Root)
+```
+
+Registry: resonance records accept the new op kinds and condition 9 (validated by the same
+decoder). `crates/rules::spread::SpreadHit` gains `modifier`, `SpreadOutcome` gains `splashes`.
+
+Session program (accounts keep their size: `mods` still has 6 stored slots; Exposed and Root take a
+stored slot left free, `state::mods::from_combat`):
+
+```
+ModKindData:          7 Exposed, 8 Root
+OpKind (event mirror): 21..=27 as above
+HitResultData:        ... landed, splash: SplashData, nova: NovaData, jump_mod: ResistModData
+ResonanceSpread:      ... accuracy, hit_mods: [TimedModData; 8], splashes: [SplashHitData; 8],
+                      splash_count: u8
+  SplashHitData { monster, damage: u32, hp: u32, died: bool }
+ModsTicked.expired:   u16 (was u8)
+SessionError:         Rooted (move_path of a rooted unit)
+```
+
+A splash kill is paid like any kill (`unpaid_kills`). Website combat WASM: ABI 9 (nine modifier
+slots, `Defender.crit_taken_pct`).

@@ -15,7 +15,7 @@ export type WikiData = {
   aspects: { name: string; family: string; native: string; trait: string; condition: string; about: string }[];
   states: { name: string; turns: number | null; about: string }[];
   traits: { trait: string; aspect: string; epithet: string; hit: unknown; template: unknown[] }[];
-  resonances: { base: string; tint: string; name: string | null; condition: string; ops: unknown[]; about: string | null }[];
+  resonances: { base: string; tint: string; name: string | null; condition: string; ops: unknown[]; about: string | null; lore: string | null }[];
   hitSteps: { steps: string; text: string }[];
   numbers: { group: string; fields: FieldDoc[] }[];
   monsterSkills: (Record<string, unknown> & { id: number; name: string; about: string })[];
@@ -142,7 +142,7 @@ export function buildWiki(root: string, art = join(root, "app/assets/bestiary"),
 
   const resonances = (json(root, "assets/registry/resonances.json").records as { base: string; tint: string; name: string | null; condition: string; ops: unknown[] }[])
     .filter((r) => r.base !== r.tint)
-    .map((r) => ({ base: r.base, tint: r.tint, name: r.name, condition: r.condition, ops: r.ops, about: r.name ? about("resonances.json", r.name, true) : null }));
+    .map((r) => ({ base: r.base, tint: r.tint, name: r.name, condition: r.condition, ops: r.ops, about: r.name ? about("resonances.json", r.name, true) : null, lore: r.name ? about("resonance_lore.json", r.name, true) : null }));
   const traits = json(root, "assets/registry/traits.json").records;
 
   const steps = parseHitSteps(read(root, "crates/combat/src/hit.rs"));

@@ -281,7 +281,8 @@ mod tests {
         assert!(bad(3, 7), "unknown native state");
         assert!(!bad(3, tables::NO_STATE), "no native state is allowed");
         assert!(bad(4, 6), "unknown trait");
-        assert!(bad(5, 9), "unknown condition");
+        assert!(bad(5, 10), "unknown condition");
+        assert!(!bad(5, 9), "IsBleeding (resonance pass)");
         assert!(bad(6, 1), "reserved byte");
     }
 
@@ -303,7 +304,7 @@ mod tests {
             !validate_record(TableKind::Resonances, 0, &x)
         };
         assert!(bad(9, 200), "unknown state");
-        assert!(bad(0, 9), "unknown condition");
+        assert!(bad(0, 10), "unknown condition");
         assert!(bad(1, 2), "unknown flag");
         assert!(bad(2, OpKind::COUNT), "unknown op");
         assert!(bad(14, 1), "reserved byte");

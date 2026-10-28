@@ -106,10 +106,29 @@ pub enum OpKind {
     /// The attacker's next attacks with an `arg` packet get `res_accuracy[tier] x value` to the
     /// d20.
     AccuracyBuff,
+    /// The hit becomes a crit (the crit-only ops of the hit act too).
+    ForceCrit,
+    /// `arg` lands without a roll, strength from the base packet x `value`.
+    ApplyState,
+    /// A timed modifier `arg` (`ModKind`) on the target and on every enemy this resonance's
+    /// jumps reach.
+    ApplyMod,
+    /// The target had the base's native state before the hit: `arg` lands without a roll,
+    /// strength from the base packet x `value`.
+    StateIfHad,
+    /// The target had `arg` before the hit (or `ANY_STATE`): every enemy adjacent to it takes
+    /// `value` bp of the hit's damage.
+    Splash,
+    /// When the native state lands, it and a timed modifier `arg` (`ModKind`) land on every
+    /// enemy within `value` cells of the target.
+    Nova,
+    /// When the native state lands, a timed modifier `arg` (`ModKind`) on the target that lasts
+    /// `res_mod_turns` beyond it.
+    ModAfterNative,
 }
 
 impl OpKind {
-    pub const COUNT: u8 = 21;
+    pub const COUNT: u8 = 28;
 
     pub const fn from_u8(v: u8) -> Option<OpKind> {
         use OpKind::*;
@@ -135,6 +154,13 @@ impl OpKind {
             18 => AddPacket,
             19 => Penetrate,
             20 => AccuracyBuff,
+            21 => ForceCrit,
+            22 => ApplyState,
+            23 => ApplyMod,
+            24 => StateIfHad,
+            25 => Splash,
+            26 => Nova,
+            27 => ModAfterNative,
             _ => return Option::None,
         })
     }
@@ -144,12 +170,12 @@ impl OpKind {
         use OpKind::*;
         match self {
             None | NativeTurns | NativePower | NativeFaster | NativePowerArmor | ThawDamage
-            | Knockback | IgniteCells | Penetrate => ArgKind::Zero,
-            Multiplier => ArgKind::StateOrAny,
+            | Knockback | IgniteCells | Penetrate | ForceCrit => ArgKind::Zero,
+            Multiplier | Splash => ArgKind::StateOrAny,
             StateOnCrit | ExtraStateChance | Linked | LinkedChance | RemoveState | Jump
-            | JumpLine => ArgKind::State,
+            | JumpLine | ApplyState | StateIfHad => ArgKind::State,
             JumpChain => ArgKind::StateOnly,
-            LinkedMod => ArgKind::Mod,
+            LinkedMod | ApplyMod | Nova | ModAfterNative => ArgKind::Mod,
             AddPacket | AccuracyBuff => ArgKind::Aspect,
         }
     }
@@ -348,6 +374,7 @@ fn condition(v: u8) -> Option<ResonanceCondition> {
         6 => CanBleed,
         7 => CanBeStunned,
         8 => HasArmor,
+        9 => IsBleeding,
         _ => return None,
     })
 }
@@ -544,12 +571,19 @@ mod tests {
             Op::new(OpKind::LinkedMod, ModKind::Slow as u8, 10_000),
             Op::new(OpKind::JumpChain, StateKind::Bleeding as u8, 3),
             Op::new(OpKind::AddPacket, Aspect::Fire as u8, 10_000),
+            Op::new(OpKind::ForceCrit, 0, 0),
+            Op::new(OpKind::ApplyState, NATIVE, 10_000),
+            Op::new(OpKind::ApplyMod, ModKind::Exposed as u8, 10_000),
+            Op::new(OpKind::StateIfHad, StateKind::Burning as u8, 10_000),
+            Op::new(OpKind::Splash, StateKind::Freeze as u8, 5_000),
+            Op::new(OpKind::Nova, ModKind::Weakening as u8, 2),
+            Op::new(OpKind::ModAfterNative, ModKind::Slow as u8, 10_000),
         ];
         for op in ops {
             assert_eq!(Op::decode(&op.encode()), Some(op));
         }
         // Unknown kind, bad args, a stray byte on None, a short slice.
-        assert_eq!(Op::decode(&[21, 0, 0, 0, 0, 0]), None);
+        assert_eq!(Op::decode(&[28, 0, 0, 0, 0, 0]), None);
         assert_eq!(
             Op::decode(&[OpKind::NativeTurns as u8, 1, 0, 0, 0, 0]),
             None
@@ -561,6 +595,9 @@ mod tests {
         );
         assert_eq!(Op::decode(&[OpKind::LinkedMod as u8, 6, 0, 0, 0, 0]), None);
         assert_eq!(Op::decode(&[OpKind::AddPacket as u8, 6, 0, 0, 0, 0]), None);
+        assert_eq!(Op::decode(&[OpKind::ForceCrit as u8, 1, 0, 0, 0, 0]), None);
+        assert_eq!(Op::decode(&[OpKind::ApplyMod as u8, 6, 0, 0, 0, 0]), None);
+        assert_eq!(Op::decode(&[OpKind::Nova as u8, 9, 0, 0, 0, 0]), None);
         assert_eq!(Op::decode(&[0, 0, 1, 0, 0, 0]), None);
         assert_eq!(Op::decode(&[1, 0xFF, 0, 0]), None);
     }

@@ -25,6 +25,9 @@
 //! Patch 9b (ABI 8): the hero sheet gives the resistance to each state; a state roll and an effect
 //! roll record the counterweight their chance met.
 //!
+//! Resonance pass (ABI 9): nine modifier slots (Exposed, Root); a defender carries the crit
+//! chance every attacker gets against it.
+//!
 //! Built with `std`: `deadroll-types` pulls `solana-pubkey`, whose `atomic` feature links `std`
 //! (`parking_lot`) on non-SBF targets, so `no_std` is not possible here. std on wasm32 aborts on
 //! panic and brings its own allocator.
@@ -58,7 +61,7 @@ use deadroll_types::{
 };
 
 /// Bumped on any change of the exports or the byte layouts.
-pub const ABI_VERSION: u32 = 8;
+pub const ABI_VERSION: u32 = 9;
 /// Size of the input and output buffers.
 pub const BUFFER_LEN: usize = 8192;
 

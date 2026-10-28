@@ -7,7 +7,7 @@ import { ASPECT_NAMES, effectAmount, formatBp } from "./names";
 import { Effect, Form, Purpose, RangeTag, Target, derive, skillSide, usableInCombat, type Category, type Side, type SkillBlocks } from "./skillcheck";
 import { Applied, HitOutcome, type Aspect, type ModKind, type TimedMod } from "./types";
 
-export const MOD_NAMES = ["Haste", "Slow", "Empowerment", "Weakening", "Protection", "Vulnerability", "Resistance"] as const;
+export const MOD_NAMES = ["Haste", "Slow", "Empowerment", "Weakening", "Protection", "Vulnerability", "Resistance", "Exposed", "Rooted"] as const;
 /** Haste, Empowerment, Protection, Resistance help the bearer; the rest hurt. */
 export const modIsBuff = (k: ModKind): boolean => k === 0 || k === 2 || k === 4 || k === 6;
 
@@ -58,6 +58,10 @@ export function modEffectText(m: TimedMod): string {
       return `+${pct} resist`;
     case 6:
       return `resist ${resistanceText(m)}`;
+    case 7:
+      return `+${Math.round(m.powerBp / 100)}% crit chance against it`;
+    case 8:
+      return "cannot move";
     default:
       return `+${pct} ${ASPECT_NAMES[m.aspect] ?? "?"} damage taken`;
   }

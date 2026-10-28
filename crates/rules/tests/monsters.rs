@@ -477,3 +477,36 @@ fn the_ai_debuffs_before_it_strikes() {
     assert_eq!(s.stats.blocks.purpose, deadroll_skillcheck::Purpose::Damage);
     let _ = GOBLIN;
 }
+
+#[test]
+fn a_rooted_monster_only_reaches_what_it_reaches_from_where_it_stands() {
+    let r = reg();
+    let chief = r.template(CHIEFTAIN).unwrap();
+    let p = chief.profile(1, &CFG.monsters);
+    let skills = skills_of(&r, &chief);
+    let cooldowns = [0u8; MONSTER_SLOTS];
+    let me = AiMonster {
+        index: 0,
+        ap: 5,
+        profile: &p,
+        skills: &skills,
+        cooldowns: &cooldowns,
+    };
+    let free = [unit(c(5, 5), 30, 30, chief.kin)];
+    let mut rooted = free;
+    rooted[0].mods[ModKind::Root as usize] = deadroll_combat::TimedMod {
+        kind: ModKind::Root,
+        turns: 2,
+        power_bp: 1,
+        ..Default::default()
+    };
+    // Some distance is reached by walking first: the rooted monster cannot.
+    let walked = (6..20u8).find(|&x| {
+        let heroes = [unit(c(x, 5), 20, 30, 0)];
+        plan(&CFG, &me, &heroes, &free).is_some() && plan(&CFG, &me, &heroes, &rooted).is_none()
+    });
+    assert!(walked.is_some());
+    // Next to it, rooted or not, it acts.
+    let heroes = [unit(c(6, 5), 20, 30, 0)];
+    assert!(plan(&CFG, &me, &heroes, &rooted).is_some());
+}

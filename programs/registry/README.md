@@ -40,9 +40,9 @@ The aspect, trait and resonance records are the format of `crates/combat/src/tab
 **Traits** (6 x 32 B, index = trait id; all zero = absent): `[0] present (1)`, `[1]` reserved, `[2..8] hit op` (acts whenever the tint triggers), `[8..14]`, `[14..20]` template ops (the trait on the base's native state: generated pairs, the second tint of a triple), `[20..32]` reserved.
 
 **Resonances** (36 x 16 B, index = `base * 6 + tint`, same as `deadroll_combat::resonance_id`):
-`[0] condition` (0 Always, 1 CanBurn, 2 CanBeChilled, 3 CanBeFrozen, 4 IsFrozen, 5 CanBeShocked, 6 CanBleed, 7 CanBeStunned, 8 HasArmor),
+`[0] condition` (0 Always, 1 CanBurn, 2 CanBeChilled, 3 CanBeFrozen, 4 IsFrozen, 5 CanBeShocked, 6 CanBleed, 7 CanBeStunned, 8 HasArmor, 9 IsBleeding),
 `[1] flags` (bit 0: this record overrides the generated mechanics), `[2..8] op 0`, `[8..14] op 1`, `[14..16]` reserved.
-Op (6 B): `[0] kind` (`deadroll_combat::tables::OpKind`, 0..=20; bit 7 = only on a crit), `[1] arg` (a `StateKind`, `ModKind` or `Aspect` by kind; `0xFF` = the base's native state, or any state for a Multiplier), `[2..6] value u32` (a scale in bp of the `Balance` curve the kind names, or a count).
+Op (6 B): `[0] kind` (`deadroll_combat::tables::OpKind`, 0..=27; bit 7 = only on a crit), `[1] arg` (a `StateKind`, `ModKind` or `Aspect` by kind; `0xFF` = the base's native state, or any state for a Multiplier), `[2..6] value u32` (a scale in bp of the `Balance` curve the kind names, or a count).
 
 **Bestiary** (32 x 48 B, index = bestiary id: 0 wolf, 1 goblin, 2 goblin chieftain, 3 goblin warrior, 4 goblin shaman; an all-zero record is an empty slot):
 

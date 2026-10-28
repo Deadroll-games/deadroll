@@ -3,7 +3,8 @@
 //!
 //! The accounts keep the six slots they had before patch 9 ([`STORED_MODS`], the kinds up to
 //! Vulnerability, each in its own slot) and, appended at their end, the Resistance slot with its
-//! aspect weights ([`ResistModData`]).
+//! aspect weights ([`ResistModData`]). The resonance pass kinds (Exposed, Root) take a stored slot left
+//! free (`from_combat`).
 use anchor_lang::prelude::*;
 #[cfg(test)]
 use deadroll_combat::MODS_MAX;
@@ -24,6 +25,9 @@ pub enum ModKindData {
     Vulnerability,
     /// Patch 9.
     Resistance,
+    /// Resonance pass (resonances only).
+    Exposed,
+    Root,
 }
 
 /// `deadroll_combat::TimedMod`: a buff or debuff on a unit, `turns == 0` = empty slot.
@@ -75,6 +79,8 @@ impl From<ModKind> for ModKindData {
             ModKind::Protection => Self::Protection,
             ModKind::Vulnerability => Self::Vulnerability,
             ModKind::Resistance => Self::Resistance,
+            ModKind::Exposed => Self::Exposed,
+            ModKind::Root => Self::Root,
         }
     }
 }
@@ -89,6 +95,8 @@ impl From<ModKindData> for ModKind {
             ModKindData::Protection => Self::Protection,
             ModKindData::Vulnerability => Self::Vulnerability,
             ModKindData::Resistance => Self::Resistance,
+            ModKindData::Exposed => Self::Exposed,
+            ModKindData::Root => Self::Root,
         }
     }
 }
@@ -104,6 +112,11 @@ fn mod_of(m: &TimedModData, weights_pct: [u8; Aspect::COUNT]) -> TimedMod {
     }
 }
 
+/// One stored slot of `m` (its weights dropped).
+pub fn mod_data(m: &TimedMod) -> TimedModData {
+    data_of(m)
+}
+
 fn data_of(m: &TimedMod) -> TimedModData {
     TimedModData {
         kind: m.kind.into(),
@@ -117,17 +130,21 @@ fn data_of(m: &TimedMod) -> TimedModData {
 /// The stored slots and the Resistance slot as one `TimedMods`, each kind in its own slot.
 pub fn to_combat(mods: &ModsData, resist: &ResistModData) -> TimedMods {
     let mut out = TimedMods::default();
-    for (slot, m) in out.iter_mut().zip(mods) {
-        *slot = mod_of(m, [0; Aspect::COUNT]);
+    for m in mods.iter().filter(|m| m.turns > 0) {
+        let kind = ModKind::from(m.kind);
+        out[kind as usize] = mod_of(m, [0; Aspect::COUNT]);
     }
     out[ModKind::Resistance as usize] = mod_of(&resist.data, resist.weights_pct);
     out
 }
 
-/// `mods` as the stored slots and the Resistance slot: every kind in its own slot.
+/// `mods` as the stored slots and the Resistance slot. The kinds before patch 9 keep their own
+/// slot; the resonance pass kinds (Exposed, Root) take the stored slots left free, in kind order, and
+/// are dropped when none is (the account size stays).
 pub fn from_combat(mods: &TimedMods) -> (ModsData, ResistModData) {
     let mut out = ModsData::default();
     let mut resist = ResistModData::default();
+    let mut late = [None; 2];
     for m in mods.iter().filter(|m| !m.is_empty()) {
         match m.kind {
             ModKind::Resistance => {
@@ -136,7 +153,19 @@ pub fn from_combat(mods: &TimedMods) -> (ModsData, ResistModData) {
                     weights_pct: m.weights_pct,
                 }
             }
-            kind => out[kind as usize] = data_of(m),
+            ModKind::Exposed => late[0] = Some(data_of(m)),
+            ModKind::Root => late[1] = Some(data_of(m)),
+            ModKind::Haste
+            | ModKind::Slow
+            | ModKind::Empowerment
+            | ModKind::Weakening
+            | ModKind::Protection
+            | ModKind::Vulnerability => out[m.kind as usize] = data_of(m),
+        }
+    }
+    for m in late.into_iter().flatten() {
+        if let Some(slot) = out.iter_mut().find(|s| s.turns == 0) {
+            *slot = m;
         }
     }
     (out, resist)
@@ -149,7 +178,11 @@ mod tests {
     #[test]
     fn mirrors_the_combat_bytes() {
         let mut mods = TimedMods::default();
-        for (i, kind) in ModKind::ALL.into_iter().enumerate() {
+        for (i, kind) in ModKind::ALL[..=ModKind::Resistance as usize]
+            .iter()
+            .copied()
+            .enumerate()
+        {
             mods[i] = TimedMod {
                 kind,
                 aspect: Aspect::ALL[i % Aspect::COUNT],
@@ -166,7 +199,8 @@ mod tests {
         assert_eq!(borsh::to_vec(&data[0]).unwrap(), one[..TIMED_MOD_SIZE]);
         assert_eq!(to_combat(&data, &resist), mods);
         assert_eq!(resist.weights_pct, [65, 0, 35, 0, 0, 65]);
-        assert_eq!(STORED_MODS, MODS_MAX - 1);
+        assert_eq!(STORED_MODS, ModKind::Resistance as usize);
+        assert_eq!(MODS_MAX, ModKind::COUNT);
         assert_eq!(TimedModData::INIT_SPACE, TIMED_MOD_SIZE);
         assert_eq!(ResistModData::INIT_SPACE, RESIST_MOD_SIZE);
         assert_eq!(
@@ -198,5 +232,31 @@ mod tests {
         assert_eq!(back[ModKind::Slow as usize].power_bp, 500);
         assert_eq!(back[ModKind::Resistance as usize].power_bp, 900);
         assert_eq!(back[ModKind::Resistance as usize].weights_pct[0], 100);
+    }
+
+    #[test]
+    fn exposed_and_root_take_the_free_stored_slots() {
+        let m = |kind, power_bp| TimedMod {
+            kind,
+            turns: 2,
+            power_bp,
+            ..TimedMod::default()
+        };
+        let mut mods = TimedMods::default();
+        mods[ModKind::Slow as usize] = m(ModKind::Slow, 500);
+        mods[ModKind::Exposed as usize] = m(ModKind::Exposed, 2_000);
+        mods[ModKind::Root as usize] = m(ModKind::Root, 10_000);
+        let (data, resist) = from_combat(&mods);
+        assert_eq!(data[0].kind, ModKindData::Exposed);
+        assert_eq!(data[2].kind, ModKindData::Root);
+        assert_eq!(to_combat(&data, &resist), mods);
+        // Every stored slot taken: they are dropped.
+        let mut full = TimedMods::default();
+        for kind in &ModKind::ALL[..STORED_MODS] {
+            full[*kind as usize] = m(*kind, 100);
+        }
+        full[ModKind::Root as usize] = m(ModKind::Root, 10_000);
+        let (data, resist) = from_combat(&full);
+        assert!(to_combat(&data, &resist)[ModKind::Root as usize].is_empty());
     }
 }

@@ -37,6 +37,8 @@ import {
   getHitOutcomeEncoder,
   getJumpDataDecoder,
   getJumpDataEncoder,
+  getNovaDataDecoder,
+  getNovaDataEncoder,
   getOpResultDataDecoder,
   getOpResultDataEncoder,
   getPacketResultDataDecoder,
@@ -45,6 +47,8 @@ import {
   getResistModDataEncoder,
   getResonanceDataDecoder,
   getResonanceDataEncoder,
+  getSplashDataDecoder,
+  getSplashDataEncoder,
   getStateRollDataDecoder,
   getStateRollDataEncoder,
   getTintRollDataDecoder,
@@ -57,6 +61,8 @@ import {
   type HitOutcomeArgs,
   type JumpData,
   type JumpDataArgs,
+  type NovaData,
+  type NovaDataArgs,
   type OpResultData,
   type OpResultDataArgs,
   type PacketResultData,
@@ -65,6 +71,8 @@ import {
   type ResistModDataArgs,
   type ResonanceData,
   type ResonanceDataArgs,
+  type SplashData,
+  type SplashDataArgs,
   type StateRollData,
   type StateRollDataArgs,
   type TintRollData,
@@ -107,6 +115,12 @@ export type HitResultData = {
   accuracyBuff: AccuracyBuffData;
   /** `state_bit`s of the states that landed on the target. */
   landed: number;
+  /** Resonance pass: damage to the enemies adjacent to the target (`ResonanceSpread` says who). */
+  splash: SplashData;
+  /** Resonance pass: a state and a modifier on the enemies around the target. */
+  nova: NovaData;
+  /** Resonance pass: the modifier every enemy the jumps reach gets (`turns == 0` = none). */
+  jumpMod: ResistModData;
 };
 
 export type HitResultDataArgs = {
@@ -141,6 +155,12 @@ export type HitResultDataArgs = {
   accuracyBuff: AccuracyBuffDataArgs;
   /** `state_bit`s of the states that landed on the target. */
   landed: number;
+  /** Resonance pass: damage to the enemies adjacent to the target (`ResonanceSpread` says who). */
+  splash: SplashDataArgs;
+  /** Resonance pass: a state and a modifier on the enemies around the target. */
+  nova: NovaDataArgs;
+  /** Resonance pass: the modifier every enemy the jumps reach gets (`turns == 0` = none). */
+  jumpMod: ResistModDataArgs;
 };
 
 export function getHitResultDataEncoder(): Encoder<HitResultDataArgs> {
@@ -181,6 +201,9 @@ export function getHitResultDataEncoder(): Encoder<HitResultDataArgs> {
     ["targetModCount", getU8Encoder()],
     ["accuracyBuff", getAccuracyBuffDataEncoder()],
     ["landed", getU8Encoder()],
+    ["splash", getSplashDataEncoder()],
+    ["nova", getNovaDataEncoder()],
+    ["jumpMod", getResistModDataEncoder()],
   ]);
 }
 
@@ -222,6 +245,9 @@ export function getHitResultDataDecoder(): Decoder<HitResultData> {
     ["targetModCount", getU8Decoder()],
     ["accuracyBuff", getAccuracyBuffDataDecoder()],
     ["landed", getU8Decoder()],
+    ["splash", getSplashDataDecoder()],
+    ["nova", getNovaDataDecoder()],
+    ["jumpMod", getResistModDataDecoder()],
   ]);
 }
 

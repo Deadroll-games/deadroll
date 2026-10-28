@@ -259,6 +259,7 @@ fn arb_defender() -> impl Strategy<Value = Defender> {
                 states,
                 tag_resist_bp,
                 immune_tags,
+                crit_taken_pct: 0,
             },
         )
 }

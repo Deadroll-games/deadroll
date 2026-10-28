@@ -50,7 +50,7 @@ export const TableKind = {
 } as const;
 export type TableKind = (typeof TableKind)[keyof typeof TableKind];
 
-const RESONANCE_CONDITIONS = 9;
+const RESONANCE_CONDITIONS = 10;
 const ROLES = 6;
 const BIOMES = 2;
 const ASPECT_COUNT = 6;
@@ -121,6 +121,7 @@ export const CONDITION: Record<string, number> = {
   CanBleed: 6,
   CanBeStunned: 7,
   HasArmor: 8,
+  IsBleeding: 9,
 };
 /** `deadroll_combat::tables::OpKind`, in discriminant order. */
 export const OP_KIND: Record<string, number> = {
@@ -145,6 +146,13 @@ export const OP_KIND: Record<string, number> = {
   AddPacket: 18,
   Penetrate: 19,
   AccuracyBuff: 20,
+  ForceCrit: 21,
+  ApplyState: 22,
+  ApplyMod: 23,
+  StateIfHad: 24,
+  Splash: 25,
+  Nova: 26,
+  ModAfterNative: 27,
 };
 const OP_KINDS = Object.keys(OP_KIND).length;
 /** What an op's `arg` names (`deadroll_combat::tables::ArgKind`). */
@@ -152,6 +160,7 @@ type ArgKind = "Zero" | "State" | "StateOnly" | "StateOrAny" | "Mod" | "Aspect";
 export function opArg(kind: number): ArgKind {
   switch (kind) {
     case OP_KIND.Multiplier:
+    case OP_KIND.Splash:
       return "StateOrAny";
     case OP_KIND.StateOnCrit:
     case OP_KIND.ExtraStateChance:
@@ -160,10 +169,15 @@ export function opArg(kind: number): ArgKind {
     case OP_KIND.RemoveState:
     case OP_KIND.Jump:
     case OP_KIND.JumpLine:
+    case OP_KIND.ApplyState:
+    case OP_KIND.StateIfHad:
       return "State";
     case OP_KIND.JumpChain:
       return "StateOnly";
     case OP_KIND.LinkedMod:
+    case OP_KIND.ApplyMod:
+    case OP_KIND.Nova:
+    case OP_KIND.ModAfterNative:
       return "Mod";
     case OP_KIND.AddPacket:
     case OP_KIND.AccuracyBuff:
@@ -179,6 +193,9 @@ export const MOD_KIND: Record<string, number> = {
   Weakening: 3,
   Protection: 4,
   Vulnerability: 5,
+  // 6 = Resistance: a resonance has no aspect weights to give one.
+  Exposed: 7,
+  Root: 8,
 };
 /** Tint traits, by trait id (docs/DAMAGE_TYPES_AND_MIXES.md 3.2). */
 export const TINT_TRAIT: Record<string, number> = {
@@ -312,7 +329,7 @@ export function validate_op(e: Uint8Array): boolean {
     case "StateOrAny":
       return arg === ANY_STATE || isStateKind(arg);
     case "Mod":
-      return arg < Object.keys(MOD_KIND).length;
+      return Object.values(MOD_KIND).includes(arg);
     case "Aspect":
       return isAspect(arg);
   }

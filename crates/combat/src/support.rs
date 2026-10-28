@@ -12,6 +12,8 @@
 //! | Vulnerability | multiplier     | `Defender.vuln_bp` of the modifier's aspect   |
 //! | Resistance    | counterweight  | `Defender.resist_bp` by its aspect weights    |
 //! | Haste / Slow  | opposing pair  | action points: `ap * (BP + haste) / (BP + slow)` |
+//! | Exposed       | addition       | `Defender.crit_taken_pct`, every attacker     |
+//! | Root          | rule           | the bearer cannot move ([`rooted`])           |
 //!
 //! Roll order of one support action (the website replays it from the VRF seed, keep it stable):
 //! 1. hostile only (a debuff on an enemy): `d20` hit roll against the target's defense,
@@ -49,10 +51,15 @@ pub enum ModKind {
     /// Patch 9: resistance to the aspects of its skill and its bearer's predisposition, each by
     /// its weight (`TimedMod::weights_pct`).
     Resistance,
+    /// Resonance only: every attacker's crit chance against the bearer grows by `power_bp`
+    /// (bp of a percent point, `100` = +1%).
+    Exposed,
+    /// Resonance only: the bearer cannot move (it can still act).
+    Root,
 }
 
 impl ModKind {
-    pub const COUNT: usize = 7;
+    pub const COUNT: usize = 9;
     pub const ALL: [ModKind; Self::COUNT] = [
         ModKind::Haste,
         ModKind::Slow,
@@ -61,13 +68,19 @@ impl ModKind {
         ModKind::Protection,
         ModKind::Vulnerability,
         ModKind::Resistance,
+        ModKind::Exposed,
+        ModKind::Root,
     ];
 
-    /// Slow, Weakening, Vulnerability: harmful, applied to enemies.
+    /// Slow, Weakening, Vulnerability, Exposed, Root: harmful, applied to enemies.
     pub const fn is_harmful(self) -> bool {
         matches!(
             self,
-            ModKind::Slow | ModKind::Weakening | ModKind::Vulnerability
+            ModKind::Slow
+                | ModKind::Weakening
+                | ModKind::Vulnerability
+                | ModKind::Exposed
+                | ModKind::Root
         )
     }
 }
@@ -103,7 +116,7 @@ impl TimedMod {
 pub type TimedMods = [TimedMod; MODS_MAX];
 
 /// Bit of a modifier kind in an expiry mask.
-pub const fn mod_bit(kind: ModKind) -> u8 {
+pub const fn mod_bit(kind: ModKind) -> u16 {
     1 << kind as u8
 }
 
@@ -165,7 +178,7 @@ pub fn free_slot(mods: &TimedMods, kind: ModKind) -> Option<usize> {
 
 /// Start of the bearer's own turn: every duration goes down by one; returns the [`mod_bit`]s of
 /// the modifiers that ended.
-pub fn tick_mods(mods: &mut TimedMods) -> u8 {
+pub fn tick_mods(mods: &mut TimedMods) -> u16 {
     let mut expired = 0;
     for m in mods.iter_mut().filter(|m| m.turns > 0) {
         m.turns -= 1;
@@ -215,6 +228,14 @@ pub fn apply_to_defender(defender: &mut Defender, mods: &TimedMods) {
         let v = &mut defender.vuln_bp[mods[i].aspect as usize];
         *v = v.saturating_add(mods[i].power_bp);
     }
+    defender.crit_taken_pct = defender
+        .crit_taken_pct
+        .saturating_add(mod_power(mods, ModKind::Exposed) / 100);
+}
+
+/// The bearer cannot move: a Root on it.
+pub fn rooted(mods: &TimedMods) -> bool {
+    find_mod(mods, ModKind::Root).is_some()
 }
 
 /// The part of a Resistance of `power_bp` that an aspect of weight `weight_pct` gets.
@@ -315,10 +336,11 @@ pub struct SupportBalance {
 
 impl SupportBalance {
     pub const DEFAULT: SupportBalance = SupportBalance {
-        // Haste, Slow, Empowerment, Weakening, Protection, Vulnerability, Resistance
-        mod_min_bp: [2_500, 2_500, 2_000, 2_500, 2_000, 2_000, 2_000],
-        mod_max_bp: [5_000, 5_000, 4_000, 5_000, 4_000, 4_000, 4_000],
-        mod_duration: [2, 2, 2, 2, 2, 2, 2],
+        // Haste, Slow, Empowerment, Weakening, Protection, Vulnerability, Resistance, then
+        // Exposed and Root: no skill effect gives those two (resonance only), so no numbers.
+        mod_min_bp: [2_500, 2_500, 2_000, 2_500, 2_000, 2_000, 2_000, 0, 0],
+        mod_max_bp: [5_000, 5_000, 4_000, 5_000, 4_000, 4_000, 4_000, 0, 0],
+        mod_duration: [2, 2, 2, 2, 2, 2, 2, 0, 0],
         rider_chance_pct: 30,
         passive_point_bp: 5_000,
     };

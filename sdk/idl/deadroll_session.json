@@ -3940,6 +3940,11 @@
       "code": 6091,
       "name": "CornerBlocked",
       "msg": "A diagonal step cuts the corner of a cell that cannot be entered"
+    },
+    {
+      "code": 6092,
+      "name": "Rooted",
+      "msg": "The unit is rooted and cannot move"
     }
   ],
   "types": [
@@ -5896,6 +5901,39 @@
               "`state_bit`s of the states that landed on the target."
             ],
             "type": "u8"
+          },
+          {
+            "name": "splash",
+            "docs": [
+              "Resonance pass: damage to the enemies adjacent to the target (`ResonanceSpread` says who)."
+            ],
+            "type": {
+              "defined": {
+                "name": "SplashData"
+              }
+            }
+          },
+          {
+            "name": "nova",
+            "docs": [
+              "Resonance pass: a state and a modifier on the enemies around the target."
+            ],
+            "type": {
+              "defined": {
+                "name": "NovaData"
+              }
+            }
+          },
+          {
+            "name": "jump_mod",
+            "docs": [
+              "Resonance pass: the modifier every enemy the jumps reach gets (`turns == 0` = none)."
+            ],
+            "type": {
+              "defined": {
+                "name": "ResistModData"
+              }
+            }
           }
         ]
       }
@@ -6227,6 +6265,12 @@
           },
           {
             "name": "Resistance"
+          },
+          {
+            "name": "Exposed"
+          },
+          {
+            "name": "Root"
           }
         ]
       }
@@ -6259,7 +6303,7 @@
             "docs": [
               "`deadroll_combat::support::mod_bit` of every buff or debuff that ended now."
             ],
-            "type": "u8"
+            "type": "u16"
           },
           {
             "name": "mods",
@@ -6910,6 +6954,37 @@
       }
     },
     {
+      "name": "NovaData",
+      "docs": [
+        "`deadroll_combat::Nova`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "radius",
+            "type": "u8"
+          },
+          {
+            "name": "state",
+            "type": {
+              "defined": {
+                "name": "ActiveState"
+              }
+            }
+          },
+          {
+            "name": "modifier",
+            "type": {
+              "defined": {
+                "name": "ResistModData"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
       "name": "OpKind",
       "docs": [
         "`deadroll_combat::tables::OpKind`."
@@ -6979,6 +7054,27 @@
           },
           {
             "name": "AccuracyBuff"
+          },
+          {
+            "name": "ForceCrit"
+          },
+          {
+            "name": "ApplyState"
+          },
+          {
+            "name": "ApplyMod"
+          },
+          {
+            "name": "StateIfHad"
+          },
+          {
+            "name": "Splash"
+          },
+          {
+            "name": "Nova"
+          },
+          {
+            "name": "ModAfterNative"
           }
         ]
       }
@@ -8114,6 +8210,43 @@
                 "name": "AccuracyBuffData"
               }
             }
+          },
+          {
+            "name": "hit_mods",
+            "docs": [
+              "Resonance pass: the modifier each of `hits` got (`hit_mods[i]` for `hits[i]`, `turns == 0` =",
+              "none)."
+            ],
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "TimedModData"
+                  }
+                },
+                8
+              ]
+            }
+          },
+          {
+            "name": "splashes",
+            "docs": [
+              "Resonance pass: monsters a splash hit (`splashes[..splash_count]`)."
+            ],
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "SplashHitData"
+                  }
+                },
+                8
+              ]
+            }
+          },
+          {
+            "name": "splash_count",
+            "type": "u8"
           }
         ]
       }
@@ -8642,6 +8775,62 @@
           },
           {
             "name": "Combat"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SplashData",
+      "docs": [
+        "`deadroll_combat::Splash`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "damage",
+            "type": "u32"
+          },
+          {
+            "name": "aspect",
+            "type": {
+              "defined": {
+                "name": "Aspect"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "SplashHitData",
+      "docs": [
+        "One monster a splash hit (resonance pass)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "monster",
+            "docs": [
+              "Monster index."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "damage",
+            "type": "u32"
+          },
+          {
+            "name": "hp",
+            "docs": [
+              "HP after."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "died",
+            "type": "bool"
           }
         ]
       }

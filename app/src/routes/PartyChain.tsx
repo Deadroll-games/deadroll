@@ -89,7 +89,7 @@ import { useAutoFreezeTombstone } from "../chain/useAutoFreezeTombstone";
 import { useParty, type PartyEvent } from "../chain/useParty";
 import { BASIC_ATTACK_AP, Purpose, inReach, rangeReach, type RangeTag } from "../chain/skillcheck";
 import { monsterBaseAp, monsterDefense, playerDefense, unitStats } from "../chain/stats";
-import { activeMods, combatSkill, effectText, modsAt, modsTickText, toEffectResolved, type CombatSkill, type EffectResolved } from "../chain/support";
+import { activeMods, combatSkill, effectText, modLabel, modsAt, modsTickText, toEffectResolved, type CombatSkill, type EffectResolved } from "../chain/support";
 import { useTx } from "../chain/useTx";
 import { MAP_MAX, PARTY_MAX, type Cell, type Class, type HitResult, type Race } from "../chain/types";
 import { DATA_SOURCE, MOCK_VRF, PROGRAMS, explorerUrl } from "../config";
@@ -1643,7 +1643,11 @@ function tintPreviewText(p: HitPreview): string {
 /** What a resonance did beyond its target: jumps, a knockback, burning cells, an accuracy buff. */
 function spreadText(e: ReturnType<typeof toResonanceSpread>, label: (u: number) => string): string | null {
   const parts: string[] = [];
-  for (const h of e.hits) parts.push(`${stateName(h.kind)} jumped to ${label(MONSTER_BASE + h.monster)}`);
+  for (const h of e.hits) {
+    const mod = h.modifier ? ` (${modLabel(h.modifier)})` : "";
+    parts.push(`${stateName(h.kind)} reached ${label(MONSTER_BASE + h.monster)}${mod}`);
+  }
+  for (const s of e.splashes) parts.push(`${label(MONSTER_BASE + s.monster)} took ${s.damage} splash damage${s.died ? " and died" : ""}`);
   if (e.moved) parts.push(`${label(e.target)} knocked back to ${e.moved.to.x},${e.moved.to.y}`);
   if (e.ignited.length) parts.push(`${e.ignited.length} cells on fire (Burning ${e.ignitePower}) until round ${e.untilRound}`);
   if (e.accuracy.turns > 0) parts.push(`${label(e.attacker)} +${e.accuracy.bonus} accuracy to ${aspectName(e.accuracy.aspect)} attacks`);

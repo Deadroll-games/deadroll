@@ -795,9 +795,22 @@ fn pair_input(cfg: &BalanceConfig, base: Aspect, tint: Aspect, second: Option<As
 
 /// States on the target before the hit so that every op of `base` + `tint` can act: a frozen
 /// target for Cleaving Ice and Piercing Frost (a crit on a frozen target), Chill near the threshold
-/// for the other Cold pairs (their Freeze ops).
+/// for the other Cold pairs (their Freeze ops). Resonance pass: a shocked target for Incinerating
+/// Discharge, a frozen one for Ice Conduit, a bleeding one for Blackout.
 fn setup_states(base: Aspect, tint: Aspect) -> [ActiveState; STATES_MAX] {
     let mut s = [ActiveState::default(); STATES_MAX];
+    let before = |kind, power| ActiveState {
+        kind,
+        turns: 2,
+        power,
+        source: 9,
+    };
+    match (base, tint) {
+        (Aspect::Lightning, Aspect::Fire) => s[0] = before(StateKind::Shock, 2_000),
+        (Aspect::Lightning, Aspect::Cold) => s[0] = before(StateKind::Freeze, 0),
+        (Aspect::Blood, Aspect::Blunt) => s[0] = before(StateKind::Bleeding, 1),
+        _ => {}
+    }
     if base == Aspect::Cold {
         s[0] = if matches!(tint, Aspect::Blunt | Aspect::Piercing) {
             ActiveState {

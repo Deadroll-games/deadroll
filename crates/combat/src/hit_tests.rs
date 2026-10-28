@@ -3,7 +3,7 @@ use crate::resonance::Carrier;
 use crate::rng::{ScriptedRoll, VrfRoll};
 use crate::states::has;
 use crate::tables::{AspectEntry, PairEntry, TraitEntry, NATIVE};
-use crate::ModFilter;
+use crate::{ModFilter, TimedMods};
 use deadroll_types::{Family, Form, Source};
 
 const B: Balance = Balance::DEFAULT;
@@ -1101,4 +1101,240 @@ fn preview_lists_the_tints_with_what_they_add() {
     let cold = p.tints[1];
     assert!(cold.pure && cold.chance_pct == 0);
     assert_eq!((cold.min, cold.max), (10, 10));
+}
+
+fn on_target(kind: StateKind, power: u32) -> ActiveState {
+    ActiveState {
+        kind,
+        turns: 2,
+        power,
+        source: 9,
+    }
+}
+
+#[test]
+fn force_crit_makes_the_hit_a_crit_and_the_crit_ops_act() {
+    use crate::ResonanceCondition as C;
+    // Piercing Frost (resonance pass): the hit is a crit and the target freezes.
+    let t = pair(
+        Aspect::Cold,
+        Aspect::Piercing,
+        C::CanBeFrozen,
+        [
+            Op::new(OpKind::ForceCrit, 0, 0),
+            Op::new(OpKind::StateOnCrit, st(StateKind::Freeze), 0),
+        ],
+    );
+    let input = cold_bolt(Aspect::Piercing);
+    let r = resolve_hit(&input, &B, &t, &mut ScriptedRoll::new([14, 0, 0]));
+    assert!(r.crit && r.crit_roll.is_none());
+    assert_eq!(r.packets()[0].more_bp, BP + B.crit_more_bp);
+    assert!(op(&r, 0).acted && op(&r, 1).acted);
+    assert!(has(&r.states, StateKind::Freeze));
+    // The tint does not trigger: a plain hit.
+    let r = resolve_hit(&input, &B, &t, &mut ScriptedRoll::new([14, 99, 0]));
+    assert!(!r.crit && !has(&r.states, StateKind::Freeze));
+    // The preview shows the forced crit's damage for that tint.
+    let p = preview_hit(&input, &B, &t);
+    assert_eq!((p.tints[0].min, p.tints[0].max), (p.crit_min, p.crit_max));
+}
+
+#[test]
+fn exposed_on_the_target_adds_to_every_attackers_crit_chance() {
+    let mut input = basic(Aspect::Piercing, 4, 8, 0);
+    // No crit chance at all: no roll.
+    let r = resolve_hit(&input, &B, &T, &mut ScriptedRoll::new([14, 50]));
+    assert_eq!(r.crit_roll, None);
+    let mut mods = TimedMods::default();
+    crate::support::apply_mod(
+        &mut mods,
+        TimedMod {
+            kind: ModKind::Exposed,
+            turns: 2,
+            power_bp: 2_000,
+            ..TimedMod::default()
+        },
+    );
+    crate::support::apply_to_defender(&mut input.defender, &mods);
+    assert_eq!(input.defender.crit_taken_pct, 20);
+    // d20 15, crit roll 10 < 20: a crit.
+    let r = resolve_hit(&input, &B, &T, &mut ScriptedRoll::new([14, 10, 50]));
+    assert_eq!((r.crit, r.crit_roll), (true, Some(10)));
+    assert!(preview_hit(&input, &B, &T).crit_bp > BP / 20);
+}
+
+#[test]
+fn state_if_had_needs_the_native_state_before_the_hit() {
+    use crate::ResonanceCondition as C;
+    // Incinerating Discharge (resonance pass): Burning only on a target that was already shocked.
+    let t = pair(
+        Aspect::Lightning,
+        Aspect::Fire,
+        C::CanBeShocked,
+        [
+            Op::new(OpKind::StateIfHad, st(StateKind::Burning), BP),
+            Op::NONE,
+        ],
+    );
+    let mut input = skill_hit(Aspect::Lightning, Aspect::Fire);
+    let r = resolve_hit(&input, &B, &t, &mut rolls(0));
+    assert!(has(&r.states, StateKind::Shock) && !has(&r.states, StateKind::Burning));
+    assert!(!op(&r, 0).acted);
+    input.defender.states[0] = on_target(StateKind::Shock, 2_000);
+    // The native state fails its roll: Burning still lands, without a roll.
+    let r = resolve_hit(&input, &B, &t, &mut ScriptedRoll::new([14, 0, 0, 99]));
+    let o = op(&r, 0);
+    assert!(o.acted && !o.state.rolled);
+    assert_eq!(o.state.kind, StateKind::Burning);
+    assert!(has(&r.states, StateKind::Burning));
+    // Immune to Burning: nothing.
+    input.defender.immune_states = state_bit(StateKind::Burning);
+    let r = resolve_hit(&input, &B, &t, &mut rolls(0));
+    assert!(!op(&r, 0).acted);
+}
+
+#[test]
+fn splash_is_a_share_of_the_damage_when_the_target_had_the_state() {
+    use crate::ResonanceCondition as C;
+    let t = pair(
+        Aspect::Lightning,
+        Aspect::Cold,
+        C::CanBeShocked,
+        [
+            Op::new(OpKind::Splash, st(StateKind::Freeze), 5_000),
+            Op::NONE,
+        ],
+    );
+    let mut input = skill_hit(Aspect::Lightning, Aspect::Cold);
+    let r = resolve_hit(&input, &B, &t, &mut rolls(0));
+    assert_eq!(r.splash, Splash::default());
+    assert!(!op(&r, 0).acted);
+    input.defender.states[0] = frozen();
+    let r = resolve_hit(&input, &B, &t, &mut rolls(0));
+    assert_eq!(r.splash.damage, r.damage / 2);
+    assert_eq!(r.splash.aspect, Aspect::Lightning);
+    assert_eq!(op(&r, 0).amount, r.damage / 2);
+}
+
+#[test]
+fn apply_state_lands_without_a_roll_and_is_bleeding_is_the_condition() {
+    use crate::ResonanceCondition as C;
+    // Blackout (resonance pass): on a bleeding target, Stun and the Bleeding refreshed.
+    let t = pair(
+        Aspect::Blood,
+        Aspect::Blunt,
+        C::IsBleeding,
+        [
+            Op::new(OpKind::ApplyState, st(StateKind::Stun), BP),
+            Op::new(OpKind::ApplyState, NATIVE, BP),
+        ],
+    );
+    let mut input = skill_hit(Aspect::Blood, Aspect::Blunt);
+    let r = resolve_hit(&input, &B, &t, &mut rolls(0));
+    assert!(!r.resonances[0].unwrap().active);
+    assert!(!has(&r.states, StateKind::Stun));
+    input.defender.states[0] = ActiveState {
+        kind: StateKind::Bleeding,
+        turns: 1,
+        power: 1,
+        source: 9,
+    };
+    // The native roll fails (99): the resonance still stuns and refreshes the Bleeding.
+    let r = resolve_hit(&input, &B, &t, &mut ScriptedRoll::new([14, 0, 0, 99]));
+    assert!(r.resonances[0].unwrap().active);
+    assert!(has(&r.states, StateKind::Stun));
+    assert_eq!(
+        find(&r.states, StateKind::Bleeding).turns,
+        B.turns(StateKind::Bleeding)
+    );
+    assert!(op(&r, 0).acted && op(&r, 1).acted);
+}
+
+#[test]
+fn apply_mod_marks_the_target_and_follows_the_jumps() {
+    use crate::ResonanceCondition as C;
+    // Lightning Needle (resonance pass): Shock jumps, both are exposed to crits.
+    let t = pair(
+        Aspect::Lightning,
+        Aspect::Piercing,
+        C::CanBeShocked,
+        [
+            Op::new(OpKind::Jump, NATIVE, 0),
+            Op::new(OpKind::ApplyMod, ModKind::Exposed as u8, BP),
+        ],
+    );
+    let input = skill_hit(Aspect::Lightning, Aspect::Piercing);
+    let r = resolve_hit(&input, &B, &t, &mut rolls(0));
+    assert_eq!(r.jump_count, 1);
+    let m = r.target_mods()[0];
+    assert_eq!(
+        (m.kind, m.power_bp, m.turns),
+        (
+            ModKind::Exposed,
+            B.res_exposed_pct[0] * 100,
+            mod_turns(B.res_mod_turns)
+        )
+    );
+    assert_eq!(r.jump_mod, m);
+    // The native state fails: no jump, the target is still marked.
+    let r = resolve_hit(&input, &B, &t, &mut ScriptedRoll::new([14, 0, 0, 99]));
+    assert_eq!((r.jump_count, r.target_mod_count), (0, 1));
+    // Root has no strength, only presence.
+    let t = pair(
+        Aspect::Piercing,
+        Aspect::Blunt,
+        C::Always,
+        [Op::new(OpKind::ApplyMod, ModKind::Root as u8, BP), Op::NONE],
+    );
+    let input = skill_hit(Aspect::Piercing, Aspect::Blunt);
+    let r = resolve_hit(&input, &B, &t, &mut rolls(0));
+    let mut mods = TimedMods::default();
+    crate::support::apply_mod(&mut mods, r.target_mods()[0]);
+    assert!(crate::support::rooted(&mods));
+    assert!(!crate::support::rooted(&TimedMods::default()));
+}
+
+#[test]
+fn mod_after_native_lasts_beyond_the_state_and_nova_spreads_it() {
+    use crate::ResonanceCondition as C;
+    // Frozen Ram (resonance pass): Stun longer, then Slow.
+    let t = pair(
+        Aspect::Blunt,
+        Aspect::Cold,
+        C::CanBeStunned,
+        [
+            Op::new(OpKind::NativeTurns, 0, BP),
+            Op::new(OpKind::ModAfterNative, ModKind::Slow as u8, BP),
+        ],
+    );
+    let input = skill_hit(Aspect::Blunt, Aspect::Cold);
+    let r = resolve_hit(&input, &B, &t, &mut rolls(0));
+    let stun = find(&r.states, StateKind::Stun).turns;
+    assert_eq!(stun, B.turns(StateKind::Stun) + B.res_turns[0]);
+    let m = r.target_mods()[0];
+    assert_eq!(
+        (m.kind, m.turns),
+        (ModKind::Slow, mod_turns(B.res_mod_turns + stun))
+    );
+    let r = resolve_hit(&input, &B, &t, &mut ScriptedRoll::new([14, 0, 0, 99]));
+    assert_eq!(r.target_mod_count, 0);
+    // Dread Pulse (resonance pass): after the Stun lands, the enemies around are stunned and weakened.
+    let t = pair(
+        Aspect::Blunt,
+        Aspect::Blood,
+        C::CanBeStunned,
+        [Op::new(OpKind::Nova, ModKind::Weakening as u8, 2), Op::NONE],
+    );
+    let input = skill_hit(Aspect::Blunt, Aspect::Blood);
+    let r = resolve_hit(&input, &B, &t, &mut rolls(0));
+    assert_eq!(r.nova.radius, 2);
+    assert_eq!(r.nova.state, find(&r.states, StateKind::Stun));
+    assert_eq!(
+        (r.nova.modifier.kind, r.nova.modifier.power_bp),
+        (ModKind::Weakening, B.res_mod_bp[0])
+    );
+    // The target itself is not weakened.
+    assert_eq!(r.target_mod_count, 0);
+    let r = resolve_hit(&input, &B, &t, &mut ScriptedRoll::new([14, 0, 0, 99]));
+    assert_eq!(r.nova, Nova::default());
 }

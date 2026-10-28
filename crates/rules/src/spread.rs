@@ -12,10 +12,17 @@
 //! - Cells around the target (after the knockback) that are passable burn for
 //!   `Balance::burning_cell_rounds` rounds; whoever steps in catches Burning (section 7.7: such
 //!   cells "set on fire those who step on them").
+//! - A jump's modifier (`HitResult::jump_mod`) lands on every monster the jumps reach.
+//! - A nova lands its state (unless immune) and its modifier on every living monster within its
+//!   radius of the target, lowest index first.
+//! - A splash hits every living monster adjacent to the target that is not immune to its aspect,
+//!   for the same damage (a share of the hit, already through the target's defense).
 use deadroll_combat::{
-    apply_chill, apply_state, states::freeze_for, Applied, HitResult, JumpMode, JUMPS_MAX,
+    apply_chill, apply_state, states::freeze_for, Applied, HitResult, JumpMode, TimedMod, JUMPS_MAX,
 };
 use deadroll_types::{ActiveState, Cell, Monster, StateKind};
+
+use crate::input::take_damage;
 
 use crate::config::BalanceConfig;
 use crate::monster::MonsterDefense;
@@ -51,12 +58,25 @@ impl BurningCell {
     }
 }
 
-/// One monster a state jumped to.
+/// One monster a state jumped to (or a nova reached).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SpreadHit {
     pub monster: u8,
     pub kind: StateKind,
     pub applied: Applied,
+    /// A modifier the caller lands on the monster's own (empty when `turns == 0`).
+    pub modifier: TimedMod,
+}
+
+/// One monster a splash hit.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SplashHit {
+    pub monster: u8,
+    pub damage: u32,
+    /// HP after the splash.
+    pub hp: u32,
+    /// The splash killed it (`alive` cleared; the caller pays the kill).
+    pub died: bool,
 }
 
 /// What [`spread`] did.
@@ -69,6 +89,8 @@ pub struct SpreadOutcome {
     /// Cells set on fire (or refreshed) by this hit.
     pub ignited: [Cell; 8],
     pub ignited_count: u8,
+    pub splashes: [SplashHit; SPREAD_HITS_MAX],
+    pub splash_count: u8,
 }
 
 impl SpreadOutcome {
@@ -76,13 +98,29 @@ impl SpreadOutcome {
         &self.hits[..self.hit_count as usize]
     }
 
+    pub fn splashes(&self) -> &[SplashHit] {
+        &self.splashes[..self.splash_count as usize]
+    }
+
     pub fn ignited(&self) -> &[Cell] {
         &self.ignited[..self.ignited_count as usize]
     }
 
     pub fn is_empty(&self) -> bool {
-        self.hit_count == 0 && self.moved.is_none() && self.ignited_count == 0
+        self.hit_count == 0
+            && self.moved.is_none()
+            && self.ignited_count == 0
+            && self.splash_count == 0
     }
+}
+
+/// `result` passes something on to other monsters, moves the target or sets cells on fire.
+pub fn spreads(result: &HitResult) -> bool {
+    result.jump_count > 0
+        || result.knockback > 0
+        || result.ignite_power > 0
+        || result.nova.radius > 0
+        || result.splash.damage > 0
 }
 
 fn chebyshev(a: Cell, b: Cell) -> u8 {
@@ -184,6 +222,7 @@ pub fn spread(
                     monster: i as u8,
                     kind,
                     applied,
+                    modifier: result.jump_mod,
                 };
                 out.hit_count += 1;
             }
@@ -193,6 +232,63 @@ pub fn spread(
             if jump.mode != JumpMode::Chain {
                 break;
             }
+        }
+    }
+
+    // Nova: every living monster within the radius (the target excluded), lowest index first.
+    let nova = result.nova;
+    if nova.radius > 0 {
+        for i in 0..monsters.len() {
+            if (out.hit_count as usize) >= SPREAD_HITS_MAX {
+                break;
+            }
+            if i == target
+                || !monsters[i].alive
+                || chebyshev(cell_of(&monsters[i]), origin) > nova.radius
+            {
+                continue;
+            }
+            let applied = if can(monsters, i, nova.state.kind) {
+                let immune = defense.get(i).map_or(0, |d| d.immune_states);
+                land_state(&mut monsters[i].states, nova.state, immune, cfg)
+            } else {
+                Applied::None
+            };
+            out.hits[out.hit_count as usize] = SpreadHit {
+                monster: i as u8,
+                kind: nova.state.kind,
+                applied,
+                modifier: nova.modifier,
+            };
+            out.hit_count += 1;
+        }
+    }
+
+    // Splash: the same damage on every living neighbour not immune to its aspect.
+    let splash = result.splash;
+    if splash.damage > 0 {
+        for (i, m) in monsters.iter_mut().enumerate() {
+            if (out.splash_count as usize) >= SPREAD_HITS_MAX {
+                break;
+            }
+            let immune = defense
+                .get(i)
+                .is_some_and(|d| d.immune_aspects & (1 << splash.aspect as u8) != 0);
+            if i == target || immune || !m.alive || chebyshev(cell_of(m), origin) != 1 {
+                continue;
+            }
+            let (hp, died) = take_damage(m.hp, splash.damage);
+            m.hp = hp;
+            if died {
+                m.alive = false;
+            }
+            out.splashes[out.splash_count as usize] = SplashHit {
+                monster: i as u8,
+                damage: splash.damage,
+                hp,
+                died,
+            };
+            out.splash_count += 1;
         }
     }
 
@@ -392,7 +488,8 @@ mod tests {
             [SpreadHit {
                 monster: 2,
                 kind: StateKind::Burning,
-                applied: Applied::Added
+                applied: Applied::Added,
+                modifier: TimedMod::default(),
             }]
         );
         assert!(has(&ms[2], StateKind::Burning) && !has(&ms[3], StateKind::Burning));
@@ -634,5 +731,112 @@ mod tests {
             ignite(&mut cells, c(i, 9), until, 1, 0, 4);
         }
         assert!(!ignite(&mut cells, c(9, 0), until, 1, 0, 4));
+    }
+
+    fn weakening() -> TimedMod {
+        TimedMod {
+            kind: deadroll_combat::ModKind::Weakening,
+            turns: 3,
+            power_bp: 5_000,
+            ..TimedMod::default()
+        }
+    }
+
+    fn stun() -> ActiveState {
+        ActiveState {
+            kind: StateKind::Stun,
+            turns: 1,
+            power: 0,
+            source: 0,
+        }
+    }
+
+    fn run(r: &HitResult, ms: &mut [Monster], defense: &[MonsterDefense]) -> SpreadOutcome {
+        let mut cells = [BurningCell::default(); BURNING_CELLS_MAX];
+        spread(CFG, r, c(0, 5), 0, ms, defense, &OPEN, &mut cells, 1, 0)
+    }
+
+    #[test]
+    fn a_jump_carries_the_jump_modifier() {
+        let mut ms = [monster(5, 5), monster(6, 5)];
+        let mut r = with_jump(JumpMode::Adjacent, burning(3), StateKind::Burning, 1);
+        r.jump_mod = weakening();
+        let out = run(&r, &mut ms, &[MonsterDefense::NONE; 2]);
+        assert_eq!(out.hits()[0].modifier, weakening());
+        assert!(spreads(&r));
+    }
+
+    #[test]
+    fn a_nova_reaches_every_living_monster_in_its_radius_but_the_target() {
+        let mut ms = [
+            monster(5, 5),
+            monster(7, 7), // radius 2
+            monster(8, 5), // too far
+            monster(4, 4),
+            monster(5, 6),
+        ];
+        ms[4].alive = false;
+        let mut defense = [MonsterDefense::NONE; 5];
+        defense[3].immune_states = 1 << StateKind::Stun as u8;
+        let r = HitResult {
+            nova: deadroll_combat::Nova {
+                radius: 2,
+                state: stun(),
+                modifier: weakening(),
+            },
+            ..HitResult::default()
+        };
+        assert!(spreads(&r));
+        let out = run(&r, &mut ms, &defense);
+        let reached: Vec<u8> = out.hits().iter().map(|h| h.monster).collect();
+        assert_eq!(reached, [1, 3]);
+        assert!(has(&ms[1], StateKind::Stun) && !has(&ms[0], StateKind::Stun));
+        // Immune to Stun: no Stun, still the modifier.
+        assert!(!has(&ms[3], StateKind::Stun));
+        assert_eq!(out.hits()[1].applied, Applied::None);
+        assert_eq!(out.hits()[1].modifier, weakening());
+    }
+
+    #[test]
+    fn a_splash_hits_the_living_neighbours_not_immune_to_its_aspect_and_can_kill() {
+        let mut ms = [
+            monster(5, 5),
+            monster(6, 5),
+            monster(4, 6),
+            monster(5, 4),
+            monster(7, 5), // not adjacent
+        ];
+        ms[2].hp = 3;
+        let mut defense = [MonsterDefense::NONE; 5];
+        defense[3].immune_aspects = 1 << deadroll_types::Aspect::Lightning as u8;
+        let r = HitResult {
+            splash: deadroll_combat::Splash {
+                damage: 4,
+                aspect: deadroll_types::Aspect::Lightning,
+            },
+            ..HitResult::default()
+        };
+        assert!(spreads(&r));
+        let out = run(&r, &mut ms, &defense);
+        assert_eq!(
+            out.splashes(),
+            [
+                SplashHit {
+                    monster: 1,
+                    damage: 4,
+                    hp: 6,
+                    died: false
+                },
+                SplashHit {
+                    monster: 2,
+                    damage: 4,
+                    hp: 0,
+                    died: true
+                },
+            ]
+        );
+        assert!(!ms[2].alive && ms[3].hp == 10 && ms[4].hp == 10 && ms[0].hp == 10);
+        assert!(!out.is_empty());
+        assert!(!spreads(&HitResult::default()));
     }
 }

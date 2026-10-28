@@ -217,7 +217,7 @@ fn state(name: &str) -> Result<StateKind, String> {
     parse(name, StateKind::ALL, "state")
 }
 
-const CONDITIONS: [ResonanceCondition; 9] = [
+const CONDITIONS: [ResonanceCondition; 10] = [
     ResonanceCondition::Always,
     ResonanceCondition::CanBurn,
     ResonanceCondition::CanBeChilled,
@@ -227,6 +227,7 @@ const CONDITIONS: [ResonanceCondition; 9] = [
     ResonanceCondition::CanBleed,
     ResonanceCondition::CanBeStunned,
     ResonanceCondition::HasArmor,
+    ResonanceCondition::IsBleeding,
 ];
 
 fn condition(name: &str) -> Result<ResonanceCondition, String> {

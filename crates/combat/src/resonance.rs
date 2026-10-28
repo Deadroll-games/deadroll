@@ -73,6 +73,8 @@ pub enum ResonanceCondition {
     CanBleed,
     CanBeStunned,
     HasArmor,
+    /// Bleeding before this attack.
+    IsBleeding,
 }
 
 /// Id of a pair for names and lore off-chain: `base * 6 + tint`.
@@ -112,6 +114,7 @@ pub fn condition_met(condition: ResonanceCondition, target: &TargetView) -> bool
         C::CanBleed => target.can(StateKind::Bleeding),
         C::CanBeStunned => target.can(StateKind::Stun),
         C::HasArmor => target.armor > 0,
+        C::IsBleeding => target.has(StateKind::Bleeding),
     }
 }
 

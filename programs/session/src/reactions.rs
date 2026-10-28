@@ -16,8 +16,8 @@
 //!   what the action did to them (`crate::monster_cb`).
 use anchor_lang::prelude::*;
 use deadroll_combat::{
-    AccuracyBuff, Applied as CombatApplied, EffectRoll, HitInput, HitResult, ResonanceTables,
-    States, TimedMods,
+    apply_mod, AccuracyBuff, Applied as CombatApplied, EffectRoll, HitInput, HitResult,
+    ResonanceTables, States, TimedMods,
 };
 use deadroll_rules::{
     aura::REACTIVE_AURA,
@@ -25,7 +25,7 @@ use deadroll_rules::{
     line::{targets_on_line, LINE_TARGETS_MAX},
     reactive::{entered_next_to, reaction, Event, Reaction},
     resolve,
-    spread::{spread, Field, SpreadOutcome},
+    spread::{spread, spreads, Field, SpreadOutcome},
     HeroStats, MonsterDefense,
 };
 use deadroll_skillcheck::{Purpose, Target};
@@ -35,7 +35,7 @@ use crate::{
     errors::SessionError,
     events::{
         ActionRequested, AuraChanged, EffectResolved, ReactionKind, ReactiveTriggered,
-        ResonanceSpread, SpreadHitData,
+        ResonanceSpread, SplashHitData, SpreadHitData,
     },
     hit_event::{emit_hit_resolved, HitItemsData, ItemBonusData},
     line::skill_line,
@@ -44,8 +44,10 @@ use crate::{
     party::{party_keys, Party},
     rules::{cooldown_after_use, step_cost, Unit, BALANCE},
     state::{
-        external::MapLayoutView, mods::from_combat, pending_kind, GameSession, Monsters,
-        Participation, PendingAction, PendingReactiveData,
+        external::MapLayoutView,
+        mods::{from_combat, mod_data},
+        pending_kind, GameSession, Monsters, Participation, PendingAction, PendingReactiveData,
+        TimedModData,
     },
     vrf::{self, SyscallRoll},
 };
@@ -401,12 +403,13 @@ impl<'a, 'info> Cb<'a, 'info> {
         )
     }
 
-    /// Plays the jumps, knockback and burning cells of the last hit on monster `target` and
-    /// writes `ResonanceSpread` (`deadroll_rules::spread`, the simulator's code too).
+    /// Plays the jumps, nova, splash, knockback and burning cells of the last hit on monster
+    /// `target` and writes `ResonanceSpread` (`deadroll_rules::spread`, the simulator's code too).
+    /// A splash kill is paid like any kill (`unpaid_kills`).
     #[inline(never)]
     fn spread_hit(
         &mut self,
-        session: &GameSession,
+        session: &mut GameSession,
         target: u8,
         from: Cell,
         attacker: u8,
@@ -414,13 +417,15 @@ impl<'a, 'info> Cb<'a, 'info> {
         accuracy: &AccuracyBuff,
     ) -> Result<Option<(Cell, Cell)>> {
         let result = &self.result;
-        if result.jump_count == 0 && result.knockback == 0 && result.ignite_power == 0 {
+        if !spreads(result) {
             if !result.accuracy_buff.is_empty() {
                 self.emit_spread(
                     attacker,
                     target_unit,
                     &Default::default(),
                     &[],
+                    &Default::default(),
+                    &Default::default(),
                     accuracy,
                     0,
                     session.core.round,
@@ -482,6 +487,38 @@ impl<'a, 'info> Cb<'a, 'info> {
                 states: all[h.monster as usize].states,
             };
         }
+        let mut hit_mods = [TimedModData::default(); 8];
+        for (h, data) in out.hits().iter().zip(hit_mods.iter_mut()) {
+            if h.modifier.is_empty() {
+                continue;
+            }
+            let mut mods = self.monsters.mods(h.monster)?;
+            apply_mod(&mut mods, h.modifier);
+            self.monsters.set_mods(h.monster, &mods)?;
+            *data = mod_data(&h.modifier);
+        }
+        let mut splashes = [SplashHitData::default(); 8];
+        for (h, data) in out.splashes().iter().zip(splashes.iter_mut()) {
+            let mut m = all[h.monster as usize];
+            if h.died {
+                outcomes::monster_killed(
+                    session,
+                    self.session_key,
+                    self.monsters,
+                    &mut m,
+                    h.monster,
+                    attacker,
+                    self.seed,
+                )?;
+            }
+            self.monsters.set(h.monster, &m)?;
+            *data = SplashHitData {
+                monster: h.monster,
+                damage: h.damage,
+                hp: h.hp,
+                died: h.died,
+            };
+        }
         if out.moved.is_some() {
             self.monsters.set(target, &all[target as usize])?;
         }
@@ -498,6 +535,8 @@ impl<'a, 'info> Cb<'a, 'info> {
             target_unit,
             &out,
             &hits[..out.hit_count as usize],
+            &hit_mods,
+            &splashes,
             accuracy,
             ignite,
             until,
@@ -512,6 +551,8 @@ impl<'a, 'info> Cb<'a, 'info> {
         target: u8,
         out: &SpreadOutcome,
         hits: &[SpreadHitData],
+        hit_mods: &[TimedModData; 8],
+        splashes: &[SplashHitData; 8],
         accuracy: &AccuracyBuff,
         ignite_power: u32,
         until_round: u16,
@@ -536,6 +577,9 @@ impl<'a, 'info> Cb<'a, 'info> {
             ignite_power,
             until_round,
             accuracy: (*accuracy).into(),
+            hit_mods: *hit_mods,
+            splashes: *splashes,
+            splash_count: out.splash_count,
         });
     }
 

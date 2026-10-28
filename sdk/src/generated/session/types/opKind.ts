@@ -38,6 +38,13 @@ export const OpKind = {
   18: "AddPacket",
   19: "Penetrate",
   20: "AccuracyBuff",
+  21: "ForceCrit",
+  22: "ApplyState",
+  23: "ApplyMod",
+  24: "StateIfHad",
+  25: "Splash",
+  26: "Nova",
+  27: "ModAfterNative",
   None: 0,
   Multiplier: 1,
   StateOnCrit: 2,
@@ -59,6 +66,13 @@ export const OpKind = {
   AddPacket: 18,
   Penetrate: 19,
   AccuracyBuff: 20,
+  ForceCrit: 21,
+  ApplyState: 22,
+  ApplyMod: 23,
+  StateIfHad: 24,
+  Splash: 25,
+  Nova: 26,
+  ModAfterNative: 27,
 } as const;
 
 /** `deadroll_combat::tables::OpKind`. */

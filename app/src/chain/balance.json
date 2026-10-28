@@ -212,7 +212,23 @@
     ],
     "res_accuracy_turns": 2,
     "burning_cell_rounds": 2,
-    "aspect_state_resist_share_bp": 2500
+    "aspect_state_resist_share_bp": 2500,
+    "res_exposed_pct": [
+      20,
+      19,
+      18,
+      17,
+      16,
+      15,
+      14,
+      13,
+      12,
+      11,
+      10,
+      9,
+      8,
+      7
+    ]
   },
   "support": {
     "mod_min_bp": [
@@ -222,7 +238,9 @@
       2500,
       2000,
       2000,
-      2000
+      2000,
+      0,
+      0
     ],
     "mod_max_bp": [
       5000,
@@ -231,7 +249,9 @@
       5000,
       4000,
       4000,
-      4000
+      4000,
+      0,
+      0
     ],
     "mod_duration": [
       2,
@@ -240,7 +260,9 @@
       2,
       2,
       2,
-      2
+      2,
+      0,
+      0
     ],
     "rider_chance_pct": 30,
     "passive_point_bp": 5000

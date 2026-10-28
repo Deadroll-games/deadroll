@@ -17,14 +17,14 @@ import type { ActiveStateAcc, AuraAcc, CharacterAcc, MonsterAcc, SkillRecordAcc 
 import { cellKind, type ActiveState, type Cell, type TimedMod } from "./types";
 
 /** `ABI_VERSION` of the module this wrapper speaks. */
-export const COMBAT_ABI = 8;
+export const COMBAT_ABI = 9;
 /** Bytes of the resonance tables: the registry `aspects`, `traits` and `resonances` bodies. */
 export const COMBAT_TABLES_LEN = 48 + 192 + 576;
 export const COMBAT_STATS = 4;
 export const COMBAT_EQUIP_SLOTS = 11;
 export const COMBAT_STATES = 6;
-/** Modifier slots, one per kind (patch 9 added Resistance). */
-export const COMBAT_MODS = 7;
+/** Modifier slots, one per kind (patch 9 added Resistance, the resonance pass Exposed and Root). */
+export const COMBAT_MODS = 9;
 export const COMBAT_ASPECTS = 6;
 /** State kinds, Penetration (6) included. */
 export const COMBAT_STATE_KINDS = 7;

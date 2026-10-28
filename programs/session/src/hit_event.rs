@@ -98,6 +98,14 @@ pub enum OpKind {
     AddPacket,
     Penetrate,
     AccuracyBuff,
+    /// Resonance pass.
+    ForceCrit,
+    ApplyState,
+    ApplyMod,
+    StateIfHad,
+    Splash,
+    Nova,
+    ModAfterNative,
 }
 
 /// `deadroll_combat::OpOrigin`.
@@ -215,6 +223,27 @@ pub struct HitResultData {
     pub accuracy_buff: AccuracyBuffData,
     /// `state_bit`s of the states that landed on the target.
     pub landed: u8,
+    /// Resonance pass: damage to the enemies adjacent to the target (`ResonanceSpread` says who).
+    pub splash: SplashData,
+    /// Resonance pass: a state and a modifier on the enemies around the target.
+    pub nova: NovaData,
+    /// Resonance pass: the modifier every enemy the jumps reach gets (`turns == 0` = none).
+    pub jump_mod: ResistModData,
+}
+
+/// `deadroll_combat::Splash`.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SplashData {
+    pub damage: u32,
+    pub aspect: Aspect,
+}
+
+/// `deadroll_combat::Nova`.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NovaData {
+    pub radius: u8,
+    pub state: ActiveState,
+    pub modifier: ResistModData,
 }
 
 /// What a player's worn items put into a hit (`deadroll_rules::items::ItemBonus`), so the

@@ -160,17 +160,31 @@ export function toResonanceSpread(ev: any): ResonanceSpread {
     actionCounter: ev.actionCounter,
     attacker: ev.attacker,
     target: ev.target,
-    hits: (ev.hits as any[]).slice(0, ev.hitCount).map((h) => ({
-      monster: h.monster,
-      kind: h.kind as StateKind,
-      applied: h.applied as Applied,
-      states: (h.states as any[]).filter((s) => s.turns > 0).map(activeState),
-    })),
+    hits: (ev.hits as any[]).slice(0, ev.hitCount).map((h, i) => {
+      // Resonance pass: the modifier each hit got (none in events from before it).
+      const m = (ev.hitMods as any[] | undefined)?.[i];
+      return {
+        monster: h.monster,
+        kind: h.kind as StateKind,
+        applied: h.applied as Applied,
+        states: (h.states as any[]).filter((s) => s.turns > 0).map(activeState),
+        modifier:
+          m && m.turns > 0
+            ? { kind: m.kind as TimedMod["kind"], aspect: aspect(m.aspect), turns: m.turns, powerBp: m.powerBp, source: m.source }
+            : null,
+      };
+    }),
     moved: ev.moved ? { from: cell(ev.movedFrom), to: cell(ev.movedTo) } : null,
     ignited: (ev.ignited as any[]).slice(0, ev.ignitedCount).map(cell),
     ignitePower: ev.ignitePower,
     untilRound: ev.untilRound,
     accuracy: accuracyBuff(ev.accuracy),
+    splashes: ((ev.splashes as any[] | undefined) ?? []).slice(0, ev.splashCount ?? 0).map((s) => ({
+      monster: s.monster,
+      damage: s.damage,
+      hp: s.hp,
+      died: s.died,
+    })),
   };
 }
 

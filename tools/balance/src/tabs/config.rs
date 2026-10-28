@@ -302,6 +302,15 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                         ui.end_row();
                         widgets::label(
                             ui,
+                            "Exposed, crit chance percent",
+                            c.combat.res_exposed_pct != d.combat.res_exposed_pct,
+                        );
+                        for v in c.combat.res_exposed_pct.iter_mut() {
+                            widgets::int(ui, v, 0..=100);
+                        }
+                        ui.end_row();
+                        widgets::label(
+                            ui,
                             "Tint added damage min / max",
                             c.combat.tint_added != d.combat.tint_added,
                         );

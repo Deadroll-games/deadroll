@@ -149,7 +149,10 @@ function Resonances() {
               <td>{r.tint}</td>
               <td className="mono">{r.condition}</td>
               <td className="mono">{r.ops.map(opText).join(", ")}</td>
-              <td>{r.about}</td>
+              <td>
+                {r.about}
+                {r.lore && <div className="muted">{r.lore}</div>}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -222,6 +225,7 @@ function SkillPreview() {
                   {pairs.map((r) => (
                     <li key={r.tint}>
                       {r.tint} tint: <b>{r.name}</b>. {r.about}
+                      {r.lore && <div className="muted">{r.lore}</div>}
                     </li>
                   ))}
                 </ul>

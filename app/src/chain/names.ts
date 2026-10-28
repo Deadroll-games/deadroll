@@ -131,6 +131,27 @@ export function opText(op: OpResult, base: Aspect): string {
     case OpKind.AccuracyBuff:
       text = `+${op.amount} accuracy to ${aspectName(op.arg as Aspect)} attacks`;
       break;
+    case OpKind.ForceCrit:
+      text = "the hit is a crit";
+      break;
+    case OpKind.ApplyState:
+      text = `applies ${state}`;
+      break;
+    case OpKind.StateIfHad:
+      text = `on a target that already had ${native}, applies ${state}`;
+      break;
+    case OpKind.ApplyMod:
+      text = `${MOD_NAMES[op.arg as ModKind] ?? "a modifier"} on the target and on the enemies the jumps reach`;
+      break;
+    case OpKind.ModAfterNative:
+      text = `${native} brings ${MOD_NAMES[op.arg as ModKind] ?? "a modifier"}, lasting beyond it`;
+      break;
+    case OpKind.Splash:
+      text = `${op.arg === OP_NATIVE ? "" : `on a target with ${state}, `}the adjacent enemies take ${op.amount} damage`;
+      break;
+    case OpKind.Nova:
+      text = `${native} and ${MOD_NAMES[op.arg as ModKind] ?? "a modifier"} hit the enemies within ${op.amount} cells`;
+      break;
     default:
       text = "nothing";
   }

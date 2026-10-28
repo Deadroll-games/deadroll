@@ -234,6 +234,7 @@ export const PROGRAM_ERRORS = {
     6089: ["PathNotAdjacent", "A cell of the path is not next to the one before it"],
     6090: ["ActorMismatch", "The unit, the participation and the signer do not match"],
     6091: ["CornerBlocked", "A diagonal step cuts the corner of a cell that cannot be entered"],
+    6092: ["Rooted", "The unit is rooted and cannot move"],
   },
   city: {
     6000: ["Unauthorized", "Caller is not authorized for this instruction"],

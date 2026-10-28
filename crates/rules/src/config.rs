@@ -733,6 +733,11 @@ mod remote {
     use deadroll_skillcheck::SKILL_ASPECTS_MAX;
     use deadroll_types::StateKind;
 
+    /// Presets written before the resonance pass have no Exposed curve.
+    fn exposed_default() -> [u32; 14] {
+        Balance::DEFAULT.res_exposed_pct
+    }
+
     #[derive(Serialize, Deserialize)]
     #[serde(remote = "Balance")]
     pub struct BalanceDef {
@@ -764,6 +769,8 @@ mod remote {
         pub res_accuracy_turns: u8,
         pub burning_cell_rounds: u8,
         pub aspect_state_resist_share_bp: u32,
+        #[serde(default = "exposed_default")]
+        pub res_exposed_pct: [u32; 14],
     }
 
     #[derive(Serialize, Deserialize)]

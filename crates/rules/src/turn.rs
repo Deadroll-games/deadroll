@@ -23,7 +23,7 @@ pub struct TurnStart {
     /// `state_bit`s of the states that ended now.
     pub expired: u8,
     /// `deadroll_combat::support::mod_bit`s of the buffs and debuffs that ended now.
-    pub expired_mods: u8,
+    pub expired_mods: u16,
     /// Unit that applied the strongest over-time state (the killer on a death), `EMPTY_UNIT` if none.
     pub dot_source: u8,
 }

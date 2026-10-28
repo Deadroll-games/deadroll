@@ -167,6 +167,13 @@ export const OpKind = {
   AddPacket: 18,
   Penetrate: 19,
   AccuracyBuff: 20,
+  ForceCrit: 21,
+  ApplyState: 22,
+  ApplyMod: 23,
+  StateIfHad: 24,
+  Splash: 25,
+  Nova: 26,
+  ModAfterNative: 27,
 } as const;
 export type OpKind = (typeof OpKind)[keyof typeof OpKind];
 
@@ -275,8 +282,11 @@ export type HitResult = {
 /** A resonance's accuracy buff on a player (Pale Flame): +bonus to the d20 of `aspect` attacks. */
 export type AccuracyBuff = { aspect: Aspect; turns: number; bonus: number };
 
-/** One monster a state jumped to (`ResonanceSpread`). */
-export type SpreadHit = { monster: number; kind: StateKind; applied: Applied; states: ActiveState[] };
+/** One monster a state jumped to or a nova reached (`ResonanceSpread`). */
+export type SpreadHit = { monster: number; kind: StateKind; applied: Applied; states: ActiveState[]; modifier: TimedMod | null };
+
+/** One monster a splash hit (`ResonanceSpread.splashes`). */
+export type SplashHit = { monster: number; damage: number; hp: number; died: boolean };
 
 /** What a player's hit did beyond its target (session `ResonanceSpread`, after its HitResolved). */
 export type ResonanceSpread = {
@@ -290,6 +300,7 @@ export type ResonanceSpread = {
   ignitePower: number;
   untilRound: number;
   accuracy: AccuracyBuff;
+  splashes: SplashHit[];
 };
 
 /**
@@ -322,7 +333,7 @@ export type HitResolved = {
 // ---- buffs and debuffs (deadroll_combat::support, session TimedModData) ----
 
 /** ModKindData; `ModsTicked.expired` bit i is `1 << i`. */
-export const ModKind = { Haste: 0, Slow: 1, Empowerment: 2, Weakening: 3, Protection: 4, Vulnerability: 5, Resistance: 6 } as const;
+export const ModKind = { Haste: 0, Slow: 1, Empowerment: 2, Weakening: 3, Protection: 4, Vulnerability: 5, Resistance: 6, Exposed: 7, Root: 8 } as const;
 export type ModKind = (typeof ModKind)[keyof typeof ModKind];
 
 /** One active buff or debuff: `turns` own turn starts of the bearer until it ends. */

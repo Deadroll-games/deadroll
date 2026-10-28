@@ -197,4 +197,7 @@ pub enum SessionError {
     ActorMismatch,
     #[msg("A diagonal step cuts the corner of a cell that cannot be entered")]
     CornerBlocked,
+    // Resonance pass.
+    #[msg("The unit is rooted and cannot move")]
+    Rooted,
 }

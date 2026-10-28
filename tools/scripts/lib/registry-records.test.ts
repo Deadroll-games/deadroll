@@ -16,6 +16,7 @@ import {
   encodeTraits,
   TRAIT_SIZE,
   OP_KIND,
+  MOD_KIND,
   NATIVE,
   CRIT_ONLY,
   encodeMonster,
@@ -107,7 +108,7 @@ test("passable tile with cost 0 throws", () => {
   assert.throws(() => encodeTile(json.records[1]), /passable tile with cost 0/);
 });
 
-test("Piercing+Cold (Icy Point): an override, Penetration chills", () => {
+test("Piercing+Cold (Brittle Mark): an override, the target is exposed to crits", () => {
   const bytes = encodeResonances(load("resonances.json"));
   const index = 5 * 6 + 1;
   const rec = bytes.subarray(index * RESONANCE_SIZE, (index + 1) * RESONANCE_SIZE);
@@ -115,9 +116,9 @@ test("Piercing+Cold (Icy Point): an override, Penetration chills", () => {
   // condition HasArmor, override flag
   assert.equal(rec[0], 8);
   assert.equal(rec[1], 1);
-  // op 0 at bytes 2..8: Linked(Chill, 10000)
-  assert.equal(rec[2], OP_KIND.Linked);
-  assert.equal(rec[3], 1);
+  // op 0 at bytes 2..8: ApplyMod(Exposed, 10000)
+  assert.equal(rec[2], OP_KIND.ApplyMod);
+  assert.equal(rec[3], MOD_KIND.Exposed);
   assert.equal(rec[4] | (rec[5] << 8) | (rec[6] << 16) | (rec[7] << 24), 10000);
   // op 1 empty
   assert.deepEqual([...rec.subarray(8, 16)], [0, 0, 0, 0, 0, 0, 0, 0]);

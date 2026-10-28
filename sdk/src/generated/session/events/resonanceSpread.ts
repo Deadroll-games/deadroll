@@ -40,14 +40,22 @@ import {
   getAccuracyBuffDataEncoder,
   getCellDecoder,
   getCellEncoder,
+  getSplashHitDataDecoder,
+  getSplashHitDataEncoder,
   getSpreadHitDataDecoder,
   getSpreadHitDataEncoder,
+  getTimedModDataDecoder,
+  getTimedModDataEncoder,
   type AccuracyBuffData,
   type AccuracyBuffDataArgs,
   type Cell,
   type CellArgs,
+  type SplashHitData,
+  type SplashHitDataArgs,
   type SpreadHitData,
   type SpreadHitDataArgs,
+  type TimedModData,
+  type TimedModDataArgs,
 } from "../types/index.js";
 
 export const RESONANCE_SPREAD_EVENT_DISCRIMINATOR: ReadonlyUint8Array =
@@ -81,6 +89,14 @@ export type ResonanceSpreadEvent = {
   untilRound: number;
   /** The attacker's accuracy buff after the hit. */
   accuracy: AccuracyBuffData;
+  /**
+   * Resonance pass: the modifier each of `hits` got (`hit_mods[i]` for `hits[i]`, `turns == 0` =
+   * none).
+   */
+  hitMods: Array<TimedModData>;
+  /** Resonance pass: monsters a splash hit (`splashes[..splash_count]`). */
+  splashes: Array<SplashHitData>;
+  splashCount: number;
 };
 
 export type ResonanceSpreadEventArgs = {
@@ -105,6 +121,14 @@ export type ResonanceSpreadEventArgs = {
   untilRound: number;
   /** The attacker's accuracy buff after the hit. */
   accuracy: AccuracyBuffDataArgs;
+  /**
+   * Resonance pass: the modifier each of `hits` got (`hit_mods[i]` for `hits[i]`, `turns == 0` =
+   * none).
+   */
+  hitMods: Array<TimedModDataArgs>;
+  /** Resonance pass: monsters a splash hit (`splashes[..splash_count]`). */
+  splashes: Array<SplashHitDataArgs>;
+  splashCount: number;
 };
 
 /** Gets the encoder for {@link ResonanceSpreadEventArgs} event data. */
@@ -125,6 +149,9 @@ export function getResonanceSpreadEventEncoder(): FixedSizeEncoder<ResonanceSpre
       ["ignitePower", getU32Encoder()],
       ["untilRound", getU16Encoder()],
       ["accuracy", getAccuracyBuffDataEncoder()],
+      ["hitMods", getArrayEncoder(getTimedModDataEncoder(), { size: 8 })],
+      ["splashes", getArrayEncoder(getSplashHitDataEncoder(), { size: 8 })],
+      ["splashCount", getU8Encoder()],
     ]),
     [getConstantEncoder(RESONANCE_SPREAD_EVENT_DISCRIMINATOR)],
   );
@@ -148,6 +175,9 @@ export function getResonanceSpreadEventDecoder(): FixedSizeDecoder<ResonanceSpre
       ["ignitePower", getU32Decoder()],
       ["untilRound", getU16Decoder()],
       ["accuracy", getAccuracyBuffDataDecoder()],
+      ["hitMods", getArrayDecoder(getTimedModDataDecoder(), { size: 8 })],
+      ["splashes", getArrayDecoder(getSplashHitDataDecoder(), { size: 8 })],
+      ["splashCount", getU8Decoder()],
     ]),
     [getConstantDecoder(RESONANCE_SPREAD_EVENT_DISCRIMINATOR)],
   );
