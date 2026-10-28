@@ -111,6 +111,7 @@ import { MPL_CORE_PROGRAM, PROGRAMS, SYSTEM_PROGRAM, VRF } from "../config";
 import { client } from "../wallet/client";
 import { characterAppearance } from "./appearance";
 import { concat, fromBase64, sha256 } from "./bytes";
+import { packBySize } from "./send";
 import {
   bagPda,
   bestiaryPda,
@@ -391,23 +392,32 @@ export async function createCharacterIxs(
 }
 
 /**
- * The descriptions of a new character's skills (set_skill_description, once each): sent after
- * create_character, `perTx` instructions to a transaction (six of 200 bytes do not fit one).
+ * The descriptions of a new character's skills (set_skill_description, once each), after
+ * create_character; six of 200 bytes do not fit one transaction, `characterSteps` packs them.
  */
-export async function skillDescriptionIxs(owner: TransactionSigner, character: Address, skills: readonly NamedSkill[], perTx = 3): Promise<Instruction[][]> {
+export async function skillDescriptionIxs(owner: TransactionSigner, character: Address, skills: readonly NamedSkill[]): Promise<Instruction[]> {
   const accounts = {
     owner,
     character,
     skillSet: await skillSetPda(character),
     skillExtras: await skillExtrasPda(character),
   };
-  const ixs = skills
+  return skills
     .map((s, i) => [s.description, i] as const)
     .filter(([d]) => d.length > 0)
     .map(([d, i]) => getSetSkillDescriptionInstruction({ ...accounts, skillIndex: i, description: textBytes(d, SKILL_DESCRIPTION_LEN) }));
-  const out: Instruction[][] = [];
-  for (let i = 0; i < ixs.length; i += perTx) out.push(ixs.slice(i, i + perTx));
-  return out;
+}
+
+/**
+ * Creating a character as one user action: create_profile if missing, create_character, then the
+ * skill descriptions, packed in order into as few transactions as fit (one wallet confirmation
+ * for all of them, `sendBatch`).
+ */
+export async function characterSteps(owner: TransactionSigner, c: NewCharacter): Promise<{ steps: Instruction[][]; character: Address; asset: KeyPairSigner }> {
+  const made = await createCharacterIxs(owner, c);
+  const descriptions = await skillDescriptionIxs(owner, made.character, c.skills ?? SKILL_PRESETS[c.class]);
+  const groups = [[...(made.profileIx ? [made.profileIx] : []), made.ix], ...descriptions.map((ix) => [ix])];
+  return { steps: packBySize(owner, groups), character: made.character, asset: made.asset };
 }
 
 /** All characters of `owner`, by profile count (indices 0..count). */

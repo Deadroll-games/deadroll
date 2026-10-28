@@ -8,6 +8,7 @@ import { formatSol, formatSolExact, pointsLeft, shortAddress } from "./format";
 import { MapPalette } from "./MapPalette";
 import { PartyLobby } from "./PartyLobby";
 import { PrepayConfirm } from "./PrepayConfirm";
+import { StalledAction } from "./StalledAction";
 import type { CharacterDraft, LobbyPlayer, MapPaletteProps, PartyLobbyProps } from "./types";
 
 afterEach(() => {
@@ -325,5 +326,17 @@ describe("PrepayConfirm", () => {
     expect(text).not.toContain("session key");
     fireEvent.click(screen.getByRole("button", { name: "Confirm Finalize" }));
     expect(onConfirm).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("StalledAction", () => {
+  it("names the step that stopped and retries from it", () => {
+    const onRetry = vi.fn();
+    render(<StalledAction what="Publish the map" step={3} total={5} onRetry={onRetry} onDismiss={() => {}} />);
+    const text = screen.getByRole("alert").textContent ?? "";
+    expect(text).toContain("stopped at step 3 of 5; steps 1-2 are done");
+    expect(text).toContain("one wallet confirmation");
+    fireEvent.click(screen.getByRole("button", { name: "Retry from step 3" }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
   });
 });
