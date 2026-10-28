@@ -9,6 +9,7 @@ import {
   deploy,
   intFlag,
   parseFlags,
+  refuseGatedSyscalls,
   resolveBins,
   sessionVrfMode, RASTERIZER_VERSION } from "./lib/deploy.ts";
 
@@ -18,8 +19,10 @@ const USAGE = `usage: deploy-devnet.ts [--url <rpc>] [--wallet <keypair.json>] [
 
 --url defaults to https://api.devnet.solana.com, --wallet to ~/.config/solana/id.json.
 --yes skips the cost confirmation prompt.
---check-build only builds (unless --skip-build) and checks that the session is the real-VRF build;
-  no network calls.`;
+--check-build only builds (unless --skip-build) and checks that the session is the real-VRF build
+  and that no program calls a syscall gated by a feature (lib/syscalls.ts); no network calls.
+Before the cost estimate the deploy refuses any program that calls a syscall whose feature is not
+active on the cluster (lib/syscalls.ts).`;
 
 const f = parseFlags(
   process.argv.slice(2),
@@ -70,6 +73,9 @@ async function main() {
     const mode = sessionVrfMode();
     console.log(`target/deploy-stage/deadroll_session.so: ${mode} VRF build`);
     if (mode !== "real") throw new Error("refusing: the session build is not the real-VRF build");
+    // No network here: every gated syscall counts as inactive (lib/syscalls.ts).
+    refuseGatedSyscalls();
+    console.log("no program calls a gated syscall");
     return;
   }
   if (f["--uri-base"] === undefined) {

@@ -9,7 +9,7 @@
     "upload-sprites": "pnpm sdk && node --experimental-strip-types --no-warnings upload-sprites.ts",
     "seed-registry": "pnpm sdk && node --experimental-strip-types --no-warnings seed-registry.ts",
     "seed-city": "pnpm sdk && node --experimental-strip-types --no-warnings seed-city.ts",
-    "test": "pnpm sdk && node --experimental-strip-types --no-warnings --test lib/render-program.test.ts lib/registry-records.test.ts",
+    "test": "pnpm sdk && node --experimental-strip-types --no-warnings --test lib/render-program.test.ts lib/registry-records.test.ts lib/syscalls.test.ts",
     "deploy:local": "pnpm sdk && node --experimental-strip-types --no-warnings deploy-local.ts",
     "deploy:devnet": "pnpm sdk && node --experimental-strip-types --no-warnings deploy-devnet.ts"
   },
