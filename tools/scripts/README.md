@@ -31,7 +31,9 @@ Steps (each one skips itself when done):
    missing, finalized with the same bytes, or an unfinished upload of the same bytes (`blobFits` in
    `lib/render-program.ts`). A book finalized with other sprites never changes, so after a sprite change the
    books move to the next free ids and `set_sprite_books` points `GameConfig` at them; a rerun finds the same
-   ids. Runs with `--skip-build` too;
+   ids. Runs with `--skip-build` too. Then the syscall check (`lib/syscalls.ts`): it stops before
+   anything is sent if a program calls a syscall whose feature is not active on the cluster
+   (`sol_remaining_compute_units`, `sol_blake3`, `sol_big_mod_exp` are off on devnet);
 4. `solana program deploy` for the 7 programs whose on-chain bytes differ from the build. Each program is
    copied to `target/deploy-stage/` right after its own build; the mock-vrf session is moved
    there, so `target/deploy/` never keeps it. The build cache is never cleaned by hand: switching the session

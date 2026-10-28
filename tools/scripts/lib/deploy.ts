@@ -40,6 +40,7 @@ import {
 } from "@deadroll/sdk/registry";
 import { GAME_CONFIG, blobFits, connect, pda as blobPda, parseHeader } from "./render-program.ts";
 import { MAP_STRIDE, layoutBytes, loadMapPreset, presetPoints, type MapPreset } from "./demo-map.ts";
+import { GATED_SYSCALLS, featureActive, syscallProblems, type GatedSyscall } from "./syscalls.ts";
 
 export const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const SYSTEM_PROGRAM = address("11111111111111111111111111111111");
@@ -319,6 +320,22 @@ function checkArtifacts(opts: DeployOptions): void {
     if (!existsSync(join(ROOT, f))) throw new Error(`${f} missing; run without --skip-build`);
   }
   if (bookFiles().length === 0) throw new Error(`${ASSETS}/book_<id>.bin missing; run without --skip-build`);
+}
+
+/** Refuses programs that call a syscall in `inactive` (lib/syscalls.ts). */
+export function refuseGatedSyscalls(inactive: readonly GatedSyscall[] = GATED_SYSCALLS): void {
+  const programs = PROGRAMS.map((p) => ({ name: p.name, so: readFileSync(soPath(p.name)) }));
+  const problems = syscallProblems(programs, inactive);
+  if (problems.length > 0) throw new Error(`refusing: a program calls a syscall inactive on this cluster:\n  ${problems.join("\n  ")}`);
+}
+
+/** The gated syscalls whose feature is not active on the cluster, then `refuseGatedSyscalls`. */
+async function checkSyscalls(conn: Rpc): Promise<void> {
+  step("syscalls");
+  const inactive: GatedSyscall[] = [];
+  for (const s of GATED_SYSCALLS) if (!featureActive(await fetchData(conn.rpc, s.feature))) inactive.push(s);
+  refuseGatedSyscalls(inactive);
+  console.log(inactive.length > 0 ? `no program calls ${inactive.map((s) => s.name).join(", ")} (inactive here)` : "every gated syscall is active here");
 }
 
 async function preflight(conn: Rpc, opts: DeployOptions, wallet: KeyPairSigner, bins: ReturnType<typeof resolveBins>) {
@@ -645,6 +662,7 @@ export async function deploy(opts: DeployOptions): Promise<void> {
   await packSpriteBooks(conn, opts, bins);
   checkArtifacts(opts);
   console.log(`session VRF: ${opts.mockVrf ? "mock-vrf (localnet only)" : "real MagicBlock oracle"}`);
+  await checkSyscalls(conn);
 
   if (opts.confirmCost) {
     step("cost estimate");
