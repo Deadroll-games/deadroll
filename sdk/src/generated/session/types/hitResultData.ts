@@ -37,6 +37,8 @@ import {
   getHitOutcomeEncoder,
   getJumpDataDecoder,
   getJumpDataEncoder,
+  getNovaDataDecoder,
+  getNovaDataEncoder,
   getOpResultDataDecoder,
   getOpResultDataEncoder,
   getPacketResultDataDecoder,
@@ -45,6 +47,8 @@ import {
   getResistModDataEncoder,
   getResonanceDataDecoder,
   getResonanceDataEncoder,
+  getSplashDataDecoder,
+  getSplashDataEncoder,
   getStateRollDataDecoder,
   getStateRollDataEncoder,
   getTintRollDataDecoder,
@@ -57,6 +61,8 @@ import {
   type HitOutcomeArgs,
   type JumpData,
   type JumpDataArgs,
+  type NovaData,
+  type NovaDataArgs,
   type OpResultData,
   type OpResultDataArgs,
   type PacketResultData,
@@ -65,6 +71,8 @@ import {
   type ResistModDataArgs,
   type ResonanceData,
   type ResonanceDataArgs,
+  type SplashData,
+  type SplashDataArgs,
   type StateRollData,
   type StateRollDataArgs,
   type TintRollData,
@@ -107,6 +115,20 @@ export type HitResultData = {
   accuracyBuff: AccuracyBuffData;
   /** `state_bit`s of the states that landed on the target. */
   landed: number;
+  /** Resonance pass: damage to the enemies adjacent to the target (`ResonanceSpread` says who). */
+  splash: SplashData;
+  /** Resonance pass: a state and a modifier on the enemies around the target. */
+  nova: NovaData;
+  /**
+   * Triples: the modifiers every enemy the jumps and the nova reach get
+   * (`jump_mods[..jump_mod_count]`).
+   */
+  jumpMods: Array<ResistModData>;
+  jumpModCount: number;
+  /** Triples: over-time damage that ticked at once (part of `damage`). */
+  tickDamage: number;
+  /** Triples: `mod_bit`s of the modifiers taken off the target after the hit. */
+  removeMods: number;
 };
 
 export type HitResultDataArgs = {
@@ -141,6 +163,20 @@ export type HitResultDataArgs = {
   accuracyBuff: AccuracyBuffDataArgs;
   /** `state_bit`s of the states that landed on the target. */
   landed: number;
+  /** Resonance pass: damage to the enemies adjacent to the target (`ResonanceSpread` says who). */
+  splash: SplashDataArgs;
+  /** Resonance pass: a state and a modifier on the enemies around the target. */
+  nova: NovaDataArgs;
+  /**
+   * Triples: the modifiers every enemy the jumps and the nova reach get
+   * (`jump_mods[..jump_mod_count]`).
+   */
+  jumpMods: Array<ResistModDataArgs>;
+  jumpModCount: number;
+  /** Triples: over-time damage that ticked at once (part of `damage`). */
+  tickDamage: number;
+  /** Triples: `mod_bit`s of the modifiers taken off the target after the hit. */
+  removeMods: number;
 };
 
 export function getHitResultDataEncoder(): Encoder<HitResultDataArgs> {
@@ -169,7 +205,7 @@ export function getHitResultDataEncoder(): Encoder<HitResultDataArgs> {
     ["rollsUsed", getU32Encoder()],
     [
       "resOps",
-      getArrayEncoder(getArrayEncoder(getOpResultDataEncoder(), { size: 6 }), {
+      getArrayEncoder(getArrayEncoder(getOpResultDataEncoder(), { size: 7 }), {
         size: 3,
       }),
     ],
@@ -181,6 +217,12 @@ export function getHitResultDataEncoder(): Encoder<HitResultDataArgs> {
     ["targetModCount", getU8Encoder()],
     ["accuracyBuff", getAccuracyBuffDataEncoder()],
     ["landed", getU8Encoder()],
+    ["splash", getSplashDataEncoder()],
+    ["nova", getNovaDataEncoder()],
+    ["jumpMods", getArrayEncoder(getResistModDataEncoder(), { size: 3 })],
+    ["jumpModCount", getU8Encoder()],
+    ["tickDamage", getU32Encoder()],
+    ["removeMods", getU16Encoder()],
   ]);
 }
 
@@ -210,7 +252,7 @@ export function getHitResultDataDecoder(): Decoder<HitResultData> {
     ["rollsUsed", getU32Decoder()],
     [
       "resOps",
-      getArrayDecoder(getArrayDecoder(getOpResultDataDecoder(), { size: 6 }), {
+      getArrayDecoder(getArrayDecoder(getOpResultDataDecoder(), { size: 7 }), {
         size: 3,
       }),
     ],
@@ -222,6 +264,12 @@ export function getHitResultDataDecoder(): Decoder<HitResultData> {
     ["targetModCount", getU8Decoder()],
     ["accuracyBuff", getAccuracyBuffDataDecoder()],
     ["landed", getU8Decoder()],
+    ["splash", getSplashDataDecoder()],
+    ["nova", getNovaDataDecoder()],
+    ["jumpMods", getArrayDecoder(getResistModDataDecoder(), { size: 3 })],
+    ["jumpModCount", getU8Decoder()],
+    ["tickDamage", getU32Decoder()],
+    ["removeMods", getU16Decoder()],
   ]);
 }
 

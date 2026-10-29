@@ -6,8 +6,8 @@
 //! `VrfRoll` / `SyscallRoll` started there. `HitInput` and `HitResult` come from the caller so the
 //! program can keep them off the 4 KB SBF stack frame.
 use deadroll_combat::{
-    apply_mod, resolve_hit_into, resolve_rider, resolve_support, AccuracyBuff, Applied, EffectRoll,
-    HitInput, HitResult, Outcome, ResonanceTables, RollSource, States, TimedMods,
+    apply_mod, no_heal, resolve_hit_into, resolve_rider, resolve_support, AccuracyBuff, Applied,
+    EffectRoll, HitInput, HitResult, Outcome, ResonanceTables, RollSource, States, TimedMods,
 };
 use deadroll_types::Monster;
 
@@ -90,6 +90,7 @@ pub fn attack_monster(
     for m in result.target_mods() {
         apply_mod(monster_mods, *m);
     }
+    remove_mods(monster_mods, result.remove_mods);
     accuracy.apply(result.accuracy_buff);
 
     let (hp, died) = take_damage(monster.hp, result.damage);
@@ -142,6 +143,15 @@ pub fn attack_monster(
         }
     }
     AttackOutcome { died, rider }
+}
+
+/// Takes the modifiers of the `mod_bit`s in `mask` off a unit (a resonance's `RemoveMod`).
+pub fn remove_mods(mods: &mut TimedMods, mask: u16) {
+    for m in mods.iter_mut() {
+        if !m.is_empty() && mask & deadroll_combat::support::mod_bit(m.kind) != 0 {
+            *m = deadroll_combat::TimedMod::default();
+        }
+    }
 }
 
 /// A debuff skill on a monster: it rolls to land (d20 against the monster's defense).
@@ -203,7 +213,10 @@ pub fn support_ally(
     let applied = if *hp == 0 {
         Applied::None
     } else if effect == EffectAction::Heal {
-        *hp = heal(*hp, hp_max, roll.amount);
+        // A NoHeal on the unit: the heal does nothing.
+        if !no_heal(mods) {
+            *hp = heal(*hp, hp_max, roll.amount);
+        }
         Applied::None
     } else {
         land_effect(
@@ -374,7 +387,9 @@ pub fn monster_support(
     let applied = if !target.alive || target.hp == 0 {
         Applied::None
     } else if effect == EffectAction::Heal {
-        target.hp = heal(target.hp, target.hp_max, roll.amount);
+        if !no_heal(mods) {
+            target.hp = heal(target.hp, target.hp_max, roll.amount);
+        }
         Applied::None
     } else {
         land_effect(

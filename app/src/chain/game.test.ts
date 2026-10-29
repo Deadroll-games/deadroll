@@ -621,7 +621,13 @@ describe("decoders", () => {
       v.auraWeights[1][0] = Uint8Array.of(100, 0, 0, 0, 0, 0);
       v.lootIds = Uint8Array.from({ length: 12 }, (_, i) => (i === 0 ? 4 : 0xff));
       v.lootTables[0] = Uint8Array.from({ length: 108 }, (_, i) => (i === 0 ? 1 : 0));
+      v.resTriples = Uint8Array.from({ length: 1920 }, (_, i) => (i === 0 ? 7 : i === 1919 ? 9 : 0));
     });
+    // The triples pass appends res_triples (120 x 16), last in the account.
+    expect(m.bytes[m.bytes.length - 1920]).toBe(7);
+    expect(m.bytes[m.bytes.length - 1]).toBe(9);
+    expect([m.back.resTriples[0], m.back.resTriples[1919]]).toEqual([7, 9]);
+    m.bytes = m.bytes.subarray(0, -1920);
     // Patch 11 appends loot_ids (12) and loot_tables (12 x 108).
     const p11m = 12 + 12 * 108;
     expect(Array.from(m.bytes.subarray(-p11m, -p11m + 2))).toEqual([4, 0xff]);
@@ -777,7 +783,7 @@ describe("decoders", () => {
       [OpKind.AccuracyBuff, true, 1],
     ]);
     expect(h.result.resOps[1]).toEqual([]);
-    expect(h.result.jumps).toEqual([{ mode: 2, state: { kind: 4, turns: 2, power: 2000, source: 1 }, filter: 4, limit: 1, base: Aspect.Lightning }]);
+    expect(h.result.jumps).toEqual([{ mode: 2, state: { kind: 4, turns: 2, power: 2000, source: 1 }, filter: 4, limit: 1, base: Aspect.Lightning, filterAny: false }]);
     expect([h.result.knockback, h.result.accuracyBuff]).toEqual([1, { aspect: Aspect.Fire, turns: 3, bonus: 1 }]);
     expect(h.result.resonances[1]).toBeNull();
     expect(h.result.critRoll).toBeNull();

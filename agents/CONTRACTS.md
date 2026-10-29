@@ -989,3 +989,108 @@ Taking a quest is `session.join_session` (the contribution goes to the party esc
 start are `set_ready` and `start_session`. The session program does not know about quests: it is
 unchanged, and the city makes no CPI. City depends on the `deadroll-map` and `deadroll-registry`
 lib packages (account types and ids); `programs/city/lib/` is new.
+
+## 26. Resonance pass: the pair table
+
+Combat (`deadroll_combat`), appended; nothing renamed or removed:
+
+```
+OpKind:              21 ForceCrit, 22 ApplyState, 23 ApplyMod, 24 StateIfHad, 25 Splash, 26 Nova,
+                     27 ModAfterNative (OpKind::COUNT = 28)
+ResonanceCondition:  9 IsBleeding
+ModKind:             7 Exposed (crit chance against the bearer, power_bp = percent x 100),
+                     8 Root (cannot move); MODS_MAX = ModKind::COUNT = 9
+mod_bit / tick_mods: u16 (was u8)
+Defender:            ... immune_tags, crit_taken_pct: u32
+HitResult:           ... landed, splash: Splash { damage, aspect }, nova: Nova { radius, state,
+                     modifier: TimedMod }, jump_mod: TimedMod
+Balance:             ... aspect_state_resist_share_bp, res_exposed_pct: [u32; 14]
+SupportBalance:      mod_min_bp / mod_max_bp / mod_duration grow to 9 (0 for Exposed and Root)
+```
+
+Registry: resonance records accept the new op kinds and condition 9 (validated by the same
+decoder). `crates/rules::spread::SpreadHit` gains `modifier`, `SpreadOutcome` gains `splashes`.
+
+Session program (accounts keep their size: `mods` still has 6 stored slots; Exposed and Root take a
+stored slot left free, `state::mods::from_combat`):
+
+```
+ModKindData:          7 Exposed, 8 Root
+OpKind (event mirror): 21..=27 as above
+HitResultData:        ... landed, splash: SplashData, nova: NovaData, jump_mod: ResistModData
+ResonanceSpread:      ... accuracy, hit_mods: [TimedModData; 8], splashes: [SplashHitData; 8],
+                      splash_count: u8
+  SplashHitData { monster, damage: u32, hp: u32, died: bool }
+ModsTicked.expired:   u16 (was u8)
+SessionError:         Rooted (move_path of a rooted unit)
+```
+
+A splash kill is paid like any kill (`unpaid_kills`). Website combat WASM: ABI 9 (nine modifier
+slots, `Defender.crit_taken_pct`).
+
+## 27. Triples pass: the triple table
+
+The 120 ordered triples of three different aspects (base, best tint, second tint). Appended; the
+two fields of section 26 that this lane added and never shipped changed shape (marked below).
+
+Registry:
+
+```
+TableKind:            8 Triples, seed "triples", 120 records of 16 bytes (1920 B, under the 4096 cap)
+triple record:        [0] 0, [1] flags (1 = has ops), [2..14] three ops of 4 bytes
+                      (kind | CRIT_ONLY, arg, value u16 LE), [14..16] 0; all zero = no ops (the second
+                      tint's trait template is used, as before)
+index:                deadroll_combat::tables::triple_index(base, tint, second), base-major
+```
+
+Combat (`deadroll_combat`):
+
+```
+OpKind:               28 StateFaster, 29 StateSlower, 30 TickNow, 31 Escalate, 32 TickAspect,
+                      33 RemoveMod, 34 NativeShorter, 35 Delayed, 36 OnMiss, 37 ThawSplash,
+                      38 SplashLine, 39 ChainRadius, 40 ModAfterState (OpKind::COUNT = 41)
+  value, two numbers: Delayed / ModAfterState = state (low byte) | percent << 8 (0 = 100);
+                      ChainRadius = radius (low byte) | filter state or 0xFF << 8
+ModKind:              9 Blinded, 10 OffGuard, 11 Sundered, 12 Dazed, 13 Silenced, 14 NoHeal,
+                      15 Dulled (MODS_MAX = ModKind::COUNT = 16; mod_bit still fits u16)
+ResonanceTables:      ... pairs, triples: [TripleEntry; 120]; from_bytes / decode_into take a 4th
+                      body, to_bytes returns four
+Attacker:             ... tempo_bonus_bp, blinded_bp: u32
+Defender:             ... crit_taken_pct, sunder_bp: u32
+OpOrigin:             3 Triple
+JumpMode:             3 Radius;  Jump: ... base, filter_any: bool
+Splash:               ... aspect, line: bool
+HitResult:            jump_mod is replaced by jump_mods: [TimedMod; 3] + jump_mod_count (SECTION 26,
+                      never shipped); new tick_damage: u32 (part of damage), remove_mods: u16
+RES_OPS_MAX:          7 (was 6); JUMP_MODS_MAX = 3
+Balance:              ... res_exposed_pct, res_counter_bp: [u32; 14], escalate_step_bp: u32
+SupportBalance:       mod_min_bp / mod_max_bp / mod_duration grow to 16
+states:               ActiveState.source keeps the turn-order slot in its low 5 bits; bit 7 marks a
+                      dormant state, bit 6 an escalating damage over time (SOURCE_MASK, MARK_*)
+tick_turn_start_with(states, balance), rules::start_of_turn_with(.., balance)
+```
+
+Rules (`deadroll_rules`): `SpreadHit.modifier` becomes `modifiers: [TimedMod; 4]` (SECTION 26, never
+shipped); `Registry` gains `triples`; `registry::encode_triples`; `resolve::remove_mods`.
+
+Session program:
+
+```
+MonsterState:         + res_triples: [u8; 1920] at the END (8_224 -> 10_144 bytes, under the 10_240 a
+                      CPI allocates). Sessions opened before the upgrade cannot be read after it.
+open_session:         + triples (registry ["triples"] table), the last account
+ModKindData:          9 Blinded .. 15 Dulled (they take a stored mod slot left free; with six slots
+                      busy they are dropped, like Exposed and Root)
+OpKind / OpOrigin / JumpMode (event mirrors): as above
+JumpData:             ... base, filter_any
+SplashData:           ... aspect, line
+HitResultData:        jump_mod -> jump_mods: [ResistModData; 3], jump_mod_count: u8,
+                      tick_damage: u32, remove_mods: u16 (after nova)
+ResonanceSpread:      hit_mods: [[TimedModData; 4]; 8] (was [TimedModData; 8])
+SessionError:         Silenced (act / monster_act with a skill while silenced)
+```
+
+A Dazed monster uses no reactive skill; a Silenced one only its natural attack; NoHeal makes heals
+on the bearer do nothing; Blinded, OffGuard, Sundered and Dulled divide the bearer's d20, defense,
+armor against Piercing and crit chance. Website combat WASM: ABI 10 (tables +1920 bytes, sixteen
+modifier slots).

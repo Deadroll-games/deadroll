@@ -4,7 +4,7 @@ use anchor_lang::prelude::*;
 use deadroll_types::TURN_ORDER_MAX;
 
 /// The start of a unit's own turn lives in `deadroll-rules` (shared with `tools/balance`).
-pub use deadroll_rules::turn::{start_of_turn, TurnStart};
+pub use deadroll_rules::turn::{start_of_turn, start_of_turn_with, TurnStart};
 
 use crate::{
     errors::SessionError,

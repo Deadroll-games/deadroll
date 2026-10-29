@@ -86,6 +86,10 @@ pub struct MonsterState {
     pub loot_ids: [u8; LOOT_TABLES_MAX],
     /// The copied records (`deadroll_rules::loot::record`), by `loot_ids` position.
     pub loot_tables: [[u8; LOOT_RECORD_LEN]; LOOT_TABLES_MAX],
+    // Triples pass: the registry `triples` table body, copied at `open_session` like the other
+    // resonance tables (last in the account: new fields only at the end). 8_224 + 1_920 =
+    // 10_144 bytes, under the 10_240 a CPI can allocate (a test pins it).
+    pub res_triples: [u8; RES_TRIPLES_LEN],
 }
 
 /// Distinct reward tables one party copies (bodies, chests and the boss together).
@@ -175,6 +179,8 @@ pub struct BurningCellData {
 pub const RES_ASPECTS_LEN: usize = 48;
 pub const RES_TRAITS_LEN: usize = 192;
 pub const RES_PAIRS_LEN: usize = 576;
+/// `deadroll_combat::tables::TRIPLES_LEN` (120 records of 16 bytes).
+pub const RES_TRIPLES_LEN: usize = 1920;
 /// `deadroll_rules::monster::record::SIZE` and `deadroll_skillcheck::monster::SESSION_SIZE`
 /// (literals for the IDL; a test pins them).
 pub const MONSTER_RECORD_LEN: usize = 48;
@@ -214,6 +220,8 @@ pub const MONSTER_STATE_DISCRIMINATOR: [u8; 8] = [0xae, 0xda, 0x67, 0xcc, 0xde, 
 
 /// Account size, discriminator included.
 pub const MONSTER_STATE_SPACE: usize = 8 + MonsterState::INIT_SPACE;
+// A CPI allocates at most 10 KiB, and `open_session` creates the account in one call.
+const _: () = assert!(MONSTER_STATE_SPACE <= 10_240);
 
 /// Byte offsets inside a `MonsterState` account (discriminator included).
 mod off {
@@ -241,8 +249,9 @@ mod off {
     pub const AURA_WEIGHTS: usize = RESIST_MODS + MONSTERS_MAX * super::RESIST_MOD_SIZE;
     pub const LOOT_IDS: usize = AURA_WEIGHTS + MONSTERS_MAX * AURAS_PER_PLAYER * Aspect::COUNT;
     pub const LOOT_TABLES: usize = LOOT_IDS + super::LOOT_TABLES_MAX;
+    pub const RES_TRIPLES: usize = LOOT_TABLES + super::LOOT_TABLES_MAX * super::LOOT_RECORD_LEN;
     #[cfg(test)]
-    pub const END: usize = LOOT_TABLES + super::LOOT_TABLES_MAX * super::LOOT_RECORD_LEN;
+    pub const END: usize = RES_TRIPLES + super::RES_TRIPLES_LEN;
 }
 
 /// Bytes of one monster's `mods`.
@@ -430,14 +439,23 @@ impl<'a, 'info> Monsters<'a, 'info> {
     /// Copies the registry resonance table bodies.
     pub fn set_tables(
         &self,
-        aspects: &[u8; RES_ASPECTS_LEN],
-        traits: &[u8; RES_TRAITS_LEN],
-        pairs: &[u8; RES_PAIRS_LEN],
+        aspects: &[u8],
+        traits: &[u8],
+        pairs: &[u8],
+        triples: &[u8],
     ) -> Result<()> {
+        require!(
+            aspects.len() == RES_ASPECTS_LEN
+                && traits.len() == RES_TRAITS_LEN
+                && pairs.len() == RES_PAIRS_LEN
+                && triples.len() == RES_TRIPLES_LEN,
+            SessionError::InvalidRegistryTable
+        );
         let mut data = self.info.try_borrow_mut_data()?;
         data[off::RES_ASPECTS..off::RES_TRAITS].copy_from_slice(aspects);
         data[off::RES_TRAITS..off::RES_PAIRS].copy_from_slice(traits);
         data[off::RES_PAIRS..off::BURNING].copy_from_slice(pairs);
+        data[off::RES_TRIPLES..off::RES_TRIPLES + RES_TRIPLES_LEN].copy_from_slice(triples);
         Ok(())
     }
 
@@ -489,6 +507,7 @@ impl<'a, 'info> Monsters<'a, 'info> {
             &data[off::RES_ASPECTS..off::RES_TRAITS],
             &data[off::RES_TRAITS..off::RES_PAIRS],
             &data[off::RES_PAIRS..off::BURNING],
+            &data[off::RES_TRIPLES..off::RES_TRIPLES + RES_TRIPLES_LEN],
         )
         .map_err(|_| error!(SessionError::InvalidRegistryTable))
     }
@@ -730,6 +749,8 @@ mod tests {
         assert_eq!(RES_ASPECTS_LEN, deadroll_combat::tables::ASPECTS_LEN);
         assert_eq!(RES_TRAITS_LEN, deadroll_combat::tables::TRAITS_LEN);
         assert_eq!(RES_PAIRS_LEN, deadroll_combat::tables::PAIRS_LEN);
+        assert_eq!(RES_TRIPLES_LEN, deadroll_combat::tables::TRIPLES_LEN);
+        assert_eq!(MONSTER_STATE_SPACE, 10_144);
         assert_eq!(MONSTER_RECORD_LEN, record::SIZE);
         assert_eq!(LOOT_RECORD_LEN, deadroll_rules::loot::record::SIZE);
         assert_eq!(SKILL_COPY_LEN, SESSION_SIZE);
@@ -841,14 +862,14 @@ mod tests {
             source: 1,
         };
         let tables = crate::state::test_support::tables();
-        let (a, t, p) = tables.to_bytes();
+        let (a, t, p, x) = tables.to_bytes();
         {
             let info = account.info();
             let view = Monsters::load(&info, &session).unwrap();
             view.set_defense(MONSTERS_MAX as u8 - 1, &defense).unwrap();
             assert!(view.set_defense(MONSTERS_MAX as u8, &defense).is_err());
             view.set_burning_cells(&cells).unwrap();
-            view.set_tables(&a, &t, &p).unwrap();
+            view.set_tables(&a, &t, &p, &x).unwrap();
             assert_eq!(view.defense(MONSTERS_MAX as u8 - 1).unwrap(), defense);
             assert_eq!(view.defense(0).unwrap(), MonsterDefense::NONE);
             assert_eq!(view.burning_cells().unwrap(), cells);
@@ -860,6 +881,7 @@ mod tests {
         assert_eq!(state.defense[MONSTERS_MAX - 1].immune_states, 0b100);
         assert_eq!(state.burning_cells[3].power, 4);
         assert_eq!(state.res_pairs, p);
+        assert_eq!(state.res_triples, x);
         // Garbled tables are refused.
         let mut account = monsters_account(session, &[]);
         let info = account.info();

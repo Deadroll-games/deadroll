@@ -14,6 +14,42 @@ use crate::balance::Balance;
 /// A unit's state slots.
 pub type States = [ActiveState; STATES_MAX];
 
+/// `ActiveState.source` is a turn-order slot (below `TURN_ORDER_MAX`, 28): its low 5 bits. The
+/// two top bits are marks that triples put on a state, so a state needs no extra byte.
+pub const SOURCE_MASK: u8 = 0x1F;
+/// The state waits: no damage and no countdown while its bearer is frozen or stunned (triples,
+/// `Delayed`). It starts on the first turn start without them.
+pub const MARK_DORMANT: u8 = 0x80;
+/// The damage over time grows by `Balance::escalate_step_bp` after every tick (`Escalate`).
+pub const MARK_ESCALATE: u8 = 0x40;
+const MARKS: u8 = MARK_DORMANT | MARK_ESCALATE;
+
+/// The unit that applied a state: its `source` without the marks. `0xFF` (nobody) stays.
+pub const fn source_unit(source: u8) -> u8 {
+    if source == u8::MAX {
+        source
+    } else {
+        source & SOURCE_MASK
+    }
+}
+
+/// `source` with `mark` set (nobody, `0xFF`, takes no mark).
+pub const fn marked(source: u8, mark: u8) -> u8 {
+    if source == u8::MAX {
+        source
+    } else {
+        source | mark
+    }
+}
+
+/// Source after a stronger application replaces an older one: the new unit, the marks of both.
+const fn merged_source(old: u8, new: u8) -> u8 {
+    if new == u8::MAX || old == u8::MAX {
+        return new;
+    }
+    (new & SOURCE_MASK) | ((old | new) & MARKS)
+}
+
 /// Bit of a state kind in an immunity mask.
 pub const fn state_bit(kind: StateKind) -> u8 {
     1 << kind as u8
@@ -84,7 +120,7 @@ pub fn apply_state(states: &mut States, new: ActiveState) -> Applied {
         let old = &mut states[i];
         if new.power > old.power {
             old.power = new.power;
-            old.source = new.source;
+            old.source = merged_source(old.source, new.source);
         }
         old.turns = old.turns.max(new.turns);
         return Applied::Refreshed;
@@ -193,15 +229,38 @@ pub struct Tick {
     pub expired: u8,
 }
 
+/// [`tick_turn_start_with`] with the default balance (tests, tools without a config).
+pub fn tick_turn_start(states: &mut States) -> Tick {
+    tick_turn_start_with(states, &Balance::DEFAULT)
+}
+
 /// Start of the target's turn (section 7.5): over-time damage, hard control, then every
 /// duration goes down by one and finished states are removed. A Freeze with power deals it as it
 /// thaws (DAMAGE_TYPES_AND_MIXES 6.4, Burning Frost).
-pub fn tick_turn_start(states: &mut States) -> Tick {
+///
+/// Triples: a dormant state ([`MARK_DORMANT`]) does nothing while a Freeze or Stun was on the unit
+/// at the start of the tick (it wakes on the first tick without one); an escalating damage over
+/// time ([`MARK_ESCALATE`]) grows by `balance.escalate_step_bp` after it hits.
+pub fn tick_turn_start_with(states: &mut States, balance: &Balance) -> Tick {
     let mut tick = Tick::default();
+    let held = states
+        .iter()
+        .any(|s| s.turns > 0 && matches!(s.kind, StateKind::Freeze | StateKind::Stun));
     for s in states.iter_mut().filter(|s| s.turns > 0) {
+        if s.source != u8::MAX && s.source & MARK_DORMANT != 0 {
+            if held {
+                continue;
+            }
+            s.source &= !MARK_DORMANT;
+        }
         match s.kind {
             StateKind::Burning | StateKind::Bleeding => {
                 tick.dot_damage = tick.dot_damage.saturating_add(s.power);
+                if s.source != u8::MAX && s.source & MARK_ESCALATE != 0 {
+                    let step = (s.power as u64 * balance.escalate_step_bp as u64 / BP as u64)
+                        .clamp(1, u32::MAX as u64) as u32;
+                    s.power = s.power.saturating_add(step);
+                }
             }
             StateKind::Freeze | StateKind::Stun => tick.skip_action = true,
             StateKind::Chill | StateKind::Shock | StateKind::Penetration => {}

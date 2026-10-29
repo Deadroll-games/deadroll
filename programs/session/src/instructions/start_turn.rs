@@ -153,11 +153,12 @@ pub fn handler<'info>(ctx: Context<'info, StartTurn<'info>>) -> Result<()> {
             );
             let mut mods = participation.combat_mods();
             let hp_before = participation.core.hp;
-            let start = turns::start_of_turn(
+            let start = turns::start_of_turn_with(
                 &mut participation.core.states,
                 &mut mods,
                 &mut participation.cooldowns,
                 participation.core.hp,
+                &crate::rules::BALANCE.combat,
             );
             participation.core.hp = start.hp;
             participation.set_combat_mods(&mods);
@@ -235,7 +236,13 @@ pub fn handler<'info>(ctx: Context<'info, StartTurn<'info>>) -> Result<()> {
             // with its own turn (patch 6).
             let mut own = monsters.skill_cooldowns(index)?;
             let mut mods = monsters.mods(index)?;
-            let start = turns::start_of_turn(&mut monster.states, &mut mods, &mut own, monster.hp);
+            let start = turns::start_of_turn_with(
+                &mut monster.states,
+                &mut mods,
+                &mut own,
+                monster.hp,
+                &crate::rules::BALANCE.combat,
+            );
             monster.hp = start.hp;
             let mut auras = monsters.auras(index)?;
             let ended = tick_auras(&mut auras);

@@ -407,7 +407,7 @@ async function estimateCost(conn: Rpc, opts: DeployOptions, programIds: Record<s
   else if (cfgNow.length < CONFIG_LEN) {
     add(`GameConfig resize ${cfgNow.length} -> ${CONFIG_LEN} B`, (await rentFor(conn.rpc, CONFIG_LEN)) - (await rentFor(conn.rpc, cfgNow.length)));
   }
-  for (const seed of ["aspects", "resonances", "bestiary", "tileset", "prefabs", "traits", "monster_skills"]) {
+  for (const seed of ["aspects", "resonances", "bestiary", "tileset", "prefabs", "traits", "monster_skills", "triples"]) {
     const [table] = await findTablePda({ seed });
     if (!(await fetchData(conn.rpc, table))) add(`registry table ${seed}`, await rentFor(conn.rpc, 16 + 4096));
   }
@@ -553,9 +553,9 @@ async function uploadRender(conn: Rpc, opts: DeployOptions, wallet: KeyPairSigne
   step("registry tables");
   script("seed-registry.ts", [], opts);
   // open_session copies the bestiary records, the spawns' monster skills, the tile costs and the
-  // resonance tables (aspects, traits, resonances) into the session; finalize_map reads the
+  // resonance tables (aspects, traits, resonances, triples) into the session; finalize_map reads the
   // bestiary and the monster skills (patch 6) and the tileset (patch 13).
-  for (const seed of ["bestiary", "tileset", "aspects", "traits", "resonances", "monster_skills"]) {
+  for (const seed of ["bestiary", "tileset", "aspects", "traits", "resonances", "triples", "monster_skills"]) {
     const [table] = await findTablePda({ seed });
     const data = await fetchData(conn.rpc, table);
     if (!data || data.subarray(16).every((b) => b === 0)) throw new Error(`registry ${seed} table ${table} is not seeded`);

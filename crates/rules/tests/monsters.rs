@@ -477,3 +477,142 @@ fn the_ai_debuffs_before_it_strikes() {
     assert_eq!(s.stats.blocks.purpose, deadroll_skillcheck::Purpose::Damage);
     let _ = GOBLIN;
 }
+
+#[test]
+fn a_rooted_monster_only_reaches_what_it_reaches_from_where_it_stands() {
+    let r = reg();
+    let chief = r.template(CHIEFTAIN).unwrap();
+    let p = chief.profile(1, &CFG.monsters);
+    let skills = skills_of(&r, &chief);
+    let cooldowns = [0u8; MONSTER_SLOTS];
+    let me = AiMonster {
+        index: 0,
+        ap: 5,
+        profile: &p,
+        skills: &skills,
+        cooldowns: &cooldowns,
+    };
+    let free = [unit(c(5, 5), 30, 30, chief.kin)];
+    let mut rooted = free;
+    rooted[0].mods[ModKind::Root as usize] = deadroll_combat::TimedMod {
+        kind: ModKind::Root,
+        turns: 2,
+        power_bp: 1,
+        ..Default::default()
+    };
+    // Some distance is reached by walking first: the rooted monster cannot.
+    let walked = (6..20u8).find(|&x| {
+        let heroes = [unit(c(x, 5), 20, 30, 0)];
+        plan(&CFG, &me, &heroes, &free).is_some() && plan(&CFG, &me, &heroes, &rooted).is_none()
+    });
+    assert!(walked.is_some());
+    // Next to it, rooted or not, it acts.
+    let heroes = [unit(c(6, 5), 20, 30, 0)];
+    assert!(plan(&CFG, &me, &heroes, &rooted).is_some());
+}
+
+#[test]
+fn a_silenced_monster_has_only_its_natural_attack() {
+    let r = reg();
+    let chief = r.template(CHIEFTAIN).unwrap();
+    let p = chief.profile(1, &CFG.monsters);
+    let skills = skills_of(&r, &chief);
+    assert!(
+        skills.iter().any(|s| s.is_some()),
+        "the chieftain has skills"
+    );
+    let cooldowns = [0u8; MONSTER_SLOTS];
+    let me = AiMonster {
+        index: 0,
+        ap: 5,
+        profile: &p,
+        skills: &skills,
+        cooldowns: &cooldowns,
+    };
+    let heroes = [unit(c(6, 5), 20, 30, 0)];
+    let free = [unit(c(5, 5), 30, 30, chief.kin)];
+    let mut silenced = free;
+    silenced[0].mods[ModKind::Silenced as usize] = deadroll_combat::TimedMod {
+        kind: ModKind::Silenced,
+        turns: 2,
+        power_bp: 10_000,
+        ..Default::default()
+    };
+    let with_skill = (0..30u8)
+        .filter_map(|x| {
+            plan(
+                &CFG,
+                &me,
+                &[unit(c(5 + x % 3, 5 + x / 3 % 3), 20, 30, 0)],
+                &free,
+            )
+        })
+        .any(|choice| choice.slot.is_some());
+    assert!(with_skill, "a free chieftain uses a skill somewhere");
+    for x in 0..30u8 {
+        let heroes = [unit(c(5 + x % 3, 5 + x / 3 % 3), 20, 30, 0)];
+        if let Some(choice) = plan(&CFG, &me, &heroes, &silenced) {
+            assert_eq!(choice.slot, None, "silenced at {x}");
+        }
+    }
+    assert!(plan(&CFG, &me, &heroes, &silenced).is_some());
+}
+
+#[test]
+fn a_heal_does_nothing_to_a_monster_with_no_heal() {
+    let r = reg();
+    let (_, p, mending) = skill(&r, SHAMAN, "Mending");
+    let mut no_heal = TimedMods::default();
+    no_heal[ModKind::NoHeal as usize] = deadroll_combat::TimedMod {
+        kind: ModKind::NoHeal,
+        turns: 2,
+        power_bp: 10_000,
+        ..Default::default()
+    };
+    for seed in 0..20 {
+        let mut goblin = monster(3, 10);
+        monster_support(
+            &CFG,
+            8,
+            &p,
+            &mending.stats,
+            EffectAction::Heal,
+            &mut goblin,
+            &mut no_heal,
+            &mut SeededRoll::new(seed),
+        );
+        assert_eq!(goblin.hp, 3, "seed {seed}");
+        let mut healed = monster(3, 10);
+        monster_support(
+            &CFG,
+            8,
+            &p,
+            &mending.stats,
+            EffectAction::Heal,
+            &mut healed,
+            &mut TimedMods::default(),
+            &mut SeededRoll::new(seed),
+        );
+        assert!(healed.hp > 3);
+    }
+}
+
+#[test]
+fn remove_mods_takes_off_the_masked_kinds_only() {
+    let mut mods = TimedMods::default();
+    for kind in [ModKind::Weakening, ModKind::Slow, ModKind::Dazed] {
+        mods[kind as usize] = deadroll_combat::TimedMod {
+            kind,
+            turns: 2,
+            power_bp: 100,
+            ..Default::default()
+        };
+    }
+    deadroll_rules::resolve::remove_mods(
+        &mut mods,
+        deadroll_combat::support::mod_bit(ModKind::Slow)
+            | deadroll_combat::support::mod_bit(ModKind::Dazed),
+    );
+    assert!(find_mod(&mods, ModKind::Weakening).is_some());
+    assert!(find_mod(&mods, ModKind::Slow).is_none() && find_mod(&mods, ModKind::Dazed).is_none());
+}

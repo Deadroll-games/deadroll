@@ -10,7 +10,11 @@
 //!
 //! Reach counts the action points left after the action as steps of one cell (no walls): the
 //! caller walks there with its own path finding and may find the cell taken.
-use deadroll_combat::{states::has, support::find_mod, States, TimedMods};
+use deadroll_combat::{
+    states::has,
+    support::{find_mod, rooted, silenced},
+    States, TimedMods,
+};
 use deadroll_skillcheck::{Category, Purpose};
 use deadroll_types::{Cell, RangeTag, StateKind, MONSTER_SLOTS};
 
@@ -63,18 +67,19 @@ pub struct AiChoice {
     pub ap: u8,
 }
 
-fn ready<'a>(m: &AiMonster<'a>, slot: usize) -> Option<&'a MonsterSkillStats> {
-    let s = m.skills[slot].as_ref()?;
+fn ready<'a>(m: &AiMonster<'a>, slot: usize, silenced: bool) -> Option<&'a MonsterSkillStats> {
+    let s = m.skills[slot].as_ref().filter(|_| !silenced)?;
     (s.stats.blocks.category == Category::Active
         && m.cooldowns[slot] == 0
         && s.stats.ap_cost <= m.ap)
         .then_some(s)
 }
 
-/// Whether a unit at `to` is within `range` after walking with the AP left by an action of `cost`.
+/// Whether a unit at `to` is within `range` after walking with the AP left by an action of `cost`
+/// (`walk_ap`: the monster's AP, 0 when it is rooted).
 fn reachable(
     cfg: &BalanceConfig,
-    m: &AiMonster,
+    walk_ap: u8,
     from: Cell,
     to: Cell,
     range: RangeTag,
@@ -85,7 +90,7 @@ fn reachable(
     if !ally && d == 0 {
         return false;
     }
-    let walk = m.ap.saturating_sub(cost);
+    let walk = walk_ap.saturating_sub(cost);
     d <= reach(range, &cfg.players).saturating_add(walk)
 }
 
@@ -110,6 +115,9 @@ pub fn plan(
     let me = m.index as usize;
     let my = monsters.get(me)?;
     let from = my.cell;
+    // A rooted monster acts from where it stands; a silenced one uses no skill.
+    let walk_ap = if rooted(&my.mods) { 0 } else { m.ap };
+    let silenced = silenced(&my.mods);
     let ally_ok = |s: &MonsterSkillStats, i: usize| {
         let u = &monsters[i];
         u.alive && kin_reaches(s.kin_only, my.kin, u.kin, i == me)
@@ -118,7 +126,9 @@ pub fn plan(
     // 1. A heal on the most hurt ally below the threshold.
     let pct = cfg.monsters.ai_heal_below_pct as u64;
     for slot in 0..MONSTER_SLOTS {
-        let Some(s) = ready(m, slot) else { continue };
+        let Some(s) = ready(m, slot, silenced) else {
+            continue;
+        };
         if effect_action(s.stats.blocks.effect) != Some(EffectAction::Heal) {
             continue;
         }
@@ -128,7 +138,7 @@ pub fn plan(
             .filter(|&i| {
                 reachable(
                     cfg,
-                    m,
+                    walk_ap,
                     from,
                     monsters[i].cell,
                     s.stats.ext.range,
@@ -147,7 +157,9 @@ pub fn plan(
 
     // 2. A buff on an ally that lacks it, itself first.
     for slot in 0..MONSTER_SLOTS {
-        let Some(s) = ready(m, slot) else { continue };
+        let Some(s) = ready(m, slot, silenced) else {
+            continue;
+        };
         let b = &s.stats.blocks;
         if b.purpose != Purpose::Buff {
             continue;
@@ -161,7 +173,7 @@ pub fn plan(
                 && !has_effect(effect, &monsters[i])
                 && reachable(
                     cfg,
-                    m,
+                    walk_ap,
                     from,
                     monsters[i].cell,
                     s.stats.ext.range,
@@ -194,7 +206,7 @@ pub fn plan(
         let fits = |s: &MonsterSkillStats| {
             reachable(
                 cfg,
-                m,
+                walk_ap,
                 from,
                 h.cell,
                 s.stats.ext.range,
@@ -207,7 +219,9 @@ pub fn plan(
         };
         let mut best: Option<(u8, usize)> = None;
         for slot in 0..MONSTER_SLOTS {
-            let Some(s) = ready(m, slot) else { continue };
+            let Some(s) = ready(m, slot, silenced) else {
+                continue;
+            };
             if s.stats.blocks.purpose == Purpose::Buff || !fits(s) {
                 continue;
             }
@@ -238,7 +252,7 @@ pub fn plan(
         }
         let range = form_range(m.profile.form);
         let cost = cfg.players.basic_attack_ap;
-        if m.ap >= cost && reachable(cfg, m, from, h.cell, range, cost, false) {
+        if m.ap >= cost && reachable(cfg, walk_ap, from, h.cell, range, cost, false) {
             return Some(AiChoice {
                 slot: None,
                 target,

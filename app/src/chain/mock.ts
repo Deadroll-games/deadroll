@@ -173,6 +173,8 @@ const NO_RESONANCE = {
   targetMods: [],
   accuracyBuff: { aspect: Aspect.Fire, turns: 0, bonus: 0 },
   landed: 0,
+  tickDamage: 0,
+  removeMods: 0,
 } satisfies Partial<HitResult>;
 
 /** Mock monster records: the registry bestiary bytes (assets/registry/bestiary.json as

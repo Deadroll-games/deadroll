@@ -167,11 +167,33 @@ export const OpKind = {
   AddPacket: 18,
   Penetrate: 19,
   AccuracyBuff: 20,
+  ForceCrit: 21,
+  ApplyState: 22,
+  ApplyMod: 23,
+  StateIfHad: 24,
+  Splash: 25,
+  Nova: 26,
+  ModAfterNative: 27,
+  // Triples.
+  StateFaster: 28,
+  StateSlower: 29,
+  TickNow: 30,
+  Escalate: 31,
+  TickAspect: 32,
+  RemoveMod: 33,
+  NativeShorter: 34,
+  Delayed: 35,
+  OnMiss: 36,
+  ThawSplash: 37,
+  SplashLine: 38,
+  ChainRadius: 39,
+  ModAfterState: 40,
 } as const;
 export type OpKind = (typeof OpKind)[keyof typeof OpKind];
 
-/** Where an op comes from: the pair, the second tint's trait (a triple), a trait's hit part. */
-export const OpOrigin = { Pair: 0, Template: 1, Trait: 2 } as const;
+/** Where an op comes from: the pair, the second tint's trait (a triple without a record), a trait's hit
+ * part, the record of a triple. */
+export const OpOrigin = { Pair: 0, Template: 1, Trait: 2, Triple: 3 } as const;
 export type OpOrigin = (typeof OpOrigin)[keyof typeof OpOrigin];
 
 /** Op `arg` 255: the base's native state (any state, for a multiplier). */
@@ -195,9 +217,9 @@ export type OpResult = {
 };
 
 /** A state passed on to other monsters (`deadroll_combat::Jump`). */
-export const JumpMode = { Adjacent: 0, Chain: 1, Line: 2 } as const;
+export const JumpMode = { Adjacent: 0, Chain: 1, Line: 2, Radius: 3 } as const;
 export type JumpMode = (typeof JumpMode)[keyof typeof JumpMode];
-export type Jump = { mode: JumpMode; state: ActiveState; filter: StateKind; limit: number; base: Aspect };
+export type Jump = { mode: JumpMode; state: ActiveState; filter: StateKind; limit: number; base: Aspect; filterAny: boolean };
 
 export type StateRoll = {
   kind: StateKind;
@@ -270,13 +292,20 @@ export type HitResult = {
   accuracyBuff: AccuracyBuff;
   /** `1 << StateKind` of every state that landed on the target. */
   landed: number;
+  /** Triples: over-time damage that ticked at once (already part of `damage`). */
+  tickDamage: number;
+  /** Triples: `1 << ModKind` of the modifiers taken off the target after the hit. */
+  removeMods: number;
 };
 
 /** A resonance's accuracy buff on a player (Pale Flame): +bonus to the d20 of `aspect` attacks. */
 export type AccuracyBuff = { aspect: Aspect; turns: number; bonus: number };
 
-/** One monster a state jumped to (`ResonanceSpread`). */
-export type SpreadHit = { monster: number; kind: StateKind; applied: Applied; states: ActiveState[] };
+/** One monster a state jumped to or a nova reached (`ResonanceSpread`). */
+export type SpreadHit = { monster: number; kind: StateKind; applied: Applied; states: ActiveState[]; modifiers: TimedMod[] };
+
+/** One monster a splash hit (`ResonanceSpread.splashes`). */
+export type SplashHit = { monster: number; damage: number; hp: number; died: boolean };
 
 /** What a player's hit did beyond its target (session `ResonanceSpread`, after its HitResolved). */
 export type ResonanceSpread = {
@@ -290,6 +319,7 @@ export type ResonanceSpread = {
   ignitePower: number;
   untilRound: number;
   accuracy: AccuracyBuff;
+  splashes: SplashHit[];
 };
 
 /**
@@ -322,7 +352,7 @@ export type HitResolved = {
 // ---- buffs and debuffs (deadroll_combat::support, session TimedModData) ----
 
 /** ModKindData; `ModsTicked.expired` bit i is `1 << i`. */
-export const ModKind = { Haste: 0, Slow: 1, Empowerment: 2, Weakening: 3, Protection: 4, Vulnerability: 5, Resistance: 6 } as const;
+export const ModKind = { Haste: 0, Slow: 1, Empowerment: 2, Weakening: 3, Protection: 4, Vulnerability: 5, Resistance: 6, Exposed: 7, Root: 8, Blinded: 9, OffGuard: 10, Sundered: 11, Dazed: 12, Silenced: 13, NoHeal: 14, Dulled: 15 } as const;
 export type ModKind = (typeof ModKind)[keyof typeof ModKind];
 
 /** One active buff or debuff: `turns` own turn starts of the bearer until it ends. */

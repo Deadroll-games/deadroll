@@ -2155,6 +2155,10 @@
             "tables, copied into `MonsterState`."
           ],
           "address": "FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK"
+        },
+        {
+          "name": "triples",
+          "address": "sWao9CeLDqT7z3R1oVxED2SGwH9EUSySM1ftyS44b6e"
         }
       ],
       "args": [
@@ -3940,6 +3944,16 @@
       "code": 6091,
       "name": "CornerBlocked",
       "msg": "A diagonal step cuts the corner of a cell that cannot be entered"
+    },
+    {
+      "code": 6092,
+      "name": "Rooted",
+      "msg": "The unit is rooted and cannot move"
+    },
+    {
+      "code": 6093,
+      "name": "Silenced",
+      "msg": "The unit is silenced: it can only use its basic attack"
     }
   ],
   "types": [
@@ -5829,7 +5843,7 @@
                         "name": "OpResultData"
                       }
                     },
-                    6
+                    7
                   ]
                 },
                 3
@@ -5896,6 +5910,63 @@
               "`state_bit`s of the states that landed on the target."
             ],
             "type": "u8"
+          },
+          {
+            "name": "splash",
+            "docs": [
+              "Resonance pass: damage to the enemies adjacent to the target (`ResonanceSpread` says who)."
+            ],
+            "type": {
+              "defined": {
+                "name": "SplashData"
+              }
+            }
+          },
+          {
+            "name": "nova",
+            "docs": [
+              "Resonance pass: a state and a modifier on the enemies around the target."
+            ],
+            "type": {
+              "defined": {
+                "name": "NovaData"
+              }
+            }
+          },
+          {
+            "name": "jump_mods",
+            "docs": [
+              "Triples: the modifiers every enemy the jumps and the nova reach get",
+              "(`jump_mods[..jump_mod_count]`)."
+            ],
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "ResistModData"
+                  }
+                },
+                3
+              ]
+            }
+          },
+          {
+            "name": "jump_mod_count",
+            "type": "u8"
+          },
+          {
+            "name": "tick_damage",
+            "docs": [
+              "Triples: over-time damage that ticked at once (part of `damage`)."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "remove_mods",
+            "docs": [
+              "Triples: `mod_bit`s of the modifiers taken off the target after the hit."
+            ],
+            "type": "u16"
           }
         ]
       }
@@ -6086,6 +6157,10 @@
                 "name": "Aspect"
               }
             }
+          },
+          {
+            "name": "filter_any",
+            "type": "bool"
           }
         ]
       }
@@ -6106,6 +6181,9 @@
           },
           {
             "name": "Line"
+          },
+          {
+            "name": "Radius"
           }
         ]
       }
@@ -6227,6 +6305,33 @@
           },
           {
             "name": "Resistance"
+          },
+          {
+            "name": "Exposed"
+          },
+          {
+            "name": "Root"
+          },
+          {
+            "name": "Blinded"
+          },
+          {
+            "name": "OffGuard"
+          },
+          {
+            "name": "Sundered"
+          },
+          {
+            "name": "Dazed"
+          },
+          {
+            "name": "Silenced"
+          },
+          {
+            "name": "NoHeal"
+          },
+          {
+            "name": "Dulled"
           }
         ]
       }
@@ -6259,7 +6364,7 @@
             "docs": [
               "`deadroll_combat::support::mod_bit` of every buff or debuff that ended now."
             ],
-            "type": "u8"
+            "type": "u16"
           },
           {
             "name": "mods",
@@ -6837,6 +6942,15 @@
                 12
               ]
             }
+          },
+          {
+            "name": "res_triples",
+            "type": {
+              "array": [
+                "u8",
+                1920
+              ]
+            }
           }
         ]
       }
@@ -6905,6 +7019,37 @@
           {
             "name": "action_points",
             "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "NovaData",
+      "docs": [
+        "`deadroll_combat::Nova`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "radius",
+            "type": "u8"
+          },
+          {
+            "name": "state",
+            "type": {
+              "defined": {
+                "name": "ActiveState"
+              }
+            }
+          },
+          {
+            "name": "modifier",
+            "type": {
+              "defined": {
+                "name": "ResistModData"
+              }
+            }
           }
         ]
       }
@@ -6979,6 +7124,66 @@
           },
           {
             "name": "AccuracyBuff"
+          },
+          {
+            "name": "ForceCrit"
+          },
+          {
+            "name": "ApplyState"
+          },
+          {
+            "name": "ApplyMod"
+          },
+          {
+            "name": "StateIfHad"
+          },
+          {
+            "name": "Splash"
+          },
+          {
+            "name": "Nova"
+          },
+          {
+            "name": "ModAfterNative"
+          },
+          {
+            "name": "StateFaster"
+          },
+          {
+            "name": "StateSlower"
+          },
+          {
+            "name": "TickNow"
+          },
+          {
+            "name": "Escalate"
+          },
+          {
+            "name": "TickAspect"
+          },
+          {
+            "name": "RemoveMod"
+          },
+          {
+            "name": "NativeShorter"
+          },
+          {
+            "name": "Delayed"
+          },
+          {
+            "name": "OnMiss"
+          },
+          {
+            "name": "ThawSplash"
+          },
+          {
+            "name": "SplashLine"
+          },
+          {
+            "name": "ChainRadius"
+          },
+          {
+            "name": "ModAfterState"
           }
         ]
       }
@@ -6999,6 +7204,9 @@
           },
           {
             "name": "Trait"
+          },
+          {
+            "name": "Triple"
           }
         ]
       }
@@ -8114,6 +8322,48 @@
                 "name": "AccuracyBuffData"
               }
             }
+          },
+          {
+            "name": "hit_mods",
+            "docs": [
+              "The modifiers each of `hits` got (`hit_mods[i]` for `hits[i]`, `turns == 0` = none): the",
+              "nova's first, then the jump modifiers (triples: up to four)."
+            ],
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    {
+                      "defined": {
+                        "name": "TimedModData"
+                      }
+                    },
+                    4
+                  ]
+                },
+                8
+              ]
+            }
+          },
+          {
+            "name": "splashes",
+            "docs": [
+              "Resonance pass: monsters a splash hit (`splashes[..splash_count]`)."
+            ],
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "SplashHitData"
+                  }
+                },
+                8
+              ]
+            }
+          },
+          {
+            "name": "splash_count",
+            "type": "u8"
           }
         ]
       }
@@ -8642,6 +8892,69 @@
           },
           {
             "name": "Combat"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SplashData",
+      "docs": [
+        "`deadroll_combat::Splash`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "damage",
+            "type": "u32"
+          },
+          {
+            "name": "aspect",
+            "type": {
+              "defined": {
+                "name": "Aspect"
+              }
+            }
+          },
+          {
+            "name": "line",
+            "docs": [
+              "Triples: only the enemies in line with the attacker and the target."
+            ],
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SplashHitData",
+      "docs": [
+        "One monster a splash hit (resonance pass)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "monster",
+            "docs": [
+              "Monster index."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "damage",
+            "type": "u32"
+          },
+          {
+            "name": "hp",
+            "docs": [
+              "HP after."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "died",
+            "type": "bool"
           }
         ]
       }

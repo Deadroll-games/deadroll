@@ -267,6 +267,7 @@ function openSessionIx(dm: Keypair, map: PublicKey, layout: PublicKey) {
       resonances: registryTable("resonances"),
       monsterSkills: registryTable("monster_skills"),
       rewards: registryTable("rewards"),
+      triples: registryTable("triples"),
     })
     .instruction();
 }

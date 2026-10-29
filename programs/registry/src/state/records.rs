@@ -3,7 +3,7 @@
 //! Pure functions, no account access: shared by `write_table`, the seed script spec and tests.
 
 use anchor_lang::prelude::*;
-use deadroll_combat::tables::{self, decode_aspect, decode_pair, decode_trait};
+use deadroll_combat::tables::{self, decode_aspect, decode_pair, decode_trait, decode_triple};
 use deadroll_skillcheck::{monster, SkillTuning};
 use deadroll_types::{seeds, Aspect, Form, Source, StateKind, NO_TABLE};
 
@@ -22,6 +22,9 @@ pub enum TableKind {
     MonsterSkills,
     /// Reward tables (docs/PARTY_AND_TURNS.md 9.2), patch 11: `deadroll_rules::loot::record`.
     Rewards,
+    /// Triple resonances (docs/DAMAGE_TYPES_AND_MIXES.md 6.5): 120 records of 16 bytes, in
+    /// `deadroll_combat::tables::triple_index` order.
+    Triples,
 }
 
 impl TableKind {
@@ -35,6 +38,7 @@ impl TableKind {
             5 => Self::Traits,
             6 => Self::MonsterSkills,
             7 => Self::Rewards,
+            8 => Self::Triples,
             _ => return None,
         })
     }
@@ -50,6 +54,7 @@ impl TableKind {
             Self::Traits => seeds::TRAITS,
             Self::MonsterSkills => seeds::MONSTER_SKILLS,
             Self::Rewards => seeds::REWARDS,
+            Self::Triples => seeds::TRIPLES,
         }
     }
 
@@ -64,6 +69,7 @@ impl TableKind {
             Self::Traits => TRAIT_SIZE,
             Self::MonsterSkills => MONSTER_SKILL_SIZE,
             Self::Rewards => REWARD_SIZE,
+            Self::Triples => TRIPLE_SIZE,
         }
     }
 
@@ -78,6 +84,7 @@ impl TableKind {
             Self::Traits => tables::TRAITS_LEN,
             Self::MonsterSkills => MONSTER_SKILLS_MAX * MONSTER_SKILL_SIZE,
             Self::Rewards => REWARDS_MAX * REWARD_SIZE,
+            Self::Triples => tables::TRIPLES_LEN,
         }
     }
 }
@@ -85,6 +92,7 @@ impl TableKind {
 pub const ASPECT_SIZE: usize = tables::ASPECT_RECORD;
 pub const RESONANCE_SIZE: usize = tables::PAIR_RECORD;
 pub const TRAIT_SIZE: usize = tables::TRAIT_RECORD;
+pub const TRIPLE_SIZE: usize = tables::TRIPLE_RECORD;
 pub const MONSTER_SIZE: usize = 48;
 pub const TILE_SIZE: usize = deadroll_rules::tiles::record::SIZE;
 /// Bestiary ids are record indices. P0: 0 wolf, 1 goblin, 2 goblin chieftain, 3 goblin warrior, 4 goblin shaman.
@@ -122,6 +130,7 @@ pub fn validate_record(kind: TableKind, index: usize, r: &[u8]) -> bool {
         TableKind::Aspects => decode_aspect(index, r).is_some(),
         TableKind::Resonances => decode_pair(r).is_some(),
         TableKind::Traits => decode_trait(r).is_some(),
+        TableKind::Triples => decode_triple(r).is_some(),
         TableKind::Bestiary => validate_monster(r),
         // [passable, move_cost, blocks_los, flags, reserved x4]
         TableKind::Tileset => deadroll_rules::tiles::validate_record(r),
@@ -237,15 +246,53 @@ mod tests {
             TableKind::Traits,
             TableKind::MonsterSkills,
             TableKind::Rewards,
+            TableKind::Triples,
         ] {
             assert!(k.max_len() <= crate::state::TABLE_CAP);
             assert_eq!(k.max_len() % k.record_size(), 0);
             assert_eq!(TableKind::from_u8(k as u8), Some(k));
         }
-        assert_eq!(TableKind::from_u8(8), None);
+        assert_eq!(TableKind::from_u8(9), None);
+        assert_eq!(TableKind::Triples.seed(), b"triples");
+        assert_eq!(TableKind::Triples.record_size(), 16);
+        assert_eq!(TableKind::Triples.max_len(), 120 * 16);
         assert_eq!(TableKind::Rewards.seed(), b"rewards");
         assert_eq!(TableKind::MonsterSkills.seed(), b"monster_skills");
         assert_eq!(TableKind::Traits.seed(), b"traits");
+    }
+
+    #[test]
+    fn triple_records_validate_like_the_shared_decoder() {
+        use deadroll_combat::{ModKind, Op, OpKind};
+        let k = TableKind::Triples;
+        let e = tables::TripleEntry {
+            set: true,
+            ops: [
+                Op::new(OpKind::ApplyMod, ModKind::Dazed as u8, 10_000),
+                Op::new(OpKind::Delayed, StateKind::Bleeding as u8, 3 | 150 << 8),
+                Op::NONE,
+            ],
+        };
+        let r = tables::encode_triple(&e).unwrap();
+        assert!(validate_record(k, 0, &r));
+        assert!(validate_record(k, 119, &r));
+        // An empty record keeps the second tint's trait template.
+        assert!(validate_record(k, 3, &[0; 16]));
+        let bad = |at: usize, v: u8| {
+            let mut x = r;
+            x[at] = v;
+            !validate_record(k, 0, &x)
+        };
+        assert!(bad(0, 1), "reserved byte");
+        assert!(bad(1, 2), "unknown flag");
+        assert!(bad(14, 1), "reserved byte");
+        assert!(bad(2, 41), "unknown op kind");
+        assert!(bad(3, 16), "unknown modifier");
+        assert!(bad(7, 0x40), "Delayed waits for an unknown state");
+        assert!(!validate_record(k, 0, &r[..15]));
+        assert_eq!(check_range(k, 0, 120 * 16), Ok(120 * 16));
+        assert_eq!(check_range(k, 0, 121 * 16), Err(RangeError::OutOfBounds));
+        assert!(validate_write(k, 16, &[r, r].concat()));
     }
 
     #[test]
@@ -281,7 +328,8 @@ mod tests {
         assert!(bad(3, 7), "unknown native state");
         assert!(!bad(3, tables::NO_STATE), "no native state is allowed");
         assert!(bad(4, 6), "unknown trait");
-        assert!(bad(5, 9), "unknown condition");
+        assert!(bad(5, 10), "unknown condition");
+        assert!(!bad(5, 9), "IsBleeding (resonance pass)");
         assert!(bad(6, 1), "reserved byte");
     }
 
@@ -303,7 +351,7 @@ mod tests {
             !validate_record(TableKind::Resonances, 0, &x)
         };
         assert!(bad(9, 200), "unknown state");
-        assert!(bad(0, 9), "unknown condition");
+        assert!(bad(0, 10), "unknown condition");
         assert!(bad(1, 2), "unknown flag");
         assert!(bad(2, OpKind::COUNT), "unknown op");
         assert!(bad(14, 1), "reserved byte");

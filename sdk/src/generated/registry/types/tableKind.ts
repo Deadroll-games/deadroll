@@ -25,6 +25,7 @@ export const TableKind = {
   5: "Traits",
   6: "MonsterSkills",
   7: "Rewards",
+  8: "Triples",
   Aspects: 0,
   Resonances: 1,
   Bestiary: 2,
@@ -33,6 +34,7 @@ export const TableKind = {
   Traits: 5,
   MonsterSkills: 6,
   Rewards: 7,
+  Triples: 8,
 } as const;
 
 /** Which table an instruction works on. Discriminants are part of the format: append only. */

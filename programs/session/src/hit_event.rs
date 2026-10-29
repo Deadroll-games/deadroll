@@ -9,7 +9,7 @@ use anchor_lang::{prelude::*, Discriminator};
 use deadroll_combat::{
     packet::{PACKETS_MAX, SKILL_ASPECTS_MAX},
     resonance::TINT_ROLLS_MAX,
-    EffectRoll, HitResult, Outcome, JUMPS_MAX, RES_OPS_MAX, TARGET_MODS_MAX,
+    EffectRoll, HitResult, Outcome, JUMPS_MAX, JUMP_MODS_MAX, RES_OPS_MAX, TARGET_MODS_MAX,
 };
 use deadroll_rules::HeroStats;
 use deadroll_types::{ActiveState, Aspect, ItemBase, StateKind, STATES_MAX};
@@ -98,6 +98,28 @@ pub enum OpKind {
     AddPacket,
     Penetrate,
     AccuracyBuff,
+    /// Resonance pass.
+    ForceCrit,
+    ApplyState,
+    ApplyMod,
+    StateIfHad,
+    Splash,
+    Nova,
+    ModAfterNative,
+    /// Triples.
+    StateFaster,
+    StateSlower,
+    TickNow,
+    Escalate,
+    TickAspect,
+    RemoveMod,
+    NativeShorter,
+    Delayed,
+    OnMiss,
+    ThawSplash,
+    SplashLine,
+    ChainRadius,
+    ModAfterState,
 }
 
 /// `deadroll_combat::OpOrigin`.
@@ -106,6 +128,8 @@ pub enum OpOrigin {
     Pair,
     Template,
     Trait,
+    /// The record of a triple.
+    Triple,
 }
 
 /// `deadroll_combat::OpResult`: what one op of a resonance did.
@@ -131,6 +155,8 @@ pub enum JumpMode {
     Adjacent,
     Chain,
     Line,
+    /// Triples: every enemy within `limit` cells that has `filter` (any when `filter_any`).
+    Radius,
 }
 
 /// `deadroll_combat::Jump`: a state for the program to pass on (`ResonanceSpread` says where).
@@ -141,6 +167,7 @@ pub struct JumpData {
     pub filter: StateKind,
     pub limit: u8,
     pub base: Aspect,
+    pub filter_any: bool,
 }
 
 /// `deadroll_combat::StateRoll`.
@@ -215,6 +242,35 @@ pub struct HitResultData {
     pub accuracy_buff: AccuracyBuffData,
     /// `state_bit`s of the states that landed on the target.
     pub landed: u8,
+    /// Resonance pass: damage to the enemies adjacent to the target (`ResonanceSpread` says who).
+    pub splash: SplashData,
+    /// Resonance pass: a state and a modifier on the enemies around the target.
+    pub nova: NovaData,
+    /// Triples: the modifiers every enemy the jumps and the nova reach get
+    /// (`jump_mods[..jump_mod_count]`).
+    pub jump_mods: [ResistModData; JUMP_MODS_MAX],
+    pub jump_mod_count: u8,
+    /// Triples: over-time damage that ticked at once (part of `damage`).
+    pub tick_damage: u32,
+    /// Triples: `mod_bit`s of the modifiers taken off the target after the hit.
+    pub remove_mods: u16,
+}
+
+/// `deadroll_combat::Splash`.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SplashData {
+    pub damage: u32,
+    pub aspect: Aspect,
+    /// Triples: only the enemies in line with the attacker and the target.
+    pub line: bool,
+}
+
+/// `deadroll_combat::Nova`.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NovaData {
+    pub radius: u8,
+    pub state: ActiveState,
+    pub modifier: ResistModData,
 }
 
 /// What a player's worn items put into a hit (`deadroll_rules::items::ItemBonus`), so the

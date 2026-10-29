@@ -1079,6 +1079,9 @@
           },
           {
             "name": "Rewards"
+          },
+          {
+            "name": "Triples"
           }
         ]
       }

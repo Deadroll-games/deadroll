@@ -18,7 +18,7 @@ cargo build -p deadroll-combat-wasm --target wasm32-unknown-unknown --profile wa
 # -> target/wasm32-unknown-unknown/wasm/deadroll_combat_wasm.wasm
 ```
 
-There are no imports. The module exports `memory` plus the functions below. Balance numbers are always `BalanceConfig::DEFAULT`, the numbers the programs use. Resonance tables and monsters are registry data, not compiled in: the page loads the tables a session copied at `open_session` (`MonsterState.res_aspects ‖ res_traits ‖ res_pairs`, 816 bytes) with `set_tables` before `resolve`, `preview_hit`, `preview_attack` or `preview_monster_attack`, and passes each monster's 48-byte bestiary record (`MonsterState.records`, or the registry `bestiary` table in the map builder) and its skills' 16-byte session copies (`MonsterState.skill_table`). Since ABI 6 nothing about a monster is compiled in.
+There are no imports. The module exports `memory` plus the functions below. Balance numbers are always `BalanceConfig::DEFAULT`, the numbers the programs use. Resonance tables and monsters are registry data, not compiled in: the page loads the tables a session copied at `open_session` (`MonsterState.res_aspects ‖ res_traits ‖ res_pairs ‖ res_triples`, 2 736 bytes since ABI 10) with `set_tables` before `resolve`, `preview_hit`, `preview_attack` or `preview_monster_attack`, and passes each monster's 48-byte bestiary record (`MonsterState.records`, or the registry `bestiary` table in the map builder) and its skills' 16-byte session copies (`MonsterState.skill_table`). Since ABI 6 nothing about a monster is compiled in.
 
 ## Exports
 
@@ -74,6 +74,7 @@ Attacker {
   weaken_bp: u32, penetration_bp: u32, state_chance_bonus_bp: u32,
   tints: [Tint; 4],
   tempo_bonus_bp: u32,                                          // Dexterity increase on Chill
+  blinded_bp: u32,                                              // ABI 10: counterweight on the d20 (Blinded)
 }
 DamageRange { aspect: Aspect, min: u32, max: u32 }            // min == max == 0: empty slot
 Skill {
@@ -93,8 +94,11 @@ Defender {
   state_resist_bp: [u32; 7],                                    // indexed by StateKind (Penetration is 6)
   states: [ActiveState; 6],
   tag_resist_bp: [u32; 4], immune_tags: u8,                     // ABI 7: Magical, Combat, Strike, Projectile
+  crit_taken_pct: u32,                                          // ABI 9: Exposed
+  sunder_bp: u32,                                               // ABI 10: counterweight on the armor against Piercing (Sundered)
 }
-ActiveState { kind: StateKind, turns: u8, power: u32, source: u8 }   // turns == 0: empty slot
+ActiveState { kind: StateKind, turns: u8, power: u32, source: u8 }   // turns == 0: empty slot; ABI 10: source & 31 is the unit,
+                                                                // bit 7 = dormant (waits for the Freeze or Stun to end), bit 6 = escalating
 ```
 
 
@@ -217,19 +221,25 @@ HitResult {
   states: [ActiveState; 6],                                     // target after the hit
   damage: u32,
   rolls_used: u32,
-  res_ops: [[OpResult; 6]; 3],                                  // per base slot, kind None after the used ones
+  res_ops: [[OpResult; 7]; 3],                                  // per base slot, kind None after the used ones (7 since ABI 10)
   jumps: [Jump; 4], jump_count: u8,                             // states the program passes on (ResonanceSpread)
   knockback: u8, ignite_power: u32,
   target_mods: [TimedMod; 3], target_mod_count: u8,
   accuracy_buff: AccuracyBuff,
   landed: u8,                                                   // bit 1 << StateKind of what landed
+  splash: Splash { damage: u32, aspect: Aspect, line: bool },   // ABI 9; line: ABI 10
+  nova: Nova { radius: u8, state: ActiveState, modifier: TimedMod },   // ABI 9
+  jump_mods: [TimedMod; 3], jump_mod_count: u8,                 // ABI 10 (was one jump_mod)
+  tick_damage: u32,                                             // ABI 10: over-time damage ticked at once, part of damage
+  remove_mods: u16,                                             // ABI 10: bit 1 << ModKind taken off the target
 }
 OpResult {
   kind: u8 (deadroll_combat::tables::OpKind), crit_only: bool, arg: u8,
-  origin: u8 (0 Pair, 1 Template, 2 Trait), tint: Aspect, carrier: Carrier, tier: u8,
+  origin: u8 (0 Pair, 1 Template, 2 Trait, 3 Triple), tint: Aspect, carrier: Carrier, tier: u8,
   acted: bool, state: StateRoll, amount: u32, amount_max: u32,
 }
-Jump { mode: u8 (0 Adjacent, 1 Chain, 2 Line), state: ActiveState, filter: StateKind, limit: u8, base: Aspect }
+Jump { mode: u8 (0 Adjacent, 1 Chain, 2 Line, 3 Radius), state: ActiveState, filter: StateKind, limit: u8, base: Aspect,
+       filter_any: bool }                                       // ABI 10
 TintRoll { base: Aspect, tint: Aspect, carrier: Carrier, tier: u8, chance_pct: u32, roll: u16, success: bool }
 Resonance {
   base: Aspect, tint: Aspect, tier: u8, carrier: Carrier, id: u8, active: bool,

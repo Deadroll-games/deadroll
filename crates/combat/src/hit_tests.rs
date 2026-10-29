@@ -2,8 +2,10 @@ use super::*;
 use crate::resonance::Carrier;
 use crate::rng::{ScriptedRoll, VrfRoll};
 use crate::states::has;
-use crate::tables::{AspectEntry, PairEntry, TraitEntry, NATIVE};
-use crate::ModFilter;
+use crate::tables::{
+    AspectEntry, PairEntry, TraitEntry, TripleEntry, NATIVE, TRIPLES, TRIPLE_RECORD,
+};
+use crate::{ModFilter, TimedMods};
 use deadroll_types::{Family, Form, Source};
 
 const B: Balance = Balance::DEFAULT;
@@ -29,6 +31,7 @@ const fn natives() -> ResonanceTables {
             template: [Op::NONE; 2],
         }; Aspect::COUNT],
         pairs: [[NONE_PAIR; Aspect::COUNT]; Aspect::COUNT],
+        triples: [[0; TRIPLE_RECORD]; TRIPLES],
     };
     let natives = [
         StateKind::Burning,
@@ -1101,4 +1104,866 @@ fn preview_lists_the_tints_with_what_they_add() {
     let cold = p.tints[1];
     assert!(cold.pure && cold.chance_pct == 0);
     assert_eq!((cold.min, cold.max), (10, 10));
+}
+
+fn on_target(kind: StateKind, power: u32) -> ActiveState {
+    ActiveState {
+        kind,
+        turns: 2,
+        power,
+        source: 9,
+    }
+}
+
+#[test]
+fn force_crit_makes_the_hit_a_crit_and_the_crit_ops_act() {
+    use crate::ResonanceCondition as C;
+    // Piercing Frost (resonance pass): the hit is a crit and the target freezes.
+    let t = pair(
+        Aspect::Cold,
+        Aspect::Piercing,
+        C::CanBeFrozen,
+        [
+            Op::new(OpKind::ForceCrit, 0, 0),
+            Op::new(OpKind::StateOnCrit, st(StateKind::Freeze), 0),
+        ],
+    );
+    let input = cold_bolt(Aspect::Piercing);
+    let r = resolve_hit(&input, &B, &t, &mut ScriptedRoll::new([14, 0, 0]));
+    assert!(r.crit && r.crit_roll.is_none());
+    assert_eq!(r.packets()[0].more_bp, BP + B.crit_more_bp);
+    assert!(op(&r, 0).acted && op(&r, 1).acted);
+    assert!(has(&r.states, StateKind::Freeze));
+    // The tint does not trigger: a plain hit.
+    let r = resolve_hit(&input, &B, &t, &mut ScriptedRoll::new([14, 99, 0]));
+    assert!(!r.crit && !has(&r.states, StateKind::Freeze));
+    // The preview shows the forced crit's damage for that tint.
+    let p = preview_hit(&input, &B, &t);
+    assert_eq!((p.tints[0].min, p.tints[0].max), (p.crit_min, p.crit_max));
+}
+
+#[test]
+fn exposed_on_the_target_adds_to_every_attackers_crit_chance() {
+    let mut input = basic(Aspect::Piercing, 4, 8, 0);
+    // No crit chance at all: no roll.
+    let r = resolve_hit(&input, &B, &T, &mut ScriptedRoll::new([14, 50]));
+    assert_eq!(r.crit_roll, None);
+    let mut mods = TimedMods::default();
+    crate::support::apply_mod(
+        &mut mods,
+        TimedMod {
+            kind: ModKind::Exposed,
+            turns: 2,
+            power_bp: 2_000,
+            ..TimedMod::default()
+        },
+    );
+    crate::support::apply_to_defender(&mut input.defender, &mods);
+    assert_eq!(input.defender.crit_taken_pct, 20);
+    // d20 15, crit roll 10 < 20: a crit.
+    let r = resolve_hit(&input, &B, &T, &mut ScriptedRoll::new([14, 10, 50]));
+    assert_eq!((r.crit, r.crit_roll), (true, Some(10)));
+    assert!(preview_hit(&input, &B, &T).crit_bp > BP / 20);
+}
+
+#[test]
+fn state_if_had_needs_the_native_state_before_the_hit() {
+    use crate::ResonanceCondition as C;
+    // Incinerating Discharge (resonance pass): Burning only on a target that was already shocked.
+    let t = pair(
+        Aspect::Lightning,
+        Aspect::Fire,
+        C::CanBeShocked,
+        [
+            Op::new(OpKind::StateIfHad, st(StateKind::Burning), BP),
+            Op::NONE,
+        ],
+    );
+    let mut input = skill_hit(Aspect::Lightning, Aspect::Fire);
+    let r = resolve_hit(&input, &B, &t, &mut rolls(0));
+    assert!(has(&r.states, StateKind::Shock) && !has(&r.states, StateKind::Burning));
+    assert!(!op(&r, 0).acted);
+    input.defender.states[0] = on_target(StateKind::Shock, 2_000);
+    // The native state fails its roll: Burning still lands, without a roll.
+    let r = resolve_hit(&input, &B, &t, &mut ScriptedRoll::new([14, 0, 0, 99]));
+    let o = op(&r, 0);
+    assert!(o.acted && !o.state.rolled);
+    assert_eq!(o.state.kind, StateKind::Burning);
+    assert!(has(&r.states, StateKind::Burning));
+    // Immune to Burning: nothing.
+    input.defender.immune_states = state_bit(StateKind::Burning);
+    let r = resolve_hit(&input, &B, &t, &mut rolls(0));
+    assert!(!op(&r, 0).acted);
+}
+
+#[test]
+fn splash_is_a_share_of_the_damage_when_the_target_had_the_state() {
+    use crate::ResonanceCondition as C;
+    let t = pair(
+        Aspect::Lightning,
+        Aspect::Cold,
+        C::CanBeShocked,
+        [
+            Op::new(OpKind::Splash, st(StateKind::Freeze), 5_000),
+            Op::NONE,
+        ],
+    );
+    let mut input = skill_hit(Aspect::Lightning, Aspect::Cold);
+    let r = resolve_hit(&input, &B, &t, &mut rolls(0));
+    assert_eq!(r.splash, Splash::default());
+    assert!(!op(&r, 0).acted);
+    input.defender.states[0] = frozen();
+    let r = resolve_hit(&input, &B, &t, &mut rolls(0));
+    assert_eq!(r.splash.damage, r.damage / 2);
+    assert_eq!(r.splash.aspect, Aspect::Lightning);
+    assert_eq!(op(&r, 0).amount, r.damage / 2);
+}
+
+#[test]
+fn apply_state_lands_without_a_roll_and_is_bleeding_is_the_condition() {
+    use crate::ResonanceCondition as C;
+    // Blackout (resonance pass): on a bleeding target, Stun and the Bleeding refreshed.
+    let t = pair(
+        Aspect::Blood,
+        Aspect::Blunt,
+        C::IsBleeding,
+        [
+            Op::new(OpKind::ApplyState, st(StateKind::Stun), BP),
+            Op::new(OpKind::ApplyState, NATIVE, BP),
+        ],
+    );
+    let mut input = skill_hit(Aspect::Blood, Aspect::Blunt);
+    let r = resolve_hit(&input, &B, &t, &mut rolls(0));
+    assert!(!r.resonances[0].unwrap().active);
+    assert!(!has(&r.states, StateKind::Stun));
+    input.defender.states[0] = ActiveState {
+        kind: StateKind::Bleeding,
+        turns: 1,
+        power: 1,
+        source: 9,
+    };
+    // The native roll fails (99): the resonance still stuns and refreshes the Bleeding.
+    let r = resolve_hit(&input, &B, &t, &mut ScriptedRoll::new([14, 0, 0, 99]));
+    assert!(r.resonances[0].unwrap().active);
+    assert!(has(&r.states, StateKind::Stun));
+    assert_eq!(
+        find(&r.states, StateKind::Bleeding).turns,
+        B.turns(StateKind::Bleeding)
+    );
+    assert!(op(&r, 0).acted && op(&r, 1).acted);
+}
+
+#[test]
+fn apply_mod_marks_the_target_and_follows_the_jumps() {
+    use crate::ResonanceCondition as C;
+    // Lightning Needle (resonance pass): Shock jumps, both are exposed to crits.
+    let t = pair(
+        Aspect::Lightning,
+        Aspect::Piercing,
+        C::CanBeShocked,
+        [
+            Op::new(OpKind::Jump, NATIVE, 0),
+            Op::new(OpKind::ApplyMod, ModKind::Exposed as u8, BP),
+        ],
+    );
+    let input = skill_hit(Aspect::Lightning, Aspect::Piercing);
+    let r = resolve_hit(&input, &B, &t, &mut rolls(0));
+    assert_eq!(r.jump_count, 1);
+    let m = r.target_mods()[0];
+    assert_eq!(
+        (m.kind, m.power_bp, m.turns),
+        (
+            ModKind::Exposed,
+            B.res_exposed_pct[0] * 100,
+            mod_turns(B.res_mod_turns)
+        )
+    );
+    assert_eq!(r.jump_mods(), &[m]);
+    // The native state fails: no jump, the target is still marked.
+    let r = resolve_hit(&input, &B, &t, &mut ScriptedRoll::new([14, 0, 0, 99]));
+    assert_eq!((r.jump_count, r.target_mod_count), (0, 1));
+    // Root has no strength, only presence.
+    let t = pair(
+        Aspect::Piercing,
+        Aspect::Blunt,
+        C::Always,
+        [Op::new(OpKind::ApplyMod, ModKind::Root as u8, BP), Op::NONE],
+    );
+    let input = skill_hit(Aspect::Piercing, Aspect::Blunt);
+    let r = resolve_hit(&input, &B, &t, &mut rolls(0));
+    let mut mods = TimedMods::default();
+    crate::support::apply_mod(&mut mods, r.target_mods()[0]);
+    assert!(crate::support::rooted(&mods));
+    assert!(!crate::support::rooted(&TimedMods::default()));
+}
+
+#[test]
+fn mod_after_native_lasts_beyond_the_state_and_nova_spreads_it() {
+    use crate::ResonanceCondition as C;
+    // Frozen Ram (resonance pass): Stun longer, then Slow.
+    let t = pair(
+        Aspect::Blunt,
+        Aspect::Cold,
+        C::CanBeStunned,
+        [
+            Op::new(OpKind::NativeTurns, 0, BP),
+            Op::new(OpKind::ModAfterNative, ModKind::Slow as u8, BP),
+        ],
+    );
+    let input = skill_hit(Aspect::Blunt, Aspect::Cold);
+    let r = resolve_hit(&input, &B, &t, &mut rolls(0));
+    let stun = find(&r.states, StateKind::Stun).turns;
+    assert_eq!(stun, B.turns(StateKind::Stun) + B.res_turns[0]);
+    let m = r.target_mods()[0];
+    assert_eq!(
+        (m.kind, m.turns),
+        (ModKind::Slow, mod_turns(B.res_mod_turns + stun))
+    );
+    let r = resolve_hit(&input, &B, &t, &mut ScriptedRoll::new([14, 0, 0, 99]));
+    assert_eq!(r.target_mod_count, 0);
+    // Dread Pulse (resonance pass): after the Stun lands, the enemies around are stunned and weakened.
+    let t = pair(
+        Aspect::Blunt,
+        Aspect::Blood,
+        C::CanBeStunned,
+        [Op::new(OpKind::Nova, ModKind::Weakening as u8, 2), Op::NONE],
+    );
+    let input = skill_hit(Aspect::Blunt, Aspect::Blood);
+    let r = resolve_hit(&input, &B, &t, &mut rolls(0));
+    assert_eq!(r.nova.radius, 2);
+    assert_eq!(r.nova.state, find(&r.states, StateKind::Stun));
+    assert_eq!(
+        (r.nova.modifier.kind, r.nova.modifier.power_bp),
+        (ModKind::Weakening, B.res_mod_bp[0])
+    );
+    // The target itself is not weakened.
+    assert_eq!(r.target_mod_count, 0);
+    let r = resolve_hit(&input, &B, &t, &mut ScriptedRoll::new([14, 0, 0, 99]));
+    assert_eq!(r.nova, Nova::default());
+}
+
+// ---------------------------------------------------------------------------------------------
+// Triples
+
+use crate::states::{tick_turn_start_with, MARK_DORMANT, MARK_ESCALATE};
+use crate::tables::{triple_index, triple_of};
+
+/// `T` with a pair record (always) and one triple record.
+fn tri(
+    base: Aspect,
+    tint: Aspect,
+    second: Aspect,
+    pair_ops: [Op; 2],
+    ops: [Op; 3],
+) -> ResonanceTables {
+    let mut t = pair(base, tint, crate::ResonanceCondition::Always, pair_ops);
+    assert!(t.set_triple(base, tint, second, &TripleEntry { set: true, ops }));
+    t
+}
+
+/// A hit with base `base` and the tints `tint` (best) and `second`.
+fn tri_input(base: Aspect, tint: Aspect, second: Aspect) -> HitInput {
+    let mut input = skill_hit(base, tint);
+    input.attacker.tints[1] = Tint::new(second, 2, Carrier::Item);
+    input
+}
+
+/// d20 15, both tints succeed (the first by more), d100 0, native roll 0, then zeros.
+fn tri_rolls() -> ScriptedRoll<5> {
+    ScriptedRoll::new([14, 0, 1, 0, 0])
+}
+
+fn tri_op(r: &HitResult, k: usize) -> OpResult {
+    r.res_ops[0][k]
+}
+
+fn gen(kind: OpKind, arg: u8, value: u32) -> Op {
+    Op::new(kind, arg, value)
+}
+
+fn just(op: Op) -> [Op; 3] {
+    [op, Op::NONE, Op::NONE]
+}
+
+fn two(a: Op, b: Op) -> [Op; 3] {
+    [a, b, Op::NONE]
+}
+
+const NO_PAIR: [Op; 2] = [Op::NONE; 2];
+
+#[test]
+fn triple_index_is_a_bijection_over_the_120_triples() {
+    let mut seen = [false; TRIPLES];
+    for b in Aspect::ALL.iter().copied() {
+        for t in Aspect::ALL.iter().copied() {
+            for s in Aspect::ALL.iter().copied() {
+                match triple_index(b, t, s) {
+                    Some(i) => {
+                        assert!(!seen[i]);
+                        seen[i] = true;
+                        assert_eq!(triple_of(i), Some([b, t, s]));
+                    }
+                    None => assert!(b == t || b == s || t == s),
+                }
+            }
+        }
+    }
+    assert!(seen.iter().all(|x| *x));
+    assert_eq!(triple_of(TRIPLES), None);
+}
+
+#[test]
+fn a_triple_record_replaces_the_second_trait_template() {
+    let mut t = tri(
+        Aspect::Cold,
+        Aspect::Piercing,
+        Aspect::Lightning,
+        NO_PAIR,
+        just(gen(OpKind::ApplyState, st(StateKind::Bleeding), BP)),
+    );
+    t = with_trait(
+        t,
+        Aspect::Lightning,
+        Op::NONE,
+        [gen(OpKind::Jump, NATIVE, 0), Op::NONE],
+    );
+    let input = tri_input(Aspect::Cold, Aspect::Piercing, Aspect::Lightning);
+    let r = resolve_hit(&input, &B, &t, &mut tri_rolls());
+    let o = tri_op(&r, 0);
+    assert_eq!((o.kind, o.origin), (OpKind::ApplyState, OpOrigin::Triple));
+    assert!(o.acted && has(&r.states, StateKind::Bleeding));
+    // The template did not run.
+    assert_eq!(r.jump_count, 0);
+    assert_eq!(r.res_ops[0][1].kind, OpKind::None);
+    // Another second tint has no record: the template stays.
+    let input = tri_input(Aspect::Cold, Aspect::Piercing, Aspect::Fire);
+    let t2 = with_trait(
+        t,
+        Aspect::Fire,
+        Op::NONE,
+        [gen(OpKind::Jump, NATIVE, 0), Op::NONE],
+    );
+    let r = resolve_hit(&input, &B, &t2, &mut tri_rolls());
+    assert_eq!(tri_op(&r, 0).origin, OpOrigin::Template);
+    // Two equal tints are no triple of three aspects.
+    let same = tri_input(Aspect::Cold, Aspect::Piercing, Aspect::Piercing);
+    let t3 = with_trait(
+        t,
+        Aspect::Piercing,
+        Op::NONE,
+        [gen(OpKind::Jump, NATIVE, 0), Op::NONE],
+    );
+    let r = resolve_hit(&same, &B, &t3, &mut tri_rolls());
+    assert_eq!(tri_op(&r, 0).origin, OpOrigin::Template);
+}
+
+fn fire_triple(ops: [Op; 3]) -> (ResonanceTables, HitInput) {
+    (
+        tri(Aspect::Fire, Aspect::Cold, Aspect::Lightning, NO_PAIR, ops),
+        tri_input(Aspect::Fire, Aspect::Cold, Aspect::Lightning),
+    )
+}
+
+#[test]
+fn state_slower_lasts_longer_and_ticks_less() {
+    let apply = gen(OpKind::ApplyState, st(StateKind::Burning), BP);
+    let (t0, input) = fire_triple(just(apply));
+    let plain = find(
+        &resolve_hit(&input, &B, &t0, &mut tri_rolls()).states,
+        StateKind::Burning,
+    );
+    let (t, _) = fire_triple(two(
+        apply,
+        gen(OpKind::StateSlower, st(StateKind::Burning), 2),
+    ));
+    let r = resolve_hit(&input, &B, &t, &mut tri_rolls());
+    let slow = find(&r.states, StateKind::Burning);
+    assert_eq!(slow.power, (plain.power / 2).max(1));
+    assert_eq!(slow.turns, (plain.turns * 2).min(B.state_turns_max));
+    assert!(tri_op(&r, 1).acted);
+    // Stun is no damage over time: it only lasts longer.
+    let t = tri(
+        Aspect::Blunt,
+        Aspect::Fire,
+        Aspect::Cold,
+        NO_PAIR,
+        just(gen(OpKind::StateSlower, st(StateKind::Stun), 2)),
+    );
+    let input = tri_input(Aspect::Blunt, Aspect::Fire, Aspect::Cold);
+    let r = resolve_hit(&input, &B, &t, &mut tri_rolls());
+    assert_eq!(find(&r.states, StateKind::Stun).turns, 2);
+    // The state did not land: nothing to slow.
+    let r = resolve_hit(&input, &B, &t, &mut ScriptedRoll::new([14, 0, 1, 0, 99]));
+    assert!(!tri_op(&r, 0).acted && !has(&r.states, StateKind::Stun));
+}
+
+#[test]
+fn state_faster_ticks_twice_per_turn() {
+    let apply = gen(OpKind::ApplyState, st(StateKind::Bleeding), BP);
+    let (t0, input) = fire_triple(just(apply));
+    let plain = find(
+        &resolve_hit(&input, &B, &t0, &mut tri_rolls()).states,
+        StateKind::Bleeding,
+    );
+    let (t, _) = fire_triple(two(
+        apply,
+        gen(OpKind::StateFaster, st(StateKind::Bleeding), 2),
+    ));
+    let r = resolve_hit(&input, &B, &t, &mut tri_rolls());
+    let fast = find(&r.states, StateKind::Bleeding);
+    assert_eq!(fast.power, plain.power * 2);
+    assert_eq!(fast.turns as u32, (plain.turns as u32).div_ceil(2));
+    // Nothing landed to speed up.
+    let (t, _) = fire_triple(just(gen(OpKind::StateFaster, st(StateKind::Bleeding), 2)));
+    let r = resolve_hit(&input, &B, &t, &mut tri_rolls());
+    assert!(!tri_op(&r, 0).acted && !has(&r.states, StateKind::Bleeding));
+}
+
+#[test]
+fn tick_now_hits_with_the_state_power_right_away() {
+    let apply = gen(OpKind::ApplyState, st(StateKind::Bleeding), 60_000);
+    let (t0, input) = fire_triple(just(apply));
+    let base = resolve_hit(&input, &B, &t0, &mut tri_rolls());
+    let power = find(&base.states, StateKind::Bleeding).power;
+    assert!(power > 0);
+    let (t, _) = fire_triple(two(apply, gen(OpKind::TickNow, st(StateKind::Bleeding), 2)));
+    let r = resolve_hit(&input, &B, &t, &mut tri_rolls());
+    assert_eq!(r.tick_damage, power * 2);
+    assert_eq!(r.damage, base.damage + power * 2);
+    // Once by default.
+    let (t, _) = fire_triple(two(apply, gen(OpKind::TickNow, st(StateKind::Bleeding), 0)));
+    assert_eq!(
+        resolve_hit(&input, &B, &t, &mut tri_rolls()).tick_damage,
+        power
+    );
+    // No Bleeding on the target: nothing ticks.
+    let (t, _) = fire_triple(just(gen(OpKind::TickNow, st(StateKind::Bleeding), 1)));
+    let r = resolve_hit(&input, &B, &t, &mut tri_rolls());
+    assert_eq!((r.tick_damage, tri_op(&r, 0).acted), (0, false));
+}
+
+#[test]
+fn escalate_marks_the_state_and_each_tick_grows() {
+    let apply = gen(OpKind::ApplyState, st(StateKind::Burning), 60_000);
+    let (t, input) = fire_triple(two(apply, gen(OpKind::Escalate, st(StateKind::Burning), 0)));
+    let r = resolve_hit(&input, &B, &t, &mut tri_rolls());
+    assert!(tri_op(&r, 1).acted);
+    let burning = find(&r.states, StateKind::Burning);
+    assert!(burning.source & MARK_ESCALATE != 0);
+    let mut states = r.states;
+    let first = tick_turn_start_with(&mut states, &B).dot_damage;
+    let second = tick_turn_start_with(&mut states, &B).dot_damage;
+    assert_eq!(first, burning.power);
+    assert_eq!(
+        second,
+        burning.power + burning.power * B.escalate_step_bp / BP
+    );
+    // Not on the target: nothing to mark.
+    let (t, _) = fire_triple(just(gen(OpKind::Escalate, st(StateKind::Bleeding), 0)));
+    let r = resolve_hit(&input, &B, &t, &mut tri_rolls());
+    assert!(!tri_op(&r, 0).acted);
+}
+
+#[test]
+fn delayed_waits_for_the_control_to_end() {
+    let delayed = gen(
+        OpKind::Delayed,
+        st(StateKind::Bleeding),
+        st(StateKind::Freeze) as u32 | 150 << 8,
+    );
+    let t = tri(
+        Aspect::Cold,
+        Aspect::Fire,
+        Aspect::Blood,
+        NO_PAIR,
+        just(delayed),
+    );
+    let mut input = tri_input(Aspect::Cold, Aspect::Fire, Aspect::Blood);
+    input.defender.states[0] = ActiveState {
+        kind: StateKind::Freeze,
+        turns: 2,
+        power: 0,
+        source: 9,
+    };
+    let r = resolve_hit(&input, &B, &t, &mut tri_rolls());
+    let bleeding = find(&r.states, StateKind::Bleeding);
+    assert!(bleeding.source & MARK_DORMANT != 0 && bleeding.source & 0x1F == 0);
+    let mut states = r.states;
+    // Frozen: the bleeding does not tick or count down.
+    let first = tick_turn_start_with(&mut states, &B);
+    assert_eq!(first.dot_damage, 0);
+    assert_eq!(find(&states, StateKind::Bleeding).turns, bleeding.turns);
+    // The Freeze thawed in that tick (2 turns: one more). Frozen again for the next one.
+    let second = tick_turn_start_with(&mut states, &B);
+    assert_eq!(second.dot_damage, 0);
+    assert!(!has(&states, StateKind::Freeze));
+    // Now it starts.
+    let third = tick_turn_start_with(&mut states, &B);
+    assert_eq!(third.dot_damage, bleeding.power);
+    assert_eq!(find(&states, StateKind::Bleeding).source & MARK_DORMANT, 0);
+    // The target is not under control: it lands at once.
+    input.defender.states[0] = ActiveState::default();
+    let r = resolve_hit(&input, &B, &t, &mut tri_rolls());
+    assert_eq!(
+        find(&r.states, StateKind::Bleeding).source & MARK_DORMANT,
+        0
+    );
+    assert!(tri_op(&r, 0).acted && tri_op(&r, 0).amount == 0);
+    // 150% of the base packet: stronger than 100%.
+    let plain = gen(
+        OpKind::Delayed,
+        st(StateKind::Bleeding),
+        st(StateKind::Freeze) as u32,
+    );
+    let t1 = tri(
+        Aspect::Cold,
+        Aspect::Fire,
+        Aspect::Blood,
+        NO_PAIR,
+        just(plain),
+    );
+    let p1 = find(
+        &resolve_hit(&input, &B, &t1, &mut tri_rolls()).states,
+        StateKind::Bleeding,
+    )
+    .power;
+    assert!(find(&r.states, StateKind::Bleeding).power > p1);
+}
+
+#[test]
+fn tick_aspect_rebuilds_the_tick_through_the_new_aspects_defenses() {
+    let t = tri(
+        Aspect::Blood,
+        Aspect::Lightning,
+        Aspect::Fire,
+        NO_PAIR,
+        just(gen(OpKind::TickAspect, Aspect::Fire as u8, 0)),
+    );
+    let mut input = tri_input(Aspect::Blood, Aspect::Lightning, Aspect::Fire);
+    input.attacker.skill.state_chance_pct = 100;
+    let plain = resolve_hit(&input, &B, &T, &mut tri_rolls());
+    let r = resolve_hit(&input, &B, &t, &mut tri_rolls());
+    // Armor 100 (K 100) halved the Bleeding; as Fire it meets no resistance.
+    assert!(
+        find(&r.states, StateKind::Bleeding).power > find(&plain.states, StateKind::Bleeding).power
+    );
+    assert!(tri_op(&r, 0).acted);
+    // Fire resistance cuts it again.
+    input.defender.resist_bp[Aspect::Fire as usize] = 10_000;
+    let r2 = resolve_hit(&input, &B, &t, &mut tri_rolls());
+    assert!(
+        find(&r2.states, StateKind::Bleeding).power < find(&r.states, StateKind::Bleeding).power
+    );
+    // Immune to Fire: the tick stays what it was.
+    input.defender.resist_bp[Aspect::Fire as usize] = 0;
+    input.defender.immune_aspects = aspect_bit(Aspect::Fire);
+    let r3 = resolve_hit(&input, &B, &t, &mut tri_rolls());
+    assert!(!tri_op(&r3, 0).acted);
+    assert_eq!(
+        find(&r3.states, StateKind::Bleeding).power,
+        find(&plain.states, StateKind::Bleeding).power
+    );
+}
+
+#[test]
+fn remove_mod_takes_back_what_the_pair_put_on() {
+    let pair_ops = [
+        gen(OpKind::LinkedMod, ModKind::Weakening as u8, BP),
+        Op::NONE,
+    ];
+    let t = tri(
+        Aspect::Cold,
+        Aspect::Blood,
+        Aspect::Fire,
+        pair_ops,
+        just(gen(OpKind::RemoveMod, ModKind::Weakening as u8, 0)),
+    );
+    let input = tri_input(Aspect::Cold, Aspect::Blood, Aspect::Fire);
+    let r = resolve_hit(&input, &B, &t, &mut tri_rolls());
+    assert_eq!(r.target_mod_count, 0);
+    assert_eq!(r.remove_mods, crate::support::mod_bit(ModKind::Weakening));
+    assert!(tri_op(&r, 1).acted);
+    // Another kind: the Weakening stays.
+    let t = tri(
+        Aspect::Cold,
+        Aspect::Blood,
+        Aspect::Fire,
+        pair_ops,
+        just(gen(OpKind::RemoveMod, ModKind::Slow as u8, 0)),
+    );
+    let r = resolve_hit(&input, &B, &t, &mut tri_rolls());
+    assert_eq!(r.target_mods()[0].kind, ModKind::Weakening);
+}
+
+#[test]
+fn native_shorter_divides_the_native_duration() {
+    let (t, input) = fire_triple(just(gen(OpKind::NativeShorter, 0, 3)));
+    let r = resolve_hit(&input, &B, &t, &mut tri_rolls());
+    assert_eq!(find(&r.states, StateKind::Burning).turns, 1);
+    assert!(tri_op(&r, 0).acted);
+    // Never below one turn, and nothing acts when the native state fails.
+    let (t, _) = fire_triple(just(gen(OpKind::NativeShorter, 0, 100)));
+    let r = resolve_hit(&input, &B, &t, &mut ScriptedRoll::new([14, 0, 1, 0, 99]));
+    assert!(!tri_op(&r, 0).acted && !has(&r.states, StateKind::Burning));
+}
+
+#[test]
+fn thaw_splash_and_splash_line() {
+    let pair_ops = [
+        gen(OpKind::ApplyState, st(StateKind::Freeze), BP),
+        gen(OpKind::ThawDamage, 0, BP),
+    ];
+    let t = tri(
+        Aspect::Cold,
+        Aspect::Fire,
+        Aspect::Lightning,
+        pair_ops,
+        two(
+            gen(OpKind::ThawSplash, 0, BP),
+            gen(OpKind::SplashLine, 0, 0),
+        ),
+    );
+    let input = tri_input(Aspect::Cold, Aspect::Fire, Aspect::Lightning);
+    let r = resolve_hit(&input, &B, &t, &mut tri_rolls());
+    let thaw = find(&r.states, StateKind::Freeze).power;
+    assert!(thaw > 0);
+    assert_eq!(
+        (r.splash.damage, r.splash.aspect, r.splash.line),
+        (thaw, Aspect::Cold, true)
+    );
+    // No Freeze landed: no thaw to share, and no splash to line up.
+    let t = tri(
+        Aspect::Cold,
+        Aspect::Fire,
+        Aspect::Lightning,
+        NO_PAIR,
+        two(
+            gen(OpKind::ThawSplash, 0, BP),
+            gen(OpKind::SplashLine, 0, 0),
+        ),
+    );
+    let r = resolve_hit(&input, &B, &t, &mut tri_rolls());
+    assert_eq!((r.splash.damage, r.splash.line), (0, false));
+    assert!(!tri_op(&r, 0).acted && !tri_op(&r, 1).acted);
+}
+
+#[test]
+fn chain_radius_reaches_every_enemy_with_the_filter() {
+    let value = 2 | (st(StateKind::Bleeding) as u32) << 8;
+    let (t, input) = fire_triple(two(
+        gen(OpKind::ApplyState, st(StateKind::Shock), BP),
+        gen(OpKind::ChainRadius, st(StateKind::Shock), value),
+    ));
+    let r = resolve_hit(&input, &B, &t, &mut tri_rolls());
+    let j = r.jumps()[0];
+    assert_eq!(
+        (j.mode, j.limit, j.filter, j.filter_any, j.state.kind),
+        (
+            JumpMode::Radius,
+            2,
+            StateKind::Bleeding,
+            false,
+            StateKind::Shock
+        )
+    );
+    // Any enemy.
+    let (t, _) = fire_triple(two(
+        gen(OpKind::ApplyState, st(StateKind::Shock), BP),
+        gen(
+            OpKind::ChainRadius,
+            st(StateKind::Shock),
+            1 | (ANY_STATE as u32) << 8,
+        ),
+    ));
+    assert!(resolve_hit(&input, &B, &t, &mut tri_rolls()).jumps()[0].filter_any);
+    // The state did not land.
+    let (t, _) = fire_triple(just(gen(
+        OpKind::ChainRadius,
+        st(StateKind::Shock),
+        2 | 0xFF00,
+    )));
+    let r = resolve_hit(&input, &B, &t, &mut tri_rolls());
+    assert_eq!((r.jump_count, tri_op(&r, 0).acted), (0, false));
+}
+
+#[test]
+fn mod_after_state_lasts_beyond_the_state() {
+    let (t, input) = fire_triple(two(
+        gen(OpKind::ApplyState, st(StateKind::Stun), BP),
+        gen(
+            OpKind::ModAfterState,
+            ModKind::Slow as u8,
+            st(StateKind::Stun) as u32,
+        ),
+    ));
+    let r = resolve_hit(&input, &B, &t, &mut tri_rolls());
+    let stun = find(&r.states, StateKind::Stun).turns;
+    let m = r.target_mods()[0];
+    assert_eq!(m.kind, ModKind::Slow);
+    assert_eq!(m.turns, mod_turns(B.res_mod_turns + stun));
+    // No Stun landed: no modifier.
+    let (t, _) = fire_triple(just(gen(
+        OpKind::ModAfterState,
+        ModKind::Slow as u8,
+        st(StateKind::Stun) as u32,
+    )));
+    let r = resolve_hit(&input, &B, &t, &mut tri_rolls());
+    assert_eq!((r.target_mod_count, tri_op(&r, 0).acted), (0, false));
+}
+
+#[test]
+fn on_miss_rolls_even_when_the_attack_misses() {
+    let t = tri(
+        Aspect::Piercing,
+        Aspect::Lightning,
+        Aspect::Blunt,
+        NO_PAIR,
+        just(gen(OpKind::OnMiss, st(StateKind::Shock), BP)),
+    );
+    let mut input = tri_input(Aspect::Piercing, Aspect::Lightning, Aspect::Blunt);
+    input.defender.defense = 100;
+    // d20 2 misses; both tints succeed; the Shock roll 0 lands.
+    let r = resolve_hit(&input, &B, &t, &mut ScriptedRoll::new([1, 0, 1, 0]));
+    assert_eq!((r.outcome, r.damage, r.rolls_used), (Outcome::Miss, 0, 4));
+    assert!(has(&r.states, StateKind::Shock));
+    assert!(tri_op(&r, 0).acted && tri_op(&r, 0).state.rolled);
+    // The roll can fail.
+    let r = resolve_hit(&input, &B, &t, &mut ScriptedRoll::new([1, 0, 1, 99]));
+    assert!(!has(&r.states, StateKind::Shock) && tri_op(&r, 0).state.rolled);
+    // Without the second tint no such triple exists: a miss stops after the d20.
+    input.attacker.tints[1] = Tint::default();
+    let r = resolve_hit(&input, &B, &t, &mut ScriptedRoll::new([1, 0, 1, 0]));
+    assert_eq!(
+        (r.outcome, r.rolls_used, r.tint_roll_count),
+        (Outcome::Miss, 1, 0)
+    );
+    // On a hit it rolls last, after the native state.
+    let mut input = tri_input(Aspect::Piercing, Aspect::Lightning, Aspect::Blunt);
+    input.defender.defense = 1;
+    let r = resolve_hit(&input, &B, &t, &mut ScriptedRoll::new([14, 0, 1, 0, 99, 0]));
+    assert_eq!(r.outcome, Outcome::Hit);
+    assert!(!has(&r.states, StateKind::Penetration));
+    assert!(has(&r.states, StateKind::Shock));
+    assert_eq!(r.rolls_used, 6);
+}
+
+#[test]
+fn blinded_divides_the_d20_and_sundered_the_armor_against_piercing() {
+    let mut input = basic(Aspect::Piercing, 10, 10, 0);
+    input.defender.defense = 10;
+    input.defender.armor = 100;
+    let hit = |input: &HitInput| resolve_hit(input, &B, &T, &mut ScriptedRoll::new([14, 0]));
+    assert_eq!(hit(&input).outcome, Outcome::Hit);
+    input.attacker.blinded_bp = 10_000;
+    let r = hit(&input);
+    assert_eq!((r.d20, r.attack_total, r.outcome), (15, 7, Outcome::Miss));
+    // A natural 20 still hits, and the total never drops below 1.
+    let r = resolve_hit(&input, &B, &T, &mut ScriptedRoll::new([19, 0]));
+    assert_eq!(r.outcome, Outcome::Hit);
+    input.attacker.blinded_bp = u32::MAX;
+    let r = resolve_hit(&input, &B, &T, &mut ScriptedRoll::new([1, 0]));
+    assert_eq!(r.attack_total, 1);
+    // Sundered: more damage from Piercing, none more from Blunt.
+    let mut piercing = basic(Aspect::Piercing, 100, 100, 0);
+    piercing.defender.armor = 100;
+    let plain = hit(&piercing).damage;
+    piercing.defender.sunder_bp = 10_000;
+    let sundered = hit(&piercing);
+    assert!(sundered.damage > plain);
+    assert_eq!(sundered.packets()[0].armor, 50);
+    let mut blunt = basic(Aspect::Blunt, 100, 100, 0);
+    blunt.defender.armor = 100;
+    let plain = hit(&blunt).damage;
+    blunt.defender.sunder_bp = 10_000;
+    assert_eq!(hit(&blunt).damage, plain);
+    // The preview agrees.
+    let p = preview_hit(&piercing, &B, &T);
+    assert_eq!(p.min, sundered.damage);
+}
+
+#[test]
+fn root_scales_its_duration_with_the_value() {
+    let apply = |value| {
+        let t = tri(
+            Aspect::Piercing,
+            Aspect::Blunt,
+            Aspect::Fire,
+            [gen(OpKind::ApplyMod, ModKind::Root as u8, value), Op::NONE],
+            [Op::NONE; 3],
+        );
+        let input = skill_hit(Aspect::Piercing, Aspect::Blunt);
+        resolve_hit(&input, &B, &t, &mut rolls(0)).target_mods()[0]
+    };
+    assert_eq!(apply(BP).turns, mod_turns(B.res_mod_turns));
+    assert_eq!(apply(2 * BP).turns, mod_turns(B.res_mod_turns * 2));
+}
+
+#[test]
+fn the_new_mods_get_their_strength_from_the_tier_table() {
+    for (kind, power) in [
+        (ModKind::Blinded, B.res_counter_bp[0]),
+        (ModKind::OffGuard, B.res_counter_bp[0]),
+        (ModKind::Sundered, B.res_counter_bp[0]),
+        (ModKind::Dulled, B.res_counter_bp[0]),
+        (ModKind::Dazed, BP),
+        (ModKind::Silenced, BP),
+        (ModKind::NoHeal, BP),
+    ] {
+        let t = tri(
+            Aspect::Fire,
+            Aspect::Cold,
+            Aspect::Lightning,
+            [gen(OpKind::ApplyMod, kind as u8, BP), Op::NONE],
+            [Op::NONE; 3],
+        );
+        let input = skill_hit(Aspect::Fire, Aspect::Cold);
+        let m = resolve_hit(&input, &B, &t, &mut rolls(0)).target_mods()[0];
+        assert_eq!(
+            (m.kind, m.power_bp, m.turns),
+            (kind, power, mod_turns(B.res_mod_turns))
+        );
+    }
+}
+
+#[test]
+fn no_op_of_a_triple_panics_whatever_its_numbers() {
+    let mut b = B;
+    b.state_turns_max = u8::MAX;
+    b.escalate_step_bp = u32::MAX;
+    for kind in 1..OpKind::COUNT {
+        let kind = OpKind::from_u8(kind).unwrap();
+        for arg in 0..=16u8 {
+            for value in [0, 1, 2, 0xFFFF, 0x7FFF_FFFF, u32::MAX] {
+                let op = Op {
+                    kind,
+                    crit_only: false,
+                    arg,
+                    value,
+                };
+                // A triple record holds 16-bit values; a pair record any.
+                let small = Op {
+                    value: value.min(0xFFFF),
+                    ..op
+                };
+                for base in [Aspect::Fire, Aspect::Blood] {
+                    let t = tri(
+                        base,
+                        Aspect::Cold,
+                        Aspect::Lightning,
+                        [op, Op::NONE],
+                        [small, small, small],
+                    );
+                    let mut input = tri_input(base, Aspect::Cold, Aspect::Lightning);
+                    input.attacker.skill.state_chance_pct = 100;
+                    input.defender.states[0] = frozen();
+                    for rolls in [[14, 0, 1, 0, 0], [1, 0, 1, 0, 0], [19, 0, 1, 100, 100]] {
+                        let r = resolve_hit(&input, &b, &t, &mut ScriptedRoll::new(rolls));
+                        let mut states = r.states;
+                        tick_turn_start_with(&mut states, &b);
+                        tick_turn_start_with(&mut states, &b);
+                    }
+                }
+            }
+        }
+    }
 }

@@ -6,7 +6,14 @@ import { fileURLToPath } from "node:url";
 export const ASPECT_SIZE = 8;
 export const RESONANCE_SIZE = 16;
 export const TRAIT_SIZE = 32;
+export const TRIPLE_SIZE = 16;
+/** Ordered triples of three different aspects: 6 x 5 x 4. */
+export const TRIPLES = 120;
 export const OP_SIZE = 6;
+/** An op in a triple record: kind, arg, value u16. */
+export const TRIPLE_OP_SIZE = 4;
+export const TRIPLE_OPS = 3;
+export const TRIPLE_SET = 1;
 /** Op `arg`: the base's native state (or, for a Multiplier, no state required). */
 export const NATIVE = 0xff;
 export const ANY_STATE = 0xff;
@@ -47,10 +54,11 @@ export const TableKind = {
   Traits: 5,
   MonsterSkills: 6,
   Rewards: 7,
+  Triples: 8,
 } as const;
 export type TableKind = (typeof TableKind)[keyof typeof TableKind];
 
-const RESONANCE_CONDITIONS = 9;
+const RESONANCE_CONDITIONS = 10;
 const ROLES = 6;
 const BIOMES = 2;
 const ASPECT_COUNT = 6;
@@ -121,6 +129,7 @@ export const CONDITION: Record<string, number> = {
   CanBleed: 6,
   CanBeStunned: 7,
   HasArmor: 8,
+  IsBleeding: 9,
 };
 /** `deadroll_combat::tables::OpKind`, in discriminant order. */
 export const OP_KIND: Record<string, number> = {
@@ -145,13 +154,34 @@ export const OP_KIND: Record<string, number> = {
   AddPacket: 18,
   Penetrate: 19,
   AccuracyBuff: 20,
+  ForceCrit: 21,
+  ApplyState: 22,
+  ApplyMod: 23,
+  StateIfHad: 24,
+  Splash: 25,
+  Nova: 26,
+  ModAfterNative: 27,
+  StateFaster: 28,
+  StateSlower: 29,
+  TickNow: 30,
+  Escalate: 31,
+  TickAspect: 32,
+  RemoveMod: 33,
+  NativeShorter: 34,
+  Delayed: 35,
+  OnMiss: 36,
+  ThawSplash: 37,
+  SplashLine: 38,
+  ChainRadius: 39,
+  ModAfterState: 40,
 };
 const OP_KINDS = Object.keys(OP_KIND).length;
 /** What an op's `arg` names (`deadroll_combat::tables::ArgKind`). */
-type ArgKind = "Zero" | "State" | "StateOnly" | "StateOrAny" | "Mod" | "Aspect";
+type ArgKind = "Zero" | "State" | "StateOnly" | "StateOrAny" | "Mod" | "Aspect" | "Dot";
 export function opArg(kind: number): ArgKind {
   switch (kind) {
     case OP_KIND.Multiplier:
+    case OP_KIND.Splash:
       return "StateOrAny";
     case OP_KIND.StateOnCrit:
     case OP_KIND.ExtraStateChance:
@@ -160,13 +190,29 @@ export function opArg(kind: number): ArgKind {
     case OP_KIND.RemoveState:
     case OP_KIND.Jump:
     case OP_KIND.JumpLine:
+    case OP_KIND.ApplyState:
+    case OP_KIND.StateIfHad:
       return "State";
     case OP_KIND.JumpChain:
+    case OP_KIND.StateSlower:
+    case OP_KIND.OnMiss:
+    case OP_KIND.ChainRadius:
       return "StateOnly";
+    case OP_KIND.StateFaster:
+    case OP_KIND.TickNow:
+    case OP_KIND.Escalate:
+    case OP_KIND.Delayed:
+      return "Dot";
     case OP_KIND.LinkedMod:
+    case OP_KIND.ApplyMod:
+    case OP_KIND.Nova:
+    case OP_KIND.ModAfterNative:
+    case OP_KIND.RemoveMod:
+    case OP_KIND.ModAfterState:
       return "Mod";
     case OP_KIND.AddPacket:
     case OP_KIND.AccuracyBuff:
+    case OP_KIND.TickAspect:
       return "Aspect";
     default:
       return "Zero";
@@ -179,6 +225,16 @@ export const MOD_KIND: Record<string, number> = {
   Weakening: 3,
   Protection: 4,
   Vulnerability: 5,
+  // 6 = Resistance: a resonance has no aspect weights to give one.
+  Exposed: 7,
+  Root: 8,
+  Blinded: 9,
+  OffGuard: 10,
+  Sundered: 11,
+  Dazed: 12,
+  Silenced: 13,
+  NoHeal: 14,
+  Dulled: 15,
 };
 /** Tint traits, by trait id (docs/DAMAGE_TYPES_AND_MIXES.md 3.2). */
 export const TINT_TRAIT: Record<string, number> = {
@@ -227,6 +283,7 @@ export const TABLES = [
   { table: "traits", kind: TableKind.Traits, seed: "traits", file: "traits.json", recordSize: TRAIT_SIZE },
   { table: "monster_skills", kind: TableKind.MonsterSkills, seed: "monster_skills", file: "monster_skills.json", recordSize: MONSTER_SKILL_SIZE },
   { table: "rewards", kind: TableKind.Rewards, seed: "rewards", file: "reward_tables.json", recordSize: REWARD_SIZE },
+  { table: "triples", kind: TableKind.Triples, seed: "triples", file: "triples.json", recordSize: TRIPLE_SIZE },
 ] as const;
 
 export function registryAsset(name: string): string {
@@ -251,6 +308,8 @@ export function recordSize(kind: TableKind): number {
       return MONSTER_SKILL_SIZE;
     case TableKind.Rewards:
       return REWARD_SIZE;
+    case TableKind.Triples:
+      return TRIPLE_SIZE;
   }
 }
 
@@ -272,6 +331,8 @@ export function maxLen(kind: TableKind): number {
       return MONSTER_SKILLS_MAX * MONSTER_SKILL_SIZE;
     case TableKind.Rewards:
       return REWARDS_MAX * REWARD_SIZE;
+    case TableKind.Triples:
+      return TRIPLES * TRIPLE_SIZE;
   }
 }
 
@@ -295,6 +356,21 @@ function u16At(r: Uint8Array, at: number): number {
   return r[at] | (r[at + 1] << 8);
 }
 
+/** Two numbers in one value (`deadroll_combat::tables::value_ok`). */
+function valueOk(kind: number, value: number): boolean {
+  switch (kind) {
+    case OP_KIND.Delayed:
+    case OP_KIND.ModAfterState:
+      return isStateKind(value & 0xff) && value >>> 16 === 0;
+    case OP_KIND.ChainRadius: {
+      const filter = (value >>> 8) & 0xff;
+      return value >>> 16 === 0 && (value & 0xff) > 0 && (isStateKind(filter) || filter === ANY_STATE);
+    }
+    default:
+      return true;
+  }
+}
+
 /** Op: [kind | CRIT_ONLY, arg, value u32 LE] (`deadroll_combat::tables::Op::decode`). */
 export function validate_op(e: Uint8Array): boolean {
   if (e.length < OP_SIZE) return false;
@@ -302,7 +378,11 @@ export function validate_op(e: Uint8Array): boolean {
   if (kind >= OP_KINDS) return false;
   if (kind === OP_KIND.None) return e.subarray(0, OP_SIZE).every((b) => b === 0);
   const arg = e[1];
+  const value = (e[2] | (e[3] << 8) | (e[4] << 16) | (e[5] << 24)) >>> 0;
+  if (!valueOk(kind, value)) return false;
   switch (opArg(kind)) {
+    case "Dot":
+      return arg === STATE_KIND.Burning || arg === STATE_KIND.Bleeding;
     case "Zero":
       return arg === 0;
     case "State":
@@ -312,10 +392,23 @@ export function validate_op(e: Uint8Array): boolean {
     case "StateOrAny":
       return arg === ANY_STATE || isStateKind(arg);
     case "Mod":
-      return arg < Object.keys(MOD_KIND).length;
+      return Object.values(MOD_KIND).includes(arg);
     case "Aspect":
       return isAspect(arg);
   }
+}
+
+/** A triple record: all zero, or [0, TRIPLE_SET, 3 ops of 4 bytes, 0, 0]. */
+export function validate_triple(r: Uint8Array): boolean {
+  if (r.length !== TRIPLE_SIZE) return false;
+  if (r.every((b) => b === 0)) return true;
+  if (r[0] !== 0 || r[1] !== TRIPLE_SET || r[14] !== 0 || r[15] !== 0) return false;
+  for (let i = 0; i < TRIPLE_OPS; i++) {
+    const at = 2 + i * TRIPLE_OP_SIZE;
+    const wide = new Uint8Array([r[at], r[at + 1], r[at + 2], r[at + 3], 0, 0]);
+    if (!validate_op(wide)) return false;
+  }
+  return true;
 }
 
 /** All-zero is an empty slot; otherwise present == 1 and every field is checked. */
@@ -470,6 +563,8 @@ export function validate_record(kind: TableKind, index: number, r: Uint8Array): 
       return true;
     case TableKind.Rewards:
       return validate_reward(r);
+    case TableKind.Triples:
+      return validate_triple(r);
   }
 }
 
@@ -559,6 +654,12 @@ function encodeOp(e: unknown, out: Uint8Array, at: number): void {
     return obj.arg;
   };
   switch (opArg(kind)) {
+    case "Dot":
+      out[at + 1] = lookup(STATE_KIND, need(), "state");
+      if (out[at + 1] !== STATE_KIND.Burning && out[at + 1] !== STATE_KIND.Bleeding) {
+        fail(`${String(obj.kind)} takes Burning or Bleeding`);
+      }
+      break;
     case "Zero":
       if (obj.arg !== undefined) fail(`${String(obj.kind)} takes no arg`);
       break;
@@ -578,7 +679,26 @@ function encodeOp(e: unknown, out: Uint8Array, at: number): void {
       out[at + 1] = lookup(ASPECT, need(), "aspect");
       break;
   }
-  putU32(out, at + 2, obj.value === undefined ? 0 : requireInt(obj.value, "op value", 0, 0xffffffff));
+  putU32(out, at + 2, opValue(kind, obj));
+}
+
+/**
+ * The 32-bit value of an op. Delayed and ModAfterState: the state it waits for or follows (`after`)
+ * in the low byte, the strength in percent (`percent`, 0 = 100) from bit 8. ChainRadius: the radius
+ * in the low byte, the state a target must have (`filter`, or "Any") in bits 8..16.
+ */
+function opValue(kind: number, obj: Record<string, unknown>): number {
+  if (kind === OP_KIND.Delayed || kind === OP_KIND.ModAfterState) {
+    const after = lookup(STATE_KIND, obj.after, "state");
+    const percent = obj.percent === undefined ? 0 : requireInt(obj.percent, "percent", 0, 255);
+    return after | (percent << 8);
+  }
+  if (kind === OP_KIND.ChainRadius) {
+    const radius = requireInt(obj.radius, "radius", 1, 255);
+    const filter = obj.filter === "Any" ? ANY_STATE : lookup(STATE_KIND, obj.filter, "state");
+    return radius | (filter << 8);
+  }
+  return obj.value === undefined ? 0 : requireInt(obj.value, "op value", 0, 0xffffffff);
 }
 
 function encodeOps(list: unknown, max: number, out: Uint8Array, at: number, label: string): void {
@@ -639,6 +759,46 @@ export function encodeResonances(json: unknown): Uint8Array {
     if (typeof rec.override !== "boolean") fail("resonance override must be true or false");
     out[at + 1] = rec.override ? PAIR_OVERRIDE : 0;
     encodeOps(rec.ops, 2, out, at + 2, `resonance ${String(rec.base)} + ${String(rec.tint)}`);
+  }
+  return out;
+}
+
+/** `deadroll_combat::tables::triple_of`: the aspects of triple `index`. */
+export function tripleOf(index: number): [number, number, number] {
+  const s = index % 4;
+  const t = Math.floor(index / 4) % 5;
+  const b = Math.floor(index / 20);
+  const tint = t + (t >= b ? 1 : 0);
+  let second = s;
+  for (const taken of [Math.min(b, tint), Math.max(b, tint)]) {
+    if (second >= taken) second++;
+  }
+  return [b, tint, second];
+}
+
+/** `triples.json` as the `triples` table body: 120 records, table order, 16 bytes each. */
+export function encodeTriples(json: unknown): Uint8Array {
+  const records = recordsOf(json, "triples");
+  if (records.length !== TRIPLES) fail(`triples must have ${TRIPLES} records`);
+  const out = new Uint8Array(TRIPLES * TRIPLE_SIZE);
+  for (let i = 0; i < records.length; i++) {
+    const rec = asObject(records[i], "triple");
+    const got = [lookup(ASPECT, rec.base, "aspect"), lookup(ASPECT, rec.tint, "aspect"), lookup(ASPECT, rec.second, "aspect")];
+    if (tripleOf(i).some((a, k) => a !== got[k])) fail(`triple record ${i} out of order`);
+    if (!Array.isArray(rec.ops) || rec.ops.length > TRIPLE_OPS) fail(`triple ${i}: at most ${TRIPLE_OPS} ops`);
+    if (rec.ops.length === 0) continue;
+    const at = i * TRIPLE_SIZE;
+    out[at + 1] = TRIPLE_SET;
+    rec.ops.forEach((op: unknown, k: number) => {
+      const wide = new Uint8Array(OP_SIZE);
+      encodeOp(op, wide, 0);
+      const value = (wide[2] | (wide[3] << 8) | (wide[4] << 16) | (wide[5] << 24)) >>> 0;
+      if (value > 0xffff) fail(`triple ${i}: an op value does not fit 16 bits`);
+      const to = at + 2 + k * TRIPLE_OP_SIZE;
+      out[to] = wide[0];
+      out[to + 1] = wide[1];
+      putU16(out, to + 2, value);
+    });
   }
   return out;
 }
@@ -834,6 +994,8 @@ export function encodeRegistryFile(table: string, json: unknown): Uint8Array {
       return encodeMonsterSkills(json);
     case "rewards":
       return encodeRewards(json);
+    case "triples":
+      return encodeTriples(json);
     default:
       fail(`unknown table ${table}`);
   }

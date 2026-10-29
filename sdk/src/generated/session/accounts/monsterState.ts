@@ -123,6 +123,7 @@ export type MonsterState = {
   lootIds: ReadonlyUint8Array;
   /** The copied records (`deadroll_rules::loot::record`), by `loot_ids` position. */
   lootTables: Array<ReadonlyUint8Array>;
+  resTriples: ReadonlyUint8Array;
 };
 
 export type MonsterStateArgs = {
@@ -174,6 +175,7 @@ export type MonsterStateArgs = {
   lootIds: ReadonlyUint8Array;
   /** The copied records (`deadroll_rules::loot::record`), by `loot_ids` position. */
   lootTables: Array<ReadonlyUint8Array>;
+  resTriples: ReadonlyUint8Array;
 };
 
 /** Gets the encoder for {@link MonsterStateArgs} account data. */
@@ -241,6 +243,7 @@ export function getMonsterStateEncoder(): FixedSizeEncoder<MonsterStateArgs> {
         "lootTables",
         getArrayEncoder(fixEncoderSize(getBytesEncoder(), 108), { size: 12 }),
       ],
+      ["resTriples", fixEncoderSize(getBytesEncoder(), 1920)],
     ]),
     (value) => ({ ...value, discriminator: MONSTER_STATE_DISCRIMINATOR }),
   );
@@ -306,6 +309,7 @@ export function getMonsterStateDecoder(): FixedSizeDecoder<MonsterState> {
       "lootTables",
       getArrayDecoder(fixDecoderSize(getBytesDecoder(), 108), { size: 12 }),
     ],
+    ["resTriples", fixDecoderSize(getBytesDecoder(), 1920)],
   ]);
 }
 
@@ -371,5 +375,5 @@ export async function fetchAllMaybeMonsterState(
 }
 
 export function getMonsterStateSize(): number {
-  return 8224;
+  return 10144;
 }

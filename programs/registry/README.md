@@ -8,7 +8,7 @@ programs read without CPI (`docs/ARCHITECTURE.md` 4.2, 4.3). Owner lane: L4.
 | Account | Seeds | Body |
 |---|---|---|
 | `GameConfig` | `["config"]` | `GameConfigData` from `crates/types` (frozen), then `sprite_books: [Pubkey; 4]` (patch 7, offset 428, lookup order, `Pubkey::default()` = empty); `8 + 420 + 128` bytes |
-| `Table` (aspects, resonances, bestiary, tileset, prefabs, traits) | `["aspects"]`, `["resonances"]`, `["bestiary"]`, `["tileset"]`, `["prefabs"]`, `["traits"]` | 8-byte header + 4096-byte body, zero copy |
+| `Table` (aspects, resonances, bestiary, tileset, prefabs, traits, monster_skills, rewards, triples) | `["aspects"]`, `["resonances"]`, `["bestiary"]`, `["tileset"]`, `["prefabs"]`, `["traits"]`, `["monster_skills"]`, `["rewards"]`, `["triples"]` | 8-byte header + 4096-byte body, zero copy |
 
 `Table` data: 8 discriminator, `version u8`, `kind u8`, `bump u8`, `pad u8`, `len u32 LE` (highest end offset
 written), then the body at offset 16. Readers take records straight from the body at `16 + index * record_size`.
@@ -27,7 +27,7 @@ written), then the body at offset 16. Readers take records straight from the bod
 | `init_table(kind)` | authority | creates an empty table |
 | `write_table(kind, offset, bytes)` | authority | whole, aligned, valid records only; tables stay editable |
 
-`TableKind`: 0 Aspects, 1 Resonances, 2 Bestiary, 3 Tileset, 4 Prefabs, 5 Traits, 6 MonsterSkills, 7 Rewards (append only).
+`TableKind`: 0 Aspects, 1 Resonances, 2 Bestiary, 3 Tileset, 4 Prefabs, 5 Traits, 6 MonsterSkills, 7 Rewards, 8 Triples (append only).
 
 ## Record layouts (little-endian, validated by `write_table`, source: `src/state/records.rs`)
 
@@ -40,9 +40,11 @@ The aspect, trait and resonance records are the format of `crates/combat/src/tab
 **Traits** (6 x 32 B, index = trait id; all zero = absent): `[0] present (1)`, `[1]` reserved, `[2..8] hit op` (acts whenever the tint triggers), `[8..14]`, `[14..20]` template ops (the trait on the base's native state: generated pairs, the second tint of a triple), `[20..32]` reserved.
 
 **Resonances** (36 x 16 B, index = `base * 6 + tint`, same as `deadroll_combat::resonance_id`):
-`[0] condition` (0 Always, 1 CanBurn, 2 CanBeChilled, 3 CanBeFrozen, 4 IsFrozen, 5 CanBeShocked, 6 CanBleed, 7 CanBeStunned, 8 HasArmor),
+`[0] condition` (0 Always, 1 CanBurn, 2 CanBeChilled, 3 CanBeFrozen, 4 IsFrozen, 5 CanBeShocked, 6 CanBleed, 7 CanBeStunned, 8 HasArmor, 9 IsBleeding),
 `[1] flags` (bit 0: this record overrides the generated mechanics), `[2..8] op 0`, `[8..14] op 1`, `[14..16]` reserved.
-Op (6 B): `[0] kind` (`deadroll_combat::tables::OpKind`, 0..=20; bit 7 = only on a crit), `[1] arg` (a `StateKind`, `ModKind` or `Aspect` by kind; `0xFF` = the base's native state, or any state for a Multiplier), `[2..6] value u32` (a scale in bp of the `Balance` curve the kind names, or a count).
+Op (6 B): `[0] kind` (`deadroll_combat::tables::OpKind`, 0..=40; bit 7 = only on a crit), `[1] arg` (a `StateKind`, `ModKind` or `Aspect` by kind; `0xFF` = the base's native state, or any state for a Multiplier), `[2..6] value u32` (a scale in bp of the `Balance` curve the kind names, or a count).
+
+**Triples** (120 x 16 B, `["triples"]`, `TableKind::Triples`, index = `deadroll_combat::tables::triple_index(base, tint, second)`: base-major, then tint, then second, each in Aspect order among the aspects still free): `[0]` reserved, `[1] flags` (1: the record has ops), `[2..14]` three ops of 4 bytes (`[0] kind` with bit 7 = only on a crit, `[1] arg`, `[2..4] value u16`; the kind and arg checks of an op above), `[14..16]` reserved. An all-zero record has no ops: the second tint's trait template is used. The ops replace that template.
 
 **Bestiary** (32 x 48 B, index = bestiary id: 0 wolf, 1 goblin, 2 goblin chieftain, 3 goblin warrior, 4 goblin shaman; an all-zero record is an empty slot):
 

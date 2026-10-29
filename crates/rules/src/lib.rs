@@ -45,5 +45,5 @@ pub use items::{EquipError, Equipment, ItemBonus};
 pub use monster::{MonsterDefense, MonsterProfile, MonsterSkillStats, MonsterTemplate, Rank};
 pub use player::SpendError;
 pub use resolve::{AttackOutcome, RiderOutcome};
-pub use turn::{start_of_turn, TurnStart};
+pub use turn::{start_of_turn, start_of_turn_with, TurnStart};
 pub use units::{Initiative, Unit, EMPTY_UNIT, MONSTER_UNIT_BASE};

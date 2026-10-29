@@ -135,6 +135,7 @@ import {
   resonancesPda,
   monsterSkillsPda,
   rewardsPda,
+  triplesPda,
 } from "./pda";
 import type { GridPoint } from "../components/grid/types";
 import type { Chest } from "./loot";
@@ -584,6 +585,7 @@ export async function openSessionIx(dm: TransactionSigner, map: Address, priceLa
     resonances: await resonancesPda(),
     monsterSkills: await monsterSkillsPda(),
     rewards: await rewardsPda(),
+    triples: await triplesPda(),
     priceLamports,
     dmActor,
   });
@@ -1062,7 +1064,7 @@ export type Party = {
   monsterMods: TimedModAcc[][];
   /** Per monster: its registry defenses (`MonsterState.defense`, copied at open_session). */
   monsterDefense: MonsterDefenseAcc[];
-  /** The resonance tables the session copied (aspects, traits, resonances bodies). */
+  /** The resonance tables the session copied (aspects, traits, resonances, triples bodies). */
   resonanceTables: Uint8Array | null;
   /** Cells a resonance set on fire. */
   burningCells: BurningCellAcc[];
@@ -1127,7 +1129,12 @@ export async function readParty(address: Address, tiles: Uint8Array | null = nul
   const monsterMods = (monsterState?.mods ?? []).slice(0, count).map((m, i) => withResist(m, monsterState?.resistMods[i]));
   const monsterDefense = (monsterState?.defense ?? []).slice(0, count);
   const resonanceTables = monsterState
-    ? concat(Uint8Array.from(monsterState.resAspects), Uint8Array.from(monsterState.resTraits), Uint8Array.from(monsterState.resPairs))
+    ? concat(
+        Uint8Array.from(monsterState.resAspects),
+        Uint8Array.from(monsterState.resTraits),
+        Uint8Array.from(monsterState.resPairs),
+        Uint8Array.from(monsterState.resTriples),
+      )
     : null;
   const burningCells = (monsterState?.burningCells ?? []).filter((c) => c.power > 0);
   return {

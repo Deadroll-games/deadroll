@@ -20,9 +20,11 @@ export const OpOrigin = {
   0: "Pair",
   1: "Template",
   2: "Trait",
+  3: "Triple",
   Pair: 0,
   Template: 1,
   Trait: 2,
+  Triple: 3,
 } as const;
 
 /** `deadroll_combat::OpOrigin`. */

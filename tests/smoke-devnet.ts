@@ -236,6 +236,7 @@ await session.methods
     mapProgram: MAP, systemProgram: SystemProgram.programId,
     aspects: pda([Buffer.from("aspects")], REGISTRY), traits: pda([Buffer.from("traits")], REGISTRY),
     resonances: pda([Buffer.from("resonances")], REGISTRY), monsterSkills, rewards,
+    triples: pda([Buffer.from("triples")], REGISTRY),
   })
   .signers([dm])
   .rpc();

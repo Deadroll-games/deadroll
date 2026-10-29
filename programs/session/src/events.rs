@@ -3,6 +3,7 @@
 //! are session-local.
 use anchor_lang::prelude::*;
 use deadroll_character::state::{MAP_SKILLS, SKILLS_MAX};
+use deadroll_rules::spread::SPREAD_MODS_MAX;
 
 use deadroll_types::{
     ActiveState, CacheSlot, Cell, RewardSource, SessionStatus, StateKind, PARTY_MAX, STATES_MAX,
@@ -93,7 +94,7 @@ pub struct ModsTicked {
     pub unit: u8,
     pub turn_seq: u32,
     /// `deadroll_combat::support::mod_bit` of every buff or debuff that ended now.
-    pub expired: u8,
+    pub expired: u16,
     /// The unit's buffs and debuffs after the tick (`turns`: own turn starts left).
     pub mods: [TimedModData; STORED_MODS],
     /// Action points of this turn: speed with Haste and Slow.
@@ -340,6 +341,17 @@ pub struct SpreadHitData {
     pub states: [ActiveState; STATES_MAX],
 }
 
+/// One monster a splash hit (resonance pass).
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SplashHitData {
+    /// Monster index.
+    pub monster: u8,
+    pub damage: u32,
+    /// HP after.
+    pub hp: u32,
+    pub died: bool,
+}
+
 /// What a player's hit did beyond its target (docs/DAMAGE_TYPES_AND_MIXES.md 6.4), right after
 /// its `HitResolved`: states that jumped to other monsters, a knockback, burning cells, and the
 /// accuracy buff the attacker got. Only written when something happened.
@@ -364,6 +376,12 @@ pub struct ResonanceSpread {
     pub until_round: u16,
     /// The attacker's accuracy buff after the hit.
     pub accuracy: AccuracyBuffData,
+    /// The modifiers each of `hits` got (`hit_mods[i]` for `hits[i]`, `turns == 0` = none): the
+    /// nova's first, then the jump modifiers (triples: up to four).
+    pub hit_mods: [[TimedModData; SPREAD_MODS_MAX]; 8],
+    /// Resonance pass: monsters a splash hit (`splashes[..splash_count]`).
+    pub splashes: [SplashHitData; 8],
+    pub splash_count: u8,
 }
 
 /// A unit stepped into a burning cell and caught fire (`move_unit`, `monster_move`).

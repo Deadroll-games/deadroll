@@ -7,7 +7,11 @@
 //!
 //! Scores are integers in "expected damage x 400" (two d20 factors of 20). Every effect kind has
 //! an explicit value below: a new `EffectAction` or `ModKind` does not compile until it has one.
-use deadroll_combat::{preview_range, support::find_mod, HitInput, ModKind};
+use deadroll_combat::{
+    preview_range,
+    support::{find_mod, rooted},
+    HitInput, ModKind,
+};
 use deadroll_rules::{
     input::{
         action_ap, effect_action, effect_range, monster_attacker, monster_defender,
@@ -351,7 +355,19 @@ impl Battle<'_> {
                     ModKind::Protection => self.threat_on(a) * avg / (BP as u64 + avg) * turns,
                     // Only its own aspects: about half of what comes at the ally.
                     ModKind::Resistance => self.threat_on(a) * avg / (BP as u64 + avg) * turns / 2,
-                    ModKind::Slow | ModKind::Weakening | ModKind::Vulnerability => 0,
+                    // Harmful, and no skill effect gives the resonance kinds.
+                    ModKind::Slow
+                    | ModKind::Weakening
+                    | ModKind::Vulnerability
+                    | ModKind::Exposed
+                    | ModKind::Root
+                    | ModKind::Blinded
+                    | ModKind::OffGuard
+                    | ModKind::Sundered
+                    | ModKind::Dazed
+                    | ModKind::Silenced
+                    | ModKind::NoHeal
+                    | ModKind::Dulled => 0,
                 }
             }
             EffectAction::Stun | EffectAction::Freeze => 0,
@@ -396,10 +412,20 @@ impl Battle<'_> {
                             .sum();
                         party * avg / BP as u64 * turns
                     }
+                    // Buffs; the resonance kinds come from resonances only.
                     ModKind::Haste
                     | ModKind::Empowerment
                     | ModKind::Protection
-                    | ModKind::Resistance => 0,
+                    | ModKind::Resistance
+                    | ModKind::Exposed
+                    | ModKind::Root
+                    | ModKind::Blinded
+                    | ModKind::OffGuard
+                    | ModKind::Sundered
+                    | ModKind::Dazed
+                    | ModKind::Silenced
+                    | ModKind::NoHeal
+                    | ModKind::Dulled => 0,
                 }
             }
             EffectAction::Heal => 0,
@@ -540,7 +566,13 @@ impl Battle<'_> {
                     in_range(choice.range, c, to, players)
                 }
             };
-            if let Some((cell, _)) = self.best_cell(&dist, ap - choice.ap, reach) {
+            // A rooted monster acts from where it stands.
+            let walk = if rooted(&self.foes[i].mods) {
+                0
+            } else {
+                ap - choice.ap
+            };
+            if let Some((cell, _)) = self.best_cell(&dist, walk, reach) {
                 self.move_foe(i, cell);
                 if self.foes[i].m.alive && self.ended().is_none() {
                     self.foe_act(i, choice);
@@ -552,6 +584,9 @@ impl Battle<'_> {
             .filter(|&a| self.heroes[a].alive)
             .map(|a| self.heroes[a].cell)
             .collect();
+        if rooted(&self.foes[i].mods) {
+            return;
+        }
         let to = self.approach(from, &dist, ap, &cells);
         self.move_foe(i, to);
     }

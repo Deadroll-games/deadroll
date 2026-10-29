@@ -214,6 +214,12 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                                 d.combat.res_accuracy_turns,
                                 0..=20,
                             );
+                            bp_row(
+                                ui,
+                                "Escalate, growth per tick (share of the tick)",
+                                &mut c.combat.escalate_step_bp,
+                                d.combat.escalate_step_bp,
+                            );
                             int_row(
                                 ui,
                                 "Burning cells, rounds",
@@ -248,7 +254,7 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                             widgets::int(ui, v, 0..=100);
                         }
                         ui.end_row();
-                        let rows: [(&str, &mut [u32; 14], &[u32; 14]); 5] = [
+                        let rows: [(&str, &mut [u32; 14], &[u32; 14]); 6] = [
                             (
                                 "Resonance more",
                                 &mut c.combat.resonance_more_bp,
@@ -274,6 +280,11 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                                 &mut c.combat.res_mod_bp,
                                 &d.combat.res_mod_bp,
                             ),
+                            (
+                                "Blinded, Off guard, Sundered, Dulled (counterweight)",
+                                &mut c.combat.res_counter_bp,
+                                &d.combat.res_counter_bp,
+                            ),
                         ];
                         for (name, values, defaults) in rows {
                             widgets::label(ui, name, values != defaults);
@@ -298,6 +309,15 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                         );
                         for v in c.combat.res_accuracy.iter_mut() {
                             widgets::int(ui, v, 0..=20);
+                        }
+                        ui.end_row();
+                        widgets::label(
+                            ui,
+                            "Exposed, crit chance percent",
+                            c.combat.res_exposed_pct != d.combat.res_exposed_pct,
+                        );
+                        for v in c.combat.res_exposed_pct.iter_mut() {
+                            widgets::int(ui, v, 0..=100);
                         }
                         ui.end_row();
                         widgets::label(

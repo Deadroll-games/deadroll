@@ -97,6 +97,7 @@ const resonances = pda([Buffer.from("resonances")], REGISTRY);
 const monsterSkills = pda([Buffer.from("monster_skills")], REGISTRY);
 // Patch 11: reward tables (finalize_map checks the chests and the boss, open_session copies them).
 const rewards = pda([Buffer.from("rewards")], REGISTRY);
+const triples = pda([Buffer.from("triples")], REGISTRY);
 const programIdentity = pda([Buffer.from("identity")], SESSION);
 /** `MOCK_VRF_IDENTITY` of programs/session/src/vrf.rs: a public test key, mock-vrf builds only. */
 const MOCK_VRF = Keypair.fromSeed(sha256("deadroll:mock-vrf"));
@@ -343,6 +344,7 @@ function openSession(dm: Keypair, map: PublicKey, layout: PublicKey, price: BN, 
       resonances,
       monsterSkills,
       rewards,
+      triples,
     })
     .signers([dm]);
 }
@@ -387,6 +389,8 @@ function bagLayout(rewards: Reward[], split = true) {
 }
 
 /** The VRF callback, signed by `identity` (the mock identity on localnet). */
+/** Compute units the VRF oracle gives a callback (the mock callback gets the same). */
+const ORACLE_CU = 256_000;
 function consume(
   identity: Keypair,
   a: {
@@ -417,6 +421,7 @@ function consume(
       characterProgram: CHARACTER,
     })
     .remainingAccounts(party)
+    .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: ORACLE_CU })])
     .signers([identity]);
 }
 
@@ -460,6 +465,8 @@ describe("deadroll_session: deployed program", () => {
       { resonances: traits },
       // Patch 11.
       { rewards: monsterSkills },
+      // Triples.
+      { triples: resonances },
     ]) {
       await rejects(
         openSession(dm, map, map, PRICE, PublicKey.default).accountsPartial(over).rpc(),

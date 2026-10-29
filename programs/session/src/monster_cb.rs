@@ -752,6 +752,10 @@ pub fn monster_reaction_from(
     let Some(skill) = monsters.skill(b, REACTIVE_SLOT as u8)? else {
         return Ok(None);
     };
+    // Triples: a Dazed monster uses no reactive skill.
+    if deadroll_combat::dazed(&monsters.mods(b)?) {
+        return Ok(None);
+    }
     let ally_cell = match e.event {
         Event::AllyHpDrop { ally, .. } => {
             let a = monsters.get(ally)?;

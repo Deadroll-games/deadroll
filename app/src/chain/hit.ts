@@ -97,6 +97,7 @@ export function toHitResult(r: any): HitResult {
     filter: j.filter as StateKind,
     limit: j.limit,
     base: aspect(j.base),
+    filterAny: j.filterAny ?? false,
   }));
   const targetMods: TimedMod[] = ((r.targetMods ?? []) as any[]).slice(0, r.targetModCount ?? 0).map((m) => ({
     kind: m.kind as TimedMod["kind"],
@@ -148,6 +149,8 @@ export function toHitResult(r: any): HitResult {
     targetMods,
     accuracyBuff: accuracyBuff(r.accuracyBuff),
     landed: r.landed ?? 0,
+    tickDamage: r.tickDamage ?? 0,
+    removeMods: r.removeMods ?? 0,
   };
 }
 
@@ -160,17 +163,30 @@ export function toResonanceSpread(ev: any): ResonanceSpread {
     actionCounter: ev.actionCounter,
     attacker: ev.attacker,
     target: ev.target,
-    hits: (ev.hits as any[]).slice(0, ev.hitCount).map((h) => ({
-      monster: h.monster,
-      kind: h.kind as StateKind,
-      applied: h.applied as Applied,
-      states: (h.states as any[]).filter((s) => s.turns > 0).map(activeState),
-    })),
+    hits: (ev.hits as any[]).slice(0, ev.hitCount).map((h, i) => {
+      // The modifiers each hit got: the nova's, then the jump modifiers (triples: up to four).
+      const mods = ((ev.hitMods as any[] | undefined)?.[i] ?? []) as any[];
+      return {
+        monster: h.monster,
+        kind: h.kind as StateKind,
+        applied: h.applied as Applied,
+        states: (h.states as any[]).filter((s) => s.turns > 0).map(activeState),
+        modifiers: mods
+          .filter((m) => m && m.turns > 0)
+          .map((m) => ({ kind: m.kind as TimedMod["kind"], aspect: aspect(m.aspect), turns: m.turns, powerBp: m.powerBp, source: m.source })),
+      };
+    }),
     moved: ev.moved ? { from: cell(ev.movedFrom), to: cell(ev.movedTo) } : null,
     ignited: (ev.ignited as any[]).slice(0, ev.ignitedCount).map(cell),
     ignitePower: ev.ignitePower,
     untilRound: ev.untilRound,
     accuracy: accuracyBuff(ev.accuracy),
+    splashes: ((ev.splashes as any[] | undefined) ?? []).slice(0, ev.splashCount ?? 0).map((s) => ({
+      monster: s.monster,
+      damage: s.damage,
+      hp: s.hp,
+      died: s.died,
+    })),
   };
 }
 
