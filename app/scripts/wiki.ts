@@ -16,6 +16,8 @@ export type WikiData = {
   states: { name: string; turns: number | null; about: string }[];
   traits: { trait: string; aspect: string; epithet: string; hit: unknown; template: unknown[] }[];
   resonances: { base: string; tint: string; name: string | null; condition: string; ops: unknown[]; about: string | null; lore: string | null }[];
+  /** The 120 triples (a base, its best tint and a second tint), shown under their pair. */
+  triples: { base: string; tint: string; second: string; ops: unknown[]; about: string; lore: string }[];
   hitSteps: { steps: string; text: string }[];
   numbers: { group: string; fields: FieldDoc[] }[];
   monsterSkills: (Record<string, unknown> & { id: number; name: string; about: string })[];
@@ -144,6 +146,10 @@ export function buildWiki(root: string, art = join(root, "app/assets/bestiary"),
     .filter((r) => r.base !== r.tint)
     .map((r) => ({ base: r.base, tint: r.tint, name: r.name, condition: r.condition, ops: r.ops, about: r.name ? about("resonances.json", r.name, true) : null, lore: r.name ? about("resonance_lore.json", r.name, true) : null }));
   const traits = json(root, "assets/registry/traits.json").records;
+  const triples = (json(root, "assets/registry/triples.json").records as { base: string; tint: string; second: string; ops: unknown[] }[]).map((t) => {
+    const key = `${t.base} + ${t.tint} + ${t.second}`;
+    return { base: t.base, tint: t.tint, second: t.second, ops: t.ops, about: about("triples.json", key, true) ?? "", lore: about("triple_lore.json", key, true) ?? "" };
+  });
 
   const steps = parseHitSteps(read(root, "crates/combat/src/hit.rs"));
   const numbers = NUMBER_GROUPS.map((g) => {
@@ -174,7 +180,7 @@ export function buildWiki(root: string, art = join(root, "app/assets/bestiary"),
     });
 
   if (missing.length) throw new WikiError(`wiki: missing text or art for new content:\n  ${missing.join("\n  ")}`);
-  return { enums, aspects, states, traits, resonances, hitSteps: steps, numbers, monsterSkills, bestiary, sprites };
+  return { enums, aspects, states, traits, resonances, triples, hitSteps: steps, numbers, monsterSkills, bestiary, sprites };
 }
 
 const VIRTUAL = "virtual:wiki";

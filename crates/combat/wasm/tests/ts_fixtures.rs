@@ -532,6 +532,7 @@ fn build() -> Value {
         registry.aspects.clone(),
         registry.traits.clone(),
         registry.resonances.clone(),
+        registry.triples.clone(),
     ]
     .concat();
     let heroes = heroes();

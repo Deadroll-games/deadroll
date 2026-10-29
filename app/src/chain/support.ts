@@ -7,7 +7,7 @@ import { ASPECT_NAMES, effectAmount, formatBp } from "./names";
 import { Effect, Form, Purpose, RangeTag, Target, derive, skillSide, usableInCombat, type Category, type Side, type SkillBlocks } from "./skillcheck";
 import { Applied, HitOutcome, type Aspect, type ModKind, type TimedMod } from "./types";
 
-export const MOD_NAMES = ["Haste", "Slow", "Empowerment", "Weakening", "Protection", "Vulnerability", "Resistance", "Exposed", "Rooted"] as const;
+export const MOD_NAMES = ["Haste", "Slow", "Empowerment", "Weakening", "Protection", "Vulnerability", "Resistance", "Exposed", "Rooted", "Blinded", "Off guard", "Sundered", "Dazed", "Silenced", "No heal", "Dulled"] as const;
 /** Haste, Empowerment, Protection, Resistance help the bearer; the rest hurt. */
 export const modIsBuff = (k: ModKind): boolean => k === 0 || k === 2 || k === 4 || k === 6;
 
@@ -62,6 +62,20 @@ export function modEffectText(m: TimedMod): string {
       return `+${Math.round(m.powerBp / 100)}% crit chance against it`;
     case 8:
       return "cannot move";
+    case 9:
+      return `d20 divided by ${(1 + m.powerBp / 10_000).toFixed(2)}`;
+    case 10:
+      return `defense divided by ${(1 + m.powerBp / 10_000).toFixed(2)}`;
+    case 11:
+      return `armor against Piercing divided by ${(1 + m.powerBp / 10_000).toFixed(2)}`;
+    case 12:
+      return "no reactive skills";
+    case 13:
+      return "no skills, only the basic attack";
+    case 14:
+      return "heals do nothing";
+    case 15:
+      return `crit chance divided by ${(1 + m.powerBp / 10_000).toFixed(2)}`;
     default:
       return `+${pct} ${ASPECT_NAMES[m.aspect] ?? "?"} damage taken`;
   }

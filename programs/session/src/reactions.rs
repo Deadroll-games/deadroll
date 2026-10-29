@@ -25,7 +25,7 @@ use deadroll_rules::{
     line::{targets_on_line, LINE_TARGETS_MAX},
     reactive::{entered_next_to, reaction, Event, Reaction},
     resolve,
-    spread::{spread, spreads, Field, SpreadOutcome},
+    spread::{modifiers_of, spread, spreads, Field, SpreadOutcome, SPREAD_MODS_MAX},
     HeroStats, MonsterDefense,
 };
 use deadroll_skillcheck::{Purpose, Target};
@@ -487,15 +487,21 @@ impl<'a, 'info> Cb<'a, 'info> {
                 states: all[h.monster as usize].states,
             };
         }
-        let mut hit_mods = [TimedModData::default(); 8];
+        let mut hit_mods = [[TimedModData::default(); SPREAD_MODS_MAX]; 8];
         for (h, data) in out.hits().iter().zip(hit_mods.iter_mut()) {
-            if h.modifier.is_empty() {
+            let landing = modifiers_of(&self.result, h);
+            if landing.iter().all(|m| m.is_empty()) {
                 continue;
             }
             let mut mods = self.monsters.mods(h.monster)?;
-            apply_mod(&mut mods, h.modifier);
+            for (m, slot) in landing.iter().zip(data.iter_mut()) {
+                if m.is_empty() {
+                    continue;
+                }
+                apply_mod(&mut mods, *m);
+                *slot = mod_data(m);
+            }
             self.monsters.set_mods(h.monster, &mods)?;
-            *data = mod_data(&h.modifier);
         }
         let mut splashes = [SplashHitData::default(); 8];
         for (h, data) in out.splashes().iter().zip(splashes.iter_mut()) {
@@ -551,7 +557,7 @@ impl<'a, 'info> Cb<'a, 'info> {
         target: u8,
         out: &SpreadOutcome,
         hits: &[SpreadHitData],
-        hit_mods: &[TimedModData; 8],
+        hit_mods: &[[TimedModData; SPREAD_MODS_MAX]; 8],
         splashes: &[SplashHitData; 8],
         accuracy: &AccuracyBuff,
         ignite_power: u32,

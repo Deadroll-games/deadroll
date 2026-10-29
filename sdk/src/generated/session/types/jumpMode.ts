@@ -20,9 +20,11 @@ export const JumpMode = {
   0: "Adjacent",
   1: "Chain",
   2: "Line",
+  3: "Radius",
   Adjacent: 0,
   Chain: 1,
   Line: 2,
+  Radius: 3,
 } as const;
 
 /** `deadroll_combat::JumpMode`. */

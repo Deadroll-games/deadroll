@@ -8,6 +8,8 @@
 
 import {
   combineCodec,
+  getBooleanDecoder,
+  getBooleanEncoder,
   getStructDecoder,
   getStructEncoder,
   getU32Decoder,
@@ -24,14 +26,25 @@ import {
 } from "./index.js";
 
 /** `deadroll_combat::Splash`. */
-export type SplashData = { damage: number; aspect: Aspect };
+export type SplashData = {
+  damage: number;
+  aspect: Aspect;
+  /** Triples: only the enemies in line with the attacker and the target. */
+  line: boolean;
+};
 
-export type SplashDataArgs = { damage: number; aspect: AspectArgs };
+export type SplashDataArgs = {
+  damage: number;
+  aspect: AspectArgs;
+  /** Triples: only the enemies in line with the attacker and the target. */
+  line: boolean;
+};
 
 export function getSplashDataEncoder(): FixedSizeEncoder<SplashDataArgs> {
   return getStructEncoder([
     ["damage", getU32Encoder()],
     ["aspect", getAspectEncoder()],
+    ["line", getBooleanEncoder()],
   ]);
 }
 
@@ -39,6 +52,7 @@ export function getSplashDataDecoder(): FixedSizeDecoder<SplashData> {
   return getStructDecoder([
     ["damage", getU32Decoder()],
     ["aspect", getAspectDecoder()],
+    ["line", getBooleanDecoder()],
   ]);
 }
 

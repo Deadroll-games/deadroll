@@ -5,9 +5,10 @@
 use std::{fs, path::Path, string::String, vec::Vec};
 
 use deadroll_combat::tables::{
-    decode_aspect, decode_pair, decode_trait, encode_aspect, encode_pair, encode_trait, ArgKind,
-    AspectEntry, Op, OpKind, PairEntry, ResonanceTables, TraitEntry, ANY_STATE, NATIVE, PAIR_OPS,
-    TEMPLATE_OPS, TRAITS,
+    decode_aspect, decode_pair, decode_trait, decode_triple, encode_aspect, encode_pair,
+    encode_trait, encode_triple, triple_of, ArgKind, AspectEntry, Op, OpKind, PairEntry,
+    ResonanceTables, TraitEntry, TripleEntry, ANY_STATE, NATIVE, PAIR_OPS, TEMPLATE_OPS, TRAITS,
+    TRIPLES, TRIPLE_OPS,
 };
 use deadroll_combat::{ModKind, ResonanceCondition};
 use deadroll_skillcheck::{
@@ -44,6 +45,8 @@ pub struct Registry {
     pub aspects: Vec<u8>,
     pub traits: Vec<u8>,
     pub resonances: Vec<u8>,
+    /// The `triples` table body (`TRIPLES` records).
+    pub triples: Vec<u8>,
     pub bestiary: Vec<u8>,
     pub monster_skills: Vec<u8>,
     /// Patch 11: the `rewards` table body, its tables by id (`None` for an empty id) and their
@@ -66,11 +69,19 @@ impl Registry {
         let aspects = encode_aspects(&read("aspects.json")?)?;
         let traits = encode_traits(&read("traits.json")?)?;
         let resonances = encode_resonances(&read("resonances.json")?)?;
+        let triples = encode_triples(&read("triples.json")?)?;
         let bestiary_json = read("bestiary.json")?;
         let skills_json = read("monster_skills.json")?;
         let bestiary = encode_bestiary(&bestiary_json)?;
         let monster_skills = encode_monster_skills(&skills_json)?;
-        let mut r = Registry::from_bytes(aspects, traits, resonances, bestiary, monster_skills)?;
+        let mut r = Registry::from_bytes(
+            aspects,
+            traits,
+            resonances,
+            triples,
+            bestiary,
+            monster_skills,
+        )?;
         r.monster_names = names::<MonsterJson>(&bestiary_json, |m| m.name.clone())?;
         r.skill_names = names::<MonsterSkillJson>(&skills_json, |m| m.name.clone())?;
         let rewards_json = read("reward_tables.json")?;
@@ -103,10 +114,11 @@ impl Registry {
         aspects: Vec<u8>,
         traits: Vec<u8>,
         resonances: Vec<u8>,
+        triples: Vec<u8>,
         bestiary: Vec<u8>,
         monster_skills: Vec<u8>,
     ) -> Result<Registry, String> {
-        let tables = ResonanceTables::from_bytes(&aspects, &traits, &resonances)
+        let tables = ResonanceTables::from_bytes(&aspects, &traits, &resonances, &triples)
             .map_err(|e| format!("resonance tables: {e:?}"))?;
         let templates: Vec<Option<MonsterTemplate>> = bestiary
             .chunks(record::SIZE)
@@ -131,6 +143,7 @@ impl Registry {
             aspects,
             traits,
             resonances,
+            triples,
             bestiary,
             monster_skills,
             rewards: Vec::new(),
@@ -272,6 +285,29 @@ struct OpJson {
     value: u32,
     #[serde(default)]
     crit: bool,
+    /// `Delayed`, `ModAfterState`: the state it waits for or follows (low byte of `value`).
+    #[serde(default)]
+    after: Option<String>,
+    /// `Delayed`, `ModAfterState`: strength in percent of the base (0 = 100).
+    #[serde(default)]
+    percent: u32,
+    /// `ChainRadius`: cells around the target.
+    #[serde(default)]
+    radius: u32,
+    /// `ChainRadius`: the state a target must have, or `Any`.
+    #[serde(default)]
+    filter: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TripleJson {
+    base: String,
+    tint: String,
+    second: String,
+    #[allow(dead_code)]
+    name: Option<String>,
+    ops: Vec<OpJson>,
 }
 
 #[derive(Deserialize)]
@@ -447,7 +483,7 @@ fn op(j: &OpJson) -> Result<Op, String> {
             None => 0,
             Some(a) => return Err(format!("{}: takes no arg, got `{a}`", j.kind)),
         },
-        ArgKind::State | ArgKind::StateOnly => match need()? {
+        ArgKind::State | ArgKind::StateOnly | ArgKind::Dot => match need()? {
             "Native" if kind.arg() == ArgKind::State => NATIVE,
             name => state(name)? as u8,
         },
@@ -458,11 +494,30 @@ fn op(j: &OpJson) -> Result<Op, String> {
         ArgKind::Mod => parse(need()?, &ModKind::ALL, "modifier")? as u8,
         ArgKind::Aspect => aspect(need()?)? as u8,
     };
+    // Two numbers in one value: see `deadroll_combat::tables`.
+    let value = match kind {
+        OpKind::Delayed | OpKind::ModAfterState => {
+            let after = j
+                .after
+                .as_deref()
+                .ok_or_else(|| format!("{}: needs `after`", j.kind))?;
+            state(after)? as u32 | j.percent << 8
+        }
+        OpKind::ChainRadius => {
+            let filter = match j.filter.as_deref() {
+                Some("Any") => ANY_STATE,
+                Some(name) => state(name)? as u8,
+                None => return Err(format!("{}: needs `filter`", j.kind)),
+            };
+            j.radius | (filter as u32) << 8
+        }
+        _ => j.value,
+    };
     let op = Op {
         kind,
         crit_only: j.crit,
         arg,
-        value: j.value,
+        value,
     };
     Op::decode(&op.encode()).ok_or_else(|| format!("{}: invalid op", j.kind))
 }
@@ -559,6 +614,32 @@ pub fn encode_resonances(json: &str) -> Result<Vec<u8>, String> {
         };
         let bytes = encode_pair(&entry);
         decode_pair(&bytes).ok_or_else(|| format!("{label}: invalid"))?;
+        out.extend_from_slice(&bytes);
+    }
+    Ok(out)
+}
+
+/// `triples.json` as the `triples` table body: all `TRIPLES` records in table order (base,
+/// then tint, then second), a record without ops is the neutral one.
+pub fn encode_triples(json: &str) -> Result<Vec<u8>, String> {
+    let list: Vec<TripleJson> = records(json, "triples")?;
+    if list.len() != TRIPLES {
+        return Err(format!("triples: {TRIPLES} records"));
+    }
+    let mut out = Vec::new();
+    for (i, r) in list.iter().enumerate() {
+        let got = [aspect(&r.base)?, aspect(&r.tint)?, aspect(&r.second)?];
+        if triple_of(i) != Some(got) {
+            return Err(format!("triples: record {i} out of order"));
+        }
+        let label = format!("{:?} + {:?} + {:?}", got[0], got[1], got[2]);
+        let entry = TripleEntry {
+            set: !r.ops.is_empty(),
+            ops: ops::<TRIPLE_OPS>(&r.ops, &label)?,
+        };
+        let bytes = encode_triple(&entry)
+            .ok_or_else(|| format!("{label}: an op value does not fit 16 bits"))?;
+        decode_triple(&bytes).ok_or_else(|| format!("{label}: invalid"))?;
         out.extend_from_slice(&bytes);
     }
     Ok(out)
@@ -850,21 +931,33 @@ mod tests {
             kind: "Linked".into(),
             arg: None,
             value: 1,
-            crit: false
+            crit: false,
+            after: None,
+            percent: 0,
+            radius: 0,
+            filter: None,
         })
         .is_err());
         assert!(op(&OpJson {
             kind: "NativeTurns".into(),
             arg: Some("Fire".into()),
             value: 1,
-            crit: false
+            crit: false,
+            after: None,
+            percent: 0,
+            radius: 0,
+            filter: None,
         })
         .is_err());
         assert!(op(&OpJson {
             kind: "Nope".into(),
             arg: None,
             value: 1,
-            crit: false
+            crit: false,
+            after: None,
+            percent: 0,
+            radius: 0,
+            filter: None,
         })
         .is_err());
         assert!(encode_aspects(r#"{"records":[]}"#).is_err());

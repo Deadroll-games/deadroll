@@ -3,8 +3,8 @@
 //!
 //! The accounts keep the six slots they had before patch 9 ([`STORED_MODS`], the kinds up to
 //! Vulnerability, each in its own slot) and, appended at their end, the Resistance slot with its
-//! aspect weights ([`ResistModData`]). The resonance pass kinds (Exposed, Root) take a stored slot left
-//! free (`from_combat`).
+//! aspect weights ([`ResistModData`]). The resonance kinds (Exposed, Root, and the triple kinds
+//! from Blinded to Dulled) take a stored slot left free, in kind order (`from_combat`).
 use anchor_lang::prelude::*;
 #[cfg(test)]
 use deadroll_combat::MODS_MAX;
@@ -28,6 +28,14 @@ pub enum ModKindData {
     /// Resonance pass (resonances only).
     Exposed,
     Root,
+    /// Triples (resonances only).
+    Blinded,
+    OffGuard,
+    Sundered,
+    Dazed,
+    Silenced,
+    NoHeal,
+    Dulled,
 }
 
 /// `deadroll_combat::TimedMod`: a buff or debuff on a unit, `turns == 0` = empty slot.
@@ -81,6 +89,13 @@ impl From<ModKind> for ModKindData {
             ModKind::Resistance => Self::Resistance,
             ModKind::Exposed => Self::Exposed,
             ModKind::Root => Self::Root,
+            ModKind::Blinded => Self::Blinded,
+            ModKind::OffGuard => Self::OffGuard,
+            ModKind::Sundered => Self::Sundered,
+            ModKind::Dazed => Self::Dazed,
+            ModKind::Silenced => Self::Silenced,
+            ModKind::NoHeal => Self::NoHeal,
+            ModKind::Dulled => Self::Dulled,
         }
     }
 }
@@ -97,6 +112,13 @@ impl From<ModKindData> for ModKind {
             ModKindData::Resistance => Self::Resistance,
             ModKindData::Exposed => Self::Exposed,
             ModKindData::Root => Self::Root,
+            ModKindData::Blinded => Self::Blinded,
+            ModKindData::OffGuard => Self::OffGuard,
+            ModKindData::Sundered => Self::Sundered,
+            ModKindData::Dazed => Self::Dazed,
+            ModKindData::Silenced => Self::Silenced,
+            ModKindData::NoHeal => Self::NoHeal,
+            ModKindData::Dulled => Self::Dulled,
         }
     }
 }
@@ -139,12 +161,12 @@ pub fn to_combat(mods: &ModsData, resist: &ResistModData) -> TimedMods {
 }
 
 /// `mods` as the stored slots and the Resistance slot. The kinds before patch 9 keep their own
-/// slot; the resonance pass kinds (Exposed, Root) take the stored slots left free, in kind order, and
-/// are dropped when none is (the account size stays).
+/// slot; the resonance kinds (Exposed, Root, Blinded to Dulled) take the stored slots left free,
+/// in kind order, and are dropped when none is (the account size stays).
 pub fn from_combat(mods: &TimedMods) -> (ModsData, ResistModData) {
     let mut out = ModsData::default();
     let mut resist = ResistModData::default();
-    let mut late = [None; 2];
+    let mut late = [None; ModKind::COUNT - STORED_MODS - 1];
     for m in mods.iter().filter(|m| !m.is_empty()) {
         match m.kind {
             ModKind::Resistance => {
@@ -153,14 +175,14 @@ pub fn from_combat(mods: &TimedMods) -> (ModsData, ResistModData) {
                     weights_pct: m.weights_pct,
                 }
             }
-            ModKind::Exposed => late[0] = Some(data_of(m)),
-            ModKind::Root => late[1] = Some(data_of(m)),
             ModKind::Haste
             | ModKind::Slow
             | ModKind::Empowerment
             | ModKind::Weakening
             | ModKind::Protection
             | ModKind::Vulnerability => out[m.kind as usize] = data_of(m),
+            // The kinds after Resistance, in kind order.
+            late_kind => late[late_kind as usize - STORED_MODS - 1] = Some(data_of(m)),
         }
     }
     for m in late.into_iter().flatten() {
@@ -232,6 +254,42 @@ mod tests {
         assert_eq!(back[ModKind::Slow as usize].power_bp, 500);
         assert_eq!(back[ModKind::Resistance as usize].power_bp, 900);
         assert_eq!(back[ModKind::Resistance as usize].weights_pct[0], 100);
+    }
+
+    #[test]
+    fn the_triple_kinds_take_the_free_stored_slots_too() {
+        let m = |kind, power_bp| TimedMod {
+            kind,
+            turns: 2,
+            power_bp,
+            ..TimedMod::default()
+        };
+        let mut mods = TimedMods::default();
+        mods[ModKind::Haste as usize] = m(ModKind::Haste, 500);
+        mods[ModKind::Dazed as usize] = m(ModKind::Dazed, 10_000);
+        mods[ModKind::Silenced as usize] = m(ModKind::Silenced, 10_000);
+        mods[ModKind::Dulled as usize] = m(ModKind::Dulled, 7_000);
+        let (data, resist) = from_combat(&mods);
+        assert_eq!(data[0].kind, ModKindData::Haste);
+        assert_eq!(data[1].kind, ModKindData::Dazed);
+        assert_eq!(data[2].kind, ModKindData::Silenced);
+        assert_eq!(data[3].kind, ModKindData::Dulled);
+        assert_eq!(to_combat(&data, &resist), mods);
+        // Every kind survives the data enum and back.
+        for kind in ModKind::ALL {
+            assert_eq!(ModKind::from(ModKindData::from(kind)), kind);
+        }
+        // Nine late kinds, six slots: the first six in kind order are kept.
+        let mut many = TimedMods::default();
+        for kind in &ModKind::ALL[ModKind::Exposed as usize..] {
+            many[*kind as usize] = m(*kind, 100);
+        }
+        let (data, resist) = from_combat(&many);
+        let back = to_combat(&data, &resist);
+        assert!(!back[ModKind::Exposed as usize].is_empty());
+        assert!(!back[ModKind::Dazed as usize].is_empty());
+        assert!(back[ModKind::Silenced as usize].is_empty());
+        assert!(back[ModKind::Dulled as usize].is_empty());
     }
 
     #[test]

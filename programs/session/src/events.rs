@@ -2,6 +2,7 @@
 //! `TurnSkipped`, `ModsTicked`, `EffectResolved`, `SkillUsed`, `PlayerDied`, `FleeVoted`, `RewardsRolled`, `ChestOpenRequested`, `ChestOpened`, `CacheSettled`, `ContributionRefunded`, `CacheClosed`, `EscrowClaimed` and `SessionKeyChanged`
 //! are session-local.
 use anchor_lang::prelude::*;
+use deadroll_rules::spread::SPREAD_MODS_MAX;
 use deadroll_character::state::{MAP_SKILLS, SKILLS_MAX};
 
 use deadroll_types::{
@@ -375,9 +376,9 @@ pub struct ResonanceSpread {
     pub until_round: u16,
     /// The attacker's accuracy buff after the hit.
     pub accuracy: AccuracyBuffData,
-    /// Resonance pass: the modifier each of `hits` got (`hit_mods[i]` for `hits[i]`, `turns == 0` =
-    /// none).
-    pub hit_mods: [TimedModData; 8],
+    /// The modifiers each of `hits` got (`hit_mods[i]` for `hits[i]`, `turns == 0` = none): the
+    /// nova's first, then the jump modifiers (triples: up to four).
+    pub hit_mods: [[TimedModData; SPREAD_MODS_MAX]; 8],
     /// Resonance pass: monsters a splash hit (`splashes[..splash_count]`).
     pub splashes: [SplashHitData; 8],
     pub splash_count: u8,

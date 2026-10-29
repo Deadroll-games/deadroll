@@ -8,6 +8,8 @@
 
 import {
   combineCodec,
+  getBooleanDecoder,
+  getBooleanEncoder,
   getStructDecoder,
   getStructEncoder,
   getU8Decoder,
@@ -42,6 +44,7 @@ export type JumpData = {
   filter: StateKind;
   limit: number;
   base: Aspect;
+  filterAny: boolean;
 };
 
 export type JumpDataArgs = {
@@ -50,6 +53,7 @@ export type JumpDataArgs = {
   filter: StateKindArgs;
   limit: number;
   base: AspectArgs;
+  filterAny: boolean;
 };
 
 export function getJumpDataEncoder(): FixedSizeEncoder<JumpDataArgs> {
@@ -59,6 +63,7 @@ export function getJumpDataEncoder(): FixedSizeEncoder<JumpDataArgs> {
     ["filter", getStateKindEncoder()],
     ["limit", getU8Encoder()],
     ["base", getAspectEncoder()],
+    ["filterAny", getBooleanEncoder()],
   ]);
 }
 
@@ -69,6 +74,7 @@ export function getJumpDataDecoder(): FixedSizeDecoder<JumpData> {
     ["filter", getStateKindDecoder()],
     ["limit", getU8Decoder()],
     ["base", getAspectDecoder()],
+    ["filterAny", getBooleanDecoder()],
   ]);
 }
 

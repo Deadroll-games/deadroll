@@ -200,6 +200,8 @@ export const DEADROLL_SESSION_ERROR__ACTOR_MISMATCH = 0x17ca; // 6090
 export const DEADROLL_SESSION_ERROR__CORNER_BLOCKED = 0x17cb; // 6091
 /** Rooted: The unit is rooted and cannot move */
 export const DEADROLL_SESSION_ERROR__ROOTED = 0x17cc; // 6092
+/** Silenced: The unit is silenced: it can only use its basic attack */
+export const DEADROLL_SESSION_ERROR__SILENCED = 0x17cd; // 6093
 
 export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__ACTOR_MISMATCH
@@ -284,6 +286,7 @@ export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__SETTLE_DEADLINE_NOT_PASSED
   | typeof DEADROLL_SESSION_ERROR__SETTLE_DEADLINE_PASSED
   | typeof DEADROLL_SESSION_ERROR__SETTLE_TIMEOUT_TOO_SHORT
+  | typeof DEADROLL_SESSION_ERROR__SILENCED
   | typeof DEADROLL_SESSION_ERROR__SKILL_NOT_SELECTED
   | typeof DEADROLL_SESSION_ERROR__SKILL_ON_COOLDOWN
   | typeof DEADROLL_SESSION_ERROR__TOO_MANY_LOOT_TABLES
@@ -382,6 +385,7 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__SETTLE_DEADLINE_NOT_PASSED]: `The DM can still settle the party: wait for the deadline`,
     [DEADROLL_SESSION_ERROR__SETTLE_DEADLINE_PASSED]: `The DM's time to settle the party is over: each player claims their own`,
     [DEADROLL_SESSION_ERROR__SETTLE_TIMEOUT_TOO_SHORT]: `The map gives the DM less than the minimum time to settle`,
+    [DEADROLL_SESSION_ERROR__SILENCED]: `The unit is silenced: it can only use its basic attack`,
     [DEADROLL_SESSION_ERROR__SKILL_NOT_SELECTED]: `This skill was not taken onto the map (set_ready selection)`,
     [DEADROLL_SESSION_ERROR__SKILL_ON_COOLDOWN]: `Skill is on cooldown`,
     [DEADROLL_SESSION_ERROR__TOO_MANY_LOOT_TABLES]: `Too many different reward tables for one party`,

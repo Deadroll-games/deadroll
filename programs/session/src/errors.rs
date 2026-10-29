@@ -200,4 +200,7 @@ pub enum SessionError {
     // Resonance pass.
     #[msg("The unit is rooted and cannot move")]
     Rooted,
+    // Triples.
+    #[msg("The unit is silenced: it can only use its basic attack")]
+    Silenced,
 }

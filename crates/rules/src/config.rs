@@ -738,6 +738,15 @@ mod remote {
         Balance::DEFAULT.res_exposed_pct
     }
 
+    /// Presets written before the triples have no counterweight curve or Escalate step.
+    fn counter_default() -> [u32; 14] {
+        Balance::DEFAULT.res_counter_bp
+    }
+
+    fn escalate_default() -> u32 {
+        Balance::DEFAULT.escalate_step_bp
+    }
+
     #[derive(Serialize, Deserialize)]
     #[serde(remote = "Balance")]
     pub struct BalanceDef {
@@ -771,6 +780,10 @@ mod remote {
         pub aspect_state_resist_share_bp: u32,
         #[serde(default = "exposed_default")]
         pub res_exposed_pct: [u32; 14],
+        #[serde(default = "counter_default")]
+        pub res_counter_bp: [u32; 14],
+        #[serde(default = "escalate_default")]
+        pub escalate_step_bp: u32,
     }
 
     #[derive(Serialize, Deserialize)]

@@ -119,8 +119,16 @@ export type HitResultData = {
   splash: SplashData;
   /** Resonance pass: a state and a modifier on the enemies around the target. */
   nova: NovaData;
-  /** Resonance pass: the modifier every enemy the jumps reach gets (`turns == 0` = none). */
-  jumpMod: ResistModData;
+  /**
+   * Triples: the modifiers every enemy the jumps and the nova reach get
+   * (`jump_mods[..jump_mod_count]`).
+   */
+  jumpMods: Array<ResistModData>;
+  jumpModCount: number;
+  /** Triples: over-time damage that ticked at once (part of `damage`). */
+  tickDamage: number;
+  /** Triples: `mod_bit`s of the modifiers taken off the target after the hit. */
+  removeMods: number;
 };
 
 export type HitResultDataArgs = {
@@ -159,8 +167,16 @@ export type HitResultDataArgs = {
   splash: SplashDataArgs;
   /** Resonance pass: a state and a modifier on the enemies around the target. */
   nova: NovaDataArgs;
-  /** Resonance pass: the modifier every enemy the jumps reach gets (`turns == 0` = none). */
-  jumpMod: ResistModDataArgs;
+  /**
+   * Triples: the modifiers every enemy the jumps and the nova reach get
+   * (`jump_mods[..jump_mod_count]`).
+   */
+  jumpMods: Array<ResistModDataArgs>;
+  jumpModCount: number;
+  /** Triples: over-time damage that ticked at once (part of `damage`). */
+  tickDamage: number;
+  /** Triples: `mod_bit`s of the modifiers taken off the target after the hit. */
+  removeMods: number;
 };
 
 export function getHitResultDataEncoder(): Encoder<HitResultDataArgs> {
@@ -189,7 +205,7 @@ export function getHitResultDataEncoder(): Encoder<HitResultDataArgs> {
     ["rollsUsed", getU32Encoder()],
     [
       "resOps",
-      getArrayEncoder(getArrayEncoder(getOpResultDataEncoder(), { size: 6 }), {
+      getArrayEncoder(getArrayEncoder(getOpResultDataEncoder(), { size: 7 }), {
         size: 3,
       }),
     ],
@@ -203,7 +219,10 @@ export function getHitResultDataEncoder(): Encoder<HitResultDataArgs> {
     ["landed", getU8Encoder()],
     ["splash", getSplashDataEncoder()],
     ["nova", getNovaDataEncoder()],
-    ["jumpMod", getResistModDataEncoder()],
+    ["jumpMods", getArrayEncoder(getResistModDataEncoder(), { size: 3 })],
+    ["jumpModCount", getU8Encoder()],
+    ["tickDamage", getU32Encoder()],
+    ["removeMods", getU16Encoder()],
   ]);
 }
 
@@ -233,7 +252,7 @@ export function getHitResultDataDecoder(): Decoder<HitResultData> {
     ["rollsUsed", getU32Decoder()],
     [
       "resOps",
-      getArrayDecoder(getArrayDecoder(getOpResultDataDecoder(), { size: 6 }), {
+      getArrayDecoder(getArrayDecoder(getOpResultDataDecoder(), { size: 7 }), {
         size: 3,
       }),
     ],
@@ -247,7 +266,10 @@ export function getHitResultDataDecoder(): Decoder<HitResultData> {
     ["landed", getU8Decoder()],
     ["splash", getSplashDataDecoder()],
     ["nova", getNovaDataDecoder()],
-    ["jumpMod", getResistModDataDecoder()],
+    ["jumpMods", getArrayDecoder(getResistModDataDecoder(), { size: 3 })],
+    ["jumpModCount", getU8Decoder()],
+    ["tickDamage", getU32Decoder()],
+    ["removeMods", getU16Decoder()],
   ]);
 }
 

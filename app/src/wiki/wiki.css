@@ -26,3 +26,6 @@
   .bestiary-grid { grid-template-columns: 1fr; }
   .bestiary-card.wide { grid-template-columns: 1fr; }
 }
+
+.wiki-triples { margin: 0 0 8px 16px; padding: 0; list-style: none; font-size: 13px; }
+.wiki-triples li { margin: 2px 0; }

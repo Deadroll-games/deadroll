@@ -20,12 +20,12 @@ use crate::{
     rules::{BALANCE, EMPTY_UNIT, MIN_PRICE_LAMPORTS},
     state::{
         external::{
-            read_bestiary, read_map_full, read_monster_skill, read_reward_table, read_table_body,
-            read_tile_costs, MapLayoutView, ASPECTS_TABLE, BESTIARY_TABLE, MONSTER_SKILLS_TABLE,
-            RESONANCES_TABLE, REWARDS_TABLE, TILESET_TABLE, TRAITS_TABLE,
+            read_bestiary, read_map_full, read_monster_skill, read_reward_table, read_tile_costs,
+            with_table_body, MapLayoutView, ASPECTS_TABLE, BESTIARY_TABLE, MONSTER_SKILLS_TABLE,
+            RESONANCES_TABLE, REWARDS_TABLE, TILESET_TABLE, TRAITS_TABLE, TRIPLES_TABLE,
         },
         Escrow, GameSession, Monsters, ACCOUNT_VERSION, NO_CHEST, RES_ASPECTS_LEN, RES_PAIRS_LEN,
-        RES_TRAITS_LEN,
+        RES_TRAITS_LEN, RES_TRIPLES_LEN,
     },
 };
 
@@ -91,6 +91,9 @@ pub struct OpenSession<'info> {
     /// tables, copied into `MonsterState`.
     #[account(address = REWARDS_TABLE @ SessionError::InvalidRegistryTable)]
     pub rewards: UncheckedAccount<'info>,
+    /// CHECK: registry `["triples"]` table (triples pass), copied into `MonsterState`.
+    #[account(address = TRIPLES_TABLE @ SessionError::InvalidRegistryTable)]
+    pub triples: UncheckedAccount<'info>,
 }
 
 pub fn handler(ctx: Context<OpenSession>, price_lamports: u64, dm_actor: Pubkey) -> Result<()> {
@@ -177,6 +180,7 @@ pub fn handler(ctx: Context<OpenSession>, price_lamports: u64, dm_actor: Pubkey)
         &accounts.aspects,
         &accounts.traits,
         &accounts.resonances,
+        &accounts.triples,
         &monsters,
     )?;
     monsters.clear_loot_tables()?;
@@ -263,18 +267,35 @@ fn copy_tables(
     aspects: &AccountInfo,
     traits: &AccountInfo,
     resonances: &AccountInfo,
+    triples: &AccountInfo,
     monsters: &Monsters,
 ) -> Result<()> {
-    let aspects: [u8; RES_ASPECTS_LEN] =
-        read_table_body(aspects, &ASPECTS_TABLE, TableKind::Aspects)?;
-    let traits: [u8; RES_TRAITS_LEN] = read_table_body(traits, &TRAITS_TABLE, TableKind::Traits)?;
-    let pairs: [u8; RES_PAIRS_LEN] =
-        read_table_body(resonances, &RESONANCES_TABLE, TableKind::Resonances)?;
+    // The four bodies are borrowed from their accounts, never copied onto the 4 KB stack frame.
     let mut tables = Box::<ResonanceTables>::default();
-    tables
-        .decode_into(&aspects, &traits, &pairs)
-        .map_err(|_| error!(SessionError::InvalidRegistryTable))?;
-    monsters.set_tables(&aspects, &traits, &pairs)
+    with_table_body(aspects, &ASPECTS_TABLE, TableKind::Aspects, RES_ASPECTS_LEN, |a| {
+        with_table_body(traits, &TRAITS_TABLE, TableKind::Traits, RES_TRAITS_LEN, |t| {
+            with_table_body(
+                resonances,
+                &RESONANCES_TABLE,
+                TableKind::Resonances,
+                RES_PAIRS_LEN,
+                |p| {
+                    with_table_body(
+                        triples,
+                        &TRIPLES_TABLE,
+                        TableKind::Triples,
+                        RES_TRIPLES_LEN,
+                        |x| {
+                            tables
+                                .decode_into(a, t, p, x)
+                                .map_err(|_| error!(SessionError::InvalidRegistryTable))?;
+                            monsters.set_tables(a, t, p, x)
+                        },
+                    )
+                },
+            )
+        })
+    })
 }
 
 /// The skills spawn `index` took from its template's pool (docs/BESTIARY.md 3.2, MAP_DESCRIPTION.md

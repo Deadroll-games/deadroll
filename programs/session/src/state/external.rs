@@ -34,6 +34,8 @@ pub const RESONANCES_TABLE: Pubkey = pubkey!("5wvxCqYJgp3gckLyZeNz3md4g8qmRxd7ne
 pub const MONSTER_SKILLS_TABLE: Pubkey = pubkey!("NQNEuKDUZhACnTJ9sD3dW49BoiPtJPatp6bpY61r81p");
 /// Registry `["rewards"]` table (patch 11).
 pub const REWARDS_TABLE: Pubkey = pubkey!("FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK");
+/// Registry `["triples"]` table (triples pass).
+pub const TRIPLES_TABLE: Pubkey = pubkey!("sWao9CeLDqT7z3R1oVxED2SGwH9EUSySM1ftyS44b6e");
 
 /// `sha256("account:Character")[..8]`.
 pub const CHARACTER_DISCRIMINATOR: [u8; 8] = [0x8c, 0x73, 0xa5, 0x24, 0xf1, 0x99, 0x66, 0x54];
@@ -311,6 +313,33 @@ fn table_record<const N: usize>(
     Ok(Some(record))
 }
 
+/// Runs `f` over the first `len` bytes of the registry table `kind` at `address` (a whole table
+/// body, every record written), borrowed: no copy on the stack. Same checks as [`table_record`].
+pub fn with_table_body<R>(
+    info: &AccountInfo,
+    address: &Pubkey,
+    kind: TableKind,
+    len: usize,
+    f: impl FnOnce(&[u8]) -> Result<R>,
+) -> Result<R> {
+    require!(
+        info.key == address && check_header(info, &deadroll_registry::ID, Table::DISCRIMINATOR),
+        SessionError::InvalidRegistryTable
+    );
+    let data = info.try_borrow_data()?;
+    require!(
+        data.len() >= table_off::BODY + TABLE_CAP && data[table_off::KIND] == kind as u8,
+        SessionError::InvalidRegistryTable
+    );
+    let mut written = [0u8; 4];
+    written.copy_from_slice(&data[table_off::LEN..table_off::LEN + 4]);
+    require!(
+        len <= u32::from_le_bytes(written) as usize && len <= TABLE_CAP,
+        SessionError::InvalidRegistryTable
+    );
+    f(&data[table_off::BODY..table_off::BODY + len])
+}
+
 /// The first `N` bytes of the registry table `kind` at `address` (a whole table body, every
 /// record written), with the checks of [`table_record`].
 pub fn read_table_body<const N: usize>(
@@ -491,6 +520,7 @@ mod tests {
         assert_eq!(pda(seeds::RESONANCES), RESONANCES_TABLE);
         assert_eq!(pda(seeds::MONSTER_SKILLS), MONSTER_SKILLS_TABLE);
         assert_eq!(pda(seeds::REWARDS), REWARDS_TABLE);
+        assert_eq!(pda(seeds::TRIPLES), TRIPLES_TABLE);
     }
 
     #[test]

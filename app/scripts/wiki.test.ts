@@ -16,6 +16,16 @@ describe("wiki generator", () => {
     expect(w.sprites.some((s) => s.slug === "tombstone")).toBe(false);
     expect(w.sprites.find((s) => s.id === 400)).toEqual({ id: 400, slug: "wolf", name: "Wolf", art: "bestiary/400_wolf" });
     expect(w.hitSteps[0]?.steps).toBe("3");
+    // The triples pass: 120 triples, each under its pair, each with its text and lore.
+    expect(w.triples).toHaveLength(120);
+    expect(w.triples.every((t) => t.about && t.lore && t.ops.length > 0 && t.ops.length <= 3)).toBe(true);
+    expect(w.triples.filter((t) => t.base === "Fire" && t.tint === "Cold").map((t) => t.second)).toEqual(["Lightning", "Blood", "Blunt", "Piercing"]);
+    expect(w.hitSteps.at(-1)?.steps).toBe("22");
+  });
+
+  it("fails on a triple without its mechanics text or its lore", () => {
+    expect(() => buildWiki(ROOT, undefined, { "triples.json": {} })).toThrow(/triples.json: "Fire \+ Cold \+ Lightning"/);
+    expect(() => buildWiki(ROOT, undefined, { "triple_lore.json": {} })).toThrow(/triple_lore.json: "Piercing \+ Blunt \+ Blood"/);
   });
 
   it("fails on a new aspect without a text", () => {

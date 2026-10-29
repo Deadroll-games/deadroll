@@ -2155,6 +2155,10 @@
             "tables, copied into `MonsterState`."
           ],
           "address": "FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK"
+        },
+        {
+          "name": "triples",
+          "address": "sWao9CeLDqT7z3R1oVxED2SGwH9EUSySM1ftyS44b6e"
         }
       ],
       "args": [
@@ -3945,6 +3949,11 @@
       "code": 6092,
       "name": "Rooted",
       "msg": "The unit is rooted and cannot move"
+    },
+    {
+      "code": 6093,
+      "name": "Silenced",
+      "msg": "The unit is silenced: it can only use its basic attack"
     }
   ],
   "types": [
@@ -5834,7 +5843,7 @@
                         "name": "OpResultData"
                       }
                     },
-                    6
+                    7
                   ]
                 },
                 3
@@ -5925,15 +5934,39 @@
             }
           },
           {
-            "name": "jump_mod",
+            "name": "jump_mods",
             "docs": [
-              "Resonance pass: the modifier every enemy the jumps reach gets (`turns == 0` = none)."
+              "Triples: the modifiers every enemy the jumps and the nova reach get",
+              "(`jump_mods[..jump_mod_count]`)."
             ],
             "type": {
-              "defined": {
-                "name": "ResistModData"
-              }
+              "array": [
+                {
+                  "defined": {
+                    "name": "ResistModData"
+                  }
+                },
+                3
+              ]
             }
+          },
+          {
+            "name": "jump_mod_count",
+            "type": "u8"
+          },
+          {
+            "name": "tick_damage",
+            "docs": [
+              "Triples: over-time damage that ticked at once (part of `damage`)."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "remove_mods",
+            "docs": [
+              "Triples: `mod_bit`s of the modifiers taken off the target after the hit."
+            ],
+            "type": "u16"
           }
         ]
       }
@@ -6124,6 +6157,10 @@
                 "name": "Aspect"
               }
             }
+          },
+          {
+            "name": "filter_any",
+            "type": "bool"
           }
         ]
       }
@@ -6144,6 +6181,9 @@
           },
           {
             "name": "Line"
+          },
+          {
+            "name": "Radius"
           }
         ]
       }
@@ -6271,6 +6311,27 @@
           },
           {
             "name": "Root"
+          },
+          {
+            "name": "Blinded"
+          },
+          {
+            "name": "OffGuard"
+          },
+          {
+            "name": "Sundered"
+          },
+          {
+            "name": "Dazed"
+          },
+          {
+            "name": "Silenced"
+          },
+          {
+            "name": "NoHeal"
+          },
+          {
+            "name": "Dulled"
           }
         ]
       }
@@ -6881,6 +6942,15 @@
                 12
               ]
             }
+          },
+          {
+            "name": "res_triples",
+            "type": {
+              "array": [
+                "u8",
+                1920
+              ]
+            }
           }
         ]
       }
@@ -7075,6 +7145,45 @@
           },
           {
             "name": "ModAfterNative"
+          },
+          {
+            "name": "StateFaster"
+          },
+          {
+            "name": "StateSlower"
+          },
+          {
+            "name": "TickNow"
+          },
+          {
+            "name": "Escalate"
+          },
+          {
+            "name": "TickAspect"
+          },
+          {
+            "name": "RemoveMod"
+          },
+          {
+            "name": "NativeShorter"
+          },
+          {
+            "name": "Delayed"
+          },
+          {
+            "name": "OnMiss"
+          },
+          {
+            "name": "ThawSplash"
+          },
+          {
+            "name": "SplashLine"
+          },
+          {
+            "name": "ChainRadius"
+          },
+          {
+            "name": "ModAfterState"
           }
         ]
       }
@@ -7095,6 +7204,9 @@
           },
           {
             "name": "Trait"
+          },
+          {
+            "name": "Triple"
           }
         ]
       }
@@ -8214,15 +8326,20 @@
           {
             "name": "hit_mods",
             "docs": [
-              "Resonance pass: the modifier each of `hits` got (`hit_mods[i]` for `hits[i]`, `turns == 0` =",
-              "none)."
+              "The modifiers each of `hits` got (`hit_mods[i]` for `hits[i]`, `turns == 0` = none): the",
+              "nova's first, then the jump modifiers (triples: up to four)."
             ],
             "type": {
               "array": [
                 {
-                  "defined": {
-                    "name": "TimedModData"
-                  }
+                  "array": [
+                    {
+                      "defined": {
+                        "name": "TimedModData"
+                      }
+                    },
+                    4
+                  ]
                 },
                 8
               ]
@@ -8798,6 +8915,13 @@
                 "name": "Aspect"
               }
             }
+          },
+          {
+            "name": "line",
+            "docs": [
+              "Triples: only the enemies in line with the attacker and the target."
+            ],
+            "type": "bool"
           }
         ]
       }

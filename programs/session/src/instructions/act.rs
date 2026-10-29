@@ -144,6 +144,11 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
             skill_use(&skill) == SkillUse::Ok,
             SessionError::InvalidSkill
         );
+        // Triples: a silenced player has only the weapon.
+        require!(
+            !deadroll_combat::silenced(&participation.combat_mods()),
+            SessionError::Silenced
+        );
         // `read_skill` checked `skill_slot < SKILLS_MAX`. The weapon has no cooldown.
         require!(
             participation.cooldowns[skill_slot as usize] == 0,

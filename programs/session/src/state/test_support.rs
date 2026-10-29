@@ -153,6 +153,7 @@ pub fn monsters_account(session: Pubkey, monsters: &[Monster]) -> TestAccount {
         aura_weights: Default::default(),
         loot_ids,
         loot_tables,
+        res_triples: [0; super::RES_TRIPLES_LEN],
     };
     let mut data = Vec::new();
     state.try_serialize(&mut data).unwrap();

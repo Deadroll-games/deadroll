@@ -152,12 +152,52 @@ export function opText(op: OpResult, base: Aspect): string {
     case OpKind.Nova:
       text = `${native} and ${MOD_NAMES[op.arg as ModKind] ?? "a modifier"} hit the enemies within ${op.amount} cells`;
       break;
+    case OpKind.StateFaster:
+      text = `${state} ticks ${op.amount === 0 ? "faster" : `${op.amount} turns left`}, with more power per tick`;
+      break;
+    case OpKind.StateSlower:
+      text = `${state} lasts ${op.amount} turns and ticks less`;
+      break;
+    case OpKind.TickNow:
+      text = `${state} ticks at once for ${op.amount} damage`;
+      break;
+    case OpKind.Escalate:
+      text = `${state} grows by ${pct(op.amount)} with every tick`;
+      break;
+    case OpKind.TickAspect:
+      text = `the damage over time is ${aspectName(op.arg as Aspect)} damage (${op.amount} per tick)`;
+      break;
+    case OpKind.RemoveMod:
+      text = `removes ${MOD_NAMES[op.arg as ModKind] ?? "a modifier"}`;
+      break;
+    case OpKind.NativeShorter:
+      text = `${native} lasts ${op.amount}x shorter`;
+      break;
+    case OpKind.Delayed:
+      text = `${state} starts when the control ends${op.amount ? "" : " (at once: nothing holds the target)"}`;
+      break;
+    case OpKind.OnMiss:
+      text = `a chance of ${state}, even on a miss`;
+      break;
+    case OpKind.ThawSplash:
+      text = `the thaw hits the adjacent enemies for ${op.amount}`;
+      break;
+    case OpKind.SplashLine:
+      text = "the splash goes only along the line";
+      break;
+    case OpKind.ChainRadius:
+      text = `${state} lands on every enemy within ${op.amount} cells`;
+      break;
+    case OpKind.ModAfterState:
+      text = `${MOD_NAMES[op.arg as ModKind] ?? "a modifier"} lasts beyond the control`;
+      break;
     default:
       text = "nothing";
   }
   const from =
     op.origin === OpOrigin.Trait ? `${traitName(op.tint)}: `
     : op.origin === OpOrigin.Template ? `${traitName(op.tint)} (triple): `
+    : op.origin === OpOrigin.Triple ? "triple: "
     : "";
   const crit = op.critOnly ? "on a crit, " : "";
   return `${from}${crit}${text}${op.acted ? "" : " (did not trigger)"}`;

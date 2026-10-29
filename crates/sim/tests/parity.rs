@@ -68,7 +68,7 @@ fn sim_registry() -> Registry {
 /// The program's view of the same data: the table bodies decoded as `Monsters::tables_into`
 /// does, and the defenses as `read_bestiary` reads them.
 fn program_tables(r: &Registry) -> ResonanceTables {
-    ResonanceTables::from_bytes(&r.aspects, &r.traits, &r.resonances).unwrap()
+    ResonanceTables::from_bytes(&r.aspects, &r.traits, &r.resonances, &r.triples).unwrap()
 }
 
 fn program_defense(r: &Registry, id: u8) -> MonsterDefense {
@@ -239,7 +239,9 @@ fn sim_monsters(cfg: &BalanceConfig) -> Vec<(u8, MonsterProfile, u32)> {
 /// The program's template of bestiary id `id`: the record bytes `open_session` copies into
 /// `MonsterState.records`, decoded as `Monsters::template` does.
 fn program_template(id: u8) -> MonsterTemplate {
-    let r = sim_registry();
+    // The registry is read from disk once: the triple test asks thousands of times.
+    static REGISTRY: std::sync::OnceLock<Registry> = std::sync::OnceLock::new();
+    let r = REGISTRY.get_or_init(sim_registry);
     let at = id as usize * deadroll_rules::monster::record::SIZE;
     MonsterTemplate::from_record(&r.bestiary[at..at + deadroll_rules::monster::record::SIZE])
         .unwrap()
@@ -842,7 +844,10 @@ fn resonance_side(
     resolve_hit_into(input, &cfg.combat, tables, src, &mut result);
     let mut ms = cluster(result.states);
     let units = ms.iter().map(|m| Cell { x: m.x, y: m.y }).collect();
-    let defense = vec![program_defense(&sim_registry(), 1); ms.len()];
+    // The registry is read from disk once: the triple test resolves thousands of hits.
+    static GOBLIN: std::sync::OnceLock<MonsterDefense> = std::sync::OnceLock::new();
+    let goblin = *GOBLIN.get_or_init(|| program_defense(&sim_registry(), 1));
+    let defense = vec![goblin; ms.len()];
     let mut cells = [BurningCell::default(); BURNING_CELLS_MAX];
     spread(
         cfg,
@@ -873,6 +878,8 @@ fn every_resonance_pair_resolves_the_same_and_every_op_acts() {
     assert_eq!(pairs.len(), 30);
     // A triple too: Piercing Frost of the Storm (docs 6.5).
     pairs.push((Aspect::Cold, Aspect::Piercing, Some(Aspect::Lightning)));
+    // The triples pass: the pairs act the same with a triple record behind them (the triple
+    // test below checks the records).
     for (base, tint, second) in pairs {
         let mechanics = st.pair(base, tint);
         assert!(
@@ -918,6 +925,122 @@ fn every_resonance_pair_resolves_the_same_and_every_op_acts() {
             );
         }
     }
+}
+
+/// States on the target before the hit besides `setup_states`: the ops of a triple that need one
+/// (a frozen, shocked, burning, bleeding, stunned or penetrated target).
+fn triple_setups(base: Aspect, tint: Aspect) -> Vec<[ActiveState; STATES_MAX]> {
+    let mut out = vec![setup_states(base, tint)];
+    for kind in [
+        StateKind::Freeze,
+        StateKind::Shock,
+        StateKind::Burning,
+        StateKind::Bleeding,
+        StateKind::Stun,
+        StateKind::Penetration,
+    ] {
+        let mut s = [ActiveState::default(); STATES_MAX];
+        s[0] = ActiveState {
+            kind,
+            turns: 2,
+            power: if kind == StateKind::Shock { 2_000 } else { 1 },
+            source: 9,
+        };
+        out.push(s);
+    }
+    out
+}
+
+#[test]
+fn every_triple_resolves_the_same_and_every_op_acts() {
+    use deadroll_combat::tables::{triple_of, TRIPLES};
+    let cfg = sim_config();
+    let registry = sim_registry();
+    let (st, pt) = (registry.tables, program_tables(&registry));
+    assert_eq!(st, pt);
+    assert_eq!(registry.triples.len(), deadroll_combat::tables::TRIPLES_LEN);
+    for index in 0..TRIPLES {
+        let [base, tint, second] = triple_of(index).unwrap();
+        let record = st
+            .triple(base, tint, second)
+            .unwrap_or_else(|| panic!("{base:?} + {tint:?} + {second:?} has no record"));
+        let mut acted = [false; deadroll_combat::RES_OPS_MAX];
+        let mut kinds = [OpKind::None; deadroll_combat::RES_OPS_MAX];
+        let mut origins = 0;
+        for (n, states) in triple_setups(base, tint).into_iter().enumerate() {
+            let mut input = pair_input(&cfg, base, tint, Some(second));
+            input.defender.states = states;
+            // The default setup gets more seeds: the others only fill the ops it cannot reach.
+            let seeds = if n == 0 { 160u8 } else { 50 };
+            for i in 0..seeds {
+                let p = resonance_side(
+                    program_rules::BALANCE,
+                    &pt,
+                    &input,
+                    &mut SyscallRoll::new(seed(i)),
+                );
+                let s = resonance_side(&cfg, &st, &input, &mut VrfRoll::new(seed(i)));
+                assert_eq!(
+                    s, p,
+                    "{base:?} + {tint:?} + {second:?}, setup {n}, seed {i}"
+                );
+                let r = &s.0;
+                let Some(res) = r.resonances[0].filter(|r| r.active) else {
+                    continue;
+                };
+                // The two tints can come out the other way round: that is another triple.
+                if (res.tint, res.second_tint) != (tint, Some(second)) {
+                    continue;
+                }
+                for (k, op) in r.ops(0).enumerate() {
+                    kinds[k] = op.kind;
+                    acted[k] |= op.acted;
+                    if op.origin == deadroll_combat::OpOrigin::Triple {
+                        origins += 1;
+                    }
+                }
+            }
+        }
+        assert!(origins > 0, "{base:?} + {tint:?} + {second:?} never ran its record");
+        for (k, kind) in kinds
+            .iter()
+            .enumerate()
+            .filter(|(_, k)| **k != OpKind::None)
+        {
+            assert!(
+                acted[k],
+                "{base:?} + {tint:?} + {second:?}: op {k} ({kind:?}) never acted; record {:?}",
+                record.ops
+            );
+        }
+    }
+}
+
+#[test]
+fn a_miss_with_an_on_miss_triple_resolves_the_same_on_both_sides() {
+    let cfg = sim_config();
+    let registry = sim_registry();
+    let (st, pt) = (registry.tables, program_tables(&registry));
+    let mut input = pair_input(&cfg, Aspect::Piercing, Aspect::Lightning, Some(Aspect::Blunt));
+    input.defender.defense = 1_000;
+    let mut shocked = 0;
+    for i in 0..120u8 {
+        let p = resonance_side(
+            program_rules::BALANCE,
+            &pt,
+            &input,
+            &mut SyscallRoll::new(seed(i)),
+        );
+        let s = resonance_side(&cfg, &st, &input, &mut VrfRoll::new(seed(i)));
+        assert_eq!(s, p, "seed {i}");
+        // A natural 20 always hits.
+        if s.0.outcome == deadroll_combat::Outcome::Miss
+            && deadroll_combat::states::has(&s.0.states, StateKind::Shock)
+        {
+            shocked += 1;
+        }
+    }
+    assert!(shocked > 0, "Shock never landed on a miss");
 }
 
 #[test]

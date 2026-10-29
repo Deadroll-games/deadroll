@@ -491,11 +491,12 @@ impl<'a> Battle<'a> {
                 let s = s as usize;
                 let h = &mut self.heroes[s];
                 let before = h.hp;
-                let start = deadroll_rules::start_of_turn(
+                let start = deadroll_rules::start_of_turn_with(
                     &mut h.states,
                     &mut h.mods,
                     &mut h.cooldowns,
                     h.hp,
+                    &self.cfg.combat,
                 );
                 h.hp = start.hp;
                 h.accuracy.tick();
@@ -530,11 +531,12 @@ impl<'a> Battle<'a> {
                 let f = &mut self.foes[i];
                 let before = f.m.hp;
                 // Skill cooldowns (the reactive's too) and the temporary aura count own turns.
-                let start = deadroll_rules::start_of_turn(
+                let start = deadroll_rules::start_of_turn_with(
                     &mut f.m.states,
                     &mut f.mods,
                     &mut f.cooldowns,
                     f.m.hp,
+                    &self.cfg.combat,
                 );
                 f.m.hp = start.hp;
                 tick_auras(&mut f.auras);
@@ -1278,7 +1280,8 @@ impl<'a> Battle<'a> {
         let b = e.bearer;
         let f = &self.foes[b];
         let skill = f.skills[REACTIVE_SLOT]?;
-        if !f.m.alive {
+        // A Dazed monster uses no reactive skill.
+        if !f.m.alive || deadroll_combat::support::dazed(&f.mods) {
             return None;
         }
         let source = e
@@ -1403,7 +1406,12 @@ impl<'a> Battle<'a> {
             if h.applied != Applied::None {
                 self.stats.states_landed[h.kind as usize] += 1;
             }
-            apply_mod(&mut self.foes[h.monster as usize].mods, h.modifier);
+            for m in deadroll_rules::spread::modifiers_of(&self.result, h)
+                .iter()
+                .filter(|m| !m.is_empty())
+            {
+                apply_mod(&mut self.foes[h.monster as usize].mods, *m);
+            }
         }
         for h in out.splashes() {
             self.stats.slots[s].damage += h.damage as u64;
@@ -2137,6 +2145,46 @@ mod tests {
             }
         }
         assert!(fired);
+    }
+
+    #[test]
+    fn a_dazed_monster_does_not_answer_with_its_reactive_skill() {
+        let party = [hero(Class::Warrior, vec![])];
+        let fight = pack(&[(CHIEFTAIN, false), (GOBLIN, false)]);
+        let (mut reacted, mut dazed_reacted) = (0, 0);
+        for seed in 0..60 {
+            for dazed in [false, true] {
+                let mut b = Battle::new(CFG, &party, &fight, Settings::default(), seed);
+                let next = Cell {
+                    x: b.heroes[0].cell.x + 1,
+                    y: b.heroes[0].cell.y,
+                };
+                place_foe(&mut b, 0, next);
+                b.foes[0].m.hp = b.foes[0].m.hp_max / 2 + 1;
+                if dazed {
+                    b.foes[0].mods[ModKind::Dazed as usize] = deadroll_combat::TimedMod {
+                        kind: ModKind::Dazed,
+                        turns: 3,
+                        power_bp: 10_000,
+                        ..Default::default()
+                    };
+                }
+                b.hero_act(
+                    0,
+                    Action::Attack {
+                        skill: None,
+                        target: 0,
+                    },
+                );
+                if dazed {
+                    dazed_reacted += b.stats.monster_reactions;
+                } else {
+                    reacted += b.stats.monster_reactions;
+                }
+            }
+        }
+        assert!(reacted > 0, "a free chieftain reacts");
+        assert_eq!(dazed_reacted, 0);
     }
 
     #[test]

@@ -14,6 +14,13 @@
 //! | Haste / Slow  | opposing pair  | action points: `ap * (BP + haste) / (BP + slow)` |
 //! | Exposed       | addition       | `Defender.crit_taken_pct`, every attacker     |
 //! | Root          | rule           | the bearer cannot move ([`rooted`])           |
+//! | Blinded       | counterweight  | divides the bearer's d20 (`Attacker.blinded_bp`) |
+//! | OffGuard      | counterweight  | divides the bearer's defense                  |
+//! | Sundered      | counterweight  | divides the armor against Piercing (`Defender.sunder_bp`) |
+//! | Dazed         | rule           | no reactive skills ([`dazed`])                |
+//! | Silenced      | rule           | no skills, basic attack and move only ([`silenced`]) |
+//! | NoHeal        | rule           | heals on the bearer do nothing ([`no_heal`])  |
+//! | Dulled        | counterweight  | divides the bearer's crit chance              |
 //!
 //! Roll order of one support action (the website replays it from the VRF seed, keep it stable):
 //! 1. hostile only (a debuff on an enemy): `d20` hit roll against the target's defense,
@@ -56,10 +63,25 @@ pub enum ModKind {
     Exposed,
     /// Resonance only: the bearer cannot move (it can still act).
     Root,
+    /// Triples only: the bearer's d20 is divided by a counterweight of `power_bp`.
+    Blinded,
+    /// Triples only: the bearer's defense is divided by a counterweight of `power_bp`.
+    OffGuard,
+    /// Triples only: the bearer's armor against Piercing packets is divided by a counterweight of
+    /// `power_bp`.
+    Sundered,
+    /// Triples only: the bearer uses no reactive skill.
+    Dazed,
+    /// Triples only: the bearer uses no skill (a basic attack and a move are still allowed).
+    Silenced,
+    /// Triples only: heals on the bearer do nothing.
+    NoHeal,
+    /// Triples only: the bearer's crit chance is divided by a counterweight of `power_bp`.
+    Dulled,
 }
 
 impl ModKind {
-    pub const COUNT: usize = 9;
+    pub const COUNT: usize = 16;
     pub const ALL: [ModKind; Self::COUNT] = [
         ModKind::Haste,
         ModKind::Slow,
@@ -70,9 +92,16 @@ impl ModKind {
         ModKind::Resistance,
         ModKind::Exposed,
         ModKind::Root,
+        ModKind::Blinded,
+        ModKind::OffGuard,
+        ModKind::Sundered,
+        ModKind::Dazed,
+        ModKind::Silenced,
+        ModKind::NoHeal,
+        ModKind::Dulled,
     ];
 
-    /// Slow, Weakening, Vulnerability, Exposed, Root: harmful, applied to enemies.
+    /// Slow, Weakening, Vulnerability and every resonance-only kind: harmful, applied to enemies.
     pub const fn is_harmful(self) -> bool {
         matches!(
             self,
@@ -81,6 +110,13 @@ impl ModKind {
                 | ModKind::Vulnerability
                 | ModKind::Exposed
                 | ModKind::Root
+                | ModKind::Blinded
+                | ModKind::OffGuard
+                | ModKind::Sundered
+                | ModKind::Dazed
+                | ModKind::Silenced
+                | ModKind::NoHeal
+                | ModKind::Dulled
         )
     }
 }
@@ -206,7 +242,16 @@ pub fn apply_to_attacker(attacker: &mut Attacker, mods: &TimedMods) {
     }
     attacker.weaken_bp = attacker
         .weaken_bp
-        .saturating_add(mod_power(mods, ModKind::Weakening));
+            .saturating_add(mod_power(mods, ModKind::Weakening));
+    // Triples: a Blinded bearer's d20 and a Dulled bearer's crit chance are divided.
+    attacker.blinded_bp = attacker
+        .blinded_bp
+        .saturating_add(mod_power(mods, ModKind::Blinded));
+    let dulled = mod_power(mods, ModKind::Dulled);
+    if dulled > 0 {
+        attacker.crit_chance_pct = ratio(attacker.crit_chance_pct as u64, 0, dulled)
+            .min(u32::MAX as u64) as u32;
+    }
 }
 
 /// Protection is a counterweight on every aspect (through resistance, so the cap still holds);
@@ -231,6 +276,29 @@ pub fn apply_to_defender(defender: &mut Defender, mods: &TimedMods) {
     defender.crit_taken_pct = defender
         .crit_taken_pct
         .saturating_add(mod_power(mods, ModKind::Exposed) / 100);
+    // Triples: OffGuard divides the defense, Sundered the armor against Piercing.
+    let off_guard = mod_power(mods, ModKind::OffGuard);
+    if off_guard > 0 {
+        defender.defense = ratio(defender.defense as u64, 0, off_guard).min(u32::MAX as u64) as u32;
+    }
+    defender.sunder_bp = defender
+        .sunder_bp
+        .saturating_add(mod_power(mods, ModKind::Sundered));
+}
+
+/// The bearer uses no reactive skill: a Dazed on it.
+pub fn dazed(mods: &TimedMods) -> bool {
+    find_mod(mods, ModKind::Dazed).is_some()
+}
+
+/// The bearer uses no skill, only a basic attack and a move: a Silenced on it.
+pub fn silenced(mods: &TimedMods) -> bool {
+    find_mod(mods, ModKind::Silenced).is_some()
+}
+
+/// Heals on the bearer do nothing: a NoHeal on it.
+pub fn no_heal(mods: &TimedMods) -> bool {
+    find_mod(mods, ModKind::NoHeal).is_some()
 }
 
 /// The bearer cannot move: a Root on it.
@@ -336,11 +404,12 @@ pub struct SupportBalance {
 
 impl SupportBalance {
     pub const DEFAULT: SupportBalance = SupportBalance {
-        // Haste, Slow, Empowerment, Weakening, Protection, Vulnerability, Resistance, then
-        // Exposed and Root: no skill effect gives those two (resonance only), so no numbers.
-        mod_min_bp: [2_500, 2_500, 2_000, 2_500, 2_000, 2_000, 2_000, 0, 0],
-        mod_max_bp: [5_000, 5_000, 4_000, 5_000, 4_000, 4_000, 4_000, 0, 0],
-        mod_duration: [2, 2, 2, 2, 2, 2, 2, 0, 0],
+        // Haste, Slow, Empowerment, Weakening, Protection, Vulnerability, Resistance, then the
+        // resonance-only kinds (Exposed, Root, and the triple kinds): no skill effect gives
+        // those, so no numbers.
+        mod_min_bp: [2_500, 2_500, 2_000, 2_500, 2_000, 2_000, 2_000, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        mod_max_bp: [5_000, 5_000, 4_000, 5_000, 4_000, 4_000, 4_000, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        mod_duration: [2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         rider_chance_pct: 30,
         passive_point_bp: 5_000,
     };
@@ -592,6 +661,52 @@ mod tests {
         assert_eq!(d.resist_bp[Aspect::Fire as usize], 5_000);
         assert_eq!(d.resist_bp[Aspect::Piercing as usize], 0);
         assert_eq!(resistance_share(1_000, 250), 1_000);
+    }
+
+    #[test]
+    fn triple_mods_divide_defense_crit_and_d20_and_mark_rules() {
+        let mods = with(&[
+            m(ModKind::OffGuard, 2, 10_000),
+            m(ModKind::Sundered, 2, 5_000),
+        ]);
+        let mut d = Defender {
+            defense: 11,
+            ..Defender::default()
+        };
+        apply_to_defender(&mut d, &mods);
+        assert_eq!((d.defense, d.sunder_bp), (5, 5_000));
+        let mods = with(&[
+            m(ModKind::Dulled, 2, 10_000),
+            m(ModKind::Blinded, 2, 3_000),
+        ]);
+        let mut a = Attacker {
+            crit_chance_pct: 30,
+            ..Attacker::default()
+        };
+        apply_to_attacker(&mut a, &mods);
+        assert_eq!((a.crit_chance_pct, a.blinded_bp), (15, 3_000));
+        // No such mods: nothing changes.
+        let none = TimedMods::default();
+        let mut d = Defender {
+            defense: 11,
+            ..Defender::default()
+        };
+        apply_to_defender(&mut d, &none);
+        assert_eq!((d.defense, d.sunder_bp), (11, 0));
+        // The rules: Dazed, Silenced, NoHeal.
+        let rules = with(&[
+            m(ModKind::Dazed, 1, 1),
+            m(ModKind::Silenced, 1, 1),
+            m(ModKind::NoHeal, 1, 1),
+        ]);
+        assert!(dazed(&rules) && silenced(&rules) && no_heal(&rules));
+        assert!(!dazed(&none) && !silenced(&none) && !no_heal(&none));
+        // Sixteen kinds fit the sixteen slots and the u16 expiry mask.
+        assert_eq!(ModKind::COUNT, 16);
+        assert_eq!(mod_bit(ModKind::Dulled), 1 << 15);
+        assert!(ModKind::ALL[ModKind::Exposed as usize..]
+            .iter()
+            .all(|k| k.is_harmful()));
     }
 
     #[test]

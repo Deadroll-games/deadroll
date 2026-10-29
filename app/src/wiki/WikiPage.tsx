@@ -1,7 +1,7 @@
 // The wiki: what is in the game now, as the code has it (app/scripts/wiki.ts builds the data from
 // crates/types, crates/combat, BalanceConfig and the registry, with the short texts of
 // assets/wiki). No RPC.
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import wiki from "virtual:wiki";
 import { Category, Form, Purpose, SKILL_ERROR_MESSAGES, Source, derive, makeBlocks, validate } from "../chain/skillcheck";
 import { formatBp } from "../chain/names";
@@ -114,9 +114,32 @@ function States() {
 }
 
 const opText = (op: unknown): string => {
-  const o = op as { kind: string; arg?: string; value?: number; crit?: boolean };
-  return `${o.kind}${o.arg ? ` ${o.arg}` : ""}${o.value !== undefined ? ` ${o.value}` : ""}${o.crit ? " (crit)" : ""}`;
+  const o = op as { kind: string; arg?: string; value?: number; crit?: boolean; after?: string; percent?: number; radius?: number; filter?: string };
+  const extra = [
+    o.after ? `after ${o.after}` : "",
+    o.percent ? `${o.percent}%` : "",
+    o.radius ? `radius ${o.radius}` : "",
+    o.filter ? `with ${o.filter}` : "",
+  ].filter(Boolean);
+  return `${o.kind}${o.arg ? ` ${o.arg}` : ""}${o.value !== undefined ? ` ${o.value}` : ""}${extra.length ? ` ${extra.join(" ")}` : ""}${o.crit ? " (crit)" : ""}`;
 };
+
+/** The triples of a pair: the third aspect that turns it into a triple, with what it adds. */
+function Triples({ base, tint }: { base: string; tint: string }) {
+  const list = wiki.triples.filter((t) => t.base === base && t.tint === tint);
+  if (list.length === 0) return null;
+  return (
+    <ul className="wiki-triples">
+      {list.map((t) => (
+        <li key={t.second}>
+          + {t.second}: {t.about}
+          <div className="muted">{t.lore}</div>
+          <div className="mono muted">{t.ops.map(opText).join(", ")}</div>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 function Resonances() {
   const named = wiki.resonances.filter((r) => r.name);
@@ -127,6 +150,10 @@ function Resonances() {
       <p>
         Each aspect of a skill is a base; the other aspects of the character (race, class, items) are tints. A tint that rolls under its chance makes a
         resonance of its base: the base's native state plus the tint's trait, unless the pair has its own mechanics below.
+      </p>
+      <p>
+        A third aspect among the character's tints that also rolls under its chance makes a triple: the second tint then does not add its trait,
+        but the effect listed under the pair, on top of the pair's own.
       </p>
       <table className="wiki-table">
         <thead>
@@ -141,19 +168,26 @@ function Resonances() {
         </thead>
         <tbody>
           {named.map((r) => (
-            <tr key={`${r.base}-${r.tint}`}>
-              <td>
-                <b>{r.name}</b>
-              </td>
-              <td>{r.base}</td>
-              <td>{r.tint}</td>
-              <td className="mono">{r.condition}</td>
-              <td className="mono">{r.ops.map(opText).join(", ")}</td>
-              <td>
-                {r.about}
-                {r.lore && <div className="muted">{r.lore}</div>}
-              </td>
-            </tr>
+            <Fragment key={`${r.base}-${r.tint}`}>
+              <tr>
+                <td>
+                  <b>{r.name}</b>
+                </td>
+                <td>{r.base}</td>
+                <td>{r.tint}</td>
+                <td className="mono">{r.condition}</td>
+                <td className="mono">{r.ops.map(opText).join(", ")}</td>
+                <td>
+                  {r.about}
+                  {r.lore && <div className="muted">{r.lore}</div>}
+                </td>
+              </tr>
+              <tr>
+                <td colSpan={6}>
+                  <Triples base={r.base} tint={r.tint} />
+                </td>
+              </tr>
+            </Fragment>
           ))}
         </tbody>
       </table>
@@ -226,6 +260,7 @@ function SkillPreview() {
                     <li key={r.tint}>
                       {r.tint} tint: <b>{r.name}</b>. {r.about}
                       {r.lore && <div className="muted">{r.lore}</div>}
+                      <Triples base={aspect.name} tint={r.tint} />
                     </li>
                   ))}
                 </ul>

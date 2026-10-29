@@ -15,10 +15,11 @@ fn hex(bytes: &[u8]) -> String {
 fn registry_bytes_match_the_seed_fixture() {
     let r = Registry::shipped().unwrap();
     let json = format!(
-        "{{\n  \"note\": \"assets/registry encoded by deadroll-rules (crates/rules/tests/registry.rs)\",\n  \"aspects\": \"{}\",\n  \"traits\": \"{}\",\n  \"resonances\": \"{}\",\n  \"bestiary\": \"{}\",\n  \"monster_skills\": \"{}\",\n  \"rewards\": \"{}\",\n  \"tileset\": \"{}\"\n}}\n",
+        "{{\n  \"note\": \"assets/registry encoded by deadroll-rules (crates/rules/tests/registry.rs)\",\n  \"aspects\": \"{}\",\n  \"traits\": \"{}\",\n  \"resonances\": \"{}\",\n  \"triples\": \"{}\",\n  \"bestiary\": \"{}\",\n  \"monster_skills\": \"{}\",\n  \"rewards\": \"{}\",\n  \"tileset\": \"{}\"\n}}\n",
         hex(&r.aspects),
         hex(&r.traits),
         hex(&r.resonances),
+        hex(&r.triples),
         hex(&r.bestiary),
         hex(&r.monster_skills),
         hex(&r.rewards),

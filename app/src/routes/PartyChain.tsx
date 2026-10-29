@@ -1513,7 +1513,7 @@ function describe(e: PartyEvent, label: (u: number) => string, skillName: SkillN
       const res = hit.resonances
         .filter((x) => x?.active)
         .map((x) => `${resonanceName(x!.id, x!.secondTint)} (${carrierName(x!.carrier).toLowerCase()})`);
-      return `${label(d.attacker)} -> ${label(d.target)}: d20 ${hit.d20}${hit.crit ? " CRIT" : ""}, ${variantKey(HitOutcome, d.result.outcome)}, ${hit.damage} dmg${res.length ? `, ${res.join(", ")}` : ""}`;
+      return `${label(d.attacker)} -> ${label(d.target)}: d20 ${hit.d20}${hit.crit ? " CRIT" : ""}, ${variantKey(HitOutcome, d.result.outcome)}, ${hit.damage} dmg${hit.tickDamage > 0 ? ` (${hit.tickDamage} of it from ticks at once)` : ""}${res.length ? `, ${res.join(", ")}` : ""}`;
     }
     case "ResonanceSpread":
       return spreadText(toResonanceSpread(d), label);
@@ -1644,7 +1644,7 @@ function tintPreviewText(p: HitPreview): string {
 function spreadText(e: ReturnType<typeof toResonanceSpread>, label: (u: number) => string): string | null {
   const parts: string[] = [];
   for (const h of e.hits) {
-    const mod = h.modifier ? ` (${modLabel(h.modifier)})` : "";
+    const mod = h.modifiers.length ? ` (${h.modifiers.map(modLabel).join(", ")})` : "";
     parts.push(`${stateName(h.kind)} reached ${label(MONSTER_BASE + h.monster)}${mod}`);
   }
   for (const s of e.splashes) parts.push(`${label(MONSTER_BASE + s.monster)} took ${s.damage} splash damage${s.died ? " and died" : ""}`);

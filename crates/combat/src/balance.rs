@@ -71,6 +71,12 @@ pub struct Balance {
     /// Exposed (a resonance's mark on the target): crit chance every attacker gets against it,
     /// percent, by the tint's tier, index `tier - 1`. Lasts `res_mod_turns`.
     pub res_exposed_pct: [u32; 14],
+    /// Triples. Blinded (the bearer's d20), OffGuard (its defense), Sundered (its armor against
+    /// Piercing) and Dulled (its crit chance): the counterweight, bp, by the tint's tier, index
+    /// `tier - 1`. Lasts `res_mod_turns`.
+    pub res_counter_bp: [u32; 14],
+    /// Triples, `Escalate`: a damage over time grows by this share of its power after each tick.
+    pub escalate_step_bp: u32,
 }
 
 impl Balance {
@@ -139,6 +145,11 @@ impl Balance {
         burning_cell_rounds: 2,
         aspect_state_resist_share_bp: 2_500,
         res_exposed_pct: [20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7],
+        res_counter_bp: [
+            10_000, 9_500, 9_000, 8_500, 8_000, 7_500, 7_000, 6_500, 6_000, 5_500, 5_000, 4_500,
+            4_000, 3_500,
+        ],
+        escalate_step_bp: 5_000,
     };
 
     pub const fn tint_chance(&self, tier: Tier) -> u32 {
@@ -175,6 +186,10 @@ impl Balance {
 
     pub const fn res_exposed(&self, tier: Tier) -> u32 {
         self.res_exposed_pct[tier.get() as usize - 1]
+    }
+
+    pub const fn res_counter(&self, tier: Tier) -> u32 {
+        self.res_counter_bp[tier.get() as usize - 1]
     }
 
     pub const fn pure_pair(&self, tier: Tier) -> u32 {
@@ -228,6 +243,7 @@ mod tests {
             assert!(b.res_turns[i] >= b.res_turns[i + 1]);
             assert!(b.res_accuracy[i] >= b.res_accuracy[i + 1]);
             assert!(b.res_exposed_pct[i] > b.res_exposed_pct[i + 1]);
+            assert!(b.res_counter_bp[i] > b.res_counter_bp[i + 1]);
             assert!(b.tint_added[i][1] >= b.tint_added[i + 1][1]);
         }
         assert_eq!(b.tint_chance(Tier::BEST), 40);

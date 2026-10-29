@@ -219,6 +219,7 @@ fn arb_attacker() -> impl Strategy<Value = Attacker> {
                 state_chance_bonus_bp,
                 tints,
                 tempo_bonus_bp: 0,
+                blinded_bp: 0,
             },
         )
 }
@@ -260,6 +261,7 @@ fn arb_defender() -> impl Strategy<Value = Defender> {
                 tag_resist_bp,
                 immune_tags,
                 crit_taken_pct: 0,
+                sunder_bp: 0,
             },
         )
 }
@@ -474,8 +476,8 @@ proptest! {
         t2 in 1u8..=20,
         p1 in any::<u32>(),
         p2 in any::<u32>(),
-        src1 in any::<u8>(),
-        src2 in any::<u8>(),
+        src1 in 0u8..32,
+        src2 in 0u8..32,
         other in arb_kind(),
     ) {
         let mut states = States::default();

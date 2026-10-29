@@ -91,6 +91,8 @@ export type OpenSessionInstruction<
     "NQNEuKDUZhACnTJ9sD3dW49BoiPtJPatp6bpY61r81p",
   TAccountRewards extends string | AccountMeta<string> =
     "FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK",
+  TAccountTriples extends string | AccountMeta<string> =
+    "sWao9CeLDqT7z3R1oVxED2SGwH9EUSySM1ftyS44b6e",
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
 > = Instruction<TProgram> &
   InstructionWithData<ReadonlyUint8Array> &
@@ -145,6 +147,9 @@ export type OpenSessionInstruction<
       TAccountRewards extends string
         ? ReadonlyAccount<TAccountRewards>
         : TAccountRewards,
+      TAccountTriples extends string
+        ? ReadonlyAccount<TAccountTriples>
+        : TAccountTriples,
       ...TRemainingAccounts,
     ]
   >;
@@ -210,6 +215,7 @@ export type OpenSessionAsyncInput<
   TAccountMonsterSkills extends InstructionAccountInput =
     InstructionAccountInput,
   TAccountRewards extends InstructionAccountInput = InstructionAccountInput,
+  TAccountTriples extends InstructionAccountInput = InstructionAccountInput,
 > = {
   dm: TAccountDm;
   map: TAccountMap;
@@ -231,6 +237,7 @@ export type OpenSessionAsyncInput<
   monsterSkills?: TAccountMonsterSkills;
   /** tables, copied into `MonsterState`. */
   rewards?: TAccountRewards;
+  triples?: TAccountTriples;
   priceLamports: OpenSessionInstructionDataArgs["priceLamports"];
   dmActor: OpenSessionInstructionDataArgs["dmActor"];
 };
@@ -253,6 +260,7 @@ export async function getOpenSessionInstructionAsync<
   TAccountResonances extends InstructionAccountInput,
   TAccountMonsterSkills extends InstructionAccountInput,
   TAccountRewards extends InstructionAccountInput,
+  TAccountTriples extends InstructionAccountInput,
   TProgramAddress extends Address = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
 >(
   input: OpenSessionAsyncInput<
@@ -272,7 +280,8 @@ export async function getOpenSessionInstructionAsync<
     TAccountTraits,
     TAccountResonances,
     TAccountMonsterSkills,
-    TAccountRewards
+    TAccountRewards,
+    TAccountTriples
   >,
   config?: { programAddress?: TProgramAddress },
 ): Promise<
@@ -345,6 +354,10 @@ export async function getOpenSessionInstructionAsync<
     ResolvedInstructionAccountMeta<
       TAccountRewards,
       InstructionAccountInputAddress<TAccountRewards>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountTriples,
+      InstructionAccountInputAddress<TAccountTriples>
     >
   >
 > {
@@ -415,6 +428,11 @@ export async function getOpenSessionInstructionAsync<
     },
     rewards: {
       value: input.rewards ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    triples: {
+      value: input.triples ?? null,
       isSigner: false,
       isWritable: false,
     },
@@ -511,6 +529,10 @@ export async function getOpenSessionInstructionAsync<
     accounts.rewards.value =
       "FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK" as Address<"FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK">;
   }
+  if (!accounts.triples.value) {
+    accounts.triples.value =
+      "sWao9CeLDqT7z3R1oVxED2SGwH9EUSySM1ftyS44b6e" as Address<"sWao9CeLDqT7z3R1oVxED2SGwH9EUSySM1ftyS44b6e">;
+  }
 
   return Object.freeze({
     accounts: [
@@ -531,6 +553,7 @@ export async function getOpenSessionInstructionAsync<
       getAccountMeta("resonances", accounts.resonances),
       getAccountMeta("monsterSkills", accounts.monsterSkills),
       getAccountMeta("rewards", accounts.rewards),
+      getAccountMeta("triples", accounts.triples),
     ],
     data: getOpenSessionInstructionDataEncoder().encode(
       args as OpenSessionInstructionDataArgs,
@@ -605,6 +628,10 @@ export async function getOpenSessionInstructionAsync<
     ResolvedInstructionAccountMeta<
       TAccountRewards,
       InstructionAccountInputAddress<TAccountRewards>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountTriples,
+      InstructionAccountInputAddress<TAccountTriples>
     >
   >);
 }
@@ -630,6 +657,7 @@ export type OpenSessionInput<
   TAccountMonsterSkills extends InstructionAccountInput =
     InstructionAccountInput,
   TAccountRewards extends InstructionAccountInput = InstructionAccountInput,
+  TAccountTriples extends InstructionAccountInput = InstructionAccountInput,
 > = {
   dm: TAccountDm;
   map: TAccountMap;
@@ -651,6 +679,7 @@ export type OpenSessionInput<
   monsterSkills?: TAccountMonsterSkills;
   /** tables, copied into `MonsterState`. */
   rewards?: TAccountRewards;
+  triples?: TAccountTriples;
   priceLamports: OpenSessionInstructionDataArgs["priceLamports"];
   dmActor: OpenSessionInstructionDataArgs["dmActor"];
 };
@@ -673,6 +702,7 @@ export function getOpenSessionInstruction<
   TAccountResonances extends InstructionAccountInput,
   TAccountMonsterSkills extends InstructionAccountInput,
   TAccountRewards extends InstructionAccountInput,
+  TAccountTriples extends InstructionAccountInput,
   TProgramAddress extends Address = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
 >(
   input: OpenSessionInput<
@@ -692,7 +722,8 @@ export function getOpenSessionInstruction<
     TAccountTraits,
     TAccountResonances,
     TAccountMonsterSkills,
-    TAccountRewards
+    TAccountRewards,
+    TAccountTriples
   >,
   config?: { programAddress?: TProgramAddress },
 ): OpenSessionInstruction<
@@ -764,6 +795,10 @@ export function getOpenSessionInstruction<
   ResolvedInstructionAccountMeta<
     TAccountRewards,
     InstructionAccountInputAddress<TAccountRewards>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountTriples,
+    InstructionAccountInputAddress<TAccountTriples>
   >
 > {
   // Program address.
@@ -836,6 +871,11 @@ export function getOpenSessionInstruction<
       isSigner: false,
       isWritable: false,
     },
+    triples: {
+      value: input.triples ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
   };
   const accounts = originalAccounts as Record<
     keyof typeof originalAccounts,
@@ -882,6 +922,10 @@ export function getOpenSessionInstruction<
     accounts.rewards.value =
       "FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK" as Address<"FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK">;
   }
+  if (!accounts.triples.value) {
+    accounts.triples.value =
+      "sWao9CeLDqT7z3R1oVxED2SGwH9EUSySM1ftyS44b6e" as Address<"sWao9CeLDqT7z3R1oVxED2SGwH9EUSySM1ftyS44b6e">;
+  }
 
   return Object.freeze({
     accounts: [
@@ -902,6 +946,7 @@ export function getOpenSessionInstruction<
       getAccountMeta("resonances", accounts.resonances),
       getAccountMeta("monsterSkills", accounts.monsterSkills),
       getAccountMeta("rewards", accounts.rewards),
+      getAccountMeta("triples", accounts.triples),
     ],
     data: getOpenSessionInstructionDataEncoder().encode(
       args as OpenSessionInstructionDataArgs,
@@ -976,6 +1021,10 @@ export function getOpenSessionInstruction<
     ResolvedInstructionAccountMeta<
       TAccountRewards,
       InstructionAccountInputAddress<TAccountRewards>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountTriples,
+      InstructionAccountInputAddress<TAccountTriples>
     >
   >);
 }
@@ -1006,6 +1055,7 @@ export type ParsedOpenSessionInstruction<
     monsterSkills: TAccountMetas[15];
     /** tables, copied into `MonsterState`. */
     rewards: TAccountMetas[16];
+    triples: TAccountMetas[17];
   };
   data: OpenSessionInstructionData;
 };
@@ -1018,12 +1068,12 @@ export function parseOpenSessionInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
 ): ParsedOpenSessionInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 17) {
+  if (instruction.accounts.length < 18) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 17,
+        expectedAccountMetas: 18,
       },
     );
   }
@@ -1053,6 +1103,7 @@ export function parseOpenSessionInstruction<
       resonances: getNextAccount(),
       monsterSkills: getNextAccount(),
       rewards: getNextAccount(),
+      triples: getNextAccount(),
     },
     data: getOpenSessionInstructionDataDecoder().decode(instruction.data),
   };

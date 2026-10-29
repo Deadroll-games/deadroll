@@ -86,6 +86,7 @@ const resonances = pda([Buffer.from("resonances")], REGISTRY);
 const monsterSkills = pda([Buffer.from("monster_skills")], REGISTRY);
 // Patch 11: reward tables (the preset's chest and boss table).
 const rewards = pda([Buffer.from("rewards")], REGISTRY);
+const triples = pda([Buffer.from("triples")], REGISTRY);
 
 /** Patch 6: the accounts that finalize the deaths a callback queued (`GameSession.pending_deaths`):
  * each queued slot's Character, SkillSet and Bag, writable, in slot order. */
@@ -786,6 +787,7 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
         resonances,
         monsterSkills,
         rewards,
+        triples,
       })
       .signers([demo.dm])
       .rpc({ commitment: "confirmed" })

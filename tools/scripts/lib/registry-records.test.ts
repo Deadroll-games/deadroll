@@ -14,6 +14,12 @@ import {
   encodeTileset,
   encodePrefabs,
   encodeTraits,
+  encodeTriples,
+  tripleOf,
+  TRIPLE_SIZE,
+  TRIPLES,
+  ASPECT,
+  check_range,
   TRAIT_SIZE,
   OP_KIND,
   MOD_KIND,
@@ -140,6 +146,7 @@ test("the encoder gives the bytes deadroll-rules reads (sim and program)", () =>
   assert.equal(hex(encodeAspects(load("aspects.json"))), fixture.aspects);
   assert.equal(hex(encodeTraits(load("traits.json"))), fixture.traits);
   assert.equal(hex(encodeResonances(load("resonances.json"))), fixture.resonances);
+  assert.equal(hex(encodeTriples(load("triples.json"))), fixture.triples);
   assert.equal(hex(encodeBestiary(load("bestiary.json"))), fixture.bestiary);
   assert.equal(hex(encodeMonsterSkills(load("monster_skills.json"))), fixture.monster_skills);
   assert.equal(hex(encodeRewards(load("reward_tables.json"))), fixture.rewards);
@@ -223,4 +230,86 @@ test("reward tables: stub file, validator mirrors LootTable::from_record", () =>
   const bestiary = encodeBestiary(load("bestiary.json"));
   assert.equal(bestiary[44], 4);
   assert.equal(bestiary[4 * MONSTER_SIZE + 44], NO_TABLE);
+});
+
+test("triples pass: 120 records of 16 bytes, every one with ops, all valid", () => {
+  const bytes = encodeTriples(load("triples.json"));
+  assert.equal(bytes.length, TRIPLES * TRIPLE_SIZE);
+  assert.equal(validate_write(TableKind.Triples, 0, bytes), true);
+  for (let i = 0; i < TRIPLES; i++) {
+    const rec = bytes.subarray(i * TRIPLE_SIZE, (i + 1) * TRIPLE_SIZE);
+    assert.equal(rec[1], 1, `triple ${i} has ops`);
+    assert.notEqual(rec[2], 0, `triple ${i} has a first op`);
+  }
+  // The index order is base-major over the aspects still free.
+  assert.deepEqual(tripleOf(0), [0, 1, 2]);
+  assert.deepEqual(tripleOf(119), [5, 4, 3]);
+  const seen = new Set<string>();
+  for (let i = 0; i < TRIPLES; i++) {
+    const t = tripleOf(i);
+    assert.equal(new Set(t).size, 3);
+    seen.add(t.join());
+  }
+  assert.equal(seen.size, TRIPLES);
+});
+
+test("triples pass: Fire + Cold + Lightning jumps the Burning; record bytes", () => {
+  const bytes = encodeTriples(load("triples.json"));
+  const rec = bytes.subarray(0, TRIPLE_SIZE);
+  // [0, set, Jump(Burning, 0), two empty ops, 0, 0]
+  assert.deepEqual([...rec.subarray(0, 6)], [0, 1, OP_KIND.Jump, 0, 0, 0]);
+  assert.deepEqual([...rec.subarray(6, 16)], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+});
+
+test("triples pass: Delayed and ChainRadius pack two numbers in the value", () => {
+  const triples = load("triples.json") as { records: { base: string; tint: string; second: string; ops: unknown[] }[] };
+  const find = (b: string, t: string, s: string) => triples.records.findIndex((r) => r.base === b && r.tint === t && r.second === s);
+  const bytes = encodeTriples(triples);
+  const at = (b: string, t: string, s: string) => bytes.subarray(find(b, t, s) * TRIPLE_SIZE, (find(b, t, s) + 1) * TRIPLE_SIZE);
+  // Cold + Fire + Blood: [ApplyMod Weakening, Delayed Bleeding after Freeze]
+  let rec = at("Cold", "Fire", "Blood");
+  assert.equal(rec[6], OP_KIND.Delayed);
+  assert.equal(rec[7], 3);
+  assert.equal(rec[8] | (rec[9] << 8), 2);
+  // Cold + Piercing + Blood: Delayed Bleeding after Freeze, 200 percent
+  rec = at("Cold", "Piercing", "Blood");
+  assert.equal(rec[4] | (rec[5] << 8), 2 | (200 << 8));
+  // Fire + Blood + Lightning: [ApplyState Shock, ChainRadius Shock radius 2 filter Bleeding]
+  rec = at("Fire", "Blood", "Lightning");
+  assert.equal(rec[6], OP_KIND.ChainRadius);
+  assert.equal(rec[7], 4);
+  assert.equal(rec[8] | (rec[9] << 8), 2 | (3 << 8));
+});
+
+test("triples pass: bad records and bad values are refused", () => {
+  const good = encodeTriples(load("triples.json")).slice(0, TRIPLE_SIZE);
+  const bad = (at: number, v: number) => {
+    const x = good.slice();
+    x[at] = v;
+    return validate_record(TableKind.Triples, 0, x);
+  };
+  assert.equal(validate_record(TableKind.Triples, 0, new Uint8Array(TRIPLE_SIZE)), true);
+  assert.equal(bad(0, 1), false, "reserved byte");
+  assert.equal(bad(1, 2), false, "unknown flag");
+  assert.equal(bad(14, 1), false, "reserved byte");
+  assert.equal(bad(2, 41), false, "unknown op kind");
+  assert.equal(validate_record(TableKind.Triples, 0, good.subarray(0, 15)), false);
+  assert.equal(check_range(TableKind.Triples, 0, TRIPLES * TRIPLE_SIZE), TRIPLES * TRIPLE_SIZE);
+  assert.equal(check_range(TableKind.Triples, 0, (TRIPLES + 1) * TRIPLE_SIZE), "OutOfBounds");
+  // A value past 16 bits does not fit a triple op; a Dot op takes Burning or Bleeding only.
+  const one = (op: unknown) => ({
+    records: Array.from({ length: TRIPLES }, (_, i) => {
+      const [b, t, s] = tripleOf(i);
+      const names = Object.keys(ASPECT);
+      return { base: names[b], tint: names[t], second: names[s], ops: i === 0 ? [op] : [] };
+    }),
+  });
+  assert.throws(() => encodeTriples(one({ kind: "Penetrate", value: 70000 })), /16 bits/);
+  assert.throws(() => encodeTriples(one({ kind: "Escalate", arg: "Shock" })), /Burning or Bleeding/);
+  assert.throws(() => encodeTriples(one({ kind: "Delayed", arg: "Bleeding" })), /unknown state/);
+  assert.throws(() => encodeTriples(one({ kind: "ChainRadius", arg: "Shock", filter: "Any" })), /radius/);
+  assert.throws(() => encodeTriples({ records: [] }), /120 records/);
+  const out = encodeTriples(one({ kind: "ApplyMod", arg: "Dulled", value: 10000 }));
+  assert.equal(out[2], OP_KIND.ApplyMod);
+  assert.equal(out[3], MOD_KIND.Dulled);
 });

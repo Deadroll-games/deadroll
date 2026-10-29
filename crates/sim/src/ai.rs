@@ -355,12 +355,19 @@ impl Battle<'_> {
                     ModKind::Protection => self.threat_on(a) * avg / (BP as u64 + avg) * turns,
                     // Only its own aspects: about half of what comes at the ally.
                     ModKind::Resistance => self.threat_on(a) * avg / (BP as u64 + avg) * turns / 2,
-                    // Harmful, and no skill effect gives Exposed or Root.
+                    // Harmful, and no skill effect gives the resonance kinds.
                     ModKind::Slow
                     | ModKind::Weakening
                     | ModKind::Vulnerability
                     | ModKind::Exposed
-                    | ModKind::Root => 0,
+                    | ModKind::Root
+                    | ModKind::Blinded
+                    | ModKind::OffGuard
+                    | ModKind::Sundered
+                    | ModKind::Dazed
+                    | ModKind::Silenced
+                    | ModKind::NoHeal
+                    | ModKind::Dulled => 0,
                 }
             }
             EffectAction::Stun | EffectAction::Freeze => 0,
@@ -405,13 +412,20 @@ impl Battle<'_> {
                             .sum();
                         party * avg / BP as u64 * turns
                     }
-                    // Buffs; Exposed and Root come from resonances only.
+                    // Buffs; the resonance kinds come from resonances only.
                     ModKind::Haste
                     | ModKind::Empowerment
                     | ModKind::Protection
                     | ModKind::Resistance
                     | ModKind::Exposed
-                    | ModKind::Root => 0,
+                    | ModKind::Root
+                    | ModKind::Blinded
+                    | ModKind::OffGuard
+                    | ModKind::Sundered
+                    | ModKind::Dazed
+                    | ModKind::Silenced
+                    | ModKind::NoHeal
+                    | ModKind::Dulled => 0,
                 }
             }
             EffectAction::Heal => 0,

@@ -25,6 +25,12 @@
 //! Patch 9b (ABI 8): the hero sheet gives the resistance to each state; a state roll and an effect
 //! roll record the counterweight their chance met.
 //!
+//! Triples pass (ABI 10): the resonance tables carry the `triples` body after the pairs (`TABLES_LEN`
+//! grew by 1920 bytes); sixteen modifier slots (Blinded, OffGuard, Sundered, Dazed, Silenced,
+//! NoHeal, Dulled); an attacker carries the counterweight of its d20 (`blinded_bp`) and a defender
+//! the one of its armor against Piercing (`sunder_bp`); `HitResult` has the triple fields
+//! (`jump_mods`, `tick_damage`, `remove_mods`, splash `line`, jump `filter_any`).
+//!
 //! Resonance pass (ABI 9): nine modifier slots (Exposed, Root); a defender carries the crit
 //! chance every attacker gets against it.
 //!
@@ -61,7 +67,7 @@ use deadroll_types::{
 };
 
 /// Bumped on any change of the exports or the byte layouts.
-pub const ABI_VERSION: u32 = 9;
+pub const ABI_VERSION: u32 = 10;
 /// Size of the input and output buffers.
 pub const BUFFER_LEN: usize = 8192;
 
@@ -83,21 +89,23 @@ pub enum Error {
     NoTables = -5,
 }
 
-/// The registry resonance tables as `MonsterState` holds them: the `aspects`, `traits` and
-/// `resonances` bodies, back to back.
+/// The registry resonance tables as `MonsterState` holds them: the `aspects`, `traits`,
+/// `resonances` and `triples` bodies, back to back.
 pub const TABLES_LEN: usize = deadroll_combat::tables::ASPECTS_LEN
     + deadroll_combat::tables::TRAITS_LEN
-    + deadroll_combat::tables::PAIRS_LEN;
+    + deadroll_combat::tables::PAIRS_LEN
+    + deadroll_combat::tables::TRIPLES_LEN;
 
-/// Decodes the three table bodies (`TABLES_LEN` bytes).
+/// Decodes the four table bodies (`TABLES_LEN` bytes).
 pub fn decode_tables(bytes: &[u8]) -> Result<ResonanceTables, Error> {
-    use deadroll_combat::tables::{ASPECTS_LEN, TRAITS_LEN};
+    use deadroll_combat::tables::{ASPECTS_LEN, PAIRS_LEN, TRAITS_LEN};
     if bytes.len() != TABLES_LEN {
         return Err(Error::NoTables);
     }
     let (a, rest) = bytes.split_at(ASPECTS_LEN);
-    let (t, p) = rest.split_at(TRAITS_LEN);
-    ResonanceTables::from_bytes(a, t, p).map_err(|_| Error::NoTables)
+    let (t, rest) = rest.split_at(TRAITS_LEN);
+    let (p, x) = rest.split_at(PAIRS_LEN);
+    ResonanceTables::from_bytes(a, t, p, x).map_err(|_| Error::NoTables)
 }
 
 /// A character as the chain stores it: `CharacterData` fields, `Character.class_tier` and what it
@@ -1063,7 +1071,7 @@ mod tests {
 
     fn table_bytes() -> Vec<u8> {
         let r = registry();
-        [r.aspects, r.traits, r.resonances].concat()
+        [r.aspects, r.traits, r.resonances, r.triples].concat()
     }
 
     fn input() -> HitInput {

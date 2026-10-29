@@ -12,13 +12,19 @@
 //! - Cells around the target (after the knockback) that are passable burn for
 //!   `Balance::burning_cell_rounds` rounds; whoever steps in catches Burning (section 7.7: such
 //!   cells "set on fire those who step on them").
-//! - A jump's modifier (`HitResult::jump_mod`) lands on every monster the jumps reach.
+//! - The jump modifiers (`HitResult::jump_mods`) land on every monster the jumps and the nova
+//!   reach.
+//! - A radius jump (`JumpMode::Radius`) lands its state (unless immune) on every living monster
+//!   within the radius of the target that has the jump's filter state (or any), lowest index
+//!   first.
 //! - A nova lands its state (unless immune) and its modifier on every living monster within its
 //!   radius of the target, lowest index first.
 //! - A splash hits every living monster adjacent to the target that is not immune to its aspect,
-//!   for the same damage (a share of the hit, already through the target's defense).
+//!   for the same damage (a share of the hit, already through the target's defense). A lined
+//!   splash only the two cells on the line through the attacker and the target.
 use deadroll_combat::{
-    apply_chill, apply_state, states::freeze_for, Applied, HitResult, JumpMode, TimedMod, JUMPS_MAX,
+    apply_chill, apply_state, states::freeze_for, Applied, HitResult, JumpMode, TimedMod,
+    JUMPS_MAX, JUMP_MODS_MAX,
 };
 use deadroll_types::{ActiveState, Cell, Monster, StateKind};
 
@@ -31,6 +37,8 @@ use crate::monster::MonsterDefense;
 pub const BURNING_CELLS_MAX: usize = 16;
 /// Monsters one hit can pass states on to.
 pub const SPREAD_HITS_MAX: usize = 8;
+/// Modifiers a spread hit lands on a monster: the jump modifiers and the nova's.
+pub const SPREAD_MODS_MAX: usize = JUMP_MODS_MAX + 1;
 
 /// The map as the spread sees it.
 pub trait Field {
@@ -64,8 +72,21 @@ pub struct SpreadHit {
     pub monster: u8,
     pub kind: StateKind,
     pub applied: Applied,
-    /// A modifier the caller lands on the monster's own (empty when `turns == 0`).
-    pub modifier: TimedMod,
+    /// The monster was reached by the nova (its modifier lands too); else by a jump.
+    pub nova: bool,
+}
+
+/// The modifiers the caller lands on the monster `hit` reached: the nova's (for a nova hit), then
+/// the jump modifiers of `result`. Empty slots (`turns == 0`) come last or in between.
+pub fn modifiers_of(result: &HitResult, hit: &SpreadHit) -> [TimedMod; SPREAD_MODS_MAX] {
+    let mut out = [TimedMod::default(); SPREAD_MODS_MAX];
+    if hit.nova {
+        out[0] = result.nova.modifier;
+    }
+    for (slot, m) in out[1..].iter_mut().zip(result.jump_mods()) {
+        *slot = *m;
+    }
+    out
 }
 
 /// One monster a splash hit.
@@ -193,6 +214,31 @@ pub fn spread(
 
     for jump in result.jumps().iter().take(JUMPS_MAX) {
         let kind = jump.state.kind;
+        if jump.mode == JumpMode::Radius {
+            for i in 0..monsters.len() {
+                if (out.hit_count as usize) >= SPREAD_HITS_MAX {
+                    break;
+                }
+                if i == target
+                    || !can(monsters, i, kind)
+                    || chebyshev(cell_of(&monsters[i]), origin) > jump.limit
+                    || !(jump.filter_any
+                        || deadroll_combat::states::has(&monsters[i].states, jump.filter))
+                {
+                    continue;
+                }
+                let immune = defense.get(i).map_or(0, |d| d.immune_states);
+                let applied = land_state(&mut monsters[i].states, jump.state, immune, cfg);
+                out.hits[out.hit_count as usize] = SpreadHit {
+                    monster: i as u8,
+                    kind,
+                    applied,
+                    nova: false,
+                };
+                out.hit_count += 1;
+            }
+            continue;
+        }
         // Reached by this jump: the target and every monster it passed through.
         let mut reached = 1u32 << target.min(31);
         let mut from = origin;
@@ -211,6 +257,7 @@ pub fn spread(
                         i != target && can(monsters, i, kind) && cell_of(&monsters[i]) == behind
                     })
                 }),
+                JumpMode::Radius => None,
             };
             let Some(i) = next else {
                 break;
@@ -222,7 +269,7 @@ pub fn spread(
                     monster: i as u8,
                     kind,
                     applied,
-                    modifier: result.jump_mod,
+                    nova: false,
                 };
                 out.hit_count += 1;
             }
@@ -258,7 +305,7 @@ pub fn spread(
                 monster: i as u8,
                 kind: nova.state.kind,
                 applied,
-                modifier: nova.modifier,
+                nova: true,
             };
             out.hit_count += 1;
         }
@@ -276,6 +323,17 @@ pub fn spread(
                 .is_some_and(|d| d.immune_aspects & (1 << splash.aspect as u8) != 0);
             if i == target || immune || !m.alive || chebyshev(cell_of(m), origin) != 1 {
                 continue;
+            }
+            // A lined splash: only the cells right behind and right in front of the target.
+            if splash.line {
+                let cell = cell_of(m);
+                let on_line = dir != (0, 0)
+                    && [dir, (-dir.0, -dir.1)]
+                        .iter()
+                        .any(|&(dx, dy)| step(origin, dx, dy) == Some(cell));
+                if !on_line {
+                    continue;
+                }
             }
             let (hp, died) = take_damage(m.hp, splash.damage);
             m.hp = hp;
@@ -446,6 +504,7 @@ mod tests {
             filter,
             limit,
             base: Aspect::Fire,
+            filter_any: false,
         };
         r.jump_count = 1;
         r
@@ -489,7 +548,7 @@ mod tests {
                 monster: 2,
                 kind: StateKind::Burning,
                 applied: Applied::Added,
-                modifier: TimedMod::default(),
+                nova: false,
             }]
         );
         assert!(has(&ms[2], StateKind::Burning) && !has(&ms[3], StateKind::Burning));
@@ -760,10 +819,55 @@ mod tests {
     fn a_jump_carries_the_jump_modifier() {
         let mut ms = [monster(5, 5), monster(6, 5)];
         let mut r = with_jump(JumpMode::Adjacent, burning(3), StateKind::Burning, 1);
-        r.jump_mod = weakening();
+        r.jump_mods[0] = weakening();
+        r.jump_mods[1] = TimedMod {
+            kind: deadroll_combat::ModKind::Slow,
+            turns: 3,
+            power_bp: 2_000,
+            ..TimedMod::default()
+        };
+        r.jump_mod_count = 2;
         let out = run(&r, &mut ms, &[MonsterDefense::NONE; 2]);
-        assert_eq!(out.hits()[0].modifier, weakening());
+        // A jump hit lands the jump modifiers only (slot 0 is the nova's).
+        let mods = modifiers_of(&r, &out.hits()[0]);
+        assert!(mods[0].is_empty());
+        assert_eq!(mods[1], weakening());
+        assert_eq!(mods[2].kind, deadroll_combat::ModKind::Slow);
+        assert!(mods[3].is_empty());
         assert!(spreads(&r));
+    }
+
+    #[test]
+    fn a_radius_jump_reaches_every_enemy_with_the_filter_within_the_radius() {
+        let mut ms = [
+            monster(5, 5),
+            monster(7, 5), // radius 2, bleeding
+            monster(6, 5), // radius 1, not bleeding
+            monster(9, 5), // too far
+            monster(5, 7), // radius 2, bleeding but dead
+        ];
+        let bleeding = ActiveState {
+            kind: StateKind::Bleeding,
+            turns: 2,
+            power: 1,
+            source: 0,
+        };
+        ms[1].states[0] = bleeding;
+        ms[3].states[0] = bleeding;
+        ms[4].states[0] = bleeding;
+        ms[4].alive = false;
+        let mut r = with_jump(JumpMode::Radius, burning(3), StateKind::Bleeding, 2);
+        let out = run(&r, &mut ms, &[MonsterDefense::NONE; 5]);
+        let reached: Vec<u8> = out.hits().iter().map(|h| h.monster).collect();
+        assert_eq!(reached, [1]);
+        assert!(has(&ms[1], StateKind::Burning) && !has(&ms[2], StateKind::Burning));
+        // Any enemy: the one next to it too, but not the far or the dead.
+        r.jumps[0].filter_any = true;
+        let mut ms2 = ms;
+        ms2[1].states[0] = ActiveState::default();
+        let out = run(&r, &mut ms2, &[MonsterDefense::NONE; 5]);
+        let reached: Vec<u8> = out.hits().iter().map(|h| h.monster).collect();
+        assert_eq!(reached, [1, 2]);
     }
 
     #[test]
@@ -794,7 +898,9 @@ mod tests {
         // Immune to Stun: no Stun, still the modifier.
         assert!(!has(&ms[3], StateKind::Stun));
         assert_eq!(out.hits()[1].applied, Applied::None);
-        assert_eq!(out.hits()[1].modifier, weakening());
+        // A nova hit lands the nova's modifier first (and the jump modifiers, none here).
+        assert!(out.hits()[1].nova);
+        assert_eq!(modifiers_of(&r, &out.hits()[1])[0], weakening());
     }
 
     #[test]
@@ -813,6 +919,7 @@ mod tests {
             splash: deadroll_combat::Splash {
                 damage: 4,
                 aspect: deadroll_types::Aspect::Lightning,
+                line: false,
             },
             ..HitResult::default()
         };
@@ -838,5 +945,34 @@ mod tests {
         assert!(!ms[2].alive && ms[3].hp == 10 && ms[4].hp == 10 && ms[0].hp == 10);
         assert!(!out.is_empty());
         assert!(!spreads(&HitResult::default()));
+    }
+
+    #[test]
+    fn a_lined_splash_only_hits_the_cells_on_the_line_through_the_target() {
+        // The attacker is at (0, 5), the target at (5, 5): the line runs along y = 5.
+        let mut ms = [
+            monster(5, 5),
+            monster(6, 5), // behind
+            monster(4, 5), // in front
+            monster(5, 6), // beside
+            monster(6, 6), // diagonal
+        ];
+        let r = HitResult {
+            splash: deadroll_combat::Splash {
+                damage: 4,
+                aspect: deadroll_types::Aspect::Lightning,
+                line: true,
+            },
+            ..HitResult::default()
+        };
+        let out = run(&r, &mut ms, &[MonsterDefense::NONE; 5]);
+        let hit: Vec<u8> = out.splashes().iter().map(|h| h.monster).collect();
+        assert_eq!(hit, [1, 2]);
+        assert!(ms[3].hp == 10 && ms[4].hp == 10);
+        // Without the line every neighbour is hit.
+        let mut ms = [monster(5, 5), monster(6, 5), monster(5, 6)];
+        let mut open = r;
+        open.splash.line = false;
+        assert_eq!(run(&open, &mut ms, &[MonsterDefense::NONE; 3]).splash_count, 2);
     }
 }

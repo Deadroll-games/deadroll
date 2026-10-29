@@ -9,7 +9,7 @@ Party, `Participation`, turns, combat, the VRF callback and the party price escr
 | Account | Seeds | What |
 |---|---|---|
 | `GameSession` | `["session", map]` | party state, turn order, the map copy |
-| `MonsterState` | `["monsters", session]` | monsters of the party |
+| `MonsterState` | `["monsters", session]` | monsters of the party and the registry resonance tables (aspects, traits, resonances, triples); 10 144 bytes, a CPI allocates at most 10 240 (a test pins it) |
 | `Escrow` | `["escrow", session]` | the party price (docs/GAME_COMMISSIONS.md) |
 | `Participation` | `["participation", session, character]` | one hero in the party |
 | `RewardCache` | `["cache", character]` | patch 11: the cache after the party, until "Done" in the bag screen |

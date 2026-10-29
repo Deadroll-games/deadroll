@@ -130,6 +130,11 @@ pub fn handler(ctx: Context<MonsterAct>, monster: u8, action: u8, target: u8) ->
                 skill_use(&skill.stats) == SkillUse::Ok,
                 SessionError::MonsterSkillMissing
             );
+            // Triples: a silenced monster has only its natural attack.
+            require!(
+                !deadroll_combat::silenced(&monsters.mods(monster)?),
+                SessionError::Silenced
+            );
             require!(
                 monsters.skill_cooldowns(monster)?[k as usize] == 0,
                 SessionError::SkillOnCooldown
