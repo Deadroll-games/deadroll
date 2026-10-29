@@ -230,6 +230,8 @@ A skill's effect is **separate from the aspect's native state**. A Cold skill wi
 
 ## 7. Fusions
 
+**Later.** Fusions do not work in combat yet: a skill with two aspects gives each aspect its own damage, native state and resonances (`DAMAGE_TYPES_AND_MIXES.md`, section 6), but no fusion. The table below is the design for that update.
+
 ### 7.1 What it is
 
 A **fusion** is an effect that appears when **two aspects** are chosen in one skill. It is recorded in the skill and triggers by its own d100 chance on every use.
@@ -238,9 +240,10 @@ A fusion and a resonance are **different mechanics with different tables**:
 
 |        | Fusion                       | Resonance                                           |
 | ------ | ---------------------------- | --------------------------------------------------- |
-| Source | two aspects inside the skill | the skill's aspect + the character's predisposition |
+| Source | two aspects inside the skill | the skill's aspect + tints from the race predisposition and items |
 | When   | d100 chance on every use     | tint die d100                                       |
-| Table  | section 7.3 of this document | `DAMAGE_TYPES_AND_MIXES.md`, section 6              |
+| Table  | section 7.3 of this document | `DAMAGE_TYPES_AND_MIXES.md`, sections 6.4 (30 pairs) and 6.5 (120 triples) |
+| Status | later                        | works                                               |
 
 One hit can give both a fusion and a resonance at the same time.
 

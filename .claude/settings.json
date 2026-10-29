@@ -1,4 +1,7 @@
 {
+  "env": {
+    "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet"
+  },
   "permissions": {
     "allow": [
       "Bash(git status*)",
@@ -72,7 +75,7 @@
       "Bash(solana program close*)",
       "Read(./.env)",
       "Read(./.env.*)",
-      "Read(./private/**)",
+      "Read(./private/keys/**)",
       "Read(**/*keypair*.json)",
       "Read(**/id.json)",
       "Read(./target/deploy/*.json)",

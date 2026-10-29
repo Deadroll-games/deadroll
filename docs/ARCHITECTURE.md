@@ -144,12 +144,12 @@ Each program, crate or app folder is self-sufficient:
 
 | Program       | Owns accounts                                                                                                                       | Changes when                          |
 | ------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
-| **registry**  | `GameConfig`, aspect registry, tables of resonances, fusions, reactions, collisions, bestiary, tileset, `PrefabBook`, reward tables | new aspects, monsters, balance        |
+| **registry**  | `GameConfig`, aspect registry, tables of resonances, triples, fusions, reactions, collisions, bestiary, tileset, `PrefabBook`, reward tables | new aspects, monsters, balance        |
 | **character** | player profile, character, skills, bag, storage, achievements                                                                       | new races, classes, professions       |
 | **items**     | item state, NFT item collection, artisan listings, crafting                                                                         | new recipes, affixes, professions     |
 | **map**       | maps, their validation and finalization, secrets root, `layout` PDA                                                                 | new tiles, builder rules              |
 | **session**   | party, `Participation`, turns, combat, VRF callback, temporary cache, party price escrow                                            | new combat mechanics                  |
-| **city**      | city, buildings, interiors, order board, secret slots                                                                               | new buildings                         |
+| **city**      | city, buildings, Tavern board, quests (interiors are site only; secret slots later)                                                 | new buildings                         |
 | **render**    | `SpriteBook`, `Palette`, `RasterizerCode`                                                                                           | new art, new rasterizer version       |
 
 ### 3.2 Program structure
@@ -192,7 +192,7 @@ Turns, hits, resonances, fusions, collisions, reactions and the VRF callback liv
 | session | MagicBlock VRF | request randomness, receive the callback                                                                                                                  |
 | session | Session Keys   | check the session token                                                                                                                                   |
 | items   | character      | crafting: deduct the player's resources, profession experience for the artisan                                                                            |
-| city    | character      | check access conditions (achievements), grant achievements when a secret is opened                                                                        |
+| city    | character      | **later**: check access conditions (achievements), grant achievements when a secret is opened. Now `city` makes no CPI: it only reads the map and the party |
 
 `equip` and `unequip` live in the `character` program and work outside a party only.
 
@@ -259,8 +259,11 @@ Rules:
 - Program clients from `sdk/`.
 - The `combat`, `skillcheck`, `mapcheck`, `render` crates are included as WASM.
 - `combat.wasm` is committed in the app. CI checks that it matches a build from the sources. The hit preview is computed by it.
-- Sections: city, character and skill builder, Artisans' Guild, Tavern and quests, map builder (DM), party (map, combat, roll log).
-- Deploy: static hosting (for example, Cloudflare Pages).
+- **One game screen.** The city is the main page. A click on a building opens its interior without a transaction. In the Tavern: the guild board and the DM's table (map builder, then post the quest); the quest window holds the lobby. The dungeon is the party: map, combat, roll log.
+- **Side panel** to the right of the map, the same in the city and in the dungeon: minimap on parchment, bag, skills scroll (list and builder), helmet (character window, creation, the active character), dungeon icon, castle (back to the city), settings.
+- **Wiki and bestiary** (`/wiki`, `/bestiary`) are built from the repository by a Vite plugin, with no RPC: enums and doc comments of `crates/types`, `BalanceConfig`, the registry JSON, texts in `assets/wiki/` and the monster sprites. The build fails when a text or picture is missing.
+- **One wallet confirmation per action.** When an action needs several transactions (for example, creating a character, publishing a map), the site builds them all and the wallet signs them at once.
+- Deploy: static hosting on Vercel, built from `main` automatically.
 
 ---
 
@@ -305,6 +308,8 @@ A separate workflow per zone, with a path filter, so that a front-end edit does 
 | ------------ | ------------------------------------------------------------------------------- |
 | **localnet** | development and tests; clones the Session Keys program from devnet; `session` is built with the `mock-vrf` feature and the oracle role is played by the website or a test |
 | **devnet**   | hackathon demo, testing with players                                            |
+
+**Devnet syscalls.** Some syscalls are not active on devnet: `remaining_compute_units`, `blake3`, `big_mod_exp`. A program that calls one of them fails there (a VRF callback fails silently). Programs must not use them; the deploy scripts refuse such a program.
 | **mainnet**  | phase 4                                                                         |
 
 Program addresses per environment are stored in `Anchor.toml` and in `sdk/`.

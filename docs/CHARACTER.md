@@ -131,7 +131,7 @@ The simulator picks the specific curve.
 
 - A character starts at **level 1**.
 - In the first version there are levels 1-4: this is enough for two map tiers (1-2 and 3-4).
-- **Experience is given for every killed monster** (full to each living character; per pack comes later, `PARTY_AND_TURNS.md`, section 4), but it **accumulates in the temporary cache** and is added to the character only on victory over the boss or on a peaceful exit (`PARTY_AND_TURNS.md`, section 7).
+- **Experience is given for every killed monster** (full to each living character). **Planned:** for every won arena, in full to each living character, and nothing after a retreat (`PARTY_AND_TURNS.md`, sections 4.1 and 7.5). It **accumulates in the temporary cache** and is added to the character only on victory over the boss or on a peaceful exit (`PARTY_AND_TURNS.md`, section 7).
 - On **escape**, the accumulated experience is lost.
 - After a **peaceful exit**, a penalty to the experience received applies to the next dungeon.
 - A character whose level is noticeably higher than the map tier gets **less experience or none**, and rewards are not rolled for them.

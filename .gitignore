@@ -1,5 +1,6 @@
 # secrets and keys: never commit
 /private/
+/image_presets
 .env
 .env.*
 *.keypair.json

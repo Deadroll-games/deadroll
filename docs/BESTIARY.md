@@ -26,7 +26,7 @@ Related documents:
 | Block                     | What it defines                                                                                         |
 | ------------------------- | ------------------------------------------------------------------------------------------------------- |
 | **Role**                  | Swarm, Fast, Tank, Loner, Boss; determines how the monster enters a pack (section 2.1)                 |
-| **Biome**                 | where it lives: Forest, Caves and Ruins; affects loot and suitable maps                                 |
+| **Biome**                 | where it comes from: Forest, Caves and Ruins; flavor only, it does not tie the monster to a map biome (section 11) |
 | **Size**                  | base cells: regular monsters 1×1, large monsters and bosses 2×2                                         |
 | **Minimum map tier**      | from which map tier it can appear; there is no maximum (section 4)                                      |
 | **Stats**                 | HP, armor, evasion, accuracy, speed, initiative: as relative levels                                     |
@@ -57,6 +57,14 @@ Pack rules:
 - A pack can mix monsters of **different biomes and roles**: a Treant, a Wood Fairy and several Goblins make a normal pack.
 - The size of a pack and the number of packs on a map are limited by the map tier (`MAP_DESCRIPTION.md`, section 10.2).
 - How a pack enters combat is described in `PARTY_AND_TURNS.md`, section 4.
+
+**Planned (arena update, `PARTY_AND_TURNS.md`, section 4.1):**
+
+- On the map only one monster of a pack is visible, picked by the DM; the rest of the pack is hidden until the fight.
+- The site shows the pack's threat level, declared openly by the DM and checked by the program when the pack is revealed.
+- A pack has a facing set by the DM: coming from its back, the party moves first; from the front, the monsters do.
+- Outside combat monsters stand still. A fight is one pack in its own arena.
+- After a retreat the pack heals fully, stays on guard and gets stronger (`PARTY_AND_TURNS.md`, section 7.5).
 
 ---
 
@@ -107,6 +115,8 @@ The template's pool is larger than the number of slots, so that the DM has a cho
 ## 6. Boss summoning
 
 Instead of phases, bosses have a **built-in summon** of helpers.
+
+**Later:** a boss calling allies during combat becomes a reactive skill with a limit of uses, for some bosses only, in a separate skills update.
 
 - **At the start of combat** the boss appears at once with **two helpers**.
 - **Once per combat** the boss can summon **two more**, regardless of whether the first ones are alive.
@@ -226,10 +236,10 @@ Consequences of Freeze immunity: Cold damage to a Treant goes through, but reson
 
 ### 9.1 Rules
 
-- **Experience** for each combat won goes into the temporary cache (`PARTY_AND_TURNS.md`, section 8).
+- **Experience** goes into the temporary cache (`PARTY_AND_TURNS.md`, section 8): now for each killed monster, planned for each won arena.
 - **Body resources** from each killed monster are rolled **separately for each** living participant, like the other rewards, and go into the temporary cache.
 - The **level of body resources** always equals the **monster's level**.
-- Resources correspond to the monster's **biome** or to the **monster itself**.
+- Resources correspond to the monster's **biome** or to the **monster itself**. For now body resources follow the table of section 9.2.
 - Summoned helpers give no loot.
 - There are no finished items: everything goes to crafting with artisans.
 
@@ -285,7 +295,7 @@ Bosses must be valuable. From a boss, in addition to the party's regular reward 
 | **Forest**           | Wolf, Bear, Treant, Wood Fairy           | Wood Fairy King |
 | **Caves and Ruins**  | Goblin, Troll                            | Goblin Chieftain |
 
-The biome suggests to the DM whom to place on a map with which tileset, and determines loot. It is not a strict ban.
+Monsters are **not tied to biomes**. The map biome (`MAP_DESCRIPTION.md`, section 4.4) is picture only, and any monster may stand on any map. The table above is the monster's origin, for flavor and loot.
 
 ---
 

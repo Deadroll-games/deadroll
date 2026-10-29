@@ -16,7 +16,7 @@ Related documents:
 
 1. **One city for everyone.** One `City` account, and all new players appear in it.
 2. **Looking is free.** Opening a building, viewing orders, the interior, a storefront is reading accounts via RPC: no signature, no fee, no turn.
-3. **Walking around the city happens only in the interface.** There is no combat and there are no traps in the city, position decides nothing, so it is not stored on-chain and needs no transactions.
+3. **Walking around the city happens only in the interface.** There is no combat and there are no traps in the city, position decides nothing, so it is not stored on-chain and needs no transactions. Now the city is the site's main page and a building opens with a click, without a transaction.
 4. **A transaction only when something changes.** Post an order, take a quest, order a craft, buy.
 5. **The city grows by data.** A new building of an existing type is added with a single instruction, without updating the site.
 6. **Visibility in the interface, access in the program.** The site can hide a building, but only the program can forbid an action.
@@ -50,27 +50,31 @@ One PDA `["city"]`.
 | Field             | Purpose                                                           |
 | ----------------- | ----------------------------------------------------------------- |
 | `width`, `height` | size of the city map                                              |
-| `cells`           | tiles, 1 byte per cell (format as in `MAP_DESCRIPTION.md`)        |
-| `objects`         | decor: trees, fountain, lanterns, carts                           |
+| `cells`           | tiles, 1 byte per cell, `CITY_W_MAX` (48) per row, up to 48×32; site tile ids |
+| `objects`         | decor: trees, fountain, lanterns, carts; up to 32, each `(sprite u16, x, y)` |
 | `spawn`           | the cell where a player appears                                   |
 | `building_count`  | how many buildings have been created                              |
-| `authority`       | who can add and change buildings                                  |
+| `authority`       | who can add and change buildings; set at `init_city` from `GameConfig.authority` |
+
+Instructions: `init_city`, `write_city` (cells in chunks), `set_city_objects` (decor and spawn).
 
 ### 3.2 `Building`
 
-A separate PDA for each building: `["building", id]`. Separate accounts rather than a list inside `City`, because that way a new building is added without resizing the city, and each building changes independently.
+A separate PDA for each building: `["building", id]` (`id` u16, little endian). Separate accounts rather than a list inside `City`, because that way a new building is added without resizing the city, and each building changes independently.
 
 | Field                 | Example                                               |
 | --------------------- | ----------------------------------------------------- |
 | `id`                  | 3                                                     |
-| `kind`                | Tavern / Blacksmith / Weaponsmith / Market / Guild... |
-| `prefab_id`, `x`, `y` | how and where to draw it on the city map              |
+| `kind`                | Tavern / MastersGuild / Storage now; Market, Guild... later |
+| `prefab_id` (u16), `x`, `y` | how and where to draw it on the city map (a site picture) |
 | `door`                | the cell that, when clicked, opens the building       |
-| `program`             | id of the program the building calls                  |
+| `program`             | id of the program the building calls; one of `GameConfig.programs`, or the default key only for a closed building |
 | `target`              | the building's main account (for example, the PDA of the order board) |
-| `interior_id`         | interior (section 7)                                  |
-| `status`              | `active` / `closed` / `secret` (section 6)            |
-| `requirement`         | access condition (section 5)                          |
+| `interior_id`         | interior (section 7); a site interior, no account     |
+| `status`              | `active` / `closed` now; `secret` later (section 6) |
+| `requirement`         | access condition (section 5); only `none` for now     |
+
+Instructions, `City.authority` only: `add_building`, `update_building`, `close_building` (status `closed`, the account stays). An active Tavern has `program` = city and `target` = its `TavernBoard`.
 
 ### 3.3 Building accounts
 
@@ -78,7 +82,7 @@ Each building type owns its accounts in its own program (or in a module of the D
 
 | Type                  | Main account `target` | Child accounts                |
 | --------------------- | --------------------- | ----------------------------- |
-| Tavern                | `TavernBoard`         | a `Quest` PDA for each order  |
+| Tavern                | `TavernBoard` `["tavern_board", building]` | a `Quest` PDA `["quest", session]` for each party |
 | Blacksmith, Weaponsmith | `Workshop`          | craft orders                  |
 | Market (phase 2)      | `Market`              | lots                          |
 
@@ -110,9 +114,21 @@ Extension rules:
 | **Artisans' Guild**     | services of Blacksmiths and Weaponsmiths, NPC artisan, profession choice (`ITEMS_AND_CRAFT.md`, sections 7-8) |
 | **Storage**             | storing items and resources, survives character death (`ITEMS_AND_CRAFT.md`, section 6) |
 
+**Now:** the city has these three buildings. The Tavern is open; the Artisans' Guild and the Storage are closed and drawn with a boarded-up door.
+
+### Tavern quests (built)
+
+- The `city` program owns `TavernBoard` and `Quest` and makes **no CPI**.
+- **Post a quest:** the DM's main wallet sends `session.open_session` and `city.post_quest` in **one transaction**. `post_quest` only reads the map (in session, the DM's) and the party (in the lobby, the same map and DM). The quest stores the map, DM, tier, biome, minimum players and price.
+- **Take a quest:** `session.join_session` with a contribution to the party escrow. Ready and Start are `set_ready` and `start_session`. The session program does not know about quests.
+- **Close a quest:** `close_quest` by the quest's DM once the party left the lobby, has no players, or is gone. The rent returns to the DM.
+- In the Tavern the site shows the guild board (read only) and the DM's table (map builder, then post the quest). The quest window holds the lobby.
+
 ---
 
 ## 5. Access conditions
+
+**Now** only `none` exists. The other conditions and `check_requirement` come later, each with its check.
 
 ### 5.1 Condition types
 
@@ -204,14 +220,14 @@ An interior is a small map in the `MAP_DESCRIPTION.md` format:
 - floor and wall tiles, furniture prefabs (counter, tables, barrels, forge, anvil);
 - **interactive points**: cells that, when clicked, open an interface module (order board, order table, anvil).
 
-Interiors are stored in `Interior` accounts and are reused: all Taverns can refer to one interior. Inside a building the player also walks only in the interface.
+Interiors live **on the site only**: there are no `Interior` accounts. `Building.interior_id` names a site interior, and all Taverns can share one. Inside a building the player also walks only in the interface.
 
 ---
 
 ## 8. Rendering
 
-- The city and interiors are drawn with the same `render_map` of the rasterizer.
-- Buildings are `PrefabBook` prefabs with the `building` category and a large base (for example, Tavern 4×3, forge 3×3) and headroom above for the roof.
+- The city and interiors are drawn with the **site's art** (PNG pictures, sprite ids from 1000, `ART_DESCRIPTION.md`, section 6.5), not with `render_map`.
+- Buildings are site pictures with a large base (for example, Tavern 4×3, forge 3×3) and headroom above for the roof.
 - Draw order is the same as for maps: sorting by the bottom cell, so the player's character can walk behind a building.
 - Buildings with status `closed` are drawn with a boarded-up door, `secret` ones without access are not drawn (decor from `City.objects` takes their place).
 
@@ -221,25 +237,27 @@ Interiors are stored in `Interior` accounts and are reused: all Taverns can refe
 
 | What            | Size       | Deposit              |
 | --------------- | ---------- | -------------------- |
-| `City` 48×32    | ~1.6 KB    | ~0.012 SOL           |
-| `Building`      | ~120 bytes | ~0.0017 SOL each     |
-| `Interior` 12×8 | ~200 bytes | ~0.0023 SOL          |
+| `City` 48×32    | 1,713 bytes | ~0.0128 SOL         |
+| `Building`      | 87 bytes   | ~0.0015 SOL each     |
+| `TavernBoard`   | 48 bytes   | ~0.0012 SOL          |
+| `Quest`         | 157 bytes  | ~0.0020 SOL each, returned at `close_quest` |
 | `SecretSlot`    | ~80 bytes  | ~0.0015 SOL          |
 
-A city with about ten buildings and their interiors comes to roughly 0.05 SOL.
+A city with about ten buildings comes to roughly 0.03 SOL.
 
 ---
 
 ## 10. Implementation checklist
 
-- [ ] `City` with tiles, decor, spawn point, `authority`
-- [ ] `Building` as separate PDAs, instructions `add_building`, `update_building`, `close_building` for `authority` only
-- [ ] Allowlist of programs for buildings
+- [x] `City` with tiles, decor, spawn point, `authority`
+- [x] `Building` as separate PDAs, instructions `add_building`, `update_building`, `close_building` for `authority` only
+- [x] Allowlist of programs for buildings
+- [x] `TavernBoard`, `Quest`, `post_quest` and `close_quest`
 - [ ] `check_requirement` and calling it in all building instructions that have a condition
 - [ ] Achievements (`badge`) in the player profile
-- [ ] Interface modules: Tavern, Blacksmith, Weaponsmith
-- [ ] Interiors with interactive points
+- [ ] Interface modules: Tavern (done), Blacksmith, Weaponsmith
+- [ ] Interiors with interactive points (site only)
 - [ ] `SecretSlot` and the `discover` instruction
 - [ ] Test: without an NFT or achievement, a secret building's instruction is rejected, even on a direct call
 - [ ] Test: `discover` with a wrong answer or salt is rejected
-- [ ] Test: a non-`authority` cannot add a building or change its `program`
+- [x] Test: a non-`authority` cannot add a building or change its `program`
