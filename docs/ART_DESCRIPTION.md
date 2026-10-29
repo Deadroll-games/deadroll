@@ -243,6 +243,7 @@ Before a layer with an outline is drawn, the pixels of the lower layers right be
 - **Height:** about 70-74 px, feet on the baseline **y = 91**.
 - **Head:** about 13×14 px, larger than realistic so that the face reads.
 - All races share one silhouette. The races differ in color, hair and features; the anchors lie below the neck and are the same for all.
+- **Monsters** are drawn facing **left**. The site mirrors a monster toward its target: the hero it attacked last, otherwise the nearest living hero. Mirroring is picture only; heroes are never mirrored.
 
 ### 6.2 Anchor points
 
@@ -297,6 +298,19 @@ The index of a layer in the render request is its place in this list.
 16. `FX` procedural effects, not stored as sprites
 
 An empty layer is not drawn. A long robe covers the pants through the ordering: `ARMOR_BODY` comes after `PANTS`. There is no wound overlay and no torn variant of an item: only worn items change the image, plus the gray of death.
+
+### 6.5 Sprite id layout
+
+| Ids       | What                                                            |
+| --------- | --------------------------------------------------------------- |
+| 1-399     | character bodies, hair and item bases                           |
+| 400-499   | monsters                                                        |
+| 500-599   | tiles of Caves and Ruins and of Forest, map points              |
+| 600-799   | icons of resources and consumables                              |
+| 800-999   | tiles of Crypt                                                  |
+| 1000 and up | site-only sprites (city, interface); they never go into the on-chain books |
+
+Crafted items need no sprites of their own: an item is drawn with the sprite of its base, and its colors come from its materials (section 9.2).
 
 ---
 
@@ -369,7 +383,7 @@ A base item (for example, "two-handed sword") exists only as a shape. The specif
 | `runes[]`               | inscribed runes, up to 3                                        | runes in the zone `U` (9.4)                                                           |
 | `sockets[]`             | number of sockets and what is set in them                       | sockets at the `SOCKET` points (9.4)                                                  |
 
-One sprite of a two-handed sword covers all combinations: a steel one with no runes, an onyx one with a darkness enchantment and three runes, an iron one with two empty sockets.
+So a crafted item never needs a new sprite. One sprite of a two-handed sword covers all combinations: a steel one with no runes, an onyx one with a darkness enchantment and three runes, an iron one with two empty sockets.
 
 **Enchantment color cast.** An enchantment does not draw a glow around the item, it recolors the material itself. The ramp of the primary material (slots `P` and `U`) is blended with the enchantment ramp shade by shade, in integers:
 

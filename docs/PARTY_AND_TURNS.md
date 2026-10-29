@@ -29,11 +29,11 @@ Related documents:
 2. The DM publishes a quest in the Tavern: map, tier, party price,
    optionally a private party code
 3. Players take the quest and make contributions to the party price (section 3)
-4. The price is collected, the minimum number of players is reached: the party moves to the status "assembled"
+4. The price is collected, the minimum number of players is reached: the party moves to the status "assembled" (**later**: there is no such status yet)
 5. The DM and players agree on a time (for example, in Discord);
-   the DM records the start time in the party
-6. Launch (section 2.1): the DM opens the lobby, players mark themselves ready
-7. Party: exploration ↔ combat
+   the DM records the start time in the party (**later**: there is no start time yet)
+6. Launch (section 2.1): players mark themselves ready in the lobby
+7. Party: exploration ↔ combat (planned: map ↔ arena, section 4.1)
 8. End: victory, peaceful exit, escape, defeat
 9. The DM's final audit: reveal of all declared secrets
 10. Issuing rewards from temporary caches, paying the DM,
@@ -42,8 +42,8 @@ Related documents:
 
 ### 2.1 Party launch
 
-1. **Start time.** The DM records the agreed time in the party. The site shows it in the "My Parties" section to all participants.
-2. **Lobby.** At the appointed time the DM opens the lobby (a DM transaction). The DM's client must have the map's secrets file, otherwise it cannot reveal cells.
+1. **Start time.** **Later**, not built yet: the DM records the agreed time in the party, and the site shows it to all participants.
+2. **Lobby.** The lobby opens when the DM publishes the quest: `session.open_session` and `city.post_quest` go in one transaction signed by the DM's main wallet (`CITY_DESCRIPTION.md`, section 4). Taking the quest is `session.join_session`. The quest window on the site holds the lobby: join with a share of the price, Ready, Start, enter the dungeon. The DM's client must have the map's secrets file, otherwise it cannot reveal cells (planned: no file, `MAP_DESCRIPTION.md`, section 17.5).
 3. **Ready.** Each player presses "Ready" in the "My Parties" section. One main wallet transaction:
    - creates a session key and the fee prepayment (`GAME_COMMISSIONS.md`);
    - records the skill selection on the map: 4 active, 1 reactive, 1 passive (`SKILL_BUILDER.md`, section 3.4);
@@ -65,6 +65,7 @@ The DM can publish a quest with a **private party code**. Such a quest is not vi
 - The DM sets the **party price** personally: how much they want for running the game (for example, 1 SOL).
 - The minimum is 0.01 SOL, **there is no maximum**: parties that are too expensive simply will not gather players.
 - Players make contributions in any shares: four players at 0.25 SOL each, or one player paying 1 SOL for everyone.
+- The player sets their contribution. By default the site offers the rest of the price divided among the players still missing.
 - Contributions are held in the **party escrow** (PDA), not by the DM.
 - **The party starts** when the whole price is collected and the map's minimum number of players is reached.
 - The party price is a separate amount, **not** the fee prepayment from `GAME_COMMISSIONS.md`.
@@ -100,14 +101,50 @@ What happens to the contribution of a player who left the party early or lost co
 - **Leaving combat:** all monsters in combat are dead. The mode returns to exploration, and cooldowns keep counting in turns.
 - Experience is awarded for each defeated pack (`CHARACTER.md`, section 5). Currently it is given for **each killed monster**: the full amount goes at once into the temporary cache of every living character, it is not divided. Awarding it per pack comes later.
 
-### 4.1 Planned: arena combat (big update)
+### 4.1 Planned: map and arena (big update)
 
-**Planned, not implemented.** The text above (section 4) describes how the game works now and stays valid until this update.
+**Planned, not implemented.** The text above (section 4) describes how the game works now and stays valid until this update. Map side: `MAP_DESCRIPTION.md`, section 17.
 
-- There are two modes: on the map (outside combat) and in combat.
-- When combat starts, a **mini-arena** opens (about 10×10 cells). Players and monsters are placed on it and move the same way as outside combat.
-- `move_path` is the same instruction on the map and in the arena: the player marks several cells in a row and walks along them.
-- On the map only **one monster per pack** is visible. The whole pack appears in the arena when combat starts.
+#### 4.1.1 Two modes
+
+| Mode      | When                        | Turn order                                                                 | Monsters                          |
+| --------- | --------------------------- | -------------------------------------------------------------------------- | --------------------------------- |
+| **Map**   | outside combat              | in a circle, as in exploration now                                         | stand still, the DM does not move them |
+| **Arena** | a fight with one pack       | initiative timeline (section 6), a tie goes to the higher Dexterity        | the DM moves them                 |
+
+`move_path` is the same instruction on the map and in the arena: the player marks several cells in a row and walks along them.
+
+#### 4.1.2 Packs on the map
+
+- Only **one monster of each pack** is visible on the map; the DM picks which one. The rest of the pack is hidden (`MAP_DESCRIPTION.md`, section 17.5).
+- The site shows the pack's **threat level**. The DM declares it openly; the program checks it when the pack is revealed, and a mismatch rejects the reveal.
+- A pack has a **facing** set by the DM.
+
+#### 4.1.3 Start of combat
+
+Combat starts when:
+
+- a character comes **within 1 cell** of a visible monster; or
+- an **ambush trap** triggers: the DM links a hidden pack with its arena to it, and the monsters move first.
+
+Then:
+
+- The **whole party** goes into the pack's arena, on the side of the character who came close.
+- From the pack's **back** the party moves first; from the **front** the monsters move first.
+- The arena is drawn by the DM for each pack in the builder; the DM picks its size within the limits of `BalanceConfig`. An arena may hold traps and secrets.
+- **One fight is one pack.** The map waits while the arena is played; other packs do not join.
+- A boss may occupy 2×2 cells.
+- Everything carries over between the map and the arena, both ways: HP, states, buffs, cooldowns.
+
+#### 4.1.4 End of combat
+
+- **Victory** (the pack is dead): the pack disappears from the map, and the characters return to the cells they stood on before the fight.
+- **Experience** for a won arena goes to every living character in full, instead of the current "for each killed monster".
+- **Retreat** and **Escape**: section 7.5.
+
+#### 4.1.5 Later
+
+- A boss calling allies during combat: a reactive skill with a limit of uses, for some bosses, in a separate skills update (`BESTIARY.md`, section 6).
 
 ---
 
@@ -124,6 +161,7 @@ At the start of its turn a character receives **action points (AP)** according t
 | Basic attack                           | its own AP cost                   | **either a basic attack or an active skill** per turn, not both |
 | Interaction (door, chest, search)      | its own AP cost                   | a chest only from an adjacent cell (section 9.3.1)          |
 | Escape                                 | the whole remaining turn          | combat only, needs unanimity (section 7.3)                  |
+| Retreat, Escape (planned)              | confirming skips the turn         | arena only, proposed by one, confirmed by the others (section 7.5) |
 | End turn                               | 0                                 |                                                             |
 
 Unspent AP are lost at the end of the turn.
@@ -147,6 +185,8 @@ The same AP apply, but without damage skills: steps, interactions, searching, bu
 ---
 
 ## 6. Initiative timeline (combat)
+
+Planned: the timeline runs in the arena (section 4.1); the side that moves first is set by the approach (section 4.1.3).
 
 ### 6.1 How it works
 
@@ -183,6 +223,7 @@ Mage: low speed, high initiative (Intelligence). Acts often, but does not go far
 | **Victory**          | the boss is killed                                                 | all accumulated | the entire temporary cache + boss reward | none                                           |
 | **Peaceful exit**    | outside combat, living characters on the exit cell, "Leave" button | all accumulated | the entire temporary cache               | penalty on the next dungeons (section 7.2)     |
 | **Escape**           | in combat, all living participants chose "Escape"                  | **nothing**     | **nothing**, temporary cache abandoned   | none                                           |
+| **Retreat** (planned) | from the arena back to the map (section 7.5)                     | none for this fight | the cache stays                       | the pack heals, is on guard and stronger       |
 | **Death**            | HP = 0                                                             |                 |                                          | tombstone, items burn                          |
 
 The party ends when there are no living characters left on the map (all died, escaped or exited) or the boss is killed.
@@ -207,6 +248,7 @@ A character at 0 HP leaves the fight at once: they do not take turns, cannot be 
 - If any living participant takes any other action on their turn, all intents are **reset** and the escape counts as failed; spent turns are not returned.
 - The dead do not take part in the decision. Example: in a party of four the tank has died, the other three choose to escape and leave.
 - There is no roll for escape: unanimity is the check.
+- **Planned:** with the arena update, escape is decided the way of section 7.5 (one proposes, the others confirm).
 
 ### 7.4 Death
 
@@ -214,12 +256,36 @@ A character at 0 HP leaves the fight at once: they do not take turns, cannot be 
 - The party continues without them.
 - If a character dies in a new party before the rewards of an earlier party have been issued, the rewards of the earlier party are lost too.
 
+### 7.5 Planned: Retreat and Escape from the arena
+
+**Planned, not implemented.**
+
+| Action      | Where to                             |
+| ----------- | ------------------------------------ |
+| **Retreat** | from the arena back to the map       |
+| **Escape**  | out of the dungeon (as in section 7.3: no experience, no rewards) |
+
+How it is decided:
+
+1. One player proposes it with a button.
+2. The others confirm. A character who confirms skips their turn.
+3. The monsters move once more.
+4. The survivors leave.
+
+After a **retreat**:
+
+- no experience for this fight, not even for the monsters killed;
+- the pack heals fully;
+- the pack is **on guard**: coming from its back no longer works, the monsters move first;
+- the pack is **stronger**: a buff from `BalanceConfig`;
+- the number of retreats per party is limited (`BalanceConfig`).
+
 ---
 
 ## 8. Temporary cache
 
 - Each character in the party has their own **temporary cache** in `Participation`.
-- What accumulates there: experience for each **killed monster**, and rewards from chests, hidden stashes and monsters.
+- What accumulates there: experience for each **killed monster** (planned: for each won arena, section 4.1.4), and rewards from chests, hidden stashes and monsters.
 - The contents become the character's property only on **victory** or **peaceful exit**, after the DM's final audit.
 
 ### 8.1 After the party ends
@@ -298,7 +364,7 @@ If the **base level** of the table dropped on the boss reward for the party, eve
 
 ### 9.5 Experience
 
-- Experience is awarded for each **killed monster**, in full to every living participant (it is not divided), accumulates in the cache, and is added to the character at the end. Awarding it per pack comes later (section 4).
+- Experience is awarded for each **killed monster**, in full to every living participant (it is not divided), accumulates in the cache, and is added to the character at the end. **Planned:** for each won arena, in full to every living character (section 4.1.4); nothing after a retreat (section 7.5).
 - A character whose level is noticeably higher than the map tier gets less experience or none, and no rewards are rolled for them.
 - The counterweight to the peaceful exit penalty applies here.
 
@@ -311,7 +377,7 @@ If the **base level** of the table dropped on the boss reward for the party, eve
 | Group        | Fields                                                                              |
 | ------------ | ----------------------------------------------------------------------------------- |
 | References   | map, DM, contribution escrow                                                        |
-| Mode         | exploration / combat                                                                |
+| Mode         | exploration / combat (planned: map / arena, the current arena and pack)             |
 | Queue        | exploration order; in combat, each participant's time until turn                    |
 | Participants | characters and their positions, monsters (template, HP, position, skills)           |
 | Map          | `explored`, `revealed`, revealed secrets, opened doors, DM obligations              |

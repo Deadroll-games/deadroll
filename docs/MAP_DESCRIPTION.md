@@ -15,8 +15,8 @@ Related documents:
 1. **A map stores the meaning of its cells, not a picture.** One tile type per cell, a list of objects, points, and the Merkle root of the secrets. The picture is assembled by the rasterizer.
 2. **Only ready-made parts.** The DM builds a map from a limited set of tiles and prefabs (mountains, rocks, trees, bushes...), drawn in advance and stored on chain. Custom images cannot be uploaded into a map.
 3. **The program checks the rules.** Limits, passability, and the path from entrance to exit are checked in the program when the map is created. The builder on the website uses the same code via WASM.
-4. **The public part is open, secrets are under a Merkle root.** Terrain, objects, and monsters are visible. Traps and hidden stashes are stored only as the tree root and are revealed cell by cell with a proof.
-5. **The map is a template, the party is state.** `Map` is created by the DM once and used in one party. Everything live (positions, explored and revealed cells, monster HP) lives in `GameSession`.
+4. **The public part is open, secrets are under a Merkle root.** Terrain, objects, and monsters are visible. Traps and hidden stashes are stored only as the tree root and are revealed cell by cell with a proof. **Planned (arena update, section 17):** only one monster of each pack is visible; the composition of packs is a secret too.
+5. **The map is a template, the party is state.** `Map` is created by the DM once and used in one party. Everything live (positions, explored and revealed cells, monster HP) lives in `GameSession`. **Planned (section 17.7):** the map is one-use and closes by itself after the rewards are issued; its deposit returns to the DM.
 
 ---
 
@@ -44,6 +44,8 @@ Width and height may differ (for example, 32×16 for a corridor), but each side 
 
 The brief mentions 10×10 for the MVP: that is one room, which a character crosses in 2 turns. 16×16 shows exploration better, and costs ~256 bytes in storage.
 
+**Planned (arena update):** the sizes of this section are replaced by Small, Medium, Big and Dungeon (section 17.6).
+
 ---
 
 ## 3. Map layers
@@ -53,7 +55,7 @@ The brief mentions 10×10 for the MVP: that is one room, which a character cross
 | Terrain  | floor, walls, water, doors, stairs                | public      | `Map.cells`, 1 byte per cell                         |
 | Objects  | trees, rocks, bushes, mountains, columns, barrels | public      | `Map.objects`, list of prefabs                       |
 | Points   | entrance, exit, visible chests                    | public      | `Map.points`                                         |
-| Monsters | placement from the Bestiary                       | public      | `Map.spawns`, live state in `GameSession`            |
+| Monsters | placement from the Bestiary                       | public (planned: one per pack, section 17.2) | `Map.spawns`, live state in `GameSession` |
 | Secrets  | traps, hidden stashes, secret doors               | **hidden**  | only `Map.secrets_root` + declared counts            |
 
 ---
@@ -66,6 +68,8 @@ The brief mentions 10×10 for the MVP: that is one room, which a character cross
 bit 7-3: tile type (0-31)
 bit 2-0: variant (0-7)
 ```
+
+The variant is the DM's pick and only chooses the picture of the tile in the map's biome (section 4.4). No rule reads it. A variant the biome has no picture for is drawn as variant 0.
 
 ### 4.2 Tile types (starter set)
 
@@ -84,15 +88,31 @@ bit 2-0: variant (0-7)
 | 10    | chasm                             | no       | no                           |                          |
 | 11-31 | reserved (ids are not used)       |          |                              |                          |
 
-Tile properties (passability, vision, cost) live in the on-chain `Tileset` table, not in the map. A `Tileset` record is 8 bytes: passable, step cost, blocks vision, flags (bit 0 = door), 4 reserved bytes. The record index is the tile type id. The variant (bits 2-0 of the cell byte) does not affect anything yet.
+Tile properties (passability, vision, cost) live in the on-chain `Tileset` table, not in the map. A `Tileset` record is 8 bytes: passable, step cost, blocks vision, flags (bit 0 = door), 4 reserved bytes. The record index is the tile type id. The variant (bits 2-0 of the cell byte) is not in the `Tileset`: it is picture only (section 4.1).
 
 ### 4.3 What is computed and not stored
 
-- **Wall autotiling.** Which piece of wall to draw (corner, end, straight, T-junction) is determined from the 4 neighbors: a 4-bit mask → 16 wall sprite variants. The DM just places "wall".
-- **Floor details.** Cracks, pebbles, and moss are chosen by a PRNG seeded with `SHA-256(map address ‖ cell number)`. The floor does not look like repeating tiles.
+- **Wall autotiling.** Which piece of wall to draw (corner, end, straight, T-junction) is determined from the 4 neighbors: a 4-bit mask, bit 0 north, bit 1 east, bit 2 south, bit 3 west. Walls and doors join, the map edge and void do not. The mask picks one of the biome's **16 wall shapes**. The DM just places "wall". Autotiling is computed by the site, the map stores only "wall".
 - **Transitions.** The edge of water and the edge of grass are drawn from the neighbors, the same way as walls.
 
-The variant (bits 2-0) is what the DM chooses deliberately: a floor with a drain grate, a wall with a torch, a cracked wall.
+The variant (bits 2-0) is what the DM chooses deliberately: a floor with a drain grate, a wall with a torch, a cracked wall. There is no random choice of details.
+
+In the builder the brush is a **tile type plus a variant**, shown with pictures from the chain rasterizer. A stroke overwrites the whole cell (type and variant).
+
+### 4.4 Biome
+
+The **biome** is the art set the map is drawn with. The DM picks it at `create_map`; it is stored in `Map.biome` (u8).
+
+| id | Biome           |
+| -- | --------------- |
+| 0  | Caves and Ruins |
+| 1  | Forest          |
+| 2  | Crypt           |
+
+- Picture only: no rule reads the biome, and it does not limit which monsters a map may hold (`BESTIARY.md`, section 11).
+- The battle grid, the builder, the entrance picture and the loading screen follow the biome.
+- A map created before the field (`Map` version 1) reads as Caves and Ruins.
+- **Templates.** The builder offers one 16×16 template map per biome (`assets/registry/maps/`). They live on the site only and are never uploaded: the DM loads one, edits it and publishes it through the usual `create_map` ... `finalize_map`.
 
 ---
 
@@ -101,7 +121,8 @@ The variant (bits 2-0) is what the DM chooses deliberately: a floor with a drain
 - A tile is drawn on a **64×64** canvas, with the same pixel size as characters and monsters, so that a character stands on a cell 1:1 (a character layer is 96×96 and stands on the bottom and the center of its cell).
 - The same geometry commands, slots, shading, and palette as in `ART_DESCRIPTION.md`.
 - **Seamlessness:** the edges of floor tiles must not give away the seam. The outline of floor tiles is disabled (`no_outline`), and shapes at the edges either end flat or continue symmetrically. Seams are 1 px along the edge (2 px where two tiles meet).
-- **Walls** are drawn in 16 autotiling variants. For the MVP, 6 is acceptable (straight horizontal, straight vertical, 4 corners), the rest map to the nearest one.
+- **Walls** are drawn in 16 autotiling shapes per biome, one for each value of the mask (section 4.3).
+- Tiles of each biome have their own sprites and variants (sprite ids: `ART_DESCRIPTION.md`, section 6.5).
 - Walls in the 3/4 view have a visible "front" face at the bottom, so that the map reads the same way as the characters.
 
 ---
@@ -212,7 +233,7 @@ When a party is opened, spawns are copied into `GameSession.monsters` with full 
 - Leaf: `SHA-256(map address ‖ cell number u16 ‖ contents ‖ salt 16 bytes)`. Each cell has its own salt, otherwise empty cells could be guessed by brute force.
 - The number of leaves is padded with empty leaves to a power of two.
 - Depth: 8 for an S map, 10 for L. Proof: 8-10 hashes = 256-320 bytes.
-- `Map` stores only the root (32 bytes). The tree and salts are known only to the DM client. **The DM must save the map's secrets file**: without it, cells cannot be revealed.
+- `Map` stores only the root (32 bytes). The tree and salts are known only to the DM client. **The DM must save the map's secrets file**: without it, cells cannot be revealed. **Planned (section 17.5):** there is no secrets file; the secrets lie on chain, encrypted.
 
 ### 8.3 Declared counts
 
@@ -244,7 +265,7 @@ Players see: "the map has 3 traps and 1 hidden stash", but do not know where.
 - **Line of sight:** a cell is visible if the Bresenham line from the character to it does not pass through cells that block vision (walls, trees, boulders, closed doors).
 - **Explored:** cells that have ever been in the vision of anyone in the party are marked in `GameSession.explored` and are shown muted from then on.
 
-**Important:** terrain, objects, and monsters lie on chain in the open, anyone can read them. The vision radius for the public layers is an **interface** mechanic, not cryptography. Only the secrets under the Merkle root are truly hidden. A real fog of war for terrain (with its own commitment) is planned for phase 3.
+**Important:** terrain, objects, and monsters lie on chain in the open, anyone can read them. The vision radius for the public layers is an **interface** mechanic, not cryptography. Only the secrets under the Merkle root are truly hidden. Terrain stays open: the fog of war covers only secrets and, after the arena update, the composition of packs (section 17.5).
 
 ---
 
@@ -307,9 +328,11 @@ In total, on the order of 400-500 bytes for an L map. The account is created in 
 
 The rasterizer (`ART_DESCRIPTION.md`) gets the function `render_map(map, session, viewer, mode)`.
 
+**Now:** there is no `render_map` yet. The site draws the map itself from tile, monster and character pictures made by the chain rasterizer, by the map's biome and each cell's variant, with wall autotiling (section 4.3). Monster sprites face left and the site mirrors them toward their target (`ART_DESCRIPTION.md`, section 6.1).
+
 Rendering order:
 
-1. Terrain: tiles with autotiling and floor details.
+1. Terrain: tiles of the map's biome, by variant, with autotiling.
 2. Flat objects (decor, puddles) and markers of revealed secrets.
 3. **Objects, characters, and monsters, sorted by bottom cell (y, then x).** This way a character behind a tree is partly covered by the crown, and a character in front of a tree covers the trunk.
 4. Effects (rune glow, particles).
@@ -342,6 +365,8 @@ Data:
 
 This is the target format. In the current build the cells, spawns and points live in a separate `MapLayout` account (`["layout", map]`), and the `Map` account holds the header, the tier, the map settings of section 7.1 (minimum players, chest radius, issue deadline), the layout hash and `secrets_root`.
 
+`Map` is at **version 2** (121 bytes): `biome: u8` (section 4.4) is appended at the end. A version 1 map (120 bytes) reads with the missing byte as zero (Caves and Ruins), so a finalized old map still opens a party; a version 1 draft cannot be continued.
+
 ---
 
 ## 14. Storage budget
@@ -371,14 +396,74 @@ This is the target format. In the current build the cells, spawns and points liv
 
 ## 16. Implementation checklist
 
-- [ ] `Tileset` table with tile properties
-- [ ] `PrefabBook` with the starter set of prefabs
-- [ ] The `deadroll-mapcheck` crate: all checks of section 10, compiles into both the program and WASM
-- [ ] Instructions `create_map`, `write_layout`, `write_spawns`, `write_points`, `finalize_map`
-- [ ] DM client: salt generation, Merkle tree, export and import of the secrets file
+- [x] `Tileset` table with tile properties (a registry table)
+- [x] `PrefabBook` with the starter set of prefabs (a registry table)
+- [x] The `deadroll-mapcheck` crate: all checks of section 10, compiles into both the program and WASM
+- [x] Instructions `create_map`, `write_layout`, `write_spawns`, `write_points`, `finalize_map`
+- [ ] DM client: salt generation, Merkle tree, export and import of the secrets file (planned: replaced by encrypted secrets on chain, section 17.5)
 - [ ] Reveal instruction with proof verification and counting against the declared counts
 - [ ] DM obligations block the next turn
-- [ ] `render_map` with autotiling, y-sorting, and darkening
+- [x] Biome (`Map.biome`), variant brush and biome templates in the builder
+- [x] Wall autotiling and drawing by biome and variant on the site
+- [ ] `render_map` with autotiling, y-sorting, and darkening in the rasterizer
 - [ ] Test: the DM cannot reveal a cell with contents different from the committed ones
 - [ ] Test: the DM cannot prove "empty" for a cell with a trap
-- [ ] Test: a map without a path from the entrance to the exit fails `finalize_map`
+- [x] Test: a map without a path from the entrance to the exit fails `finalize_map`
+
+---
+
+## 17. Planned: map and arena
+
+**Planned, not implemented.** This section is the design of the arena update. Until the patch, sections 1-16 describe how maps work now. Turns, combat and outcomes of the update are in `PARTY_AND_TURNS.md`, section 4.1.
+
+### 17.1 Two modes
+
+- **Map** (outside combat): the party walks the map in turns in a circle, as now. Monsters stand still; the DM moves monsters only in combat.
+- **Arena** (combat): each pack has its own small arena. One fight is one pack; the map waits while the arena is played.
+
+### 17.2 Packs on the map
+
+- On the map only **one monster of each pack** is visible. The DM picks which one.
+- The site shows the pack's **threat level**. The DM declares the threat openly when building the map; the program checks it when the pack is revealed, and a mismatch rejects the reveal.
+- A pack has a **facing** (the direction it looks), set by the DM. It decides who moves first in the arena (`PARTY_AND_TURNS.md`, section 4.1).
+
+### 17.3 Arenas
+
+- The DM draws an **arena for every pack** in the builder, with the same tiles, objects and biome rules as the map.
+- The DM picks the arena size within limits from `BalanceConfig`.
+- An arena may hold its own traps and secrets (section 17.5).
+- A boss may occupy 2×2 cells in the arena.
+
+### 17.4 Ambush trap
+
+A trap to which the DM links a **hidden pack** with its arena. When it triggers, the whole party goes into that arena and the monsters move first.
+
+### 17.5 Fog of war and secrets
+
+- Hidden: the **composition of packs** and the **secrets** (traps, hidden stashes, secret doors), under the Merkle root (section 8). Terrain stays open.
+- Until found, a secret looks like an ordinary floor or wall. After it is found it is highlighted.
+- **There is no secrets file.** The secrets lie on chain, encrypted with a key derived from a signature of the DM's wallet. The DM's client decrypts them and sends the reveals by itself, with the DM's session key, without separate signatures (like the players' moves, `GAME_COMMISSIONS.md`, section 7).
+- **The DM must be online** during the party.
+- The DM's final audit before payment stays (`PARTY_AND_TURNS.md`, section 3.2).
+- **Later:** fog of war through a MagicBlock Private Ephemeral Rollup (TEE).
+
+### 17.6 Map sizes
+
+The DM picks the size; sizes are set by area.
+
+| Size        | Side, about     | Packs, chests, reward budget |
+| ----------- | --------------- | ---------------------------- |
+| **Small**   | up to 32×32     | ×1 (the base)                |
+| **Medium**  | ~72×72          | ×3                           |
+| **Big**     | ~101×101        | ×5                           |
+| **Dungeon** | ~143×143        | ×8                           |
+
+The limits of packs and chests and the reward budget of Small are the base; the multipliers are in `BalanceConfig`.
+
+### 17.7 One-use map
+
+A map is played once. After the rewards are issued it closes by itself, and its deposit returns to the DM.
+
+### 17.8 Later
+
+- A boss calling allies during combat: a reactive skill with a limit of uses, for some bosses, in a separate skills update (`BESTIARY.md`, section 6).

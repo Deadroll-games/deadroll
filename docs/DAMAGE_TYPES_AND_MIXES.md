@@ -165,6 +165,24 @@ One rule for all: a hit with an aspect gives a chance to apply its native state,
 
 **Pure pair** (the tint matches the base, for example a Cold mage with a Cold predisposition): there is no separate resonance; instead the **chance and strength of the native state grow**.
 
+### 5.1 Debuffs from resonances
+
+Resonances (section 6) also put timed debuffs on the target. Each one divides, never subtracts (`COMBAT_MATH.md`, section 3).
+
+| Debuff       | Source         | Essence                                                       |
+| ------------ | -------------- | ------------------------------------------------------------- |
+| **Exposed**  | pairs, triples | every attacker's crit chance against the bearer grows         |
+| **Root**     | pairs, triples | the bearer cannot move, but can still act                     |
+| **Blinded**  | triples        | the bearer's d20 is divided                                   |
+| **OffGuard** | triples        | the bearer's defense is divided                               |
+| **Sundered** | triples        | the bearer's armor against Piercing is divided                |
+| **Dulled**   | triples        | the bearer's crit chance is divided                           |
+| **Dazed**    | triples        | the bearer uses no reactive skill (only monsters for now)     |
+| **Silenced** | triples        | the bearer uses no skill; a basic attack and a move are still allowed |
+| **NoHeal**   | triples        | heals on the bearer do nothing                                |
+
+Slow and Weakening are the ordinary skill debuffs (`SKILL_BUILDER.md`, section 6.1); resonances use them too.
+
 ---
 
 ## 6. Resonances
@@ -172,7 +190,7 @@ One rule for all: a hit with an aspect gives a chance to apply its native state,
 ### 6.1 Rules
 
 1. A character uses a skill. **Each aspect of the skill is a separate base**: a skill with three aspects has three bases.
-2. All other aspects of the character (race, class, items) are **tint candidates**.
+2. All other aspects of the character (race predisposition, items) are **tint candidates**. A class has no aspect, and the aspects of one skill never tint each other.
 3. For **each base separately**:
    - **target check:** if the target is immune to this base, no dice are rolled for it;
    - each tint rolls **its own d100**, the chance depends on the carrier's tier;
@@ -213,79 +231,240 @@ Calculation rules for the tables below:
 
 ### 6.4 Attacking pair resonances
 
-Row: base (the skill's aspect). On the right: tint, name (draft), essence, target condition.
+Row: base (the skill's aspect). On the right: tint, name, essence, target condition. The table follows `assets/registry/resonances.json` (mechanics) and `assets/wiki/resonances.json` (texts); the wiki shows the same rows with flavor text.
 
 #### Base: Fire
 
-| Tint      | Name             | Essence                                                              | Condition           |
-| --------- | ---------------- | -------------------------------------------------------------------- | ------------------- |
-| Cold      | Pale Flame       | Burning lasts longer, Fire attacks are more accurate                 | target can burn     |
-| Lightning | Stormfire        | Burning jumps to an adjacent target                                  | target can burn     |
-| Blood     | Boiling Blood    | Burning also causes Bleeding                                         | target can burn     |
-| Blunt     | Blasting Flame   | the hit knocks back and ignites adjacent cells                       | target can burn     |
-| Piercing  | Stinging Flame   | a crit is guaranteed to ignite, Burning penetrates part of the armor | target can burn     |
+| Tint | Name | Essence | Condition |
+| --- | --- | --- | --- |
+| Cold | Pale Flame | Burning lasts longer, and the attacker gets a Fire accuracy buff. | target can burn |
+| Lightning | Stormfire | Burning jumps to the nearest other enemy. | target can burn |
+| Blood | Boiling Blood | Bleeding comes together with Burning. | target can burn |
+| Blunt | Blasting Flame | Knocks the target back one cell and sets the cells around it on fire. | target can burn |
+| Piercing | Stinging Flame | A crit always burns; Penetration comes together with Burning. | target can burn |
 
 #### Base: Cold
 
-| Tint      | Name                       | Essence                                                                     | Condition                  |
-| --------- | -------------------------- | --------------------------------------------------------------------------- | -------------------------- |
-| Fire      | Burning Frost              | when it thaws, Freeze deals damage                                          | target can be frozen       |
-| Lightning | Ringing Ice                | Freeze jumps to an adjacent target                                          | target can be frozen       |
-| Blood     | Chilled Blood              | Chill also weakens the target's strength                                    | target can be chilled      |
-| Blunt     | Cleaving Ice               | a hit on a frozen target deals extra damage and removes Freeze              | target is frozen           |
-| Piercing  | **Piercing Frost**         | a crit on a frozen target is stronger, a crit can freeze                    | target can be frozen       |
+| Tint | Name | Essence | Condition |
+| --- | --- | --- | --- |
+| Fire | Burning Frost | Thaws a frozen target and deals damage for the Freeze turns removed. | target can be frozen |
+| Lightning | Ringing Ice | Freeze jumps to the nearest other enemy. | target can be frozen |
+| Blood | Chilled Blood | Weakens the target together with Chill. | target can be chilled |
+| Blunt | Cleaving Ice | Against a frozen target: a damage multiplier, and the Freeze shatters. | target is frozen |
+| Piercing | Piercing Frost | The hit is always a crit, and the target freezes. | target can be frozen |
 
 #### Base: Lightning
 
-| Tint     | Name                  | Essence                                              | Condition                  |
-| -------- | --------------------- | ---------------------------------------------------- | -------------------------- |
-| Fire     | Incinerating Discharge | Shock ignites the target                            | target can be shocked      |
-| Cold     | Frost Spark           | Shock also chills                                    | target can be shocked      |
-| Blood    | Blood Arc             | the discharge jumps further along bleeding targets   | target can be shocked      |
-| Blunt    | Thunderclap           | Shock with a chance of Stun                          | target can be shocked      |
-| Piercing | Lightning Needle      | the discharge passes through the target to the next one in line | target can be shocked |
+| Tint | Name | Essence | Condition |
+| --- | --- | --- | --- |
+| Fire | Incinerating Discharge | If the target was already shocked before the hit, it catches fire. | target can be shocked |
+| Cold | Ice Conduit | If the target is frozen, every enemy next to it takes a share of the hit's damage. | target can be shocked |
+| Blood | Blood Arc | Shock jumps along a chain of bleeding enemies, up to three. | target can be shocked |
+| Blunt | Thunderclap | A chance to stun together with Shock. | target can be shocked |
+| Piercing | Lightning Needle | Shock jumps to the nearest other enemy; the target and that enemy are Exposed: every attacker crits them more often. | target can be shocked |
 
 #### Base: Blood
 
-| Tint      | Name                     | Essence                                                  | Condition              |
-| --------- | ------------------------ | -------------------------------------------------------- | ---------------------- |
-| Fire      | Seething                 | Bleeding deals part of its damage as Fire damage         | target can bleed       |
-| Cold      | Chilling Wounds          | Bleeding slows                                           | target can bleed       |
-| Lightning | Frenzied Pulse           | Bleeding ticks more often but is shorter                 | target can bleed       |
-| Blunt     | Internal Bleeding        | Bleeding is stronger and is not removed by simple healing | target can bleed      |
-| Piercing  | Deep Wound               | a crit lengthens and strengthens Bleeding                | target can bleed       |
+| Tint | Name | Essence | Condition |
+| --- | --- | --- | --- |
+| Fire | Seething | A weaker Burning comes together with Bleeding. | target can bleed |
+| Cold | Chilling Wounds | Slows the target together with Bleeding. | target can bleed |
+| Lightning | Frenzied Pulse | Bleeding ticks faster. | target can bleed |
+| Blunt | Blackout | Only on a target that already bleeds: it is stunned, and its Bleeding is renewed. | target is bleeding |
+| Piercing | Deep Wound | Bleeding lasts longer and is stronger. | target can bleed |
 
 #### Base: Blunt
 
-| Tint      | Name                 | Essence                                    | Condition                |
-| --------- | -------------------- | ------------------------------------------ | ------------------------ |
-| Fire      | Red-hot Hammer       | a stunned target catches fire              | target can be stunned    |
-| Cold      | Frozen Ram           | Stun lasts longer, the target is chilled   | target can be stunned    |
-| Lightning | Concussive Discharge | Stun jumps to an adjacent target           | target can be stunned    |
-| Blood     | Pulverize            | Stun causes Bleeding                       | target can be stunned    |
-| Piercing  | Breach               | Stun also penetrates armor                 | target can be stunned    |
+| Tint | Name | Essence | Condition |
+| --- | --- | --- | --- |
+| Fire | Red-hot Hammer | Burning comes together with Stun. | target can be stunned |
+| Cold | Frozen Ram | Stun lasts longer, and the target stays slowed after it. | target can be stunned |
+| Lightning | Thunderstruck | Stun lasts longer. | target can be stunned |
+| Blood | Dread Pulse | When Stun lands, the enemies around the target are stunned and weakened too. | target can be stunned |
+| Piercing | Breach | Extra armor penetration and more damage on this hit. | target can be stunned |
 
 #### Base: Piercing
 
-| Tint      | Name              | Essence                                     | Condition              |
-| --------- | ----------------- | ------------------------------------------- | ---------------------- |
-| Fire      | Red-hot Point     | Penetration ignites                         | target has armor       |
-| Cold      | **Icy Point**     | Penetration chills                          | target has armor       |
-| Lightning | Piercing Spark    | Penetration with a chance of Shock          | target has armor       |
-| Blood     | Bloodletting      | a crit causes Bleeding                      | target can bleed       |
-| Blunt     | Armor Breaker     | Penetration is stronger against heavy armor | target has armor       |
+| Tint | Name | Essence | Condition |
+| --- | --- | --- | --- |
+| Fire | Red-hot Point | A weak Burning without a roll (the Fire tint also adds Fire damage). | target has armor |
+| Cold | Brittle Mark | The target is Exposed: every attacker's crit chance against it grows for a few turns. | target has armor |
+| Lightning | Piercing Spark | Extra Lightning damage and a chance of Shock of its own. | target has armor |
+| Blood | Bloodletting | A Bleeding with much more damage, without a roll. | target can bleed |
+| Blunt | Crippling Point | The target is Rooted: it cannot move for a few turns, but can still act. | target has armor |
 
 ### 6.5 Triple resonances
 
-Triple mechanics: **the pair resonance with the best tint + the tint trait of the second tint**.
+A triple is **the skill's aspect (base) + the best tint + the second tint**. The order matters: base Cold, best tint Piercing, second Lightning is a different triple from base Cold, best tint Lightning, second Piercing. For 6 aspects that is 6 bases × 5 best tints × 4 second tints = **120 triples**.
 
-The order of the two tints between themselves does not matter (base Cold + Piercing + Lightning = base Cold + Lightning + Piercing). For 6 aspects that is 6 bases × 10 pairs of tints = 60 triples.
+How a triple works:
 
-The name is generated: **the name of the pair with the best tint + the epithet of the second tint** (epithets in 3.2).
+- The **pair** of the base and the best tint always gives its own effect (section 6.4).
+- The triple **adds its own effect on top**: up to 3 operations from the registry table `triples` (one record of 16 bytes per triple). The record replaces the trait template of the second tint; the hit part of the second tint's trait still applies.
+- "+ Shock", "+ Stun" and "+ Penetration" in a triple are **guaranteed**, without a roll. In a pair, Shock keeps its normal chance.
+- Tints come only from the race predisposition and items; the aspects of one skill never tint each other.
+- All numbers are in `BalanceConfig` or in the operation values.
 
-Example: base Cold, best tint Piercing, second Lightning → **Piercing Frost of the Storm**: a crit on a frozen target is stronger + the Lightning tint trait (the effect jumps to an adjacent target).
+Name: **the name of the pair with the best tint + the epithet of the second tint** (of Ash, of Frost, of the Storm, of Blood, of Ruin, of the Point).
 
-Any triple can be **overridden manually** (its own name, its own mechanics) if generation gives a boring result. Overrides are marked in the wiki.
+Some triples are approximations, close to the text but not literal:
+
+- thaw damage to neighbours lands when the Freeze lands, not when it thaws;
+- "a guaranteed crit at thaw" is a strong Exposed;
+- delayed states wait while the target has any Freeze or Stun, not only the named one;
+- a few effects meant for neighbours also land on the target.
+
+The mapping is in `assets/registry/triples.json`, the texts in `assets/wiki/triples.json` (mechanics) and `assets/wiki/triple_lore.json` (flavor). The wiki shows the triples under each pair.
+
+#### Base: Fire
+
+| Best tint | Second tint | Name | Added on top of the pair |
+| --- | --- | --- | --- |
+| Cold | Lightning | Pale Flame of the Storm | A short lightning arc: Burning jumps to one more adjacent enemy. |
+| Cold | Blood | Pale Flame of Blood | A burn from within: the Burning damage grows with every tick. |
+| Cold | Blunt | Pale Flame of Ruin | The blow breaks the guard and knocks the target back one cell; it is off guard (its defense is divided) for a while. |
+| Cold | Piercing | Pale Flame of the Point | The target is Sundered: its armor against Piercing is divided (about half). |
+| Lightning | Cold | Stormfire of Frost | Frost: the target and the enemy the burn jumped to are Slowed and Blinded (their d20 is divided). |
+| Lightning | Blood | Stormfire of Blood | The jump becomes a blood lightning: Bleeding lands and jumps too, and the neighbours take a share of the damage. |
+| Lightning | Blunt | Stormfire of Ruin | A chance to stun with the Burning, the Stun jumps to a neighbour, and the target is knocked back one cell. |
+| Lightning | Piercing | Stormfire of the Point | The target (and the neighbour) are Exposed to crits, and a crit always ignites. |
+| Blood | Cold | Boiling Blood of Frost | Bleeding ticks slower; the target is Slowed and Rooted. |
+| Blood | Lightning | Boiling Blood of the Storm | Shock lands and jumps to every bleeding enemy within 2 cells. |
+| Blood | Blunt | Boiling Blood of Ruin | Stun lands; Bleeding is refreshed and stronger. |
+| Blood | Piercing | Boiling Blood of the Point | Bleeding deals its damage twice per turn. |
+| Blunt | Cold | Blasting Flame of Frost | After the knockback the target slides: Slowed and off guard. |
+| Blunt | Lightning | Blasting Flame of the Storm | Shock lands and jumps to every burning enemy within 2 cells. |
+| Blunt | Blood | Blasting Flame of Blood | The knocked-back target leaves a bloody trail: Weakened and bleeding. |
+| Blunt | Piercing | Blasting Flame of the Point | The target flies 2 cells and gets Penetration. |
+| Piercing | Cold | Stinging Flame of Frost | An ice plug in the wound: the target is Slowed and Vulnerable, so the next hit hurts more. |
+| Piercing | Lightning | Stinging Flame of the Storm | Shock lands; the Burning of a crit also reaches a neighbour. |
+| Piercing | Blood | Stinging Flame of Blood | Strong Bleeding and Weakening. |
+| Piercing | Blunt | Stinging Flame of Ruin | The target is Dazed: it uses no reactive skill. |
+
+#### Base: Cold
+
+| Best tint | Second tint | Name | Added on top of the pair |
+| --- | --- | --- | --- |
+| Fire | Lightning | Burning Frost of the Storm | The damage of the thawing Freeze also hits all neighbours (dealt at once). |
+| Fire | Blood | Burning Frost of Blood | Weakening now; Bleeding starts only after the thaw. |
+| Fire | Blunt | Burning Frost of Ruin | Stun, and extra damage from the broken ice against a frozen target. |
+| Fire | Piercing | Burning Frost of the Point | The target is so Exposed that the next hit crits almost surely. |
+| Lightning | Fire | Ringing Ice of Ash | Thermal shock: the neighbours take damage, and a weak Burning jumps to one of them. |
+| Lightning | Blood | Ringing Ice of Blood | The freeze jumps further (to the enemy behind), and everyone it reaches is Weakened. |
+| Lightning | Blunt | Ringing Ice of Ruin | Stun; if the target was frozen, the shards hurt every enemy next to it. |
+| Lightning | Piercing | Ringing Ice of the Point | The target and the enemy the freeze jumped to are Exposed to crits. |
+| Blood | Fire | Chilled Blood of Ash | The Weakening is taken off, but a weak Burning appears. |
+| Blood | Lightning | Chilled Blood of the Storm | Shock chains to every enemy within 2 cells, and all of them are Weakened. |
+| Blood | Blunt | Chilled Blood of Ruin | Stun lasts longer, and a Slow remains after it. |
+| Blood | Piercing | Chilled Blood of the Point | Bleeding starts only when the target thaws, and hits harder. |
+| Blunt | Fire | Cleaving Ice of Ash | Thermal shock (more damage) and a weak Burning on the target. |
+| Blunt | Lightning | Cleaving Ice of the Storm | Shock, and the shards hurt the neighbours. |
+| Blunt | Blood | Cleaving Ice of Blood | Bleeding and Weakening. |
+| Blunt | Piercing | Cleaving Ice of the Point | Penetration, and the hit is a certain crit against a frozen target. |
+| Piercing | Fire | Piercing Frost of Ash | When the target thaws it takes damage and a weak Burning. |
+| Piercing | Lightning | Piercing Frost of the Storm | The Freeze jumps to a neighbour, and Shock lands. |
+| Piercing | Blood | Piercing Frost of Blood | Strong Bleeding after the thaw, and a Weakening that lasts past it. |
+| Piercing | Blunt | Piercing Frost of Ruin | The ice cracks and the target is stunned. |
+
+#### Base: Lightning
+
+| Best tint | Second tint | Name | Added on top of the pair |
+| --- | --- | --- | --- |
+| Fire | Cold | Incinerating Discharge of Frost | A Slow, and the Burning ticks less often but longer. |
+| Fire | Blood | Incinerating Discharge of Blood | Shock is stronger, and the target is Weakened. |
+| Fire | Blunt | Incinerating Discharge of Ruin | Stun, and the Burning spreads to a neighbour. |
+| Fire | Piercing | Incinerating Discharge of the Point | The target is Exposed to crits, and a crit ignites it. |
+| Cold | Fire | Ice Conduit of Ash | A weak Burning lands and jumps to a neighbour (the pair already damages the neighbours). |
+| Cold | Blood | Ice Conduit of Blood | Everyone hit by the discharge is Weakened. |
+| Cold | Blunt | Ice Conduit of Ruin | Stun, and the Stun spreads to the enemies around. |
+| Cold | Piercing | Ice Conduit of the Point | Penetration, and the damage to the neighbours goes only along the straight line. |
+| Blood | Fire | Blood Arc of Ash | A weak Burning on every bleeding enemy within 3 cells. |
+| Blood | Cold | Blood Arc of Frost | Everyone in the chain is Slowed. |
+| Blood | Blunt | Blood Arc of Ruin | Stun on every bleeding enemy within 3 cells. |
+| Blood | Piercing | Blood Arc of the Point | Penetration on every bleeding enemy within 3 cells. |
+| Blunt | Fire | Thunderclap of Ash | Burning, and the Stun lasts longer. |
+| Blunt | Cold | Thunderclap of Frost | A Slow that lasts past the end of the Stun. |
+| Blunt | Blood | Thunderclap of Blood | Weakening, and the Shock jumps to a neighbour. |
+| Blunt | Piercing | Thunderclap of the Point | Penetration, and a crit always stuns. |
+| Piercing | Fire | Lightning Needle of Ash | A weak Burning on the target and on the neighbour. |
+| Piercing | Cold | Lightning Needle of Frost | Both are Slowed, and their crit chance drops (Dulled). |
+| Piercing | Blood | Lightning Needle of Blood | Weakening and Bleeding on the target and on the neighbour. |
+| Piercing | Blunt | Lightning Needle of Ruin | Both are Dazed, and the target is knocked back one cell. |
+
+#### Base: Blood
+
+| Best tint | Second tint | Name | Added on top of the pair |
+| --- | --- | --- | --- |
+| Fire | Cold | Seething of Frost | A Slow, and the weak Burning ticks longer. |
+| Fire | Lightning | Seething of the Storm | Shock lands, and the Burning jumps to a neighbour. |
+| Fire | Blunt | Seething of Ruin | Stun, and the Bleeding is refreshed. |
+| Fire | Piercing | Seething of the Point | Bleeding deals its damage twice per turn. |
+| Cold | Fire | Chilling Wounds of Ash | The Slow is taken off, and a weak Burning appears. |
+| Cold | Lightning | Chilling Wounds of the Storm | Shock chains to every enemy within 2 cells, and all of them are Weakened. |
+| Cold | Blunt | Chilling Wounds of Ruin | Stun, and a strong Slow remains after it. |
+| Cold | Piercing | Chilling Wounds of the Point | Bleeding is stronger, and the target is Slowed. |
+| Lightning | Fire | Frenzied Pulse of Ash | The Bleeding tick deals Fire damage: the armor no longer cuts it, Fire resistance does. |
+| Lightning | Cold | Frenzied Pulse of Frost | Bleeding ticks less often, and the target is Slowed. |
+| Lightning | Blunt | Frenzied Pulse of Ruin | Stun, and two Bleeding ticks at once. |
+| Lightning | Piercing | Frenzied Pulse of the Point | The Bleeding ticks even more often, and Penetration lands. |
+| Blunt | Fire | Blackout of Ash | Burning lands (with the Stun of the pair). |
+| Blunt | Cold | Blackout of Frost | A Slow, and the Stun lasts longer. |
+| Blunt | Lightning | Blackout of the Storm | Shock, and the Stun jumps to a neighbour. |
+| Blunt | Piercing | Blackout of the Point | Penetration (the Stun of the pair is already certain). |
+| Piercing | Fire | Deep Wound of Ash | Stronger Bleeding, but the target cannot be healed. |
+| Piercing | Cold | Deep Wound of Frost | Bleeding lasts longer, and the target is Slowed. |
+| Piercing | Lightning | Deep Wound of the Storm | Shock, and the Bleeding ticks twice at once. |
+| Piercing | Blunt | Deep Wound of Ruin | The target is Dazed, and the Bleeding is refreshed. |
+
+#### Base: Blunt
+
+| Best tint | Second tint | Name | Added on top of the pair |
+| --- | --- | --- | --- |
+| Fire | Cold | Red-hot Hammer of Frost | A Slow, and a stronger Burning. |
+| Fire | Lightning | Red-hot Hammer of the Storm | Shock, and the Burning jumps to a neighbour. |
+| Fire | Blood | Red-hot Hammer of Blood | Weakening, and Bleeding along with the Burning. |
+| Fire | Piercing | Red-hot Hammer of the Point | Penetration (the Burning already lands with the Stun). |
+| Cold | Fire | Frozen Ram of Ash | A weak Burning; the Stun is shorter, but the blow hits harder. |
+| Cold | Lightning | Frozen Ram of the Storm | Shock, and the shards hurt the neighbours. |
+| Cold | Blood | Frozen Ram of Blood | Weakening; Bleeding starts after the Stun ends. |
+| Cold | Piercing | Frozen Ram of the Point | A certain crit, and a Slow. |
+| Lightning | Fire | Thunderstruck of Ash | Burning starts after the Stun ends. |
+| Lightning | Cold | Thunderstruck of Frost | A Slow, and the Stun cannot be shaken off early: it lasts longer. |
+| Lightning | Blood | Thunderstruck of Blood | Weakening, and a Shock that lasts longer. |
+| Lightning | Piercing | Thunderstruck of the Point | Penetration; on a crit the Stun is certain and lasts longer. |
+| Blood | Fire | Dread Pulse of Ash | A weak Burning on everyone around. |
+| Blood | Cold | Dread Pulse of Frost | A Slow on the target and on everyone the wave reaches. |
+| Blood | Lightning | Dread Pulse of the Storm | Shock on everyone around. |
+| Blood | Piercing | Dread Pulse of the Point | Penetration on everyone around (the wave of the pair weakens them). |
+| Piercing | Fire | Breach of Ash | Penetration and a weak Burning at the point of impact. |
+| Piercing | Cold | Breach of Frost | A Penetration lands, and a Slow follows it (the pair already adds damage). |
+| Piercing | Lightning | Breach of the Storm | Shock, and the damage passes through nearly all the armor. |
+| Piercing | Blood | Breach of Blood | Weakening, and a strong Bleeding. |
+
+#### Base: Piercing
+
+| Best tint | Second tint | Name | Added on top of the pair |
+| --- | --- | --- | --- |
+| Fire | Cold | Red-hot Point of Frost | A Slow, and the next hit on this wound hurts more (Vulnerability). |
+| Fire | Lightning | Red-hot Point of the Storm | Shock, and extra Lightning damage on a crit. |
+| Fire | Blood | Red-hot Point of Blood | Strong Bleeding and Weakening. |
+| Fire | Blunt | Red-hot Point of Ruin | The target is Dazed, and knocked back one cell. |
+| Cold | Fire | Brittle Mark of Ash | The target is even more Exposed, and a crit adds a weak Burning. |
+| Cold | Lightning | Brittle Mark of the Storm | Shock, and a crit is almost certain. |
+| Cold | Blood | Brittle Mark of Blood | Bleeding and Weakening; the target also defends worse (off guard). |
+| Cold | Blunt | Brittle Mark of Ruin | More damage, and the target is Dazed. |
+| Lightning | Fire | Piercing Spark of Ash | A weak Burning, and extra damage when the target was already shocked. |
+| Lightning | Cold | Piercing Spark of Frost | A Slow, and a second chance of Shock. |
+| Lightning | Blood | Piercing Spark of Blood | Weakening, and a Bleeding that ticks as Lightning damage. |
+| Lightning | Blunt | Piercing Spark of Ruin | The target is Dazed, and Shock can land even on a miss. |
+| Blood | Fire | Bloodletting of Ash | Stronger Bleeding, but the target cannot be healed. |
+| Blood | Cold | Bloodletting of Frost | Bleeding lasts longer, and the target is Slowed. |
+| Blood | Lightning | Bloodletting of the Storm | Shock, and the Bleeding ticks twice at once. |
+| Blood | Blunt | Bloodletting of Ruin | Stun, and the Bleeding is refreshed and stronger. |
+| Blunt | Fire | Crippling Point of Ash | The target is rooted and catches a weak Burning. |
+| Blunt | Cold | Crippling Point of Frost | The Root lasts longer, and a Slow follows it. |
+| Blunt | Lightning | Crippling Point of the Storm | Shock, and the target cannot use skills (Silenced). |
+| Blunt | Blood | Crippling Point of Blood | Weakening and Bleeding while the target is rooted. |
 
 ---
 
