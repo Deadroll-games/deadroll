@@ -150,6 +150,8 @@ pub enum MapError {
     // The program's own (write_arena).
     #[msg("Arena cells do not match its size (at most ARENA_SIDE_MAX a side)")]
     ArenaCellsMismatch,
+    #[msg("Not a map layout of this program in the current format")]
+    InvalidLayout,
 }
 
 impl From<MapCheckError> for MapError {

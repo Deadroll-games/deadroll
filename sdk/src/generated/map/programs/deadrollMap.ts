@@ -45,12 +45,14 @@ import {
   getCreateMapInstructionAsync,
   getFinalizeMapInstructionAsync,
   getSetStatusInstructionAsync,
+  getWriteArenaInstructionAsync,
   getWriteLayoutInstructionAsync,
   getWritePointsInstructionAsync,
   getWriteSpawnsInstructionAsync,
   parseCreateMapInstruction,
   parseFinalizeMapInstruction,
   parseSetStatusInstruction,
+  parseWriteArenaInstruction,
   parseWriteLayoutInstruction,
   parseWritePointsInstruction,
   parseWriteSpawnsInstruction,
@@ -59,10 +61,12 @@ import {
   type ParsedCreateMapInstruction,
   type ParsedFinalizeMapInstruction,
   type ParsedSetStatusInstruction,
+  type ParsedWriteArenaInstruction,
   type ParsedWriteLayoutInstruction,
   type ParsedWritePointsInstruction,
   type ParsedWriteSpawnsInstruction,
   type SetStatusAsyncInput,
+  type WriteArenaAsyncInput,
   type WriteLayoutAsyncInput,
   type WritePointsAsyncInput,
   type WriteSpawnsAsyncInput,
@@ -117,18 +121,20 @@ export function identifyDeadrollMapAccount(
 }
 
 export const DeadrollMapEvent = {
-  0: "LayoutWritten",
-  1: "MapCreated",
-  2: "MapFinalized",
-  3: "MapStatusChanged",
-  4: "PointsWritten",
-  5: "SpawnsWritten",
-  LayoutWritten: 0,
-  MapCreated: 1,
-  MapFinalized: 2,
-  MapStatusChanged: 3,
-  PointsWritten: 4,
-  SpawnsWritten: 5,
+  0: "ArenaWritten",
+  1: "LayoutWritten",
+  2: "MapCreated",
+  3: "MapFinalized",
+  4: "MapStatusChanged",
+  5: "PointsWritten",
+  6: "SpawnsWritten",
+  ArenaWritten: 0,
+  LayoutWritten: 1,
+  MapCreated: 2,
+  MapFinalized: 3,
+  MapStatusChanged: 4,
+  PointsWritten: 5,
+  SpawnsWritten: 6,
 } as const;
 
 export type DeadrollMapEvent = (typeof DeadrollMapEvent)[Exclude<
@@ -140,6 +146,17 @@ export function identifyDeadrollMapEvent(
   event: { data: ReadonlyUint8Array } | ReadonlyUint8Array,
 ): DeadrollMapEvent {
   const data = "data" in event ? event.data : event;
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([224, 221, 225, 127, 99, 13, 157, 130]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollMapEvent.ArenaWritten;
+  }
   if (
     containsBytes(
       data,
@@ -215,15 +232,17 @@ export const DeadrollMapInstruction = {
   0: "CreateMap",
   1: "FinalizeMap",
   2: "SetStatus",
-  3: "WriteLayout",
-  4: "WritePoints",
-  5: "WriteSpawns",
+  3: "WriteArena",
+  4: "WriteLayout",
+  5: "WritePoints",
+  6: "WriteSpawns",
   CreateMap: 0,
   FinalizeMap: 1,
   SetStatus: 2,
-  WriteLayout: 3,
-  WritePoints: 4,
-  WriteSpawns: 5,
+  WriteArena: 3,
+  WriteLayout: 4,
+  WritePoints: 5,
+  WriteSpawns: 6,
 } as const;
 
 export type DeadrollMapInstruction = (typeof DeadrollMapInstruction)[Exclude<
@@ -267,6 +286,17 @@ export function identifyDeadrollMapInstruction(
     )
   ) {
     return DeadrollMapInstruction.SetStatus;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([8, 200, 150, 136, 138, 141, 180, 241]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollMapInstruction.WriteArena;
   }
   if (
     containsBytes(
@@ -320,6 +350,9 @@ export type ParsedDeadrollMapInstruction<
       instructionType: typeof DeadrollMapInstruction.SetStatus;
     } & ParsedSetStatusInstruction<TProgram>)
   | ({
+      instructionType: typeof DeadrollMapInstruction.WriteArena;
+    } & ParsedWriteArenaInstruction<TProgram>)
+  | ({
       instructionType: typeof DeadrollMapInstruction.WriteLayout;
     } & ParsedWriteLayoutInstruction<TProgram>)
   | ({
@@ -353,6 +386,13 @@ export function parseDeadrollMapInstruction<TProgram extends string>(
       return {
         instructionType: DeadrollMapInstruction.SetStatus,
         ...parseSetStatusInstruction(instruction),
+      };
+    }
+    case DeadrollMapInstruction.WriteArena: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: DeadrollMapInstruction.WriteArena,
+        ...parseWriteArenaInstruction(instruction),
       };
     }
     case DeadrollMapInstruction.WriteLayout: {
@@ -415,6 +455,10 @@ export type DeadrollMapPluginInstructions = {
     input: SetStatusAsyncInput,
   ) => ReturnType<typeof getSetStatusInstructionAsync> &
     SelfPlanAndSendFunctions;
+  writeArena: (
+    input: WriteArenaAsyncInput,
+  ) => ReturnType<typeof getWriteArenaInstructionAsync> &
+    SelfPlanAndSendFunctions;
   writeLayout: (
     input: WriteLayoutAsyncInput,
   ) => ReturnType<typeof getWriteLayoutInstructionAsync> &
@@ -465,6 +509,11 @@ export function deadrollMapProgram() {
             addSelfPlanAndSendFunctions(
               client,
               getSetStatusInstructionAsync(input),
+            ),
+          writeArena: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getWriteArenaInstructionAsync(input),
             ),
           writeLayout: (input) =>
             addSelfPlanAndSendFunctions(

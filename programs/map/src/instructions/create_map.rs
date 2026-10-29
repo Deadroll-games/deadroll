@@ -4,12 +4,12 @@ use deadroll_rules::{
     loot::{chest_radius_ok, settle_timeout_ok},
     BalanceConfig,
 };
-use deadroll_types::{seeds, Biome, MapStatus, NO_TABLE, PARTY_MAX};
+use deadroll_types::{seeds, Biome, MapStatus, PARTY_MAX};
 
 use crate::{
     errors::MapError,
     events::MapCreated,
-    state::{Map, MapLayout, MapSettings, ACCOUNT_VERSION, LAYOUT_VERSION},
+    state::{LayoutBytes, Map, MapSettings, ACCOUNT_VERSION},
 };
 
 #[derive(Accounts)]
@@ -25,14 +25,10 @@ pub struct CreateMap<'info> {
         bump,
     )]
     pub map: Account<'info, Map>,
-    #[account(
-        init,
-        payer = dm,
-        space = 8 + MapLayout::INIT_SPACE,
-        seeds = [seeds::LAYOUT, map.key().as_ref()],
-        bump,
-    )]
-    pub layout: Box<Account<'info, MapLayout>>,
+    /// CHECK: `MapLayout` PDA, created in the handler (see `state::LayoutBytes`: the account is
+    /// written in place, never decoded whole).
+    #[account(mut, seeds = [seeds::LAYOUT, map.key().as_ref()], bump)]
+    pub layout: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
 }
 
@@ -86,13 +82,14 @@ pub fn handler(
     map.settle_timeout_secs = settle_timeout_secs;
     map.biome = biome;
 
-    // Field by field: a full `MapLayoutData` literal would put 1.3 KB on the stack.
     // Cells start zeroed, which is `TileKind::Void`; the DM overwrites them with `write_layout`.
-    let layout = &mut ctx.accounts.layout.core;
-    layout.version = LAYOUT_VERSION;
-    layout.map = map_key;
-    layout.bump = ctx.bumps.layout;
-    layout.boss_table = NO_TABLE;
+    LayoutBytes::create(
+        &ctx.accounts.layout,
+        &ctx.accounts.dm,
+        &ctx.accounts.system_program,
+        &map_key,
+        ctx.bumps.layout,
+    )?;
 
     emit!(MapCreated {
         map: map_key,

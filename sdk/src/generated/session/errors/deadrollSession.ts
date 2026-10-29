@@ -202,6 +202,20 @@ export const DEADROLL_SESSION_ERROR__CORNER_BLOCKED = 0x17cb; // 6091
 export const DEADROLL_SESSION_ERROR__ROOTED = 0x17cc; // 6092
 /** Silenced: The unit is silenced: it can only use its basic attack */
 export const DEADROLL_SESSION_ERROR__SILENCED = 0x17cd; // 6093
+/** ArenaTransition: The party is between the map and an arena: enter_arena or leave_arena comes first */
+export const DEADROLL_SESSION_ERROR__ARENA_TRANSITION = 0x17ce; // 6094
+/** MapWithoutArenas: The map has no arenas (finalized before the arena update): it cannot open a party */
+export const DEADROLL_SESSION_ERROR__MAP_WITHOUT_ARENAS = 0x17cf; // 6095
+/** NotEngaged: No pack is engaged: step next to a pack's visible monster first */
+export const DEADROLL_SESSION_ERROR__NOT_ENGAGED = 0x17d0; // 6096
+/** ArenaNotWon: The arena's pack is not dead yet */
+export const DEADROLL_SESSION_ERROR__ARENA_NOT_WON = 0x17d1; // 6097
+/** InArena: Not in an arena: chests are on the map */
+export const DEADROLL_SESSION_ERROR__IN_ARENA = 0x17d2; // 6098
+/** InvalidArenaAccounts: The remaining accounts are not the Participation of each living player, in slot order */
+export const DEADROLL_SESSION_ERROR__INVALID_ARENA_ACCOUNTS = 0x17d3; // 6099
+/** TooManyTemplates: Too many distinct monster templates for one party */
+export const DEADROLL_SESSION_ERROR__TOO_MANY_TEMPLATES = 0x17d4; // 6100
 
 export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__ACTOR_MISMATCH
@@ -209,6 +223,8 @@ export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__ALREADY_ACTED
   | typeof DEADROLL_SESSION_ERROR__ALREADY_CLAIMED
   | typeof DEADROLL_SESSION_ERROR__ALREADY_SETTLED
+  | typeof DEADROLL_SESSION_ERROR__ARENA_NOT_WON
+  | typeof DEADROLL_SESSION_ERROR__ARENA_TRANSITION
   | typeof DEADROLL_SESSION_ERROR__CACHE_NOT_CLAIMED
   | typeof DEADROLL_SESSION_ERROR__CELL_BLOCKED
   | typeof DEADROLL_SESSION_ERROR__CELL_OCCUPIED
@@ -221,8 +237,10 @@ export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__DEATH_ACCOUNTS_MISSING
   | typeof DEADROLL_SESSION_ERROR__DEATHS_PENDING
   | typeof DEADROLL_SESSION_ERROR__DM_MAIN_WALLET_ONLY
+  | typeof DEADROLL_SESSION_ERROR__IN_ARENA
   | typeof DEADROLL_SESSION_ERROR__INVALID_ACTION
   | typeof DEADROLL_SESSION_ERROR__INVALID_ALLY_TARGET
+  | typeof DEADROLL_SESSION_ERROR__INVALID_ARENA_ACCOUNTS
   | typeof DEADROLL_SESSION_ERROR__INVALID_CACHE_SESSIONS
   | typeof DEADROLL_SESSION_ERROR__INVALID_CHARACTER
   | typeof DEADROLL_SESSION_ERROR__INVALID_CHEST
@@ -249,6 +267,7 @@ export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__INVALID_TOKEN
   | typeof DEADROLL_SESSION_ERROR__LINE_BLOCKED
   | typeof DEADROLL_SESSION_ERROR__MAP_NOT_FINALIZED
+  | typeof DEADROLL_SESSION_ERROR__MAP_WITHOUT_ARENAS
   | typeof DEADROLL_SESSION_ERROR__MONSTER_NEAR_CHEST
   | typeof DEADROLL_SESSION_ERROR__MONSTER_SKILL_MISSING
   | typeof DEADROLL_SESSION_ERROR__NO_PLAYERS
@@ -258,6 +277,7 @@ export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__NOT_CACHE_OWNER
   | typeof DEADROLL_SESSION_ERROR__NOT_CHARACTER_OWNER
   | typeof DEADROLL_SESSION_ERROR__NOT_DM
+  | typeof DEADROLL_SESSION_ERROR__NOT_ENGAGED
   | typeof DEADROLL_SESSION_ERROR__NOT_ENOUGH_ACTION_POINTS
   | typeof DEADROLL_SESSION_ERROR__NOT_ENOUGH_PLAYERS
   | typeof DEADROLL_SESSION_ERROR__NOT_FINISHED
@@ -292,6 +312,7 @@ export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__TOO_MANY_LOOT_TABLES
   | typeof DEADROLL_SESSION_ERROR__TOO_MANY_MONSTER_SKILLS
   | typeof DEADROLL_SESSION_ERROR__TOO_MANY_PENDING_PARTIES
+  | typeof DEADROLL_SESSION_ERROR__TOO_MANY_TEMPLATES
   | typeof DEADROLL_SESSION_ERROR__TURN_ALREADY_STARTED
   | typeof DEADROLL_SESSION_ERROR__TURN_NOT_STARTED
   | typeof DEADROLL_SESSION_ERROR__UNAUTHORIZED
@@ -308,6 +329,8 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__ALREADY_ACTED]: `Only one attack or active skill per turn`,
     [DEADROLL_SESSION_ERROR__ALREADY_CLAIMED]: `Escrow is already claimed`,
     [DEADROLL_SESSION_ERROR__ALREADY_SETTLED]: `Rewards of this character are already settled`,
+    [DEADROLL_SESSION_ERROR__ARENA_NOT_WON]: `The arena's pack is not dead yet`,
+    [DEADROLL_SESSION_ERROR__ARENA_TRANSITION]: `The party is between the map and an arena: enter_arena or leave_arena comes first`,
     [DEADROLL_SESSION_ERROR__CACHE_NOT_CLAIMED]: `This cache is not settled yet`,
     [DEADROLL_SESSION_ERROR__CELL_BLOCKED]: `Cell cannot be entered`,
     [DEADROLL_SESSION_ERROR__CELL_OCCUPIED]: `Cell is occupied`,
@@ -320,8 +343,10 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__DEATH_ACCOUNTS_MISSING]: `A death needs the character's SkillSet and Bag`,
     [DEADROLL_SESSION_ERROR__DEATHS_PENDING]: `A death is waiting to be finalized: start_turn (or a claim) first`,
     [DEADROLL_SESSION_ERROR__DM_MAIN_WALLET_ONLY]: `The DM settles with the main wallet, not a session key`,
+    [DEADROLL_SESSION_ERROR__IN_ARENA]: `Not in an arena: chests are on the map`,
     [DEADROLL_SESSION_ERROR__INVALID_ACTION]: `Unknown monster action`,
     [DEADROLL_SESSION_ERROR__INVALID_ALLY_TARGET]: `Target is not a living ally`,
+    [DEADROLL_SESSION_ERROR__INVALID_ARENA_ACCOUNTS]: `The remaining accounts are not the Participation of each living player, in slot order`,
     [DEADROLL_SESSION_ERROR__INVALID_CACHE_SESSIONS]: `The remaining accounts are not the GameSession of each open reward cache entry, in entry order`,
     [DEADROLL_SESSION_ERROR__INVALID_CHARACTER]: `Account is not a Deadroll character`,
     [DEADROLL_SESSION_ERROR__INVALID_CHEST]: `No such chest on this map`,
@@ -348,6 +373,7 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__INVALID_TOKEN]: `Session token is not valid for this signer and wallet, or it has expired`,
     [DEADROLL_SESSION_ERROR__LINE_BLOCKED]: `A wall cuts the line before the target`,
     [DEADROLL_SESSION_ERROR__MAP_NOT_FINALIZED]: `Map is not finalized`,
+    [DEADROLL_SESSION_ERROR__MAP_WITHOUT_ARENAS]: `The map has no arenas (finalized before the arena update): it cannot open a party`,
     [DEADROLL_SESSION_ERROR__MONSTER_NEAR_CHEST]: `A living monster is too close to the chest or to you`,
     [DEADROLL_SESSION_ERROR__MONSTER_SKILL_MISSING]: `This monster has no active skill in that slot`,
     [DEADROLL_SESSION_ERROR__NO_PLAYERS]: `Party has no players`,
@@ -357,6 +383,7 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__NOT_CACHE_OWNER]: `Only the character's owner, with the main wallet, closes its cache`,
     [DEADROLL_SESSION_ERROR__NOT_CHARACTER_OWNER]: `Character does not belong to the signer`,
     [DEADROLL_SESSION_ERROR__NOT_DM]: `Only the DM of this session can do this`,
+    [DEADROLL_SESSION_ERROR__NOT_ENGAGED]: `No pack is engaged: step next to a pack's visible monster first`,
     [DEADROLL_SESSION_ERROR__NOT_ENOUGH_ACTION_POINTS]: `Not enough action points`,
     [DEADROLL_SESSION_ERROR__NOT_ENOUGH_PLAYERS]: `Fewer players than the map's minimum`,
     [DEADROLL_SESSION_ERROR__NOT_FINISHED]: `Party has not ended`,
@@ -391,6 +418,7 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__TOO_MANY_LOOT_TABLES]: `Too many different reward tables for one party`,
     [DEADROLL_SESSION_ERROR__TOO_MANY_MONSTER_SKILLS]: `Too many different monster skills for one party`,
     [DEADROLL_SESSION_ERROR__TOO_MANY_PENDING_PARTIES]: `Too many parties wait for this character's rewards: claim one, or wait for its deadline`,
+    [DEADROLL_SESSION_ERROR__TOO_MANY_TEMPLATES]: `Too many distinct monster templates for one party`,
     [DEADROLL_SESSION_ERROR__TURN_ALREADY_STARTED]: `This turn has already started`,
     [DEADROLL_SESSION_ERROR__TURN_NOT_STARTED]: `The turn has not started: call start_turn first`,
     [DEADROLL_SESSION_ERROR__UNAUTHORIZED]: `Caller is not authorized for this instruction`,

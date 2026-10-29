@@ -123,6 +123,7 @@ export type WriteSpawnsAsyncInput<
 > = {
   dm: TAccountDm;
   map: TAccountMap;
+  /** `LayoutBytes::load`; written in place. */
   layout?: TAccountLayout;
   spawns: WriteSpawnsInstructionDataArgs["spawns"];
 };
@@ -219,6 +220,7 @@ export type WriteSpawnsInput<
 > = {
   dm: TAccountDm;
   map: TAccountMap;
+  /** `LayoutBytes::load`; written in place. */
   layout: TAccountLayout;
   spawns: WriteSpawnsInstructionDataArgs["spawns"];
 };
@@ -301,6 +303,7 @@ export type ParsedWriteSpawnsInstruction<
   accounts: {
     dm: TAccountMetas[0];
     map: TAccountMetas[1];
+    /** `LayoutBytes::load`; written in place. */
     layout: TAccountMetas[2];
   };
   data: WriteSpawnsInstructionData;

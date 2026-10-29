@@ -168,28 +168,37 @@ pub fn entry_cells(
     );
     let at = anchor(approach, w, h);
     let mut found = 0;
-    while found < out.len() {
-        let mut best: Option<(u8, Cell)> = None;
-        for y in 0..h {
-            for x in 0..w {
-                let c = Cell { x, y };
-                let byte = arena_byte(arenas, pack, x as usize, y as usize);
-                if !tiles.is_passable(byte) || taken.contains(&c) || out[..found].contains(&c) {
-                    continue;
-                }
-                let d = chebyshev(at, c);
-                // Row-major scan: the first cell at the best distance wins a tie.
-                if best.is_none_or(|(b, _)| d < b) {
-                    best = Some((d, c));
-                }
-            }
+    // Ring by ring around the anchor (Chebyshev distance `d`), each ring row by row: the order
+    // of distance, then row, then column, without sorting.
+    let mut take = |x: u8, y: u8| -> bool {
+        let c = Cell { x, y };
+        if tiles.is_passable(arena_byte(arenas, pack, x as usize, y as usize)) && !taken.contains(&c) {
+            out[found] = c;
+            found += 1;
         }
-        match best {
-            Some((_, c)) => {
-                out[found] = c;
-                found += 1;
+        found == out.len()
+    };
+    for d in 0..w.max(h) {
+        let (y0, y1) = (at.y.saturating_sub(d), (at.y + d).min(h - 1));
+        let (x0, x1) = (at.x.saturating_sub(d), (at.x + d).min(w - 1));
+        for y in y0..=y1 {
+            if y.abs_diff(at.y) == d {
+                for x in x0..=x1 {
+                    if take(x, y) {
+                        return out.len();
+                    }
+                }
+                continue;
             }
-            None => break,
+            // Inside the ring only its two side cells are at distance `d`.
+            if let Some(x) = at.x.checked_sub(d) {
+                if take(x, y) {
+                    return out.len();
+                }
+            }
+            if d > 0 && at.x + d < w && take(at.x + d, y) {
+                return out.len();
+            }
         }
     }
     found
@@ -357,19 +366,25 @@ fn check_entries(
         count += 1;
     }
     let monsters = &monsters[..count];
+    // One search: the cells of every side must lie in the part of the arena the first side's
+    // party reaches, and from there every monster can be reached (steps go both ways).
+    let mut reach = None;
     for approach in Approach::ALL {
         let mut party = [Cell::default(); PARTY_MAX];
         if entry_cells(arenas, pack, tiles, approach, monsters, &mut party) < PARTY_MAX {
             return Err(E::ArenaNoRoom);
         }
-        let reach = arena_reach(arenas, pack, tiles, party[0], monsters);
-        let together = party.iter().all(|c| reach.contains(*c));
-        let every_monster = monsters
-            .iter()
-            .all(|m| neighbors(*m, p.width, p.height).any(|c| reach.contains(c)));
-        if !together || !every_monster {
+        let reach = reach.get_or_insert_with(|| arena_reach(arenas, pack, tiles, party[0], monsters));
+        if !party.iter().all(|c| reach.contains(*c)) {
             return Err(E::ArenaUnreachable);
         }
+    }
+    let reach = reach.ok_or(E::ArenaNoRoom)?;
+    let every_monster = monsters
+        .iter()
+        .all(|m| neighbors(*m, p.width, p.height).any(|c| reach.contains(c)));
+    if !every_monster {
+        return Err(E::ArenaUnreachable);
     }
     Ok(())
 }

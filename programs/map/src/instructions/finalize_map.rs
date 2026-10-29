@@ -11,6 +11,8 @@ use deadroll_registry::state::{
 };
 use deadroll_rules::{config::BalanceConfig, loot::map_rules, map_tables, tiles::tile_rules};
 use deadroll_types::{seeds, MapLayoutDataV2, MapStatus};
+
+use crate::state::{decode_arenas, decode_core, LAYOUT_SPACE};
 use solana_sha256_hasher::hash;
 
 use crate::{
@@ -39,8 +41,10 @@ pub struct FinalizeMap<'info> {
         constraint = map.core.status == MapStatus::Draft @ MapError::NotDraft,
     )]
     pub map: Account<'info, Map>,
-    #[account(seeds = [seeds::LAYOUT, map.key().as_ref()], bump = layout.core.bump)]
-    pub layout: Box<Account<'info, MapLayout>>,
+    /// Owner and discriminator checked, never decoded whole (`state::LayoutBytes`): the core and
+    /// the arenas are decoded into boxes one at a time.
+    #[account(seeds = [seeds::LAYOUT, map.key().as_ref()], bump)]
+    pub layout: LazyAccount<'info, MapLayout>,
     /// CHECK: registry `["bestiary"]` table (patch 6): roles, minimum tiers and skill pools of the
     /// spawns, read in place by `deadroll_registry::state::view`.
     #[account(address = BESTIARY_TABLE @ MapError::InvalidRegistryTable)]
@@ -102,12 +106,16 @@ fn reward_tables(
 /// after the discriminator (arena update: the core and the arenas, `[8 .. 8 + MapLayout::INIT_SPACE]`).
 pub fn handler(ctx: Context<FinalizeMap>, secrets_root: [u8; 32]) -> Result<()> {
     let accounts = ctx.accounts;
-    let rules = templates(
-        &accounts.bestiary,
-        &accounts.monster_skills,
-        &accounts.layout.core,
-    )?;
-    let tables = reward_tables(&accounts.rewards, &accounts.layout.core)?;
+    let (core, arenas) = {
+        let data = accounts.layout.as_ref().try_borrow_data()?;
+        require!(
+            data.len() >= LAYOUT_SPACE && data[8] == crate::state::LAYOUT_VERSION,
+            MapError::InvalidLayout
+        );
+        (decode_core(&data)?, decode_arenas(&data)?)
+    };
+    let rules = templates(&accounts.bestiary, &accounts.monster_skills, &core)?;
+    let tables = reward_tables(&accounts.rewards, &core)?;
     let tiles = tile_rules(
         &table_body(&accounts.tileset, TableKind::Tileset)
             .map_err(|_| error!(MapError::InvalidRegistryTable))?,
@@ -122,8 +130,8 @@ pub fn handler(ctx: Context<FinalizeMap>, secrets_root: [u8; 32]) -> Result<()> 
         map.core.width,
         map.core.height,
         map.tier,
-        &accounts.layout.core,
-        &accounts.layout.arenas,
+        &core,
+        &arenas,
         BalanceConfig::DEFAULT.arena.limits(),
         &tiles,
         |id| rules.get(id as usize).copied().flatten(),
@@ -132,9 +140,8 @@ pub fn handler(ctx: Context<FinalizeMap>, secrets_root: [u8; 32]) -> Result<()> 
     .map_err(MapError::from)?;
 
     let layout_hash: [u8; 32] = {
-        let info = accounts.layout.to_account_info();
-        let data = info.try_borrow_data()?;
-        hash(&data[8..8 + MapLayout::INIT_SPACE]).to_bytes()
+        let data = accounts.layout.as_ref().try_borrow_data()?;
+        hash(&data[8..LAYOUT_SPACE]).to_bytes()
     };
     map.core.layout_hash = layout_hash;
     // TODO(post-demo): declared secret counts with the commit-reveal trap (L6.5).
