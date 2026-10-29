@@ -12,7 +12,7 @@
   "Piercing Frost": "The hit is always a crit, and the target freezes.",
   "Incinerating Discharge": "If the target was already shocked before the hit, it catches fire.",
   "Ice Conduit": "If the target is frozen, every enemy next to it takes a share of the hit's damage.",
-  "Blood Arc": "Bleeding jumps along a chain of up to three enemies.",
+  "Blood Arc": "Shock jumps along a chain of bleeding enemies, up to three.",
   "Thunderclap": "A chance to stun together with Shock.",
   "Lightning Needle": "Shock jumps to the nearest other enemy; the target and that enemy are Exposed: every attacker crits them more often.",
   "Seething": "A weaker Burning comes together with Bleeding.",
