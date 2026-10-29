@@ -2,9 +2,10 @@
 use anchor_lang::prelude::*;
 use anchor_lang::AccountSerialize;
 use deadroll_types::{
-    cell_byte, Cell, GameSessionData, MapLayoutDataV2, MapPoint, Monster, MonsterStateData,
-    PointKind, SessionStatus, Spawn, TileKind, MAP_CELLS, MAP_MAX, MONSTERS_MAX, PARTY_MAX,
-    POINTS_MAX, SPAWNS_MAX, TILE_KINDS_MAX, TURN_ORDER_MAX,
+    cell_byte, Cell, GameSessionData, MapArenasData, MapLayoutDataV2, MapPoint, Monster,
+    MonsterStateData, PackLayout, PointKind, SessionStatus, Spawn, TileKind, ARENA_MONSTERS_MAX,
+    ARENA_SIDE_MAX, MAP_CELLS, MAP_MAX, MONSTERS_MAX, PARTY_MAX, POINTS_MAX, SESSION_TEMPLATES_MAX,
+    SPAWNS_MAX, TILE_KINDS_MAX, TURN_ORDER_MAX,
 };
 
 use super::{external::MAP_LAYOUT_DISCRIMINATOR, GameSession, MonsterState};
@@ -85,8 +86,25 @@ pub fn layout_account(map: Pubkey) -> TestAccount {
         boss_table: deadroll_types::NO_TABLE,
         bump: 255,
     };
+    // Arena update: pack 0's arena is the same 8x8 ground (the map's corner), so the views read
+    // the same cells on the map and in that arena.
+    let mut arenas = MapArenasData::EMPTY;
+    arenas.packs[0] = PackLayout {
+        visible: 0,
+        x: 5,
+        y: 5,
+        facing: deadroll_types::Facing::N,
+        width: WIDTH,
+        height: HEIGHT,
+    };
+    for y in 0..HEIGHT as usize {
+        for x in 0..WIDTH as usize {
+            arenas.cells[0][y * ARENA_SIDE_MAX + x] = cells[y * MAP_MAX + x];
+        }
+    }
     let mut data = MAP_LAYOUT_DISCRIMINATOR.to_vec();
     layout.serialize(&mut data).unwrap();
+    arenas.serialize(&mut data).unwrap();
     data.extend_from_slice(&[0; 16]);
     TestAccount::new(deadroll_map::ID, data)
 }
@@ -105,16 +123,29 @@ pub fn monster(x: u8, y: u8) -> Monster {
     }
 }
 
-/// A `MonsterState` account for `session`, serialized exactly as Anchor would; each monster's
-/// bestiary record is the shipped one of its `bestiary_id` (as `open_session` copies it).
+/// A `MonsterState` account for `session` with `monsters` in the arena slots, serialized exactly
+/// as Anchor would; each monster's bestiary record is the shipped one of its `bestiary_id` (as
+/// `enter_arena` copies it), and the party's templates are every shipped one (as `open_session`
+/// copies the map's).
 pub fn monsters_account(session: Pubkey, monsters: &[Monster]) -> TestAccount {
+    assert!(monsters.len() <= ARENA_MONSTERS_MAX);
     let mut all = [Monster::default(); MONSTERS_MAX];
     all[..monsters.len()].copy_from_slice(monsters);
     let reg = registry();
-    let mut records = [[0; super::MONSTER_RECORD_LEN]; MONSTERS_MAX];
+    let mut records = [[0; super::MONSTER_RECORD_LEN]; ARENA_MONSTERS_MAX];
     for (r, m) in records.iter_mut().zip(monsters) {
         if let Some(record) = reg.record(m.bestiary_id) {
             *r = record;
+        }
+    }
+    let mut template_ids = [super::NO_TEMPLATE; SESSION_TEMPLATES_MAX];
+    let mut templates = [[0; super::MONSTER_RECORD_LEN]; SESSION_TEMPLATES_MAX];
+    let mut t = 0;
+    for id in 0..SESSION_TEMPLATES_MAX as u8 {
+        if let Some(record) = reg.record(id) {
+            template_ids[t] = id;
+            templates[t] = record;
+            t += 1;
         }
     }
     // Patch 11: every shipped reward table, by id, as `open_session` copies the ones a map needs.
@@ -130,15 +161,14 @@ pub fn monsters_account(session: Pubkey, monsters: &[Monster]) -> TestAccount {
     }
     let state = MonsterState {
         core: MonsterStateData {
-            version: 1,
+            version: super::MONSTER_STATE_VERSION,
             session,
             monsters: all,
             count: monsters.len() as u8,
             bump: 254,
         },
-        cooldowns: [[0; super::MONSTER_SKILLS_MAX]; MONSTERS_MAX],
-        mods: [Default::default(); MONSTERS_MAX],
-        defense: [Default::default(); MONSTERS_MAX],
+        mods: [Default::default(); ARENA_MONSTERS_MAX],
+        defense: [Default::default(); ARENA_MONSTERS_MAX],
         res_aspects: [0; super::RES_ASPECTS_LEN],
         res_traits: [0; super::RES_TRAITS_LEN],
         res_pairs: [0; super::RES_PAIRS_LEN],
@@ -146,14 +176,19 @@ pub fn monsters_account(session: Pubkey, monsters: &[Monster]) -> TestAccount {
         records,
         skill_table: [[0; super::SKILL_COPY_LEN]; deadroll_types::SESSION_SKILLS_MAX],
         skill_count: 0,
-        skills: [[deadroll_rules::monster::NO_SKILL; deadroll_types::MONSTER_SLOTS]; MONSTERS_MAX],
-        skill_cooldowns: [[0; deadroll_types::MONSTER_SLOTS]; MONSTERS_MAX],
-        auras: [Default::default(); MONSTERS_MAX],
+        skills: [[deadroll_rules::monster::NO_SKILL; deadroll_types::MONSTER_SLOTS];
+            ARENA_MONSTERS_MAX],
+        skill_cooldowns: [[0; deadroll_types::MONSTER_SLOTS]; ARENA_MONSTERS_MAX],
+        auras: [Default::default(); ARENA_MONSTERS_MAX],
         resist_mods: Default::default(),
         aura_weights: Default::default(),
         loot_ids,
         loot_tables,
         res_triples: [0; super::RES_TRIPLES_LEN],
+        spawn_of: [0; ARENA_MONSTERS_MAX],
+        template_ids,
+        templates,
+        skill_ids: [0; deadroll_types::SESSION_SKILLS_MAX],
     };
     let mut data = Vec::new();
     state.try_serialize(&mut data).unwrap();
@@ -224,6 +259,22 @@ pub fn session(players: &[Cell]) -> GameSession {
         ended_at: 0,
         chest_radius: 3,
         settle_timeout_secs: 600,
+        // In an arena by default: the views see the test monsters as its pack, on the test
+        // map's cells (pack 0's arena is the map's 8x8 corner, `layout_account`).
+        mode: super::ArenaMode::Arena,
+        arena_pack: 0,
+        engaged_by: 0,
+        packs: [deadroll_types::PackLayout::EMPTY; deadroll_types::PACKS_MAX],
+        packs_alive: 0,
+        map_width: WIDTH,
+        map_height: HEIGHT,
+        map_pos: [Cell::default(); PARTY_MAX],
+        map_order: [EMPTY_UNIT; PARTY_MAX],
+        map_order_len: 0,
+        map_turn_index: 0,
+        map_round: 1,
+        unit_time: [0; PARTY_MAX + ARENA_MONSTERS_MAX],
+        player_dex: [0; PARTY_MAX],
     }
 }
 

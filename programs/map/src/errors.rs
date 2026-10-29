@@ -88,7 +88,7 @@ pub enum MapError {
     ChestOutOfBounds,
     #[msg("Chest stands on a cell that cannot be entered")]
     ChestNotPassable,
-    #[msg("Chest shares a cell with the entrance, the exit, a spawn or another chest")]
+    #[msg("Chest shares a cell with the entrance, the exit or another chest")]
     ChestOverlap,
     #[msg("Unknown reward table")]
     UnknownTable,
@@ -118,6 +118,38 @@ pub enum MapError {
     // The map's art set, the program's own.
     #[msg("Unknown map biome")]
     InvalidBiome,
+    // Arena update (deadroll_mapcheck::MapCheckError from PackOutOfRange on, same order).
+    #[msg("A pack number is not below PACKS_MAX")]
+    PackOutOfRange,
+    #[msg("A spawn's pack has no arena")]
+    PackWithoutArena,
+    #[msg("A pack has more monsters than an arena holds")]
+    PackTooBig,
+    #[msg("An arena side is outside BalanceConfig.arena")]
+    ArenaSizeOutOfRange,
+    #[msg("An arena cell has a tile type the Tileset does not have")]
+    ArenaInvalidTile,
+    #[msg("The monster shown on the map is not a spawn of its pack")]
+    VisibleNotInPack,
+    #[msg("A pack's map cell is outside the map")]
+    PackOutOfBounds,
+    #[msg("A pack's map cell cannot be entered")]
+    PackNotPassable,
+    #[msg("A pack stands on the entrance, the exit, a chest or another pack")]
+    PackOverlap,
+    #[msg("A pack stands next to the entrance")]
+    PackAtEntrance,
+    #[msg("No cell next to a pack can be reached from the entrance")]
+    PackUnreachable,
+    #[msg("From some side an arena has no room for a full party")]
+    ArenaNoRoom,
+    #[msg("From some side the party in an arena is split or cannot reach a monster")]
+    ArenaUnreachable,
+    #[msg("More distinct monster templates than a party copies")]
+    TooManyTemplates,
+    // The program's own (write_arena).
+    #[msg("Arena cells do not match its size (at most ARENA_SIDE_MAX a side)")]
+    ArenaCellsMismatch,
 }
 
 impl From<MapCheckError> for MapError {
@@ -169,6 +201,20 @@ impl From<MapCheckError> for MapError {
             C::PointOutOfBounds => MapError::PointOutOfBounds,
             C::PointNotPassable => MapError::PointNotPassable,
             C::PointOverlap => MapError::PointOverlap,
+            C::PackOutOfRange => MapError::PackOutOfRange,
+            C::PackWithoutArena => MapError::PackWithoutArena,
+            C::PackTooBig => MapError::PackTooBig,
+            C::ArenaSizeOutOfRange => MapError::ArenaSizeOutOfRange,
+            C::ArenaInvalidTile => MapError::ArenaInvalidTile,
+            C::VisibleNotInPack => MapError::VisibleNotInPack,
+            C::PackOutOfBounds => MapError::PackOutOfBounds,
+            C::PackNotPassable => MapError::PackNotPassable,
+            C::PackOverlap => MapError::PackOverlap,
+            C::PackAtEntrance => MapError::PackAtEntrance,
+            C::PackUnreachable => MapError::PackUnreachable,
+            C::ArenaNoRoom => MapError::ArenaNoRoom,
+            C::ArenaUnreachable => MapError::ArenaUnreachable,
+            C::TooManyTemplates => MapError::TooManyTemplates,
         }
     }
 }

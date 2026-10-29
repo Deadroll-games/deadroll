@@ -11,7 +11,7 @@ pub use map_layout::*;
 /// no biome byte and reads as `Biome::Caves`).
 pub const ACCOUNT_VERSION: u8 = 2;
 /// Patch 13: `MapLayout.core.version` of the `MapLayoutDataV2` format.
-pub const LAYOUT_VERSION: u8 = 2;
+pub const LAYOUT_VERSION: u8 = 3;
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -31,7 +31,10 @@ pub(crate) mod tests {
             MapLayout::DISCRIMINATOR,
             &hash(b"account:MapLayout").to_bytes()[..8]
         );
-        assert_eq!(MapLayout::INIT_SPACE, MapLayoutDataV2::SIZE);
+        assert_eq!(
+            MapLayout::INIT_SPACE,
+            MapLayoutDataV2::SIZE + deadroll_types::MapArenasData::SIZE
+        );
         // tier, then patch 11: min_players, chest_radius, settle_timeout_secs (u32), then biome.
         assert_eq!(Map::INIT_SPACE, MapData::SIZE + 1 + 1 + 1 + 4 + 1);
     }

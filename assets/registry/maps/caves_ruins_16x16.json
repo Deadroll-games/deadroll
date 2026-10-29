@@ -8,9 +8,7 @@
   "chest_radius": 3,
   "settle_timeout_secs": 3600,
   "boss_table": 1,
-  "chests": [
-    { "x": 2, "y": 12, "table": 0 }
-  ],
+  "chests": [{ "x": 2, "y": 12, "table": 0 }],
   "rows": [
     "################",
     "#E.,,###########",
@@ -48,12 +46,130 @@
     "0000000000000000"
   ],
   "spawns": [
-    { "bestiary_id": 0, "x": 7, "y": 3, "level": 1, "skills": 7, "flags": 0, "aspects": 0, "pack": 1 },
-    { "bestiary_id": 0, "x": 7, "y": 4, "level": 1, "skills": 14, "flags": 0, "aspects": 0, "pack": 1 },
-    { "bestiary_id": 1, "x": 12, "y": 8, "level": 1, "skills": 3, "flags": 0, "aspects": 0, "pack": 2 },
-    { "bestiary_id": 1, "x": 13, "y": 8, "level": 1, "skills": 3, "flags": 0, "aspects": 0, "pack": 2 },
-    { "bestiary_id": 2, "x": 11, "y": 12, "level": 1, "skills": 31, "flags": 0, "aspects": 0, "pack": 3 },
-    { "bestiary_id": 3, "x": 10, "y": 12, "level": 1, "skills": 3, "flags": 0, "aspects": 0, "pack": 3 },
-    { "bestiary_id": 4, "x": 11, "y": 13, "level": 1, "skills": 7, "flags": 0, "aspects": 0, "pack": 3 }
+    {
+      "bestiary_id": 0,
+      "x": 4,
+      "y": 4,
+      "level": 1,
+      "skills": 7,
+      "flags": 0,
+      "aspects": 0,
+      "pack": 1
+    },
+    {
+      "bestiary_id": 0,
+      "x": 4,
+      "y": 5,
+      "level": 1,
+      "skills": 14,
+      "flags": 0,
+      "aspects": 0,
+      "pack": 1
+    },
+    {
+      "bestiary_id": 1,
+      "x": 4,
+      "y": 4,
+      "level": 1,
+      "skills": 3,
+      "flags": 0,
+      "aspects": 0,
+      "pack": 2
+    },
+    {
+      "bestiary_id": 1,
+      "x": 5,
+      "y": 4,
+      "level": 1,
+      "skills": 3,
+      "flags": 0,
+      "aspects": 0,
+      "pack": 2
+    },
+    {
+      "bestiary_id": 2,
+      "x": 5,
+      "y": 5,
+      "level": 1,
+      "skills": 31,
+      "flags": 0,
+      "aspects": 0,
+      "pack": 3
+    },
+    {
+      "bestiary_id": 3,
+      "x": 4,
+      "y": 5,
+      "level": 1,
+      "skills": 3,
+      "flags": 0,
+      "aspects": 0,
+      "pack": 3
+    },
+    {
+      "bestiary_id": 4,
+      "x": 5,
+      "y": 6,
+      "level": 1,
+      "skills": 7,
+      "flags": 0,
+      "aspects": 0,
+      "pack": 3
+    }
+  ],
+  "packs": [
+    {
+      "pack": 1,
+      "visible": 0,
+      "x": 7,
+      "y": 3,
+      "facing": "W",
+      "rows": [
+        "........",
+        ".#....#.",
+        "........",
+        "........",
+        "........",
+        "........",
+        ".#....#.",
+        "........"
+      ]
+    },
+    {
+      "pack": 2,
+      "visible": 2,
+      "x": 12,
+      "y": 8,
+      "facing": "NW",
+      "rows": [
+        "........",
+        ".#....#.",
+        "........",
+        "........",
+        "........",
+        "........",
+        ".#....#.",
+        "........"
+      ]
+    },
+    {
+      "pack": 3,
+      "visible": 4,
+      "x": 11,
+      "y": 12,
+      "facing": "NW",
+      "rows": [
+        "..........",
+        "..........",
+        "..#....#..",
+        "..........",
+        "..........",
+        "..........",
+        "..........",
+        "..#....#..",
+        "..........",
+        ".........."
+      ]
+    }
   ]
 }

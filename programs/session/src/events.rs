@@ -6,8 +6,8 @@ use deadroll_character::state::{MAP_SKILLS, SKILLS_MAX};
 use deadroll_rules::spread::SPREAD_MODS_MAX;
 
 use deadroll_types::{
-    ActiveState, CacheSlot, Cell, RewardSource, SessionStatus, StateKind, PARTY_MAX, STATES_MAX,
-    TURN_ORDER_MAX,
+    ActiveState, CacheSlot, Cell, RewardSource, SessionStatus, StateKind, ARENA_MONSTERS_MAX,
+    PARTY_MAX, STATES_MAX, TURN_ORDER_MAX,
 };
 
 use deadroll_skillcheck::{Effect, Trigger};
@@ -491,4 +491,46 @@ pub struct SessionKeyChanged {
     pub character: Option<Pubkey>,
     /// `Participation.session_key` or `GameSession.dm_actor` now; default = none.
     pub session_key: Pubkey,
+}
+
+// Arena update (docs/PARTY_AND_TURNS.md 4.1).
+/// Player `slot` stepped onto (`x`, `y`) next to pack `pack`'s visible monster: `enter_arena` next.
+#[event]
+pub struct PackEngaged {
+    pub session: Pubkey,
+    pub pack: u8,
+    pub slot: u8,
+    pub x: u8,
+    pub y: u8,
+}
+
+/// The party entered pack `pack`'s arena: `party_first` from the pack's back. The living
+/// players stand on `players` (by slot), the pack's monsters are the `MonsterState` slots,
+/// `spawns` their layout spawns.
+#[event]
+pub struct ArenaEntered {
+    pub session: Pubkey,
+    pub pack: u8,
+    pub party_first: bool,
+    pub width: u8,
+    pub height: u8,
+    pub players: [Cell; PARTY_MAX],
+    pub monsters: u8,
+    pub spawns: [u8; ARENA_MONSTERS_MAX],
+}
+
+/// The last monster of pack `pack` died: `leave_arena` next.
+#[event]
+pub struct ArenaWon {
+    pub session: Pubkey,
+    pub pack: u8,
+}
+
+/// The party left pack `pack`'s arena for the map, each living player with the pack's
+/// experience `xp` (by slot) in its cache; the pack is gone from the map.
+#[event]
+pub struct ArenaLeft {
+    pub session: Pubkey,
+    pub pack: u8,
+    pub xp: [u32; PARTY_MAX],
 }

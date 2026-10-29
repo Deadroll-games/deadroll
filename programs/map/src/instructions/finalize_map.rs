@@ -98,8 +98,8 @@ fn reward_tables(
     Ok(out)
 }
 
-/// Runs every builder rule, then freezes the map: `layout_hash` = SHA-256 of the layout core
-/// bytes (account data `[8 .. 8 + MapLayoutDataV2::SIZE]`).
+/// Runs every builder rule, then freezes the map: `layout_hash` = SHA-256 of the layout bytes
+/// after the discriminator (arena update: the core and the arenas, `[8 .. 8 + MapLayout::INIT_SPACE]`).
 pub fn handler(ctx: Context<FinalizeMap>, secrets_root: [u8; 32]) -> Result<()> {
     let accounts = ctx.accounts;
     let rules = templates(
@@ -123,6 +123,8 @@ pub fn handler(ctx: Context<FinalizeMap>, secrets_root: [u8; 32]) -> Result<()> 
         map.core.height,
         map.tier,
         &accounts.layout.core,
+        &accounts.layout.arenas,
+        BalanceConfig::DEFAULT.arena.limits(),
         &tiles,
         |id| rules.get(id as usize).copied().flatten(),
         &loot,
@@ -132,7 +134,7 @@ pub fn handler(ctx: Context<FinalizeMap>, secrets_root: [u8; 32]) -> Result<()> 
     let layout_hash: [u8; 32] = {
         let info = accounts.layout.to_account_info();
         let data = info.try_borrow_data()?;
-        hash(&data[8..8 + MapLayoutDataV2::SIZE]).to_bytes()
+        hash(&data[8..8 + MapLayout::INIT_SPACE]).to_bytes()
     };
     map.core.layout_hash = layout_hash;
     // TODO(post-demo): declared secret counts with the commit-reveal trap (L6.5).

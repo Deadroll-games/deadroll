@@ -2,16 +2,20 @@
 //! `deadroll_rules::loot`, written into each player's temporary cache (`Participation.cache`).
 //!
 //! - A kill marks the monster in `GameSession.unpaid_kills` (`outcomes::monster_killed`); the end
-//!   of the same VRF callback pays it ([`pay_kills`]): the monster's full experience to every
-//!   living player (their share applied) and a body reward to each one whose rewards are rolled,
-//!   then the boss table with its guarantee. A kill outside a callback (over-time damage in
+//!   of the same VRF callback pays it ([`pay_kills`]): a body reward to each living player whose
+//!   rewards are rolled, then for the boss the boss table with its guarantee. Arena update: the
+//!   experience is the pack's, in full to every living player (their share applied) when the
+//!   arena is won (`leave_arena`; the boss pack with the boss kill), not per kill. A kill outside a callback (over-time damage in
 //!   `start_turn`, which has no party accounts) waits for the next callback or the settlement.
 //! - A chest's roll is its own VRF request (`open_chest`): [`open_chest`].
 //!
 //! Every die comes from the VRF value of the action that pays (CLAUDE.md rule 10), each event on
 //! its own stretch of the stream, after the combat rolls.
 use anchor_lang::prelude::*;
-use deadroll_rules::loot::{on_monster_killed, reward_event, LootTable, RewardRoll};
+use deadroll_rules::{
+    arena::on_pack_won,
+    loot::{reward_event, LootTable, RewardRoll},
+};
 use deadroll_types::{CacheSlot, RewardSource, MONSTERS_MAX, NO_TABLE, PARTY_MAX};
 
 use crate::{
@@ -114,10 +118,18 @@ pub fn pay_kills(
         }
         let monster = monsters.get(index)?;
         let profile = monsters.profile(index, monster.level)?;
-        // Experience: every living player, the full amount times their share (Ivan's decision,
-        // patch 11); `on_monster_killed` is the one place that becomes "per pack" later.
+        // Arena update: the experience is the pack's (docs/PARTY_AND_TURNS.md 4.1.4): the boss
+        // pays its whole pack's with its kill, a regular pack pays at `leave_arena`.
         let alive = session.alive_mask & session.full_mask();
-        let xp = on_monster_killed(profile.xp, alive, &session.xp_bp);
+        let xp = if profile.boss {
+            on_pack_won(
+                crate::arena::arena_pack_xp(monsters)?,
+                alive,
+                &session.xp_bp,
+            )
+        } else {
+            [0; PARTY_MAX]
+        };
         let eligible = session.loot_eligible();
         // The body (`profile.loot_table` is `NO_TABLE` for a summoned helper).
         let body = match monsters.loot_table(profile.loot_table)? {
@@ -322,13 +334,36 @@ mod tests {
         s.unpaid_kills = 0b111;
         let mut mem = Mem::default();
         for left in [0b110, 0b100, 0b000] {
-            let xp = mem.xp;
             pay_kills_within_budget(&mut s, key, &monsters, [7; 32], &mut mem).unwrap();
-            assert_eq!(s.unpaid_kills, left);
-            assert!(mem.xp[0] > xp[0], "each callback pays one kill");
+            assert_eq!(s.unpaid_kills, left, "each callback pays one kill");
         }
         pay_kills_within_budget(&mut s, key, &monsters, [7; 32], &mut mem).unwrap();
         assert_eq!(s.unpaid_kills, 0);
+        // Arena update: a regular kill pays no experience, the pack does (`leave_arena`).
+        assert_eq!(mem.xp, [0; PARTY_MAX]);
+    }
+
+    #[test]
+    fn the_boss_kill_pays_its_whole_pack() {
+        use crate::state::test_support::{ids, monster, monsters_account, profile};
+        let key = Pubkey::new_unique();
+        let mut boss = monster(5, 5);
+        boss.bestiary_id = ids::GOBLIN_CHIEFTAIN;
+        boss.level = 1;
+        let mut helper = monster(6, 5);
+        helper.bestiary_id = ids::GOBLIN_WARRIOR;
+        helper.level = 1;
+        let mut account = monsters_account(key, &[boss, helper]);
+        let info = account.info();
+        let monsters = Monsters::load(&info, &key).unwrap();
+        let mut s = crate::state::test_support::session(&[Default::default(); 2]);
+        s.core.player_count = 2;
+        s.boss_table = 1;
+        s.xp_bp[1] = 5_000;
+        let mut mem = Mem::default();
+        pay_kills(&mut s, key, &monsters, 0b01, [7; 32], &mut mem).unwrap();
+        let pack = profile(ids::GOBLIN_CHIEFTAIN).xp + profile(ids::GOBLIN_WARRIOR).xp;
+        assert_eq!(mem.xp, [pack, pack / 2, 0, 0]);
     }
 
     #[test]

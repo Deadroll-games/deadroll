@@ -283,7 +283,7 @@ impl<'a, 'info> Cb<'a, 'info> {
         skill: &SkillStats,
     ) -> Result<([u8; LINE_TARGETS_MAX], usize)> {
         let to = cell_of(&self.monsters.get(target)?);
-        let layout = MapLayoutView::load(self.layout)?;
+        let layout = MapLayoutView::load(self.layout, session.ground())?;
         let line = skill_line(session, &layout, from, to, skill.ext.range);
         let count = self.monsters.count()?;
         let mut units = [(0u8, Cell::default()); MONSTERS_MAX];
@@ -439,7 +439,7 @@ impl<'a, 'info> Cb<'a, 'info> {
             *m = self.monsters.get(i as u8)?;
         }
         let defense: [MonsterDefense; MONSTERS_MAX] = self.monsters.defenses()?;
-        let layout = MapLayoutView::load(self.layout)?;
+        let layout = MapLayoutView::load(self.layout, session.ground())?;
         let mut field = SessionField {
             width: session.width,
             height: session.height,
@@ -458,9 +458,10 @@ impl<'a, 'info> Cb<'a, 'info> {
             field.units[field.unit_count] = cell_of(m);
             field.unit_count += 1;
         }
-        for (i, c) in session.chest_list().iter().enumerate() {
-            if session.chests_opened & (1 << i) == 0 {
-                field.units[field.unit_count] = c.cell();
+        // Arena update: the chests are on the map, the packs' visible monsters too.
+        if session.ground().is_none() {
+            for c in session.closed_chests() {
+                field.units[field.unit_count] = c;
                 field.unit_count += 1;
             }
         }
@@ -705,7 +706,7 @@ impl<'a, 'info> Cb<'a, 'info> {
         if skill.blocks.target == Target::Line && target != caster {
             let from = session.player_pos[caster as usize];
             let to = session.player_pos[target as usize];
-            let layout = MapLayoutView::load(self.layout)?;
+            let layout = MapLayoutView::load(self.layout, session.ground())?;
             let line = skill_line(session, &layout, from, to, skill.ext.range);
             let mut units = [(0u8, Cell::default()); PARTY_MAX];
             let mut m = 0;

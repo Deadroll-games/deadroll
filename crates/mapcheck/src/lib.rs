@@ -4,6 +4,7 @@
 //! the website builder runs the same function through WASM.
 #![no_std]
 
+pub mod arena;
 pub mod limits;
 pub mod loot;
 pub mod path;
@@ -13,10 +14,12 @@ pub mod walk;
 
 use deadroll_skillcheck::{check_monster_selection, monster::RECORDS_MAX, SkillError};
 use deadroll_types::{
-    Cell, MapLayoutDataV2, PointKind, POINTS_MAX, SESSION_SKILLS_MAX, SPAWNS_MAX, SPAWN_ELITE,
+    Cell, MapArenasData, MapLayoutDataV2, PointKind, POINTS_MAX, SESSION_SKILLS_MAX,
+    SESSION_TEMPLATES_MAX, SPAWNS_MAX, SPAWN_ELITE,
 };
 
-use limits::{tier_limits, BOSSES, BOSS_HELPERS, PACK_RADIUS, SIDE_MAX, SIDE_MIN};
+use arena::ArenaLimits;
+use limits::{tier_limits, BOSSES, BOSS_HELPERS, SIDE_MAX, SIDE_MIN};
 use loot::{MapLoot, TableRules};
 use roster::{Role, SpawnRules};
 use tiles::{cell_index, in_bounds, TileRules};
@@ -42,9 +45,12 @@ pub enum MapCheckError {
     ExitMismatch,
     /// `spawn_count` is above `SPAWNS_MAX`.
     TooManySpawns,
+    /// Arena update: a spawn outside its pack's arena (before it, outside the map).
     SpawnOutOfBounds,
+    /// Arena update: a spawn on an arena cell that cannot be entered.
     SpawnNotPassable,
-    /// Two spawns on one cell, or a spawn on the entrance or the exit.
+    /// Two spawns of one pack on one arena cell (before the arena update: two spawns on one map
+    /// cell, or a spawn on the entrance or the exit).
     SpawnOverlap,
     /// The bestiary id has no role.
     UnknownMonster,
@@ -64,11 +70,11 @@ pub enum MapCheckError {
     TooManyPacks,
     /// Two loners in one pack.
     TwoLoners,
-    /// Two monsters of one pack farther apart than `PACK_RADIUS`.
+    /// Unused since the arena update (a pack stands in its own arena).
     PackTooSpread,
     /// No path from the entrance to the exit.
     ExitUnreachable,
-    /// A spawn cannot be reached from the entrance.
+    /// Unused since the arena update (`PackUnreachable`, `ArenaUnreachable`).
     SpawnUnreachable,
     /// Patch 6. The map tier is below the template's minimum tier (BESTIARY 4, MAP 7.2).
     TierBelowTemplate,
@@ -114,6 +120,35 @@ pub enum MapCheckError {
     PointNotPassable,
     /// The entrance and the exit on one cell.
     PointOverlap,
+    // Arena update (docs/MAP_DESCRIPTION.md 17.2, 17.3).
+    /// A spawn's pack number is not below `PACKS_MAX`.
+    PackOutOfRange,
+    /// A spawn's pack has no arena.
+    PackWithoutArena,
+    /// More monsters in one pack than an arena holds (`ARENA_MONSTERS_MAX`).
+    PackTooBig,
+    /// An arena side outside the limits of `BalanceConfig.arena`.
+    ArenaSizeOutOfRange,
+    /// An arena cell with a tile type the `Tileset` does not have.
+    ArenaInvalidTile,
+    /// The monster shown on the map is not a spawn of its pack.
+    VisibleNotInPack,
+    /// The visible monster's map cell is outside the map.
+    PackOutOfBounds,
+    /// The visible monster's map cell cannot be entered.
+    PackNotPassable,
+    /// The visible monster stands on the entrance, the exit, a chest or another pack's cell.
+    PackOverlap,
+    /// The visible monster stands next to the entrance: the party would start in the fight.
+    PackAtEntrance,
+    /// No cell next to the visible monster can be reached from the entrance.
+    PackUnreachable,
+    /// From some side the arena has no free cells for a full party.
+    ArenaNoRoom,
+    /// From some side the entering party is split, or cannot reach a monster.
+    ArenaUnreachable,
+    /// More distinct bestiary templates than a session copies (`SESSION_TEMPLATES_MAX`).
+    TooManyTemplates,
 }
 
 impl MapCheckError {
@@ -124,12 +159,16 @@ impl MapCheckError {
 
 /// Runs every builder rule on a map. `tiles` are the registry `Tileset` (patch 13);
 /// `template_of` gives a bestiary id's rules from the registry (`None`: no such template);
-/// `loot` the chest and reward table rules (patch 11).
+/// `loot` the chest and reward table rules (patch 11); `arenas` and `arena_limits` the packs'
+/// arenas (arena update, [`arena`]).
+#[allow(clippy::too_many_arguments)]
 pub fn check_map<R: Fn(u8) -> Option<TableRules>>(
     width: u8,
     height: u8,
     tier: u8,
     layout: &MapLayoutDataV2,
+    arenas: &MapArenasData,
+    arena_limits: ArenaLimits,
     tiles: &TileRules,
     template_of: impl Fn(u8) -> Option<SpawnRules>,
     loot: &MapLoot<R>,
@@ -158,23 +197,12 @@ pub fn check_map<R: Fn(u8) -> Option<TableRules>>(
     let mut elites = 0u8;
     // Distinct chosen skills, bit per `monster_skills` index.
     let mut skills = [0u64; RECORDS_MAX / 64];
-    for (i, spawn) in spawns.iter().enumerate() {
-        let cell = Cell {
-            x: spawn.x,
-            y: spawn.y,
-        };
-        if !in_bounds(cell, width, height) {
-            return Err(E::SpawnOutOfBounds);
-        }
-        if !tiles.is_passable(layout.cells[cell_index(cell.x, cell.y)]) {
-            return Err(E::SpawnNotPassable);
-        }
-        let taken =
-            ends.contains(&cell) || spawns[..i].iter().any(|s| s.x == spawn.x && s.y == spawn.y);
-        if taken {
-            return Err(E::SpawnOverlap);
-        }
+    // Distinct templates, bit per bestiary id.
+    let mut templates = [0u64; 4];
+    for spawn in spawns {
         let t = template_of(spawn.bestiary_id).ok_or(E::UnknownMonster)?;
+        let id = spawn.bestiary_id as usize;
+        templates[id / 64] |= 1 << (id % 64);
         let role = t.role;
         if !(limits.level_min..=limits.level_max).contains(&spawn.level) {
             return Err(E::LevelOutOfTier);
@@ -215,6 +243,9 @@ pub fn check_map<R: Fn(u8) -> Option<TableRules>>(
     if skills.iter().map(|w| w.count_ones()).sum::<u32>() > SESSION_SKILLS_MAX as u32 {
         return Err(E::TooManySessionSkills);
     }
+    if templates.iter().map(|w| w.count_ones()).sum::<u32>() > SESSION_TEMPLATES_MAX as u32 {
+        return Err(E::TooManyTemplates);
+    }
     let boss_pack = boss_pack.ok_or(E::BossCount)?;
 
     // Roles are known for every spawn here, so `unwrap_or` never hides an id.
@@ -247,14 +278,11 @@ pub fn check_map<R: Fn(u8) -> Option<TableRules>>(
 
     for (i, a) in spawns.iter().enumerate() {
         for b in &spawns[i + 1..] {
-            if a.pack != b.pack {
-                continue;
-            }
-            if role(a.bestiary_id) == Role::Loner && role(b.bestiary_id) == Role::Loner {
+            if a.pack == b.pack
+                && role(a.bestiary_id) == Role::Loner
+                && role(b.bestiary_id) == Role::Loner
+            {
                 return Err(E::TwoLoners);
-            }
-            if a.x.abs_diff(b.x).max(a.y.abs_diff(b.y)) > PACK_RADIUS {
-                return Err(E::PackTooSpread);
             }
         }
     }
@@ -274,13 +302,18 @@ pub fn check_map<R: Fn(u8) -> Option<TableRules>>(
     if !reach.contains(exit) {
         return Err(E::ExitUnreachable);
     }
-    if spawns
-        .iter()
-        .any(|s| !reach.contains(Cell { x: s.x, y: s.y }))
-    {
-        return Err(E::SpawnUnreachable);
-    }
-    loot::check_chest_access(width, height, layout, &reach)
+    loot::check_chest_access(width, height, layout, &reach)?;
+    arena::check_arenas(
+        width,
+        height,
+        layout,
+        arenas,
+        arena_limits,
+        tiles,
+        ends,
+        &chests[..chest_count],
+        &reach,
+    )
 }
 
 /// Every cell inside the map has a tile type the `Tileset` has (any variant).
@@ -346,7 +379,10 @@ fn check_points(
 mod tests {
     use super::*;
     use deadroll_skillcheck::Category;
-    use deadroll_types::{cell_byte, MapPoint, Pubkey, Spawn, TileKind, MAP_CELLS, NO_TABLE};
+    use deadroll_types::{
+        cell_byte, Facing, MapPoint, PackLayout, Pubkey, Spawn, TileKind, ARENA_CELLS,
+        ARENA_SIDE_MAX, MAP_CELLS, NO_TABLE, PACKS_MAX,
+    };
 
     /// Test bestiary ids (the shipped registry order).
     mod ids {
@@ -415,14 +451,15 @@ mod tests {
             chest(5, 5, tables::SMALL),
         ]);
         let mut spawns = [Spawn::default(); SPAWNS_MAX];
+        // Arena update: the cells are in each pack's arena ([`arenas`]).
         let list = [
-            spawn(ids::WOLF, 6, 2, 1),
-            spawn(ids::WOLF, 7, 3, 1),
-            spawn(ids::GOBLIN, 2, 10, 2),
-            spawn(ids::GOBLIN, 3, 11, 2),
-            spawn(ids::GOBLIN_CHIEFTAIN, 12, 12, 3),
-            spawn(ids::GOBLIN_WARRIOR, 11, 12, 3),
-            spawn(ids::GOBLIN_SHAMAN, 12, 11, 3),
+            spawn(ids::WOLF, 4, 4, 1),
+            spawn(ids::WOLF, 5, 4, 1),
+            spawn(ids::GOBLIN, 4, 4, 2),
+            spawn(ids::GOBLIN, 4, 5, 2),
+            spawn(ids::GOBLIN_CHIEFTAIN, 4, 4, 3),
+            spawn(ids::GOBLIN_WARRIOR, 3, 4, 3),
+            spawn(ids::GOBLIN_SHAMAN, 4, 3, 3),
         ];
         spawns[..list.len()].copy_from_slice(&list);
         MapLayoutDataV2 {
@@ -502,8 +539,75 @@ mod tests {
         }
     }
 
+    /// The arena sizes of the tests.
+    const LIMITS: ArenaLimits = ArenaLimits {
+        side_min: 6,
+        side_max: 12,
+    };
+
+    fn pack(visible: u8, x: u8, y: u8, facing: Facing) -> PackLayout {
+        PackLayout {
+            visible,
+            x,
+            y,
+            facing,
+            width: 8,
+            height: 8,
+        }
+    }
+
+    /// The demo's packs: wolves (pack 1), goblins (2) and the boss pack (3), each in an open
+    /// 8x8 arena.
+    fn arenas() -> MapArenasData {
+        let mut a = MapArenasData::EMPTY;
+        a.packs[1] = pack(0, 6, 2, Facing::S);
+        a.packs[2] = pack(2, 2, 10, Facing::E);
+        a.packs[3] = pack(4, 12, 12, Facing::N);
+        for p in 1..4 {
+            a.cells[p] = [FLOOR; ARENA_CELLS];
+        }
+        a
+    }
+
+    /// [`check_map`] with the demo arenas.
+    fn check_t(
+        width: u8,
+        height: u8,
+        tier: u8,
+        layout: &MapLayoutDataV2,
+        tiles: &TileRules,
+        template_of: impl Fn(u8) -> Option<SpawnRules>,
+        loot: &TestLoot,
+    ) -> Result<(), MapCheckError> {
+        check_map(
+            width,
+            height,
+            tier,
+            layout,
+            &arenas(),
+            LIMITS,
+            tiles,
+            template_of,
+            loot,
+        )
+    }
+
     fn check(layout: &MapLayoutDataV2) -> Result<(), MapCheckError> {
-        check_map(16, 16, 1, layout, &tiles(), p0_role, &test_loot())
+        check_t(16, 16, 1, layout, &tiles(), p0_role, &test_loot())
+    }
+
+    fn check_with(layout: &MapLayoutDataV2, arenas: &MapArenasData) -> Result<(), MapCheckError> {
+        check_map(
+            16,
+            16,
+            1,
+            layout,
+            arenas,
+            LIMITS,
+            &tiles(),
+            p0_role,
+            &test_loot(),
+        )
     }
 
     fn set(layout: &mut MapLayoutDataV2, x: u8, y: u8, kind: TileKind) {
@@ -522,7 +626,7 @@ mod tests {
         layout.points[0] = point(PointKind::Entrance, Cell { x: 0, y: 0 }, 0);
         layout.points[1] = point(PointKind::Exit, Cell { x: 31, y: 31 }, 0);
         assert_eq!(
-            check_map(32, 32, 1, &layout, &tiles(), p0_role, &test_loot()),
+            check_t(32, 32, 1, &layout, &tiles(), p0_role, &test_loot()),
             Ok(())
         );
     }
@@ -531,11 +635,11 @@ mod tests {
     fn rejects_size() {
         let layout = demo();
         assert_eq!(
-            check_map(7, 16, 1, &layout, &tiles(), p0_role, &test_loot()),
+            check_t(7, 16, 1, &layout, &tiles(), p0_role, &test_loot()),
             Err(MapCheckError::SizeOutOfRange)
         );
         assert_eq!(
-            check_map(16, 33, 1, &layout, &tiles(), p0_role, &test_loot()),
+            check_t(16, 33, 1, &layout, &tiles(), p0_role, &test_loot()),
             Err(MapCheckError::SizeOutOfRange)
         );
     }
@@ -544,11 +648,11 @@ mod tests {
     fn rejects_tier() {
         let layout = demo();
         assert_eq!(
-            check_map(16, 16, 0, &layout, &tiles(), p0_role, &test_loot()),
+            check_t(16, 16, 0, &layout, &tiles(), p0_role, &test_loot()),
             Err(MapCheckError::TierOutOfRange)
         );
         assert_eq!(
-            check_map(16, 16, 3, &layout, &tiles(), p0_role, &test_loot()),
+            check_t(16, 16, 3, &layout, &tiles(), p0_role, &test_loot()),
             Err(MapCheckError::TierOutOfRange)
         );
     }
@@ -563,7 +667,7 @@ mod tests {
         more.known |= 1 << TileKind::COUNT;
         more.cost[TileKind::COUNT] = 1;
         assert_eq!(
-            check_map(16, 16, 1, &layout, &more, p0_role, &test_loot()),
+            check_t(16, 16, 1, &layout, &more, p0_role, &test_loot()),
             Ok(())
         );
     }
@@ -669,33 +773,41 @@ mod tests {
     }
 
     #[test]
-    fn rejects_spawn_out_of_bounds() {
+    fn rejects_spawn_out_of_its_arena() {
+        // Arena update: the cell is in the pack's 8x8 arena, not on the 16x16 map.
         let mut layout = demo();
-        layout.spawns[0].x = 16;
+        layout.spawns[0].x = 8;
         assert_eq!(check(&layout), Err(MapCheckError::SpawnOutOfBounds));
+        layout.spawns[0].x = 7;
+        assert_eq!(check(&layout), Ok(()));
     }
 
     #[test]
-    fn rejects_spawn_on_wall() {
+    fn rejects_spawn_on_an_arena_wall() {
+        let mut a = arenas();
+        a.cells[1][4 * ARENA_SIDE_MAX + 4] = WALL;
+        assert_eq!(
+            check_with(&demo(), &a),
+            Err(MapCheckError::SpawnNotPassable)
+        );
+        // A wall under the map cell of a hidden monster changes nothing now.
         let mut layout = demo();
-        set(&mut layout, 6, 2, TileKind::Wall);
-        assert_eq!(check(&layout), Err(MapCheckError::SpawnNotPassable));
+        set(&mut layout, 7, 3, TileKind::Wall);
+        assert_eq!(check(&layout), Ok(()));
     }
 
     #[test]
-    fn rejects_overlap() {
+    fn rejects_overlap_within_a_pack_only() {
         let mut layout = demo();
-        layout.spawns[1].x = 6;
-        layout.spawns[1].y = 2;
+        layout.spawns[1].x = 4;
         assert_eq!(check(&layout), Err(MapCheckError::SpawnOverlap));
-        let mut layout = demo();
-        layout.spawns[0].x = ENTRANCE.x;
-        layout.spawns[0].y = ENTRANCE.y;
-        assert_eq!(check(&layout), Err(MapCheckError::SpawnOverlap));
-        let mut layout = demo();
-        layout.spawns[4].x = EXIT.x;
-        layout.spawns[4].y = EXIT.y;
-        assert_eq!(check(&layout), Err(MapCheckError::SpawnOverlap));
+        // Different packs may use the same arena cell: they never share an arena.
+        let layout = demo();
+        assert_eq!(
+            (layout.spawns[0].x, layout.spawns[0].y),
+            (layout.spawns[2].x, layout.spawns[2].y)
+        );
+        assert_eq!(check(&layout), Ok(()));
     }
 
     #[test]
@@ -718,7 +830,7 @@ mod tests {
             s.level = 3;
         }
         assert_eq!(
-            check_map(16, 16, 2, &layout, &tiles(), p0_role, &test_loot()),
+            check_t(16, 16, 2, &layout, &tiles(), p0_role, &test_loot()),
             Ok(())
         );
     }
@@ -791,7 +903,7 @@ mod tests {
             }
         };
         assert_eq!(
-            check_map(
+            check_t(
                 16,
                 16,
                 1,
@@ -806,7 +918,7 @@ mod tests {
         let mut layout = demo();
         layout.spawns[1].bestiary_id = ids::GOBLIN;
         assert_eq!(
-            check_map(
+            check_t(
                 16,
                 16,
                 1,
@@ -820,11 +932,13 @@ mod tests {
     }
 
     #[test]
-    fn rejects_spread_pack() {
+    fn a_pack_may_spread_over_its_arena() {
+        // Arena update: no pack radius any more.
         let mut layout = demo();
-        layout.spawns[1].x = 6 + PACK_RADIUS + 1;
-        assert_eq!(check(&layout), Err(MapCheckError::PackTooSpread));
-        layout.spawns[1].x = 6 + PACK_RADIUS;
+        layout.spawns[1].x = 7;
+        layout.spawns[1].y = 7;
+        layout.spawns[0].x = 0;
+        layout.spawns[0].y = 1;
         assert_eq!(check(&layout), Ok(()));
     }
 
@@ -838,9 +952,9 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unreachable_spawn() {
+    fn rejects_unreachable_pack() {
         let mut layout = demo();
-        // Wall in the first wolf.
+        // Wall in the wolves' map cell (6, 2).
         for (x, y) in [
             (5, 1),
             (6, 1),
@@ -853,9 +967,213 @@ mod tests {
         ] {
             set(&mut layout, x, y, TileKind::Wall);
         }
-        layout.spawns[1].x = 7;
-        layout.spawns[1].y = 4;
-        assert_eq!(check(&layout), Err(MapCheckError::SpawnUnreachable));
+        assert_eq!(check(&layout), Err(MapCheckError::PackUnreachable));
+    }
+
+    #[test]
+    fn every_used_pack_has_an_arena_and_every_spawn_a_used_pack() {
+        let mut layout = demo();
+        layout.spawns[1].pack = PACKS_MAX as u8;
+        // Five packs on tier 1 fail the pack count first; drop one.
+        layout.spawns[3].pack = 2;
+        assert_eq!(check(&layout), Err(MapCheckError::PackOutOfRange));
+        let mut layout = demo();
+        layout.spawns[1].pack = 0;
+        assert_eq!(check(&layout), Err(MapCheckError::PackWithoutArena));
+        // An arena without monsters: its visible monster is not in it.
+        let mut a = arenas();
+        a.packs[5] = pack(0, 9, 9, Facing::N);
+        a.cells[5] = [FLOOR; ARENA_CELLS];
+        assert_eq!(
+            check_with(&demo(), &a),
+            Err(MapCheckError::VisibleNotInPack)
+        );
+        let mut a = arenas();
+        a.packs[1].visible = 2;
+        assert_eq!(
+            check_with(&demo(), &a),
+            Err(MapCheckError::VisibleNotInPack)
+        );
+        a.packs[1].visible = 1;
+        assert_eq!(check_with(&demo(), &a), Ok(()));
+        a.packs[1].visible = 40;
+        assert_eq!(
+            check_with(&demo(), &a),
+            Err(MapCheckError::VisibleNotInPack)
+        );
+    }
+
+    #[test]
+    fn rejects_arena_size_and_tiles() {
+        let mut a = arenas();
+        a.packs[2].width = 5;
+        assert_eq!(
+            check_with(&demo(), &a),
+            Err(MapCheckError::ArenaSizeOutOfRange)
+        );
+        a.packs[2].width = 13;
+        assert_eq!(
+            check_with(&demo(), &a),
+            Err(MapCheckError::ArenaSizeOutOfRange)
+        );
+        a.packs[2].width = 12;
+        assert_eq!(check_with(&demo(), &a), Ok(()));
+        // The storage cap holds even if the limits allow more.
+        let wide = ArenaLimits {
+            side_min: 6,
+            side_max: 40,
+        };
+        a.packs[2].width = 13;
+        assert_eq!(
+            check_map(
+                16,
+                16,
+                1,
+                &demo(),
+                &a,
+                wide,
+                &tiles(),
+                p0_role,
+                &test_loot()
+            ),
+            Err(MapCheckError::ArenaSizeOutOfRange)
+        );
+        let mut a = arenas();
+        a.cells[3][7 * ARENA_SIDE_MAX + 7] = cell_byte(TileKind::COUNT as u8, 0);
+        assert_eq!(
+            check_with(&demo(), &a),
+            Err(MapCheckError::ArenaInvalidTile)
+        );
+        // Bytes past the arena's size are not looked at.
+        let mut a = arenas();
+        a.cells[3][7 * ARENA_SIDE_MAX + 8] = cell_byte(TileKind::COUNT as u8, 0);
+        assert_eq!(check_with(&demo(), &a), Ok(()));
+    }
+
+    #[test]
+    fn rejects_pack_map_cell() {
+        let check_pack = |x: u8, y: u8| {
+            let mut a = arenas();
+            a.packs[1].x = x;
+            a.packs[1].y = y;
+            check_with(&demo(), &a)
+        };
+        assert_eq!(check_pack(16, 2), Err(MapCheckError::PackOutOfBounds));
+        assert_eq!(check_pack(0, 5), Err(MapCheckError::PackNotPassable));
+        assert_eq!(check_pack(EXIT.x, EXIT.y), Err(MapCheckError::PackOverlap));
+        assert_eq!(check_pack(5, 5), Err(MapCheckError::PackOverlap));
+        assert_eq!(check_pack(2, 10), Err(MapCheckError::PackOverlap));
+        assert_eq!(check_pack(2, 2), Err(MapCheckError::PackAtEntrance));
+        assert_eq!(
+            check_pack(ENTRANCE.x, ENTRANCE.y),
+            Err(MapCheckError::PackOverlap)
+        );
+        assert_eq!(check_pack(3, 3), Ok(()));
+    }
+
+    #[test]
+    fn rejects_arena_without_room_or_path() {
+        // A wall ring around the wolves: the party cannot reach them from any side.
+        let mut a = arenas();
+        for (x, y) in [
+            (3, 3),
+            (4, 3),
+            (5, 3),
+            (6, 3),
+            (3, 4),
+            (6, 4),
+            (3, 5),
+            (4, 5),
+            (5, 5),
+            (6, 5),
+        ] {
+            a.cells[1][y * ARENA_SIDE_MAX + x] = WALL;
+        }
+        assert_eq!(
+            check_with(&demo(), &a),
+            Err(MapCheckError::ArenaUnreachable)
+        );
+        // A wall across the arena splits the party coming from the north-west corner side.
+        let mut a = arenas();
+        for i in 0..8 {
+            a.cells[2][(7 - i) * ARENA_SIDE_MAX + i] = WALL;
+        }
+        assert_eq!(
+            check_with(&demo(), &a),
+            Err(MapCheckError::ArenaUnreachable)
+        );
+        // A 6x6 arena of walls with 3 floor cells has no room for 4.
+        let mut a = arenas();
+        a.packs[3].width = 6;
+        a.packs[3].height = 6;
+        a.cells[3] = [WALL; ARENA_CELLS];
+        for (x, y) in [(4, 4), (3, 4), (4, 3), (0, 0), (1, 0), (2, 0)] {
+            a.cells[3][y * ARENA_SIDE_MAX + x] = FLOOR;
+        }
+        assert_eq!(check_with(&demo(), &a), Err(MapCheckError::ArenaNoRoom));
+    }
+
+    #[test]
+    fn rejects_too_many_templates() {
+        let many = |id: u8| {
+            if id >= 10 {
+                Some(SpawnRules::plain(Role::Fast))
+            } else {
+                p0_role(id)
+            }
+        };
+        let mut layout = demo();
+        // 8 more templates in the wolves' pack: 5 + 8 = 13 distinct.
+        for i in 0..8u8 {
+            layout.spawns[7 + i as usize] = Spawn {
+                bestiary_id: 10 + i,
+                ..spawn(ids::WOLF, i, 0, 1)
+            };
+        }
+        layout.spawn_count = 15;
+        for s in layout.spawns.iter_mut() {
+            s.level = 3;
+        }
+        assert_eq!(
+            check_t(16, 16, 2, &layout, &tiles(), many, &test_loot()),
+            Err(MapCheckError::TooManyTemplates)
+        );
+        // 12 distinct pass this rule (and fail the tier's monster count next).
+        layout.spawns[14].bestiary_id = ids::WOLF;
+        assert_eq!(
+            check_t(16, 16, 2, &layout, &tiles(), many, &test_loot()),
+            Err(MapCheckError::TooManyMonsters)
+        );
+    }
+
+    #[test]
+    fn rejects_a_pack_bigger_than_an_arena() {
+        // The tier limits keep packs smaller today; the arena rule holds on its own.
+        let mut layout = demo();
+        for i in 0..8u8 {
+            layout.spawns[7 + i as usize] = spawn(ids::WOLF, i, 7, 1);
+        }
+        layout.spawn_count = 15;
+        let (chests, count) = loot::chest_cells(&layout);
+        let reach =
+            path::reachable_avoiding(&layout.cells, &tiles(), 16, 16, ENTRANCE, &chests[..count]);
+        let run = |layout: &MapLayoutDataV2| {
+            arena::check_arenas(
+                16,
+                16,
+                layout,
+                &arenas(),
+                LIMITS,
+                &tiles(),
+                [ENTRANCE, EXIT],
+                &chests[..count],
+                &reach,
+            )
+        };
+        assert_eq!(run(&layout), Err(MapCheckError::PackTooBig));
+        // 2 wolves and 6 more: exactly an arena.
+        layout.spawn_count = 13;
+        assert_eq!(run(&layout), Ok(()));
     }
 
     #[test]
@@ -866,6 +1184,8 @@ mod tests {
         assert_eq!(MapCheckError::MinPlayersOutOfRange.code(), 29);
         assert_eq!(MapCheckError::ChestUnreachable.code(), 40);
         assert_eq!(MapCheckError::PointOverlap.code(), 44);
+        assert_eq!(MapCheckError::PackOutOfRange.code(), 45);
+        assert_eq!(MapCheckError::TooManyTemplates.code(), 58);
     }
 
     #[test]
@@ -917,12 +1237,12 @@ mod tests {
         let layout = demo();
         for bad in [0, 5] {
             assert_eq!(
-                check_map(16, 16, 1, &layout, &tiles(), p0_role, &loot_for(bad)),
+                check_t(16, 16, 1, &layout, &tiles(), p0_role, &loot_for(bad)),
                 Err(MapCheckError::MinPlayersOutOfRange)
             );
         }
         assert_eq!(
-            check_map(16, 16, 1, &layout, &tiles(), p0_role, &loot_for(4)),
+            check_t(16, 16, 1, &layout, &tiles(), p0_role, &loot_for(4)),
             Ok(())
         );
     }
@@ -933,7 +1253,7 @@ mod tests {
         let small = |x, y| chest(x, y, tables::SMALL);
         set_chests(&mut layout, &[small(5, 5), small(6, 6)]);
         assert_eq!(
-            check_map(16, 16, 1, &layout, &tiles(), p0_role, &loot_for(2)),
+            check_t(16, 16, 1, &layout, &tiles(), p0_role, &loot_for(2)),
             Ok(()),
             "the tier allows two"
         );
@@ -955,10 +1275,13 @@ mod tests {
         assert_eq!(check(&layout), Err(MapCheckError::ChestNotPassable));
         set(&mut layout, 0, 5, TileKind::DeepWater);
         assert_eq!(check(&layout), Err(MapCheckError::ChestNotPassable));
-        for cell in [ENTRANCE, EXIT, Cell { x: 6, y: 2 }] {
+        for cell in [ENTRANCE, EXIT] {
             *chest0(&mut layout) = chest(cell.x, cell.y, tables::SMALL);
             assert_eq!(check(&layout), Err(MapCheckError::ChestOverlap));
         }
+        // Arena update: a chest on a pack's map cell is the pack's overlap.
+        *chest0(&mut layout) = chest(6, 2, tables::SMALL);
+        assert_eq!(check(&layout), Err(MapCheckError::PackOverlap));
         let small = chest(5, 5, tables::SMALL);
         set_chests(&mut layout, &[small, small]);
         assert_eq!(check(&layout), Err(MapCheckError::ChestOverlap));
@@ -995,11 +1318,11 @@ mod tests {
             &[chest(5, 5, tables::SMALL), chest(6, 6, tables::SMALL)],
         );
         assert_eq!(
-            check_map(16, 16, 1, &layout, &tiles(), p0_role, &loot_for(1)),
+            check_t(16, 16, 1, &layout, &tiles(), p0_role, &loot_for(1)),
             Err(MapCheckError::OverBudget)
         );
         assert_eq!(
-            check_map(16, 16, 1, &layout, &tiles(), p0_role, &loot_for(2)),
+            check_t(16, 16, 1, &layout, &tiles(), p0_role, &loot_for(2)),
             Ok(())
         );
     }
@@ -1018,7 +1341,7 @@ mod tests {
     }
 
     #[test]
-    fn closed_chest_hides_a_spawn() {
+    fn closed_chest_hides_a_pack() {
         let mut layout = demo();
         // Wall off the wolves' corner but one gap, then put the chest in the gap.
         for x in 1..=8 {
@@ -1031,7 +1354,7 @@ mod tests {
         layout.points[0] = point(PointKind::Entrance, Cell { x: 1, y: 6 }, 0);
         assert_eq!(check(&layout), Ok(()));
         *chest0(&mut layout) = chest(3, 4, tables::SMALL);
-        assert_eq!(check(&layout), Err(MapCheckError::SpawnUnreachable));
+        assert_eq!(check(&layout), Err(MapCheckError::PackUnreachable));
     }
 
     #[test]
@@ -1075,29 +1398,29 @@ mod tests {
         let roster = with_pool(0);
         // No skills chosen while the pool has some.
         assert_eq!(
-            check_map(16, 16, 1, &layout, &tiles(), &roster, &test_loot()),
+            check_t(16, 16, 1, &layout, &tiles(), &roster, &test_loot()),
             Err(MapCheckError::MonsterSkillCount)
         );
         layout.spawns[0].skills = 0b1_0111;
         layout.spawns[1].skills = 0b1_1110;
         assert_eq!(
-            check_map(16, 16, 1, &layout, &tiles(), &roster, &test_loot()),
+            check_t(16, 16, 1, &layout, &tiles(), &roster, &test_loot()),
             Ok(())
         );
         layout.spawns[1].skills = 0b10_0111;
         assert_eq!(
-            check_map(16, 16, 1, &layout, &tiles(), &roster, &test_loot()),
+            check_t(16, 16, 1, &layout, &tiles(), &roster, &test_loot()),
             Err(MapCheckError::MonsterSkillUnknown)
         );
         // An elite takes all four actives.
         layout.spawns[1].skills = 0b1_1111;
         assert_eq!(
-            check_map(16, 16, 1, &layout, &tiles(), &roster, &test_loot()),
+            check_t(16, 16, 1, &layout, &tiles(), &roster, &test_loot()),
             Err(MapCheckError::MonsterSkillCount)
         );
         layout.spawns[1].flags = SPAWN_ELITE;
         assert_eq!(
-            check_map(16, 16, 1, &layout, &tiles(), &roster, &test_loot()),
+            check_t(16, 16, 1, &layout, &tiles(), &roster, &test_loot()),
             Ok(())
         );
     }
@@ -1110,7 +1433,7 @@ mod tests {
         layout.spawns[1].flags = SPAWN_ELITE;
         assert_eq!(check(&layout), Err(MapCheckError::TooManyElites));
         assert_eq!(
-            check_map(16, 16, 2, &layout, &tiles(), p0_role, &test_loot()),
+            check_t(16, 16, 2, &layout, &tiles(), p0_role, &test_loot()),
             Err(MapCheckError::LevelOutOfTier)
         );
         let mut layout = demo();
@@ -1127,7 +1450,7 @@ mod tests {
             Some(t)
         };
         assert_eq!(
-            check_map(16, 16, 1, &layout, &tiles(), high, &test_loot()),
+            check_t(16, 16, 1, &layout, &tiles(), high, &test_loot()),
             Err(MapCheckError::TierBelowTemplate)
         );
     }
@@ -1148,7 +1471,7 @@ mod tests {
         }
         // 5 templates x 16 distinct skills = 80 > 32.
         assert_eq!(
-            check_map(16, 16, 1, &layout, &tiles(), roster, &test_loot()),
+            check_t(16, 16, 1, &layout, &tiles(), roster, &test_loot()),
             Err(MapCheckError::TooManySessionSkills)
         );
         // The same two templates share their skills: 2 x 16 = 32 fit.
@@ -1165,7 +1488,7 @@ mod tests {
             Some(t)
         };
         assert_eq!(
-            check_map(16, 16, 1, &layout, &tiles(), two, &test_loot()),
+            check_t(16, 16, 1, &layout, &tiles(), two, &test_loot()),
             Ok(())
         );
     }

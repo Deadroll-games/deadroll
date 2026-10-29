@@ -17,6 +17,7 @@
 //! - Integers only, no allocation, `no_std` without features.
 #![cfg_attr(not(feature = "std"), no_std)]
 
+pub mod arena;
 pub mod aura;
 pub mod config;
 pub mod input;
@@ -37,8 +38,8 @@ pub mod turn;
 pub mod units;
 
 pub use config::{
-    BalanceConfig, FeeTuning, ItemBaseStats, ItemTuning, LootTuning, MonsterScaling, PlayerTuning,
-    LEVELS, MAP_TIERS, TIERS,
+    ArenaTuning, BalanceConfig, FeeTuning, ItemBaseStats, ItemTuning, LootTuning, MonsterScaling,
+    PlayerTuning, LEVELS, MAP_TIERS, TIERS,
 };
 pub use input::{EffectAction, HeroStats, Side, SkillStats, SkillUse};
 pub use items::{EquipError, Equipment, ItemBonus};

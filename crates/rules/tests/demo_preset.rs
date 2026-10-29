@@ -16,6 +16,11 @@
 //! `min_players`, `boss_table` (`reward_tables.json` id) and the visible `chests`. The layout's
 //! points are the entrance, the exit, then the chests in order.
 //!
+//! Arena update: `"packs"`, one entry per pack number the spawns use:
+//! `{ "pack": 1, "visible": 0, "x": 3, "y": 2, "facing": "NW", "rows": ["........", ...] }`:
+//! the spawn shown on the map, its map cell, the facing (`Facing` by name) and the arena rows (the
+//! same characters, no points). A spawn's `x`, `y` are its cell in its pack's arena.
+//!
 //! Optional, for the builder templates: `"biome"` (`Biome`, 0 Caves when absent) and `"variants"`,
 //! one row of digits 0-7 per map row: the variant (bits 2-0) of each cell, 0 when absent. The
 //! variant only picks the picture, the rules ignore it.
@@ -25,8 +30,9 @@ use std::path::PathBuf;
 use deadroll_mapcheck::{check_map, loot::MapLoot, tiles::cell_index};
 use deadroll_rules::{loot::map_rules, registry::Registry, tiles::tile_rules, BalanceConfig};
 use deadroll_types::{
-    cell_byte, Biome, Cell, MapLayoutDataV2, MapPoint, PointKind, Pubkey, Spawn, TileKind,
-    CHESTS_MAX, MAP_CELLS, POINTS_MAX, SPAWNS_MAX,
+    cell_byte, Biome, Cell, Facing, MapArenasData, MapLayoutDataV2, MapPoint, PackLayout,
+    PointKind, Pubkey, Spawn, TileKind, ARENA_SIDE_MAX, CHESTS_MAX, MAP_CELLS, POINTS_MAX,
+    SPAWNS_MAX,
 };
 use serde_json::Value;
 
@@ -56,8 +62,39 @@ fn u8_field(v: &Value, key: &str) -> u8 {
         .unwrap()
 }
 
+/// The packs and arenas of a preset (arena update).
+fn load_arenas(json: &Value) -> MapArenasData {
+    let mut arenas = MapArenasData::EMPTY;
+    for p in json["packs"].as_array().expect("packs") {
+        let n = u8_field(p, "pack") as usize;
+        let rows = p["rows"].as_array().expect("arena rows");
+        let width = rows[0].as_str().expect("arena row").chars().count();
+        let facing = p["facing"].as_str().expect("facing");
+        let facing = *Facing::ALL
+            .iter()
+            .find(|f| format!("{f:?}") == facing)
+            .unwrap_or_else(|| panic!("unknown facing {facing}"));
+        arenas.packs[n] = PackLayout {
+            visible: u8_field(p, "visible"),
+            x: u8_field(p, "x"),
+            y: u8_field(p, "y"),
+            facing,
+            width: width as u8,
+            height: rows.len() as u8,
+        };
+        for (y, row) in rows.iter().enumerate() {
+            let row = row.as_str().expect("arena row");
+            assert_eq!(row.chars().count(), width, "arena row {y} length");
+            for (x, ch) in row.chars().enumerate() {
+                arenas.cells[n][y * ARENA_SIDE_MAX + x] = cell_byte(tile(ch) as u8, 0);
+            }
+        }
+    }
+    arenas
+}
+
 /// Builds the layout described by a preset, as the seed script writes it on-chain.
-fn load(path: &PathBuf) -> (u8, u8, u8, u8, MapLayoutDataV2) {
+fn load(path: &PathBuf) -> (u8, u8, u8, u8, MapLayoutDataV2, MapArenasData) {
     let json: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     let (width, height, tier) = (
         u8_field(&json, "width"),
@@ -162,7 +199,15 @@ fn load(path: &PathBuf) -> (u8, u8, u8, u8, MapLayoutDataV2) {
         boss_table: u8_field(&json, "boss_table"),
         bump: 0,
     };
-    (width, height, tier, u8_field(&json, "min_players"), layout)
+    let arenas = load_arenas(&json);
+    (
+        width,
+        height,
+        tier,
+        u8_field(&json, "min_players"),
+        layout,
+        arenas,
+    )
 }
 
 #[test]
@@ -175,7 +220,7 @@ fn every_preset_passes_the_builder_rules() {
     for entry in std::fs::read_dir(&dir).expect("assets/registry/maps") {
         let path = entry.unwrap().path();
         if path.extension().is_some_and(|e| e == "json") {
-            let (width, height, tier, min_players, layout) = load(&path);
+            let (width, height, tier, min_players, layout, arenas) = load(&path);
             let loot = MapLoot {
                 min_players,
                 rules: map_rules(&cfg.loot, tier),
@@ -187,6 +232,8 @@ fn every_preset_passes_the_builder_rules() {
                     height,
                     tier,
                     &layout,
+                    &arenas,
+                    cfg.arena.limits(),
                     &tiles,
                     |id| reg.spawn_rules(id, &cfg.monsters),
                     &loot

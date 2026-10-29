@@ -1,7 +1,7 @@
 //! Encounters: which registry monsters at which level (elite or not, with which pool skills), on
 //! what arena.
 use deadroll_sim::{
-    presets::{Arena, EncounterSlot},
+    presets::{Approach, Arena, EncounterSlot},
     resolve_fight, EncounterPreset,
 };
 use eframe::egui::{self, Ui};
@@ -40,6 +40,8 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                         skills: None,
                     }],
                     arena: Arena::default(),
+                    approach: Approach::Front,
+                    then: Vec::new(),
                 },
                 |e| &mut e.name,
             );
@@ -88,6 +90,22 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                     ui.label("Gap (columns between the party and the monsters)");
                     widgets::int(ui, &mut e.arena.gap, 1..=30);
                     ui.end_row();
+                    ui.label("Party comes from (back: the party moves first)");
+                    ui.horizontal(|ui| {
+                        ui.radio_value(&mut e.approach, Approach::Front, "front");
+                        ui.radio_value(&mut e.approach, Approach::Back, "back");
+                    });
+                    ui.end_row();
+                    if !e.then.is_empty() {
+                        ui.label("Then (packs after this one, edit the JSON)");
+                        let then: Vec<String> = e
+                            .then
+                            .iter()
+                            .map(|s| format!("{} ({:?})", s.encounter, s.approach))
+                            .collect();
+                        ui.label(then.join(", "));
+                        ui.end_row();
+                    }
                 });
             ui.add_space(6.0);
             ui.strong("Monsters");

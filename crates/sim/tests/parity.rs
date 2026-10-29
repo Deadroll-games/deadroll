@@ -1654,3 +1654,42 @@ fn monster_auras_and_ai_are_the_same() {
         );
     }
 }
+
+/// Arena update: the timeline the simulator runs is the program's: the same arena numbers, the
+/// initiative and Dexterity `set_ready` stores, the same side moving first for every approach.
+#[test]
+fn arena_timeline_matches_the_program() {
+    use deadroll_rules::arena::{delay, first_side, from_back, Approach};
+    use deadroll_sim::presets::Approach as Side;
+    use deadroll_types::{Facing, Stat};
+    let cfg = sim_config();
+    assert_eq!(cfg.arena, program_rules::BALANCE.arena);
+    for (c, set) in demo() {
+        for gear in GEARS {
+            let f = sim_fighter(&c, set, &cfg, gear);
+            let h = program_hero(&c, gear);
+            let dex = Stat::Dexterity as usize;
+            assert_eq!(f.hero.stats[dex], h.stats[dex]);
+            assert_eq!(
+                delay(input::hero::initiative(&cfg, &f.hero), &cfg.arena),
+                delay(
+                    program_rules::hero_initiative(&h),
+                    &program_rules::BALANCE.arena
+                )
+            );
+        }
+    }
+    for &facing in Facing::ALL {
+        for approach in Approach::ALL {
+            let side = if from_back(facing, approach) {
+                Side::Back
+            } else {
+                Side::Front
+            };
+            assert_eq!(
+                deadroll_sim::setup::first_side(side),
+                first_side(facing, approach)
+            );
+        }
+    }
+}

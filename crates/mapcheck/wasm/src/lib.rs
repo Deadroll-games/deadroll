@@ -12,11 +12,11 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use deadroll_mapcheck::{check_map, loot::MapLoot, roster::SpawnRules, MapCheckError};
 use deadroll_rules::{loot::map_rules, map_tables, tiles::tile_rules, BalanceConfig};
-use deadroll_types::MapLayoutDataV2;
+use deadroll_types::{MapArenasData, MapLayoutDataV2};
 
-/// Bumped on any change of the exports or the byte layouts.
-pub const ABI_VERSION: u32 = 1;
-/// Size of the input buffer: a request is 1305 bytes, a table body at most 4096.
+/// Bumped on any change of the exports or the byte layouts (2: the arenas, arena update).
+pub const ABI_VERSION: u32 = 2;
+/// Size of the input buffer: a request is 2505 bytes, a table body at most 4096.
 pub const BUFFER_LEN: usize = 4096;
 /// Bestiary ids a spawn can name (registry `BESTIARY_MAX`).
 const BESTIARY_MAX: usize = 32;
@@ -43,7 +43,8 @@ pub enum Table {
     Tileset = 3,
 }
 
-/// A draft as `finalize_map` sees it: the `Map` numbers and the layout core.
+/// A draft as `finalize_map` sees it: the `Map` numbers, the layout core and (arena update) the
+/// packs' arenas that follow it in the `MapLayout` account.
 #[derive(BorshSerialize, BorshDeserialize, Clone, Debug, PartialEq, Eq)]
 pub struct MapCheckRequest {
     pub width: u8,
@@ -51,6 +52,7 @@ pub struct MapCheckRequest {
     pub tier: u8,
     pub min_players: u8,
     pub layout: MapLayoutDataV2,
+    pub arenas: MapArenasData,
 }
 
 /// The registry table bodies (as far as written), by [`Table`].
@@ -89,6 +91,8 @@ pub fn check(request: &MapCheckRequest, tables: &Tables) -> Result<(), MapCheckE
         request.height,
         request.tier,
         layout,
+        &request.arenas,
+        cfg.arena.limits(),
         &tile_rules(&tables.tileset),
         |id| templates.get(id as usize).copied().flatten(),
         &loot,
