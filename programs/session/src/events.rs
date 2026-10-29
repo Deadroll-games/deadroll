@@ -2,8 +2,8 @@
 //! `TurnSkipped`, `ModsTicked`, `EffectResolved`, `SkillUsed`, `PlayerDied`, `FleeVoted`, `RewardsRolled`, `ChestOpenRequested`, `ChestOpened`, `CacheSettled`, `ContributionRefunded`, `CacheClosed`, `EscrowClaimed` and `SessionKeyChanged`
 //! are session-local.
 use anchor_lang::prelude::*;
-use deadroll_rules::spread::SPREAD_MODS_MAX;
 use deadroll_character::state::{MAP_SKILLS, SKILLS_MAX};
+use deadroll_rules::spread::SPREAD_MODS_MAX;
 
 use deadroll_types::{
     ActiveState, CacheSlot, Cell, RewardSource, SessionStatus, StateKind, PARTY_MAX, STATES_MAX,

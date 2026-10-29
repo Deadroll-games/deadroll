@@ -517,7 +517,10 @@ fn a_silenced_monster_has_only_its_natural_attack() {
     let chief = r.template(CHIEFTAIN).unwrap();
     let p = chief.profile(1, &CFG.monsters);
     let skills = skills_of(&r, &chief);
-    assert!(skills.iter().any(|s| s.is_some()), "the chieftain has skills");
+    assert!(
+        skills.iter().any(|s| s.is_some()),
+        "the chieftain has skills"
+    );
     let cooldowns = [0u8; MONSTER_SLOTS];
     let me = AiMonster {
         index: 0,
@@ -536,7 +539,14 @@ fn a_silenced_monster_has_only_its_natural_attack() {
         ..Default::default()
     };
     let with_skill = (0..30u8)
-        .filter_map(|x| plan(&CFG, &me, &[unit(c(5 + x % 3, 5 + x / 3 % 3), 20, 30, 0)], &free))
+        .filter_map(|x| {
+            plan(
+                &CFG,
+                &me,
+                &[unit(c(5 + x % 3, 5 + x / 3 % 3), 20, 30, 0)],
+                &free,
+            )
+        })
         .any(|choice| choice.slot.is_some());
     assert!(with_skill, "a free chieftain uses a skill somewhere");
     for x in 0..30u8 {

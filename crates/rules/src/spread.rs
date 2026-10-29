@@ -973,6 +973,9 @@ mod tests {
         let mut ms = [monster(5, 5), monster(6, 5), monster(5, 6)];
         let mut open = r;
         open.splash.line = false;
-        assert_eq!(run(&open, &mut ms, &[MonsterDefense::NONE; 3]).splash_count, 2);
+        assert_eq!(
+            run(&open, &mut ms, &[MonsterDefense::NONE; 3]).splash_count,
+            2
+        );
     }
 }

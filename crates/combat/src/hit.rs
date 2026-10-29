@@ -29,7 +29,6 @@ use crate::modifiers::{
     armor_cut, counter, effective_armor, is_physical, more, product_matching, ratio, resist_cut,
     sum_matching, Mod,
 };
-use crate::support::mod_bit;
 use crate::packet::{
     build_packets, DamageRange, Packets, Skill, ADDED_MAX, PACKETS_MAX, SKILL_ASPECTS_MAX,
 };
@@ -41,6 +40,7 @@ use crate::states::{
     apply_chill_for, apply_state, aspect_bit, find, form_bit, freeze_for, marked, power_of, remove,
     source_bit, state_bit, Applied, States, MARK_DORMANT, MARK_ESCALATE, TAGS,
 };
+use crate::support::mod_bit;
 use crate::support::{mod_turns, AccuracyBuff, ModKind, TimedMod};
 use crate::tables::{Op, OpKind, ResonanceTables, ANY_STATE, PAIR_OPS, TRIPLE_OPS};
 
@@ -1010,7 +1010,9 @@ pub fn resolve_hit_into(
                     let m = res_mod(kind, res.base, tier, p.op.value, duration, a, balance);
                     out.target_mods[out.target_mod_count as usize] = m;
                     out.target_mod_count += 1;
-                    if p.op.kind == OpKind::ApplyMod && (out.jump_mod_count as usize) < JUMP_MODS_MAX {
+                    if p.op.kind == OpKind::ApplyMod
+                        && (out.jump_mod_count as usize) < JUMP_MODS_MAX
+                    {
                         out.jump_mods[out.jump_mod_count as usize] = m;
                         out.jump_mod_count += 1;
                     }
@@ -1107,7 +1109,10 @@ pub fn resolve_hit_into(
                         }
                     } else {
                         let longer = |turns: u8| {
-                            (turns as u32).saturating_mul(n).min(balance.state_turns_max as u32).max(1) as u8
+                            (turns as u32)
+                                .saturating_mul(n)
+                                .min(balance.state_turns_max as u32)
+                                .max(1) as u8
                         };
                         if let Some(i) = find(&lands.states, kind) {
                             let live = &mut lands.states[i];
@@ -1188,9 +1193,8 @@ pub fn resolve_hit_into(
                     let per_turn = more(v, balance.res_power(tier)) as u128
                         * balance.dot_share_bp as u128
                         / (BP as u128 * BP as u128);
-                    let power = (per_turn.saturating_mul(rate as u128).min(u32::MAX as u128)
-                        as u32)
-                        .max(1);
+                    let power =
+                        (per_turn.saturating_mul(rate as u128).min(u32::MAX as u128) as u32).max(1);
                     if let Some(i) = find(&lands.states, n) {
                         lands.states[i].power = power;
                     }
@@ -1198,17 +1202,16 @@ pub fn resolve_hit_into(
                     (o.acted, o.amount) = (true, power);
                 }
                 OpKind::Delayed => {
-                    let (Some(kind), Ok(after)) = (
-                        state.filter(|k| can(*k)),
-                        StateKind::try_from(p.op.low()),
-                    ) else {
+                    let (Some(kind), Ok(after)) =
+                        (state.filter(|k| can(*k)), StateKind::try_from(p.op.low()))
+                    else {
                         continue;
                     };
                     let damage = (base_damage as u128 * p.op.percent_bp() as u128 / BP as u128)
                         .min(u64::MAX as u128) as u64;
                     // It waits only when the control is on the target and the state is new.
-                    let wait = find(&lands.states, after).is_some()
-                        && find(&lands.states, kind).is_none();
+                    let wait =
+                        find(&lands.states, after).is_some() && find(&lands.states, kind).is_none();
                     let mut apply = apply_of(kind, damage);
                     if wait {
                         apply.source = marked(a.slot, MARK_DORMANT);
@@ -1227,9 +1230,9 @@ pub fn resolve_hit_into(
                     o.amount = wait as u32;
                 }
                 OpKind::ThawSplash => {
-                    let Some(i) = find(&lands.states, StateKind::Freeze).filter(|_| {
-                        lands.landed & state_bit(StateKind::Freeze) != 0
-                    }) else {
+                    let Some(i) = find(&lands.states, StateKind::Freeze)
+                        .filter(|_| lands.landed & state_bit(StateKind::Freeze) != 0)
+                    else {
                         continue;
                     };
                     let damage = (lands.states[i].power as u64 * p.op.value as u64 / BP as u64)
@@ -1282,17 +1285,15 @@ pub fn resolve_hit_into(
                     ) else {
                         continue;
                     };
-                    let Some(i) = find(&lands.states, after)
-                        .filter(|_| lands.landed & state_bit(after) != 0)
+                    let Some(i) =
+                        find(&lands.states, after).filter(|_| lands.landed & state_bit(after) != 0)
                     else {
                         continue;
                     };
                     if out.target_mod_count as usize >= TARGET_MODS_MAX {
                         continue;
                     }
-                    let duration = balance
-                        .res_mod_turns
-                        .saturating_add(lands.states[i].turns);
+                    let duration = balance.res_mod_turns.saturating_add(lands.states[i].turns);
                     let m = res_mod(
                         kind,
                         res.base,

@@ -108,7 +108,10 @@ mod tests {
         let first = start_of_turn_with(&mut states, &mut mods, &mut [], 100, &balance);
         let second = start_of_turn_with(&mut states, &mut mods, &mut [], first.hp, &balance);
         assert_eq!(first.dot_damage, 10);
-        assert_eq!(second.dot_damage, 10 + 10 * balance.escalate_step_bp / 10_000);
+        assert_eq!(
+            second.dot_damage,
+            10 + 10 * balance.escalate_step_bp / 10_000
+        );
         // The killer is the unit, not the unit with the mark.
         assert_eq!((first.dot_source, second.dot_source), (2, 2));
         // The default-balance entry point agrees.

@@ -6,8 +6,8 @@
 //! `VrfRoll` / `SyscallRoll` started there. `HitInput` and `HitResult` come from the caller so the
 //! program can keep them off the 4 KB SBF stack frame.
 use deadroll_combat::{
-    apply_mod, no_heal, resolve_hit_into, resolve_rider, resolve_support, AccuracyBuff, Applied, EffectRoll,
-    HitInput, HitResult, Outcome, ResonanceTables, RollSource, States, TimedMods,
+    apply_mod, no_heal, resolve_hit_into, resolve_rider, resolve_support, AccuracyBuff, Applied,
+    EffectRoll, HitInput, HitResult, Outcome, ResonanceTables, RollSource, States, TimedMods,
 };
 use deadroll_types::Monster;
 

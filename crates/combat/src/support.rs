@@ -242,15 +242,15 @@ pub fn apply_to_attacker(attacker: &mut Attacker, mods: &TimedMods) {
     }
     attacker.weaken_bp = attacker
         .weaken_bp
-            .saturating_add(mod_power(mods, ModKind::Weakening));
+        .saturating_add(mod_power(mods, ModKind::Weakening));
     // Triples: a Blinded bearer's d20 and a Dulled bearer's crit chance are divided.
     attacker.blinded_bp = attacker
         .blinded_bp
         .saturating_add(mod_power(mods, ModKind::Blinded));
     let dulled = mod_power(mods, ModKind::Dulled);
     if dulled > 0 {
-        attacker.crit_chance_pct = ratio(attacker.crit_chance_pct as u64, 0, dulled)
-            .min(u32::MAX as u64) as u32;
+        attacker.crit_chance_pct =
+            ratio(attacker.crit_chance_pct as u64, 0, dulled).min(u32::MAX as u64) as u32;
     }
 }
 
@@ -407,8 +407,12 @@ impl SupportBalance {
         // Haste, Slow, Empowerment, Weakening, Protection, Vulnerability, Resistance, then the
         // resonance-only kinds (Exposed, Root, and the triple kinds): no skill effect gives
         // those, so no numbers.
-        mod_min_bp: [2_500, 2_500, 2_000, 2_500, 2_000, 2_000, 2_000, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        mod_max_bp: [5_000, 5_000, 4_000, 5_000, 4_000, 4_000, 4_000, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        mod_min_bp: [
+            2_500, 2_500, 2_000, 2_500, 2_000, 2_000, 2_000, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ],
+        mod_max_bp: [
+            5_000, 5_000, 4_000, 5_000, 4_000, 4_000, 4_000, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ],
         mod_duration: [2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         rider_chance_pct: 30,
         passive_point_bp: 5_000,
@@ -675,10 +679,7 @@ mod tests {
         };
         apply_to_defender(&mut d, &mods);
         assert_eq!((d.defense, d.sunder_bp), (5, 5_000));
-        let mods = with(&[
-            m(ModKind::Dulled, 2, 10_000),
-            m(ModKind::Blinded, 2, 3_000),
-        ]);
+        let mods = with(&[m(ModKind::Dulled, 2, 10_000), m(ModKind::Blinded, 2, 3_000)]);
         let mut a = Attacker {
             crit_chance_pct: 30,
             ..Attacker::default()

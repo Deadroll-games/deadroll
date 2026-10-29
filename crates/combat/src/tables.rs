@@ -352,9 +352,7 @@ impl Op {
             ArgKind::Zero => arg == 0,
             ArgKind::State => arg == NATIVE || state(arg),
             ArgKind::StateOnly => state(arg),
-            ArgKind::Dot => {
-                arg == StateKind::Burning as u8 || arg == StateKind::Bleeding as u8
-            }
+            ArgKind::Dot => arg == StateKind::Burning as u8 || arg == StateKind::Bleeding as u8,
             ArgKind::StateOrAny => arg == ANY_STATE || state(arg),
             // A resonance has no aspect weights to give a Resistance.
             ArgKind::Mod => (arg as usize) < ModKind::COUNT && arg != ModKind::Resistance as u8,
@@ -841,7 +839,11 @@ mod tests {
             Op::new(OpKind::ThawSplash, 0, 10_000),
             Op::new(OpKind::SplashLine, 0, 0),
             Op::new(OpKind::ChainRadius, StateKind::Shock as u8, 2 | 3 << 8),
-            Op::new(OpKind::ChainRadius, StateKind::Burning as u8, 1 | (ANY_STATE as u32) << 8),
+            Op::new(
+                OpKind::ChainRadius,
+                StateKind::Burning as u8,
+                1 | (ANY_STATE as u32) << 8,
+            ),
             Op::new(OpKind::ModAfterState, ModKind::Slow as u8, 5),
         ];
         for op in ops {
@@ -865,8 +867,14 @@ mod tests {
         assert_eq!(Op::decode(&[OpKind::Nova as u8, 16, 0, 0, 0, 0]), None);
         assert_eq!(Op::decode(&[OpKind::Escalate as u8, 1, 0, 0, 0, 0]), None);
         assert_eq!(Op::decode(&[OpKind::Delayed as u8, 3, 0x20, 0, 0, 0]), None);
-        assert_eq!(Op::decode(&[OpKind::ChainRadius as u8, 4, 0, 0xFF, 0, 0]), None);
-        assert_eq!(Op::decode(&[OpKind::ModAfterState as u8, 7, 9, 0, 0, 0]), None);
+        assert_eq!(
+            Op::decode(&[OpKind::ChainRadius as u8, 4, 0, 0xFF, 0, 0]),
+            None
+        );
+        assert_eq!(
+            Op::decode(&[OpKind::ModAfterState as u8, 7, 9, 0, 0, 0]),
+            None
+        );
         assert_eq!(Op::decode(&[0, 0, 1, 0, 0, 0]), None);
         assert_eq!(Op::decode(&[1, 0xFF, 0, 0]), None);
     }
@@ -951,8 +959,14 @@ mod tests {
         assert_eq!(r.len(), TRIPLE_RECORD);
         assert_eq!(decode_triple(&r), Some(e));
         // An empty record is neutral and all zeros.
-        assert_eq!(encode_triple(&TripleEntry::default()), Some([0; TRIPLE_RECORD]));
-        assert_eq!(decode_triple(&[0; TRIPLE_RECORD]), Some(TripleEntry::default()));
+        assert_eq!(
+            encode_triple(&TripleEntry::default()),
+            Some([0; TRIPLE_RECORD])
+        );
+        assert_eq!(
+            decode_triple(&[0; TRIPLE_RECORD]),
+            Some(TripleEntry::default())
+        );
         // A value past 16 bits does not fit.
         let big = TripleEntry {
             set: true,

@@ -1514,11 +1514,7 @@ fn state_faster_ticks_twice_per_turn() {
     assert_eq!(fast.power, plain.power * 2);
     assert_eq!(fast.turns as u32, (plain.turns as u32).div_ceil(2));
     // Nothing landed to speed up.
-    let (t, _) = fire_triple(just(gen(
-        OpKind::StateFaster,
-        st(StateKind::Bleeding),
-        2,
-    )));
+    let (t, _) = fire_triple(just(gen(OpKind::StateFaster, st(StateKind::Bleeding), 2)));
     let r = resolve_hit(&input, &B, &t, &mut tri_rolls());
     assert!(!tri_op(&r, 0).acted && !has(&r.states, StateKind::Bleeding));
 }
@@ -1530,18 +1526,12 @@ fn tick_now_hits_with_the_state_power_right_away() {
     let base = resolve_hit(&input, &B, &t0, &mut tri_rolls());
     let power = find(&base.states, StateKind::Bleeding).power;
     assert!(power > 0);
-    let (t, _) = fire_triple(two(
-        apply,
-        gen(OpKind::TickNow, st(StateKind::Bleeding), 2),
-    ));
+    let (t, _) = fire_triple(two(apply, gen(OpKind::TickNow, st(StateKind::Bleeding), 2)));
     let r = resolve_hit(&input, &B, &t, &mut tri_rolls());
     assert_eq!(r.tick_damage, power * 2);
     assert_eq!(r.damage, base.damage + power * 2);
     // Once by default.
-    let (t, _) = fire_triple(two(
-        apply,
-        gen(OpKind::TickNow, st(StateKind::Bleeding), 0),
-    ));
+    let (t, _) = fire_triple(two(apply, gen(OpKind::TickNow, st(StateKind::Bleeding), 0)));
     assert_eq!(
         resolve_hit(&input, &B, &t, &mut tri_rolls()).tick_damage,
         power
@@ -1555,10 +1545,7 @@ fn tick_now_hits_with_the_state_power_right_away() {
 #[test]
 fn escalate_marks_the_state_and_each_tick_grows() {
     let apply = gen(OpKind::ApplyState, st(StateKind::Burning), 60_000);
-    let (t, input) = fire_triple(two(
-        apply,
-        gen(OpKind::Escalate, st(StateKind::Burning), 0),
-    ));
+    let (t, input) = fire_triple(two(apply, gen(OpKind::Escalate, st(StateKind::Burning), 0)));
     let r = resolve_hit(&input, &B, &t, &mut tri_rolls());
     assert!(tri_op(&r, 1).acted);
     let burning = find(&r.states, StateKind::Burning);
@@ -1658,16 +1645,14 @@ fn tick_aspect_rebuilds_the_tick_through_the_new_aspects_defenses() {
     let r = resolve_hit(&input, &B, &t, &mut tri_rolls());
     // Armor 100 (K 100) halved the Bleeding; as Fire it meets no resistance.
     assert!(
-        find(&r.states, StateKind::Bleeding).power
-            > find(&plain.states, StateKind::Bleeding).power
+        find(&r.states, StateKind::Bleeding).power > find(&plain.states, StateKind::Bleeding).power
     );
     assert!(tri_op(&r, 0).acted);
     // Fire resistance cuts it again.
     input.defender.resist_bp[Aspect::Fire as usize] = 10_000;
     let r2 = resolve_hit(&input, &B, &t, &mut tri_rolls());
     assert!(
-        find(&r2.states, StateKind::Bleeding).power
-            < find(&r.states, StateKind::Bleeding).power
+        find(&r2.states, StateKind::Bleeding).power < find(&r.states, StateKind::Bleeding).power
     );
     // Immune to Fire: the tick stays what it was.
     input.defender.resist_bp[Aspect::Fire as usize] = 0;

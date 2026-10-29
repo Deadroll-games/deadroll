@@ -272,30 +272,42 @@ fn copy_tables(
 ) -> Result<()> {
     // The four bodies are borrowed from their accounts, never copied onto the 4 KB stack frame.
     let mut tables = Box::<ResonanceTables>::default();
-    with_table_body(aspects, &ASPECTS_TABLE, TableKind::Aspects, RES_ASPECTS_LEN, |a| {
-        with_table_body(traits, &TRAITS_TABLE, TableKind::Traits, RES_TRAITS_LEN, |t| {
+    with_table_body(
+        aspects,
+        &ASPECTS_TABLE,
+        TableKind::Aspects,
+        RES_ASPECTS_LEN,
+        |a| {
             with_table_body(
-                resonances,
-                &RESONANCES_TABLE,
-                TableKind::Resonances,
-                RES_PAIRS_LEN,
-                |p| {
+                traits,
+                &TRAITS_TABLE,
+                TableKind::Traits,
+                RES_TRAITS_LEN,
+                |t| {
                     with_table_body(
-                        triples,
-                        &TRIPLES_TABLE,
-                        TableKind::Triples,
-                        RES_TRIPLES_LEN,
-                        |x| {
-                            tables
-                                .decode_into(a, t, p, x)
-                                .map_err(|_| error!(SessionError::InvalidRegistryTable))?;
-                            monsters.set_tables(a, t, p, x)
+                        resonances,
+                        &RESONANCES_TABLE,
+                        TableKind::Resonances,
+                        RES_PAIRS_LEN,
+                        |p| {
+                            with_table_body(
+                                triples,
+                                &TRIPLES_TABLE,
+                                TableKind::Triples,
+                                RES_TRIPLES_LEN,
+                                |x| {
+                                    tables
+                                        .decode_into(a, t, p, x)
+                                        .map_err(|_| error!(SessionError::InvalidRegistryTable))?;
+                                    monsters.set_tables(a, t, p, x)
+                                },
+                            )
                         },
                     )
                 },
             )
-        })
-    })
+        },
+    )
 }
 
 /// The skills spawn `index` took from its template's pool (docs/BESTIARY.md 3.2, MAP_DESCRIPTION.md

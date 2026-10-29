@@ -126,7 +126,9 @@ pub fn plan(
     // 1. A heal on the most hurt ally below the threshold.
     let pct = cfg.monsters.ai_heal_below_pct as u64;
     for slot in 0..MONSTER_SLOTS {
-        let Some(s) = ready(m, slot, silenced) else { continue };
+        let Some(s) = ready(m, slot, silenced) else {
+            continue;
+        };
         if effect_action(s.stats.blocks.effect) != Some(EffectAction::Heal) {
             continue;
         }
@@ -155,7 +157,9 @@ pub fn plan(
 
     // 2. A buff on an ally that lacks it, itself first.
     for slot in 0..MONSTER_SLOTS {
-        let Some(s) = ready(m, slot, silenced) else { continue };
+        let Some(s) = ready(m, slot, silenced) else {
+            continue;
+        };
         let b = &s.stats.blocks;
         if b.purpose != Purpose::Buff {
             continue;
@@ -215,7 +219,9 @@ pub fn plan(
         };
         let mut best: Option<(u8, usize)> = None;
         for slot in 0..MONSTER_SLOTS {
-            let Some(s) = ready(m, slot, silenced) else { continue };
+            let Some(s) = ready(m, slot, silenced) else {
+                continue;
+            };
             if s.stats.blocks.purpose == Purpose::Buff || !fits(s) {
                 continue;
             }

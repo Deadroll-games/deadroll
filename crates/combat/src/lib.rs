@@ -39,7 +39,8 @@ pub use states::{
 };
 pub use support::{
     apply_mod, apply_to_attacker, apply_to_defender, dazed, free_slot, mod_range, mod_turns,
-    no_heal, resistance_share, resolve_rider, resolve_support, rooted, silenced, speed_ap, tick_mods, AccuracyBuff,
-    EffectRoll, ModKind, SupportBalance, SupportInput, TimedMod, TimedMods, MODS_MAX,
+    no_heal, resistance_share, resolve_rider, resolve_support, rooted, silenced, speed_ap,
+    tick_mods, AccuracyBuff, EffectRoll, ModKind, SupportBalance, SupportInput, TimedMod,
+    TimedMods, MODS_MAX,
 };
 pub use tables::{Op, OpKind, ResonanceTables, TableError};

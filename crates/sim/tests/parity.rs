@@ -1001,7 +1001,10 @@ fn every_triple_resolves_the_same_and_every_op_acts() {
                 }
             }
         }
-        assert!(origins > 0, "{base:?} + {tint:?} + {second:?} never ran its record");
+        assert!(
+            origins > 0,
+            "{base:?} + {tint:?} + {second:?} never ran its record"
+        );
         for (k, kind) in kinds
             .iter()
             .enumerate()
@@ -1021,7 +1024,12 @@ fn a_miss_with_an_on_miss_triple_resolves_the_same_on_both_sides() {
     let cfg = sim_config();
     let registry = sim_registry();
     let (st, pt) = (registry.tables, program_tables(&registry));
-    let mut input = pair_input(&cfg, Aspect::Piercing, Aspect::Lightning, Some(Aspect::Blunt));
+    let mut input = pair_input(
+        &cfg,
+        Aspect::Piercing,
+        Aspect::Lightning,
+        Some(Aspect::Blunt),
+    );
     input.defender.defense = 1_000;
     let mut shocked = 0;
     for i in 0..120u8 {
