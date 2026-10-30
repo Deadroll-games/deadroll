@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use deadroll_rules::{line::line_ends, Footprint};
 use deadroll_skillcheck::Target;
 use deadroll_types::{seeds, Cell, SessionStatus};
 use session_keys::{session_auth_or, Session, SessionTokenV2};
@@ -176,11 +177,11 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
             require!(target < monsters.count()?, SessionError::InvalidTarget);
             let monster = monsters.get(target)?;
             require!(monster.alive, SessionError::InvalidTarget);
-            let to = Cell {
-                x: monster.x,
-                y: monster.y,
-            };
-            (Unit::Monster(target), Some((to, false)))
+            // Patch B: a large monster is its whole square.
+            (
+                Unit::Monster(target),
+                Some((monsters.footprint(target)?, false)),
+            )
         }
         Side::Ally if target == slot => {
             // A self-cast resolves on the caster's own participation: no second account.
@@ -207,7 +208,7 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
                 x: ally.core.x,
                 y: ally.core.y,
             };
-            (Unit::Player(target), Some((to, true)))
+            (Unit::Player(target), Some((Footprint::from(to), true)))
         }
     };
     // The range tag of the skill, or the weapon's for the basic attack (patch 5).
@@ -223,8 +224,9 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
         // a wall before the target cuts it.
         if skill.is_some_and(|s| s.blocks.target == Target::Line) {
             let layout = MapLayoutView::load(&accounts.layout, session.ground())?;
-            let line = skill_line(session, &layout, from, to, range);
-            require!(line.index_of(to).is_some(), SessionError::LineBlocked);
+            let (start, through) = line_ends(from, to);
+            let line = skill_line(session, &layout, start, through, range);
+            require!(line.index_of(through).is_some(), SessionError::LineBlocked);
         }
     }
 

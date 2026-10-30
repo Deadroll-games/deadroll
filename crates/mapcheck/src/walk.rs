@@ -7,6 +7,8 @@
 
 use deadroll_types::Cell;
 
+use crate::footprint::Footprint;
+
 /// Most cells one move walks (the instruction's path argument).
 pub const MAX_PATH: usize = 16;
 
@@ -78,6 +80,22 @@ pub fn walk<F: Field>(
     start: Cell,
     path: &[Cell],
     ap: u8,
+    stop: impl FnMut(Cell, Cell) -> bool,
+) -> Result<Walk, WalkError> {
+    walk_sized(field, start, 1, path, ap, stop)
+}
+
+/// Patch B: [`walk`] for a unit of `size` cells per side (`crate::footprint`): `start` and the
+/// path are its top-left cell. Each step checks every cell of the footprint it moves to (on the
+/// field, enterable, free) and costs the dearest cell it enters; a diagonal step needs both
+/// orthogonal footprints it passes between on enterable tiles. The field's `blocker` must not
+/// count the mover itself. A size of 1 is [`walk`].
+pub fn walk_sized<F: Field>(
+    field: &F,
+    start: Cell,
+    size: u8,
+    path: &[Cell],
+    ap: u8,
     mut stop: impl FnMut(Cell, Cell) -> bool,
 ) -> Result<Walk, WalkError> {
     if path.is_empty() || path.len() > MAX_PATH {
@@ -88,15 +106,34 @@ pub fn walk<F: Field>(
         ap_left: ap,
         steps: 0,
     };
+    let enterable = |at: Cell| {
+        Footprint::new(at, size)
+            .cells()
+            .all(|c| field.step_cost(c).is_some())
+    };
     for &next in path {
         let from = walked.end;
         if !adjacent(from, next) {
             return Err(WalkError::NotAdjacent);
         }
-        if !field.contains(next) {
+        let here = Footprint::new(from, size);
+        let there = Footprint::new(next, size);
+        let mut cost = 0u8;
+        for c in there.cells() {
+            if !field.contains(c) {
+                return Err(WalkError::OutOfBounds);
+            }
+        }
+        // The size's own footprint may run past the byte range: then it is off the field.
+        if there.cells().count() != (there.size as usize) * (there.size as usize) {
             return Err(WalkError::OutOfBounds);
         }
-        let cost = field.step_cost(next).ok_or(WalkError::Blocked)?;
+        for c in there.cells() {
+            let step = field.step_cost(c).ok_or(WalkError::Blocked)?;
+            if !here.covers(c) {
+                cost = cost.max(step);
+            }
+        }
         if from.x != next.x && from.y != next.y {
             let side = Cell {
                 x: next.x,
@@ -106,14 +143,16 @@ pub fn walk<F: Field>(
                 x: from.x,
                 y: next.y,
             };
-            if field.step_cost(side).is_none() || field.step_cost(other).is_none() {
+            if !enterable(side) || !enterable(other) {
                 return Err(WalkError::CornerBlocked);
             }
         }
-        match field.blocker(next) {
-            Some(Blocker::Unit) => return Err(WalkError::Occupied),
-            Some(Blocker::ClosedChest) => return Err(WalkError::ChestInTheWay),
-            None => {}
+        for c in there.cells() {
+            match field.blocker(c) {
+                Some(Blocker::Unit) => return Err(WalkError::Occupied),
+                Some(Blocker::ClosedChest) => return Err(WalkError::ChestInTheWay),
+                None => {}
+            }
         }
         walked.ap_left = walked
             .ap_left
@@ -335,6 +374,70 @@ mod tests {
         let bad = [c(1, 0), c(9, 9)];
         let w = walk(&Arena { rows: LONG }, c(0, 0), &bad, 9, |_, _| true).unwrap();
         assert_eq!(w.steps, 1);
+    }
+
+    fn big(rows: &[&str], start: Cell, path: &[Cell], ap: u8) -> Result<Walk, WalkError> {
+        walk_sized(&Arena { rows }, start, 2, path, ap, |_, _| false)
+    }
+
+    #[test]
+    fn a_large_unit_walks_with_its_whole_square() {
+        let rows = &[
+            "......", //
+            "......", //
+            "...~..", //
+            "......", //
+            "....#.", //
+            "......",
+        ];
+        // Straight steps on open ground cost 1 each.
+        assert_eq!(big(rows, c(0, 0), &[c(1, 0)], 9).unwrap().ap_left, 8);
+        // Entering the shallow water with any cell costs 2; leaving it costs the cells it enters.
+        assert_eq!(big(rows, c(1, 1), &[c(2, 1)], 9).unwrap().ap_left, 7);
+        assert_eq!(big(rows, c(2, 1), &[c(2, 0)], 9).unwrap().ap_left, 8);
+        // A wall under any cell blocks; the edge too.
+        assert_eq!(big(rows, c(3, 2), &[c(3, 3)], 9), Err(WalkError::Blocked));
+        assert_eq!(
+            big(rows, c(3, 0), &[c(4, 0), c(5, 0)], 9),
+            Err(WalkError::OutOfBounds)
+        );
+        assert_eq!(
+            big(rows, c(0, 3), &[c(0, 4), c(0, 5)], 9),
+            Err(WalkError::OutOfBounds)
+        );
+        // The square at (3,3) holds the wall at (4,4).
+        assert_eq!(big(rows, c(2, 2), &[c(3, 3)], 9), Err(WalkError::Blocked));
+        // A diagonal needs both side squares enterable: from (2,3) to (3,2) it passes the
+        // squares at (3,3) (it holds the wall) and (2,2).
+        assert_eq!(
+            big(rows, c(2, 3), &[c(3, 2)], 9),
+            Err(WalkError::CornerBlocked)
+        );
+        assert_eq!(big(rows, c(0, 0), &[c(1, 1)], 9).unwrap().end, c(1, 1));
+        // Its own cells never stop it; any other unit's cell does.
+        let rows = &["....", "....", "...U", "...."];
+        assert_eq!(
+            big(rows, c(0, 0), &[c(1, 0), c(1, 1)], 9).unwrap().end,
+            c(1, 1)
+        );
+        assert_eq!(big(rows, c(1, 0), &[c(2, 1)], 9), Err(WalkError::Occupied));
+        let rows = &["..C.", "....", "....", "...."];
+        assert_eq!(
+            big(rows, c(0, 1), &[c(1, 0)], 9),
+            Err(WalkError::ChestInTheWay)
+        );
+        // A size of 1 is the plain walk.
+        assert_eq!(
+            walk_sized(
+                &Arena { rows: LONG },
+                c(0, 0),
+                1,
+                &[c(1, 1), c(2, 2)],
+                9,
+                |_, _| false
+            ),
+            go(LONG, c(0, 0), &[c(1, 1), c(2, 2)], 9)
+        );
     }
 
     #[test]

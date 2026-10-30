@@ -25,7 +25,8 @@ use deadroll_combat::{
 };
 use deadroll_rules::{
     arena::{
-        delay, next_unit, on_pack_won, pack_xp, round_at, start_time, FirstSide, TimelineUnit,
+        delay, next_unit, on_pack_won, pack_xp, round_at, start_time, turn_delay, FirstSide,
+        TimelineUnit,
     },
     aura::{
         monster_passive_aura, passive_aura, tick_auras, Aura, AuraField, MonsterAuraField,
@@ -33,14 +34,14 @@ use deadroll_rules::{
     },
     input::hero,
     input::{effect_action, EffectAction, SkillStats},
-    line::{line_cells, targets_on_line},
+    line::{line_cells, line_ends, targets_on_line},
     monster::{kin_reaches, monster_ap, PASSIVE_SLOT, REACTIVE_SLOT},
     monster_ai::{AiChoice, AiTarget},
     reactive::{entered_next_to, hit_events, nearby, reaction, Event, Reaction},
     resolve,
     spread::{spread, spreads, step_into, BurningCell, Field, BURNING_CELLS_MAX},
     units::cooldown_after_use,
-    BalanceConfig, MonsterDefense, MonsterProfile, MonsterSkillStats, Unit,
+    BalanceConfig, Footprint, MonsterDefense, MonsterProfile, MonsterSkillStats, Unit,
 };
 use deadroll_skillcheck::{Purpose, Target, ACTIVE_MAX};
 use deadroll_types::{
@@ -216,6 +217,8 @@ pub(crate) struct Foe {
     pub skills: [Option<MonsterSkillStats>; MONSTER_SLOTS],
     pub cooldowns: [u8; MONSTER_SLOTS],
     pub auras: MonsterAuras,
+    /// Patch B: cells per side (`MonsterTemplate::size`).
+    pub size: u8,
 }
 
 /// A hero's action this turn.
@@ -371,17 +374,36 @@ impl<'a> Battle<'a> {
             })
             .collect();
         let first = 1 + arena.gap;
+        // Each monster takes the first free place, column by column from `first`, each column's
+        // rows from the middle outwards like the heroes; a large monster needs its whole square
+        // inside and free (patch B).
+        let mut placed: Vec<Footprint> = Vec::new();
+        let mut place = |size: u8| -> Cell {
+            for x in first..arena.width {
+                for row in 0..arena.height as i16 {
+                    let off = (row + 1) / 2 * if row % 2 == 1 { -1 } else { 1 };
+                    let y = (mid as i16 + off).rem_euclid(arena.height as i16) as u8;
+                    let f = Footprint::new(Cell { x, y }, size);
+                    if f.inside(arena.width, arena.height) && !placed.iter().any(|p| p.overlaps(&f))
+                    {
+                        placed.push(f);
+                        return f.at;
+                    }
+                }
+            }
+            // No room: a stack in the corner (an encounter bigger than its arena).
+            Cell {
+                x: arena.width.saturating_sub(size.max(1)),
+                y: 0,
+            }
+        };
         let foes = fight
             .spawns
             .iter()
             .enumerate()
             .map(|(i, s)| {
-                let col = i / arena.height as usize;
-                let row = i % arena.height as usize;
-                // Rows from the middle outwards, like the heroes.
-                let off = (row as i16 + 1) / 2 * if row % 2 == 1 { -1 } else { 1 };
-                let y = (mid as i16 + off).rem_euclid(arena.height as i16) as u8;
                 let t = &s.template;
+                let Cell { x, y } = place(t.size);
                 let hp = t.hp_at(s.level, s.flags, &cfg.monsters);
                 let profile = t.profile(s.level, &cfg.monsters);
                 // The passive skill works from the start, like `open_session` copies it.
@@ -396,7 +418,7 @@ impl<'a> Battle<'a> {
                     m: Monster {
                         bestiary_id: i as u8,
                         level: s.level,
-                        x: first + col as u8,
+                        x,
                         y,
                         hp,
                         hp_max: hp,
@@ -414,6 +436,7 @@ impl<'a> Battle<'a> {
                     skills: s.skills,
                     cooldowns: [0; MONSTER_SLOTS],
                     auras,
+                    size: t.size,
                 }
             })
             .collect();
@@ -509,6 +532,7 @@ impl<'a> Battle<'a> {
                     cell: self.foe_cell_of(i),
                     kin: self.foes[i].profile.kin,
                     auras: self.foes[i].auras,
+                    size: self.foes[i].size,
                 })
                 .collect(),
         };
@@ -536,7 +560,7 @@ impl<'a> Battle<'a> {
         self.party_view().field().monster_mods(
             &f.mods,
             i as u8,
-            self.foe_cell_of(i),
+            self.foe_fp(i),
             f.profile.kin,
             basic,
         )
@@ -583,10 +607,11 @@ impl<'a> Battle<'a> {
                 return;
             }
             self.round = round;
-            if let Some(unit) = Unit::from_id(line[k].id) {
-                self.turn(unit);
-            }
-            line[k].time = line[k].time.saturating_add(delay(initiative[k], &t));
+            let step = match Unit::from_id(line[k].id) {
+                Some(unit) => turn_delay(initiative[k], &self.turn(unit), &t),
+                None => delay(initiative[k], &t),
+            };
+            line[k].time = line[k].time.saturating_add(step);
             if let Some(outcome) = self.ended() {
                 self.stats.outcome = outcome;
                 self.stats.rounds = round;
@@ -612,7 +637,10 @@ impl<'a> Battle<'a> {
         }
     }
 
-    pub(crate) fn turn(&mut self, unit: Unit) {
+    /// One unit's turn. Returns its buffs and debuffs with the auras over it right after the turn
+    /// start's tick: the timeline takes the turn's delay under them, as `start_turn` does
+    /// (`deadroll_rules::arena::turn_delay`).
+    pub(crate) fn turn(&mut self, unit: Unit) -> TimedMods {
         match unit {
             Unit::Player(s) => {
                 let s = s as usize;
@@ -632,9 +660,10 @@ impl<'a> Battle<'a> {
                 tick_auras(&mut h.auras);
                 self.stats.slots[s].turns += 1;
                 self.credit_dot(start.dot_source, start.dot_damage);
+                let delay_mods = self.hero_mods(s, false);
                 if start.died {
                     self.hero_died(s);
-                    return;
+                    return delay_mods;
                 }
                 self.note_aura_reach(s);
                 if start.hp < before {
@@ -647,11 +676,12 @@ impl<'a> Battle<'a> {
                     self.react(&events, &mut src);
                 }
                 if start.skip.is_some() || !self.heroes[s].alive {
-                    return;
+                    return delay_mods;
                 }
                 let chill = chill_slow_bp(&self.heroes[s].states, &self.cfg.combat);
                 let ap = speed_ap(self.heroes[s].max_ap, &self.hero_mods(s, false), chill);
                 self.hero_turn(s, ap);
+                delay_mods
             }
             Unit::Monster(i) => {
                 let i = i as usize;
@@ -669,9 +699,10 @@ impl<'a> Battle<'a> {
                 tick_auras(&mut f.auras);
                 self.stats.monster_turns += 1;
                 self.credit_dot(start.dot_source, start.dot_damage);
+                let delay_mods = self.foe_mods(i, false);
                 if start.died {
                     self.foe_died(i);
-                    return;
+                    return delay_mods;
                 }
                 if start.hp < before {
                     let source = match Unit::from_id(start.dot_source) {
@@ -688,11 +719,12 @@ impl<'a> Battle<'a> {
                     if start.skip.is_some() {
                         self.stats.monster_turns_skipped += 1;
                     }
-                    return;
+                    return delay_mods;
                 }
                 let chill = chill_slow_bp(&self.foes[i].m.states, &self.cfg.combat);
                 let ap = speed_ap(self.foes[i].max_ap, &self.foe_mods(i, false), chill);
                 self.foe_turn(i, ap);
+                delay_mods
             }
         }
     }
@@ -751,35 +783,44 @@ impl<'a> Battle<'a> {
         }
     }
 
-    /// The living monsters on the line of `skill` from `from` through monster `target`, in line
-    /// order (the arena has no walls).
-    pub(crate) fn line_foes(&self, from: Cell, target: usize, skill: &SkillStats) -> Vec<usize> {
+    /// Patch B: the cells monster `i` stands on.
+    pub(crate) fn foe_fp(&self, i: usize) -> Footprint {
+        Footprint::new(self.foe_cell_of(i), self.foes[i].size)
+    }
+
+    /// The living monsters on the line of `skill` from a caster on `from` through monster
+    /// `target`, in line order (the arena has no walls).
+    pub(crate) fn line_foes(
+        &self,
+        from: impl Into<Footprint>,
+        target: usize,
+        skill: &SkillStats,
+    ) -> Vec<usize> {
         let reach = deadroll_rules::units::reach(skill.ext.range, &self.cfg.players);
         let (w, h) = (self.width, self.height);
-        let line = line_cells(from, self.foe_cell_of(target), reach, |c| {
-            c.x < w && c.y < h
-        });
-        let units: Vec<(u8, Cell)> = (0..self.foes.len())
+        let (from, through) = line_ends(from, self.foe_fp(target));
+        let line = line_cells(from, through, reach, |c| c.x < w && c.y < h);
+        let units: Vec<(u8, Footprint)> = (0..self.foes.len())
             .filter(|&i| self.foes[i].m.alive)
-            .map(|i| (i as u8, self.foe_cell_of(i)))
+            .map(|i| (i as u8, self.foe_fp(i)))
             .collect();
         let (t, n) = targets_on_line(&line, units.iter().copied());
         t[..n].iter().map(|&i| i as usize).collect()
     }
 
-    /// The living heroes but `skip` on the line of `skill` from `from` through hero `target`.
+    /// The living heroes but `skip` on the line of `skill` from a caster on `from` through hero
+    /// `target`.
     fn heroes_on_line(
         &self,
-        from: Cell,
+        from: impl Into<Footprint>,
         target: usize,
         skip: Option<usize>,
         skill: &SkillStats,
     ) -> Vec<usize> {
         let reach = deadroll_rules::units::reach(skill.ext.range, &self.cfg.players);
         let (w, h) = (self.width, self.height);
-        let line = line_cells(from, self.heroes[target].cell, reach, |c| {
-            c.x < w && c.y < h
-        });
+        let (from, through) = line_ends(from, self.heroes[target].cell);
+        let line = line_cells(from, through, reach, |c| c.x < w && c.y < h);
         let units: Vec<(u8, Cell)> = (0..self.heroes.len())
             .filter(|&a| Some(a) != skip && self.heroes[a].alive)
             .map(|a| (a as u8, self.heroes[a].cell))
@@ -1061,7 +1102,7 @@ impl<'a> Battle<'a> {
         target: usize,
         src: &mut SeededRoll,
     ) -> Vec<ReactEvent> {
-        let from = self.foe_cell_of(i);
+        let from = self.foe_fp(i);
         let targets = match skill.filter(|k| k.stats.blocks.target == Target::Line) {
             Some(k) => self.heroes_on_line(from, target, None, &k.stats),
             None => vec![target],
@@ -1137,7 +1178,7 @@ impl<'a> Battle<'a> {
         target: usize,
         src: &mut SeededRoll,
     ) -> Vec<ReactEvent> {
-        let from = self.foe_cell_of(i);
+        let from = self.foe_fp(i);
         let targets = if skill.stats.blocks.target == Target::Line {
             self.heroes_on_line(from, target, None, &skill.stats)
         } else {
@@ -1189,7 +1230,7 @@ impl<'a> Battle<'a> {
         ally: usize,
         src: &mut SeededRoll,
     ) {
-        let from = self.foe_cell_of(i);
+        let from = self.foe_fp(i);
         let targets = if skill.stats.blocks.target == Target::Line && ally != i {
             self.line_foes(from, ally, &skill.stats)
                 .into_iter()
@@ -1285,7 +1326,7 @@ impl<'a> Battle<'a> {
         source: Option<usize>,
     ) -> Vec<FoeEvent> {
         let hp_max = self.foes[i].m.hp_max;
-        let at = self.foe_cell_of(i);
+        let at = self.foe_fp(i);
         let mut out = vec![FoeEvent {
             bearer: i,
             event: Event::HpDrop {
@@ -1296,7 +1337,7 @@ impl<'a> Battle<'a> {
             source,
         }];
         for (b, f) in self.foes.iter().enumerate() {
-            if b != i && f.m.alive && nearby(self.cfg, self.foe_cell_of(b), at) {
+            if b != i && f.m.alive && nearby(self.cfg, self.foe_fp(b), at) {
                 out.push(FoeEvent {
                     bearer: b,
                     event: Event::AllyHpDrop {
@@ -1317,6 +1358,8 @@ impl<'a> Battle<'a> {
         let mut out = Vec::new();
         for &(i, from, to) in moves {
             for (b, h) in self.heroes.iter().enumerate() {
+                let size = self.foes[i].size;
+                let (from, to) = (Footprint::new(from, size), Footprint::new(to, size));
                 if h.alive && entered_next_to(from, to, h.cell) {
                     out.push(ReactEvent {
                         bearer: b,
@@ -1354,9 +1397,9 @@ impl<'a> Battle<'a> {
         let source = e
             .source
             .filter(|&i| self.foes[i].m.alive)
-            .map(|i| (i as u8, self.foe_cell_of(i)));
+            .map(|i| (i as u8, self.foe_fp(i)));
         let ally_cell = match e.event {
-            Event::AllyHpDrop { ally, .. } => Some(self.heroes[ally as usize].cell),
+            Event::AllyHpDrop { ally, .. } => Some(self.heroes[ally as usize].cell.into()),
             Event::Hit { .. } | Event::HpDrop { .. } | Event::Controlled | Event::EnemyEntered => {
                 None
             }
@@ -1414,7 +1457,7 @@ impl<'a> Battle<'a> {
         let source = e
             .source
             .filter(|&s| self.heroes[s].alive)
-            .map(|s| (s as u8, self.heroes[s].cell));
+            .map(|s| (s as u8, self.heroes[s].cell.into()));
         let ally_cell = match e.event {
             Event::AllyHpDrop { ally, .. } => {
                 // A kin-only skill answers allies of its kin only.
@@ -1422,7 +1465,7 @@ impl<'a> Battle<'a> {
                 if !kin_reaches(skill.kin_only, f.profile.kin, a.profile.kin, false) {
                     return None;
                 }
-                Some(self.foe_cell_of(ally as usize))
+                Some(self.foe_fp(ally as usize))
             }
             Event::Hit { .. } | Event::HpDrop { .. } | Event::Controlled | Event::EnemyEntered => {
                 None
@@ -1433,7 +1476,7 @@ impl<'a> Battle<'a> {
             &skill.stats,
             f.cooldowns[REACTIVE_SLOT],
             b as u8,
-            self.foe_cell_of(b),
+            self.foe_fp(b),
             &e.event,
             source,
             ally_cell,
@@ -1507,19 +1550,20 @@ impl<'a> Battle<'a> {
                 .filter(|h| h.alive)
                 .map(|h| h.cell)
                 .chain(
-                    monsters
-                        .iter()
-                        .filter(|m| m.alive)
-                        .map(|m| Cell { x: m.x, y: m.y }),
+                    (0..self.foes.len())
+                        .filter(|&i| monsters[i].alive)
+                        .flat_map(|i| self.foe_fp(i).cells().collect::<Vec<_>>()),
                 )
                 .collect(),
         };
+        let sizes: Vec<u8> = self.foes.iter().map(|f| f.size).collect();
         let out = spread(
             self.cfg,
             r,
             self.heroes[s].cell,
             target,
             &mut monsters,
+            &sizes,
             &defense,
             &field,
             &mut self.cells,
@@ -1566,7 +1610,7 @@ impl<'a> Battle<'a> {
             self.stats.burned_by_cells += 1;
         }
         let events: Vec<FoeEvent> = (0..self.foes.len())
-            .filter(|&i| self.foes[i].m.alive && entered_next_to(from, cell, self.foe_cell_of(i)))
+            .filter(|&i| self.foes[i].m.alive && entered_next_to(from, cell, self.foe_fp(i)))
             .map(|i| FoeEvent {
                 bearer: i,
                 event: Event::EnemyEntered,
@@ -1591,16 +1635,19 @@ impl<'a> Battle<'a> {
         f.m.x = cell.x;
         f.m.y = cell.y;
         let immune = f.defense.immune_states;
-        if step_into(
-            &self.cells,
-            cell,
-            self.round,
-            &mut f.m.states,
-            immune,
-            self.cfg,
-        )
-        .is_some()
-        {
+        // Patch B: a large monster ends on every cell of its square; the first burning one counts.
+        let burned = Footprint::new(cell, f.size).cells().any(|c| {
+            step_into(
+                &self.cells,
+                c,
+                self.round,
+                &mut f.m.states,
+                immune,
+                self.cfg,
+            )
+            .is_some()
+        });
+        if burned {
             self.stats.burned_by_cells += 1;
         }
         let events = self.moved_events(&[(i, from, cell)]);
@@ -1619,7 +1666,7 @@ impl<'a> Battle<'a> {
         let source = e
             .source
             .filter(|&i| self.foes[i].m.alive)
-            .map(|i| (i as u8, self.foe_cell_of(i)));
+            .map(|i| (i as u8, self.foe_fp(i)));
         h.alive
             && reaction(
                 self.cfg,
@@ -1788,7 +1835,7 @@ mod tests {
 
     fn plan(b: &Battle, s: usize) -> Option<Action> {
         let ap = b.heroes[s].max_ap;
-        let dist = b.distances(b.heroes[s].cell);
+        let dist = b.distances(b.heroes[s].cell.into());
         b.plan(s, &dist, ap).map(|(_, a)| a)
     }
 
@@ -1922,6 +1969,42 @@ mod tests {
         assert_eq!(cells.len(), n);
         assert!(b.heroes.iter().all(|h| h.cell.x == 1));
         assert!(b.foes.iter().all(|f| f.m.x >= 4 && f.m.x < 10 && f.m.y < 6));
+    }
+
+    #[test]
+    fn a_large_monster_takes_its_whole_square_and_is_reached_by_any_cell() {
+        // Patch B: the goblin chieftain (bestiary 2) is 2x2; goblins fill the rest around it.
+        let party = [hero(Class::Warrior, vec![])];
+        let mut fight = goblins(5);
+        fight.spawns[0].bestiary_id = 2;
+        fight.spawns[0].template = registry().template(2).unwrap();
+        let b = Battle::new(CFG, &party, &fight, Settings::default(), 1);
+        assert_eq!(b.foes[0].size, 2);
+        let squares: Vec<Footprint> = (0..b.foes.len()).map(|i| b.foe_fp(i)).collect();
+        for (i, f) in squares.iter().enumerate() {
+            assert!(f.inside(b.width, b.height), "{f:?}");
+            assert!(squares[..i].iter().all(|o| !o.overlaps(f)), "{f:?}");
+        }
+        // Next to its lower-right cell is melee reach.
+        let boss = squares[0];
+        let below = Cell {
+            x: boss.at.x + 1,
+            y: boss.at.y + 2,
+        };
+        assert!(deadroll_rules::units::in_range(
+            deadroll_types::RangeTag::Melee,
+            below,
+            boss,
+            &CFG.players
+        ));
+        // A hero can walk onto none of its cells.
+        let dist = b.distances(b.heroes[0].cell.into());
+        for c in boss.cells() {
+            assert_eq!(
+                dist[c.y as usize * b.width as usize + c.x as usize],
+                u16::MAX
+            );
+        }
     }
 
     // -----------------------------------------------------------------------------------------
@@ -2175,7 +2258,7 @@ mod tests {
             y: b.heroes[0].cell.y,
         };
         place_foe(&mut b, 0, next);
-        let dist = b.distances(b.heroes[0].cell);
+        let dist = b.distances(b.heroes[0].cell.into());
         assert!(matches!(
             b.plan(0, &dist, 2),
             Some((_, Action::Attack { skill: None, .. }))
@@ -2190,7 +2273,7 @@ mod tests {
         let party2 = [only_bash];
         let mut b2 = Battle::new(CFG, &party2, &fight, Settings::default(), 1);
         place_foe(&mut b2, 0, next);
-        let dist2 = b2.distances(b2.heroes[0].cell);
+        let dist2 = b2.distances(b2.heroes[0].cell.into());
         assert!(b2.plan(0, &dist2, 2).is_some());
         assert_eq!(b.plan(0, &dist, 1), None);
     }

@@ -257,6 +257,7 @@ fn bearers(
             cell: cells[i],
             kin: kins[i],
             auras: auras[i],
+            size: 1,
         })
         .collect()
 }

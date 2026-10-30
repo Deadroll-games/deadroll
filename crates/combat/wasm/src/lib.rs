@@ -34,6 +34,10 @@
 //! Resonance pass (ABI 9): nine modifier slots (Exposed, Root); a defender carries the crit
 //! chance every attacker gets against it.
 //!
+//! Patch B (ABI 11): a monster may stand on a 2x2 square (`deadroll_rules::Footprint`). A bearer,
+//! an AI unit and a unit-mods request carry the unit's `size` (cells per side) at their end; the
+//! hit requests take it from the monster's record.
+//!
 //! Built with `std`: `deadroll-types` pulls `solana-pubkey`, whose `atomic` feature links `std`
 //! (`parking_lot`) on non-SBF targets, so `no_std` is not possible here. std on wasm32 aborts on
 //! panic and brings its own allocator.
@@ -54,7 +58,7 @@ use deadroll_rules::{
     monster::{record, select_skills, NO_SKILL},
     monster_ai::{plan, AiMonster, AiTarget, AiUnit},
     player::stat_damage_increases,
-    BalanceConfig, MonsterSkillStats, MonsterTemplate,
+    BalanceConfig, Footprint, MonsterSkillStats, MonsterTemplate,
 };
 use deadroll_skillcheck::{
     check_monster_selection,
@@ -67,7 +71,7 @@ use deadroll_types::{
 };
 
 /// Bumped on any change of the exports or the byte layouts.
-pub const ABI_VERSION: u32 = 10;
+pub const ABI_VERSION: u32 = 11;
 /// Size of the input and output buffers.
 pub const BUFFER_LEN: usize = 8192;
 
@@ -376,6 +380,13 @@ pub struct BearerInput {
     pub cell: Cell,
     pub kin: u8,
     pub auras: [(AuraInput, bool); AURAS_PER_PLAYER],
+    /// ABI 11: cells per side (the record's `size`; 0 counts as 1).
+    pub size: u8,
+}
+
+/// Patch B: the square of a monster of template `t` whose top-left cell is `at`.
+fn square(at: Cell, t: &MonsterTemplate) -> Footprint {
+    Footprint::new(at, t.size)
 }
 
 /// The party's auras as the session holds them (`GameSession.auras`, `player_pos`,
@@ -428,6 +439,7 @@ impl PartyInput {
                         kin_only,
                         ..Aura::from(a)
                     }),
+                    size: b.size,
                 })
                 .collect(),
         }
@@ -473,8 +485,13 @@ pub fn monster_attack_input(r: &MonsterAttackRequest) -> Result<HitInput, Error>
     let skill = r.skill.as_ref().map(monster_skill_of).transpose()?;
     let view = r.party.view();
     let field = view.field();
-    let monster_mods =
-        field.monster_mods(&r.monster.mods, r.index, r.at, profile.kin, skill.is_none());
+    let monster_mods = field.monster_mods(
+        &r.monster.mods,
+        r.index,
+        square(r.at, &t),
+        profile.kin,
+        skill.is_none(),
+    );
     let at = r
         .party
         .cells
@@ -503,6 +520,8 @@ pub struct AiUnitInput {
     pub states: [ActiveState; STATES_MAX],
     pub mods: TimedMods,
     pub kin: u8,
+    /// ABI 11: cells per side (players 1).
+    pub size: u8,
 }
 
 impl From<AiUnitInput> for AiUnit {
@@ -515,6 +534,7 @@ impl From<AiUnitInput> for AiUnit {
             states: u.states,
             mods: u.mods,
             kin: u.kin,
+            size: u.size,
         }
     }
 }
@@ -601,13 +621,21 @@ pub struct UnitModsRequest {
     pub at: Cell,
     pub basic_attack: bool,
     pub kin: u8,
+    /// ABI 11: a monster's cells per side.
+    pub size: u8,
 }
 
 pub fn unit_mods(r: &UnitModsRequest) -> TimedMods {
     let view = r.party.view();
     let field = view.field();
     if r.monster {
-        field.monster_mods(&r.mods, r.slot, r.at, r.kin, r.basic_attack)
+        field.monster_mods(
+            &r.mods,
+            r.slot,
+            Footprint::new(r.at, r.size),
+            r.kin,
+            r.basic_attack,
+        )
     } else {
         field.hero_mods(&r.mods, r.slot, r.at, r.basic_attack)
     }
@@ -729,7 +757,7 @@ pub fn attack_input(r: &AttackRequest) -> Result<HitInput, Error> {
     let target_mods = field.monster_mods(
         &r.target.mods,
         r.target_index,
-        r.target_at,
+        square(r.target_at, &t),
         profile.kin,
         false,
     );
@@ -1566,6 +1594,7 @@ mod tests {
                 at: cell,
                 basic_attack: false,
                 kin: 0,
+                size: 1,
             };
             let mut out = [0u8; BUFFER_LEN];
             let len = unit_mods_bytes(&borsh::to_vec(&r).unwrap(), &mut out).unwrap();

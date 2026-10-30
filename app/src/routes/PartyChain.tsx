@@ -14,6 +14,9 @@ import type { HitItemSides, HitMods } from "../components/dice/types";
 import { StatsPanel } from "../components/stats/StatsPanel";
 import type { StatsUnit } from "../components/stats/types";
 import { Grid } from "../components/grid/Grid";
+import { TurnBar } from "../components/turns/TurnBar";
+import type { TurnBarItem } from "../components/turns/types";
+import { turnBar } from "../chain/timeline";
 import type { GridAura, GridChest, GridPointKind, GridTile, GridUnit } from "../components/grid/types";
 import { PartyLobby } from "../components/forms/PartyLobby";
 import type { LobbyPlayer } from "../components/forms/types";
@@ -84,12 +87,13 @@ import {
   type CombatWasm,
   type HitPreview,
 } from "../chain/combatWasm";
-import { ACTIVE_SLOTS, REACTIVE_SLOT, kinOf, monsterBearersOf, monsterSkillName, monsterSkillsOf, skillAction, useBuilderRegistry, useMonsterSkillTable, type MonsterSkill } from "../chain/monsters";
+import { ACTIVE_SLOTS, REACTIVE_SLOT, kinOf, monsterBearersOf, sizeOf, squareOf, monsterSkillName, monsterSkillsOf, skillAction, useBuilderRegistry, useMonsterSkillTable, type MonsterSkill } from "../chain/monsters";
 import { errorName } from "../chain/send";
 import { statusLabel, type SubStatus } from "../chain/subscribe";
 import { cooldownLabel, skillCooldowns, skillUsedText, skipText, arenaStepFor, startTurnFor, takenOntoMap, tickText, turnActed, turnStarted } from "../chain/turns";
 import { skillSetPda } from "../chain/pda";
 import { affordable, cheb, extendPath, pathCost, reachable, route, type Step } from "../chain/route";
+import { cellsOf, covers, footprint, lineEnds, squareDistance, type Footprint } from "../chain/footprint";
 import { useAutoFreezeTombstone } from "../chain/useAutoFreezeTombstone";
 import { useParty, type PartyEvent } from "../chain/useParty";
 import { BASIC_ATTACK_AP, Purpose, inReach, rangeReach, type RangeTag } from "../chain/skillcheck";
@@ -107,6 +111,8 @@ import { sessionTokenPda } from "../chain/pda";
 import { useAppWallet } from "../wallet/AppWallet";
 import { formatSol, shortAddress } from "../wallet/ConnectButton";
 
+/** Patch B: turns the arena turn bar shows (the current one included). */
+const TURN_BAR_LEN = 8;
 const CELL_PX = 64; // sprites: one whole 64 px tile per cell (grid integerCell)
 
 type LiveParty = ReturnType<typeof useParty> & { address: Address };
@@ -517,7 +523,10 @@ export function PartyView({ address }: { address: Address }) {
   const taken = useCallback(
     (p: Party, mover: number) => {
       const t = new Set<number>();
-      p.monsters.forEach((m, i) => m.alive && MONSTER_BASE + i !== mover && t.add(m.y * MAP_MAX + m.x));
+      // Patch B: a 2x2 monster holds every cell of its square.
+      p.monsters.forEach((m, i) => {
+        if (m.alive && MONSTER_BASE + i !== mover) for (const c of cellsOf(squareOf(p, i))) t.add(c.y * MAP_MAX + c.x);
+      });
       p.players.forEach((pl) => p.session.aliveMask & (1 << pl.slot) && pl.slot !== mover && t.add(pl.part.core.y * MAP_MAX + pl.part.core.x));
       // Patch 11: a closed chest occupies its cell; arena update: on the map only, with the packs'
       // visible monsters.
@@ -558,7 +567,7 @@ export function PartyView({ address }: { address: Address }) {
         alive: m.alive,
         label: `${bestiaryName(m.bestiaryId)} ${i}`,
         // Cells per side: the bestiary record (`record::CELLS`).
-        size: ((party.monsterRecords[i]?.[3] ?? 1) === 2 ? 2 : 1) as 1 | 2,
+        size: sizeOf(party, i) as 1 | 2,
       })),
       // Arena update: on the map each pack shows its one visible monster; it stands still.
       ...visiblePacks(party).map((v) => ({
@@ -617,9 +626,15 @@ export function PartyView({ address }: { address: Address }) {
   const mRange = (mChosen ? mChosen.sheet.ext[0]! : (mSheet?.range ?? 0)) as RangeTag;
   const mAp = mChosen ? mChosen.sheet.apCost : BASIC_ATTACK_AP;
 
+  // Patch B: a 2x2 monster walks, reaches and is reached with its whole square.
+  const moverSize = party && mIndex >= 0 ? sizeOf(party, mIndex) : 1;
+  const moverSquare: Footprint | null = moverPos ? footprint(moverPos, moverSize) : null;
   const ground = useMemo(
-    () => (party?.ground && s && unit !== null ? { tiles: party.ground, width: s.width, height: s.height, tileCost, taken: taken(party, unit) } : null),
-    [party, s, unit, tileCost, taken],
+    () =>
+      party?.ground && s && unit !== null
+        ? { tiles: party.ground, width: s.width, height: s.height, tileCost, taken: taken(party, unit), size: moverSize }
+        : null,
+    [party, s, unit, tileCost, taken, moverSize],
   );
   // Patch 13: the path is marked cell by cell (a far cell adds the cheapest way to it) and walked in
   // one move_path. It belongs to this unit's turn: a new turn starts an empty one.
@@ -749,7 +764,10 @@ export function PartyView({ address }: { address: Address }) {
             ? unitOf({ x: pl.part.core.x, y: pl.part.core.y }, pl.part.core.hp, pl.part.hpMax || pl.char.core.hpMax, (p!.session.aliveMask & (1 << slot)) !== 0, statesOf(pl.part.core.states), activeMods(pl.part.mods), 0xff)
             : unitOf({ x: 0, y: 0 }, 0, 0, false, [], [], 0xff);
         });
-        const monsters = p.monsters.map((x, j) => unitOf({ x: x.x, y: x.y }, x.hp, x.hpMax, x.alive, statesOf(x.states), activeMods(p!.monsterMods[j]), kinOf(p!, j)));
+        const monsters = p.monsters.map((x, j) => ({
+          ...unitOf({ x: x.x, y: x.y }, x.hp, x.hpMax, x.alive, statesOf(x.states), activeMods(p!.monsterMods[j]), kinOf(p!, j)),
+          size: sizeOf(p!, j),
+        }));
         let plan = null as ReturnType<CombatWasm["monsterPlan"]> | null;
         try {
           plan = combat.monsterPlan({
@@ -765,21 +783,28 @@ export function PartyView({ address }: { address: Address }) {
         } catch (err) {
           console.warn(err);
         }
-        const nearest = living.reduce((a, b) => (cheb(m, { x: b.part.core.x, y: b.part.core.y }) < cheb(m, { x: a.part.core.x, y: a.part.core.y }) ? b : a));
-        const targetCell: Cell = plan?.found
+        // Patch B: a 2x2 monster reaches from, and walks with, its whole square.
+        const size = sizeOf(p, mi);
+        const at = (c: Cell) => footprint(c, size);
+        const heroAt = (c: Cell) => footprint(c);
+        const nearest = living.reduce((a, b) =>
+          squareDistance(at(m), heroAt({ x: b.part.core.x, y: b.part.core.y })) < squareDistance(at(m), heroAt({ x: a.part.core.x, y: a.part.core.y })) ? b : a,
+        );
+        const target: Footprint = plan?.found
           ? plan.ally
-            ? { x: p.monsters[plan.target]!.x, y: p.monsters[plan.target]!.y }
-            : { x: heroes[plan.target]!.cell[0], y: heroes[plan.target]!.cell[1] }
-          : { x: nearest.part.core.x, y: nearest.part.core.y };
+            ? squareOf(p, plan.target)
+            : heroAt({ x: heroes[plan.target]!.cell[0], y: heroes[plan.target]!.cell[1] })
+          : heroAt({ x: nearest.part.core.x, y: nearest.part.core.y });
         const reachCells = plan?.found ? rangeReach(plan.range as RangeTag) : 1;
         const inRange = (c: Cell) => {
-          const d = cheb(c, targetCell);
+          const d = squareDistance(at(c), target);
           return d <= reachCells && (plan?.ally ? true : d >= 1);
         };
         let ap = m.actionPoints;
         const keep = plan?.found ? plan.ap : BASIC_ATTACK_AP;
         if (!inRange(m)) {
-          const steps = route({ from: m, goal: (x, y) => inRange({ x, y }), tiles: p.ground!, width: p.session.width, height: p.session.height, tileCost: Array.from(p.session.tileCost), taken: taken(p, u) });
+          const ground = { tiles: p.ground!, width: p.session.width, height: p.session.height, tileCost: Array.from(p.session.tileCost), taken: taken(p, u), size };
+          const steps = route({ ...ground, from: m, goal: (x, y) => inRange({ x, y }) });
           const take = steps ? affordable(steps, ap, keep) : [];
           if (take.length) {
             const r = await send(`move ${label(u)}`, actor.signer, async () => [await movePathIx(actor, address, p!.session.layout, { kind: "monster", index: mi }, take)], { quiet: true });
@@ -1008,32 +1033,38 @@ export function PartyView({ address }: { address: Address }) {
   const ended = st !== "active";
   const livingPlayers = party.players.filter((p) => s.aliveMask & (1 << p.slot));
   // A skill's targets within its reach (the weapon: every living monster, the program checks range).
-  const reachOk = (c: Cell) => !chosen || !moverPos || inReach(chosen.side, chosen.range, cheb(moverPos, c));
-  const monsterTargets: Cell[] = !canAttack
+  // Patch B: distances run between the nearest cells of a 2x2 monster's square.
+  const reachOk = (t: Footprint) => !chosen || !moverSquare || inReach(chosen.side, chosen.range, squareDistance(moverSquare, t));
+  const playerSquares = livingPlayers.map((p) => footprint({ x: p.part.core.x, y: p.part.core.y }));
+  const targetSquares: Footprint[] = !canAttack
     ? []
-    : myTurn && moverPos
+    : myTurn && moverSquare
       ? chosenSide === "ally"
-        ? livingPlayers.map((p) => ({ x: p.part.core.x, y: p.part.core.y })).filter(reachOk)
-        : party.monsters.filter((m) => m.alive).map((m) => ({ x: m.x, y: m.y })).filter(reachOk)
-      : monsterTurn && isDm && moverPos
+        ? playerSquares.filter(reachOk)
+        : party.monsters.flatMap((m, i) => (m.alive ? [squareOf(party, i)] : [])).filter(reachOk)
+      : monsterTurn && isDm && moverSquare
         ? mSide === "ally"
           ? party.monsters
               .map((m, i) => ({ m, i }))
               .filter(({ m, i }) => m.alive && (!mChosen?.sheet.kinOnly || i === mIndex || kinOf(party, i) === kinOf(party, mIndex)))
-              .map(({ m }) => ({ x: m.x, y: m.y }))
-              .filter((c) => inReach("ally", mRange, cheb(moverPos, c)))
-          : livingPlayers.map((p) => ({ x: p.part.core.x, y: p.part.core.y })).filter((c) => inReach("enemy", mRange, cheb(moverPos, c)))
+              .map(({ i }) => squareOf(party, i))
+              .filter((t) => inReach("ally", mRange, squareDistance(moverSquare, t)))
+          : playerSquares.filter((t) => inReach("enemy", mRange, squareDistance(moverSquare, t)))
         : [];
+  const monsterTargets: Cell[] = targetSquares.flatMap(cellsOf);
+  const hoverTarget = hover ? targetSquares.find((t) => covers(t, hover)) : undefined;
   // A line skill under the pointer (docs/SKILL_BUILDER.md 4.3): from the caster through the
-  // hovered target to the skill's reach, a wall ends it (the module runs the program's line).
+  // hovered target to the skill's reach, a wall ends it (the module runs the program's line,
+  // between the nearest cells of large units: `line_ends`).
+  const lineEnd = chosen?.line && moverSquare && hoverTarget ? lineEnds(moverSquare, hoverTarget) : null;
   const lineCells: Cell[] =
-    combat && chosen?.line && moverPos && hover && monsterTargets.some((c) => c.x === hover.x && c.y === hover.y)
+    combat && chosen && lineEnd
       ? (() => {
           try {
             return combat
               .line({
-                from: [moverPos.x, moverPos.y],
-                through: [hover.x, hover.y],
+                from: [lineEnd.from.x, lineEnd.from.y],
+                through: [lineEnd.through.x, lineEnd.through.y],
                 reach: rangeReach(chosen.range),
                 width: s.width,
                 height: s.height,
@@ -1086,11 +1117,11 @@ export function PartyView({ address }: { address: Address }) {
           const record = chosen ? (skillRecords[activePlayer.character]?.[chosen.slot] ?? null) : null;
           const inReach = party.monsters
             .map((m, i) => ({ m, i }))
-            .filter(({ m }) => m.alive && reachOk({ x: m.x, y: m.y }));
+            .filter(({ m, i }) => m.alive && reachOk(squareOf(party, i)));
           const hovered = lineCells.length
-            ? party.monsters.map((m, i) => ({ m, i })).filter(({ m }) => m.alive && onLine(m))
+            ? party.monsters.map((m, i) => ({ m, i })).filter(({ m, i }) => m.alive && cellsOf(squareOf(party, i)).some(onLine))
             : hover
-              ? inReach.filter(({ m }) => m.x === hover.x && m.y === hover.y)
+              ? inReach.filter(({ i }) => covers(squareOf(party, i), hover))
               : [];
           return (hovered.length ? hovered : inReach.slice(0, 4)).flatMap(({ m, i }) => {
             const p = previewOnMonster(combat, hero, heroMods, record, m, activeMods(party.monsterMods[i]), party.monsterRecords[i] ?? new Uint8Array(48), i, accuracy, sessionParty, activePlayer.slot);
@@ -1104,7 +1135,7 @@ export function PartyView({ address }: { address: Address }) {
   const monsterPreviews =
     combat && tablesReady && monsterTurn && isDm && canAttack && mIndex >= 0 && mSide === "enemy" && (!mChosen || mChosen.sheet.blocks[1] === Purpose.Damage)
       ? livingPlayers
-          .filter((pl) => moverPos && inReach("enemy", mRange, cheb(moverPos, { x: pl.part.core.x, y: pl.part.core.y })))
+          .filter((pl) => moverSquare && inReach("enemy", mRange, squareDistance(moverSquare, footprint({ x: pl.part.core.x, y: pl.part.core.y }))))
           .flatMap((pl) => {
             const m = party.monsters[mIndex]!;
             try {
@@ -1126,6 +1157,15 @@ export function PartyView({ address }: { address: Address }) {
           })
       : [];
 
+  // Patch B: the arena's turn bar, the timeline's forecast of the next turns.
+  const barTurns: TurnBarItem[] = turnBar(party, TURN_BAR_LEN).map((t) => ({
+    id: t.unit,
+    kind: t.unit < MONSTER_BASE ? "player" : "monster",
+    label: label(t.unit),
+    now: t.now,
+    mine: t.unit < MONSTER_BASE ? mine.some((p) => p.slot === t.unit) : isDm,
+  }));
+
   return (
     <section>
       <h1>
@@ -1135,6 +1175,7 @@ export function PartyView({ address }: { address: Address }) {
       <SessionKeyBox party={party} pk={pk} isDm={isDm} me={me} send={send} busy={busy} />
       <div style={{ display: "flex", gap: 20, alignItems: "flex-start", flexWrap: "wrap" }}>
         <div>
+          {!ended && arenaMode(s) === "arena" && <TurnBar turns={barTurns} />}
           <Grid
             width={s.width}
             height={s.height}

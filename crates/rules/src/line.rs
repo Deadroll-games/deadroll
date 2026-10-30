@@ -7,7 +7,7 @@
 //! line hits the monsters on it, a buff line the allies on it, in line order.
 use deadroll_types::{Cell, MAP_MAX};
 
-use crate::units::chebyshev;
+use crate::{units::chebyshev, Footprint};
 
 /// Most cells of one line.
 pub const LINE_MAX: usize = MAP_MAX;
@@ -78,17 +78,27 @@ pub fn line_cells(from: Cell, through: Cell, reach: u8, passable: impl Fn(Cell) 
     out
 }
 
-/// The units on `line`, in line order: `units` gives each candidate's index and cell (living
-/// units of the skill's side only).
-pub fn targets_on_line(
+/// Patch B: the two ends of a line from a caster on `caster` at a unit on `target`: it starts at
+/// the caster's cell nearest the target and runs through the target's cell nearest that start
+/// (for one-cell units, their own cells).
+pub fn line_ends(caster: impl Into<Footprint>, target: impl Into<Footprint>) -> (Cell, Cell) {
+    let (caster, target) = (caster.into(), target.into());
+    let through = target.nearest(caster.nearest(target.at));
+    (caster.nearest(through), through)
+}
+
+/// The units on `line`, in line order: `units` gives each candidate's index and cells (living
+/// units of the skill's side only). Patch B: a large unit is hit once, where the line first
+/// crosses it.
+pub fn targets_on_line<F: Into<Footprint>>(
     line: &Line,
-    units: impl Iterator<Item = (u8, Cell)> + Clone,
+    units: impl Iterator<Item = (u8, F)> + Clone,
 ) -> ([u8; LINE_TARGETS_MAX], usize) {
     let mut out = [0u8; LINE_TARGETS_MAX];
     let mut n = 0;
     for cell in line.cells() {
         for (index, at) in units.clone() {
-            if at == *cell && n < LINE_TARGETS_MAX {
+            if at.into().covers(*cell) && n < LINE_TARGETS_MAX && !out[..n].contains(&index) {
                 out[n] = index;
                 n += 1;
             }
@@ -151,5 +161,31 @@ mod tests {
         let units = [(7u8, c(4, 0)), (2, c(1, 0)), (5, c(1, 1)), (9, c(6, 0))];
         let (t, n) = targets_on_line(&l, units.iter().copied());
         assert_eq!(&t[..n], &[2, 7, 9]);
+    }
+
+    #[test]
+    fn a_large_unit_is_hit_once_and_casts_from_its_nearest_cell() {
+        let l = line_cells(c(0, 1), c(1, 1), 8, open);
+        // A 2x2 unit on (3..5, 0..2): the line crosses two of its cells.
+        let units = [
+            (4u8, Footprint::new(c(3, 0), 2)),
+            (1, Footprint::cell(c(2, 1))),
+            (6, Footprint::cell(c(6, 1))),
+        ];
+        let (t, n) = targets_on_line(&l, units.iter().copied());
+        assert_eq!(&t[..n], &[1, 4, 6]);
+        // Its own line starts at its cell nearest the target, never inside itself.
+        let boss = Footprint::new(c(3, 3), 2);
+        assert_eq!(line_ends(boss, c(8, 4)), (c(4, 4), c(8, 4)));
+        assert_eq!(line_ends(boss, c(0, 0)), (c(3, 3), c(0, 0)));
+        let (from, through) = line_ends(boss, c(8, 4));
+        let l = line_cells(from, through, 4, open);
+        assert!(l.cells().iter().all(|x| !boss.covers(*x)));
+        assert_eq!(l.cells()[0], c(5, 4));
+        // A line at it runs through its nearest cell.
+        assert_eq!(line_ends(c(0, 4), boss), (c(0, 4), c(3, 4)));
+        assert_eq!(line_ends(c(6, 0), boss), (c(6, 0), c(4, 3)));
+        // One-cell units: their own cells.
+        assert_eq!(line_ends(c(2, 2), c(5, 5)), (c(2, 2), c(5, 5)));
     }
 }

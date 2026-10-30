@@ -32,6 +32,8 @@ pub struct SpawnRules {
     /// Skill slots by `Category` for a regular spawn, an elite one and a boss
     /// (`MonsterScaling::slots`).
     pub slots: [[u8; Category::COUNT]; 3],
+    /// Patch B: cells per side in an arena (`crate::footprint`), 1 or 2.
+    pub size: u8,
 }
 
 impl SpawnRules {
@@ -44,6 +46,7 @@ impl SpawnRules {
             pool_len: 0,
             pool: [Category::Active; POOL_MAX],
             slots: [[3, 0, 1], [4, 0, 1], [5, 1, 1]],
+            size: 1,
         }
     }
 

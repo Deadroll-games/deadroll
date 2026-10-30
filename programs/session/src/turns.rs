@@ -5,7 +5,10 @@
 //! order of the initiative roll); in an arena every unit is on the initiative timeline
 //! (`deadroll_rules::arena`): the living unit with the lowest time acts, its turn adds its delay.
 use anchor_lang::prelude::*;
-use deadroll_rules::arena::{delay, next_unit, round_at, start_time, FirstSide, TimelineUnit};
+use deadroll_combat::TimedMods;
+use deadroll_rules::arena::{
+    delay, next_unit, round_at, start_time, turn_delay, FirstSide, TimelineUnit,
+};
 use deadroll_types::TURN_ORDER_MAX;
 
 /// The start of a unit's own turn lives in `deadroll-rules` (shared with `tools/balance`).
@@ -28,10 +31,14 @@ pub fn advance(session: &mut GameSession, session_key: Pubkey, monsters: &Monste
     match session.mode {
         ArenaMode::Map => advance_circle(session, session_key, monsters),
         ArenaMode::Arena => {
+            // `start_turn` added the delay under the turn's buffs and debuffs; a turn passed
+            // without it (a timeout) takes the delay of the bare initiative.
             if let Some(unit) = session.current_unit() {
-                let id = unit.id() as usize;
-                let step = delay(initiative_of(session, unit), &BALANCE.arena);
-                session.unit_time[id] = session.unit_time[id].saturating_add(step);
+                if !session.turn_started() {
+                    let id = unit.id() as usize;
+                    let step = delay(initiative_of(session, unit), &BALANCE.arena);
+                    session.unit_time[id] = session.unit_time[id].saturating_add(step);
+                }
             }
             next_on_timeline(session, session_key, monsters)
         }
@@ -154,6 +161,21 @@ pub fn begin(
         turn_seq: session.turn_seq,
     });
     Ok(())
+}
+
+/// Patch B: in an arena, the start of `unit`'s turn puts its next turn on the timeline: its time
+/// grows by the delay under `mods` (its own with the auras over it, after the turn start's tick).
+/// An effect that lands later in the turn changes the delay from the next turn on, and a turn
+/// lost to Freeze or Stun takes the delay as well (docs/PARTY_AND_TURNS.md 6.2).
+pub fn add_turn_delay(session: &mut GameSession, unit: Unit, mods: &TimedMods) {
+    if session.mode != ArenaMode::Arena {
+        return;
+    }
+    let id = unit.id() as usize;
+    let step = turn_delay(initiative_of(session, unit), mods, &BALANCE.arena);
+    if let Some(t) = session.unit_time.get_mut(id) {
+        *t = t.saturating_add(step);
+    }
 }
 
 /// Initiative of a unit (its delay on the timeline).
@@ -383,6 +405,39 @@ mod tests {
         let third = start_of_turn(&mut states, &mut mods, &mut [], 10);
         assert_eq!(third.expired_mods, mod_bit(ModKind::Slow));
         assert!(mods.iter().all(|m| m.is_empty()));
+    }
+
+    #[test]
+    fn the_turn_start_puts_the_next_turn_on_the_timeline_under_its_mods() {
+        use crate::state::test_support::session;
+        use deadroll_rules::arena::{delay, turn_delay};
+        use deadroll_types::Cell;
+        let mut s = session(&[Cell::default(), Cell::default()]);
+        s.player_initiative = [10, 4, 0, 0];
+        let mut slow = NONE;
+        slow[0] = TimedMod {
+            kind: ModKind::Slow,
+            turns: 1,
+            power_bp: 10_000,
+            ..NONE[0]
+        };
+        // On the map nothing moves.
+        s.mode = ArenaMode::Map;
+        add_turn_delay(&mut s, Unit::Player(0), &slow);
+        assert_eq!(s.unit_time[0], 0);
+        s.mode = ArenaMode::Arena;
+        add_turn_delay(&mut s, Unit::Player(0), &NONE);
+        assert_eq!(s.unit_time[0], delay(10, &BALANCE.arena));
+        // Slowed 100%: initiative 5's delay.
+        add_turn_delay(&mut s, Unit::Player(1), &slow);
+        assert_eq!(s.unit_time[1], turn_delay(4, &slow, &BALANCE.arena));
+        assert_eq!(s.unit_time[1], delay(2, &BALANCE.arena));
+        // A Haste leaves the order alone.
+        let mut haste = slow;
+        haste[0].kind = ModKind::Haste;
+        let before = s.unit_time[0];
+        add_turn_delay(&mut s, Unit::Player(0), &haste);
+        assert_eq!(s.unit_time[0], before + delay(10, &BALANCE.arena));
     }
 
     #[test]

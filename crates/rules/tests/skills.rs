@@ -444,8 +444,8 @@ fn reactions_need_their_reach_and_no_cooldown() {
     let riposte = stats(&presets::WARRIOR[4]); // melee counterattack
     let hit = Event::Hit { crit: false };
     let at = c(4, 4);
-    let near = Some((3, c(5, 4)));
-    let far = Some((3, c(8, 4)));
+    let near = Some((3, c(5, 4).into()));
+    let far = Some((3, c(8, 4).into()));
     assert_eq!(
         reaction(&CFG, &riposte, 0, 0, at, &hit, near, None),
         Some(Reaction::Strike { monster: 3 })
@@ -486,16 +486,16 @@ fn reactions_need_their_reach_and_no_cooldown() {
         hp_max: 50,
     };
     assert_eq!(
-        reaction(&CFG, &shield, 0, 2, at, &ally, None, Some(c(5, 5))),
+        reaction(&CFG, &shield, 0, 2, at, &ally, None, Some(c(5, 5).into())),
         Some(Reaction::Buff { slot: 0 })
     );
     assert_eq!(
-        reaction(&CFG, &shield, 0, 2, at, &ally, None, Some(c(6, 6))),
+        reaction(&CFG, &shield, 0, 2, at, &ally, None, Some(c(6, 6).into())),
         None
     );
     shield.ext.range = RangeTag::Ranged;
     assert_eq!(
-        reaction(&CFG, &shield, 0, 2, at, &ally, None, Some(c(6, 6))),
+        reaction(&CFG, &shield, 0, 2, at, &ally, None, Some(c(6, 6).into())),
         Some(Reaction::Buff { slot: 0 })
     );
 }

@@ -7,11 +7,12 @@
 //! from ([`entry_cells`]); the monsters stand where the DM put them.
 
 use deadroll_types::{
-    Cell, Facing, MapArenasData, MapLayoutDataV2, PackLayout, ARENA_MONSTERS_MAX, ARENA_SIDE_MAX,
-    PACKS_MAX, PARTY_MAX,
+    Cell, Facing, MapArenasData, MapLayoutDataV2, PackLayout, Spawn, ARENA_MONSTERS_MAX,
+    ARENA_SIDE_MAX, PACKS_MAX, PARTY_MAX,
 };
 
 use crate::{
+    footprint::Footprint,
     path::{reachable_over, Reach},
     tiles::{in_bounds, TileRules},
     MapCheckError,
@@ -172,7 +173,9 @@ pub fn entry_cells(
     // of distance, then row, then column, without sorting.
     let mut take = |x: u8, y: u8| -> bool {
         let c = Cell { x, y };
-        if tiles.is_passable(arena_byte(arenas, pack, x as usize, y as usize)) && !taken.contains(&c) {
+        if tiles.is_passable(arena_byte(arenas, pack, x as usize, y as usize))
+            && !taken.contains(&c)
+        {
             out[found] = c;
             found += 1;
         }
@@ -202,6 +205,25 @@ pub fn entry_cells(
         }
     }
     found
+}
+
+/// Patch B: the most cells an arena's pack stands on (every monster 2×2).
+pub const ARENA_TAKEN_MAX: usize = ARENA_MONSTERS_MAX * 4;
+
+/// Writes the cells of `units` into `out` (the `taken` of [`entry_cells`], the `blocked` of
+/// [`arena_reach`]); returns how many fit.
+pub fn footprint_cells(units: impl Iterator<Item = Footprint>, out: &mut [Cell]) -> usize {
+    let mut n = 0;
+    for f in units {
+        for c in f.cells() {
+            if n == out.len() {
+                return n;
+            }
+            out[n] = c;
+            n += 1;
+        }
+    }
+    n
 }
 
 /// The cells reachable inside `pack`'s arena from `start`, around `blocked`.
@@ -252,27 +274,32 @@ pub(crate) fn check_arenas(
     ends: [Cell; 2],
     chests: &[Cell],
     map_reach: &Reach,
+    size_of: &dyn Fn(u8) -> u8,
 ) -> Result<(), MapCheckError> {
     use MapCheckError as E;
     let spawns = &layout.spawns[..(layout.spawn_count as usize).min(layout.spawns.len())];
+    let footprint = |s: &Spawn| Footprint::new(Cell { x: s.x, y: s.y }, size_of(s.bestiary_id));
 
-    // Every monster stands in its pack's arena.
+    // Every monster stands in its pack's arena, with every cell of its footprint (patch B).
     let mut in_pack = [0u8; PACKS_MAX];
     for (i, s) in spawns.iter().enumerate() {
         let p = arenas.packs.get(s.pack as usize).ok_or(E::PackOutOfRange)?;
         if !p.is_used() {
             return Err(E::PackWithoutArena);
         }
-        let cell = Cell { x: s.x, y: s.y };
-        if !in_bounds(cell, p.width, p.height) {
+        let f = footprint(s);
+        if !f.inside(p.width, p.height) {
             return Err(E::SpawnOutOfBounds);
         }
-        if !tiles.is_passable(arena_byte(arenas, s.pack, s.x as usize, s.y as usize)) {
+        let passable = f
+            .cells()
+            .all(|c| tiles.is_passable(arena_byte(arenas, s.pack, c.x as usize, c.y as usize)));
+        if !passable {
             return Err(E::SpawnNotPassable);
         }
         let taken = spawns[..i]
             .iter()
-            .any(|o| o.pack == s.pack && o.x == s.x && o.y == s.y);
+            .any(|o| o.pack == s.pack && footprint(o).overlaps(&f));
         if taken {
             return Err(E::SpawnOverlap);
         }
@@ -311,7 +338,7 @@ pub(crate) fn check_arenas(
         if !neighbors(p.cell(), width, height).any(|c| map_reach.contains(c)) {
             return Err(E::PackUnreachable);
         }
-        check_entries(arenas, pack, tiles, spawns)?;
+        check_entries(arenas, pack, tiles, spawns, size_of)?;
     }
     Ok(())
 }
@@ -355,17 +382,21 @@ fn check_entries(
     arenas: &MapArenasData,
     pack: u8,
     tiles: &TileRules,
-    spawns: &[deadroll_types::Spawn],
+    spawns: &[Spawn],
+    size_of: &dyn Fn(u8) -> u8,
 ) -> Result<(), MapCheckError> {
     use MapCheckError as E;
     let p = arenas.packs[pack as usize];
-    let mut monsters = [Cell::default(); ARENA_MONSTERS_MAX];
-    let mut count = 0;
-    for s in spawns.iter().filter(|s| s.pack == pack) {
-        monsters[count] = Cell { x: s.x, y: s.y };
-        count += 1;
-    }
-    let monsters = &monsters[..count];
+    // Every cell the pack stands on (a large monster's whole footprint).
+    let mut cells = [Cell::default(); ARENA_TAKEN_MAX];
+    let count = footprint_cells(
+        spawns
+            .iter()
+            .filter(|s| s.pack == pack)
+            .map(|s| Footprint::new(Cell { x: s.x, y: s.y }, size_of(s.bestiary_id))),
+        &mut cells,
+    );
+    let monsters = &cells[..count];
     // One search: the cells of every side must lie in the part of the arena the first side's
     // party reaches, and from there every monster can be reached (steps go both ways).
     let mut reach = None;
@@ -374,15 +405,22 @@ fn check_entries(
         if entry_cells(arenas, pack, tiles, approach, monsters, &mut party) < PARTY_MAX {
             return Err(E::ArenaNoRoom);
         }
-        let reach = reach.get_or_insert_with(|| arena_reach(arenas, pack, tiles, party[0], monsters));
+        let reach =
+            reach.get_or_insert_with(|| arena_reach(arenas, pack, tiles, party[0], monsters));
         if !party.iter().all(|c| reach.contains(*c)) {
             return Err(E::ArenaUnreachable);
         }
     }
     let reach = reach.ok_or(E::ArenaNoRoom)?;
-    let every_monster = monsters
+    // A large monster is reached next to any cell of its square.
+    let every_monster = spawns
         .iter()
-        .all(|m| neighbors(*m, p.width, p.height).any(|c| reach.contains(c)));
+        .filter(|s| s.pack == pack)
+        .map(|s| Footprint::new(Cell { x: s.x, y: s.y }, size_of(s.bestiary_id)))
+        .all(|f| {
+            f.cells()
+                .any(|m| neighbors(m, p.width, p.height).any(|c| reach.contains(c)))
+        });
     if !every_monster {
         return Err(E::ArenaUnreachable);
     }
@@ -470,6 +508,35 @@ mod tests {
         }
         a.cells[1] = cells;
         a
+    }
+
+    #[test]
+    fn a_large_monster_in_a_corner_is_reached_next_to_any_of_its_cells() {
+        // Patch B: the 2x2 chieftain fills the corner (10..12, 10..12) of an open 12 x 12 arena;
+        // its corner cell (11, 11) has no free neighbor, the others do.
+        let a = arena(&["............"; 12]);
+        let spawn = |bestiary_id, x, y| Spawn {
+            bestiary_id,
+            x,
+            y,
+            pack: 1,
+            ..Spawn::default()
+        };
+        let spawns = [spawn(2, 10, 10), spawn(3, 9, 10), spawn(4, 10, 9)];
+        let size = |id: u8| if id == 2 { 2 } else { 1 };
+        assert_eq!(check_entries(&a, 1, &starter(), &spawns, &size), Ok(()));
+        // Walled in: a wall ring around its square and its helpers.
+        let mut rows = ["............"; 12];
+        rows[8] = "........####";
+        rows[9] = "........#...";
+        rows[10] = "........#...";
+        rows[11] = "........#...";
+        let walled = arena(&rows);
+        let spawns = [spawn(2, 10, 10), spawn(3, 9, 10), spawn(4, 9, 9)];
+        assert_eq!(
+            check_entries(&walled, 1, &starter(), &spawns, &size),
+            Err(MapCheckError::ArenaUnreachable)
+        );
     }
 
     #[test]

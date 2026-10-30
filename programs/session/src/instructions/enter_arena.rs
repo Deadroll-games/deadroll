@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use deadroll_mapcheck::tiles::TileRules;
 use deadroll_rules::{
-    arena::{entry_cells, first_side, Approach, FirstSide},
+    arena::{entry_cells, first_side, footprint_cells, Approach, FirstSide, ARENA_TAKEN_MAX},
     spread::{BurningCell, BURNING_CELLS_MAX},
 };
 use deadroll_types::{seeds, Cell, SessionStatus, ARENA_MONSTERS_MAX, PARTY_MAX};
@@ -59,8 +59,10 @@ pub fn handler<'info>(ctx: Context<'info, EnterArena<'info>>) -> Result<()> {
         .get(pack as usize)
         .ok_or(SessionError::NotEngaged)?;
 
-    // The pack's monsters, in spawn order.
-    let mut taken = [Cell::default(); ARENA_MONSTERS_MAX];
+    // The pack's monsters, in spawn order; every cell they stand on (patch B: a large one's whole
+    // square) is taken.
+    let mut taken = [Cell::default(); ARENA_TAKEN_MAX];
+    let mut taken_count = 0usize;
     let mut spawns = [u8::MAX; ARENA_MONSTERS_MAX];
     let mut count = 0usize;
     for i in 0..layout.spawn_count() {
@@ -70,10 +72,8 @@ pub fn handler<'info>(ctx: Context<'info, EnterArena<'info>>) -> Result<()> {
         }
         require!(count < ARENA_MONSTERS_MAX, SessionError::InvalidLayout);
         load_monster(session, &monsters, count as u8, i, &spawn)?;
-        taken[count] = Cell {
-            x: spawn.x,
-            y: spawn.y,
-        };
+        let square = monsters.footprint(count as u8)?;
+        taken_count += footprint_cells(core::iter::once(square), &mut taken[taken_count..]);
         spawns[count] = i;
         count += 1;
     }
@@ -113,7 +113,7 @@ pub fn handler<'info>(ctx: Context<'info, EnterArena<'info>>) -> Result<()> {
         pack,
         &tiles,
         approach,
-        &taken[..count],
+        &taken[..taken_count],
         &mut cells[..living],
     );
     require!(found == living, SessionError::InvalidLayout);

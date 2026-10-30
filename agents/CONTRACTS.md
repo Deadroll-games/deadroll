@@ -1169,3 +1169,36 @@ events                PackEngaged { session, pack, slot, x, y }, ArenaEntered { 
                       party_first, width, height, players: [Cell; 4], monsters, spawns: [u8; 8] },
                       ArenaWon { session, pack }, ArenaLeft { session, pack, xp: [u32; 4] }
 ```
+
+## 29. Patch B: initiative under effects, 2x2 monsters
+
+docs/PARTY_AND_TURNS.md 6.2; docs/BESTIARY.md 2; docs/MAP_DESCRIPTION.md 17. Needs a devnet
+upgrade (map and session programs). No account layout changed: sessions and maps from section 28
+stay readable. `crates/types`: nothing.
+
+Rules: `ArenaTuning` appended `slow_initiative_bp` (10_000). `deadroll_rules::arena` adds
+`effective_initiative`, `turn_delay`, `upcoming`; re-exports `footprint_cells`, `ARENA_TAKEN_MAX`.
+`deadroll_rules::line::line_ends`. Range, auras, `nearby`, `entered_next_to`, `reaction` and
+`targets_on_line` take `impl Into<Footprint>` (a `Cell` is a one-cell unit); `MonsterBearer` and
+`AiUnit` appended `size`; `spread` takes the monsters' `sizes`; `SpreadOutcome.ignited` is 12 cells.
+`deadroll_mapcheck::footprint::Footprint`, `walk::walk_sized`; `SpawnRules.size`; `check_arenas`
+counts a spawn's square (existing codes `SpawnOutOfBounds`, `SpawnNotPassable`, `SpawnOverlap`,
+`ArenaUnreachable`; no new code).
+
+Map program: `finalize_map` refuses a 2x2 spawn whose square leaves its arena, touches a wall or
+another spawn. A map finalized before the upgrade keeps its spawns as they are.
+
+Session program:
+
+```
+start_turn            in an arena, adds the turn's delay to the unit's unit_time at once, under its
+                      modifiers with the auras after the tick (a Slow divides initiative); also on a
+                      Freeze or Stun skip. advance adds the bare delay only to a turn never started
+act, monster_act      range and line between the nearest cells of 2x2 units (line_ends)
+move_path             a 2x2 monster walks its whole square (walk_sized); its cells block others
+enter_arena           the party is placed around the squares
+event ResonanceSpread ignited: [Cell; 12] (was [Cell; 8])
+```
+
+combat.wasm ABI 11: `BearerInput`, `AiUnitInput` and `UnitModsRequest` appended `size: u8`.
+Fixture `app/src/chain/__fixtures__/arena.json` (`crates/rules/tests/arena_ts_fixtures.rs`).
