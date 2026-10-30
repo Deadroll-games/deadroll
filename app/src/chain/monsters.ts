@@ -3,6 +3,7 @@
 // (`MonsterState.records`, `skill_table`); this file only finds and labels them.
 import { useEffect, useState } from "react";
 import { DATA_SOURCE } from "../config";
+import { footprint, type Footprint } from "./footprint";
 import { auraInputOf, type BearerInput, type CombatWasm, type MonsterSkillSheet, type SpawnSkillsResult } from "./combatWasm";
 import { registryBestiary, registryMonsterSkills, registryRewards, registryTileset, type Party } from "./game";
 import { mockTable } from "./mock";
@@ -20,6 +21,8 @@ const RECORD_SIZE = 48;
 const POOL_START_AT = 39;
 const POOL_LEN_AT = 40;
 const KIN_AT = 41;
+/** `record::CELLS`: cells per side (1 or 2). */
+const CELLS_AT = 3;
 /** Monster skill records (`deadroll_skillcheck::monster`): size, the category byte. */
 const SKILL_RECORD_SIZE = 32;
 const SKILL_CATEGORY_AT = 1;
@@ -73,12 +76,21 @@ export function monsterSkillsOf(party: Party, i: number, combat: CombatWasm, tab
 /** The kin of monster `i` (its bestiary record). */
 export const kinOf = (party: Party, i: number) => party.monsterRecords[i]?.[KIN_AT] ?? 0xff;
 
+/** Patch B: the cells per side of monster `i` (its bestiary record), 1 or 2. */
+export const sizeOf = (party: Party, i: number) => (party.monsterRecords[i]?.[CELLS_AT] === 2 ? 2 : 1);
+
+/** Patch B: the square monster `i` stands on. */
+export const squareOf = (party: Party, i: number): Footprint => {
+  const m = party.monsters[i];
+  return footprint({ x: m?.x ?? 0, y: m?.y ?? 0 }, sizeOf(party, i));
+};
+
 /** The living monsters that bear an aura (`MonsterState.auras`), for the module's party input. */
 export function monsterBearersOf(party: Party): BearerInput[] {
   return party.monsters.flatMap((m, i) => {
     const auras = party.monsterAuras[i] ?? [];
     if (!m.alive || !auras.some((a) => a.aura.turns > 0)) return [];
-    return [{ index: i, cell: [m.x, m.y] as const, kin: kinOf(party, i), auras: auras.map((a) => ({ aura: auraInputOf(a.aura), kinOnly: a.kinOnly })) }];
+    return [{ index: i, cell: [m.x, m.y] as const, kin: kinOf(party, i), auras: auras.map((a) => ({ aura: auraInputOf(a.aura), kinOnly: a.kinOnly })), size: sizeOf(party, i) }];
   });
 }
 
@@ -116,6 +128,12 @@ export type SpawnView = { record: Uint8Array; pool: PoolSkill[]; check: SpawnSki
 export function bestiaryRecord(reg: BuilderRegistry, id: number): Uint8Array | null {
   const r = reg.bestiary.subarray(id * RECORD_SIZE, (id + 1) * RECORD_SIZE);
   return r.length === RECORD_SIZE && r[0] === 1 ? r : null;
+}
+
+/** Patch B: a template's cells per side in an arena (its record), 1 when unknown. */
+export function bestiarySize(reg: BuilderRegistry | null, id: number): number {
+  const r = reg ? bestiaryRecord(reg, id) : null;
+  return r?.[CELLS_AT] === 2 ? 2 : 1;
 }
 
 /** A spawn's pool, slots and verdict (`check_monster_selection` through the combat module, as

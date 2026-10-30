@@ -35,7 +35,8 @@ import { useTx } from "../chain/useTx";
 import { DATA_SOURCE, explorerUrl } from "../config";
 import { useAppWallet } from "../wallet/AppWallet";
 import { useCombat } from "../chain/combatWasm";
-import { SPAWN_ELITE, spawnView, useBuilderRegistry, type SpawnView } from "../chain/monsters";
+import { covers, footprint } from "../chain/footprint";
+import { SPAWN_ELITE, bestiarySize, spawnView, useBuilderRegistry, type SpawnView } from "../chain/monsters";
 import { SKILL_ERRORS, SKILL_ERROR_MESSAGES } from "../chain/skillcheck";
 import { FACING_NAMES } from "../chain/mock";
 import { ARENA_SIDE_MAX, ARENA_SIDE_MIN, addPack, addToPack, arenaGrid, packAt, paintArena, removeSpawns, resizeArena, setPack } from "../chain/packs";
@@ -163,7 +164,8 @@ export function MapBuilder({ onPublish }: { onPublish?: (map: Address) => void }
       const next = addToPack(layout, pack, cell, tool.bestiaryId, defaultSkills(tool.bestiaryId));
       if (next) edit({ ...layout, ...next });
     } else if (tool.kind === "erase") {
-      const next = removeSpawns(layout, (sp) => sp.pack === pack && sp.x === cell.x && sp.y === cell.y);
+      // Patch B: any cell of a 2x2 monster's square erases it.
+      const next = removeSpawns(layout, (sp) => sp.pack === pack && covers(footprint(sp, bestiarySize(registry, sp.bestiaryId)), cell));
       edit({ ...layout, ...next });
       if (!next.packs[pack]) setView(null);
     }
@@ -232,13 +234,17 @@ export function MapBuilder({ onPublish }: { onPublish?: (map: Address) => void }
 
   // Arena update: on the map each pack's visible monster at its cell; in an arena the pack's monsters.
   const units: GridUnit[] = useMemo(() => {
-    const unit = (i: number, x: number, y: number, label: string): GridUnit => ({ id: 4 + i, kind: "monster", x, y, hp: 1, hpMax: 1, alive: true, label });
-    if (view !== null) return layout.spawns.flatMap((sp, i) => (sp.pack === view ? [unit(i, sp.x, sp.y, bestiaryName(sp.bestiaryId))] : []));
+    const unit = (i: number, x: number, y: number, label: string, size: 1 | 2 = 1): GridUnit => ({ id: 4 + i, kind: "monster", x, y, hp: 1, hpMax: 1, alive: true, label, size });
+    // Patch B: in its arena a 2x2 monster shows its whole square (on the map, one cell).
+    if (view !== null)
+      return layout.spawns.flatMap((sp, i) =>
+        sp.pack === view ? [unit(i, sp.x, sp.y, bestiaryName(sp.bestiaryId), bestiarySize(registry, sp.bestiaryId) as 1 | 2)] : [],
+      );
     return layout.packs.flatMap((pk, n) => {
       const sp = pk ? layout.spawns[pk.visible] : undefined;
       return pk && sp ? [unit(pk.visible, pk.x, pk.y, `${bestiaryName(sp.bestiaryId)}: pack ${n}, looking ${FACING_NAMES[pk.facing]}`)] : [];
     });
-  }, [layout.spawns, layout.packs, view]);
+  }, [layout.spawns, layout.packs, view, registry]);
   const arena = view !== null ? layout.packs[view] : null;
 
   return (

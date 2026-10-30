@@ -138,6 +138,7 @@ fn ai_unit_json(u: &AiUnitInput) -> Value {
         "states": states_json(&u.states),
         "mods": mods_json(&u.mods),
         "kin": u.kin,
+        "size": u.size,
     })
 }
 
@@ -201,6 +202,7 @@ fn party_json(p: &PartyInput) -> Value {
                 "cell": [b.cell.x, b.cell.y],
                 "kin": b.kin,
                 "auras": b.auras.iter().map(|(a, k)| json!({ "aura": aura_json(a), "kinOnly": k })).collect::<Vec<Value>>(),
+                "size": b.size,
             })
         })
         .collect();
@@ -861,6 +863,7 @@ fn build() -> Value {
                     "at": [r.at.x, r.at.y],
                     "basicAttack": r.basic_attack,
                     "kin": r.kin,
+                    "size": r.size,
                 },
                 "bytes": hex(&borsh::to_vec(r).unwrap()),
                 "mods": mods_json(&unit_mods(r)),

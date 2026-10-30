@@ -82,6 +82,7 @@ export type ResonanceSpreadEvent = {
   /**
    * Cells set on fire (`ignited[..ignited_count]`): Burning of `ignite_power` on whoever
    * steps in, through round `until_round`.
+   * Patch B: 12, the ring around a 2x2 target (`deadroll_rules::spread::IGNITED_MAX`).
    */
   ignited: Array<Cell>;
   ignitedCount: number;
@@ -114,6 +115,7 @@ export type ResonanceSpreadEventArgs = {
   /**
    * Cells set on fire (`ignited[..ignited_count]`): Burning of `ignite_power` on whoever
    * steps in, through round `until_round`.
+   * Patch B: 12, the ring around a 2x2 target (`deadroll_rules::spread::IGNITED_MAX`).
    */
   ignited: Array<CellArgs>;
   ignitedCount: number;
@@ -144,7 +146,7 @@ export function getResonanceSpreadEventEncoder(): FixedSizeEncoder<ResonanceSpre
       ["moved", getBooleanEncoder()],
       ["movedFrom", getCellEncoder()],
       ["movedTo", getCellEncoder()],
-      ["ignited", getArrayEncoder(getCellEncoder(), { size: 8 })],
+      ["ignited", getArrayEncoder(getCellEncoder(), { size: 12 })],
       ["ignitedCount", getU8Encoder()],
       ["ignitePower", getU32Encoder()],
       ["untilRound", getU16Encoder()],
@@ -176,7 +178,7 @@ export function getResonanceSpreadEventDecoder(): FixedSizeDecoder<ResonanceSpre
       ["moved", getBooleanDecoder()],
       ["movedFrom", getCellDecoder()],
       ["movedTo", getCellDecoder()],
-      ["ignited", getArrayDecoder(getCellDecoder(), { size: 8 })],
+      ["ignited", getArrayDecoder(getCellDecoder(), { size: 12 })],
       ["ignitedCount", getU8Decoder()],
       ["ignitePower", getU32Decoder()],
       ["untilRound", getU16Decoder()],

@@ -54,6 +54,13 @@ canvas.sprite-canvas { flex: none; max-width: none; }
 .log a { color: var(--muted); }
 .turn-banner { font-size: 15px; }
 .turn-banner b.me { color: var(--accent); }
+.turn-bar { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; flex-wrap: wrap; }
+.turn-bar ol { display: flex; gap: 4px; margin: 0; padding: 0; list-style: none; flex-wrap: wrap; }
+.turn-bar-item { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel-2); font-size: 12px; }
+.turn-bar-item.monster { border-color: #6b3a3a; }
+.turn-bar-item.mine .turn-bar-label { color: var(--accent); }
+.turn-bar-item.now { border-color: var(--accent); background: var(--panel); font-weight: 600; }
+.turn-bar-now { font-size: 10px; text-transform: uppercase; color: var(--accent); }
 .skills { display: flex; flex-wrap: wrap; gap: 6px; }
 .skills .btn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
 .skills .btn.cooldown { filter: grayscale(1); border-style: dashed; }
