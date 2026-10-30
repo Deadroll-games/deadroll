@@ -16,12 +16,12 @@
 //! discriminator. `SIZE` is the max borsh size (`Option` counted as `Some`).
 
 use crate::{
-    Aspect, BuildingKind, BuildingStatus, Class, EquipSlot, EquipSource, ItemBase, LayerRef,
-    MapStatus, PointKind, Pubkey, Race, Requirement, RewardKind, SessionStatus, StateKind,
-    BAG_CONSUMABLE_SLOTS, BAG_RESOURCE_SLOTS, CACHE_BYTES, CACHE_SLOTS, CHESTS_MAX, CITY_CELLS,
-    CITY_OBJECTS_MAX, EMPTY_ITEM, EQUIP_SLOTS, LAYERS_MAX, MAP_CELLS, MONSTERS_MAX, PARTY_MAX,
-    POINTS_MAX, PROGRAMS_COUNT, SOULBOUND_MAX, SPAWNS_MAX, STATES_MAX, STATS_COUNT, TURN_ORDER_MAX,
-    URI_BASE_LEN,
+    Aspect, BuildingKind, BuildingStatus, Class, EquipSlot, EquipSource, Facing, ItemBase,
+    LayerRef, MapStatus, PointKind, Pubkey, Race, Requirement, RewardKind, SessionStatus,
+    StateKind, ARENA_CELLS, ARENA_SIDE_MAX, BAG_CONSUMABLE_SLOTS, BAG_RESOURCE_SLOTS, CACHE_BYTES,
+    CACHE_SLOTS, CHESTS_MAX, CITY_CELLS, CITY_OBJECTS_MAX, EMPTY_ITEM, EQUIP_SLOTS, LAYERS_MAX,
+    MAP_CELLS, MONSTERS_MAX, PACKS_MAX, PARTY_MAX, POINTS_MAX, PROGRAMS_COUNT, SOULBOUND_MAX,
+    SPAWNS_MAX, STATES_MAX, STATS_COUNT, TURN_ORDER_MAX, URI_BASE_LEN,
 };
 
 const PUBKEY: usize = 32;
@@ -573,6 +573,82 @@ impl MapLayoutDataV2 {
         self.point_list()
             .iter()
             .filter(|p| p.kind == PointKind::Chest)
+    }
+}
+
+// Arena update (docs/MAP_DESCRIPTION.md 17, PARTY_AND_TURNS.md 4.1): every pack has one monster
+// on the map and its own arena. A spawn's `x`, `y` are its cell in its pack's arena; the map cell
+// is the pack's. In the map program's `MapLayout` after the core.
+shared! {
+    /// One pack of a map: the monster shown on the map, where it stands and looks, and the size of
+    /// its arena. `width == 0` marks a pack number the map does not use.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct PackLayout {
+        /// Index into `MapLayoutDataV2.spawns` of the monster shown on the map (one of the pack).
+        pub visible: u8,
+        /// The visible monster's cell on the map.
+        pub x: u8,
+        pub y: u8,
+        pub facing: Facing,
+        /// Arena size in cells, within `deadroll_rules::BalanceConfig.arena`.
+        pub width: u8,
+        pub height: u8,
+    }
+
+    /// The packs of a map and their arenas, by pack number.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct MapArenasData {
+        pub packs: [PackLayout; PACKS_MAX],
+        /// Row-major cell bytes (`cell_byte`) of each pack's arena, `ARENA_SIDE_MAX` per row.
+        pub cells: [[u8; ARENA_CELLS]; PACKS_MAX],
+    }
+}
+
+impl PackLayout {
+    pub const SIZE: usize = 1 + 2 + Facing::SIZE + 2;
+    pub const EMPTY: PackLayout = PackLayout {
+        visible: 0,
+        x: 0,
+        y: 0,
+        facing: Facing::N,
+        width: 0,
+        height: 0,
+    };
+
+    /// The map uses this pack number.
+    pub const fn is_used(&self) -> bool {
+        self.width != 0
+    }
+
+    /// The visible monster's cell on the map.
+    pub const fn cell(&self) -> Cell {
+        Cell {
+            x: self.x,
+            y: self.y,
+        }
+    }
+}
+
+impl MapArenasData {
+    pub const SIZE: usize = PACKS_MAX * PackLayout::SIZE + PACKS_MAX * ARENA_CELLS;
+    pub const EMPTY: MapArenasData = MapArenasData {
+        packs: [PackLayout::EMPTY; PACKS_MAX],
+        cells: [[0; ARENA_CELLS]; PACKS_MAX],
+    };
+
+    /// The cell byte at `(x, y)` of pack `pack`'s arena (`None` outside the storage).
+    pub fn cell(&self, pack: u8, x: u8, y: u8) -> Option<u8> {
+        if x as usize >= ARENA_SIDE_MAX || y as usize >= ARENA_SIDE_MAX {
+            return None;
+        }
+        self.cells
+            .get(pack as usize)
+            .map(|arena| arena[y as usize * ARENA_SIDE_MAX + x as usize])
+    }
+
+    /// The used pack numbers' records, by number.
+    pub fn pack(&self, pack: u8) -> Option<&PackLayout> {
+        self.packs.get(pack as usize).filter(|p| p.is_used())
     }
 }
 

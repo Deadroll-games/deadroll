@@ -876,6 +876,68 @@
       "args": []
     },
     {
+      "name": "enter_arena",
+      "docs": [
+        "Arena update: the party goes into the arena of the pack a player stepped next to",
+        "(permissionless). `remaining_accounts`: each living player's `Participation`, by slot."
+      ],
+      "discriminator": [
+        237,
+        44,
+        241,
+        163,
+        152,
+        39,
+        13,
+        181
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "Any participant: entering holds no choice (the engaging player's tab sends it with the move)."
+          ],
+          "signer": true
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.core.map",
+                "account": "GameSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "monsters",
+          "writable": true
+        },
+        {
+          "name": "layout",
+          "docs": [
+            "its arena."
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "flee",
       "docs": [
         "Player chooses \"Escape\" on their turn; the party flees when every living player did."
@@ -1121,6 +1183,62 @@
           "type": "pubkey"
         }
       ]
+    },
+    {
+      "name": "leave_arena",
+      "docs": [
+        "Arena update: the arena's pack is dead; pays it and brings the party back to the map",
+        "(permissionless). `remaining_accounts`: each living player's `Participation`, by slot."
+      ],
+      "discriminator": [
+        204,
+        47,
+        233,
+        122,
+        254,
+        232,
+        201,
+        66
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "Any participant: leaving a won arena holds no choice."
+          ],
+          "signer": true
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.core.map",
+                "account": "GameSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "monsters",
+          "writable": true
+        }
+      ],
+      "args": []
     },
     {
       "name": "leave_party",
@@ -3068,6 +3186,45 @@
       ]
     },
     {
+      "name": "ArenaEntered",
+      "discriminator": [
+        97,
+        195,
+        78,
+        106,
+        35,
+        221,
+        131,
+        187
+      ]
+    },
+    {
+      "name": "ArenaLeft",
+      "discriminator": [
+        91,
+        80,
+        61,
+        218,
+        103,
+        177,
+        31,
+        25
+      ]
+    },
+    {
+      "name": "ArenaWon",
+      "discriminator": [
+        184,
+        139,
+        85,
+        190,
+        95,
+        170,
+        160,
+        190
+      ]
+    },
+    {
       "name": "AuraChanged",
       "discriminator": [
         121,
@@ -3299,6 +3456,19 @@
         115,
         48,
         128
+      ]
+    },
+    {
+      "name": "PackEngaged",
+      "discriminator": [
+        114,
+        29,
+        155,
+        118,
+        1,
+        40,
+        143,
+        62
       ]
     },
     {
@@ -3954,6 +4124,41 @@
       "code": 6093,
       "name": "Silenced",
       "msg": "The unit is silenced: it can only use its basic attack"
+    },
+    {
+      "code": 6094,
+      "name": "ArenaTransition",
+      "msg": "The party is between the map and an arena: enter_arena or leave_arena comes first"
+    },
+    {
+      "code": 6095,
+      "name": "MapWithoutArenas",
+      "msg": "The map has no arenas (finalized before the arena update): it cannot open a party"
+    },
+    {
+      "code": 6096,
+      "name": "NotEngaged",
+      "msg": "No pack is engaged: step next to a pack's visible monster first"
+    },
+    {
+      "code": 6097,
+      "name": "ArenaNotWon",
+      "msg": "The arena's pack is not dead yet"
+    },
+    {
+      "code": 6098,
+      "name": "InArena",
+      "msg": "Not in an arena: chests are on the map"
+    },
+    {
+      "code": 6099,
+      "name": "InvalidArenaAccounts",
+      "msg": "The remaining accounts are not the Participation of each living player, in slot order"
+    },
+    {
+      "code": 6100,
+      "name": "TooManyTemplates",
+      "msg": "Too many distinct monster templates for one party"
     }
   ],
   "types": [
@@ -4090,6 +4295,136 @@
           },
           {
             "name": "Froze"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ArenaEntered",
+      "docs": [
+        "The party entered pack `pack`'s arena: `party_first` from the pack's back. The living",
+        "players stand on `players` (by slot), the pack's monsters are the `MonsterState` slots,",
+        "`spawns` their layout spawns."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "pack",
+            "type": "u8"
+          },
+          {
+            "name": "party_first",
+            "type": "bool"
+          },
+          {
+            "name": "width",
+            "type": "u8"
+          },
+          {
+            "name": "height",
+            "type": "u8"
+          },
+          {
+            "name": "players",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "Cell"
+                  }
+                },
+                4
+              ]
+            }
+          },
+          {
+            "name": "monsters",
+            "type": "u8"
+          },
+          {
+            "name": "spawns",
+            "type": {
+              "array": [
+                "u8",
+                8
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ArenaLeft",
+      "docs": [
+        "The party left pack `pack`'s arena for the map, each living player with the pack's",
+        "experience `xp` (by slot) in its cache; the pack is gone from the map."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "pack",
+            "type": "u8"
+          },
+          {
+            "name": "xp",
+            "type": {
+              "array": [
+                "u32",
+                4
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ArenaMode",
+      "docs": [
+        "Arena update: where the party is."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Map"
+          },
+          {
+            "name": "Engaged"
+          },
+          {
+            "name": "Arena"
+          },
+          {
+            "name": "Won"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ArenaWon",
+      "docs": [
+        "The last monster of pack `pack` died: `leave_arena` next."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "pack",
+            "type": "u8"
           }
         ]
       }
@@ -5040,6 +5375,45 @@
       }
     },
     {
+      "name": "Facing",
+      "docs": [
+        "The direction a pack looks (`PackLayout.facing`), set by the DM. North is `y - 1`, east",
+        "`x + 1`, clockwise. Coming from its back the party moves first in the arena."
+      ],
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "N"
+          },
+          {
+            "name": "NE"
+          },
+          {
+            "name": "E"
+          },
+          {
+            "name": "SE"
+          },
+          {
+            "name": "S"
+          },
+          {
+            "name": "SW"
+          },
+          {
+            "name": "W"
+          },
+          {
+            "name": "NW"
+          }
+        ]
+      }
+    },
+    {
       "name": "FleeVoted",
       "type": {
         "kind": "struct",
@@ -5497,6 +5871,128 @@
               "array": [
                 "u8",
                 32
+              ]
+            }
+          },
+          {
+            "name": "mode",
+            "docs": [
+              "The map or an arena, and the two steps between them."
+            ],
+            "type": {
+              "defined": {
+                "name": "ArenaMode"
+              }
+            }
+          },
+          {
+            "name": "arena_pack",
+            "docs": [
+              "The pack the party is engaged with or fighting, `NO_PACK` on the map. Its monsters are the",
+              "live slots of `MonsterState`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "engaged_by",
+            "docs": [
+              "The player who stepped next to the pack: their side is where the party enters."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "packs",
+            "docs": [
+              "The map's packs, copied at `open_session`: the visible monster's map cell, the facing,",
+              "the arena size."
+            ],
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "PackLayout"
+                  }
+                },
+                8
+              ]
+            }
+          },
+          {
+            "name": "packs_alive",
+            "docs": [
+              "Bit per pack number still on the map."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "map_width",
+            "docs": [
+              "Kept while the party is in an arena (`width`, `height`, `player_pos`, the turn order",
+              "and the round are the arena's then): the map's size, each player's map cell before the",
+              "fight, the map circle, its index and round."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "map_height",
+            "type": "u8"
+          },
+          {
+            "name": "map_pos",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "Cell"
+                  }
+                },
+                4
+              ]
+            }
+          },
+          {
+            "name": "map_order",
+            "type": {
+              "array": [
+                "u8",
+                4
+              ]
+            }
+          },
+          {
+            "name": "map_order_len",
+            "type": "u8"
+          },
+          {
+            "name": "map_turn_index",
+            "type": "u8"
+          },
+          {
+            "name": "map_round",
+            "type": "u16"
+          },
+          {
+            "name": "unit_time",
+            "docs": [
+              "The arena's initiative timeline (docs/PARTY_AND_TURNS.md 6): each unit's time until its",
+              "turn, by turn-order id (players `0..PARTY_MAX`, then the arena's monsters)."
+            ],
+            "type": {
+              "array": [
+                "u32",
+                12
+              ]
+            }
+          },
+          {
+            "name": "player_dex",
+            "docs": [
+              "Each player's Dexterity, set at `set_ready(true)`: it wins a tie on the timeline."
+            ],
+            "type": {
+              "array": [
+                "u16",
+                4
               ]
             }
           }
@@ -6655,7 +7151,12 @@
     {
       "name": "MonsterState",
       "docs": [
-        "`[\"monsters\", session]`: every monster of the party, spawned from the map layout.",
+        "`[\"monsters\", session]`: the monsters of the arena the party fights in, and the registry copies",
+        "the party fixed at `open_session`. Arena update: the live slots `0..ARENA_MONSTERS_MAX` hold the",
+        "current pack only, loaded by `enter_arena` (on the map there are none); the copies are one",
+        "bestiary record per template, the chosen skills, the reward and resonance tables, so the size",
+        "no longer grows with the monsters of the map. Version `MONSTER_STATE_VERSION`; an account from",
+        "before the arena update (version 1, every monster of the map) is refused.",
         "",
         "On-chain it is never Borsh-decoded as a whole: `[Monster; 24]` (~1.3 KB) decoded by",
         "`Account<MonsterState>` overflows the 4 KB SBPF v3 stack frame. Contexts take it as",
@@ -6670,7 +7171,9 @@
           {
             "name": "core",
             "docs": [
-              "Frozen contract, first after the discriminator."
+              "Frozen contract, first after the discriminator. Arena update: `monsters[..count]` are the",
+              "arena's pack (`count <= ARENA_MONSTERS_MAX`); the entries past `ARENA_MONSTERS_MAX` are not",
+              "used."
             ],
             "type": {
               "defined": {
@@ -6679,26 +7182,9 @@
             }
           },
           {
-            "name": "cooldowns",
-            "docs": [
-              "Not used since patch 6 (`skill_cooldowns` holds every monster slot). Kept for the layout."
-            ],
-            "type": {
-              "array": [
-                {
-                  "array": [
-                    "u8",
-                    4
-                  ]
-                },
-                24
-              ]
-            }
-          },
-          {
             "name": "mods",
             "docs": [
-              "Per monster: buffs and debuffs (`deadroll_combat::support`), like `Participation.mods`",
+              "Per arena slot: buffs and debuffs (`deadroll_combat::support`), like `Participation.mods`",
               "(the Resistance is in `resist_mods`)."
             ],
             "type": {
@@ -6713,14 +7199,14 @@
                     6
                   ]
                 },
-                24
+                8
               ]
             }
           },
           {
             "name": "defense",
             "docs": [
-              "Per monster: the defenses of its bestiary record."
+              "Per arena slot: the defenses of its bestiary record."
             ],
             "type": {
               "array": [
@@ -6729,7 +7215,7 @@
                     "name": "MonsterDefenseData"
                   }
                 },
-                24
+                8
               ]
             }
           },
@@ -6783,7 +7269,7 @@
           {
             "name": "records",
             "docs": [
-              "Per monster: its bestiary record (`deadroll_rules::monster::record`)."
+              "Per arena slot: its bestiary record (`deadroll_rules::monster::record`), from `templates`."
             ],
             "type": {
               "array": [
@@ -6793,7 +7279,7 @@
                     48
                   ]
                 },
-                24
+                8
               ]
             }
           },
@@ -6822,7 +7308,7 @@
           {
             "name": "skills",
             "docs": [
-              "Per monster, per slot (`0..5` active, `5` reactive, `6` passive): an index into",
+              "Per arena slot, per skill slot (`0..5` active, `5` reactive, `6` passive): an index into",
               "`skill_table`, `NO_SKILL` (0xFF) = empty."
             ],
             "type": {
@@ -6833,15 +7319,15 @@
                     7
                   ]
                 },
-                24
+                8
               ]
             }
           },
           {
             "name": "skill_cooldowns",
             "docs": [
-              "Per monster, per slot: own turn starts until usable (the reactive's too), counted down by",
-              "`start_turn`."
+              "Per arena slot, per skill slot: own turn starts until usable (the reactive's too), counted",
+              "down by `start_turn`."
             ],
             "type": {
               "array": [
@@ -6851,14 +7337,14 @@
                     7
                   ]
                 },
-                24
+                8
               ]
             }
           },
           {
             "name": "auras",
             "docs": [
-              "Per monster: its passive skill's aura (from `open_session`), then its reactive skill's."
+              "Per arena slot: its passive skill's aura (from `enter_arena`), then its reactive skill's."
             ],
             "type": {
               "array": [
@@ -6872,14 +7358,14 @@
                     2
                   ]
                 },
-                24
+                8
               ]
             }
           },
           {
             "name": "resist_mods",
             "docs": [
-              "Per monster: its Resistance with the aspect weights, like `Participation.resist_mod`."
+              "Per arena slot: its Resistance with the aspect weights, like `Participation.resist_mod`."
             ],
             "type": {
               "array": [
@@ -6888,14 +7374,14 @@
                     "name": "ResistModData"
                   }
                 },
-                24
+                8
               ]
             }
           },
           {
             "name": "aura_weights",
             "docs": [
-              "Per monster, per aura slot: a Resistance aura's aspect weights."
+              "Per arena slot, per aura slot: a Resistance aura's aspect weights."
             ],
             "type": {
               "array": [
@@ -6910,7 +7396,7 @@
                     2
                   ]
                 },
-                24
+                8
               ]
             }
           },
@@ -6949,6 +7435,58 @@
               "array": [
                 "u8",
                 1920
+              ]
+            }
+          },
+          {
+            "name": "spawn_of",
+            "docs": [
+              "Per arena slot: the spawn of the map layout it was loaded from."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                8
+              ]
+            }
+          },
+          {
+            "name": "template_ids",
+            "docs": [
+              "The bestiary records of the party's templates, each once, copied at `open_session`;",
+              "`template_ids` gives their bestiary ids, `NO_TEMPLATE` = free."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                12
+              ]
+            }
+          },
+          {
+            "name": "templates",
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    "u8",
+                    48
+                  ]
+                },
+                12
+              ]
+            }
+          },
+          {
+            "name": "skill_ids",
+            "docs": [
+              "The registry `monster_skills` index of each `skill_table` entry: `enter_arena` finds a",
+              "spawn's chosen skills there."
+            ],
+            "type": {
+              "array": [
+                "u16",
+                32
               ]
             }
           }
@@ -7285,6 +7823,86 @@
           {
             "name": "amount_max",
             "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PackEngaged",
+      "docs": [
+        "Player `slot` stepped onto (`x`, `y`) next to pack `pack`'s visible monster: `enter_arena` next."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "pack",
+            "type": "u8"
+          },
+          {
+            "name": "slot",
+            "type": "u8"
+          },
+          {
+            "name": "x",
+            "type": "u8"
+          },
+          {
+            "name": "y",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PackLayout",
+      "docs": [
+        "One pack of a map: the monster shown on the map, where it stands and looks, and the size of",
+        "its arena. `width == 0` marks a pack number the map does not use."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "visible",
+            "docs": [
+              "Index into `MapLayoutDataV2.spawns` of the monster shown on the map (one of the pack)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "x",
+            "docs": [
+              "The visible monster's cell on the map."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "y",
+            "type": "u8"
+          },
+          {
+            "name": "facing",
+            "type": {
+              "defined": {
+                "name": "Facing"
+              }
+            }
+          },
+          {
+            "name": "width",
+            "docs": [
+              "Arena size in cells, within `deadroll_rules::BalanceConfig.arena`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "height",
+            "type": "u8"
           }
         ]
       }

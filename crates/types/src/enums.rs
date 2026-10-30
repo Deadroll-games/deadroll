@@ -191,3 +191,10 @@ u8_enum!(
     /// Only `None` for now; the other conditions are appended with their checks.
     Requirement { None }
 );
+
+// Arena update (docs/MAP_DESCRIPTION.md 17.2, PARTY_AND_TURNS.md 4.1.3).
+u8_enum!(
+    /// The direction a pack looks (`PackLayout.facing`), set by the DM. North is `y - 1`, east
+    /// `x + 1`, clockwise. Coming from its back the party moves first in the arena.
+    Facing { N, NE, E, SE, S, SW, W, NW }
+);

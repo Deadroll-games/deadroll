@@ -34,7 +34,7 @@ mod tests {
         let s = session(&[from]);
         let mut layout = layout_account(s.core.map);
         let info = layout.info();
-        let view = MapLayoutView::load(&info).unwrap();
+        let view = MapLayoutView::load(&info, None).unwrap();
         skill_line(&s, &view, from, through, range).cells().to_vec()
     }
 

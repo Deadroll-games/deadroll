@@ -29,7 +29,7 @@ custom-heap = []
 custom-panic = []
 
 [dependencies]
-anchor-lang.workspace = true
+anchor-lang = { workspace = true, features = ["lazy-account"] }
 deadroll-types = { workspace = true, features = ["anchor"] }
 deadroll-mapcheck.workspace = true
 deadroll-rules.workspace = true

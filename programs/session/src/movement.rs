@@ -1,9 +1,11 @@
 //! The map as the ground of `move_path` (patch 13): `deadroll_mapcheck::walk` checks the path, this
-//! file says what a cell costs (the session's copy of the `Tileset`) and what stands on it.
+//! file says what a cell costs (the session's copy of the `Tileset`) and what stands on it. Arena
+//! update: the ground is the map or the arena of the pack the party fights (`GameSession::ground`,
+//! `width`, `height`); on the map the packs' visible monsters occupy their cells.
 use anchor_lang::prelude::*;
 use deadroll_mapcheck::walk::{Blocker, Field, WalkError};
 use deadroll_rules::spread::{step_into, BurningCell, BURNING_CELLS_MAX};
-use deadroll_types::{ActiveState, Cell, MONSTERS_MAX, STATES_MAX};
+use deadroll_types::{ActiveState, Cell, ARENA_MONSTERS_MAX, STATES_MAX};
 
 use crate::{
     errors::SessionError,
@@ -19,7 +21,7 @@ pub struct MapField<'a, 'b> {
     layout: &'a MapLayoutView<'b>,
     mover: Unit,
     /// Cells of the living monsters other than the mover.
-    monsters: [Option<Cell>; MONSTERS_MAX],
+    monsters: [Option<Cell>; ARENA_MONSTERS_MAX],
 }
 
 impl<'a, 'b> MapField<'a, 'b> {
@@ -29,8 +31,8 @@ impl<'a, 'b> MapField<'a, 'b> {
         monsters: &Monsters,
         mover: Unit,
     ) -> Result<Self> {
-        let mut cells = [None; MONSTERS_MAX];
-        for index in 0..monsters.count()?.min(MONSTERS_MAX as u8) {
+        let mut cells = [None; ARENA_MONSTERS_MAX];
+        for index in 0..monsters.count()?.min(ARENA_MONSTERS_MAX as u8) {
             let m = monsters.get(index)?;
             if m.alive && mover != Unit::Monster(index) {
                 cells[index as usize] = Some(Cell { x: m.x, y: m.y });
@@ -62,7 +64,10 @@ impl Field for MapField<'_, '_> {
                 && s.player_alive(slot)
                 && s.player_pos[slot as usize] == cell
         });
-        if player || self.monsters.contains(&Some(cell)) {
+        // Arena update: on the map the packs' visible monsters stand on their cells.
+        let monster =
+            self.monsters.contains(&Some(cell)) || s.visible_monsters().any(|c| c == cell);
+        if player || monster {
             return Some(Blocker::Unit);
         }
         // Patch 11: a closed chest occupies its cell.
@@ -163,7 +168,7 @@ mod tests {
         let mut layout = layout_account(s.core.map);
         let mut monsters = monsters_account(monsters_session, ms);
         let (layout_info, monsters_info) = (layout.info(), monsters.info());
-        let layout_view = MapLayoutView::load(&layout_info)?;
+        let layout_view = MapLayoutView::load(&layout_info, None)?;
         let monsters_view = Monsters::load(&monsters_info, &monsters_session)?;
         let field = MapField::new(&s, &layout_view, &monsters_view, mover)?;
         walk_cells(&field, start, path, ap, |_, _| false).map_err(walk_error)
@@ -190,9 +195,34 @@ mod tests {
     }
 
     #[test]
+    fn on_the_map_a_living_packs_visible_monster_occupies_its_cell() {
+        let with_pack = |alive: u8, mode| {
+            walk_with(&[ORIGIN], 0, &[], P0, ORIGIN, &[c(1, 1)], 5, |s| {
+                s.mode = mode;
+                s.packs[2] = deadroll_types::PackLayout {
+                    x: 1,
+                    y: 1,
+                    width: 8,
+                    height: 8,
+                    ..deadroll_types::PackLayout::EMPTY
+                };
+                s.packs_alive = alive;
+            })
+        };
+        use crate::state::ArenaMode;
+        let err = with_pack(0b100, ArenaMode::Map).unwrap_err();
+        assert_eq!(code(err), u32::from(SessionError::CellOccupied));
+        // A dead pack is gone; in an arena the map's packs are not there.
+        assert_eq!(end(with_pack(0, ArenaMode::Map).unwrap()), (c(1, 1), 4));
+        assert_eq!(end(with_pack(0b100, ArenaMode::Arena).unwrap()), (c(1, 1), 4));
+    }
+
+    #[test]
     fn a_closed_chest_blocks_an_opened_one_does_not() {
         let with_chest = |opened: u8| {
             walk_with(&[ORIGIN], 0, &[], P0, ORIGIN, &[c(1, 1)], 5, |s| {
+                // Arena update: chests are on the map.
+                s.mode = crate::state::ArenaMode::Map;
                 s.chests[0] = deadroll_types::MapPoint {
                     kind: deadroll_types::PointKind::Chest,
                     x: 1,

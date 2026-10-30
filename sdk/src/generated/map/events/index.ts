@@ -6,6 +6,7 @@
  * @see https://github.com/codama-idl/codama
  */
 
+export * from "./arenaWritten.js";
 export * from "./layoutWritten.js";
 export * from "./mapCreated.js";
 export * from "./mapFinalized.js";

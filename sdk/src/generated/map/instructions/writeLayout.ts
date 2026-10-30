@@ -127,6 +127,7 @@ export type WriteLayoutAsyncInput<
 > = {
   dm: TAccountDm;
   map: TAccountMap;
+  /** `LayoutBytes::load`; written in place. */
   layout?: TAccountLayout;
   offset: WriteLayoutInstructionDataArgs["offset"];
   cells: WriteLayoutInstructionDataArgs["cells"];
@@ -224,6 +225,7 @@ export type WriteLayoutInput<
 > = {
   dm: TAccountDm;
   map: TAccountMap;
+  /** `LayoutBytes::load`; written in place. */
   layout: TAccountLayout;
   offset: WriteLayoutInstructionDataArgs["offset"];
   cells: WriteLayoutInstructionDataArgs["cells"];
@@ -307,6 +309,7 @@ export type ParsedWriteLayoutInstruction<
   accounts: {
     dm: TAccountMetas[0];
     map: TAccountMetas[1];
+    /** `LayoutBytes::load`; written in place. */
     layout: TAccountMetas[2];
   };
   data: WriteLayoutInstructionData;

@@ -636,3 +636,44 @@ fn city_structs() {
         )
     );
 }
+
+/// Arena update: a pack record and the arenas of a map.
+#[test]
+fn arenas_layout() {
+    let pack = PackLayout {
+        visible: 3,
+        x: 7,
+        y: 9,
+        facing: last(Facing::ALL),
+        width: ARENA_SIDE_MAX as u8,
+        height: 6,
+    };
+    let bytes = check(&pack, PackLayout::SIZE);
+    assert_eq!(bytes, [3, 7, 9, Facing::NW as u8, 12, 6]);
+    assert!(pack.is_used() && !PackLayout::EMPTY.is_used());
+    assert_eq!(pack.cell(), Cell { x: 7, y: 9 });
+
+    let mut arenas = MapArenasData::EMPTY;
+    arenas.packs[PACKS_MAX - 1] = pack;
+    arenas.cells[PACKS_MAX - 1][2 * ARENA_SIDE_MAX + 5] = 0xAB;
+    let bytes = check(&arenas, MapArenasData::SIZE);
+    assert_eq!(MapArenasData::SIZE, 8 * 6 + 8 * 144);
+    // Packs first, then the arenas row-major with `ARENA_SIDE_MAX` per row.
+    assert_eq!(bytes[(PACKS_MAX - 1) * PackLayout::SIZE], 3);
+    let cells = PACKS_MAX * PackLayout::SIZE + (PACKS_MAX - 1) * ARENA_CELLS;
+    assert_eq!(bytes[cells + 2 * ARENA_SIDE_MAX + 5], 0xAB);
+    assert_eq!(arenas.cell(PACKS_MAX as u8 - 1, 5, 2), Some(0xAB));
+    assert_eq!(arenas.cell(PACKS_MAX as u8, 5, 2), None);
+    assert_eq!(arenas.cell(0, ARENA_SIDE_MAX as u8, 0), None);
+    assert_eq!(arenas.pack(PACKS_MAX as u8 - 1), Some(&pack));
+    assert_eq!(arenas.pack(0), None);
+    assert!(Facing::try_from(Facing::COUNT as u8).is_err());
+}
+
+#[cfg(feature = "anchor")]
+#[test]
+fn arena_sizes_match_anchor_init_space() {
+    use anchor_lang::Space;
+    assert_eq!(PackLayout::SIZE, PackLayout::INIT_SPACE);
+    assert_eq!(MapArenasData::SIZE, MapArenasData::INIT_SPACE);
+}

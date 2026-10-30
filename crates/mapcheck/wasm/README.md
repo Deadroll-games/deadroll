@@ -6,7 +6,7 @@ gets the verdict `finalize_map` would give a draft before it sends anything. Pat
 `check` decodes the registry tables with `deadroll_rules` (`tiles::tile_rules`, `map_tables`, the tier
 loot of `BalanceConfig::DEFAULT`) and runs `check_map`, the same calls as `finalize_map`.
 
-## ABI (version 1)
+## ABI (version 2)
 
 Static buffers, no imports. The module has a 4096-byte input buffer.
 
@@ -23,7 +23,9 @@ Static buffers, no imports. The module has a 4096-byte input buffer.
 `MapCheckRequest` = `width u8, height u8, tier u8, min_players u8` (the `Map` fields), then
 `MapLayoutDataV2` (1301 bytes: version, map key, 1024 cell bytes, 24 spawns of 9 bytes, spawn count,
 6 points of 4 bytes, point count, boss table, bump). The version, the map key and the bump are not
-checked.
+checked. Version 2 (arena update) appends `MapArenasData` (1200 bytes: 8 packs of 6 bytes, `visible,
+x, y, facing, width, height`, then 8 arenas of 144 cell bytes, 12 per row), what follows the core in
+the `MapLayout` account.
 
 Errors: -1 input longer than the buffer, -2 not a `MapCheckRequest` (or trailing bytes), -3 unknown
 table kind.

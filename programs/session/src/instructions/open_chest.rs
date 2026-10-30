@@ -8,7 +8,7 @@ use crate::{
     events::ChestOpenRequested,
     party::party_keys,
     rules::{Unit, BALANCE, EMPTY_UNIT},
-    state::{GameSession, MonsterState, Monsters, Participation, PendingAction},
+    state::{ArenaMode, GameSession, MonsterState, Monsters, Participation, PendingAction},
     vrf::{self, CallbackAccounts, RequestAccounts},
 };
 
@@ -107,6 +107,8 @@ pub fn handler(ctx: Context<OpenChest>, chest: u8) -> Result<()> {
         SessionError::NotYourTurn
     );
     require!(session.turn_started(), SessionError::TurnNotStarted);
+    // Arena update: chests are on the map.
+    require!(session.mode == ArenaMode::Map, SessionError::InArena);
     require!(
         session.player_alive(slot) && participation.core.hp > 0,
         SessionError::UnitDead
@@ -128,12 +130,8 @@ pub fn handler(ctx: Context<OpenChest>, chest: u8) -> Result<()> {
     require!(chebyshev(at, cell) == 1, SessionError::ChestNotAdjacent);
     let monsters = Monsters::load(accounts.monsters.as_ref(), &session.key())?;
     let radius = session.chest_radius;
-    for i in 0..monsters.count()? {
-        let m = monsters.get(i)?;
-        if !m.alive {
-            continue;
-        }
-        let c = Cell { x: m.x, y: m.y };
+    // Arena update: on the map the living monsters are the packs' visible ones.
+    for c in session.visible_monsters() {
         let near_player = (0..session.core.player_count).any(|p| {
             session.player_alive(p) && chebyshev(c, session.player_pos[p as usize]) <= radius
         });

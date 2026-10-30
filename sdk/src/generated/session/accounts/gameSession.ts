@@ -45,6 +45,8 @@ import {
   type ReadonlyUint8Array,
 } from "@solana/kit";
 import {
+  getArenaModeDecoder,
+  getArenaModeEncoder,
   getAuraDataDecoder,
   getAuraDataEncoder,
   getCellDecoder,
@@ -53,6 +55,8 @@ import {
   getGameSessionDataEncoder,
   getMapPointDecoder,
   getMapPointEncoder,
+  getPackLayoutDecoder,
+  getPackLayoutEncoder,
   getPendingActionDecoder,
   getPendingActionEncoder,
   getPendingMonsterReactiveDataDecoder,
@@ -61,6 +65,8 @@ import {
   getPendingReactiveDataEncoder,
   getReactiveDataDecoder,
   getReactiveDataEncoder,
+  type ArenaMode,
+  type ArenaModeArgs,
   type AuraData,
   type AuraDataArgs,
   type Cell,
@@ -69,6 +75,8 @@ import {
   type GameSessionDataArgs,
   type MapPoint,
   type MapPointArgs,
+  type PackLayout,
+  type PackLayoutArgs,
   type PendingAction,
   type PendingActionArgs,
   type PendingMonsterReactiveData,
@@ -221,6 +229,41 @@ export type GameSession = {
    * be entered (registry `Tileset`, copied at `open_session`).
    */
   tileCost: ReadonlyUint8Array;
+  /** The map or an arena, and the two steps between them. */
+  mode: ArenaMode;
+  /**
+   * The pack the party is engaged with or fighting, `NO_PACK` on the map. Its monsters are the
+   * live slots of `MonsterState`.
+   */
+  arenaPack: number;
+  /** The player who stepped next to the pack: their side is where the party enters. */
+  engagedBy: number;
+  /**
+   * The map's packs, copied at `open_session`: the visible monster's map cell, the facing,
+   * the arena size.
+   */
+  packs: Array<PackLayout>;
+  /** Bit per pack number still on the map. */
+  packsAlive: number;
+  /**
+   * Kept while the party is in an arena (`width`, `height`, `player_pos`, the turn order
+   * and the round are the arena's then): the map's size, each player's map cell before the
+   * fight, the map circle, its index and round.
+   */
+  mapWidth: number;
+  mapHeight: number;
+  mapPos: Array<Cell>;
+  mapOrder: ReadonlyUint8Array;
+  mapOrderLen: number;
+  mapTurnIndex: number;
+  mapRound: number;
+  /**
+   * The arena's initiative timeline (docs/PARTY_AND_TURNS.md 6): each unit's time until its
+   * turn, by turn-order id (players `0..PARTY_MAX`, then the arena's monsters).
+   */
+  unitTime: Array<number>;
+  /** Each player's Dexterity, set at `set_ready(true)`: it wins a tie on the timeline. */
+  playerDex: Array<number>;
 };
 
 export type GameSessionArgs = {
@@ -354,6 +397,41 @@ export type GameSessionArgs = {
    * be entered (registry `Tileset`, copied at `open_session`).
    */
   tileCost: ReadonlyUint8Array;
+  /** The map or an arena, and the two steps between them. */
+  mode: ArenaModeArgs;
+  /**
+   * The pack the party is engaged with or fighting, `NO_PACK` on the map. Its monsters are the
+   * live slots of `MonsterState`.
+   */
+  arenaPack: number;
+  /** The player who stepped next to the pack: their side is where the party enters. */
+  engagedBy: number;
+  /**
+   * The map's packs, copied at `open_session`: the visible monster's map cell, the facing,
+   * the arena size.
+   */
+  packs: Array<PackLayoutArgs>;
+  /** Bit per pack number still on the map. */
+  packsAlive: number;
+  /**
+   * Kept while the party is in an arena (`width`, `height`, `player_pos`, the turn order
+   * and the round are the arena's then): the map's size, each player's map cell before the
+   * fight, the map circle, its index and round.
+   */
+  mapWidth: number;
+  mapHeight: number;
+  mapPos: Array<CellArgs>;
+  mapOrder: ReadonlyUint8Array;
+  mapOrderLen: number;
+  mapTurnIndex: number;
+  mapRound: number;
+  /**
+   * The arena's initiative timeline (docs/PARTY_AND_TURNS.md 6): each unit's time until its
+   * turn, by turn-order id (players `0..PARTY_MAX`, then the arena's monsters).
+   */
+  unitTime: Array<number>;
+  /** Each player's Dexterity, set at `set_ready(true)`: it wins a tie on the timeline. */
+  playerDex: Array<number>;
 };
 
 /** Gets the encoder for {@link GameSessionArgs} account data. */
@@ -415,6 +493,20 @@ export function getGameSessionEncoder(): FixedSizeEncoder<GameSessionArgs> {
       ["chestRadius", getU8Encoder()],
       ["settleTimeoutSecs", getU32Encoder()],
       ["tileCost", fixEncoderSize(getBytesEncoder(), 32)],
+      ["mode", getArenaModeEncoder()],
+      ["arenaPack", getU8Encoder()],
+      ["engagedBy", getU8Encoder()],
+      ["packs", getArrayEncoder(getPackLayoutEncoder(), { size: 8 })],
+      ["packsAlive", getU8Encoder()],
+      ["mapWidth", getU8Encoder()],
+      ["mapHeight", getU8Encoder()],
+      ["mapPos", getArrayEncoder(getCellEncoder(), { size: 4 })],
+      ["mapOrder", fixEncoderSize(getBytesEncoder(), 4)],
+      ["mapOrderLen", getU8Encoder()],
+      ["mapTurnIndex", getU8Encoder()],
+      ["mapRound", getU16Encoder()],
+      ["unitTime", getArrayEncoder(getU32Encoder(), { size: 12 })],
+      ["playerDex", getArrayEncoder(getU16Encoder(), { size: 4 })],
     ]),
     (value) => ({ ...value, discriminator: GAME_SESSION_DISCRIMINATOR }),
   );
@@ -478,6 +570,20 @@ export function getGameSessionDecoder(): FixedSizeDecoder<GameSession> {
     ["chestRadius", getU8Decoder()],
     ["settleTimeoutSecs", getU32Decoder()],
     ["tileCost", fixDecoderSize(getBytesDecoder(), 32)],
+    ["mode", getArenaModeDecoder()],
+    ["arenaPack", getU8Decoder()],
+    ["engagedBy", getU8Decoder()],
+    ["packs", getArrayDecoder(getPackLayoutDecoder(), { size: 8 })],
+    ["packsAlive", getU8Decoder()],
+    ["mapWidth", getU8Decoder()],
+    ["mapHeight", getU8Decoder()],
+    ["mapPos", getArrayDecoder(getCellDecoder(), { size: 4 })],
+    ["mapOrder", fixDecoderSize(getBytesDecoder(), 4)],
+    ["mapOrderLen", getU8Decoder()],
+    ["mapTurnIndex", getU8Decoder()],
+    ["mapRound", getU16Decoder()],
+    ["unitTime", getArrayDecoder(getU32Decoder(), { size: 12 })],
+    ["playerDex", getArrayDecoder(getU16Decoder(), { size: 4 })],
   ]);
 }
 
@@ -543,5 +649,5 @@ export async function fetchAllMaybeGameSession(
 }
 
 export function getGameSessionSize(): number {
-  return 1080;
+  return 1206;
 }

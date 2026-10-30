@@ -58,6 +58,10 @@ import {
   status,
   type Actor,
   type Party,
+  arenaMode,
+  enterArenaIx,
+  leaveArenaIx,
+  visiblePacks,
 } from "./game";
 import { MAP_PRESETS, presetToLayout, type MapPresetData } from "./mock";
 import { equipIx, equipmentOf, inventory, unequipIx } from "./items";
@@ -195,15 +199,64 @@ async function openParty(specs: Spec[]) {
   }
 }
 
-const taken = (p: Party, moverUnit: number) => {
+/** `toward`: on the map, the pack the walk goes to; the cells next to every other pack's monster
+ * are kept out (stepping there engages it). */
+const taken = (p: Party, moverUnit: number, toward = -1) => {
   const t = new Set<number>();
   p.monsters.forEach((m, i) => m.alive && MONSTER_BASE + i !== moverUnit && t.add(m.y * MAP_MAX + m.x));
   p.players.forEach((pl) => p.session.aliveMask & (1 << pl.slot) && pl.slot !== moverUnit && t.add(pl.part.core.y * MAP_MAX + pl.part.core.x));
-  // Patch 11: a closed chest occupies its cell.
-  for (const c of chestsOf(p.session)) if (!c.opened) t.add(c.y * MAP_MAX + c.x);
+  // Patch 11: a closed chest occupies its cell; arena update: on the map only, with the packs.
+  if (arenaMode(p.session) === "map") {
+    for (const c of chestsOf(p.session)) if (!c.opened) t.add(c.y * MAP_MAX + c.x);
+    for (const v of visiblePacks(p)) {
+      t.add(v.y * MAP_MAX + v.x);
+      if (v.pack !== toward) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) t.add((v.y + dy) * MAP_MAX + v.x + dx);
+    }
+  }
   return t;
 };
 const tileCost = (p: Party) => Array.from(p.session.tileCost);
+
+/** Arena update: the first living player walks the map next to pack `pack`'s monster (the others
+ * pass), `enter_arena` follows; returns the party in the arena. */
+async function enterPack(opened: Awaited<ReturnType<typeof openParty>>, pack: number): Promise<Party> {
+  const { acc, players, dmKey, oracle, finalize } = opened;
+  for (let guard = 0; guard < 100; guard++) {
+    const party = (await readParty(acc.session))!;
+    const s = party.session;
+    if (s.core.pendingVrf) {
+      await oracle(await pickSeed("miss"));
+      continue;
+    }
+    if (s.pendingDeaths) {
+      await finalize(dmKey);
+      continue;
+    }
+    const mode = arenaMode(s);
+    if (mode === "arena") return party;
+    if (mode === "engaged") {
+      await send(dmKey, await enterArenaIx(acc.session, s, dmKey));
+      continue;
+    }
+    const unit = currentUnit(s)!;
+    const pl = players[unit]!;
+    const me = party.players[unit]!;
+    if (!turnStarted(s)) {
+      await send(pl.key, [await startTurnIx(acc.session, { participation: me.participation, character: me.character }, pl.key)]);
+      continue;
+    }
+    const walker = party.players.find((x) => s.aliveMask & (1 << x.slot))!.slot;
+    if (unit === walker) {
+      const target = s.packs[pack]!;
+      const from = { x: me.part.core.x, y: me.part.core.y };
+      const steps = route({ from, goal: (x, y) => cheb({ x, y }, target) === 1, tiles: party.ground!, width: s.width, height: s.height, tileCost: tileCost(party), taken: taken(party, unit, pack) });
+      const take = steps ? affordable(steps, playerAp(me.part, s), 0) : [];
+      if (take.length) await send(pl.key, [await movePathIx(pl.actor, acc.session, s.layout, { kind: "player", slot: unit, character: pl.character }, take)]);
+    }
+    if (arenaMode((await readParty(acc.session))!.session) === "map") await send(pl.key, [await endTurnIx(pl.actor, acc.session, pl.character)]);
+  }
+  throw new Error(`pack ${pack} never engaged`);
+}
 /**
  * Patch 5: a monster's walk stops on the first cell next to a Cold Snap bearer and asks for a
  * reactive roll; the oracle answers it. Returns the AP the monster has left.
@@ -223,9 +276,15 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
     let party = first;
 
     // 4-7. combat: wolves go for the mage, the mage casts Frost Burn (resonant seed), the warrior hunts.
+    // Arena update: on the map the warrior walks next to the wolves' monster; the party fights them
+    // in their arena, comes back, and walks to the boss pack. Arena slots: the pack's spawns in order.
     const tiles = party.tiles!;
-    const wolves = preset.spawns.flatMap((s, i) => (s.bestiary_id === 0 ? [i] : []));
-    const boss = preset.spawns.findIndex((s) => s.bestiary_id === 2);
+    const [WOLF_PACK, BOSS_PACK] = [1, 3];
+    const slots = (pack: number) => preset.spawns.filter((x) => x.pack === pack);
+    const wolves = slots(WOLF_PACK).flatMap((x, i) => (x.bestiary_id === 0 ? [i] : []));
+    const boss = slots(BOSS_PACK).findIndex((x) => x.bestiary_id === 2);
+    let goal = WOLF_PACK;
+    const arenas: string[] = [];
     let resonance = false;
     let mageDied = false;
     let victory = false;
@@ -247,6 +306,19 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
         await finalize(dmKey);
         continue;
       }
+      // Arena update: the steps between the map and an arena go out by themselves (any key).
+      const mode = arenaMode(s);
+      if (mode === "engaged") {
+        const evs = await send(dmKey, await enterArenaIx(acc.session, s, dmKey));
+        arenas.push(`enter ${evs.find((e) => e.name === "ArenaEntered")!.data.pack}`);
+        continue;
+      }
+      if (mode === "won") {
+        const evs = await send(dmKey, await leaveArenaIx(acc.session, s, dmKey));
+        arenas.push(`leave ${evs.find((e) => e.name === "ArenaLeft")!.data.pack}`);
+        goal = BOSS_PACK;
+        continue;
+      }
       const unit = currentUnit(s)!;
       // Every turn begins with start_turn, sent alone by whoever plays the unit (the app's rule).
       if (!turnStarted(s)) {
@@ -264,7 +336,23 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
         continue;
       }
       const mageAlive = (s.aliveMask & (1 << MAGE)) !== 0;
-      const livingWolves = wolves.filter((i) => party.monsters[i]!.alive);
+      const inWolves = mode === "arena" && s.arenaPack === WOLF_PACK;
+      const livingWolves = inWolves ? wolves.filter((i) => party.monsters[i]!.alive) : [];
+      if (mode === "map") {
+        // The first living player walks to the goal pack; the others pass.
+        const pl = players[unit]!;
+        const walker = [WARRIOR, MAGE].find((x) => s.aliveMask & (1 << x));
+        const target = s.packs[goal]!;
+        if (unit === walker) {
+          const me = party.players[unit]!;
+          const from = { x: me.part.core.x, y: me.part.core.y };
+          const steps = route({ from, goal: (x, y) => cheb({ x, y }, target) === 1, tiles: party.ground!, width: s.width, height: s.height, tileCost: tileCost(party), taken: taken(party, unit, goal) });
+          const take = steps ? affordable(steps, playerAp(me.part, s), 0) : [];
+          if (take.length) await send(pl.key, [await movePathIx(pl.actor, acc.session, s.layout, { kind: "player", slot: unit, character: pl.character }, take)]);
+        }
+        if (arenaMode((await readParty(acc.session, tiles))!.session) === "map") await send(pl.key, [await endTurnIx(pl.actor, acc.session, pl.character)]);
+        continue;
+      }
       if (unit < MONSTER_BASE) {
         const pl = players[unit]!;
         const me = party.players[unit]!;
@@ -281,12 +369,12 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
           hits++;
           resonance = hit.result.resonances.some((r) => r?.active);
           expect(resonance).toBe(true);
-        } else if (unit === WARRIOR && (!mageAlive || livingWolves.length === 0)) {
-          const targets = livingWolves.length ? livingWolves : [boss];
+        } else if (unit === WARRIOR && (!mageAlive || livingWolves.length === 0 || !inWolves)) {
+          const targets = inWolves ? livingWolves : [boss];
           const target = targets[0]!;
           const m = party.monsters[target]!;
           if (cheb(pos, m) > 1) {
-            const steps = route({ from: pos, goal: (x, y) => cheb({ x, y }, m) === 1, tiles, width: s.width, height: s.height, tileCost: tileCost(party), taken: taken(party, unit) });
+            const steps = route({ from: pos, goal: (x, y) => cheb({ x, y }, m) === 1, tiles: party.ground!, width: s.width, height: s.height, tileCost: tileCost(party), taken: taken(party, unit) });
             const take = steps ? affordable(steps, ap, 2) : [];
             if (take.length) {
               await send(pl.key, [await movePathIx(pl.actor, acc.session, s.layout, { kind: "player", slot: unit, character: pl.character }, take)]);
@@ -308,16 +396,16 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
             }
           }
         }
-        if (!victory) await send(pl.key, [await endTurnIx(pl.actor, acc.session, pl.character)]);
+        if (!victory && arenaMode((await readParty(acc.session, tiles))!.session) === "arena") await send(pl.key, [await endTurnIx(pl.actor, acc.session, pl.character)]);
       } else {
         const mi = unit - MONSTER_BASE;
         const m = party.monsters[mi]!;
         const mage = party.players[MAGE]!;
-        if (wolves.includes(mi) && m.alive && mageAlive) {
+        if (inWolves && wolves.includes(mi) && m.alive && mageAlive) {
           const target = { x: mage.part.core.x, y: mage.part.core.y };
           let ap = m.actionPoints;
           if (cheb(m, target) > 1) {
-            const steps = route({ from: m, goal: (x, y) => cheb({ x, y }, target) === 1, tiles, width: s.width, height: s.height, tileCost: tileCost(party), taken: taken(party, unit) });
+            const steps = route({ from: m, goal: (x, y) => cheb({ x, y }, target) === 1, tiles: party.ground!, width: s.width, height: s.height, tileCost: tileCost(party), taken: taken(party, unit) });
             const take = steps ? affordable(steps, ap, 2) : [];
             if (take.length) {
               await send(dmKey, [await movePathIx(dmActor, acc.session, s.layout, { kind: "monster", index: mi }, take)]);
@@ -346,7 +434,7 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
           }
         }
         party = (await readParty(acc.session, tiles))!;
-        if (currentUnit(party.session) === unit) await send(dmKey, [await endTurnIx(dmActor, acc.session, null)]);
+        if (currentUnit(party.session) === unit && arenaMode(party.session) === "arena") await send(dmKey, [await endTurnIx(dmActor, acc.session, null)]);
       }
     }
     expect(hits).toBeGreaterThan(2);
@@ -355,6 +443,7 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
     expect(resonance).toBe(true);
     expect(mageDied).toBe(true);
     expect(victory).toBe(true);
+    expect(arenas).toEqual([`enter ${WOLF_PACK}`, `leave ${WOLF_PACK}`, `enter ${BOSS_PACK}`]);
 
     // 8. the settlement (patch 11): the DM's main wallet hands out every cache and takes the
     // escrow; the DM's session key and a player cannot.
@@ -377,10 +466,13 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
   it("support skills: Quicken on self, Shelter on an ally, Sap on a wolf", { timeout: 15 * 60_000 }, async () => {
     const supportSkills = SKILL_PRESETS[Class.Support];
     const [QUICKEN, SAP, SHELTER] = ["Quicken", "Sap", "Shelter"].map((n) => supportSkills.findIndex((k) => k.name === n)) as [number, number, number];
-    const { dmKey, dmActor, players, acc, oracle, finalize, party: first } = await openParty([
+    const opened = await openParty([
       { cls: Class.Warrior, race: Race.Human, pred: Aspect.Piercing, stats: [10, 7, 5, 8], name: "Bran" },
       { cls: Class.Support, race: Race.Human, pred: Aspect.Blood, stats: [5, 7, 13, 5], name: "Mira", skills: supportSkills },
     ]);
+    const { dmKey, dmActor, players, acc, oracle, finalize } = opened;
+    // Arena update: the wolves are fought in their arena.
+    const first = await enterPack(opened, 1);
     const SUPPORT = 1;
     const tiles = first.tiles!;
     const wolves = first.monsters.flatMap((m, i) => (m.bestiaryId === 0 ? [i] : []));
@@ -475,7 +567,7 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
         if (wolves.includes(mi) && m.alive && s.aliveMask & (1 << WARRIOR)) {
           let ap = m.actionPoints;
           if (cheb(m, target) > 1) {
-            const steps = route({ from: m, goal: (x, y) => cheb({ x, y }, target) === 1, tiles, width: s.width, height: s.height, tileCost: tileCost(party), taken: taken(party, unit) });
+            const steps = route({ from: m, goal: (x, y) => cheb({ x, y }, target) === 1, tiles: party.ground!, width: s.width, height: s.height, tileCost: tileCost(party), taken: taken(party, unit) });
             const take = steps ? affordable(steps, ap, 2) : [];
             if (take.length) {
               await send(dmKey, [await movePathIx(dmActor, acc.session, s.layout, { kind: "monster", index: mi }, take)]);
@@ -500,10 +592,13 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
     const EXPOSE = supportSkills.findIndex((k) => k.name === "Expose");
     expect(EXPOSE).toBeGreaterThanOrEqual(0);
     // A Fire predisposition (forest elf) gives the warrior's basic hit a Fire packet next to the Piercing sword.
-    const { dmKey, dmActor, players, acc, oracle, finalize, party: first } = await openParty([
+    const opened = await openParty([
       { cls: Class.Warrior, race: Race.ForestElf, pred: Aspect.Fire, stats: [10, 7, 5, 8], name: "Bran" },
       { cls: Class.Support, race: Race.Human, pred: Aspect.Blood, stats: [5, 7, 13, 5], name: "Mira", skills: supportSkills },
     ]);
+    const { dmKey, dmActor, players, acc, oracle, finalize } = opened;
+    // Arena update: the wolves are fought in their arena.
+    const first = await enterPack(opened, 1);
     const SUPPORT = 1;
     const tiles = first.tiles!;
     const wolves = first.monsters.flatMap((m, i) => (m.bestiaryId === 0 ? [i] : []));
@@ -592,7 +687,7 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
         if (wolves.includes(mi) && m.alive && s.aliveMask & (1 << WARRIOR)) {
           let ap = m.actionPoints;
           if (cheb(m, target) > 1) {
-            const steps = route({ from: m, goal: (x, y) => cheb({ x, y }, target) === 1, tiles, width: s.width, height: s.height, tileCost: tileCost(party), taken: taken(party, unit) });
+            const steps = route({ from: m, goal: (x, y) => cheb({ x, y }, target) === 1, tiles: party.ground!, width: s.width, height: s.height, tileCost: tileCost(party), taken: taken(party, unit) });
             const take = steps ? affordable(steps, ap, 2) : [];
             if (take.length) {
               await send(dmKey, [await movePathIx(dmActor, acc.session, s.layout, { kind: "monster", index: mi }, take)]);

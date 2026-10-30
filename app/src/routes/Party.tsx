@@ -16,7 +16,7 @@ import { bestiaryName } from "../chain/names";
 import { useAutoFreezeTombstone } from "../chain/useAutoFreezeTombstone";
 import type { TombstoneLog } from "../chain/tombstone";
 import { monsterDefense, playerDefense, unitStats } from "../chain/stats";
-import { Aspect, Class, ModKind, PARTY_MAX, type HitResult, type TimedMod } from "../chain/types";
+import { Aspect, Class, MAP_MAX, ModKind, PARTY_MAX, Tile, cellByte, type HitResult, type TimedMod } from "../chain/types";
 import { DATA_SOURCE } from "../config";
 import { client } from "../wallet/client";
 import { PartyView } from "./PartyChain";
@@ -24,21 +24,30 @@ import { PartyView } from "./PartyChain";
 const PRICE = 100_000_000n;
 const DM = "DMw4Ns7ZqX5o8b2bJm1yQe3kV9tRgHc6uLpAa1dF2sKe";
 
-function initialUnits(): GridUnit[] {
-  return [
-    { id: 0, kind: "player", x: 1, y: 2, hp: 30, hpMax: 30, alive: true, label: "Bran" },
-    { id: 1, kind: "player", x: 2, y: 1, hp: 22, hpMax: 22, alive: true, label: "Aria" },
-    ...DEMO_MAP.spawns.map((s, i) => ({
-      id: 4 + i,
-      kind: "monster" as const,
-      x: s.x,
-      y: s.y,
-      hp: 12,
-      hpMax: 12,
-      alive: true,
-      label: bestiaryName(s.bestiaryId),
-    })),
+/** Arena update: the mock party in pack `pack`'s arena (players at its north-west corner, the
+ * pack where the DM put it), or on the map with each pack's visible monster (`pack` null). The
+ * monsters keep their spawn index in the id (4 + spawn). */
+function initialUnits(pack: number | null = null): GridUnit[] {
+  const players: GridUnit[] = [
+    { id: 0, kind: "player", x: pack === null ? 1 : 0, y: pack === null ? 2 : 0, hp: 30, hpMax: 30, alive: true, label: "Bran" },
+    { id: 1, kind: "player", x: pack === null ? 2 : 1, y: pack === null ? 1 : 0, hp: 22, hpMax: 22, alive: true, label: "Aria" },
   ];
+  const monster = (i: number, x: number, y: number): GridUnit => {
+    const sp = DEMO_MAP.spawns[i]!;
+    return { id: 4 + i, kind: "monster", x, y, hp: 12, hpMax: 12, alive: true, label: bestiaryName(sp.bestiaryId) };
+  };
+  if (pack === null) {
+    return [...players, ...DEMO_MAP.packs.flatMap((pk) => (pk ? [monster(pk.visible, pk.x, pk.y)] : []))];
+  }
+  return [...players, ...DEMO_MAP.spawns.flatMap((sp, i) => (sp.pack === pack ? [monster(i, sp.x, sp.y)] : []))];
+}
+
+/** The cells of pack `pack`'s arena at the map's stride (32), the rest walls. */
+function arenaTiles(pack: number): Uint8Array {
+  const pk = DEMO_MAP.packs[pack]!;
+  const out = new Uint8Array(MAP_MAX * MAP_MAX).fill(cellByte(Tile.Wall));
+  for (let y = 0; y < pk.height; y++) for (let x = 0; x < pk.width; x++) out[y * MAP_MAX + x] = pk.cells[y * pk.width + x]!;
+  return out;
 }
 
 /** Mock buffs and debuffs: Bran empowered, Aria hasted, the first wolf exposed to Fire. */
@@ -83,7 +92,14 @@ function MockParty() {
   const [players, setPlayers] = useState<LobbyPlayer[]>([]);
   const [started, setStarted] = useState(false);
 
-  const [units, setUnits] = useState(initialUnits);
+  const [units, setUnits] = useState(() => initialUnits());
+  // Arena update: the map, or the arena of a pack (mock: entered with a button).
+  const [arena, setArena] = useState<number | null>(null);
+  const goTo = (pack: number | null) => {
+    setArena(pack);
+    setUnits(initialUnits(pack));
+    setTarget(null);
+  };
   const [active, setActive] = useState(1);
   const [target, setTarget] = useState<number | null>(null);
   const [hit, setHit] = useState<{ result: HitResult; attacker: string; target: string; key: number; attackerId: number; targetId: number } | null>(null);
@@ -171,10 +187,10 @@ function MockParty() {
       ) : (
         <div style={{ display: "flex", gap: 20, alignItems: "flex-start", flexWrap: "wrap" }}>
           <Grid
-            width={16}
-            height={16}
-            tiles={DEMO_MAP.tiles}
-            points={draftPoints(DEMO_MAP)}
+            width={arena === null ? 16 : DEMO_MAP.packs[arena]!.width}
+            height={arena === null ? 16 : DEMO_MAP.packs[arena]!.height}
+            tiles={arena === null ? DEMO_MAP.tiles : arenaTiles(arena)}
+            points={arena === null ? draftPoints(DEMO_MAP) : []}
             units={units}
             activeUnitId={active}
             selectedUnitId={target}
@@ -184,6 +200,22 @@ function MockParty() {
           />
           <div style={{ flex: "1 1 360px", display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 12, minWidth: 0 }}>
             <div className="panel">
+              <p>
+                {arena === null ? "Map: step next to a pack's monster to fight it." : `Arena: pack ${arena}.`}{" "}
+                {arena === null
+                  ? DEMO_MAP.packs.flatMap((pk, n) =>
+                      pk ? [
+                        <button key={n} type="button" className="btn" onClick={() => goTo(n)}>
+                          Arena of pack {n}
+                        </button>,
+                      ] : [],
+                    )
+                  : (
+                    <button type="button" className="btn" onClick={() => goTo(null)}>
+                      Win: back to the map
+                    </button>
+                  )}
+              </p>
               <p>
                 Active: <b>{activeUnit?.label}</b> · Target: <b>{units.find((u) => u.id === target)?.label ?? "click a monster"}</b>
               </p>

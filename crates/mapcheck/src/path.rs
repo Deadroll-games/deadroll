@@ -100,6 +100,27 @@ pub fn reachable_avoiding(
     start: Cell,
     blocked: &[Cell],
 ) -> Reach {
+    reachable_over(
+        |x, y| cells[y * MAP_MAX + x],
+        rules,
+        width,
+        height,
+        start,
+        blocked,
+    )
+}
+
+/// [`reachable_avoiding`] over any grid up to `MAP_MAX` a side: `byte_at(x, y)` is the cell byte
+/// (arena update: an arena is stored with `ARENA_SIDE_MAX` cells per row).
+#[inline(always)]
+pub fn reachable_over(
+    byte_at: impl Fn(usize, usize) -> u8,
+    rules: &TileRules,
+    width: u8,
+    height: u8,
+    start: Cell,
+    blocked: &[Cell],
+) -> Reach {
     let mut reach = Reach::empty();
     let (w, h) = (width as usize, height as usize);
     if !in_bounds(start, width, height) || w > MAP_MAX || h > MAP_MAX {
@@ -110,9 +131,8 @@ pub fn reachable_avoiding(
     // step can enter).
     let mut pass = [0u32; MAP_MAX];
     for (y, row) in pass.iter_mut().enumerate().take(h) {
-        let line = &cells[y * MAP_MAX..y * MAP_MAX + w];
-        for (x, &byte) in line.iter().enumerate() {
-            *row |= ((passable >> cell_kind(byte)) & 1) << x;
+        for x in 0..w {
+            *row |= ((passable >> cell_kind(byte_at(x, y))) & 1) << x;
         }
     }
     let mut open = pass;

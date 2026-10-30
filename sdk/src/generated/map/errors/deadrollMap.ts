@@ -96,7 +96,7 @@ export const DEADROLL_MAP_ERROR__INVALID_POINT = 0x1796; // 6038
 export const DEADROLL_MAP_ERROR__CHEST_OUT_OF_BOUNDS = 0x1797; // 6039
 /** ChestNotPassable: Chest stands on a cell that cannot be entered */
 export const DEADROLL_MAP_ERROR__CHEST_NOT_PASSABLE = 0x1798; // 6040
-/** ChestOverlap: Chest shares a cell with the entrance, the exit, a spawn or another chest */
+/** ChestOverlap: Chest shares a cell with the entrance, the exit or another chest */
 export const DEADROLL_MAP_ERROR__CHEST_OVERLAP = 0x1799; // 6041
 /** UnknownTable: Unknown reward table */
 export const DEADROLL_MAP_ERROR__UNKNOWN_TABLE = 0x179a; // 6042
@@ -124,8 +124,45 @@ export const DEADROLL_MAP_ERROR__POINT_NOT_PASSABLE = 0x17a4; // 6052
 export const DEADROLL_MAP_ERROR__POINT_OVERLAP = 0x17a5; // 6053
 /** InvalidBiome: Unknown map biome */
 export const DEADROLL_MAP_ERROR__INVALID_BIOME = 0x17a6; // 6054
+/** PackOutOfRange: A pack number is not below PACKS_MAX */
+export const DEADROLL_MAP_ERROR__PACK_OUT_OF_RANGE = 0x17a7; // 6055
+/** PackWithoutArena: A spawn's pack has no arena */
+export const DEADROLL_MAP_ERROR__PACK_WITHOUT_ARENA = 0x17a8; // 6056
+/** PackTooBig: A pack has more monsters than an arena holds */
+export const DEADROLL_MAP_ERROR__PACK_TOO_BIG = 0x17a9; // 6057
+/** ArenaSizeOutOfRange: An arena side is outside BalanceConfig.arena */
+export const DEADROLL_MAP_ERROR__ARENA_SIZE_OUT_OF_RANGE = 0x17aa; // 6058
+/** ArenaInvalidTile: An arena cell has a tile type the Tileset does not have */
+export const DEADROLL_MAP_ERROR__ARENA_INVALID_TILE = 0x17ab; // 6059
+/** VisibleNotInPack: The monster shown on the map is not a spawn of its pack */
+export const DEADROLL_MAP_ERROR__VISIBLE_NOT_IN_PACK = 0x17ac; // 6060
+/** PackOutOfBounds: A pack's map cell is outside the map */
+export const DEADROLL_MAP_ERROR__PACK_OUT_OF_BOUNDS = 0x17ad; // 6061
+/** PackNotPassable: A pack's map cell cannot be entered */
+export const DEADROLL_MAP_ERROR__PACK_NOT_PASSABLE = 0x17ae; // 6062
+/** PackOverlap: A pack stands on the entrance, the exit, a chest or another pack */
+export const DEADROLL_MAP_ERROR__PACK_OVERLAP = 0x17af; // 6063
+/** PackAtEntrance: A pack stands next to the entrance */
+export const DEADROLL_MAP_ERROR__PACK_AT_ENTRANCE = 0x17b0; // 6064
+/** PackUnreachable: No cell next to a pack can be reached from the entrance */
+export const DEADROLL_MAP_ERROR__PACK_UNREACHABLE = 0x17b1; // 6065
+/** ArenaNoRoom: From some side an arena has no room for a full party */
+export const DEADROLL_MAP_ERROR__ARENA_NO_ROOM = 0x17b2; // 6066
+/** ArenaUnreachable: From some side the party in an arena is split or cannot reach a monster */
+export const DEADROLL_MAP_ERROR__ARENA_UNREACHABLE = 0x17b3; // 6067
+/** TooManyTemplates: More distinct monster templates than a party copies */
+export const DEADROLL_MAP_ERROR__TOO_MANY_TEMPLATES = 0x17b4; // 6068
+/** ArenaCellsMismatch: Arena cells do not match its size (at most ARENA_SIDE_MAX a side) */
+export const DEADROLL_MAP_ERROR__ARENA_CELLS_MISMATCH = 0x17b5; // 6069
+/** InvalidLayout: Not a map layout of this program in the current format */
+export const DEADROLL_MAP_ERROR__INVALID_LAYOUT = 0x17b6; // 6070
 
 export type DeadrollMapError =
+  | typeof DEADROLL_MAP_ERROR__ARENA_CELLS_MISMATCH
+  | typeof DEADROLL_MAP_ERROR__ARENA_INVALID_TILE
+  | typeof DEADROLL_MAP_ERROR__ARENA_NO_ROOM
+  | typeof DEADROLL_MAP_ERROR__ARENA_SIZE_OUT_OF_RANGE
+  | typeof DEADROLL_MAP_ERROR__ARENA_UNREACHABLE
   | typeof DEADROLL_MAP_ERROR__BOSS_COUNT
   | typeof DEADROLL_MAP_ERROR__BOSS_PACK_MIXED
   | typeof DEADROLL_MAP_ERROR__BOSS_TABLE_MISSING
@@ -145,6 +182,7 @@ export type DeadrollMapError =
   | typeof DEADROLL_MAP_ERROR__HELPER_OUTSIDE_BOSS_PACK
   | typeof DEADROLL_MAP_ERROR__INVALID_BIOME
   | typeof DEADROLL_MAP_ERROR__INVALID_CONFIG
+  | typeof DEADROLL_MAP_ERROR__INVALID_LAYOUT
   | typeof DEADROLL_MAP_ERROR__INVALID_POINT
   | typeof DEADROLL_MAP_ERROR__INVALID_REGISTRY_TABLE
   | typeof DEADROLL_MAP_ERROR__INVALID_STATUS_TRANSITION
@@ -156,7 +194,15 @@ export type DeadrollMapError =
   | typeof DEADROLL_MAP_ERROR__NOT_DM
   | typeof DEADROLL_MAP_ERROR__NOT_DRAFT
   | typeof DEADROLL_MAP_ERROR__OVER_BUDGET
+  | typeof DEADROLL_MAP_ERROR__PACK_AT_ENTRANCE
+  | typeof DEADROLL_MAP_ERROR__PACK_NOT_PASSABLE
+  | typeof DEADROLL_MAP_ERROR__PACK_OUT_OF_BOUNDS
+  | typeof DEADROLL_MAP_ERROR__PACK_OUT_OF_RANGE
+  | typeof DEADROLL_MAP_ERROR__PACK_OVERLAP
+  | typeof DEADROLL_MAP_ERROR__PACK_TOO_BIG
   | typeof DEADROLL_MAP_ERROR__PACK_TOO_SPREAD
+  | typeof DEADROLL_MAP_ERROR__PACK_UNREACHABLE
+  | typeof DEADROLL_MAP_ERROR__PACK_WITHOUT_ARENA
   | typeof DEADROLL_MAP_ERROR__POINT_NOT_PASSABLE
   | typeof DEADROLL_MAP_ERROR__POINT_OUT_OF_BOUNDS
   | typeof DEADROLL_MAP_ERROR__POINT_OVERLAP
@@ -177,21 +223,28 @@ export type DeadrollMapError =
   | typeof DEADROLL_MAP_ERROR__TOO_MANY_POINTS
   | typeof DEADROLL_MAP_ERROR__TOO_MANY_SESSION_SKILLS
   | typeof DEADROLL_MAP_ERROR__TOO_MANY_SPAWNS
+  | typeof DEADROLL_MAP_ERROR__TOO_MANY_TEMPLATES
   | typeof DEADROLL_MAP_ERROR__TWO_LONERS
   | typeof DEADROLL_MAP_ERROR__UNKNOWN_MONSTER
   | typeof DEADROLL_MAP_ERROR__UNKNOWN_TABLE
-  | typeof DEADROLL_MAP_ERROR__UNTRUSTED_CALLER;
+  | typeof DEADROLL_MAP_ERROR__UNTRUSTED_CALLER
+  | typeof DEADROLL_MAP_ERROR__VISIBLE_NOT_IN_PACK;
 
 let deadrollMapErrorMessages: Record<DeadrollMapError, string> | undefined;
 if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !== "production") {
   deadrollMapErrorMessages = {
+    [DEADROLL_MAP_ERROR__ARENA_CELLS_MISMATCH]: `Arena cells do not match its size (at most ARENA_SIDE_MAX a side)`,
+    [DEADROLL_MAP_ERROR__ARENA_INVALID_TILE]: `An arena cell has a tile type the Tileset does not have`,
+    [DEADROLL_MAP_ERROR__ARENA_NO_ROOM]: `From some side an arena has no room for a full party`,
+    [DEADROLL_MAP_ERROR__ARENA_SIZE_OUT_OF_RANGE]: `An arena side is outside BalanceConfig.arena`,
+    [DEADROLL_MAP_ERROR__ARENA_UNREACHABLE]: `From some side the party in an arena is split or cannot reach a monster`,
     [DEADROLL_MAP_ERROR__BOSS_COUNT]: `Map needs exactly one boss`,
     [DEADROLL_MAP_ERROR__BOSS_PACK_MIXED]: `Regular monster in the boss pack`,
     [DEADROLL_MAP_ERROR__BOSS_TABLE_MISSING]: `The boss needs a reward table`,
     [DEADROLL_MAP_ERROR__BOSS_TABLE_ONE_LEVEL]: `The boss reward table needs at least two levels`,
     [DEADROLL_MAP_ERROR__CHEST_NOT_PASSABLE]: `Chest stands on a cell that cannot be entered`,
     [DEADROLL_MAP_ERROR__CHEST_OUT_OF_BOUNDS]: `Chest is outside the map`,
-    [DEADROLL_MAP_ERROR__CHEST_OVERLAP]: `Chest shares a cell with the entrance, the exit, a spawn or another chest`,
+    [DEADROLL_MAP_ERROR__CHEST_OVERLAP]: `Chest shares a cell with the entrance, the exit or another chest`,
     [DEADROLL_MAP_ERROR__CHEST_RADIUS_OUT_OF_RANGE]: `The chest radius is outside the limits (LootTuning.chest_radius_min..=max)`,
     [DEADROLL_MAP_ERROR__CHEST_UNREACHABLE]: `No cell next to a chest can be reached from the entrance`,
     [DEADROLL_MAP_ERROR__CHUNK_OUT_OF_RANGE]: `Chunk goes past the end of the tile grid`,
@@ -204,6 +257,7 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_MAP_ERROR__HELPER_OUTSIDE_BOSS_PACK]: `Boss helper outside the boss pack`,
     [DEADROLL_MAP_ERROR__INVALID_BIOME]: `Unknown map biome`,
     [DEADROLL_MAP_ERROR__INVALID_CONFIG]: `Account is not the registry GameConfig`,
+    [DEADROLL_MAP_ERROR__INVALID_LAYOUT]: `Not a map layout of this program in the current format`,
     [DEADROLL_MAP_ERROR__INVALID_POINT]: `Unused since patch 13`,
     [DEADROLL_MAP_ERROR__INVALID_REGISTRY_TABLE]: `Account is not the registry bestiary or monster skills table`,
     [DEADROLL_MAP_ERROR__INVALID_STATUS_TRANSITION]: `Map status cannot change this way`,
@@ -215,7 +269,15 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_MAP_ERROR__NOT_DM]: `Only the map's DM can do this`,
     [DEADROLL_MAP_ERROR__NOT_DRAFT]: `Map is not a draft`,
     [DEADROLL_MAP_ERROR__OVER_BUDGET]: `Chests and boss cost more than the reward budget`,
+    [DEADROLL_MAP_ERROR__PACK_AT_ENTRANCE]: `A pack stands next to the entrance`,
+    [DEADROLL_MAP_ERROR__PACK_NOT_PASSABLE]: `A pack's map cell cannot be entered`,
+    [DEADROLL_MAP_ERROR__PACK_OUT_OF_BOUNDS]: `A pack's map cell is outside the map`,
+    [DEADROLL_MAP_ERROR__PACK_OUT_OF_RANGE]: `A pack number is not below PACKS_MAX`,
+    [DEADROLL_MAP_ERROR__PACK_OVERLAP]: `A pack stands on the entrance, the exit, a chest or another pack`,
+    [DEADROLL_MAP_ERROR__PACK_TOO_BIG]: `A pack has more monsters than an arena holds`,
     [DEADROLL_MAP_ERROR__PACK_TOO_SPREAD]: `Pack monsters stand too far apart`,
+    [DEADROLL_MAP_ERROR__PACK_UNREACHABLE]: `No cell next to a pack can be reached from the entrance`,
+    [DEADROLL_MAP_ERROR__PACK_WITHOUT_ARENA]: `A spawn's pack has no arena`,
     [DEADROLL_MAP_ERROR__POINT_NOT_PASSABLE]: `The entrance or the exit is on a cell that cannot be entered`,
     [DEADROLL_MAP_ERROR__POINT_OUT_OF_BOUNDS]: `The entrance or the exit is outside the map`,
     [DEADROLL_MAP_ERROR__POINT_OVERLAP]: `The entrance and the exit share a cell`,
@@ -236,10 +298,12 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_MAP_ERROR__TOO_MANY_POINTS]: `Too many points (entrance, exit and chests)`,
     [DEADROLL_MAP_ERROR__TOO_MANY_SESSION_SKILLS]: `Too many different monster skills for one party`,
     [DEADROLL_MAP_ERROR__TOO_MANY_SPAWNS]: `Too many spawns`,
+    [DEADROLL_MAP_ERROR__TOO_MANY_TEMPLATES]: `More distinct monster templates than a party copies`,
     [DEADROLL_MAP_ERROR__TWO_LONERS]: `Two loners in one pack`,
     [DEADROLL_MAP_ERROR__UNKNOWN_MONSTER]: `Unknown bestiary id`,
     [DEADROLL_MAP_ERROR__UNKNOWN_TABLE]: `Unknown reward table`,
     [DEADROLL_MAP_ERROR__UNTRUSTED_CALLER]: `Caller is not the trusted game program's authority PDA`,
+    [DEADROLL_MAP_ERROR__VISIBLE_NOT_IN_PACK]: `The monster shown on the map is not a spawn of its pack`,
   };
 }
 

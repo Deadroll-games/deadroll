@@ -1,6 +1,9 @@
 //! One whole fight. The turn flow is the session program's, every rule call goes through
 //! `deadroll_rules` (the same code the program runs):
-//! - initiative from one roll stream (`turns::begin`), players by slot then monsters by index;
+//! - arena update: the initiative timeline of the arena (`deadroll_rules::arena`): the side the
+//!   approach lets move first starts at 0, each turn adds the unit's delay, the lowest time acts;
+//!   an encounter's `then` packs are fought after it, each in its own arena, the heroes' HP,
+//!   states, buffs and cooldowns carried over, the pack's experience paid when it is won;
 //! - each turn: `start_of_turn` (over-time damage, Freeze / Stun skip, durations, cooldowns),
 //!   AP from speed with Haste / Slow and the auras over the unit, moves, at most one attack or
 //!   active skill, each at its own AP cost;
@@ -14,13 +17,16 @@
 //!   start, a reactive skill.
 //!
 //! Dice: one seeded stream per fight hands out one seed per action (the VRF value on-chain).
-//! Ends: a boss dies (or every monster, when there is no boss) = victory, every hero dead =
-//! defeat, `max_rounds` = draw.
+//! Ends: a boss dies (or every monster of the last pack) = victory, every hero dead = defeat,
+//! `max_rounds` (arena rounds, `ArenaTuning::round_time`) in one arena = draw.
 use deadroll_combat::{
     apply_mod, chill_slow_bp, speed_ap, AccuracyBuff, Applied, HitInput, HitResult, OpKind,
     Outcome as HitOutcome, ResonanceTables, RollSource, SeededRoll, StateRoll, States, TimedMods,
 };
 use deadroll_rules::{
+    arena::{
+        delay, next_unit, on_pack_won, pack_xp, round_at, start_time, FirstSide, TimelineUnit,
+    },
     aura::{
         monster_passive_aura, passive_aura, tick_auras, Aura, AuraField, MonsterAuraField,
         MonsterAuras, MonsterBearer, PartyAuras, PlayerAuras, PASSIVE_AURA, REACTIVE_AURA,
@@ -33,12 +39,12 @@ use deadroll_rules::{
     reactive::{entered_next_to, hit_events, nearby, reaction, Event, Reaction},
     resolve,
     spread::{spread, spreads, step_into, BurningCell, Field, BURNING_CELLS_MAX},
-    units::{cooldown_after_use, roll_initiative},
+    units::cooldown_after_use,
     BalanceConfig, MonsterDefense, MonsterProfile, MonsterSkillStats, Unit,
 };
 use deadroll_skillcheck::{Purpose, Target, ACTIVE_MAX};
 use deadroll_types::{
-    ActiveState, Cell, Monster, StateKind, BP, MONSTER_SLOTS, PARTY_MAX, STATES_MAX,
+    ActiveState, Cell, Monster, Stat, StateKind, BP, MONSTER_SLOTS, PARTY_MAX, STATES_MAX,
 };
 
 use crate::setup::{Fight, Fighter};
@@ -123,6 +129,59 @@ pub struct BattleStats {
     pub monster_skills: u32,
     pub monster_healed: u64,
     pub monster_reactions: u32,
+    /// Arena update: arenas fought and won, the pack experience each living hero got, and the
+    /// party's HP at the end out of its maximum.
+    pub packs: u32,
+    pub packs_won: u32,
+    pub xp: u32,
+    pub hp_left: u64,
+    pub hp_max: u64,
+}
+
+impl BattleStats {
+    /// Adds the stats of the next arena of the same run.
+    fn absorb(&mut self, o: BattleStats) {
+        self.outcome = o.outcome;
+        self.rounds += o.rounds;
+        for (a, b) in self.slots.iter_mut().zip(&o.slots) {
+            a.damage += b.damage;
+            a.crit_extra += b.crit_extra;
+            a.dot_damage += b.dot_damage;
+            a.healed += b.healed;
+            a.turns += b.turns;
+            a.attacks += b.attacks;
+            a.hits += b.hits;
+            a.crits += b.crits;
+            a.effects_landed += b.effects_landed;
+            a.died |= b.died;
+        }
+        self.kills.extend(o.kills);
+        self.monster_turns += o.monster_turns;
+        self.monster_turns_skipped += o.monster_turns_skipped;
+        for (a, b) in self.states_landed.iter_mut().zip(o.states_landed) {
+            *a += b;
+        }
+        self.resonances += o.resonances;
+        self.triples += o.triples;
+        for (a, b) in self.ops_acted.iter_mut().zip(o.ops_acted) {
+            *a += b;
+        }
+        self.jumps += o.jumps;
+        self.knockbacks += o.knockbacks;
+        self.cells_ignited += o.cells_ignited;
+        self.burned_by_cells += o.burned_by_cells;
+        self.reactions += o.reactions;
+        self.line_extra_hits += o.line_extra_hits;
+        self.aura_reach += o.aura_reach;
+        self.monster_skills += o.monster_skills;
+        self.monster_healed += o.monster_healed;
+        self.monster_reactions += o.monster_reactions;
+        self.packs += o.packs;
+        self.packs_won += o.packs_won;
+        self.xp += o.xp;
+        self.hp_left = o.hp_left;
+        self.hp_max = o.hp_max;
+    }
 }
 
 pub(crate) struct Hero {
@@ -186,6 +245,8 @@ pub(crate) struct Battle<'a> {
     result: Box<HitResult>,
     stats: BattleStats,
     boss_dead: bool,
+    /// Arena update: who starts the timeline.
+    first: FirstSide,
 }
 
 const NO_MODS: TimedMods = [deadroll_combat::TimedMod {
@@ -236,7 +297,8 @@ pub(crate) struct FoeEvent {
     source: Option<usize>,
 }
 
-/// Runs one fight to its end.
+/// Runs one fight to its end: the encounter's arena, then (arena update) each of its `then` packs
+/// while the party wins, the heroes carried from one arena to the next.
 pub fn fight(
     cfg: &BalanceConfig,
     party: &[Fighter],
@@ -246,7 +308,22 @@ pub fn fight(
 ) -> BattleStats {
     let mut b = Battle::new(cfg, party, fight, settings, seed);
     b.run();
-    b.stats
+    b.close_arena();
+    let (mut stats, mut heroes, mut over) = (b.stats, b.heroes, b.boss_dead);
+    for (k, next) in fight.then.iter().enumerate() {
+        if over || stats.outcome != Outcome::Victory {
+            break;
+        }
+        let seed = seed ^ (k as u64 + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        let mut b = Battle::new(cfg, party, next, settings, seed);
+        b.carry(heroes);
+        b.run();
+        b.close_arena();
+        over = b.boss_dead;
+        heroes = core::mem::take(&mut b.heroes);
+        stats.absorb(b.stats);
+    }
+    stats
 }
 
 impl<'a> Battle<'a> {
@@ -375,9 +452,43 @@ impl<'a> Battle<'a> {
                 monster_skills: 0,
                 monster_healed: 0,
                 monster_reactions: 0,
+                packs: 1,
+                packs_won: 0,
+                xp: 0,
+                hp_left: 0,
+                hp_max: 0,
             },
             boss_dead: false,
+            first: fight.first,
         }
+    }
+
+    /// The heroes of the arena before: everything carries over but the cell
+    /// (docs/PARTY_AND_TURNS.md 4.1.3: HP, states, buffs, cooldowns).
+    fn carry(&mut self, before: Vec<Hero>) {
+        for (h, old) in self.heroes.iter_mut().zip(before) {
+            let cell = h.cell;
+            *h = Hero { cell, ..old };
+        }
+    }
+
+    /// The end of an arena: a won one pays the pack's experience to every living hero
+    /// (`deadroll_rules::arena::on_pack_won`), and the party's HP is noted.
+    fn close_arena(&mut self) {
+        if self.stats.outcome == Outcome::Victory {
+            self.stats.packs_won = 1;
+            let xp = pack_xp(self.foes.iter().map(|f| f.profile.xp));
+            let alive = self
+                .heroes
+                .iter()
+                .enumerate()
+                .filter(|(_, h)| h.alive)
+                .fold(0u8, |m, (s, _)| m | 1 << s);
+            let paid = on_pack_won(xp, alive, &[BP as u16; PARTY_MAX]);
+            self.stats.xp = paid.iter().copied().max().unwrap_or(0);
+        }
+        self.stats.hp_left = self.heroes.iter().map(|h| h.hp as u64).sum();
+        self.stats.hp_max = self.heroes.iter().map(|h| h.hp_max as u64).sum();
     }
 
     /// One seed per action, like one VRF value per action.
@@ -431,39 +542,55 @@ impl<'a> Battle<'a> {
         )
     }
 
+    /// The arena timeline (docs/PARTY_AND_TURNS.md 6, `deadroll_rules::arena`), as the session
+    /// program runs it: the first side starts at 0, the other at its delay; the living unit with
+    /// the lowest time acts, a tie to the higher Dexterity (a monster: its initiative).
     fn run(&mut self) {
-        let mut units: Vec<(u8, u16)> = Vec::new();
+        let t = self.cfg.arena;
+        let party_first = self.first == FirstSide::Party;
+        let mut line: Vec<TimelineUnit> = Vec::new();
+        let mut initiative: Vec<u16> = Vec::new();
         for (slot, h) in self.heroes.iter().enumerate() {
-            units.push((Unit::Player(slot as u8).id(), h.initiative));
+            line.push(TimelineUnit {
+                id: Unit::Player(slot as u8).id(),
+                time: start_time(party_first, h.initiative, &t),
+                tie: self.party[h.fighter].hero.stats[Stat::Dexterity as usize],
+                alive: h.alive,
+            });
+            initiative.push(h.initiative);
         }
         for (i, f) in self.foes.iter().enumerate() {
-            units.push((Unit::Monster(i as u8).id(), f.initiative));
+            line.push(TimelineUnit {
+                id: Unit::Monster(i as u8).id(),
+                time: start_time(!party_first, f.initiative, &t),
+                tie: f.initiative,
+                alive: f.m.alive,
+            });
+            initiative.push(f.initiative);
         }
-        let order = roll_initiative(&units, &mut self.action_rolls());
-        let len = order.len as usize;
-        let mut round: u16 = 1;
-        let mut index = 0;
         loop {
+            for u in line.iter_mut() {
+                u.alive = Unit::from_id(u.id).is_some_and(|unit| self.alive(unit));
+            }
+            let Some(k) = next_unit(&line) else {
+                self.stats.outcome = self.ended().unwrap_or(Outcome::Draw);
+                return;
+            };
+            let round = round_at(line[k].time, &t);
             if round > self.settings.max_rounds {
                 self.stats.outcome = Outcome::Draw;
                 self.stats.rounds = self.settings.max_rounds;
                 return;
             }
-            if let Some(unit) = Unit::from_id(order.order[index]) {
-                if self.alive(unit) {
-                    self.turn(unit);
-                    if let Some(outcome) = self.ended() {
-                        self.stats.outcome = outcome;
-                        self.stats.rounds = round;
-                        return;
-                    }
-                }
+            self.round = round;
+            if let Some(unit) = Unit::from_id(line[k].id) {
+                self.turn(unit);
             }
-            index += 1;
-            if index == len {
-                index = 0;
-                round += 1;
-                self.round = round;
+            line[k].time = line[k].time.saturating_add(delay(initiative[k], &t));
+            if let Some(outcome) = self.ended() {
+                self.stats.outcome = outcome;
+                self.stats.rounds = round;
+                return;
             }
         }
     }
@@ -1650,6 +1777,8 @@ mod tests {
                 gap: 3,
             },
             tables: registry().tables,
+            first: FirstSide::Monsters,
+            then: Vec::new(),
         }
     }
 
@@ -2084,6 +2213,8 @@ mod tests {
                 gap: 6,
             },
             tables: reg.tables,
+            first: FirstSide::Monsters,
+            then: Vec::new(),
         }
     }
 

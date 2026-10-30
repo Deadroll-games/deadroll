@@ -1,7 +1,9 @@
 // Devnet smoke test for the character gear and the real MagicBlock VRF: a warrior created with its
 // starter kit (create_character), unequip and equip, a party of two on a room whose boss pack stands
-// on the entrance's diagonal (patch 6), set_ready with the 4 + 1 + 1 skills, start_session, then
-// turns until the warrior's Bleeding Cleave hits the line chieftain, goblin warrior, shaman: the
+// next to the entrance (arena update: the warrior steps next to its monster on the map and the party
+// enters its arena, the chieftain on the party corner's diagonal), set_ready with the 4 + 1 + 1
+// skills, start_session, then turns until the warrior's Bleeding Cleave hits the line chieftain,
+// goblin warrior, shaman: the
 // heaviest callback path (three hits, the monsters' auras, Battle Cry when the dice cross 50%).
 // Then the chieftain throws daggers (a monster skill) at the second hero until it is down, and
 // start_turn finalizes the queued death (patch 6).
@@ -47,17 +49,22 @@ const BLEEDING_CLEAVE = 3;
 const ENTRANCE = { x: 1, y: 1 };
 const EXIT = { x: 14, y: 14 };
 const [WOLF, GOBLIN, CHIEFTAIN, GOBLIN_WARRIOR, SHAMAN] = [0, 1, 2, 3, 4];
-/** programs/session/tests/session.test.ts CAMP: monster indices wolves 0, 1; goblins 2, 3; chieftain 4; warrior 5; shaman 6. */
+/** programs/session/tests/session.test.ts CAMP: the boss pack first, its arena slots chieftain 0,
+ * warrior 1, shaman 2 (x, y are arena cells). */
 const CAMP = [
-  { id: WOLF, x: 10, y: 3, pack: 1, skills: 0b0111 },
-  { id: WOLF, x: 11, y: 3, pack: 1, skills: 0b1110 },
-  { id: GOBLIN, x: 8, y: 8, pack: 2, skills: 0b11 },
-  { id: GOBLIN, x: 9, y: 8, pack: 2, skills: 0b11 },
-  { id: CHIEFTAIN, x: 2, y: 2, pack: 3, skills: 0b11111 },
-  { id: GOBLIN_WARRIOR, x: 3, y: 3, pack: 3, skills: 0b11 },
-  { id: SHAMAN, x: 4, y: 4, pack: 3, skills: 0b111 },
+  { id: CHIEFTAIN, x: 1, y: 1, pack: 3, skills: 0b11111 },
+  { id: GOBLIN_WARRIOR, x: 2, y: 2, pack: 3, skills: 0b11 },
+  { id: SHAMAN, x: 3, y: 3, pack: 3, skills: 0b111 },
+  { id: WOLF, x: 9, y: 2, pack: 1, skills: 0b0111 },
+  { id: WOLF, x: 10, y: 2, pack: 1, skills: 0b1110 },
+  { id: GOBLIN, x: 7, y: 7, pack: 2, skills: 0b11 },
+  { id: GOBLIN, x: 8, y: 7, pack: 2, skills: 0b11 },
 ];
-const CHIEFTAIN_INDEX = 4;
+/** Arena update: each pack's monster on the map (the boss pack's next to the entrance, looking
+ * south-east: the warrior comes from its back) and a 12 x 12 open arena. */
+const PACK_CELLS: Record<number, { x: number; y: number }> = { 3: { x: 3, y: 3 }, 1: { x: 12, y: 12 }, 2: { x: 12, y: 8 } };
+const ARENA_SIDE = 12;
+const CHIEFTAIN_INDEX = 0;
 /** The chieftain's Dagger Throw: pool bit 2, the third active slot (`deadroll_rules::monster::select_skills`). */
 const DAGGER_THROW_SLOT = 2;
 /** Bleeding Cleave tries for the line with Battle Cry before the smoke goes on with the line alone. */
@@ -221,6 +228,11 @@ await mapProgram.methods.writeLayout(0, Buffer.from(tiles)).accountsStrict(edit)
 await mapProgram.methods.writeSpawns(spawns).accountsStrict(edit).signers([dm]).rpc();
 // Patch 11: no chests, the tier 1 boss table of assets/registry/reward_tables.json.
 await mapProgram.methods.writePoints(points, 1).accountsStrict(edit).signers([dm]).rpc();
+for (const pack of [3, 1, 2]) {
+  const record = { visible: CAMP.findIndex((x) => x.pack === pack), ...PACK_CELLS[pack]!, facing: { se: {} }, width: ARENA_SIDE, height: ARENA_SIDE };
+  const cells = Buffer.alloc(ARENA_SIDE * ARENA_SIDE, cellByte(Tile.StoneFloor));
+  await mapProgram.methods.writeArena(pack, record, cells).accountsStrict(edit).signers([dm]).rpc();
+}
 const tileset = pda([Buffer.from("tileset")], REGISTRY);
 await mapProgram.methods.finalizeMap(new Array(32).fill(0)).accountsStrict({ ...edit, bestiary, monsterSkills, rewards, tileset }).signers([dm]).rpc();
 
@@ -329,6 +341,39 @@ async function callbackBudget(sig: string, what: string) {
 }
 
 await callbackBudget(init.signature, "initiative");
+
+// Arena update: on the map only the players move. The warrior steps onto (2, 2), next to the boss
+// pack's monster; enter_arena (any signer) takes the party into its arena.
+for (let guard = 0; guard < 6; guard++) {
+  const s = await state();
+  if (Object.keys(s.mode)[0] === "engaged") break;
+  const unit = s.core.turnOrder[s.core.turnIndex];
+  const h = heroes[unit]!;
+  if (s.startedSeq !== s.turnSeq) {
+    await session.methods
+      .startTurn()
+      .accountsStrict({ session: sessionPda, monsters, participation: h.participation, character: h.character, sessionAuthority, config, characterProgram: CHARACTER, skillSet: h.skillSet, bag: pda([Buffer.from("bag"), h.character.toBuffer()], CHARACTER), payer: provider.wallet.publicKey, ...vrfAccounts })
+      .rpc({ commitment: "confirmed" });
+    continue;
+  }
+  if (unit !== 0) {
+    await endTurn(h.wallet, h.participation);
+    continue;
+  }
+  await session.methods
+    .movePath(0, [{ x: 2, y: 2 }])
+    .accountsStrict({ signer: h.wallet.publicKey, session: sessionPda, participation: h.participation, monsters, layout, sessionToken: null, ...vrfAccounts })
+    .signers([h.wallet])
+    .rpc({ commitment: "confirmed" });
+}
+const living = heroes.map((h) => ({ pubkey: h.participation, isSigner: false, isWritable: true }));
+const enterSig = await session.methods
+  .enterArena()
+  .accountsStrict({ payer: provider.wallet.publicKey, session: sessionPda, monsters, layout })
+  .remainingAccounts(living)
+  .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 600_000 })])
+  .rpc({ commitment: "confirmed" });
+console.log("enter_arena:", explorer(enterSig));
 
 const monsterState = () => session.account.monsterState.fetch(monsters);
 const named = (events: any[], name: string) => events.filter((x) => x.name.toLowerCase() === name);

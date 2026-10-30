@@ -11,7 +11,7 @@ import { BESTIARY_NAMES, BIOME_NAMES, bestiaryName } from "../chain/names";
 import { chestRequest, lookRequest, pointLook, tileLook, tileVariants } from "../chain/appearance";
 import { useSprites } from "../raster/useSprites";
 import { SPAWNS_MAX, Tile, cellByte, cellIndex, type Cell, type Spawn } from "../chain/types";
-import { MAPCHECK_MESSAGES, useMapcheck, type MapCheckDraft, type MapcheckWasm } from "../chain/mapcheckWasm";
+import { MAPCHECK_MESSAGES, useMapcheck, type MapCheckDraft, type MapcheckWasm, type PackDraft } from "../chain/mapcheckWasm";
 import { buildMapIxs, draftPoints, mapRent, mapStatus, mapsOf, type MapAcc } from "../chain/game";
 import {
   CHESTS_MAX,
@@ -37,6 +37,8 @@ import { useAppWallet } from "../wallet/AppWallet";
 import { useCombat } from "../chain/combatWasm";
 import { SPAWN_ELITE, spawnView, useBuilderRegistry, type SpawnView } from "../chain/monsters";
 import { SKILL_ERRORS, SKILL_ERROR_MESSAGES } from "../chain/skillcheck";
+import { FACING_NAMES } from "../chain/mock";
+import { ARENA_SIDE_MAX, ARENA_SIDE_MIN, addPack, addToPack, arenaGrid, packAt, paintArena, removeSpawns, resizeArena, setPack } from "../chain/packs";
 
 const CATEGORY_NAMES = ["active", "reactive", "passive"];
 
@@ -50,7 +52,8 @@ export function spawnSkillError(view: SpawnView | null): string | null {
 
 const BESTIARY = Object.entries(BESTIARY_NAMES).map(([id, name]) => ({ id: Number(id), name }));
 const PRESETS = MAP_PRESETS.map((p) => ({ name: p.name, width: p.width, height: p.height }));
-/** One user action, five transactions: create_map, write_layout, write_spawns, write_points, finalize_map. */
+/** One user action, one transaction per step: create_map, write_layout, write_spawns, write_points,
+ * write_arena for each pack (arena update), finalize_map. */
 const PUBLISH = "Publish the map";
 const same = (a: Cell | null, b: Cell) => a !== null && a.x === b.x && a.y === b.y;
 
@@ -78,6 +81,10 @@ export function MapBuilder({ onPublish }: { onPublish?: (map: Address) => void }
   const [size, setSize] = useState({ width: first.width, height: first.height });
   const [layout, setLayout] = useState(() => presetToLayout(first));
   const [tool, setTool] = useState<BuilderTool>({ kind: "tile", tile: Tile.StoneFloor, variant: 0 });
+  // Arena update: the grid shows the map or one pack's arena; `placing` moves a pack's monster on
+  // the map with the next map click.
+  const [view, setView] = useState<number | null>(null);
+  const [placing, setPlacing] = useState<number | null>(null);
   // The tiles in the map's biome (the on-chain rasterizer), flat colors until it is loaded.
   const draw = useSprites();
   const [errors, setErrors] = useState<string[]>([]);
@@ -147,35 +154,59 @@ export function MapBuilder({ onPublish }: { onPublish?: (map: Address) => void }
     setFinalized(false);
   };
 
+  const defaultSkills = (bestiaryId: number) => viewOf({ bestiaryId, flags: 0, skills: 0 })?.check?.defaultMask ?? 0;
+  /** Arena update: a click in pack `view`'s arena paints it, adds a monster or erases one. */
+  const onArenaCell = (pack: number, cell: Cell) => {
+    if (tool.kind === "tile") edit({ ...layout, ...paintArena(layout, pack, cell, cellByte(tool.tile, tool.variant)) });
+    else if (tool.kind === "spawn") {
+      if (layout.spawns.length >= SPAWNS_MAX) return;
+      const next = addToPack(layout, pack, cell, tool.bestiaryId, defaultSkills(tool.bestiaryId));
+      if (next) edit({ ...layout, ...next });
+    } else if (tool.kind === "erase") {
+      const next = removeSpawns(layout, (sp) => sp.pack === pack && sp.x === cell.x && sp.y === cell.y);
+      edit({ ...layout, ...next });
+      if (!next.packs[pack]) setView(null);
+    }
+  };
+
   const onCell = ({ x, y }: Cell) => {
     const cell = { x, y };
+    if (view !== null) return onArenaCell(view, cell);
     const onPoint = same(layout.entrance, cell) || same(layout.exit, cell);
+    const onPack = packAt(layout, cell) !== null;
+    if (placing !== null) {
+      if (!onPoint && !onPack && !layout.chests.some((c) => c.x === x && c.y === y)) edit({ ...layout, ...setPack(layout, placing, cell) });
+      setPlacing(null);
+      return;
+    }
     if (tool.kind === "tile") {
       const tiles = layout.tiles.slice();
       // The brush overwrites the whole cell: its tile type and the variant the DM picked.
       tiles[cellIndex(x, y)] = cellByte(tool.tile, tool.variant);
       edit({ ...layout, tiles });
     } else if (tool.kind === "entrance" || tool.kind === "exit") {
-      const taken = layout.chests.some((c) => c.x === x && c.y === y) || layout.spawns.some((s) => s.x === x && s.y === y) || onPoint;
+      const taken = layout.chests.some((c) => c.x === x && c.y === y) || onPack || onPoint;
       if (!taken) edit({ ...layout, [tool.kind]: cell });
     } else if (tool.kind === "chest") {
       const limit = Math.min(CHESTS_MAX, tierLoot(tier)?.chests ?? 0);
-      const taken = layout.chests.some((c) => c.x === x && c.y === y) || layout.spawns.some((s) => s.x === x && s.y === y);
+      const taken = layout.chests.some((c) => c.x === x && c.y === y) || onPack;
       if (taken || onPoint || layout.chests.length >= limit) return;
       // The first table the tier allows; the DM picks another in the loot panel.
       const table = tables.find((t) => t.cost > 0 && tableAllowed(t, tier))?.id ?? NO_TABLE;
       edit({ ...layout, chests: [...layout.chests, { x, y, table }] });
     } else if (tool.kind === "spawn") {
-      if (onPoint || layout.chests.some((c) => c.x === x && c.y === y)) return;
-      if (layout.spawns.some((s) => s.x === x && s.y === y) || layout.spawns.length >= SPAWNS_MAX) return;
-      const pack = Math.max(0, ...layout.spawns.map((s) => s.pack)) + 1;
-      // The default choice fills the slots (the first skills of each kind of the pool).
-      const skills = viewOf({ bestiaryId: tool.bestiaryId, flags: 0, skills: 0 })?.check?.defaultMask ?? 0;
-      edit({ ...layout, spawns: [...layout.spawns, { bestiaryId: tool.bestiaryId, x, y, level: 1, skills, flags: 0, aspects: 0, pack }] });
+      // Arena update: a monster placed on the map is a new pack's visible one, in its own arena
+      // (the default choice fills the slots: the first skills of each kind of the pool).
+      if (onPoint || onPack || layout.chests.some((c) => c.x === x && c.y === y) || layout.spawns.length >= SPAWNS_MAX) return;
+      const added = addPack(layout, cell, tool.bestiaryId, defaultSkills(tool.bestiaryId));
+      if (added) edit({ ...layout, ...added.next });
     } else {
+      const pack = packAt(layout, cell);
+      const rest = pack === null ? layout : removeSpawns(layout, (sp) => sp.pack === pack);
       edit({
         ...layout,
-        spawns: layout.spawns.filter((s) => s.x !== x || s.y !== y),
+        ...rest,
+        packs: pack === null ? layout.packs : rest.packs.map((pk, n) => (n === pack ? null : pk)),
         chests: layout.chests.filter((c) => c.x !== x || c.y !== y),
         entrance: same(layout.entrance, cell) ? null : layout.entrance,
         exit: same(layout.exit, cell) ? null : layout.exit,
@@ -199,30 +230,51 @@ export function MapBuilder({ onPublish }: { onPublish?: (map: Address) => void }
   const chestSprite = (opened: boolean) => draw(`chest:${opened}`, chestRequest(opened));
   const tilePreview = (tile: Tile, variant: number) => tileSprite({ tile, variant, mask: 0 });
 
-  const units: GridUnit[] = useMemo(
-    () =>
-      layout.spawns.map((s, i) => ({ id: 4 + i, kind: "monster", x: s.x, y: s.y, hp: 1, hpMax: 1, alive: true, label: bestiaryName(s.bestiaryId) })),
-    [layout.spawns],
-  );
+  // Arena update: on the map each pack's visible monster at its cell; in an arena the pack's monsters.
+  const units: GridUnit[] = useMemo(() => {
+    const unit = (i: number, x: number, y: number, label: string): GridUnit => ({ id: 4 + i, kind: "monster", x, y, hp: 1, hpMax: 1, alive: true, label });
+    if (view !== null) return layout.spawns.flatMap((sp, i) => (sp.pack === view ? [unit(i, sp.x, sp.y, bestiaryName(sp.bestiaryId))] : []));
+    return layout.packs.flatMap((pk, n) => {
+      const sp = pk ? layout.spawns[pk.visible] : undefined;
+      return pk && sp ? [unit(pk.visible, pk.x, pk.y, `${bestiaryName(sp.bestiaryId)}: pack ${n}, looking ${FACING_NAMES[pk.facing]}`)] : [];
+    });
+  }, [layout.spawns, layout.packs, view]);
+  const arena = view !== null ? layout.packs[view] : null;
 
   return (
     <section>
       <h1>Map builder</h1>
       <div style={{ display: "flex", gap: 20, alignItems: "flex-start", flexWrap: "wrap" }}>
-        <Grid
-          width={size.width}
-          height={size.height}
-          tiles={layout.tiles}
-          units={units}
-          chests={chests}
-          points={draftPoints(layout)}
-          cellPx={32}
-          tileSprite={tileSprite}
-          pointSprite={pointSprite}
-          chestSprite={chestSprite}
-          onCellClick={onCell}
-          onUnitClick={(u) => onCell({ x: u.x, y: u.y })}
-        />
+        <div>
+          <Grid
+            width={arena ? arena.width : size.width}
+            height={arena ? arena.height : size.height}
+            tiles={arena ? arenaGrid(arena) : layout.tiles}
+            units={units}
+            chests={arena ? [] : chests}
+            points={arena ? [] : draftPoints(layout)}
+            cellPx={32}
+            tileSprite={tileSprite}
+            pointSprite={pointSprite}
+            chestSprite={chestSprite}
+            onCellClick={onCell}
+            onUnitClick={(u) => {
+              // On the map a click on a pack's monster opens its arena (Erase removes the pack).
+              const pack = view === null ? packAt(layout, u) : null;
+              if (pack !== null && tool.kind !== "erase" && placing === null) setView(pack);
+              else onCell({ x: u.x, y: u.y });
+            }}
+          />
+          <PackPanel
+            layout={layout}
+            view={view}
+            placing={placing}
+            locked={busy !== null}
+            onView={setView}
+            onPlace={setPlacing}
+            onChange={(next) => edit({ ...layout, ...next })}
+          />
+        </div>
         <div style={{ flex: "1 1 320px" }}>
           <MapPalette
             tool={tool}
@@ -327,6 +379,92 @@ export function MapBuilder({ onPublish }: { onPublish?: (map: Address) => void }
         </div>
       </div>
     </section>
+  );
+}
+
+/** Arena update: the packs (docs/MAP_DESCRIPTION.md 17.2, 17.3). On the map: open a pack's arena.
+ * In an arena: the monster shown on the map, the facing, the arena size, moving the pack on the map. */
+function PackPanel(p: {
+  layout: { spawns: Spawn[]; packs: (PackDraft | null)[] };
+  view: number | null;
+  placing: number | null;
+  locked: boolean;
+  onView: (pack: number | null) => void;
+  onPlace: (pack: number | null) => void;
+  onChange: (next: { spawns: Spawn[]; packs: (PackDraft | null)[] }) => void;
+}) {
+  const { layout, view } = p;
+  if (view === null) {
+    const used = layout.packs.flatMap((pk, n) => (pk ? [n] : []));
+    return (
+      <div className="panel">
+        <p className="muted">
+          {p.placing !== null
+            ? `Click a map cell for pack ${p.placing}'s monster.`
+            : "A monster placed on the map starts a pack: its arena opens from the list or a click on it."}
+        </p>
+        {used.map((n) => (
+          <button key={n} type="button" className="btn" onClick={() => p.onView(n)}>
+            Arena of pack {n}
+          </button>
+        ))}
+      </div>
+    );
+  }
+  const pk = layout.packs[view];
+  if (!pk) return null;
+  const members = layout.spawns.map((sp, i) => ({ sp, i })).filter(({ sp }) => sp.pack === view);
+  return (
+    <div className="panel">
+      <h3>Pack {view}: its arena</h3>
+      <p className="muted">Paint the arena, place the pack's monsters with the spawn tool, Erase removes one.</p>
+      <fieldset disabled={p.locked}>
+        <label>
+          Shown on the map{" "}
+          <select value={pk.visible} onChange={(e) => p.onChange(setPack(layout, view, { visible: Number(e.target.value) }))}>
+            {members.map(({ sp, i }) => (
+              <option key={i} value={i}>
+                {bestiaryName(sp.bestiaryId)} ({sp.x}, {sp.y})
+              </option>
+            ))}
+          </select>
+        </label>{" "}
+        <label>
+          Looking{" "}
+          <select value={pk.facing} onChange={(e) => p.onChange(setPack(layout, view, { facing: Number(e.target.value) }))}>
+            {FACING_NAMES.map((name, f) => (
+              <option key={name} value={f}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>{" "}
+        <label>
+          Size{" "}
+          <input type="number" min={ARENA_SIDE_MIN} max={ARENA_SIDE_MAX} value={pk.width} onChange={(e) => p.onChange(resizeArena(layout, view, Number(e.target.value), pk.height))} />
+          {" x "}
+          <input type="number" min={ARENA_SIDE_MIN} max={ARENA_SIDE_MAX} value={pk.height} onChange={(e) => p.onChange(resizeArena(layout, view, pk.width, Number(e.target.value)))} />
+        </label>
+      </fieldset>
+      <p>
+        On the map at ({pk.x}, {pk.y}).{" "}
+        <button
+          type="button"
+          className="btn"
+          disabled={p.locked}
+          onClick={() => {
+            p.onPlace(view);
+            p.onView(null);
+          }}
+        >
+          Move it on the map
+        </button>{" "}
+        <button type="button" className="btn" onClick={() => p.onView(null)}>
+          Back to the map
+        </button>
+      </p>
+      <p className="muted">From the pack's back the party moves first, from the front and the sides the monsters do.</p>
+    </div>
   );
 }
 

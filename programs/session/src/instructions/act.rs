@@ -121,6 +121,7 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
         SessionError::NotYourTurn
     );
     require!(session.turn_started(), SessionError::TurnNotStarted);
+    session.require_in_play()?;
     require!(
         session.player_alive(slot) && participation.core.hp > 0,
         SessionError::UnitDead
@@ -221,7 +222,7 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
         // A line runs from the caster through the target (docs/SKILL_BUILDER.md, 2 and 5.3);
         // a wall before the target cuts it.
         if skill.is_some_and(|s| s.blocks.target == Target::Line) {
-            let layout = MapLayoutView::load(&accounts.layout)?;
+            let layout = MapLayoutView::load(&accounts.layout, session.ground())?;
             let line = skill_line(session, &layout, from, to, range);
             require!(line.index_of(to).is_some(), SessionError::LineBlocked);
         }

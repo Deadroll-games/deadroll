@@ -922,5 +922,12 @@
     "over_tier_no_loot": 2,
     "resource_stack_max": 10,
     "consumable_stack_max": 5
+  },
+  "arena": {
+    "side_min": 6,
+    "side_max": 12,
+    "time_scale": 1200,
+    "initiative_base": 6,
+    "round_time": 100
   }
 }

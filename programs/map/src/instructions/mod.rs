@@ -2,6 +2,7 @@
 pub mod create_map;
 pub mod finalize_map;
 pub mod set_status;
+pub mod write_arena;
 pub mod write_layout;
 pub mod write_points;
 pub mod write_spawns;

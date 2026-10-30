@@ -106,7 +106,9 @@ pub fn handler<'info>(ctx: Context<'info, StartTurn<'info>>) -> Result<()> {
             bump: vrf::SESSION_AUTHORITY_BUMP,
         };
         outcomes::finalize_deaths(session, session_key, &signer, ctx.remaining_accounts)?;
-        if session.turn_started() {
+        // Arena update: between the map and an arena no turn starts (`leave_arena` waits for the
+        // deaths of the last action).
+        if session.turn_started() || !session.in_play() {
             // The deaths came from the callback of this turn's action: the turn goes on, but a
             // player who went down in its own action has no turn left.
             if let Some(Unit::Player(slot)) = session.current_unit() {
@@ -123,6 +125,7 @@ pub fn handler<'info>(ctx: Context<'info, StartTurn<'info>>) -> Result<()> {
             SessionError::InvalidDeathAccounts
         );
     }
+    session.require_in_play()?;
     let current = session.current_unit().ok_or(SessionError::NotActive)?;
     require!(!session.turn_started(), SessionError::TurnAlreadyStarted);
     let monsters = Monsters::load(&accounts.monsters, &session_key)?;

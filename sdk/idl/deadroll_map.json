@@ -56,6 +56,9 @@
         },
         {
           "name": "layout",
+          "docs": [
+            "written in place, never decoded whole)."
+          ],
           "writable": true,
           "pda": {
             "seeds": [
@@ -157,6 +160,10 @@
         },
         {
           "name": "layout",
+          "docs": [
+            "Owner and discriminator checked, never decoded whole (`state::LayoutBytes`): the core and",
+            "the arenas are decoded into boxes one at a time."
+          ],
           "pda": {
             "seeds": [
               {
@@ -311,6 +318,98 @@
       ]
     },
     {
+      "name": "write_arena",
+      "docs": [
+        "Arena update: DM replaces one pack's record (visible monster, map cell, facing, arena size)",
+        "and its arena cells in a draft layout."
+      ],
+      "discriminator": [
+        8,
+        200,
+        150,
+        136,
+        138,
+        141,
+        180,
+        241
+      ],
+      "accounts": [
+        {
+          "name": "dm",
+          "signer": true
+        },
+        {
+          "name": "map",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  112
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "map.core.dm",
+                "account": "Map"
+              },
+              {
+                "kind": "account",
+                "path": "map.core.index",
+                "account": "Map"
+              }
+            ]
+          }
+        },
+        {
+          "name": "layout",
+          "docs": [
+            "`LayoutBytes::load`; written in place."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  97,
+                  121,
+                  111,
+                  117,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "map"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "pack",
+          "type": "u8"
+        },
+        {
+          "name": "record",
+          "type": {
+            "defined": {
+              "name": "PackLayout"
+            }
+          }
+        },
+        {
+          "name": "cells",
+          "type": "bytes"
+        }
+      ]
+    },
+    {
       "name": "write_layout",
       "docs": [
         "DM writes a chunk of cell bytes (tile type and variant) into a draft layout."
@@ -357,6 +456,9 @@
         },
         {
           "name": "layout",
+          "docs": [
+            "`LayoutBytes::load`; written in place."
+          ],
           "writable": true,
           "pda": {
             "seeds": [
@@ -438,6 +540,9 @@
         },
         {
           "name": "layout",
+          "docs": [
+            "`LayoutBytes::load`; written in place."
+          ],
           "writable": true,
           "pda": {
             "seeds": [
@@ -524,6 +629,9 @@
         },
         {
           "name": "layout",
+          "docs": [
+            "`LayoutBytes::load`; written in place."
+          ],
           "writable": true,
           "pda": {
             "seeds": [
@@ -589,6 +697,19 @@
     }
   ],
   "events": [
+    {
+      "name": "ArenaWritten",
+      "discriminator": [
+        224,
+        221,
+        225,
+        127,
+        99,
+        13,
+        157,
+        130
+      ]
+    },
     {
       "name": "LayoutWritten",
       "discriminator": [
@@ -877,7 +998,7 @@
     {
       "code": 6041,
       "name": "ChestOverlap",
-      "msg": "Chest shares a cell with the entrance, the exit, a spawn or another chest"
+      "msg": "Chest shares a cell with the entrance, the exit or another chest"
     },
     {
       "code": 6042,
@@ -943,9 +1064,155 @@
       "code": 6054,
       "name": "InvalidBiome",
       "msg": "Unknown map biome"
+    },
+    {
+      "code": 6055,
+      "name": "PackOutOfRange",
+      "msg": "A pack number is not below PACKS_MAX"
+    },
+    {
+      "code": 6056,
+      "name": "PackWithoutArena",
+      "msg": "A spawn's pack has no arena"
+    },
+    {
+      "code": 6057,
+      "name": "PackTooBig",
+      "msg": "A pack has more monsters than an arena holds"
+    },
+    {
+      "code": 6058,
+      "name": "ArenaSizeOutOfRange",
+      "msg": "An arena side is outside BalanceConfig.arena"
+    },
+    {
+      "code": 6059,
+      "name": "ArenaInvalidTile",
+      "msg": "An arena cell has a tile type the Tileset does not have"
+    },
+    {
+      "code": 6060,
+      "name": "VisibleNotInPack",
+      "msg": "The monster shown on the map is not a spawn of its pack"
+    },
+    {
+      "code": 6061,
+      "name": "PackOutOfBounds",
+      "msg": "A pack's map cell is outside the map"
+    },
+    {
+      "code": 6062,
+      "name": "PackNotPassable",
+      "msg": "A pack's map cell cannot be entered"
+    },
+    {
+      "code": 6063,
+      "name": "PackOverlap",
+      "msg": "A pack stands on the entrance, the exit, a chest or another pack"
+    },
+    {
+      "code": 6064,
+      "name": "PackAtEntrance",
+      "msg": "A pack stands next to the entrance"
+    },
+    {
+      "code": 6065,
+      "name": "PackUnreachable",
+      "msg": "No cell next to a pack can be reached from the entrance"
+    },
+    {
+      "code": 6066,
+      "name": "ArenaNoRoom",
+      "msg": "From some side an arena has no room for a full party"
+    },
+    {
+      "code": 6067,
+      "name": "ArenaUnreachable",
+      "msg": "From some side the party in an arena is split or cannot reach a monster"
+    },
+    {
+      "code": 6068,
+      "name": "TooManyTemplates",
+      "msg": "More distinct monster templates than a party copies"
+    },
+    {
+      "code": 6069,
+      "name": "ArenaCellsMismatch",
+      "msg": "Arena cells do not match its size (at most ARENA_SIDE_MAX a side)"
+    },
+    {
+      "code": 6070,
+      "name": "InvalidLayout",
+      "msg": "Not a map layout of this program in the current format"
     }
   ],
   "types": [
+    {
+      "name": "ArenaWritten",
+      "docs": [
+        "Arena update: a pack's record and arena were written (`write_arena`)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "map",
+            "type": "pubkey"
+          },
+          {
+            "name": "pack",
+            "type": "u8"
+          },
+          {
+            "name": "width",
+            "type": "u8"
+          },
+          {
+            "name": "height",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Facing",
+      "docs": [
+        "The direction a pack looks (`PackLayout.facing`), set by the DM. North is `y - 1`, east",
+        "`x + 1`, clockwise. Coming from its back the party moves first in the arena."
+      ],
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "N"
+          },
+          {
+            "name": "NE"
+          },
+          {
+            "name": "E"
+          },
+          {
+            "name": "SE"
+          },
+          {
+            "name": "S"
+          },
+          {
+            "name": "SW"
+          },
+          {
+            "name": "W"
+          },
+          {
+            "name": "NW"
+          }
+        ]
+      }
+    },
     {
       "name": "LayoutWritten",
       "type": {
@@ -1021,6 +1288,47 @@
               "`Caves` through `Map::decode_padded`."
             ],
             "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MapArenasData",
+      "docs": [
+        "The packs of a map and their arenas, by pack number."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "packs",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "PackLayout"
+                  }
+                },
+                8
+              ]
+            }
+          },
+          {
+            "name": "cells",
+            "docs": [
+              "Row-major cell bytes (`cell_byte`) of each pack's arena, `ARENA_SIDE_MAX` per row."
+            ],
+            "type": {
+              "array": [
+                {
+                  "array": [
+                    "u8",
+                    144
+                  ]
+                },
+                8
+              ]
+            }
           }
         ]
       }
@@ -1177,8 +1485,17 @@
     {
       "name": "MapLayout",
       "docs": [
-        "`[\"layout\", map]`. `finalize_map` hashes the core bytes into `Map.layout_hash`.",
-        "Patch 13: the core is `MapLayoutDataV2` (cells with variants, points), version 2."
+        "`[\"layout\", map]`. `finalize_map` hashes the account bytes after the discriminator into",
+        "`Map.layout_hash`.",
+        "Patch 13: the core is `MapLayoutDataV2` (cells with variants, points), version 2.",
+        "Arena update: version 3, the packs and their arenas after the core (`write_arena`). A layout",
+        "from before it is smaller: it can neither be written nor open a party.",
+        "",
+        "The account (~2.5 KB) is never Borsh-decoded whole on-chain: `Account<MapLayout>` would put two",
+        "copies of it on the 4 KB SBF stack frame. The instructions go through [`LayoutBytes`] (in place,",
+        "like the session's `MapLayoutView`); `finalize_map` decodes the core and the arenas into boxes",
+        "one at a time. Contexts take it as `UncheckedAccount` (seeds checked), `finalize_map` as",
+        "`LazyAccount` (owner, discriminator, IDL entry)."
       ],
       "type": {
         "kind": "struct",
@@ -1188,6 +1505,14 @@
             "type": {
               "defined": {
                 "name": "MapLayoutDataV2"
+              }
+            }
+          },
+          {
+            "name": "arenas",
+            "type": {
+              "defined": {
+                "name": "MapArenasData"
               }
             }
           }
@@ -1395,6 +1720,55 @@
                 "name": "MapStatus"
               }
             }
+          }
+        ]
+      }
+    },
+    {
+      "name": "PackLayout",
+      "docs": [
+        "One pack of a map: the monster shown on the map, where it stands and looks, and the size of",
+        "its arena. `width == 0` marks a pack number the map does not use."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "visible",
+            "docs": [
+              "Index into `MapLayoutDataV2.spawns` of the monster shown on the map (one of the pack)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "x",
+            "docs": [
+              "The visible monster's cell on the map."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "y",
+            "type": "u8"
+          },
+          {
+            "name": "facing",
+            "type": {
+              "defined": {
+                "name": "Facing"
+              }
+            }
+          },
+          {
+            "name": "width",
+            "docs": [
+              "Arena size in cells, within `deadroll_rules::BalanceConfig.arena`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "height",
+            "type": "u8"
           }
         ]
       }
