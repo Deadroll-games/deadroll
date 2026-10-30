@@ -273,7 +273,7 @@ pub fn session(players: &[Cell]) -> GameSession {
         map_order_len: 0,
         map_turn_index: 0,
         map_round: 1,
-        unit_time: [0; PARTY_MAX + ARENA_MONSTERS_MAX],
+        unit_time: [0; super::ARENA_UNITS],
         player_dex: [0; PARTY_MAX],
     }
 }

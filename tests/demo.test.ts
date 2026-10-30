@@ -26,6 +26,9 @@ import { MAP_STRIDE, cellKind, layoutBytes, loadMapPreset, presetPoints } from "
 
 /** `PointKind` as the Anchor client encodes it, by discriminant. */
 const POINT_KIND = [{ chest: {} }, { entrance: {} }, { exit: {} }];
+/** Arena update: `Facing` as the IDL enum, by discriminant. */
+const FACING_KIND = ["n", "ne", "e", "se", "s", "sw", "w", "nw"].map((k) => ({ [k]: {} }));
+const modeOf = (s: any) => Object.keys(s.mode)[0];
 import { newSkill, partyAccounts } from "./skill_ext.ts";
 import { MPL_CORE_PROGRAM, PROGRAMS, SESSION_KEYS_PROGRAM, VRF } from "@deadroll/sdk";
 
@@ -393,6 +396,11 @@ class Demo {
     await mapProgram.methods.writeSpawns(preset.spawns).accountsStrict(edit).signers([this.dm]).rpc().then(track("write_spawns"));
     const points = presetPoints(preset).map((p) => ({ ...p, kind: POINT_KIND[p.kind] }));
     await mapProgram.methods.writePoints(points, preset.bossTable).accountsStrict(edit).signers([this.dm]).rpc().then(track("write_points"));
+    // Arena update: every pack's monster on the map, its facing and its arena.
+    for (const pk of preset.packs) {
+      const record = { visible: pk.visible, x: pk.x, y: pk.y, facing: FACING_KIND[pk.facing], width: pk.width, height: pk.height };
+      await mapProgram.methods.writeArena(pk.pack, record, Buffer.from(pk.cells)).accountsStrict(edit).signers([this.dm]).rpc().then(track("write_arena"));
+    }
     await mapProgram.methods
       .finalizeMap(new Array(32).fill(0))
       .accountsStrict({ ...edit, bestiary, monsterSkills, rewards, tileset })
@@ -616,6 +624,59 @@ class Demo {
     return { sig, hit: await eventOf(sig, "hitResolved"), events: await eventsOf(sig) };
   }
 
+  // --- arena update
+  /** Each living player's participation, writable, in slot order. */
+  async livingParts() {
+    const s = await this.state();
+    return this.players.flatMap((pl, i) => (s.aliveMask & (1 << i) ? [{ pubkey: pl.participation, isSigner: false, isWritable: true }] : []));
+  }
+  /** `enter_arena` or `leave_arena`: permissionless, sent here by the provider wallet. */
+  async enterArena() {
+    return session.methods
+      .enterArena()
+      .accountsStrict({ payer: provider.wallet.publicKey, session: this.acc.session, monsters: this.acc.monsters, layout: this.layout })
+      .remainingAccounts(await this.livingParts())
+      .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 600_000 })])
+      .rpc({ commitment: "confirmed" })
+      .then(track("enter_arena"));
+  }
+  async leaveArena() {
+    return session.methods
+      .leaveArena()
+      .accountsStrict({ payer: provider.wallet.publicKey, session: this.acc.session, monsters: this.acc.monsters })
+      .remainingAccounts(await this.livingParts())
+      .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })])
+      .rpc({ commitment: "confirmed" })
+      .then(track("leave_arena"));
+  }
+  /** The first living player walks the map next to pack `pack`'s visible monster (the others end
+   * their turns); the party enters its arena and its first turn starts. */
+  async engage(pack: number) {
+    for (let guard = 0; guard < 100; guard++) {
+      const { s, unit } = await this.current();
+      if (modeOf(s) === "engaged") {
+        await logCu("enter_arena", await this.enterArena());
+        await this.begin();
+        return;
+      }
+      if (s.startedSeq !== s.turnSeq) {
+        await this.begin();
+        continue;
+      }
+      const walker = this.players.findIndex((_, i) => s.aliveMask & (1 << i));
+      if (unit !== walker) {
+        await this.endTurn(unit);
+        continue;
+      }
+      const pk = s.packs[pack];
+      const steps = await this.route(s.playerPos[unit], (x, y) => cheb({ x, y }, pk) === 1, unit);
+      assert.ok(steps, `a path to pack ${pack}`);
+      await this.walk(unit, null, steps, await this.ap(unit, s));
+      if (modeOf(await this.state()) === "map") await this.endTurn(unit);
+    }
+    assert.fail(`pack ${pack} never engaged`);
+  }
+
   // --- turn helpers
   /** Initiative units of the started session: players by slot, then living monsters by index. */
   async initiativeUnits(): Promise<[number, number][]> {
@@ -646,11 +707,17 @@ class Demo {
     for (let i = 0; i < this.players.length; i++) {
       if (i !== mover && s.aliveMask & (1 << i)) taken.add(s.playerPos[i].y * MAP_STRIDE + s.playerPos[i].x);
     }
-    // Patch 11: a closed chest occupies its cell.
-    for (let i = 0; i < s.chestCount; i++) if (!(s.chestsOpened & (1 << i))) taken.add(s.chests[i].y * MAP_STRIDE + s.chests[i].x);
+    // Arena update: in an arena its cells; on the map the chests and the packs' monsters occupy theirs.
+    const mode = modeOf(s);
+    const arena = mode === "arena" || mode === "won" ? preset.packs.find((pk) => pk.pack === s.arenaPack)! : null;
+    if (!arena) {
+      // Patch 11: a closed chest occupies its cell.
+      for (let i = 0; i < s.chestCount; i++) if (!(s.chestsOpened & (1 << i))) taken.add(s.chests[i].y * MAP_STRIDE + s.chests[i].x);
+      for (let n = 0; n < 8; n++) if (s.packs[n].width && s.packsAlive & (1 << n)) taken.add(s.packs[n].y * MAP_STRIDE + s.packs[n].x);
+    }
     // Patch 13: the step cost of the cell's tile type, as the session copied the Tileset.
-    const tile = (x: number, y: number) =>
-      x < 0 || y < 0 || x >= preset.width || y >= preset.height ? 0 : s.tileCost[cellKind(preset.tiles[y * MAP_STRIDE + x])];
+    const byte = (x: number, y: number) => (arena ? arena.cells[y * arena.width + x]! : preset.tiles[y * MAP_STRIDE + x]!);
+    const tile = (x: number, y: number) => (x < 0 || y < 0 || x >= s.width || y >= s.height ? 0 : s.tileCost[cellKind(byte(x, y))]);
     const cost = (x: number, y: number) => (taken.has(y * MAP_STRIDE + x) ? 0 : tile(x, y));
     const dirs = [N, NE, E, SE, S, SW, W, NW].map((d) => [d, ...DELTA[d]]);
     // Dijkstra on a 32x32 grid: a linear scan for the minimum is plenty.
@@ -717,6 +784,8 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
     (await demo.part(WARRIOR)).cooldowns[PIERCING_THRUST] === 0 ? PIERCING_THRUST : BASE_ATTACK;
   let wolves: number[] = [];
   let boss = -1;
+  /** The demo preset's wolves and boss pack numbers. */
+  const [WOLF_PACK, BOSS_PACK] = [1, 3];
 
   before(async () => {
     [demo.dm, demo.dmActor] = await Promise.all([funded(), funded(1)]);
@@ -762,8 +831,10 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
     const map = await mapProgram.account.map.fetch(demo.map);
     assert.ok(map.core.status.finalized);
     assert.equal(map.core.width, preset.width);
-    wolves = preset.spawns.flatMap((s, i) => (s.bestiaryId === WOLF ? [i] : []));
-    boss = preset.spawns.findIndex((s) => s.bestiaryId === CHIEFTAIN);
+    // Arena update: the slots in each pack's arena (spawn order within the pack).
+    const slotsOf = (pack: number) => preset.spawns.filter((x) => x.pack === pack);
+    wolves = slotsOf(WOLF_PACK).flatMap((x, i) => (x.bestiaryId === WOLF ? [i] : []));
+    boss = slotsOf(BOSS_PACK).findIndex((x) => x.bestiaryId === CHIEFTAIN);
     assert.equal(wolves.length, 2);
     assert.ok(boss >= 0);
   });
@@ -862,7 +933,8 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
 
     // The oracle answers the initiative request (action 0) with player slot 0's accounts.
     const units = await demo.initiativeUnits();
-    assert.equal(units.length, 2 + preset.spawns.length);
+    // Arena update: on the map only the players take turns.
+    assert.equal(units.length, 2);
     // A fixed VRF value: every run rolls the same order.
     const seed = createHash("sha256").update("deadroll:demo:initiative").digest();
     const rolled = await demo.consume(0, seed);
@@ -878,6 +950,9 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
   });
 
   it("combat with wolves: moves, attacks, VRF rolls, hit breakdown, a resonance; the mage dies", async () => {
+    // Arena update: the warrior walks next to the wolves on the map; the party enters their arena.
+    await demo.engage(WOLF_PACK);
+    assert.equal(modeOf(await demo.state()), "arena");
     let resonanceShown = false;
     let mageDied: { sig: string; fin: string | null } | null = null;
     for (let guard = 0; guard < 300; guard++) {
@@ -1003,6 +1078,14 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
   });
 
   it("the warrior kills the goblin chieftain: victory", async () => {
+    // Arena update: the won wolves' arena pays its experience and brings the party back; the
+    // warrior walks to the boss pack.
+    assert.equal(modeOf(await demo.state()), "won");
+    const xpBefore = (await demo.part(WARRIOR)).cacheXp;
+    await logCu("leave_arena", await demo.leaveArena());
+    assert.equal(modeOf(await demo.state()), "map");
+    assert.ok((await demo.part(WARRIOR)).cacheXp > xpBefore, "the wolves' experience");
+    await demo.engage(BOSS_PACK);
     let victory: string | null = null;
     for (let guard = 0; guard < 400 && !victory; guard++) {
       const { s, unit } = await demo.current();

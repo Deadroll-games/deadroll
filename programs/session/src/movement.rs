@@ -195,6 +195,29 @@ mod tests {
     }
 
     #[test]
+    fn on_the_map_a_living_packs_visible_monster_occupies_its_cell() {
+        let with_pack = |alive: u8, mode| {
+            walk_with(&[ORIGIN], 0, &[], P0, ORIGIN, &[c(1, 1)], 5, |s| {
+                s.mode = mode;
+                s.packs[2] = deadroll_types::PackLayout {
+                    x: 1,
+                    y: 1,
+                    width: 8,
+                    height: 8,
+                    ..deadroll_types::PackLayout::EMPTY
+                };
+                s.packs_alive = alive;
+            })
+        };
+        use crate::state::ArenaMode;
+        let err = with_pack(0b100, ArenaMode::Map).unwrap_err();
+        assert_eq!(code(err), u32::from(SessionError::CellOccupied));
+        // A dead pack is gone; in an arena the map's packs are not there.
+        assert_eq!(end(with_pack(0, ArenaMode::Map).unwrap()), (c(1, 1), 4));
+        assert_eq!(end(with_pack(0b100, ArenaMode::Arena).unwrap()), (c(1, 1), 4));
+    }
+
+    #[test]
     fn a_closed_chest_blocks_an_opened_one_does_not() {
         let with_chest = |opened: u8| {
             walk_with(&[ORIGIN], 0, &[], P0, ORIGIN, &[c(1, 1)], 5, |s| {

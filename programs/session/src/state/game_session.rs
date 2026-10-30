@@ -180,7 +180,7 @@ pub struct GameSession {
     pub map_round: u16,
     /// The arena's initiative timeline (docs/PARTY_AND_TURNS.md 6): each unit's time until its
     /// turn, by turn-order id (players `0..PARTY_MAX`, then the arena's monsters).
-    pub unit_time: [u32; PARTY_MAX + ARENA_MONSTERS_MAX],
+    pub unit_time: [u32; ARENA_UNITS],
     /// Each player's Dexterity, set at `set_ready(true)`: it wins a tie on the timeline.
     pub player_dex: [u16; PARTY_MAX],
 }
@@ -200,6 +200,10 @@ pub enum ArenaMode {
     /// The arena's pack is dead: `leave_arena` pays it and brings the party back.
     Won,
 }
+
+/// Turn-order ids of an arena: every player slot, then every arena slot. A named length: `InitSpace`
+/// multiplies an array length expression without parentheses.
+pub const ARENA_UNITS: usize = PARTY_MAX + ARENA_MONSTERS_MAX;
 
 /// `GameSession.arena_pack` on the map.
 pub const NO_PACK: u8 = 0xFF;
@@ -356,6 +360,16 @@ impl GameSession {
 mod tests {
     use crate::state::test_support::session;
     use deadroll_types::Cell;
+
+    #[test]
+    fn the_account_size_is_its_borsh_size() {
+        use anchor_lang::Space;
+        let s = session(&[Cell { x: 0, y: 0 }]);
+        assert_eq!(
+            anchor_lang::prelude::borsh::to_vec(&s).unwrap().len(),
+            super::GameSession::INIT_SPACE
+        );
+    }
 
     #[test]
     fn one_action_per_turn() {

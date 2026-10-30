@@ -9,12 +9,16 @@ import { useEffect, useState } from "react";
 import wasmUrl from "./wasm/mapcheck.wasm?url";
 import { MAP_CELLS, PointKind, SPAWNS_MAX, type Cell, type Spawn } from "./types";
 
-/** `ABI_VERSION` of the module this wrapper speaks. */
-export const MAPCHECK_ABI = 1;
+/** `ABI_VERSION` of the module this wrapper speaks (2: the arenas, arena update). */
+export const MAPCHECK_ABI = 2;
 /** `POINTS_MAX`: the entrance, the exit and up to 4 chests. */
 export const POINTS_MAX = 6;
-/** Bytes of a request: 4 map numbers and the 1301-byte layout core. */
-export const MAPCHECK_REQUEST_LEN = 4 + 1301;
+/** Arena update: `PACKS_MAX`, `ARENA_SIDE_MAX` (crates/types). */
+export const PACKS_MAX = 8;
+export const ARENA_SIDE_MAX = 12;
+/** Bytes of a request: 4 map numbers, the 1301-byte layout core, then the 1200-byte arenas (8 packs
+ * of 6 bytes, 8 arenas of 144 cells, `ARENA_SIDE_MAX` per row). */
+export const MAPCHECK_REQUEST_LEN = 4 + 1301 + PACKS_MAX * 6 + PACKS_MAX * ARENA_SIDE_MAX * ARENA_SIDE_MAX;
 
 /** `deadroll_mapcheck::MapCheckError` by code (append only, as the crate). */
 export const MAPCHECK_ERRORS = [
@@ -63,6 +67,21 @@ export const MAPCHECK_ERRORS = [
   "PointOutOfBounds",
   "PointNotPassable",
   "PointOverlap",
+  // Arena update.
+  "PackOutOfRange",
+  "PackWithoutArena",
+  "PackTooBig",
+  "ArenaSizeOutOfRange",
+  "ArenaInvalidTile",
+  "VisibleNotInPack",
+  "PackOutOfBounds",
+  "PackNotPassable",
+  "PackOverlap",
+  "PackAtEntrance",
+  "PackUnreachable",
+  "ArenaNoRoom",
+  "ArenaUnreachable",
+  "TooManyTemplates",
 ] as const;
 export type MapCheckError = (typeof MAPCHECK_ERRORS)[number];
 
@@ -76,9 +95,9 @@ export const MAPCHECK_MESSAGES: Record<MapCheckError, string> = {
   EntranceMismatch: "Entrance mismatch",
   ExitMismatch: "Exit mismatch",
   TooManySpawns: `At most ${SPAWNS_MAX} spawns`,
-  SpawnOutOfBounds: "A spawn is outside the map",
-  SpawnNotPassable: "A spawn stands on a cell that cannot be entered",
-  SpawnOverlap: "A spawn shares a cell with another spawn, the entrance or the exit",
+  SpawnOutOfBounds: "A monster stands outside its pack's arena",
+  SpawnNotPassable: "A monster stands on an arena cell that cannot be entered",
+  SpawnOverlap: "Two monsters of one pack share an arena cell",
   UnknownMonster: "A spawn names a monster the bestiary does not have",
   LevelOutOfTier: "A monster level is outside the map tier",
   BossCount: "The map needs exactly one boss",
@@ -88,9 +107,9 @@ export const MAPCHECK_MESSAGES: Record<MapCheckError, string> = {
   TooManyMonsters: "Too many monsters for this tier",
   TooManyPacks: "Too many packs for this tier",
   TwoLoners: "Two loners in one pack",
-  PackTooSpread: "Monsters of one pack stand too far apart",
+  PackTooSpread: "Monsters of one pack stand too far apart (unused since arenas)",
   ExitUnreachable: "There is no path from the entrance to the exit",
-  SpawnUnreachable: "A spawn cannot be reached from the entrance",
+  SpawnUnreachable: "A spawn cannot be reached from the entrance (unused since arenas)",
   TierBelowTemplate: "A monster needs a higher map tier",
   MonsterSkillUnknown: "A spawn chose a skill its template does not have",
   MonsterSkillCount: "A spawn must fill every skill slot of its template",
@@ -102,7 +121,7 @@ export const MAPCHECK_MESSAGES: Record<MapCheckError, string> = {
   InvalidPoint: "Invalid point",
   ChestOutOfBounds: "A chest is outside the map",
   ChestNotPassable: "A chest stands on a cell that cannot be entered",
-  ChestOverlap: "A chest shares a cell with the entrance, the exit, a spawn or another chest",
+  ChestOverlap: "A chest shares a cell with the entrance, the exit or another chest",
   UnknownTable: "A reward table does not exist",
   TableNotAllowed: "A reward table is not allowed on this tier",
   BossTableMissing: "Choose the boss reward table",
@@ -113,6 +132,20 @@ export const MAPCHECK_MESSAGES: Record<MapCheckError, string> = {
   PointOutOfBounds: "The entrance or the exit is outside the map",
   PointNotPassable: "The entrance or the exit stands on a cell that cannot be entered",
   PointOverlap: "The entrance and the exit share a cell",
+  PackOutOfRange: `A pack number must be below ${PACKS_MAX}`,
+  PackWithoutArena: "A pack has no arena: draw it",
+  PackTooBig: "A pack has more monsters than an arena holds",
+  ArenaSizeOutOfRange: "An arena side is outside the allowed sizes",
+  ArenaInvalidTile: "An arena cell has a tile type the Tileset does not have",
+  VisibleNotInPack: "Pick the monster shown on the map from its own pack",
+  PackOutOfBounds: "A pack's monster on the map stands outside the map",
+  PackNotPassable: "A pack's monster on the map stands on a cell that cannot be entered",
+  PackOverlap: "A pack's monster on the map shares a cell with the entrance, the exit, a chest or another pack",
+  PackAtEntrance: "A pack's monster on the map stands next to the entrance",
+  PackUnreachable: "No cell next to a pack's monster on the map can be reached",
+  ArenaNoRoom: "From some side an arena has no room for a party of 4",
+  ArenaUnreachable: "From some side the party in an arena is split or cannot reach a monster",
+  TooManyTemplates: "Too many different monsters for one party",
 };
 
 /** The registry tables finalize_map reads, as written on chain (`set_table` kinds 0-3). */
@@ -127,10 +160,17 @@ export type MapCheckDraft = {
   tiles: Uint8Array;
   entrance: Cell | null;
   exit: Cell | null;
+  /** Arena update: `x`, `y` of a spawn are its cell in its pack's arena. */
   spawns: Spawn[];
   chests: { x: number; y: number; table: number }[];
   bossTable: number;
+  /** Arena update: the packs by number (`null`: not used). */
+  packs: (PackDraft | null)[];
 };
+
+/** Arena update: one pack as the builder edits it: the spawn shown on the map, its map cell, the
+ * facing (`Facing`, 0 = N, clockwise), the arena size and cells (`width` per row). */
+export type PackDraft = { visible: number; x: number; y: number; facing: number; width: number; height: number; cells: Uint8Array };
 
 /** The points as `write_points` stores them: the entrance, the exit (when placed), the chests. */
 export function draftPointList(d: Pick<MapCheckDraft, "entrance" | "exit" | "chests">): { kind: number; x: number; y: number; data: number }[] {
@@ -167,6 +207,17 @@ export function encodeMapCheck(d: MapCheckDraft): Uint8Array {
   u8(Math.min(points.length, 0xff));
   u8(d.bossTable);
   u8(0); // bump
+  // Arena update: `MapArenasData`.
+  for (let n = 0; n < PACKS_MAX; n++) {
+    const pk = d.packs[n];
+    if (pk) [pk.visible, pk.x, pk.y, pk.facing, pk.width, pk.height].forEach(u8);
+    else at += 6;
+  }
+  for (let n = 0; n < PACKS_MAX; n++) {
+    const pk = d.packs[n];
+    if (pk) for (let y = 0; y < pk.height; y++) out.set(pk.cells.subarray(y * pk.width, (y + 1) * pk.width), at + y * ARENA_SIDE_MAX);
+    at += ARENA_SIDE_MAX * ARENA_SIDE_MAX;
+  }
   return out;
 }
 
