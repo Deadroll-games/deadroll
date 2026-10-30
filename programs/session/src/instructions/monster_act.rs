@@ -1,8 +1,9 @@
 use anchor_lang::prelude::*;
 use deadroll_rules::{
     input::{skill_use, target_side, Side, SkillUse},
+    line::line_ends,
     monster::{kin_reaches, record},
-    MonsterSkillStats,
+    Footprint, MonsterSkillStats,
 };
 use deadroll_skillcheck::Target;
 use deadroll_types::{seeds, Cell, SessionStatus, MONSTER_SLOTS};
@@ -144,10 +145,8 @@ pub fn handler(ctx: Context<MonsterAct>, monster: u8, action: u8, target: u8) ->
         }
     };
     let profile = monsters.profile(monster, state.level)?;
-    let from = Cell {
-        x: state.x,
-        y: state.y,
-    };
+    // Patch B: a large monster acts from its whole square.
+    let from = monsters.footprint(monster)?;
     let range = skill.map_or(monster_range(profile.form), |k| k.stats.ext.range);
     let participation = &accounts.participation;
     let target_unit = match target_side(skill.as_ref().map(|k| &k.stats)) {
@@ -188,10 +187,7 @@ pub fn handler(ctx: Context<MonsterAct>, monster: u8, action: u8, target: u8) ->
                 ),
                 SessionError::NotSameKin
             );
-            let to = Cell {
-                x: ally.x,
-                y: ally.y,
-            };
+            let to = monsters.footprint(target)?;
             require!(in_ally_range(range, from, to), SessionError::OutOfRange);
             if target != monster {
                 check_line(session, &accounts.layout, Some(skill), from, to)?;
@@ -273,18 +269,19 @@ pub fn handler(ctx: Context<MonsterAct>, monster: u8, action: u8, target: u8) ->
 }
 
 /// A line runs from the monster through its target (docs/SKILL_BUILDER.md 2, 5.3): a wall before
-/// the target cuts it.
+/// the target cuts it. Patch B: between the nearest cells of large units (`line_ends`).
 fn check_line(
     session: &GameSession,
     layout: &AccountInfo,
     skill: Option<&MonsterSkillStats>,
-    from: Cell,
-    to: Cell,
+    from: Footprint,
+    to: impl Into<Footprint>,
 ) -> Result<()> {
     if let Some(k) = skill.filter(|k| k.stats.blocks.target == Target::Line) {
         let layout = MapLayoutView::load(layout, session.ground())?;
-        let line = skill_line(session, &layout, from, to, k.stats.ext.range);
-        require!(line.index_of(to).is_some(), SessionError::LineBlocked);
+        let (start, through) = line_ends(from, to);
+        let line = skill_line(session, &layout, start, through, k.stats.ext.range);
+        require!(line.index_of(through).is_some(), SessionError::LineBlocked);
     }
     Ok(())
 }

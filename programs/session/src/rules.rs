@@ -6,10 +6,10 @@
 //! until balancing, tuned in `tools/balance`); the wrappers below keep one call per rule.
 use deadroll_combat::DamageRange;
 use deadroll_rules::{
-    config::BalanceConfig, input::hero, items, monster, player, units, HeroStats,
+    config::BalanceConfig, input::hero, items, monster, player, units, Footprint, HeroStats,
 };
 use deadroll_types::{
-    cell_kind, Aspect, Cell, Class, Form, Race, RangeTag, Source, STATS_COUNT, TILE_KINDS_MAX,
+    cell_kind, Aspect, Class, Form, Race, RangeTag, Source, STATS_COUNT, TILE_KINDS_MAX,
 };
 
 pub use deadroll_rules::units::{
@@ -107,13 +107,18 @@ pub const BASIC_STATE_CHANCE_PCT: u32 = BALANCE.players.basic_state_chance_pct;
 /// HP a heal restores per point of the weapon's range, bp.
 pub const HEAL_WEAPON_BP: u32 = BALANCE.players.heal_weapon_bp;
 
-/// Whether `range` reaches from `from` to `to` (Chebyshev distance, never the own cell).
-pub fn in_range(range: RangeTag, from: Cell, to: Cell) -> bool {
+/// Whether `range` reaches from `from` to `to` (Chebyshev distance between the nearest cells,
+/// never the own cell; patch B: a large monster is its whole square).
+pub fn in_range(range: RangeTag, from: impl Into<Footprint>, to: impl Into<Footprint>) -> bool {
     units::in_range(range, from, to, &BALANCE.players)
 }
 
 /// Whether a buff of `range` reaches an ally (allies may share a cell).
-pub fn in_ally_range(range: RangeTag, from: Cell, to: Cell) -> bool {
+pub fn in_ally_range(
+    range: RangeTag,
+    from: impl Into<Footprint>,
+    to: impl Into<Footprint>,
+) -> bool {
     units::in_ally_range(range, from, to, &BALANCE.players)
 }
 
@@ -271,6 +276,7 @@ mod tests {
 
     #[test]
     fn range_by_tag() {
+        use deadroll_types::Cell;
         let at = Cell { x: 5, y: 5 };
         let c = |x, y| Cell { x, y };
         assert!(!in_range(RangeTag::Melee, at, at));

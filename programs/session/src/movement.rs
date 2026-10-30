@@ -3,7 +3,10 @@
 //! update: the ground is the map or the arena of the pack the party fights (`GameSession::ground`,
 //! `width`, `height`); on the map the packs' visible monsters occupy their cells.
 use anchor_lang::prelude::*;
-use deadroll_mapcheck::walk::{Blocker, Field, WalkError};
+use deadroll_mapcheck::{
+    footprint::Footprint,
+    walk::{Blocker, Field, WalkError},
+};
 use deadroll_rules::spread::{step_into, BurningCell, BURNING_CELLS_MAX};
 use deadroll_types::{ActiveState, Cell, ARENA_MONSTERS_MAX, STATES_MAX};
 
@@ -20,8 +23,8 @@ pub struct MapField<'a, 'b> {
     session: &'a GameSession,
     layout: &'a MapLayoutView<'b>,
     mover: Unit,
-    /// Cells of the living monsters other than the mover.
-    monsters: [Option<Cell>; ARENA_MONSTERS_MAX],
+    /// Cells of the living monsters other than the mover (patch B: a large one's whole square).
+    monsters: [Option<Footprint>; ARENA_MONSTERS_MAX],
 }
 
 impl<'a, 'b> MapField<'a, 'b> {
@@ -35,7 +38,8 @@ impl<'a, 'b> MapField<'a, 'b> {
         for index in 0..monsters.count()?.min(ARENA_MONSTERS_MAX as u8) {
             let m = monsters.get(index)?;
             if m.alive && mover != Unit::Monster(index) {
-                cells[index as usize] = Some(Cell { x: m.x, y: m.y });
+                let at = Cell { x: m.x, y: m.y };
+                cells[index as usize] = Some(Footprint::new(at, monsters.size(index)?));
             }
         }
         Ok(Self {
@@ -65,8 +69,8 @@ impl Field for MapField<'_, '_> {
                 && s.player_pos[slot as usize] == cell
         });
         // Arena update: on the map the packs' visible monsters stand on their cells.
-        let monster =
-            self.monsters.contains(&Some(cell)) || s.visible_monsters().any(|c| c == cell);
+        let monster = self.monsters.iter().flatten().any(|f| f.covers(cell))
+            || s.visible_monsters().any(|c| c == cell);
         if player || monster {
             return Some(Blocker::Unit);
         }
@@ -91,12 +95,15 @@ pub fn walk_error(e: WalkError) -> Error {
 
 /// Every cell of a walked path sets the mover on fire if it burns (docs/DAMAGE_TYPES_AND_MIXES.md
 /// 6.4, Blasting Flame; 7.7: burning cells set on fire those who step on them). Writes
-/// `CellBurned` per cell.
+/// `CellBurned` per cell. Patch B: a mover of `size` cells per side steps onto its whole square;
+/// the first burning cell of each step counts.
+#[allow(clippy::too_many_arguments)]
 pub fn burn_on_path(
     session: &GameSession,
     session_key: Pubkey,
     cells: &[BurningCell; BURNING_CELLS_MAX],
     mover: Unit,
+    size: u8,
     walked: &[Cell],
     states: &mut [ActiveState; STATES_MAX],
     immune_states: u8,
@@ -104,23 +111,26 @@ pub fn burn_on_path(
     if cells.iter().all(|c| !c.burns(session.core.round)) {
         return;
     }
-    for &at in walked {
-        if let Some((_, applied)) = step_into(
-            cells,
-            at,
-            session.core.round,
-            states,
-            immune_states,
-            BALANCE,
-        ) {
-            emit!(CellBurned {
-                session: session_key,
-                unit: mover.id(),
-                x: at.x,
-                y: at.y,
-                applied: applied.into(),
-                states: *states,
-            });
+    for &step in walked {
+        for at in Footprint::new(step, size).cells() {
+            if let Some((_, applied)) = step_into(
+                cells,
+                at,
+                session.core.round,
+                states,
+                immune_states,
+                BALANCE,
+            ) {
+                emit!(CellBurned {
+                    session: session_key,
+                    unit: mover.id(),
+                    x: at.x,
+                    y: at.y,
+                    applied: applied.into(),
+                    states: *states,
+                });
+                break;
+            }
         }
     }
 }
@@ -341,6 +351,49 @@ mod tests {
         let w = walk(&[ORIGIN], 0, &pack, mover, at, &[c(5, 4), at], 4).unwrap();
         assert_eq!(end(w), (at, 2));
         let err = walk(&[ORIGIN], 0, &pack, mover, at, &[c(6, 5)], 4).unwrap_err();
+        assert_eq!(code(err), u32::from(SessionError::CellOccupied));
+    }
+
+    /// Patch B: the shipped goblin chieftain (bestiary 2) is 2x2.
+    fn chieftain(x: u8, y: u8) -> Monster {
+        Monster {
+            bestiary_id: 2,
+            ..monster(x, y)
+        }
+    }
+
+    #[test]
+    fn a_large_monster_holds_its_whole_square_and_walks_with_it() {
+        let boss = [chieftain(3, 3), monster(6, 3)];
+        // A player cannot step onto any of its 4 cells.
+        for cell in [c(3, 3), c(4, 3), c(3, 4), c(4, 4)] {
+            let start = if cell.x == 3 {
+                c(2, cell.y)
+            } else {
+                c(5, cell.y)
+            };
+            let err = walk(&[start], 0, &boss, P0, start, &[cell], 5).unwrap_err();
+            assert_eq!(code(err), u32::from(SessionError::CellOccupied), "{cell:?}");
+        }
+        // The chieftain walks its square: its own cells never stop it, another unit beside the
+        // cells it enters does.
+        let session_key = Pubkey::new_unique();
+        let s = session(&[ORIGIN]);
+        let mut layout = layout_account(s.core.map);
+        let mut monsters = monsters_account(session_key, &boss);
+        let (layout_info, monsters_info) = (layout.info(), monsters.info());
+        let layout_view = MapLayoutView::load(&layout_info, None).unwrap();
+        let view = Monsters::load(&monsters_info, &session_key).unwrap();
+        assert_eq!(view.size(0).unwrap(), 2);
+        assert_eq!(view.size(1).unwrap(), 1);
+        let field = MapField::new(&s, &layout_view, &view, Unit::Monster(0)).unwrap();
+        let go = |path: &[Cell]| {
+            deadroll_mapcheck::walk::walk_sized(&field, c(3, 3), 2, path, 4, |_, _| false)
+                .map_err(walk_error)
+        };
+        assert_eq!(end(go(&[c(3, 2), c(4, 2)]).unwrap()), (c(4, 2), 2));
+        // (5, 3) puts its square on (5..7, 3..5): the other monster stands on (6, 3).
+        let err = go(&[c(4, 3), c(5, 3)]).unwrap_err();
         assert_eq!(code(err), u32::from(SessionError::CellOccupied));
     }
 }

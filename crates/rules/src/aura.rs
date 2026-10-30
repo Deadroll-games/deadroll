@@ -32,7 +32,8 @@ use crate::{
         HeroStats, SkillStats,
     },
     monster::{kin_reaches, MonsterProfile, MonsterSkillStats},
-    units::{chebyshev, MONSTER_UNIT_BASE},
+    units::{distance, MONSTER_UNIT_BASE},
+    Footprint,
 };
 
 /// Aura slots of one player: its passive skill's, then its reactive skill's.
@@ -70,9 +71,10 @@ impl Aura {
         self.turns == 0
     }
 
-    /// Whether it reaches a unit at `at` from a bearer at `bearer`.
-    pub fn reaches(&self, bearer: Cell, at: Cell) -> bool {
-        !self.self_only && chebyshev(bearer, at) <= self.radius
+    /// Whether it reaches a unit at `at` from a bearer at `bearer` (patch B: from and to any cell
+    /// of a large monster).
+    pub fn reaches(&self, bearer: impl Into<Footprint>, at: impl Into<Footprint>) -> bool {
+        !self.self_only && distance(bearer, at) <= self.radius as u16
     }
 }
 
@@ -89,9 +91,16 @@ pub struct MonsterBearer {
     /// `MonsterTemplate::kin`.
     pub kin: u8,
     pub auras: MonsterAuras,
+    /// Patch B: cells per side (`MonsterTemplate::size`; 0 counts as 1).
+    pub size: u8,
 }
 
 impl MonsterBearer {
+    /// The cells it stands on.
+    pub const fn footprint(&self) -> Footprint {
+        Footprint::new(self.cell, self.size)
+    }
+
     pub fn has_aura(auras: &MonsterAuras) -> bool {
         auras.iter().any(|a| !a.is_empty())
     }
@@ -167,14 +176,14 @@ impl AuraField<'_> {
         }
         // Debuff auras of the monsters around.
         for (b, a) in self.monsters.active() {
-            if a.hostile && a.reaches(b.cell, at) {
+            if a.hostile && a.reaches(b.footprint(), at) {
                 merge(&mut out, a, MONSTER_UNIT_BASE + b.index);
             }
         }
         out
     }
 
-    /// Monster `index` (of kin `kin`) at `at` with its own modifiers, plus every debuff aura of the
+    /// Monster `index` (of kin `kin`) on `at` (its footprint) with its own modifiers, plus every debuff aura of the
     /// players over it and every friendly aura of the monsters (its own passive skill included).
     /// `basic_attack`: for its natural attack, which no passive Empowerment strengthens (one
     /// engine for everyone, docs/BESTIARY.md 1.2; SKILL_BUILDER.md 3.1).
@@ -182,10 +191,11 @@ impl AuraField<'_> {
         &self,
         own: &TimedMods,
         index: u8,
-        at: Cell,
+        at: impl Into<Footprint>,
         kin: u8,
         basic_attack: bool,
     ) -> TimedMods {
+        let at: Footprint = at.into();
         let mut out = *own;
         for (bearer, cell, a) in self.active() {
             if a.hostile && a.reaches(cell, at) {
@@ -200,7 +210,7 @@ impl AuraField<'_> {
             let over = if a.self_only {
                 me
             } else {
-                a.reaches(b.cell, at) && kin_reaches(a.kin_only, b.kin, kin, me)
+                a.reaches(b.footprint(), at) && kin_reaches(a.kin_only, b.kin, kin, me)
             };
             if !over || (basic_attack && a.passive && a.kind == ModKind::Empowerment) {
                 continue;

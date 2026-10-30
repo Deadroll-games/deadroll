@@ -41,6 +41,7 @@ pub use config::{
     ArenaTuning, BalanceConfig, FeeTuning, ItemBaseStats, ItemTuning, LootTuning, MonsterScaling,
     PlayerTuning, LEVELS, MAP_TIERS, TIERS,
 };
+pub use deadroll_mapcheck::footprint::Footprint;
 pub use input::{EffectAction, HeroStats, Side, SkillStats, SkillUse};
 pub use items::{EquipError, Equipment, ItemBonus};
 pub use monster::{MonsterDefense, MonsterProfile, MonsterSkillStats, MonsterTemplate, Rank};

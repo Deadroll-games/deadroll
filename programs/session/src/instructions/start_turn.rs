@@ -6,7 +6,7 @@ use deadroll_rules::{
     monster::record,
     reactive::{nearby, Event},
 };
-use deadroll_types::{seeds, Cell, SessionStatus, MONSTER_SLOTS};
+use deadroll_types::{seeds, SessionStatus, MONSTER_SLOTS};
 
 use crate::{
     cpi_out::{character::DeathAccounts, SessionSigner},
@@ -271,16 +271,10 @@ pub fn handler<'info>(ctx: Context<'info, StartTurn<'info>>) -> Result<()> {
             monsters.set(index, &monster)?;
             let field = Field::load(session, &monsters)?;
             let kin = monsters.record(index)?[record::KIN];
-            let view = field.view().monster_mods(
-                &mods,
-                index,
-                Cell {
-                    x: monster.x,
-                    y: monster.y,
-                },
-                kin,
-                false,
-            );
+            let view =
+                field
+                    .view()
+                    .monster_mods(&mods, index, monsters.footprint(index)?, kin, false);
             monster.action_points = speed_ap(
                 monster_ap(session.monster_speed[index as usize]),
                 &view,
@@ -442,7 +436,7 @@ fn dot_bearers(
     let source = match Unit::from_id(source) {
         Some(Unit::Monster(i)) => {
             let m = monsters.get(i)?;
-            m.alive.then_some((i, Cell { x: m.x, y: m.y }))
+            m.alive.then_some((i, monsters.footprint(i)?))
         }
         Some(Unit::Player(_)) | None => None,
     };
@@ -488,8 +482,7 @@ fn monster_dot_bearers(
         Some(Unit::Player(s)) => Some(s),
         Some(Unit::Monster(_)) | None => None,
     };
-    let m = monsters.get(victim)?;
-    let at = Cell { x: m.x, y: m.y };
+    let at = monsters.footprint(victim)?;
     let mut bearers = 0u32;
     for b in 0..monsters.count()? {
         let event = if b == victim {
@@ -500,7 +493,7 @@ fn monster_dot_bearers(
             }
         } else {
             let o = monsters.get(b)?;
-            if !o.alive || !nearby(BALANCE, Cell { x: o.x, y: o.y }, at) {
+            if !o.alive || !nearby(BALANCE, monsters.footprint(b)?, at) {
                 continue;
             }
             Event::AllyHpDrop {

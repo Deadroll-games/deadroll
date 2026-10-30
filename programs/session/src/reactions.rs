@@ -22,11 +22,11 @@ use deadroll_combat::{
 use deadroll_rules::{
     aura::REACTIVE_AURA,
     input::{effect_action, EffectAction, SkillStats},
-    line::{targets_on_line, LINE_TARGETS_MAX},
+    line::{line_ends, targets_on_line, LINE_TARGETS_MAX},
     reactive::{entered_next_to, reaction, Event, Reaction},
     resolve,
     spread::{modifiers_of, spread, spreads, Field, SpreadOutcome, SPREAD_MODS_MAX},
-    HeroStats, MonsterDefense,
+    Footprint, HeroStats, MonsterDefense,
 };
 use deadroll_skillcheck::{Purpose, Target};
 use deadroll_types::{seeds, Cell, Monster, SessionStatus, CHESTS_MAX, MONSTERS_MAX, PARTY_MAX};
@@ -117,6 +117,10 @@ impl ReactEvents {
     }
 }
 
+/// The most cells [`SessionField`] holds: the players, every cell of the arena's monsters (patch
+/// B: 2x2 ones too) and the closed chests.
+const FIELD_UNITS: usize = PARTY_MAX + deadroll_rules::arena::ARENA_TAKEN_MAX + CHESTS_MAX;
+
 /// The map as a resonance's spread sees it: the layout's walls (the registry tile costs) and
 /// every living unit before the spread, and (patch 11) every closed chest, which occupies its cell.
 struct SessionField<'a> {
@@ -124,7 +128,8 @@ struct SessionField<'a> {
     height: u8,
     layout: &'a MapLayoutView<'a>,
     tile_cost: &'a [u8; deadroll_types::TILE_KINDS_MAX],
-    units: [Cell; PARTY_MAX + MONSTERS_MAX + CHESTS_MAX],
+    /// Patch B: a large monster holds every cell of its square.
+    units: [Cell; FIELD_UNITS],
     unit_count: usize,
 }
 
@@ -274,24 +279,25 @@ impl<'a, 'info> Cb<'a, 'info> {
         });
     }
 
-    /// The monsters on the line of `skill` from `from` through monster `target`, in line order.
+    /// The monsters on the line of `skill` from a caster on `from` through monster `target`, in
+    /// line order (patch B: between the nearest cells of large units, `line_ends`).
     pub(crate) fn line_monsters(
         &self,
         session: &GameSession,
-        from: Cell,
+        from: impl Into<Footprint>,
         target: u8,
         skill: &SkillStats,
     ) -> Result<([u8; LINE_TARGETS_MAX], usize)> {
-        let to = cell_of(&self.monsters.get(target)?);
+        let (from, to) = line_ends(from, self.monsters.footprint(target)?);
         let layout = MapLayoutView::load(self.layout, session.ground())?;
         let line = skill_line(session, &layout, from, to, skill.ext.range);
         let count = self.monsters.count()?;
-        let mut units = [(0u8, Cell::default()); MONSTERS_MAX];
+        let mut units = [(0u8, Footprint::cell(Cell::default())); MONSTERS_MAX];
         let mut n = 0;
         for i in 0..count {
             let m = self.monsters.get(i)?;
             if m.alive {
-                units[n] = (i, cell_of(&m));
+                units[n] = (i, self.monsters.footprint(i)?);
                 n += 1;
             }
         }
@@ -324,7 +330,13 @@ impl<'a, 'info> Cb<'a, 'info> {
             let view = field.view();
             (
                 p.mods_with_auras(&view, skill.is_none()),
-                view.monster_mods(&mods, index, cell_of(&monster), profile.kin, false),
+                view.monster_mods(
+                    &mods,
+                    index,
+                    self.monsters.footprint(index)?,
+                    profile.kin,
+                    false,
+                ),
             )
         };
         let before = monster.hp;
@@ -445,7 +457,7 @@ impl<'a, 'info> Cb<'a, 'info> {
             height: session.height,
             layout: &layout,
             tile_cost: &session.tile_cost,
-            units: [Cell::default(); PARTY_MAX + MONSTERS_MAX + CHESTS_MAX],
+            units: [Cell::default(); FIELD_UNITS],
             unit_count: 0,
         };
         for slot in 0..session.core.player_count {
@@ -454,15 +466,26 @@ impl<'a, 'info> Cb<'a, 'info> {
                 field.unit_count += 1;
             }
         }
-        for m in all.iter().take(count as usize).filter(|m| m.alive) {
-            field.units[field.unit_count] = cell_of(m);
-            field.unit_count += 1;
+        let mut sizes = [1u8; MONSTERS_MAX];
+        for (i, m) in all.iter().enumerate().take(count as usize) {
+            sizes[i] = self.monsters.size(i as u8)?;
+            if !m.alive {
+                continue;
+            }
+            for c in Footprint::new(cell_of(m), sizes[i]).cells() {
+                if field.unit_count < FIELD_UNITS {
+                    field.units[field.unit_count] = c;
+                    field.unit_count += 1;
+                }
+            }
         }
         // Arena update: the chests are on the map, the packs' visible monsters too.
         if session.ground().is_none() {
             for c in session.closed_chests() {
-                field.units[field.unit_count] = c;
-                field.unit_count += 1;
+                if field.unit_count < FIELD_UNITS {
+                    field.units[field.unit_count] = c;
+                    field.unit_count += 1;
+                }
             }
         }
         let mut cells = self.monsters.burning_cells()?;
@@ -472,6 +495,7 @@ impl<'a, 'info> Cb<'a, 'info> {
             from,
             target as usize,
             &mut all[..count as usize],
+            &sizes[..count as usize],
             &defense[..count as usize],
             &field,
             &mut cells,
@@ -567,7 +591,7 @@ impl<'a, 'info> Cb<'a, 'info> {
         let mut all_hits = [SpreadHitData::default(); 8];
         all_hits[..hits.len()].copy_from_slice(hits);
         let (moved_from, moved_to) = out.moved.unwrap_or_default();
-        let mut ignited = [Cell::default(); 8];
+        let mut ignited = [Cell::default(); deadroll_rules::spread::IGNITED_MAX];
         ignited[..out.ignited().len()].copy_from_slice(out.ignited());
         emit!(ResonanceSpread {
             session: self.session_key,
@@ -764,6 +788,9 @@ impl<'a, 'info> Cb<'a, 'info> {
     ) -> Result<()> {
         let mut events = ReactEvents::default();
         for &(monster, from, to) in moves.iter() {
+            // Patch B: a large monster is pushed with its whole square.
+            let size = self.monsters.size(monster)?;
+            let (from, to) = (Footprint::new(from, size), Footprint::new(to, size));
             for b in 0..session.core.player_count {
                 if session.player_alive(b)
                     && entered_next_to(from, to, session.player_pos[b as usize])
@@ -854,12 +881,12 @@ impl<'a, 'info> Cb<'a, 'info> {
         let source = match e.source {
             Some(i) => {
                 let m = self.monsters.get(i)?;
-                m.alive.then_some((i, cell_of(&m)))
+                m.alive.then_some((i, self.monsters.footprint(i)?))
             }
             None => None,
         };
         let ally_cell = match e.event {
-            Event::AllyHpDrop { ally, .. } => Some(session.player_pos[ally as usize]),
+            Event::AllyHpDrop { ally, .. } => Some(session.player_pos[ally as usize].into()),
             Event::Hit { .. } | Event::HpDrop { .. } | Event::Controlled | Event::EnemyEntered => {
                 None
             }
@@ -994,12 +1021,12 @@ pub fn is_debuff(skill: Option<&SkillStats>) -> Option<EffectAction> {
 
 /// Whether player `bearer`'s reactive skill fires on `event` (the same check as the callback's,
 /// from the session alone): `monster_move` and `start_turn` ask before they request a roll.
-/// `source`: the monster that caused it and its cell.
+/// `source`: the monster that caused it and its cells.
 pub fn fires_for(
     session: &GameSession,
     bearer: u8,
     event: &Event,
-    source: Option<(u8, Cell)>,
+    source: Option<(u8, Footprint)>,
 ) -> bool {
     if !session.player_alive(bearer) {
         return false;
@@ -1009,7 +1036,7 @@ pub fn fires_for(
         return false;
     };
     let ally_cell = match *event {
-        Event::AllyHpDrop { ally, .. } => Some(session.player_pos[ally as usize]),
+        Event::AllyHpDrop { ally, .. } => Some(session.player_pos[ally as usize].into()),
         Event::Hit { .. } | Event::HpDrop { .. } | Event::Controlled | Event::EnemyEntered => None,
     };
     reaction(

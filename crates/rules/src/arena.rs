@@ -9,9 +9,11 @@ use deadroll_combat::{
     support::{mod_power, ModKind},
     TimedMods,
 };
-use deadroll_types::{Facing, PARTY_MAX};
+use deadroll_types::{Facing, PARTY_MAX, TURN_ORDER_MAX};
 
-pub use deadroll_mapcheck::arena::{anchor, entry_cells, from_back, Approach, Sign};
+pub use deadroll_mapcheck::arena::{
+    anchor, entry_cells, footprint_cells, from_back, Approach, Sign, ARENA_TAKEN_MAX,
+};
 
 use crate::{config::ArenaTuning, loot::on_monster_killed};
 
@@ -86,6 +88,25 @@ pub fn next_unit(units: &[TimelineUnit]) -> Option<usize> {
         .filter(|(_, u)| u.alive)
         .min_by_key(|(_, u)| key(u))
         .map(|(i, _)| i)
+}
+
+/// Patch B: the next turns of the timeline, a forecast for the turn bar: the unit ids `next_unit`
+/// picks from `units` one after another, each unit's later turns `delays[i]` apart (`turn_delay`
+/// under what covers it now; an effect that lands meanwhile changes it). Writes up to `out.len()`
+/// ids, returns how many (0 when nobody lives).
+pub fn upcoming(units: &[TimelineUnit], delays: &[u32], out: &mut [u8]) -> usize {
+    let mut line = [TimelineUnit::default(); TURN_ORDER_MAX];
+    let n = units.len().min(TURN_ORDER_MAX);
+    line[..n].copy_from_slice(&units[..n]);
+    for (k, o) in out.iter_mut().enumerate() {
+        let Some(i) = next_unit(&line[..n]) else {
+            return k;
+        };
+        *o = line[i].id;
+        let step = delays.get(i).copied().unwrap_or(1).max(1);
+        line[i].time = line[i].time.saturating_add(step);
+    }
+    out.len()
 }
 
 /// The arena round a time falls in, from 1.

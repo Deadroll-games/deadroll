@@ -21,6 +21,7 @@ use deadroll_rules::{
     monster::NO_KIN,
     monster_ai::{plan as monster_plan, AiMonster, AiTarget, AiUnit},
     units::{in_ally_range, in_range},
+    Footprint,
 };
 use deadroll_skillcheck::{Purpose, Target};
 use deadroll_types::{Cell, StateKind, BP};
@@ -45,22 +46,22 @@ impl Battle<'_> {
         c.y as usize * self.width as usize + c.x as usize
     }
 
-    fn occupied(&self, c: Cell, mover: Cell) -> bool {
-        c != mover
+    /// A living unit other than the mover (standing on `mover`) holds `c`.
+    fn occupied(&self, c: Cell, mover: Footprint) -> bool {
+        !mover.covers(c)
             && (self.heroes.iter().any(|h| h.alive && h.cell == c)
-                || self
-                    .foes
-                    .iter()
-                    .any(|f| f.m.alive && f.m.x == c.x && f.m.y == c.y))
+                || (0..self.foes.len()).any(|i| self.foes[i].m.alive && self.foe_fp(i).covers(c)))
     }
 
-    /// Steps from `from` to every cell (8 directions, floor costs 1, living units block).
-    pub(crate) fn distances(&self, from: Cell) -> Vec<u16> {
+    /// Steps from `from` (the mover's cells; a large one walks with its whole square, patch B) to
+    /// every cell its top-left one can reach (8 directions, floor costs 1, living units block).
+    pub(crate) fn distances(&self, from: Footprint) -> Vec<u16> {
         let (w, h) = (self.width as usize, self.height as usize);
         let mut dist = vec![UNREACHABLE; w * h];
         let mut queue = std::collections::VecDeque::new();
-        dist[self.cell_index(from)] = 0;
-        queue.push_back(from);
+        let start = from.at;
+        dist[self.cell_index(start)] = 0;
+        queue.push_back(start);
         while let Some(at) = queue.pop_front() {
             let d = dist[self.cell_index(at)];
             // Patch 13: the 8 neighbors, a diagonal is one step (move_path).
@@ -84,7 +85,10 @@ impl Battle<'_> {
                     y: y as u8,
                 };
                 let i = self.cell_index(next);
-                if dist[i] == UNREACHABLE && !self.occupied(next, from) {
+                let square = Footprint::new(next, from.size);
+                let free = square.inside(self.width, self.height)
+                    && square.cells().all(|c| !self.occupied(c, from));
+                if dist[i] == UNREACHABLE && free {
                     dist[i] = d + 1;
                     queue.push_back(next);
                 }
@@ -113,23 +117,17 @@ impl Battle<'_> {
         best
     }
 
-    fn foe_cell(&self, i: usize) -> Cell {
-        Cell {
-            x: self.foes[i].m.x,
-            y: self.foes[i].m.y,
-        }
-    }
-
-    /// Walks toward the closest of `targets` as far as `budget` allows.
-    fn approach(&self, from: Cell, dist: &[u16], budget: u8, targets: &[Cell]) -> Cell {
+    /// Walks a mover on `from` toward the closest of `targets` as far as `budget` allows; returns
+    /// its new top-left cell.
+    fn approach(&self, from: Footprint, dist: &[u16], budget: u8, targets: &[Footprint]) -> Cell {
         let gap = |c: Cell| {
             targets
                 .iter()
-                .map(|t| deadroll_rules::units::chebyshev(c, *t) as u16)
+                .map(|t| Footprint::new(c, from.size).distance(t))
                 .min()
                 .unwrap_or(0)
         };
-        let mut best = (from, gap(from), 0u16);
+        let mut best = (from.at, gap(from.at), 0u16);
         for y in 0..self.height {
             for x in 0..self.width {
                 let c = Cell { x, y };
@@ -150,16 +148,16 @@ impl Battle<'_> {
     // Heroes
 
     pub(crate) fn hero_turn(&mut self, s: usize, ap: u8) {
-        let from = self.heroes[s].cell;
+        let from = Footprint::cell(self.heroes[s].cell);
         let dist = self.distances(from);
         if let Some((cell, action)) = self.plan(s, &dist, ap) {
             self.move_hero(s, cell);
             self.hero_act(s, action);
             return;
         }
-        let targets: Vec<Cell> = (0..self.foes.len())
+        let targets: Vec<Footprint> = (0..self.foes.len())
             .filter(|&i| self.foes[i].m.alive)
-            .map(|i| self.foe_cell(i))
+            .map(|i| self.foe_fp(i))
             .collect();
         let to = self.approach(from, &dist, ap, &targets);
         self.move_hero(s, to);
@@ -225,7 +223,7 @@ impl Battle<'_> {
             match target_side(stats.as_ref()) {
                 Side::Enemy => {
                     for i in (0..self.foes.len()).filter(|&i| self.foes[i].m.alive) {
-                        let to = self.foe_cell(i);
+                        let to = self.foe_fp(i);
                         let reach = |c| in_range(range, c, to, &self.cfg.players);
                         let Some((cell, cost)) = self.best_cell(dist, budget, reach) else {
                             continue;
@@ -472,7 +470,7 @@ impl Battle<'_> {
         let at = self.heroes[a].cell;
         (0..self.foes.len())
             .filter(|&i| self.foes[i].m.alive)
-            .min_by_key(|&i| deadroll_rules::units::chebyshev(at, self.foe_cell(i)))
+            .min_by_key(|&i| deadroll_rules::units::distance(at, self.foe_fp(i)))
             .map_or(0, |i| self.damage_on(a, i))
     }
 
@@ -515,9 +513,9 @@ impl Battle<'_> {
     // Monsters
 
     pub(crate) fn foe_turn(&mut self, i: usize, ap: u8) {
-        let from = self.foe_cell(i);
+        let from = self.foe_fp(i);
         let dist = self.distances(from);
-        let unit = |cell, hp, hp_max, alive, states, mods, kin| AiUnit {
+        let unit = |cell, hp, hp_max, alive, states, mods, kin, size| AiUnit {
             cell,
             hp,
             hp_max,
@@ -525,23 +523,25 @@ impl Battle<'_> {
             states,
             mods,
             kin,
+            size,
         };
         let heroes: Vec<AiUnit> = self
             .heroes
             .iter()
-            .map(|h| unit(h.cell, h.hp, h.hp_max, h.alive, h.states, h.mods, NO_KIN))
+            .map(|h| unit(h.cell, h.hp, h.hp_max, h.alive, h.states, h.mods, NO_KIN, 1))
             .collect();
         let monsters: Vec<AiUnit> = (0..self.foes.len())
             .map(|j| {
                 let f = &self.foes[j];
                 unit(
-                    self.foe_cell(j),
+                    self.foe_cell_of(j),
                     f.m.hp,
                     f.m.hp_max,
                     f.m.alive,
                     f.m.states,
                     f.mods,
                     f.profile.kin,
+                    f.size,
                 )
             })
             .collect();
@@ -555,15 +555,15 @@ impl Battle<'_> {
         };
         if let Some(choice) = monster_plan(self.cfg, &me, &heroes, &monsters) {
             let (to, ally) = match choice.target {
-                AiTarget::Player(s) => (self.heroes[s as usize].cell, false),
-                AiTarget::Monster(j) => (self.foe_cell(j as usize), true),
+                AiTarget::Player(s) => (Footprint::cell(self.heroes[s as usize].cell), false),
+                AiTarget::Monster(j) => (self.foe_fp(j as usize), true),
             };
             let players = &self.cfg.players;
             let reach = |c: Cell| {
                 if ally {
-                    in_ally_range(choice.range, c, to, players)
+                    in_ally_range(choice.range, Footprint::new(c, from.size), to, players)
                 } else {
-                    in_range(choice.range, c, to, players)
+                    in_range(choice.range, Footprint::new(c, from.size), to, players)
                 }
             };
             // A rooted monster acts from where it stands.
@@ -580,9 +580,9 @@ impl Battle<'_> {
                 return;
             }
         }
-        let cells: Vec<Cell> = (0..self.heroes.len())
+        let cells: Vec<Footprint> = (0..self.heroes.len())
             .filter(|&a| self.heroes[a].alive)
-            .map(|a| self.heroes[a].cell)
+            .map(|a| Footprint::cell(self.heroes[a].cell))
             .collect();
         if rooted(&self.foes[i].mods) {
             return;

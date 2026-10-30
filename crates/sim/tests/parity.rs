@@ -855,6 +855,7 @@ fn resonance_side(
         ATTACKER,
         0,
         &mut ms,
+        &[],
         &defense,
         &Open { units },
         &mut cells,
@@ -1196,7 +1197,7 @@ fn reactive_skills_resolve_the_same() {
             Trigger::EnemyAdjacent => Event::EnemyEntered,
             other => panic!("no demo reactive on {other:?}"),
         };
-        let source = Some((0, next_to));
+        let source = Some((0, next_to.into()));
         let r = reaction(program_rules::BALANCE, &pr, 0, 0, at, &event, source, None);
         assert_eq!(r, reaction(&cfg, &sr, 0, 0, at, &event, source, None));
         for i in 0..SEEDS {

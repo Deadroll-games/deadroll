@@ -5,6 +5,7 @@
 #![no_std]
 
 pub mod arena;
+pub mod footprint;
 pub mod limits;
 pub mod loot;
 pub mod path;
@@ -313,6 +314,7 @@ pub fn check_map<R: Fn(u8) -> Option<TableRules>>(
         ends,
         &chests[..chest_count],
         &reach,
+        &|id| template_of(id).map_or(1, |t| t.size),
     )
 }
 
@@ -1168,12 +1170,81 @@ mod tests {
                 [ENTRANCE, EXIT],
                 &chests[..count],
                 &reach,
+                &|_| 1,
             )
         };
         assert_eq!(run(&layout), Err(MapCheckError::PackTooBig));
         // 2 wolves and 6 more: exactly an arena.
         layout.spawn_count = 13;
         assert_eq!(run(&layout), Ok(()));
+    }
+
+    #[test]
+    fn a_large_monster_stands_on_its_whole_square() {
+        // Patch B: the chieftain is 2x2 at (4, 4): (4..6, 4..6) of the boss pack's 8x8 arena.
+        let big = |id: u8| {
+            p0_role(id).map(|mut t| {
+                if id == ids::GOBLIN_CHIEFTAIN {
+                    t.size = 2;
+                }
+                t
+            })
+        };
+        let run = |layout: &MapLayoutDataV2, arenas: &MapArenasData| {
+            check_map(
+                16,
+                16,
+                1,
+                layout,
+                arenas,
+                LIMITS,
+                &tiles(),
+                big,
+                &test_loot(),
+            )
+        };
+        let boss = 4;
+        let shaman = 6;
+        assert_eq!(run(&demo(), &arenas()), Ok(()));
+        // A helper on one of its cells.
+        let mut layout = demo();
+        layout.spawns[shaman].x = 5;
+        layout.spawns[shaman].y = 5;
+        assert_eq!(run(&layout, &arenas()), Err(MapCheckError::SpawnOverlap));
+        // Its square past the arena's edge.
+        let mut layout = demo();
+        layout.spawns[boss].x = 7;
+        assert_eq!(
+            run(&layout, &arenas()),
+            Err(MapCheckError::SpawnOutOfBounds)
+        );
+        // A wall under any of its cells.
+        let mut a = arenas();
+        a.cells[3][5 * ARENA_SIDE_MAX + 5] = WALL;
+        assert_eq!(run(&demo(), &a), Err(MapCheckError::SpawnNotPassable));
+        // A one-cell boss there passes.
+        assert_eq!(check_with(&demo(), &a), Ok(()));
+        // Its square closes the only way through a corridor 2 cells wide: the party entering on
+        // one side cannot reach the other.
+        let mut a = arenas();
+        a.cells[3] = [WALL; ARENA_CELLS];
+        for y in 0..8 {
+            for x in 4..6 {
+                a.cells[3][y * ARENA_SIDE_MAX + x] = FLOOR;
+            }
+        }
+        for x in 0..8 {
+            for y in [0, 1, 7] {
+                a.cells[3][y * ARENA_SIDE_MAX + x] = FLOOR;
+            }
+        }
+        let mut layout = demo();
+        layout.spawns[5].x = 0;
+        layout.spawns[5].y = 0;
+        layout.spawns[shaman].x = 7;
+        layout.spawns[shaman].y = 0;
+        assert_eq!(check_with(&layout, &a), Ok(()));
+        assert_eq!(run(&layout, &a), Err(MapCheckError::ArenaUnreachable));
     }
 
     #[test]
