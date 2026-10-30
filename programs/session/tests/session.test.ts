@@ -2178,7 +2178,8 @@ describe("deadroll_session: combat, death, victory and payouts", { skip: SKIP_PA
     const [p0, p1] = party.players;
     await rejects(party.monsterAct(party.dm, 0, 0), "NotYourTurn");
     await party.endTurn(p1.wallet, 1);
-    const s = await party.state();
+    // Arena update: on the timeline the mage may come again first; the first wolf's turn is next.
+    const s = await party.untilStartOf(MONSTER_BASE);
     const wolfTurn = s.core.turnOrder[s.core.turnIndex] - MONSTER_BASE;
     // A monster's turn starts first too (no participation needed).
     await rejects(party.monsterMove(party.dm, wolfTurn, [S]), "TurnNotStarted");

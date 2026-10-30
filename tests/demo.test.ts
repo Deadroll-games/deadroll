@@ -669,7 +669,7 @@ class Demo {
         continue;
       }
       const pk = s.packs[pack];
-      const steps = await this.route(s.playerPos[unit], (x, y) => cheb({ x, y }, pk) === 1, unit);
+      const steps = await this.route(s.playerPos[unit], (x, y) => cheb({ x, y }, pk) === 1, unit, pack);
       assert.ok(steps, `a path to pack ${pack}`);
       await this.walk(unit, null, steps, await this.ap(unit, s));
       if (modeOf(await this.state()) === "map") await this.endTurn(unit);
@@ -700,7 +700,7 @@ class Demo {
    * Shortest step list from `from` to any cell where `goal` holds, over passable cells not taken
    * by a living unit or a closed chest, with each step's action-point cost.
    */
-  async route(from: { x: number; y: number }, goal: (x: number, y: number) => boolean, mover: number) {
+  async route(from: { x: number; y: number }, goal: (x: number, y: number) => boolean, mover: number, toward = -1) {
     const s = await this.state();
     const taken = new Set<number>();
     for (const m of await this.monsters()) if (m.alive) taken.add(m.y * MAP_STRIDE + m.x);
@@ -713,7 +713,13 @@ class Demo {
     if (!arena) {
       // Patch 11: a closed chest occupies its cell.
       for (let i = 0; i < s.chestCount; i++) if (!(s.chestsOpened & (1 << i))) taken.add(s.chests[i].y * MAP_STRIDE + s.chests[i].x);
-      for (let n = 0; n < 8; n++) if (s.packs[n].width && s.packsAlive & (1 << n)) taken.add(s.packs[n].y * MAP_STRIDE + s.packs[n].x);
+      for (let n = 0; n < 8; n++) {
+        if (!s.packs[n].width || !(s.packsAlive & (1 << n))) continue;
+        const { x: px, y: py } = s.packs[n];
+        taken.add(py * MAP_STRIDE + px);
+        // Next to another pack's monster the walk would engage it.
+        if (n !== toward) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) taken.add((py + dy) * MAP_STRIDE + px + dx);
+      }
     }
     // Patch 13: the step cost of the cell's tile type, as the session copied the Tileset.
     const byte = (x: number, y: number) => (arena ? arena.cells[y * arena.width + x]! : preset.tiles[y * MAP_STRIDE + x]!);
@@ -953,10 +959,20 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
     // Arena update: the warrior walks next to the wolves on the map; the party enters their arena.
     await demo.engage(WOLF_PACK);
     assert.equal(modeOf(await demo.state()), "arena");
+    // A turn ends unless the action just won the arena.
+    const pass = async (who: number | null) => {
+      if (modeOf(await demo.state()) === "arena") await demo.endTurn(who);
+    };
     let resonanceShown = false;
     let mageDied: { sig: string; fin: string | null } | null = null;
     for (let guard = 0; guard < 300; guard++) {
       const { s, unit } = await demo.current();
+      // Arena update: the last wolf's death wins the arena.
+      if (modeOf(s) === "won") {
+        console.log(`  wolves' arena won, the mage ${(s.aliveMask & (1 << MAGE)) !== 0 ? "alive" : "dead"}, deaths pending ${s.pendingDeaths}`);
+        if (s.pendingDeaths) await demo.begin();
+        break;
+      }
       if (s.core.status.active && s.startedSeq !== s.turnSeq) {
         await demo.begin(); // every turn starts first (states, cooldowns)
         continue;
@@ -998,7 +1014,7 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
             if (killed) assert.ok(killed.monster === target && !killed.boss);
           }
         }
-        await demo.endTurn(WARRIOR);
+        await pass(WARRIOR);
       } else if (unit === MAGE) {
         const target = livingWolves[livingWolves.length - 1];
         if (!resonanceShown && target !== undefined && cheb(s.playerPos[MAGE], ms[target]) <= 6) {
@@ -1013,7 +1029,7 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
           assert.ok(res.some((x: any) => x.active), "a resonance triggered");
           resonanceShown = true;
         }
-        await demo.endTurn(MAGE);
+        await pass(MAGE);
       } else {
         const mi = unit - MONSTER_BASE;
         const m = ms[mi];
@@ -1035,9 +1051,9 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
             // Patch 6: down at once; the next start_turn makes the tombstone.
             if (died) mageDied = { sig, fin: await demo.settle() };
           }
-          if ((await demo.state()).core.turnOrder[(await demo.state()).core.turnIndex] === unit) await demo.endTurn(null);
+          if ((await demo.state()).core.turnOrder[(await demo.state()).core.turnIndex] === unit) await pass(null);
         } else {
-          await demo.endTurn(null);
+          await pass(null);
         }
       }
     }
@@ -1109,7 +1125,8 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
       if (ap >= 2 && cheb((await demo.state()).playerPos[WARRIOR], chief) === 1) {
         const { sig, hit, events } = await demo.attack(WARRIOR, await warriorStrike(), boss, CRIT);
         assert.ok(hit.result.outcome.hit);
-        const killed = events.find((x) => x.name === "monsterKilled")?.data;
+        // A resonance may take a helper next to it too: the boss's own kill.
+        const killed = events.find((x) => x.name === "monsterKilled" && x.data.monster === boss)?.data;
         if (killed) {
           assert.ok(killed.boss);
           const ended = events.find((x) => x.name === "sessionEnded")!.data;
