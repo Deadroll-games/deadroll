@@ -214,7 +214,10 @@ mod tests {
         assert_eq!(code(err), u32::from(SessionError::CellOccupied));
         // A dead pack is gone; in an arena the map's packs are not there.
         assert_eq!(end(with_pack(0, ArenaMode::Map).unwrap()), (c(1, 1), 4));
-        assert_eq!(end(with_pack(0b100, ArenaMode::Arena).unwrap()), (c(1, 1), 4));
+        assert_eq!(
+            end(with_pack(0b100, ArenaMode::Arena).unwrap()),
+            (c(1, 1), 4)
+        );
     }
 
     #[test]

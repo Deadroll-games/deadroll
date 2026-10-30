@@ -138,6 +138,8 @@ pub fn handler<'info>(ctx: Context<'info, StartTurn<'info>>) -> Result<()> {
     let mut dot_drop = (0u32, 0u32, 0u32);
     // Patch 6: the same for a monster's HP: the monsters whose reactive answers it.
     let mut monster_bearers = 0u32;
+    // Patch B: the unit's buffs and debuffs with the auras over it, after the tick.
+    let delay_mods;
     let (start, states, mods, action_points): (TurnStart, _, _, u8) = match current {
         Unit::Player(slot) => {
             let participation: &mut Participation = accounts
@@ -189,6 +191,8 @@ pub fn handler<'info>(ctx: Context<'info, StartTurn<'info>>) -> Result<()> {
             // (a monster's debuff aura included).
             let field = Field::load(session, &monsters)?;
             participation.refresh_ap(turn_seq, &field.view());
+            // Patch B: the delay of this turn, under what covers it now (PARTY_AND_TURNS 6.2).
+            delay_mods = participation.mods_with_auras(&field.view(), false);
             if start.hp < hp_before && !start.died {
                 reactive_bearers = dot_bearers(
                     session,
@@ -282,6 +286,7 @@ pub fn handler<'info>(ctx: Context<'info, StartTurn<'info>>) -> Result<()> {
                 &view,
                 chill,
             );
+            delay_mods = view;
             if start.died {
                 // No VRF value of its own: the reward seed of a boss killed this way is the
                 // latest one, already public but out of anyone's hands by now.
@@ -316,6 +321,7 @@ pub fn handler<'info>(ctx: Context<'info, StartTurn<'info>>) -> Result<()> {
         }
     };
     session.started_seq = turn_seq;
+    turns::add_turn_delay(session, current, &delay_mods);
 
     let unit = current.id();
     emit!(TurnTicked {

@@ -4,6 +4,11 @@
 //! The geometry (which side a character came from, where the party stands) is
 //! `deadroll_mapcheck::arena`, shared with the map builder.
 
+use deadroll_combat::{
+    modifiers::counter,
+    support::{mod_power, ModKind},
+    TimedMods,
+};
 use deadroll_types::{Facing, PARTY_MAX};
 
 pub use deadroll_mapcheck::arena::{anchor, entry_cells, from_back, Approach, Sign};
@@ -32,6 +37,21 @@ pub const fn first_side(facing: Facing, approach: Approach) -> FirstSide {
 pub fn delay(initiative: u16, t: &ArenaTuning) -> u32 {
     let div = (t.initiative_base as u32 + initiative as u32).max(1);
     (t.time_scale / div).max(1)
+}
+
+/// Initiative under the bearer's buffs and debuffs (docs/PARTY_AND_TURNS.md 6.2): a Slow divides
+/// it as a counterweight of `slow_initiative_bp` of its power (COMBAT_MATH 3). Haste changes the
+/// AP of a turn, not the order of turns (PARTY_AND_TURNS 5.1); Chill slows through speed only.
+pub fn effective_initiative(initiative: u16, mods: &TimedMods, t: &ArenaTuning) -> u16 {
+    let slow = mod_power(mods, ModKind::Slow) as u64 * t.slow_initiative_bp as u64 / 10_000;
+    counter(initiative as u64, slow.min(u32::MAX as u64) as u32) as u16
+}
+
+/// The delay of a turn under `mods` (the bearer's own with the auras over it), taken when the turn
+/// starts: an effect that lands later in the turn changes the delay from the next turn on
+/// (docs/PARTY_AND_TURNS.md 6.2). A turn lost to Freeze or Stun takes it as well.
+pub fn turn_delay(initiative: u16, mods: &TimedMods, t: &ArenaTuning) -> u32 {
+    delay(effective_initiative(initiative, mods, t), t)
 }
 
 /// A unit's time when the arena starts: 0 on the side that moves first, its own delay on the
@@ -166,6 +186,86 @@ mod tests {
             units[i].time += delay(inits[i], &T);
         }
         assert_eq!(order, [0, 4, 0, 0, 0, 4, 0, 0]);
+    }
+
+    fn mods(kinds: &[(ModKind, u32)]) -> TimedMods {
+        let mut out = TimedMods::default();
+        for (m, &(kind, power_bp)) in out.iter_mut().zip(kinds) {
+            m.kind = kind;
+            m.turns = 2;
+            m.power_bp = power_bp;
+        }
+        out
+    }
+
+    #[test]
+    fn a_slow_divides_initiative_haste_and_others_do_not() {
+        let none = mods(&[]);
+        assert_eq!(effective_initiative(10, &none, &T), 10);
+        assert_eq!(turn_delay(10, &none, &T), delay(10, &T));
+        // A 100% Slow halves it, 300% quarters it, never below 0.
+        assert_eq!(
+            effective_initiative(10, &mods(&[(ModKind::Slow, 10_000)]), &T),
+            5
+        );
+        assert_eq!(
+            effective_initiative(12, &mods(&[(ModKind::Slow, 30_000)]), &T),
+            3
+        );
+        assert_eq!(
+            effective_initiative(0, &mods(&[(ModKind::Slow, 10_000)]), &T),
+            0
+        );
+        assert_eq!(
+            effective_initiative(9, &mods(&[(ModKind::Slow, u32::MAX)]), &T),
+            0
+        );
+        assert_eq!(
+            turn_delay(10, &mods(&[(ModKind::Slow, 10_000)]), &T),
+            delay(5, &T)
+        );
+        // Haste and the other kinds leave the order alone.
+        let other = mods(&[(ModKind::Haste, 10_000), (ModKind::Weakening, 10_000)]);
+        assert_eq!(effective_initiative(10, &other, &T), 10);
+        // The share of the Slow that reaches initiative is a balance number.
+        let half = ArenaTuning {
+            slow_initiative_bp: 5_000,
+            ..T
+        };
+        assert_eq!(
+            effective_initiative(12, &mods(&[(ModKind::Slow, 10_000)]), &half),
+            8
+        );
+        let off = ArenaTuning {
+            slow_initiative_bp: 0,
+            ..T
+        };
+        assert_eq!(
+            effective_initiative(12, &mods(&[(ModKind::Slow, 10_000)]), &off),
+            12
+        );
+    }
+
+    #[test]
+    fn a_slowed_fast_unit_stops_acting_twice() {
+        // Initiative 18 against 2: the fast one acts twice in a row, slowed 200% it does not.
+        let slow = mods(&[(ModKind::Slow, 20_000)]);
+        let none = mods(&[]);
+        let run = |m: &TimedMods| {
+            let mut units = [unit(0, 0, 0), unit(4, 0, 0)];
+            let inits = [18, 2];
+            let mut order = [0u8; 4];
+            for o in order.iter_mut() {
+                let i = next_unit(&units).unwrap();
+                *o = units[i].id;
+                let own = if i == 0 { m } else { &none };
+                units[i].time += turn_delay(inits[i], own, &T);
+            }
+            order
+        };
+        // Delays 50 against 150; slowed, 100 against 150.
+        assert_eq!(run(&none), [0, 4, 0, 0]);
+        assert_eq!(run(&slow), [0, 4, 0, 4]);
     }
 
     #[test]

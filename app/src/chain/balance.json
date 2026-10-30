@@ -928,6 +928,7 @@
     "side_max": 12,
     "time_scale": 1200,
     "initiative_base": 6,
-    "round_time": 100
+    "round_time": 100,
+    "slow_initiative_bp": 10000
   }
 }

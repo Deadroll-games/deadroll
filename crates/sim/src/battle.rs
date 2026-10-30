@@ -25,7 +25,8 @@ use deadroll_combat::{
 };
 use deadroll_rules::{
     arena::{
-        delay, next_unit, on_pack_won, pack_xp, round_at, start_time, FirstSide, TimelineUnit,
+        delay, next_unit, on_pack_won, pack_xp, round_at, start_time, turn_delay, FirstSide,
+        TimelineUnit,
     },
     aura::{
         monster_passive_aura, passive_aura, tick_auras, Aura, AuraField, MonsterAuraField,
@@ -583,10 +584,11 @@ impl<'a> Battle<'a> {
                 return;
             }
             self.round = round;
-            if let Some(unit) = Unit::from_id(line[k].id) {
-                self.turn(unit);
-            }
-            line[k].time = line[k].time.saturating_add(delay(initiative[k], &t));
+            let step = match Unit::from_id(line[k].id) {
+                Some(unit) => turn_delay(initiative[k], &self.turn(unit), &t),
+                None => delay(initiative[k], &t),
+            };
+            line[k].time = line[k].time.saturating_add(step);
             if let Some(outcome) = self.ended() {
                 self.stats.outcome = outcome;
                 self.stats.rounds = round;
@@ -612,7 +614,10 @@ impl<'a> Battle<'a> {
         }
     }
 
-    pub(crate) fn turn(&mut self, unit: Unit) {
+    /// One unit's turn. Returns its buffs and debuffs with the auras over it right after the turn
+    /// start's tick: the timeline takes the turn's delay under them, as `start_turn` does
+    /// (`deadroll_rules::arena::turn_delay`).
+    pub(crate) fn turn(&mut self, unit: Unit) -> TimedMods {
         match unit {
             Unit::Player(s) => {
                 let s = s as usize;
@@ -632,9 +637,10 @@ impl<'a> Battle<'a> {
                 tick_auras(&mut h.auras);
                 self.stats.slots[s].turns += 1;
                 self.credit_dot(start.dot_source, start.dot_damage);
+                let delay_mods = self.hero_mods(s, false);
                 if start.died {
                     self.hero_died(s);
-                    return;
+                    return delay_mods;
                 }
                 self.note_aura_reach(s);
                 if start.hp < before {
@@ -647,11 +653,12 @@ impl<'a> Battle<'a> {
                     self.react(&events, &mut src);
                 }
                 if start.skip.is_some() || !self.heroes[s].alive {
-                    return;
+                    return delay_mods;
                 }
                 let chill = chill_slow_bp(&self.heroes[s].states, &self.cfg.combat);
                 let ap = speed_ap(self.heroes[s].max_ap, &self.hero_mods(s, false), chill);
                 self.hero_turn(s, ap);
+                delay_mods
             }
             Unit::Monster(i) => {
                 let i = i as usize;
@@ -669,9 +676,10 @@ impl<'a> Battle<'a> {
                 tick_auras(&mut f.auras);
                 self.stats.monster_turns += 1;
                 self.credit_dot(start.dot_source, start.dot_damage);
+                let delay_mods = self.foe_mods(i, false);
                 if start.died {
                     self.foe_died(i);
-                    return;
+                    return delay_mods;
                 }
                 if start.hp < before {
                     let source = match Unit::from_id(start.dot_source) {
@@ -688,11 +696,12 @@ impl<'a> Battle<'a> {
                     if start.skip.is_some() {
                         self.stats.monster_turns_skipped += 1;
                     }
-                    return;
+                    return delay_mods;
                 }
                 let chill = chill_slow_bp(&self.foes[i].m.states, &self.cfg.combat);
                 let ap = speed_ap(self.foes[i].max_ap, &self.foe_mods(i, false), chill);
                 self.foe_turn(i, ap);
+                delay_mods
             }
         }
     }
