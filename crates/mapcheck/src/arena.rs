@@ -412,9 +412,15 @@ fn check_entries(
         }
     }
     let reach = reach.ok_or(E::ArenaNoRoom)?;
-    let every_monster = monsters
+    // A large monster is reached next to any cell of its square.
+    let every_monster = spawns
         .iter()
-        .all(|m| neighbors(*m, p.width, p.height).any(|c| reach.contains(c)));
+        .filter(|s| s.pack == pack)
+        .map(|s| Footprint::new(Cell { x: s.x, y: s.y }, size_of(s.bestiary_id)))
+        .all(|f| {
+            f.cells()
+                .any(|m| neighbors(m, p.width, p.height).any(|c| reach.contains(c)))
+        });
     if !every_monster {
         return Err(E::ArenaUnreachable);
     }
@@ -502,6 +508,35 @@ mod tests {
         }
         a.cells[1] = cells;
         a
+    }
+
+    #[test]
+    fn a_large_monster_in_a_corner_is_reached_next_to_any_of_its_cells() {
+        // Patch B: the 2x2 chieftain fills the corner (10..12, 10..12) of an open 12 x 12 arena;
+        // its corner cell (11, 11) has no free neighbor, the others do.
+        let a = arena(&["............"; 12]);
+        let spawn = |bestiary_id, x, y| Spawn {
+            bestiary_id,
+            x,
+            y,
+            pack: 1,
+            ..Spawn::default()
+        };
+        let spawns = [spawn(2, 10, 10), spawn(3, 9, 10), spawn(4, 10, 9)];
+        let size = |id: u8| if id == 2 { 2 } else { 1 };
+        assert_eq!(check_entries(&a, 1, &starter(), &spawns, &size), Ok(()));
+        // Walled in: a wall ring around its square and its helpers.
+        let mut rows = ["............"; 12];
+        rows[8] = "........####";
+        rows[9] = "........#...";
+        rows[10] = "........#...";
+        rows[11] = "........#...";
+        let walled = arena(&rows);
+        let spawns = [spawn(2, 10, 10), spawn(3, 9, 10), spawn(4, 9, 9)];
+        assert_eq!(
+            check_entries(&walled, 1, &starter(), &spawns, &size),
+            Err(MapCheckError::ArenaUnreachable)
+        );
     }
 
     #[test]

@@ -305,6 +305,27 @@ impl<'a, 'info> Cb<'a, 'info> {
     }
 
     /// One hit of player `p` (as `hero`) with `skill` (`None` = the weapon) on monster `index`:
+    /// The attacker's and monster `index`'s modifiers with the auras over them. Its own frame: the
+    /// aura field stays off `hit_monster`'s stack (patch B: 4 KB SBF frames).
+    #[inline(never)]
+    fn hit_views(
+        &self,
+        session: &GameSession,
+        p: &Participation,
+        basic_attack: bool,
+        index: u8,
+        mods: &TimedMods,
+        kin: u8,
+    ) -> Result<(TimedMods, TimedMods)> {
+        let field = monster_cb::Field::load(session, self.monsters)?;
+        let view = field.view();
+        let square = self.monsters.footprint(index)?;
+        Ok((
+            p.mods_with_auras(&view, basic_attack),
+            view.monster_mods(mods, index, square, kin, false),
+        ))
+    }
+
     /// HP, states, death, the skill's effect and the resonance's spread, with their events.
     /// Returns the monster's knockback.
     #[inline(never)]
@@ -323,22 +344,11 @@ impl<'a, 'info> Cb<'a, 'info> {
             return Ok(None);
         }
         self.load_tables()?;
-        let mut mods = self.monsters.mods(index)?;
+        // Boxed, like the views below: 3 x 256 bytes off this frame (patch B: 4 KB SBF frames).
+        let mut mods = Box::new(self.monsters.mods(index)?);
         let profile = self.monsters.profile(index, monster.level)?;
-        let (hero_mods, view) = {
-            let field = monster_cb::Field::load(session, self.monsters)?;
-            let view = field.view();
-            (
-                p.mods_with_auras(&view, skill.is_none()),
-                view.monster_mods(
-                    &mods,
-                    index,
-                    self.monsters.footprint(index)?,
-                    profile.kin,
-                    false,
-                ),
-            )
-        };
+        let views =
+            Box::new(self.hit_views(session, p, skill.is_none(), index, &mods, profile.kin)?);
         let before = monster.hp;
         let attacker = Unit::Player(p.core.slot).id();
         let target = Unit::Monster(index).id();
@@ -353,12 +363,12 @@ impl<'a, 'info> Cb<'a, 'info> {
             attacker,
             hero,
             skill,
-            &hero_mods,
+            &views.0,
             &mut accuracy,
             &profile,
             &mut monster,
             &mut mods,
-            &view,
+            &views.1,
             &mut self.input,
             &mut self.result,
             &mut self.src,
