@@ -61,7 +61,7 @@ Pack rules:
 **Planned (arena update, `PARTY_AND_TURNS.md`, section 4.1):**
 
 - On the map only one monster of a pack is visible, picked by the DM; the rest of the pack is hidden until the fight.
-- The site shows the pack's threat level, declared openly by the DM and checked by the program when the pack is revealed.
+- The site shows the pack's threat level, declared openly by the DM and checked by the program when the pack is revealed: the sum of the monster levels, an elite counted 2 times, a boss 3 times.
 - A pack has a facing set by the DM: coming from its back, the party moves first; from the front, the monsters do.
 - Outside combat monsters stand still. A fight is one pack in its own arena.
 - After a retreat the pack heals fully, stays on guard and gets stronger (`PARTY_AND_TURNS.md`, section 7.5).

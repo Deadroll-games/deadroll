@@ -43,7 +43,7 @@ Related documents:
 ### 2.1 Party launch
 
 1. **Start time.** **Later**, not built yet: the DM records the agreed time in the party, and the site shows it to all participants.
-2. **Lobby.** The lobby opens when the DM publishes the quest: `session.open_session` and `city.post_quest` go in one transaction signed by the DM's main wallet (`CITY_DESCRIPTION.md`, section 4). Taking the quest is `session.join_session`. The quest window on the site holds the lobby: join with a share of the price, Ready, Start, enter the dungeon. The DM's client must have the map's secrets file, otherwise it cannot reveal cells (planned: no file, `MAP_DESCRIPTION.md`, section 17.5).
+2. **Lobby.** The lobby opens when the DM publishes the quest: `session.open_session` and `city.post_quest` go in one transaction signed by the DM's main wallet (`CITY_DESCRIPTION.md`, section 4). Taking the quest is `session.join_session`. The quest window on the site holds the lobby: join with a share of the price, Ready, Start, enter the dungeon. The DM's client opens the map's secrets with the DM's wallet (`MAP_DESCRIPTION.md`, section 17.5).
 3. **Ready.** Each player presses "Ready" in the "My Parties" section. One main wallet transaction:
    - creates a session key and the fee prepayment (`GAME_COMMISSIONS.md`);
    - records the skill selection on the map: 4 active, 1 reactive, 1 passive (`SKILL_BUILDER.md`, section 3.4);
@@ -117,7 +117,7 @@ What happens to the contribution of a player who left the party early or lost co
 #### 4.1.2 Packs on the map
 
 - Only **one monster of each pack** is visible on the map; the DM picks which one. The rest of the pack is hidden (`MAP_DESCRIPTION.md`, section 17.5).
-- The site shows the pack's **threat level**. The DM declares it openly; the program checks it when the pack is revealed, and a mismatch rejects the reveal.
+- The site shows the pack's **threat level**. The DM declares it openly; the program checks it when the pack is revealed, and a mismatch rejects the reveal. The threat is the sum of the monster levels, an elite counted 2 times, a boss 3 times.
 - A pack has a **facing** set by the DM.
 
 #### 4.1.3 Start of combat
@@ -160,8 +160,7 @@ At the start of its turn a character receives **action points (AP)** according t
 | Active skill                           | its own AP cost                   | **no more than one per turn**                               |
 | Basic attack                           | its own AP cost                   | **either a basic attack or an active skill** per turn, not both |
 | Interaction (door, chest, search)      | its own AP cost                   | a chest only from an adjacent cell (section 9.3.1)          |
-| Escape                                 | the whole remaining turn          | combat only, needs unanimity (section 7.3)                  |
-| Retreat, Escape (planned)              | confirming skips the turn         | arena only, proposed by one, confirmed by the others (section 7.5) |
+| Retreat, Escape                        | proposing or confirming ends the turn | arena only, proposed by one, confirmed by the others (section 7.5) |
 | End turn                               | 0                                 |                                                             |
 
 Unspent AP are lost at the end of the turn.
@@ -222,8 +221,8 @@ Mage: low speed, high initiative (Intelligence). Acts often, but does not go far
 | -------------------- | ------------------------------------------------------------------ | --------------- | ---------------------------------------- | ---------------------------------------------- |
 | **Victory**          | the boss is killed                                                 | all accumulated | the entire temporary cache + boss reward | none                                           |
 | **Peaceful exit**    | outside combat, living characters on the exit cell, "Leave" button | all accumulated | the entire temporary cache               | penalty on the next dungeons (section 7.2)     |
-| **Escape**           | in combat, all living participants chose "Escape"                  | **nothing**     | **nothing**, temporary cache abandoned   | none                                           |
-| **Retreat** (planned) | from the arena back to the map (section 7.5)                     | none for this fight | the cache stays                       | the pack heals, is on guard and stronger       |
+| **Escape**           | in an arena, all living participants chose "Escape" (section 7.5)  | **nothing**     | **nothing**, temporary cache abandoned   | none                                           |
+| **Retreat**          | from the arena back to the map (section 7.5)                       | none for this fight | the cache stays                      | the pack heals, is on guard and stronger       |
 | **Death**            | HP = 0                                                             |                 |                                          | tombstone, items burn                          |
 
 The party ends when there are no living characters left on the map (all died, escaped or exited) or the boss is killed.
@@ -243,12 +242,11 @@ A character at 0 HP leaves the fight at once: they do not take turns, cannot be 
 
 ### 7.3 Escape
 
-- Escape is a decision of the **whole group**. Each living participant, on their turn, chooses the "Escape" action: this sets their **intent** to flee and spends their whole turn.
-- When **all living** participants have the intent, the party flees: everyone leaves the map and **abandons their temporary caches**, with no experience and no rewards.
-- If any living participant takes any other action on their turn, all intents are **reset** and the escape counts as failed; spent turns are not returned.
+- Escape is a decision of the **whole group**, taken in an arena the way of section 7.5: one living participant proposes it, the others confirm on their turns.
+- When **all living** participants have voted and the monsters have moved once more, the party flees: everyone leaves the map and **abandons their temporary caches**, with no experience and no rewards.
+- If any living participant takes any other action on their turn, the proposal is **cancelled**; spent turns are not returned.
 - The dead do not take part in the decision. Example: in a party of four the tank has died, the other three choose to escape and leave.
 - There is no roll for escape: unanimity is the check.
-- **Planned:** with the arena update, escape is decided the way of section 7.5 (one proposes, the others confirm).
 
 ### 7.4 Death
 
@@ -256,9 +254,9 @@ A character at 0 HP leaves the fight at once: they do not take turns, cannot be 
 - The party continues without them.
 - If a character dies in a new party before the rewards of an earlier party have been issued, the rewards of the earlier party are lost too.
 
-### 7.5 Planned: Retreat and Escape from the arena
+### 7.5 Retreat and Escape from the arena
 
-**Planned, not implemented.**
+Both are possible only in an arena, not on the map.
 
 | Action      | Where to                             |
 | ----------- | ------------------------------------ |
@@ -267,17 +265,19 @@ A character at 0 HP leaves the fight at once: they do not take turns, cannot be 
 
 How it is decided:
 
-1. One player proposes it with a button.
-2. The others confirm. A character who confirms skips their turn.
-3. The monsters move once more.
-4. The survivors leave.
+1. One player proposes it with a button on their turn. Proposing counts as their vote and ends their turn.
+2. The other living players confirm on their turns. A character who confirms skips the rest of their turn.
+3. Any other action on a player's turn (a move, an attack, a skill, a chest, ending the turn) cancels the proposal. A vote for the other action replaces the proposal.
+4. When every living player has voted, each living monster of the arena moves once more; the players take no turns meanwhile. If the pack dies during these moves, the arena is won instead.
+5. The survivors leave.
 
 After a **retreat**:
 
-- no experience for this fight, not even for the monsters killed;
-- the pack heals fully;
-- the pack is **on guard**: coming from its back no longer works, the monsters move first;
-- the pack is **stronger**: a buff from `BalanceConfig`;
+- the characters return to the cells they stood on before the fight;
+- no experience for this fight, not even for the monsters killed; the rewards already in the cache stay;
+- the monsters killed in this fight stay dead; the rest of the pack heals fully (HP, states, buffs and cooldowns are reset when the party comes back);
+- the pack is **on guard**: coming from its back no longer works, the monsters move first, for the rest of the party;
+- the pack is **stronger** in its next fight: a buff from `BalanceConfig` (Empowerment and Protection for a number of the monsters' own turns);
 - the number of retreats per party is limited (`BalanceConfig`).
 
 ---
@@ -338,6 +338,7 @@ The **NPC artisan** in the Artisans' Guild is needed so that the game works whil
 - When creating a map, the DM assigns tables to chests, hidden stashes and the boss. Each table costs budget points, and tables with higher levels cost more.
 - A table with levels above the tier ceiling is **not in** the allowed list: the program will not accept the map. A top-level reward on a first-tier map is impossible.
 - The budget grows with party size, so that the reward **per person** stays stable.
+- The budget and the number of visible chests grow with the map's size class: Medium ×3, Big ×5, Dungeon ×8 of the Small numbers (`MAP_DESCRIPTION.md`, section 17.6; multipliers in `BalanceConfig`).
 
 ### 9.3 Reward roll
 
@@ -364,7 +365,7 @@ If the **base level** of the table dropped on the boss reward for the party, eve
 
 ### 9.5 Experience
 
-- Experience is awarded for each **killed monster**, in full to every living participant (it is not divided), accumulates in the cache, and is added to the character at the end. **Planned:** for each won arena, in full to every living character (section 4.1.4); nothing after a retreat (section 7.5).
+- Experience is awarded for each **killed monster**, in full to every living participant (it is not divided), accumulates in the cache, and is added to the character at the end. **Planned:** for each won arena, in full to every living character (section 4.1.4). Nothing after a retreat, not even for the monsters killed in that fight (section 7.5).
 - A character whose level is noticeably higher than the map tier gets less experience or none, and no rewards are rolled for them.
 - The counterweight to the peaceful exit penalty applies here.
 
