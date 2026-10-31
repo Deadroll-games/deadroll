@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
-use deadroll_rules::aura::{
-    Aura, AuraField, MonsterAuraField, PartyAuras, PlayerAuras, AURAS_PER_PLAYER,
+use deadroll_rules::{
+    aura::{Aura, AuraField, MonsterAuraField, PartyAuras, PlayerAuras, AURAS_PER_PLAYER},
+    exit::Vote,
 };
 use deadroll_types::{
     Aspect, Cell, GameSessionData, MapPoint, PackLayout, ARENA_MONSTERS_MAX, CHESTS_MAX,
@@ -183,6 +184,21 @@ pub struct GameSession {
     pub unit_time: [u32; ARENA_UNITS],
     /// Each player's Dexterity, set at `set_ready(true)`: it wins a tie on the timeline.
     pub player_dex: [u16; PARTY_MAX],
+    // Patch B: Retreat and Escape from an arena (docs/PARTY_AND_TURNS.md 7.5). `flee_mask` holds
+    // the votes for `exit_kind`.
+    /// The proposal on the table (`deadroll_rules::exit::ExitKind` as `u8`, `NO_EXIT` = none).
+    pub exit_kind: u8,
+    /// The vote passed: bit per arena slot whose last turn is still to come. While it is not
+    /// empty only those monsters move; when it empties the party leaves.
+    pub last_moves: u8,
+    /// Retreats this party made (`ArenaTuning::retreats_max`).
+    pub retreats: u8,
+    /// Bit per pack number the party retreated from: on guard, it moves first from any side.
+    pub packs_guarded: u8,
+    /// Bit per pack number whose next fight starts with the retreat buff (cleared when it starts).
+    pub packs_buffed: u8,
+    /// Bit per layout spawn killed in an arena the party retreated from: it stays dead.
+    pub dead_spawns: u32,
 }
 
 /// Arena update: where the party is.
@@ -199,11 +215,24 @@ pub enum ArenaMode {
     Arena,
     /// The arena's pack is dead: `leave_arena` pays it and brings the party back.
     Won,
+    /// Patch B: the party retreated and the monsters took their last turns: `leave_arena` brings
+    /// the party back, the pack stays on the map (docs/PARTY_AND_TURNS.md 7.5).
+    Retreated,
 }
 
 /// Turn-order ids of an arena: every player slot, then every arena slot. A named length: `InitSpace`
 /// multiplies an array length expression without parentheses.
 pub const ARENA_UNITS: usize = PARTY_MAX + ARENA_MONSTERS_MAX;
+
+/// Patch B: the bit of layout spawn `spawn` in `GameSession.dead_spawns`.
+pub const fn spawn_bit(spawn: u8) -> u32 {
+    match 1u32.checked_shl(spawn as u32) {
+        Some(b) => b,
+        None => 0,
+    }
+}
+
+const _: () = assert!(deadroll_types::SPAWNS_MAX <= 32);
 
 /// `GameSession.arena_pack` on the map.
 pub const NO_PACK: u8 = 0xFF;
@@ -266,9 +295,27 @@ impl GameSession {
     /// The arena whose cells the units stand on, `None` on the map.
     pub fn ground(&self) -> Option<u8> {
         match self.mode {
-            ArenaMode::Arena | ArenaMode::Won => Some(self.arena_pack),
+            ArenaMode::Arena | ArenaMode::Won | ArenaMode::Retreated => Some(self.arena_pack),
             ArenaMode::Map | ArenaMode::Engaged => None,
         }
+    }
+
+    /// Patch B: the Retreat or Escape proposal on the table.
+    pub fn exit_vote(&self) -> Vote {
+        Vote {
+            kind: self.exit_kind,
+            mask: self.flee_mask,
+        }
+    }
+
+    pub fn set_exit_vote(&mut self, v: Vote) {
+        self.exit_kind = v.kind;
+        self.flee_mask = v.mask;
+    }
+
+    /// The vote passed and the arena's monsters are taking their last turns: no player acts.
+    pub fn leaving(&self) -> bool {
+        self.last_moves != 0
     }
 
     /// The packs still on the map, with their record.

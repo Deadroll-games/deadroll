@@ -558,11 +558,43 @@ pub struct ArenaTuning {
     /// counterweight (docs/PARTY_AND_TURNS.md 6.2), bp of the Slow (`10_000` = all of it).
     #[cfg_attr(feature = "serde", serde(default = "slow_initiative_default"))]
     pub slow_initiative_bp: u32,
+    /// Retreats from an arena back to the map one party may make (docs/PARTY_AND_TURNS.md 7.5).
+    #[cfg_attr(feature = "serde", serde(default = "retreats_max_default"))]
+    pub retreats_max: u8,
+    /// The buff of a pack the party retreated from, for its next fight (docs/PARTY_AND_TURNS.md
+    /// 7.5): an Empowerment and a Protection of these powers (bp, `0` = none), each for
+    /// `retreat_buff_turns` of the monster's own turns.
+    #[cfg_attr(feature = "serde", serde(default = "retreat_empower_default"))]
+    pub retreat_empower_bp: u32,
+    #[cfg_attr(feature = "serde", serde(default = "retreat_protect_default"))]
+    pub retreat_protect_bp: u32,
+    #[cfg_attr(feature = "serde", serde(default = "retreat_buff_turns_default"))]
+    pub retreat_buff_turns: u8,
 }
 
 #[cfg(feature = "serde")]
 fn slow_initiative_default() -> u32 {
     ArenaTuning::DEFAULT.slow_initiative_bp
+}
+
+#[cfg(feature = "serde")]
+fn retreats_max_default() -> u8 {
+    ArenaTuning::DEFAULT.retreats_max
+}
+
+#[cfg(feature = "serde")]
+fn retreat_empower_default() -> u32 {
+    ArenaTuning::DEFAULT.retreat_empower_bp
+}
+
+#[cfg(feature = "serde")]
+fn retreat_protect_default() -> u32 {
+    ArenaTuning::DEFAULT.retreat_protect_bp
+}
+
+#[cfg(feature = "serde")]
+fn retreat_buff_turns_default() -> u8 {
+    ArenaTuning::DEFAULT.retreat_buff_turns
 }
 
 impl ArenaTuning {
@@ -573,6 +605,10 @@ impl ArenaTuning {
         initiative_base: 6,
         round_time: 100,
         slow_initiative_bp: 10_000,
+        retreats_max: 2,
+        retreat_empower_bp: 2_000,
+        retreat_protect_bp: 2_000,
+        retreat_buff_turns: 10,
     };
 }
 

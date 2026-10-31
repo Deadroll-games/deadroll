@@ -871,6 +871,34 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                                 da.slow_initiative_bp,
                                 0..=10_000,
                             );
+                            int_row(
+                                ui,
+                                "Retreat: retreats per party",
+                                &mut a.retreats_max,
+                                da.retreats_max,
+                                0..=10,
+                            );
+                            int_row(
+                                ui,
+                                "Retreat: pack buff, Empowerment bp",
+                                &mut a.retreat_empower_bp,
+                                da.retreat_empower_bp,
+                                0..=100_000,
+                            );
+                            int_row(
+                                ui,
+                                "Retreat: pack buff, Protection bp",
+                                &mut a.retreat_protect_bp,
+                                da.retreat_protect_bp,
+                                0..=100_000,
+                            );
+                            int_row(
+                                ui,
+                                "Retreat: pack buff, own turns",
+                                &mut a.retreat_buff_turns,
+                                da.retreat_buff_turns,
+                                0..=50,
+                            );
                         });
                 });
         });

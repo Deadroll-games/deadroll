@@ -540,7 +540,18 @@ describe("decoders", () => {
       v.packsAlive = 0b1110;
       v.unitTime[11] = 0x0201;
       v.playerDex[3] = 0x0403;
+      v.exitKind = 1;
+      v.lastMoves = 0b101;
+      v.retreats = 2;
+      v.packsGuarded = 0b10;
+      v.packsBuffed = 0b100;
+      v.deadSpawns = 0x0102_0304;
     });
+    // Patch B appends exit_kind, last_moves, retreats, packs_guarded, packs_buffed (u8 each) and
+    // dead_spawns (u32): 9 bytes.
+    expect(Array.from(s.bytes.subarray(-9))).toEqual([1, 0b101, 2, 0b10, 0b100, 4, 3, 2, 1]);
+    expect([s.back.exitKind, s.back.lastMoves, s.back.retreats, s.back.packsGuarded, s.back.packsBuffed, s.back.deadSpawns]).toEqual([1, 0b101, 2, 0b10, 0b100, 0x0102_0304]);
+    s.bytes = s.bytes.subarray(0, -9);
     // Arena update appends mode, arena_pack, engaged_by, packs (8 x 6), packs_alive, map_width,
     // map_height, map_pos (4 x 2), map_order (4), map_order_len, map_turn_index, map_round (u16),
     // unit_time (12 x u32), player_dex (4 x u16): 126 bytes.

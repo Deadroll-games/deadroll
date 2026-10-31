@@ -218,4 +218,11 @@ pub enum SessionError {
     InvalidArenaAccounts,
     #[msg("Too many distinct monster templates for one party")]
     TooManyTemplates,
+    // Patch B: Retreat and Escape (docs/PARTY_AND_TURNS.md 7.5).
+    #[msg("Retreat and Escape are decided in an arena")]
+    NotInArena,
+    #[msg("The party used all its retreats")]
+    RetreatLimit,
+    #[msg("No Retreat or Escape vote has passed")]
+    InvalidExit,
 }

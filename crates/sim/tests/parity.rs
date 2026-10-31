@@ -1657,11 +1657,12 @@ fn monster_auras_and_ai_are_the_same() {
 }
 
 /// Arena update: the timeline the simulator runs is the program's: the same arena numbers, the
-/// initiative and Dexterity `set_ready` stores, the same side moving first for every approach.
+/// initiative and Dexterity `set_ready` stores, the same side moving first for every approach (patch
+/// B: and for a pack on guard; the retreat buff comes from the same `ArenaTuning`).
 #[test]
 fn arena_timeline_matches_the_program() {
     use deadroll_combat::{support::ModKind, TimedMods};
-    use deadroll_rules::arena::{delay, first_side, from_back, turn_delay, Approach};
+    use deadroll_rules::arena::{delay, from_back, turn_delay, Approach};
     use deadroll_sim::presets::Approach as Side;
     use deadroll_types::{Facing, Stat};
     let cfg = sim_config();
@@ -1709,10 +1710,12 @@ fn arena_timeline_matches_the_program() {
             } else {
                 Side::Front
             };
-            assert_eq!(
-                deadroll_sim::setup::first_side(side),
-                first_side(facing, approach)
-            );
+            for guarded in [false, true] {
+                assert_eq!(
+                    deadroll_sim::setup::first_side(side, guarded),
+                    deadroll_rules::exit::first_side_guarded(facing, approach, guarded)
+                );
+            }
         }
     }
 }

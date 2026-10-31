@@ -1202,3 +1202,41 @@ event ResonanceSpread ignited: [Cell; 12] (was [Cell; 8])
 
 combat.wasm ABI 11: `BearerInput`, `AiUnitInput` and `UnitModsRequest` appended `size: u8`.
 Fixture `app/src/chain/__fixtures__/arena.json` (`crates/rules/tests/arena_ts_fixtures.rs`).
+
+## 30. Patch B: Retreat and Escape from an arena
+
+docs/PARTY_AND_TURNS.md 7.3, 7.5. Needs a devnet upgrade (session program). `GameSession` grew by
+9 bytes: sessions opened before the upgrade cannot be read after it. `crates/types`: nothing.
+
+Rules: `ArenaTuning` appended `retreats_max` (2), `retreat_empower_bp` (2_000),
+`retreat_protect_bp` (2_000), `retreat_buff_turns` (10). New module `deadroll_rules::exit`:
+`ExitKind { Retreat = 1, Escape = 2 }`, `NO_EXIT = 0`, `Vote { kind, mask }`, `vote`, `passed`,
+`after_last_move`, `can_retreat`, `first_side_guarded`, `retreat_buff`.
+
+Session program:
+
+```
+GameSession appended  exit_kind: u8, last_moves: u8, retreats: u8, packs_guarded: u8,
+                      packs_buffed: u8, dead_spawns: u32   (+9 bytes); flee_mask holds the votes
+ArenaMode appended    Retreated (the last moves are over, leave_arena comes next)
+retreat()             accounts as flee; in an arena on the voter's started turn: proposes or confirms
+                      a Retreat, ends the turn; RetreatLimit after retreats_max
+flee()                now in an arena only (NotInArena on the map): proposes or confirms an Escape
+                      the same way; the party flees after the monsters' last moves
+vote passed           every living player voted: last_moves = the living arena slots; only they get
+                      turns (each once), then Escape -> status Fled, Retreat -> mode Retreated; a
+                      pack that dies meanwhile is won (the vote is cleared)
+act, move_path, end_turn, open_chest   on a player's turn cancel the proposal (ExitCancelled)
+leave_arena           also from Retreated: the kills left are paid (bodies), no experience; the
+                      killed spawns go into dead_spawns, the pack into packs_guarded and
+                      packs_buffed, retreats + 1; the pack stays on the map
+enter_arena           skips dead_spawns; a guarded pack moves first from any side; a buffed pack's
+                      monsters start with Empowerment and Protection (retreat_buff), the bit clears
+SessionError          appended NotInArena, RetreatLimit, InvalidExit
+events                RetreatVoted { session, slot, vote_mask, alive_mask, retreats },
+                      ExitPassed { session, kind, last_moves }, ExitCancelled { session, kind, slot },
+                      ArenaRetreated { session, pack, retreats, dead_spawns }
+```
+
+Simulator presets: `EncounterPreset.guarded` and `PackStep.guarded` (a pack the party retreated
+from: monsters first, retreat buff).

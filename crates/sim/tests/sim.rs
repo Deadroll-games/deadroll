@@ -258,7 +258,9 @@ fn presets_save_and_load_by_file() {
             then: vec![deadroll_sim::presets::PackStep {
                 encounter: "goblins".into(),
                 approach: deadroll_sim::presets::Approach::Front,
+                guarded: true,
             }],
+            guarded: false,
         },
     );
     p.save(&dir).unwrap();

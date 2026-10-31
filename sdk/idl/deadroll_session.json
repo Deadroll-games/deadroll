@@ -940,7 +940,8 @@
     {
       "name": "flee",
       "docs": [
-        "Player chooses \"Escape\" on their turn; the party flees when every living player did."
+        "Player proposes or confirms \"Escape\" in an arena on their turn; when every living player",
+        "did, the monsters move once more and the party flees (docs/PARTY_AND_TURNS.md 7.5)."
       ],
       "discriminator": [
         148,
@@ -2291,6 +2292,103 @@
       ]
     },
     {
+      "name": "retreat",
+      "docs": [
+        "Patch B: player proposes or confirms \"Retreat\" in an arena on their turn; when every living",
+        "player did, the monsters move once more and `leave_arena` brings the party back to the map."
+      ],
+      "discriminator": [
+        182,
+        111,
+        131,
+        72,
+        138,
+        20,
+        35,
+        55
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "docs": [
+            "Main wallet or the participation's session key."
+          ],
+          "signer": true
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.core.map",
+                "account": "GameSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "monsters",
+          "writable": true
+        },
+        {
+          "name": "participation",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  114,
+                  116,
+                  105,
+                  99,
+                  105,
+                  112,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              },
+              {
+                "kind": "account",
+                "path": "participation.core.character",
+                "account": "Participation"
+              }
+            ]
+          }
+        },
+        {
+          "name": "session_token",
+          "docs": [
+            "MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs."
+          ],
+          "optional": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "set_ready",
       "docs": [
         "Player marks (or unmarks) ready in the lobby, main wallet only. Ready takes `selection`",
@@ -3212,6 +3310,19 @@
       ]
     },
     {
+      "name": "ArenaRetreated",
+      "discriminator": [
+        74,
+        227,
+        42,
+        75,
+        201,
+        86,
+        158,
+        209
+      ]
+    },
+    {
       "name": "ArenaWon",
       "discriminator": [
         184,
@@ -3352,6 +3463,32 @@
         72,
         108,
         78
+      ]
+    },
+    {
+      "name": "ExitCancelled",
+      "discriminator": [
+        88,
+        212,
+        4,
+        149,
+        172,
+        64,
+        137,
+        232
+      ]
+    },
+    {
+      "name": "ExitPassed",
+      "discriminator": [
+        11,
+        150,
+        104,
+        66,
+        37,
+        19,
+        227,
+        29
       ]
     },
     {
@@ -3547,6 +3684,19 @@
         79,
         167,
         126
+      ]
+    },
+    {
+      "name": "RetreatVoted",
+      "discriminator": [
+        46,
+        98,
+        189,
+        214,
+        33,
+        241,
+        97,
+        213
       ]
     },
     {
@@ -4159,6 +4309,21 @@
       "code": 6100,
       "name": "TooManyTemplates",
       "msg": "Too many distinct monster templates for one party"
+    },
+    {
+      "code": 6101,
+      "name": "NotInArena",
+      "msg": "Retreat and Escape are decided in an arena"
+    },
+    {
+      "code": 6102,
+      "name": "RetreatLimit",
+      "msg": "The party used all its retreats"
+    },
+    {
+      "code": 6103,
+      "name": "InvalidExit",
+      "msg": "No Retreat or Escape vote has passed"
     }
   ],
   "types": [
@@ -4406,6 +4571,37 @@
           },
           {
             "name": "Won"
+          },
+          {
+            "name": "Retreated"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ArenaRetreated",
+      "docs": [
+        "Patch B: the party is back on the map after a retreat; the pack stays, on guard and buffed for",
+        "its next fight, without the monsters killed in this fight (`dead_spawns`)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "pack",
+            "type": "u8"
+          },
+          {
+            "name": "retreats",
+            "type": "u8"
+          },
+          {
+            "name": "dead_spawns",
+            "type": "u32"
           }
         ]
       }
@@ -5375,6 +5571,53 @@
       }
     },
     {
+      "name": "ExitCancelled",
+      "docs": [
+        "Patch B: player `slot` took another action on their turn: the proposal of `kind` is off."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "kind",
+            "type": "u8"
+          },
+          {
+            "name": "slot",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ExitPassed",
+      "docs": [
+        "Patch B: every living player voted for `kind` (`deadroll_rules::exit::ExitKind`): the arena",
+        "slots in `last_moves` take one more turn each, then the party leaves."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "kind",
+            "type": "u8"
+          },
+          {
+            "name": "last_moves",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
       "name": "Facing",
       "docs": [
         "The direction a pack looks (`PackLayout.facing`), set by the DM. North is `y - 1`, east",
@@ -5995,6 +6238,49 @@
                 4
               ]
             }
+          },
+          {
+            "name": "exit_kind",
+            "docs": [
+              "The proposal on the table (`deadroll_rules::exit::ExitKind` as `u8`, `NO_EXIT` = none)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "last_moves",
+            "docs": [
+              "The vote passed: bit per arena slot whose last turn is still to come. While it is not",
+              "empty only those monsters move; when it empties the party leaves."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "retreats",
+            "docs": [
+              "Retreats this party made (`ArenaTuning::retreats_max`)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "packs_guarded",
+            "docs": [
+              "Bit per pack number the party retreated from: on guard, it moves first from any side."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "packs_buffed",
+            "docs": [
+              "Bit per pack number whose next fight starts with the retreat buff (cleared when it starts)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "dead_spawns",
+            "docs": [
+              "Bit per layout spawn killed in an arena the party retreated from: it stays dead."
+            ],
+            "type": "u32"
           }
         ]
       }
@@ -8982,6 +9268,41 @@
           },
           {
             "name": "splash_count",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RetreatVoted",
+      "docs": [
+        "Patch B: a player voted to retreat from the arena (docs/PARTY_AND_TURNS.md 7.5); the first vote",
+        "proposes it. `vote_mask`: bit per player slot that voted."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "slot",
+            "type": "u8"
+          },
+          {
+            "name": "vote_mask",
+            "type": "u8"
+          },
+          {
+            "name": "alive_mask",
+            "type": "u8"
+          },
+          {
+            "name": "retreats",
+            "docs": [
+              "Retreats the party made before this one."
+            ],
             "type": "u8"
           }
         ]

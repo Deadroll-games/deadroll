@@ -8,10 +8,10 @@ use deadroll_types::{seeds, SessionStatus, PARTY_MAX, TURN_ORDER_MAX};
 use crate::{
     arena::{arena_pack_xp, living_participations, store_participations, ArenaCaches},
     errors::SessionError,
-    events::ArenaLeft,
+    events::{ArenaLeft, ArenaRetreated},
     loot::{pay_kills, Caches},
     rules::EMPTY_UNIT,
-    state::{ArenaMode, GameSession, Monsters, NO_PACK},
+    state::{spawn_bit, ArenaMode, GameSession, Monsters, NO_PACK},
     turns,
 };
 
@@ -35,7 +35,10 @@ pub struct LeaveArena<'info> {
 /// `start_turn`), then the pack's experience goes in full to every living player
 /// (`deadroll_rules::arena::on_pack_won`); the pack is gone from the map, the players return to
 /// the cells they stood on before the fight, and the map circle goes on with the player after the
-/// one who engaged. `remaining_accounts`: each living player's `Participation`, in slot order.
+/// one who engaged. Patch B: after a retreat (7.5) the waiting kills are paid the same way but
+/// nobody gets experience, and the pack stays on the map without the monsters killed here, on
+/// guard and buffed for its next fight. `remaining_accounts`: each living player's
+/// `Participation`, in slot order.
 pub fn handler<'info>(ctx: Context<'info, LeaveArena<'info>>) -> Result<()> {
     let accounts = ctx.accounts;
     let session = &mut accounts.session;
@@ -46,7 +49,11 @@ pub fn handler<'info>(ctx: Context<'info, LeaveArena<'info>>) -> Result<()> {
     );
     require!(!session.core.pending_vrf, SessionError::RollPending);
     require!(session.pending_deaths == 0, SessionError::DeathsPending);
-    require!(session.mode == ArenaMode::Won, SessionError::ArenaNotWon);
+    let retreated = session.mode == ArenaMode::Retreated;
+    require!(
+        retreated || session.mode == ArenaMode::Won,
+        SessionError::ArenaNotWon
+    );
     let mut players = living_participations(ctx.remaining_accounts, session)?;
     let monsters = Monsters::load(&accounts.monsters, &session_key)?;
 
@@ -61,8 +68,14 @@ pub fn handler<'info>(ctx: Context<'info, LeaveArena<'info>>) -> Result<()> {
             pay_kills(session, session_key, &monsters, kills, seed, &mut caches)?;
             session.unpaid_kills = 0;
         }
+        // Patch B: no experience for a fight the party retreated from, not even for its kills
+        // (docs/PARTY_AND_TURNS.md 7.5); their body rewards stay in the caches.
         let alive = session.alive_mask & session.full_mask();
-        let xp = on_pack_won(arena_pack_xp(&monsters)?, alive, &session.xp_bp);
+        let xp = if retreated {
+            [0; PARTY_MAX]
+        } else {
+            on_pack_won(arena_pack_xp(&monsters)?, alive, &session.xp_bp)
+        };
         for (slot, &x) in xp.iter().enumerate() {
             if x > 0 {
                 caches.add(slot as u8, x, &[])?;
@@ -76,8 +89,27 @@ pub fn handler<'info>(ctx: Context<'info, LeaveArena<'info>>) -> Result<()> {
         xp,
     });
 
-    // Back on the map, without the pack.
-    session.packs_alive &= !(1u8 << pack);
+    if retreated {
+        // Patch B: the pack stays, without the monsters killed in this fight; on guard and
+        // buffed for its next fight, where the rest come back healed (`enter_arena`).
+        for i in 0..monsters.count()? {
+            if !monsters.get(i)?.alive {
+                session.dead_spawns |= spawn_bit(monsters.spawn_of(i)?);
+            }
+        }
+        session.packs_guarded |= 1u8 << pack;
+        session.packs_buffed |= 1u8 << pack;
+        session.retreats = session.retreats.saturating_add(1);
+        emit!(ArenaRetreated {
+            session: session_key,
+            pack,
+            retreats: session.retreats,
+            dead_spawns: session.dead_spawns,
+        });
+    } else {
+        // Back on the map, without the pack.
+        session.packs_alive &= !(1u8 << pack);
+    }
     session.width = session.map_width;
     session.height = session.map_height;
     session.player_pos = session.map_pos;

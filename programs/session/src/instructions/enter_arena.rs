@@ -1,7 +1,8 @@
 use anchor_lang::prelude::*;
 use deadroll_mapcheck::tiles::TileRules;
 use deadroll_rules::{
-    arena::{entry_cells, first_side, footprint_cells, Approach, FirstSide, ARENA_TAKEN_MAX},
+    arena::{entry_cells, footprint_cells, Approach, FirstSide, ARENA_TAKEN_MAX},
+    exit::{first_side_guarded, retreat_buff},
     spread::{BurningCell, BURNING_CELLS_MAX},
 };
 use deadroll_types::{seeds, Cell, SessionStatus, ARENA_MONSTERS_MAX, PARTY_MAX};
@@ -10,7 +11,8 @@ use crate::{
     arena::{living_participations, load_monster, store_participations},
     errors::SessionError,
     events::ArenaEntered,
-    state::{external::MapLayoutView, ArenaMode, GameSession, Monsters},
+    rules::{Unit, BALANCE},
+    state::{external::MapLayoutView, spawn_bit, ArenaMode, GameSession, Monsters},
     turns,
 };
 
@@ -37,8 +39,11 @@ pub struct EnterArena<'info> {
 /// player stepped next to (`move_path` engaged it). The pack's monsters are loaded where the DM put
 /// them; the living players take the free cells nearest the edge the engaging player came from;
 /// HP, states, buffs and cooldowns stay as they are. From the pack's back the party starts the
-/// timeline, otherwise the monsters do. The players' map cells, the map circle and the round wait
-/// for `leave_arena`. `remaining_accounts`: each living player's `Participation`, in slot order.
+/// timeline, otherwise the monsters do. Patch B: after a retreat from this pack (7.5) its killed
+/// monsters stay dead, the rest come back with full HP, the pack moves first from any side and
+/// starts its next fight with the retreat buff. The players' map cells, the map circle and the
+/// round wait for `leave_arena`. `remaining_accounts`: each living player's `Participation`, in
+/// slot order.
 pub fn handler<'info>(ctx: Context<'info, EnterArena<'info>>) -> Result<()> {
     let accounts = ctx.accounts;
     let session = &mut accounts.session;
@@ -67,7 +72,8 @@ pub fn handler<'info>(ctx: Context<'info, EnterArena<'info>>) -> Result<()> {
     let mut count = 0usize;
     for i in 0..layout.spawn_count() {
         let spawn = layout.spawn(i as usize)?;
-        if spawn.pack != pack {
+        // Patch B: a monster killed before a retreat stays dead.
+        if spawn.pack != pack || session.dead_spawns & spawn_bit(i) != 0 {
             continue;
         }
         require!(count < ARENA_MONSTERS_MAX, SessionError::InvalidLayout);
@@ -83,7 +89,22 @@ pub fn handler<'info>(ctx: Context<'info, EnterArena<'info>>) -> Result<()> {
 
     let from = session.player_pos[session.engaged_by as usize];
     let approach = Approach::between(record.cell(), from).ok_or(SessionError::NotEngaged)?;
-    let first = first_side(record.facing, approach);
+    // Patch B: a pack the party retreated from is on guard and moves first from any side; its
+    // next fight starts with the retreat buff (docs/PARTY_AND_TURNS.md 7.5).
+    let pack_bit = 1u8 << pack;
+    let first = first_side_guarded(
+        record.facing,
+        approach,
+        session.packs_guarded & pack_bit != 0,
+    );
+    if session.packs_buffed & pack_bit != 0 {
+        for slot in 0..count as u8 {
+            let mut mods = monsters.mods(slot)?;
+            retreat_buff(&mut mods, Unit::Monster(slot).id(), &BALANCE.arena);
+            monsters.set_mods(slot, &mods)?;
+        }
+        session.packs_buffed &= !pack_bit;
+    }
 
     // The map waits.
     session.map_width = session.width;

@@ -42,6 +42,7 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                     arena: Arena::default(),
                     approach: Approach::Front,
                     then: Vec::new(),
+                    guarded: false,
                 },
                 |e| &mut e.name,
             );
@@ -96,12 +97,18 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                         ui.radio_value(&mut e.approach, Approach::Back, "back");
                     });
                     ui.end_row();
+                    ui.label("Retreated from before (on guard: moves first, retreat buff)");
+                    ui.checkbox(&mut e.guarded, "");
+                    ui.end_row();
                     if !e.then.is_empty() {
                         ui.label("Then (packs after this one, edit the JSON)");
                         let then: Vec<String> = e
                             .then
                             .iter()
-                            .map(|s| format!("{} ({:?})", s.encounter, s.approach))
+                            .map(|s| {
+                                let guard = if s.guarded { ", on guard" } else { "" };
+                                format!("{} ({:?}{guard})", s.encounter, s.approach)
+                            })
                             .collect();
                         ui.label(then.join(", "));
                         ui.end_row();
