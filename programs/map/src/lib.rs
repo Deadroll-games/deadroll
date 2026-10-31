@@ -76,7 +76,7 @@ pub mod deadroll_map {
         offset: u16,
         bytes: Vec<u8>,
         len: u16,
-        threat: [u8; 8],
+        threat: Vec<u8>,
         declared: [u8; 4],
     ) -> Result<()> {
         write_secrets::handler(ctx, offset, bytes, len, threat, declared)
@@ -85,5 +85,20 @@ pub mod deadroll_map {
     /// Session program only: map enters or leaves a party.
     pub fn set_status(ctx: Context<SetStatus>, status: MapStatus) -> Result<()> {
         set_status::handler(ctx, status)
+    }
+
+    /// Patch D: DM grows a big map's layout by up to 10 KB, right after `create_map`.
+    pub fn grow_layout(ctx: Context<GrowLayout>) -> Result<()> {
+        grow_layout::handler(ctx)
+    }
+
+    /// Patch D: DM runs one transaction's share of a big map's reachability check.
+    pub fn check_step(ctx: Context<CheckStep>) -> Result<()> {
+        check_step::handler(ctx)
+    }
+
+    /// Patch D, session program only: a played map closes and its deposits go to its DM.
+    pub fn close_map(ctx: Context<CloseMap>) -> Result<()> {
+        close_map::handler(ctx)
     }
 }
