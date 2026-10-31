@@ -196,6 +196,14 @@ export const DEADROLL_MAP_ERROR__DUPLICATE_SECRET = 0x17c8; // 6088
 export const DEADROLL_MAP_ERROR__SECRETS_OUT_OF_RANGE = 0x17c9; // 6089
 /** SecretsMissing: The map has no secrets root or no encrypted secrets */
 export const DEADROLL_MAP_ERROR__SECRETS_MISSING = 0x17ca; // 6090
+/** LayoutNotGrown: The layout is not grown to its full size yet: send grow_layout first */
+export const DEADROLL_MAP_ERROR__LAYOUT_NOT_GROWN = 0x17cb; // 6091
+/** LayoutGrown: The layout already has its full size */
+export const DEADROLL_MAP_ERROR__LAYOUT_GROWN = 0x17cc; // 6092
+/** CheckNotDone: The reachability check is not done: send check_step first */
+export const DEADROLL_MAP_ERROR__CHECK_NOT_DONE = 0x17cd; // 6093
+/** MapNotInSession: The map is not in a party */
+export const DEADROLL_MAP_ERROR__MAP_NOT_IN_SESSION = 0x17ce; // 6094
 
 export type DeadrollMapError =
   | typeof DEADROLL_MAP_ERROR__AMBUSH_IN_ARENA
@@ -210,6 +218,7 @@ export type DeadrollMapError =
   | typeof DEADROLL_MAP_ERROR__BOSS_PACK_MIXED
   | typeof DEADROLL_MAP_ERROR__BOSS_TABLE_MISSING
   | typeof DEADROLL_MAP_ERROR__BOSS_TABLE_ONE_LEVEL
+  | typeof DEADROLL_MAP_ERROR__CHECK_NOT_DONE
   | typeof DEADROLL_MAP_ERROR__CHEST_NOT_PASSABLE
   | typeof DEADROLL_MAP_ERROR__CHEST_OUT_OF_BOUNDS
   | typeof DEADROLL_MAP_ERROR__CHEST_OVERLAP
@@ -232,7 +241,10 @@ export type DeadrollMapError =
   | typeof DEADROLL_MAP_ERROR__INVALID_REGISTRY_TABLE
   | typeof DEADROLL_MAP_ERROR__INVALID_STATUS_TRANSITION
   | typeof DEADROLL_MAP_ERROR__INVALID_TILE
+  | typeof DEADROLL_MAP_ERROR__LAYOUT_GROWN
+  | typeof DEADROLL_MAP_ERROR__LAYOUT_NOT_GROWN
   | typeof DEADROLL_MAP_ERROR__LEVEL_OUT_OF_TIER
+  | typeof DEADROLL_MAP_ERROR__MAP_NOT_IN_SESSION
   | typeof DEADROLL_MAP_ERROR__MIN_PLAYERS_OUT_OF_RANGE
   | typeof DEADROLL_MAP_ERROR__MONSTER_SKILL_COUNT
   | typeof DEADROLL_MAP_ERROR__MONSTER_SKILL_UNKNOWN
@@ -305,6 +317,7 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_MAP_ERROR__BOSS_PACK_MIXED]: `Regular monster in the boss pack`,
     [DEADROLL_MAP_ERROR__BOSS_TABLE_MISSING]: `The boss needs a reward table`,
     [DEADROLL_MAP_ERROR__BOSS_TABLE_ONE_LEVEL]: `The boss reward table needs at least two levels`,
+    [DEADROLL_MAP_ERROR__CHECK_NOT_DONE]: `The reachability check is not done: send check_step first`,
     [DEADROLL_MAP_ERROR__CHEST_NOT_PASSABLE]: `Chest stands on a cell that cannot be entered`,
     [DEADROLL_MAP_ERROR__CHEST_OUT_OF_BOUNDS]: `Chest is outside the map`,
     [DEADROLL_MAP_ERROR__CHEST_OVERLAP]: `Chest shares a cell with the entrance, the exit or another chest`,
@@ -327,7 +340,10 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_MAP_ERROR__INVALID_REGISTRY_TABLE]: `Account is not the registry bestiary or monster skills table`,
     [DEADROLL_MAP_ERROR__INVALID_STATUS_TRANSITION]: `Map status cannot change this way`,
     [DEADROLL_MAP_ERROR__INVALID_TILE]: `A cell has a tile type the Tileset does not have`,
+    [DEADROLL_MAP_ERROR__LAYOUT_GROWN]: `The layout already has its full size`,
+    [DEADROLL_MAP_ERROR__LAYOUT_NOT_GROWN]: `The layout is not grown to its full size yet: send grow_layout first`,
     [DEADROLL_MAP_ERROR__LEVEL_OUT_OF_TIER]: `Monster level is outside the map tier`,
+    [DEADROLL_MAP_ERROR__MAP_NOT_IN_SESSION]: `The map is not in a party`,
     [DEADROLL_MAP_ERROR__MIN_PLAYERS_OUT_OF_RANGE]: `Minimum players of the map is outside 1..=4`,
     [DEADROLL_MAP_ERROR__MONSTER_SKILL_COUNT]: `Choose as many skills of each kind as the monster has slots (all if fewer)`,
     [DEADROLL_MAP_ERROR__MONSTER_SKILL_UNKNOWN]: `A chosen skill is not in the monster's pool`,

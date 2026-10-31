@@ -176,6 +176,10 @@ export const PROGRAM_ERRORS = {
     6088: ["DuplicateSecret", "Two secrets on one cell"],
     6089: ["SecretsOutOfRange", "Encrypted secrets chunk goes past the end of the blob"],
     6090: ["SecretsMissing", "The map has no secrets root or no encrypted secrets"],
+    6091: ["LayoutNotGrown", "The layout is not grown to its full size yet: send grow_layout first"],
+    6092: ["LayoutGrown", "The layout already has its full size"],
+    6093: ["CheckNotDone", "The reachability check is not done: send check_step first"],
+    6094: ["MapNotInSession", "The map is not in a party"],
   },
   session: {
     6000: ["Unauthorized", "Caller is not authorized for this instruction"],
@@ -295,6 +299,8 @@ export const PROGRAM_ERRORS = {
     6114: ["AuditIncomplete", "The final audit is not done: every declared secret and pack must be revealed"],
     6115: ["TooManyObligations", "Too many cells to reveal at once"],
     6116: ["NotAdjacent", "Only a cell next to the character can be examined"],
+    6117: ["MapWithoutSizes", "The map was finalized before the map sizes update"],
+    6118: ["InvalidBoard", "Not the party board account"],
   },
   city: {
     6000: ["Unauthorized", "Caller is not authorized for this instruction"],

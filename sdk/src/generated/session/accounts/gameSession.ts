@@ -25,10 +25,14 @@ import {
   getI64Encoder,
   getStructDecoder,
   getStructEncoder,
+  getU128Decoder,
+  getU128Encoder,
   getU16Decoder,
   getU16Encoder,
   getU32Decoder,
   getU32Encoder,
+  getU64Decoder,
+  getU64Encoder,
   getU8Decoder,
   getU8Encoder,
   transformEncoder,
@@ -51,8 +55,6 @@ import {
   getAuraDataEncoder,
   getCellDecoder,
   getCellEncoder,
-  getFoundSecretDecoder,
-  getFoundSecretEncoder,
   getGameSessionDataDecoder,
   getGameSessionDataEncoder,
   getMapPointDecoder,
@@ -67,16 +69,12 @@ import {
   getPendingReactiveDataEncoder,
   getReactiveDataDecoder,
   getReactiveDataEncoder,
-  getSpawnDecoder,
-  getSpawnEncoder,
   type ArenaMode,
   type ArenaModeArgs,
   type AuraData,
   type AuraDataArgs,
   type Cell,
   type CellArgs,
-  type FoundSecret,
-  type FoundSecretArgs,
   type GameSessionData,
   type GameSessionDataArgs,
   type MapPoint,
@@ -91,8 +89,6 @@ import {
   type PendingReactiveDataArgs,
   type ReactiveData,
   type ReactiveDataArgs,
-  type Spawn,
-  type SpawnArgs,
 } from "../types/index.js";
 
 export const GAME_SESSION_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Array([
@@ -200,7 +196,10 @@ export type GameSession = {
   /** The map's tier and minimum players (`start_session` needs that many). */
   tier: number;
   minPlayers: number;
-  /** The visible chests: cell and reward table id; `0..chest_count` used. */
+  /**
+   * The visible chests: cell and reward table id; `0..chest_count` used. Patch D: the largest
+   * class's chests, then its hidden stashes.
+   */
   chests: Array<MapPoint>;
   chestCount: number;
   /** The reward table of the boss event (registry id). */
@@ -248,11 +247,11 @@ export type GameSession = {
   engagedBy: number;
   /**
    * The map's packs, copied at `open_session`: the visible monster's map cell, the facing,
-   * the arena size.
+   * the arena size. Patch D: the largest class's pack numbers.
    */
   packs: Array<PackLayout>;
   /** Bit per pack number still on the map. */
-  packsAlive: number;
+  packsAlive: bigint;
   /**
    * Kept while the party is in an arena (`width`, `height`, `player_pos`, the turn order
    * and the round are the arena's then): the map's size, each player's map cell before the
@@ -282,14 +281,14 @@ export type GameSession = {
   /** Retreats this party made (`ArenaTuning::retreats_max`). */
   retreats: number;
   /** Bit per pack number the party retreated from: on guard, it moves first from any side. */
-  packsGuarded: number;
+  packsGuarded: bigint;
   /** Bit per pack number whose next fight starts with the retreat buff (cleared when it starts). */
-  packsBuffed: number;
+  packsBuffed: bigint;
   /**
    * Bit per layout spawn killed in an arena the party retreated from: it stays dead.
-   * Patch C: per revealed spawn (`spawns`).
+   * Patch C: per revealed spawn (`SessionBoard` spawns).
    */
-  deadSpawns: number;
+  deadSpawns: bigint;
   /**
    * The map's `secrets_root`, its leaf count (`deadroll_mapcheck::secrets::Leaves`) and the
    * public part: each pack's threat, the declared counts (copied at `open_session`).
@@ -298,15 +297,13 @@ export type GameSession = {
   leafCount: number;
   declared: ReadonlyUint8Array;
   threat: ReadonlyUint8Array;
-  /** Bit per leaf the DM revealed. */
-  revealed: ReadonlyUint8Array;
-  /** Secrets of each type revealed (`SecretKind::counted`), never above `declared`. */
+  /**
+   * Secrets of each type revealed (`SecretKind::counted`), never above `declared`. Patch D:
+   * the revealed leaves and the secrets themselves are in the `SessionBoard`.
+   */
   foundCounts: ReadonlyUint8Array;
-  /** The secrets revealed, in order (`found_count` used): what the party sees. */
-  found: Array<FoundSecret>;
-  foundCount: number;
   /** Bit per pack number whose composition the DM revealed. */
-  packsRevealed: number;
+  packsRevealed: bigint;
   /**
    * The DM's obligations (MAP 8.5): leaves to reveal before any other action
    * (`obligation_count` used), and the player whose step or look made them.
@@ -315,18 +312,14 @@ export type GameSession = {
   obligationCount: number;
   obligedBy: number;
   /**
-   * The revealed packs' monsters, pack by pack in reveal order (`spawn_count` used): the
-   * spawns `enter_arena` loads and `dead_spawns` counts.
-   */
-  spawns: Array<Spawn>;
-  spawnCount: number;
-  /**
    * The map's totals over the revealed packs (`deadroll_mapcheck::roster::RosterTotals`):
    * monsters, elites, bosses, packs.
    */
   rosterTotals: ReadonlyUint8Array;
   /** The chests of the map; the hidden stashes found follow them in `chests`. */
   visibleChests: number;
+  /** The map's size class (`deadroll_rules::BalanceConfig.map_size`, the layout's `class`). */
+  mapClass: number;
 };
 
 export type GameSessionArgs = {
@@ -423,7 +416,10 @@ export type GameSessionArgs = {
   /** The map's tier and minimum players (`start_session` needs that many). */
   tier: number;
   minPlayers: number;
-  /** The visible chests: cell and reward table id; `0..chest_count` used. */
+  /**
+   * The visible chests: cell and reward table id; `0..chest_count` used. Patch D: the largest
+   * class's chests, then its hidden stashes.
+   */
   chests: Array<MapPointArgs>;
   chestCount: number;
   /** The reward table of the boss event (registry id). */
@@ -471,11 +467,11 @@ export type GameSessionArgs = {
   engagedBy: number;
   /**
    * The map's packs, copied at `open_session`: the visible monster's map cell, the facing,
-   * the arena size.
+   * the arena size. Patch D: the largest class's pack numbers.
    */
   packs: Array<PackLayoutArgs>;
   /** Bit per pack number still on the map. */
-  packsAlive: number;
+  packsAlive: number | bigint;
   /**
    * Kept while the party is in an arena (`width`, `height`, `player_pos`, the turn order
    * and the round are the arena's then): the map's size, each player's map cell before the
@@ -505,14 +501,14 @@ export type GameSessionArgs = {
   /** Retreats this party made (`ArenaTuning::retreats_max`). */
   retreats: number;
   /** Bit per pack number the party retreated from: on guard, it moves first from any side. */
-  packsGuarded: number;
+  packsGuarded: number | bigint;
   /** Bit per pack number whose next fight starts with the retreat buff (cleared when it starts). */
-  packsBuffed: number;
+  packsBuffed: number | bigint;
   /**
    * Bit per layout spawn killed in an arena the party retreated from: it stays dead.
-   * Patch C: per revealed spawn (`spawns`).
+   * Patch C: per revealed spawn (`SessionBoard` spawns).
    */
-  deadSpawns: number;
+  deadSpawns: number | bigint;
   /**
    * The map's `secrets_root`, its leaf count (`deadroll_mapcheck::secrets::Leaves`) and the
    * public part: each pack's threat, the declared counts (copied at `open_session`).
@@ -521,15 +517,13 @@ export type GameSessionArgs = {
   leafCount: number;
   declared: ReadonlyUint8Array;
   threat: ReadonlyUint8Array;
-  /** Bit per leaf the DM revealed. */
-  revealed: ReadonlyUint8Array;
-  /** Secrets of each type revealed (`SecretKind::counted`), never above `declared`. */
+  /**
+   * Secrets of each type revealed (`SecretKind::counted`), never above `declared`. Patch D:
+   * the revealed leaves and the secrets themselves are in the `SessionBoard`.
+   */
   foundCounts: ReadonlyUint8Array;
-  /** The secrets revealed, in order (`found_count` used): what the party sees. */
-  found: Array<FoundSecretArgs>;
-  foundCount: number;
   /** Bit per pack number whose composition the DM revealed. */
-  packsRevealed: number;
+  packsRevealed: number | bigint;
   /**
    * The DM's obligations (MAP 8.5): leaves to reveal before any other action
    * (`obligation_count` used), and the player whose step or look made them.
@@ -538,18 +532,14 @@ export type GameSessionArgs = {
   obligationCount: number;
   obligedBy: number;
   /**
-   * The revealed packs' monsters, pack by pack in reveal order (`spawn_count` used): the
-   * spawns `enter_arena` loads and `dead_spawns` counts.
-   */
-  spawns: Array<SpawnArgs>;
-  spawnCount: number;
-  /**
    * The map's totals over the revealed packs (`deadroll_mapcheck::roster::RosterTotals`):
    * monsters, elites, bosses, packs.
    */
   rosterTotals: ReadonlyUint8Array;
   /** The chests of the map; the hidden stashes found follow them in `chests`. */
   visibleChests: number;
+  /** The map's size class (`deadroll_rules::BalanceConfig.map_size`, the layout's `class`). */
+  mapClass: number;
 };
 
 /** Gets the encoder for {@link GameSessionArgs} account data. */
@@ -599,10 +589,10 @@ export function getGameSessionEncoder(): FixedSizeEncoder<GameSessionArgs> {
       ],
       ["tier", getU8Encoder()],
       ["minPlayers", getU8Encoder()],
-      ["chests", getArrayEncoder(getMapPointEncoder(), { size: 4 })],
+      ["chests", getArrayEncoder(getMapPointEncoder(), { size: 32 })],
       ["chestCount", getU8Encoder()],
       ["bossTable", getU8Encoder()],
-      ["chestsOpened", getU8Encoder()],
+      ["chestsOpened", getU32Encoder()],
       ["pendingChest", getU8Encoder()],
       ["xpBp", getArrayEncoder(getU16Encoder(), { size: 4 })],
       ["lootMask", getU8Encoder()],
@@ -614,8 +604,8 @@ export function getGameSessionEncoder(): FixedSizeEncoder<GameSessionArgs> {
       ["mode", getArenaModeEncoder()],
       ["arenaPack", getU8Encoder()],
       ["engagedBy", getU8Encoder()],
-      ["packs", getArrayEncoder(getPackLayoutEncoder(), { size: 8 })],
-      ["packsAlive", getU8Encoder()],
+      ["packs", getArrayEncoder(getPackLayoutEncoder(), { size: 40 })],
+      ["packsAlive", getU64Encoder()],
       ["mapWidth", getU8Encoder()],
       ["mapHeight", getU8Encoder()],
       ["mapPos", getArrayEncoder(getCellEncoder(), { size: 4 })],
@@ -628,25 +618,21 @@ export function getGameSessionEncoder(): FixedSizeEncoder<GameSessionArgs> {
       ["exitKind", getU8Encoder()],
       ["lastMoves", getU8Encoder()],
       ["retreats", getU8Encoder()],
-      ["packsGuarded", getU8Encoder()],
-      ["packsBuffed", getU8Encoder()],
-      ["deadSpawns", getU32Encoder()],
+      ["packsGuarded", getU64Encoder()],
+      ["packsBuffed", getU64Encoder()],
+      ["deadSpawns", getU128Encoder()],
       ["secretsRoot", fixEncoderSize(getBytesEncoder(), 32)],
       ["leafCount", getU16Encoder()],
       ["declared", fixEncoderSize(getBytesEncoder(), 4)],
-      ["threat", fixEncoderSize(getBytesEncoder(), 8)],
-      ["revealed", fixEncoderSize(getBytesEncoder(), 273)],
+      ["threat", fixEncoderSize(getBytesEncoder(), 40)],
       ["foundCounts", fixEncoderSize(getBytesEncoder(), 4)],
-      ["found", getArrayEncoder(getFoundSecretEncoder(), { size: 16 })],
-      ["foundCount", getU8Encoder()],
-      ["packsRevealed", getU8Encoder()],
+      ["packsRevealed", getU64Encoder()],
       ["obligations", getArrayEncoder(getU16Encoder(), { size: 16 })],
       ["obligationCount", getU8Encoder()],
       ["obligedBy", getU8Encoder()],
-      ["spawns", getArrayEncoder(getSpawnEncoder(), { size: 24 })],
-      ["spawnCount", getU8Encoder()],
       ["rosterTotals", fixEncoderSize(getBytesEncoder(), 4)],
       ["visibleChests", getU8Encoder()],
+      ["mapClass", getU8Encoder()],
     ]),
     (value) => ({ ...value, discriminator: GAME_SESSION_DISCRIMINATOR }),
   );
@@ -698,10 +684,10 @@ export function getGameSessionDecoder(): FixedSizeDecoder<GameSession> {
     ],
     ["tier", getU8Decoder()],
     ["minPlayers", getU8Decoder()],
-    ["chests", getArrayDecoder(getMapPointDecoder(), { size: 4 })],
+    ["chests", getArrayDecoder(getMapPointDecoder(), { size: 32 })],
     ["chestCount", getU8Decoder()],
     ["bossTable", getU8Decoder()],
-    ["chestsOpened", getU8Decoder()],
+    ["chestsOpened", getU32Decoder()],
     ["pendingChest", getU8Decoder()],
     ["xpBp", getArrayDecoder(getU16Decoder(), { size: 4 })],
     ["lootMask", getU8Decoder()],
@@ -713,8 +699,8 @@ export function getGameSessionDecoder(): FixedSizeDecoder<GameSession> {
     ["mode", getArenaModeDecoder()],
     ["arenaPack", getU8Decoder()],
     ["engagedBy", getU8Decoder()],
-    ["packs", getArrayDecoder(getPackLayoutDecoder(), { size: 8 })],
-    ["packsAlive", getU8Decoder()],
+    ["packs", getArrayDecoder(getPackLayoutDecoder(), { size: 40 })],
+    ["packsAlive", getU64Decoder()],
     ["mapWidth", getU8Decoder()],
     ["mapHeight", getU8Decoder()],
     ["mapPos", getArrayDecoder(getCellDecoder(), { size: 4 })],
@@ -727,25 +713,21 @@ export function getGameSessionDecoder(): FixedSizeDecoder<GameSession> {
     ["exitKind", getU8Decoder()],
     ["lastMoves", getU8Decoder()],
     ["retreats", getU8Decoder()],
-    ["packsGuarded", getU8Decoder()],
-    ["packsBuffed", getU8Decoder()],
-    ["deadSpawns", getU32Decoder()],
+    ["packsGuarded", getU64Decoder()],
+    ["packsBuffed", getU64Decoder()],
+    ["deadSpawns", getU128Decoder()],
     ["secretsRoot", fixDecoderSize(getBytesDecoder(), 32)],
     ["leafCount", getU16Decoder()],
     ["declared", fixDecoderSize(getBytesDecoder(), 4)],
-    ["threat", fixDecoderSize(getBytesDecoder(), 8)],
-    ["revealed", fixDecoderSize(getBytesDecoder(), 273)],
+    ["threat", fixDecoderSize(getBytesDecoder(), 40)],
     ["foundCounts", fixDecoderSize(getBytesDecoder(), 4)],
-    ["found", getArrayDecoder(getFoundSecretDecoder(), { size: 16 })],
-    ["foundCount", getU8Decoder()],
-    ["packsRevealed", getU8Decoder()],
+    ["packsRevealed", getU64Decoder()],
     ["obligations", getArrayDecoder(getU16Decoder(), { size: 16 })],
     ["obligationCount", getU8Decoder()],
     ["obligedBy", getU8Decoder()],
-    ["spawns", getArrayDecoder(getSpawnDecoder(), { size: 24 })],
-    ["spawnCount", getU8Decoder()],
     ["rosterTotals", fixDecoderSize(getBytesDecoder(), 4)],
     ["visibleChests", getU8Decoder()],
+    ["mapClass", getU8Decoder()],
   ]);
 }
 
@@ -811,5 +793,5 @@ export async function fetchAllMaybeGameSession(
 }
 
 export function getGameSessionSize(): number {
-  return 1892;
+  return 1685;
 }

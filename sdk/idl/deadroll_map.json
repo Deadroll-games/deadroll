@@ -8,6 +8,199 @@
   },
   "instructions": [
     {
+      "name": "check_step",
+      "docs": [
+        "Patch D: DM runs one transaction's share of a big map's reachability check."
+      ],
+      "discriminator": [
+        75,
+        94,
+        230,
+        211,
+        25,
+        159,
+        56,
+        243
+      ],
+      "accounts": [
+        {
+          "name": "dm",
+          "signer": true
+        },
+        {
+          "name": "map",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  112
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "map.core.dm",
+                "account": "Map"
+              },
+              {
+                "kind": "account",
+                "path": "map.core.index",
+                "account": "Map"
+              }
+            ]
+          }
+        },
+        {
+          "name": "layout",
+          "docs": [
+            "and bitsets are written in place."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  97,
+                  121,
+                  111,
+                  117,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "map"
+              }
+            ]
+          }
+        },
+        {
+          "name": "tileset",
+          "address": "GqzUadKRKmJNT2RQAhrTz31qdoMfTGmya3Cfz2vAhXHu"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "close_map",
+      "docs": [
+        "Patch D, session program only: a played map closes and its deposits go to its DM."
+      ],
+      "discriminator": [
+        49,
+        81,
+        101,
+        245,
+        210,
+        242,
+        155,
+        232
+      ],
+      "accounts": [
+        {
+          "name": "map",
+          "docs": [
+            "version (only the core is read)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "layout",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  97,
+                  121,
+                  111,
+                  117,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "map"
+              }
+            ]
+          }
+        },
+        {
+          "name": "dm",
+          "writable": true
+        },
+        {
+          "name": "session_authority",
+          "docs": [
+            "The session program's `[\"authority\"]` PDA, checked against `GameConfig` in the handler."
+          ],
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                9,
+                93,
+                27,
+                37,
+                218,
+                79,
+                221,
+                125,
+                83,
+                7,
+                123,
+                151,
+                252,
+                231,
+                65,
+                177,
+                65,
+                225,
+                242,
+                116,
+                20,
+                215,
+                178,
+                225,
+                173,
+                88,
+                9,
+                192,
+                113,
+                184,
+                209,
+                219
+              ]
+            }
+          }
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "create_map",
       "docs": [
         "DM creates an empty draft map and its layout.",
@@ -161,9 +354,10 @@
         {
           "name": "layout",
           "docs": [
-            "Owner and discriminator checked, never decoded whole (`state::LayoutBytes`): the core, the",
-            "arenas and the public secrets are decoded into boxes one at a time."
+            "the cells are read in place, the core and the arenas decoded into boxes. Patch D: the",
+            "reachability check's last share is written in place."
           ],
+          "writable": true,
           "pda": {
             "seeds": [
               {
@@ -218,6 +412,85 @@
           }
         }
       ]
+    },
+    {
+      "name": "grow_layout",
+      "docs": [
+        "Patch D: DM grows a big map's layout by up to 10 KB, right after `create_map`."
+      ],
+      "discriminator": [
+        35,
+        102,
+        241,
+        111,
+        24,
+        88,
+        107,
+        236
+      ],
+      "accounts": [
+        {
+          "name": "dm",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "map",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  112
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "map.core.dm",
+                "account": "Map"
+              },
+              {
+                "kind": "account",
+                "path": "map.core.index",
+                "account": "Map"
+              }
+            ]
+          }
+        },
+        {
+          "name": "layout",
+          "docs": [
+            "`LayoutBytes::load_header`; resized in place."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  97,
+                  121,
+                  111,
+                  117,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "map"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
     },
     {
       "name": "set_status",
@@ -670,12 +943,7 @@
         },
         {
           "name": "threat",
-          "type": {
-            "array": [
-              "u8",
-              8
-            ]
-          }
+          "type": "bytes"
         },
         {
           "name": "declared",
@@ -787,19 +1055,6 @@
         180,
         244
       ]
-    },
-    {
-      "name": "MapLayout",
-      "discriminator": [
-        142,
-        87,
-        223,
-        244,
-        59,
-        123,
-        62,
-        202
-      ]
     }
   ],
   "events": [
@@ -817,6 +1072,19 @@
       ]
     },
     {
+      "name": "LayoutGrown",
+      "discriminator": [
+        183,
+        26,
+        73,
+        17,
+        40,
+        187,
+        79,
+        166
+      ]
+    },
+    {
       "name": "LayoutWritten",
       "discriminator": [
         20,
@@ -827,6 +1095,32 @@
         114,
         153,
         232
+      ]
+    },
+    {
+      "name": "MapChecked",
+      "discriminator": [
+        86,
+        234,
+        91,
+        73,
+        172,
+        18,
+        146,
+        135
+      ]
+    },
+    {
+      "name": "MapClosed",
+      "discriminator": [
+        123,
+        67,
+        249,
+        20,
+        118,
+        131,
+        86,
+        151
       ]
     },
     {
@@ -1363,6 +1657,26 @@
       "code": 6090,
       "name": "SecretsMissing",
       "msg": "The map has no secrets root or no encrypted secrets"
+    },
+    {
+      "code": 6091,
+      "name": "LayoutNotGrown",
+      "msg": "The layout is not grown to its full size yet: send grow_layout first"
+    },
+    {
+      "code": 6092,
+      "name": "LayoutGrown",
+      "msg": "The layout already has its full size"
+    },
+    {
+      "code": 6093,
+      "name": "CheckNotDone",
+      "msg": "The reachability check is not done: send check_step first"
+    },
+    {
+      "code": 6094,
+      "name": "MapNotInSession",
+      "msg": "The map is not in a party"
     }
   ],
   "types": [
@@ -1428,6 +1742,32 @@
           },
           {
             "name": "NW"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LayoutGrown",
+      "docs": [
+        "Patch D: the layout grew towards its full size (`grow_layout`)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "map",
+            "type": "pubkey"
+          },
+          {
+            "name": "len",
+            "docs": [
+              "Its size now and its full size, in bytes."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "full",
+            "type": "u32"
           }
         ]
       }
@@ -1512,42 +1852,53 @@
       }
     },
     {
-      "name": "MapArenasData",
+      "name": "MapChecked",
       "docs": [
-        "The packs of a map and their arenas, by pack number."
+        "Patch D: the reachability check went on (`check_step`, `finalize_map`)."
       ],
       "type": {
         "kind": "struct",
         "fields": [
           {
-            "name": "packs",
-            "type": {
-              "array": [
-                {
-                  "defined": {
-                    "name": "PackLayout"
-                  }
-                },
-                8
-              ]
-            }
+            "name": "map",
+            "type": "pubkey"
           },
           {
-            "name": "cells",
+            "name": "phase",
             "docs": [
-              "Row-major cell bytes (`cell_byte`) of each pack's arena, `ARENA_SIDE_MAX` per row."
+              "`deadroll_mapcheck::wide` phase and row reached."
             ],
-            "type": {
-              "array": [
-                {
-                  "array": [
-                    "u8",
-                    144
-                  ]
-                },
-                8
-              ]
-            }
+            "type": "u8"
+          },
+          {
+            "name": "row",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MapClosed",
+      "docs": [
+        "Patch D: a played map was closed and its deposits went back to its DM (`close_map`)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "map",
+            "type": "pubkey"
+          },
+          {
+            "name": "dm",
+            "type": "pubkey"
+          },
+          {
+            "name": "lamports",
+            "docs": [
+              "Lamports returned (the map and its layout)."
+            ],
+            "type": "u64"
           }
         ]
       }
@@ -1702,133 +2053,6 @@
       }
     },
     {
-      "name": "MapLayout",
-      "docs": [
-        "`[\"layout\", map]`. `finalize_map` hashes the account bytes after the discriminator into",
-        "`Map.layout_hash`.",
-        "Patch 13: the core is `MapLayoutDataV2` (cells with variants, points), version 2.",
-        "Arena update: version 3, the packs and their arenas after the core (`write_arena`). A layout",
-        "from before it is smaller: it can neither be written nor open a party.",
-        "Patch C: version 4, the public part of the secrets (each pack's threat, the declared counts)",
-        "and the DM's encrypted copy after the arenas (`write_secrets`, `finalize_map`). The spawns",
-        "are only the monsters the packs show on the map; the rest is under `Map.secrets_root`.",
-        "",
-        "The account (~2.5 KB) is never Borsh-decoded whole on-chain: `Account<MapLayout>` would put two",
-        "copies of it on the 4 KB SBF stack frame. The instructions go through [`LayoutBytes`] (in place,",
-        "like the session's `MapLayoutView`); `finalize_map` decodes the core and the arenas into boxes",
-        "one at a time. Contexts take it as `UncheckedAccount` (seeds checked), `finalize_map` as",
-        "`LazyAccount` (owner, discriminator, IDL entry)."
-      ],
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "core",
-            "type": {
-              "defined": {
-                "name": "MapLayoutDataV2"
-              }
-            }
-          },
-          {
-            "name": "arenas",
-            "type": {
-              "defined": {
-                "name": "MapArenasData"
-              }
-            }
-          },
-          {
-            "name": "secrets",
-            "type": {
-              "defined": {
-                "name": "MapSecretsData"
-              }
-            }
-          }
-        ]
-      }
-    },
-    {
-      "name": "MapLayoutDataV2",
-      "docs": [
-        "map `[\"layout\", map]` (patch 13)."
-      ],
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "version",
-            "type": "u8"
-          },
-          {
-            "name": "map",
-            "type": "pubkey"
-          },
-          {
-            "name": "cells",
-            "docs": [
-              "Row-major cell bytes (`cell_byte`: tile type and variant), `MAP_MAX` cells per row."
-            ],
-            "type": {
-              "array": [
-                "u8",
-                1024
-              ]
-            }
-          },
-          {
-            "name": "spawns",
-            "type": {
-              "array": [
-                {
-                  "defined": {
-                    "name": "Spawn"
-                  }
-                },
-                24
-              ]
-            }
-          },
-          {
-            "name": "spawn_count",
-            "type": "u8"
-          },
-          {
-            "name": "points",
-            "docs": [
-              "The entrance, the exit and the visible chests, `0..point_count` used."
-            ],
-            "type": {
-              "array": [
-                {
-                  "defined": {
-                    "name": "MapPoint"
-                  }
-                },
-                6
-              ]
-            }
-          },
-          {
-            "name": "point_count",
-            "type": "u8"
-          },
-          {
-            "name": "boss_table",
-            "docs": [
-              "The reward table of the boss (registry `Rewards` id, `NO_TABLE` = none)."
-            ],
-            "type": "u8"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          }
-        ]
-      }
-    },
-    {
       "name": "MapPoint",
       "docs": [
         "Patch 11: a map point `(type, x, y, data)` (docs/MAP_DESCRIPTION.md 7.1)."
@@ -1858,61 +2082,6 @@
               "A visible chest: its reward table id."
             ],
             "type": "u8"
-          }
-        ]
-      }
-    },
-    {
-      "name": "MapSecretsData",
-      "docs": [
-        "The public part of a map's secrets and the DM's encrypted copy, in the map program's",
-        "`MapLayout` after the arenas."
-      ],
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "threat",
-            "docs": [
-              "Each pack's threat level, declared openly (0 for an unused pack number)."
-            ],
-            "type": {
-              "array": [
-                "u8",
-                8
-              ]
-            }
-          },
-          {
-            "name": "declared",
-            "docs": [
-              "How many secrets of each type the map holds (`SecretKind::counted`)."
-            ],
-            "type": {
-              "array": [
-                "u8",
-                4
-              ]
-            }
-          },
-          {
-            "name": "blob_len",
-            "docs": [
-              "Bytes of `blob` in use."
-            ],
-            "type": "u16"
-          },
-          {
-            "name": "blob",
-            "docs": [
-              "The DM's secrets, encrypted on the website (opaque to the programs)."
-            ],
-            "type": {
-              "array": [
-                "u8",
-                800
-              ]
-            }
           }
         ]
       }
@@ -2135,14 +2304,10 @@
           {
             "name": "threat",
             "docs": [
-              "Each pack's threat and the declared counts (the public part)."
+              "Each pack's threat (patch D: one per pack number of the map's class) and the declared",
+              "counts (the public part)."
             ],
-            "type": {
-              "array": [
-                "u8",
-                8
-              ]
-            }
+            "type": "bytes"
           },
           {
             "name": "declared",

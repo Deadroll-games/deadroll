@@ -18,6 +18,8 @@ import {
   getStructEncoder,
   getU16Decoder,
   getU16Encoder,
+  getU8Decoder,
+  getU8Encoder,
   SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
   SolanaError,
   transformEncoder,
@@ -37,18 +39,20 @@ import {
 } from "@solana/kit";
 import {
   getAccountMetaFactory,
+  getAddressFromResolvedInstructionAccount,
   type InstructionAccountInput,
   type InstructionAccountInputAddress,
   type InstructionSignerInput,
   type ResolvedInstructionAccount,
   type ResolvedInstructionAccountMeta,
 } from "@solana/program-client-core";
+import { findBoardPda } from "../pdas/index.js";
 import { DEADROLL_SESSION_PROGRAM_ADDRESS } from "../programs/index.js";
 import {
-  getCellSecretDecoder,
-  getCellSecretEncoder,
-  type CellSecret,
-  type CellSecretArgs,
+  getSecretKindDecoder,
+  getSecretKindEncoder,
+  type SecretKind,
+  type SecretKindArgs,
 } from "../types/index.js";
 
 export const REVEAL_CELL_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Array([
@@ -68,6 +72,7 @@ export type RevealCellInstruction<
   TAccountMonsters extends string | AccountMeta<string> = string,
   TAccountRewards extends string | AccountMeta<string> =
     "FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK",
+  TAccountBoard extends string | AccountMeta<string> = string,
   TAccountSessionToken extends string | AccountMeta<string> = string,
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
 > = Instruction<TProgram> &
@@ -93,6 +98,9 @@ export type RevealCellInstruction<
       TAccountRewards extends string
         ? ReadonlyAccount<TAccountRewards>
         : TAccountRewards,
+      TAccountBoard extends string
+        ? WritableAccount<TAccountBoard>
+        : TAccountBoard,
       TAccountSessionToken extends string
         ? ReadonlyAccount<TAccountSessionToken>
         : TAccountSessionToken,
@@ -103,14 +111,20 @@ export type RevealCellInstruction<
 export type RevealCellInstructionData = {
   discriminator: ReadonlyUint8Array;
   leaf: number;
-  secret: CellSecret;
+  kind: SecretKind;
+  a: number;
+  b: number;
+  c: number;
   salt: ReadonlyUint8Array;
   proof: Array<ReadonlyUint8Array>;
 };
 
 export type RevealCellInstructionDataArgs = {
   leaf: number;
-  secret: CellSecretArgs;
+  kind: SecretKindArgs;
+  a: number;
+  b: number;
+  c: number;
   salt: ReadonlyUint8Array;
   proof: Array<ReadonlyUint8Array>;
 };
@@ -120,7 +134,10 @@ export function getRevealCellInstructionDataEncoder(): Encoder<RevealCellInstruc
     getStructEncoder([
       ["discriminator", fixEncoderSize(getBytesEncoder(), 8)],
       ["leaf", getU16Encoder()],
-      ["secret", getCellSecretEncoder()],
+      ["kind", getSecretKindEncoder()],
+      ["a", getU8Encoder()],
+      ["b", getU8Encoder()],
+      ["c", getU8Encoder()],
       ["salt", fixEncoderSize(getBytesEncoder(), 16)],
       ["proof", getArrayEncoder(fixEncoderSize(getBytesEncoder(), 32))],
     ]),
@@ -132,7 +149,10 @@ export function getRevealCellInstructionDataDecoder(): Decoder<RevealCellInstruc
   return getStructDecoder([
     ["discriminator", fixDecoderSize(getBytesDecoder(), 8)],
     ["leaf", getU16Decoder()],
-    ["secret", getCellSecretDecoder()],
+    ["kind", getSecretKindDecoder()],
+    ["a", getU8Decoder()],
+    ["b", getU8Decoder()],
+    ["c", getU8Decoder()],
     ["salt", fixDecoderSize(getBytesDecoder(), 16)],
     ["proof", getArrayDecoder(fixDecoderSize(getBytesDecoder(), 32))],
   ]);
@@ -148,7 +168,7 @@ export function getRevealCellInstructionDataCodec(): Codec<
   );
 }
 
-export type RevealCellInput<
+export type RevealCellAsyncInput<
   TAccountSigner extends InstructionSignerInput = InstructionSignerInput,
   TAccountSession extends InstructionAccountInput = InstructionAccountInput,
   TAccountLayout extends InstructionAccountInput = InstructionAccountInput,
@@ -156,6 +176,7 @@ export type RevealCellInput<
     InstructionAccountInput,
   TAccountMonsters extends InstructionAccountInput = InstructionAccountInput,
   TAccountRewards extends InstructionAccountInput = InstructionAccountInput,
+  TAccountBoard extends InstructionAccountInput = InstructionAccountInput,
   TAccountSessionToken extends InstructionAccountInput =
     InstructionAccountInput,
 > = {
@@ -171,9 +192,224 @@ export type RevealCellInput<
   /** hidden stash's reward table is copied there. */
   monsters: TAccountMonsters;
   rewards?: TAccountRewards;
+  /** leaves and the found secrets, written in place. */
+  board?: TAccountBoard;
   sessionToken?: TAccountSessionToken;
   leaf: RevealCellInstructionDataArgs["leaf"];
-  secret: RevealCellInstructionDataArgs["secret"];
+  kind: RevealCellInstructionDataArgs["kind"];
+  a: RevealCellInstructionDataArgs["a"];
+  b: RevealCellInstructionDataArgs["b"];
+  c: RevealCellInstructionDataArgs["c"];
+  salt: RevealCellInstructionDataArgs["salt"];
+  proof: RevealCellInstructionDataArgs["proof"];
+};
+
+export async function getRevealCellInstructionAsync<
+  TAccountSigner extends InstructionSignerInput,
+  TAccountSession extends InstructionAccountInput,
+  TAccountLayout extends InstructionAccountInput,
+  TAccountParticipation extends InstructionAccountInput,
+  TAccountMonsters extends InstructionAccountInput,
+  TAccountRewards extends InstructionAccountInput,
+  TAccountBoard extends InstructionAccountInput,
+  TAccountSessionToken extends InstructionAccountInput,
+  TProgramAddress extends Address = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
+>(
+  input: RevealCellAsyncInput<
+    TAccountSigner,
+    TAccountSession,
+    TAccountLayout,
+    TAccountParticipation,
+    TAccountMonsters,
+    TAccountRewards,
+    TAccountBoard,
+    TAccountSessionToken
+  >,
+  config?: { programAddress?: TProgramAddress },
+): Promise<
+  RevealCellInstruction<
+    TProgramAddress,
+    ResolvedInstructionAccountMeta<
+      TAccountSigner,
+      InstructionAccountInputAddress<TAccountSigner>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountSession,
+      InstructionAccountInputAddress<TAccountSession>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountLayout,
+      InstructionAccountInputAddress<TAccountLayout>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountParticipation,
+      InstructionAccountInputAddress<TAccountParticipation>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountMonsters,
+      InstructionAccountInputAddress<TAccountMonsters>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountRewards,
+      InstructionAccountInputAddress<TAccountRewards>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountBoard,
+      InstructionAccountInputAddress<TAccountBoard>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountSessionToken,
+      InstructionAccountInputAddress<TAccountSessionToken>
+    >
+  >
+> {
+  // Program address.
+  const programAddress =
+    config?.programAddress ?? DEADROLL_SESSION_PROGRAM_ADDRESS;
+
+  // Account meta helper.
+  const getAccountMeta = getAccountMetaFactory(programAddress, "programId");
+
+  // Original accounts.
+  const originalAccounts = {
+    signer: { value: input.signer ?? null, isSigner: true, isWritable: false },
+    session: {
+      value: input.session ?? null,
+      isSigner: false,
+      isWritable: true,
+    },
+    layout: { value: input.layout ?? null, isSigner: false, isWritable: false },
+    participation: {
+      value: input.participation ?? null,
+      isSigner: false,
+      isWritable: true,
+    },
+    monsters: {
+      value: input.monsters ?? null,
+      isSigner: false,
+      isWritable: true,
+    },
+    rewards: {
+      value: input.rewards ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    board: { value: input.board ?? null, isSigner: false, isWritable: true },
+    sessionToken: {
+      value: input.sessionToken ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+  };
+  const accounts = originalAccounts as Record<
+    keyof typeof originalAccounts,
+    ResolvedInstructionAccount
+  >;
+
+  // Original args.
+  const args = { ...input };
+
+  // Resolve default values.
+  if (!accounts.rewards.value) {
+    accounts.rewards.value =
+      "FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK" as Address<"FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK">;
+  }
+  if (!accounts.board.value) {
+    accounts.board.value = await findBoardPda(
+      {
+        session: getAddressFromResolvedInstructionAccount(
+          "session",
+          accounts.session.value,
+        ),
+      },
+      { programAddress },
+    );
+  }
+
+  return Object.freeze({
+    accounts: [
+      getAccountMeta("signer", accounts.signer),
+      getAccountMeta("session", accounts.session),
+      getAccountMeta("layout", accounts.layout),
+      getAccountMeta("participation", accounts.participation),
+      getAccountMeta("monsters", accounts.monsters),
+      getAccountMeta("rewards", accounts.rewards),
+      getAccountMeta("board", accounts.board),
+      getAccountMeta("sessionToken", accounts.sessionToken),
+    ],
+    data: getRevealCellInstructionDataEncoder().encode(
+      args as RevealCellInstructionDataArgs,
+    ),
+    programAddress,
+  } as RevealCellInstruction<
+    TProgramAddress,
+    ResolvedInstructionAccountMeta<
+      TAccountSigner,
+      InstructionAccountInputAddress<TAccountSigner>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountSession,
+      InstructionAccountInputAddress<TAccountSession>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountLayout,
+      InstructionAccountInputAddress<TAccountLayout>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountParticipation,
+      InstructionAccountInputAddress<TAccountParticipation>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountMonsters,
+      InstructionAccountInputAddress<TAccountMonsters>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountRewards,
+      InstructionAccountInputAddress<TAccountRewards>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountBoard,
+      InstructionAccountInputAddress<TAccountBoard>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountSessionToken,
+      InstructionAccountInputAddress<TAccountSessionToken>
+    >
+  >);
+}
+
+export type RevealCellInput<
+  TAccountSigner extends InstructionSignerInput = InstructionSignerInput,
+  TAccountSession extends InstructionAccountInput = InstructionAccountInput,
+  TAccountLayout extends InstructionAccountInput = InstructionAccountInput,
+  TAccountParticipation extends InstructionAccountInput =
+    InstructionAccountInput,
+  TAccountMonsters extends InstructionAccountInput = InstructionAccountInput,
+  TAccountRewards extends InstructionAccountInput = InstructionAccountInput,
+  TAccountBoard extends InstructionAccountInput = InstructionAccountInput,
+  TAccountSessionToken extends InstructionAccountInput =
+    InstructionAccountInput,
+> = {
+  /** The DM's main wallet or the DM's session key bound to this party. */
+  signer: TAccountSigner;
+  session: TAccountSession;
+  layout: TAccountLayout;
+  /**
+   * The player whose step uncovered the cell (`GameSession.obliged_by`): a trap hits them.
+   * Needed only for a trap during the party.
+   */
+  participation?: TAccountParticipation;
+  /** hidden stash's reward table is copied there. */
+  monsters: TAccountMonsters;
+  rewards?: TAccountRewards;
+  /** leaves and the found secrets, written in place. */
+  board: TAccountBoard;
+  sessionToken?: TAccountSessionToken;
+  leaf: RevealCellInstructionDataArgs["leaf"];
+  kind: RevealCellInstructionDataArgs["kind"];
+  a: RevealCellInstructionDataArgs["a"];
+  b: RevealCellInstructionDataArgs["b"];
+  c: RevealCellInstructionDataArgs["c"];
   salt: RevealCellInstructionDataArgs["salt"];
   proof: RevealCellInstructionDataArgs["proof"];
 };
@@ -185,6 +421,7 @@ export function getRevealCellInstruction<
   TAccountParticipation extends InstructionAccountInput,
   TAccountMonsters extends InstructionAccountInput,
   TAccountRewards extends InstructionAccountInput,
+  TAccountBoard extends InstructionAccountInput,
   TAccountSessionToken extends InstructionAccountInput,
   TProgramAddress extends Address = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
 >(
@@ -195,6 +432,7 @@ export function getRevealCellInstruction<
     TAccountParticipation,
     TAccountMonsters,
     TAccountRewards,
+    TAccountBoard,
     TAccountSessionToken
   >,
   config?: { programAddress?: TProgramAddress },
@@ -223,6 +461,10 @@ export function getRevealCellInstruction<
   ResolvedInstructionAccountMeta<
     TAccountRewards,
     InstructionAccountInputAddress<TAccountRewards>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountBoard,
+    InstructionAccountInputAddress<TAccountBoard>
   >,
   ResolvedInstructionAccountMeta<
     TAccountSessionToken,
@@ -260,6 +502,7 @@ export function getRevealCellInstruction<
       isSigner: false,
       isWritable: false,
     },
+    board: { value: input.board ?? null, isSigner: false, isWritable: true },
     sessionToken: {
       value: input.sessionToken ?? null,
       isSigner: false,
@@ -288,6 +531,7 @@ export function getRevealCellInstruction<
       getAccountMeta("participation", accounts.participation),
       getAccountMeta("monsters", accounts.monsters),
       getAccountMeta("rewards", accounts.rewards),
+      getAccountMeta("board", accounts.board),
       getAccountMeta("sessionToken", accounts.sessionToken),
     ],
     data: getRevealCellInstructionDataEncoder().encode(
@@ -321,6 +565,10 @@ export function getRevealCellInstruction<
       InstructionAccountInputAddress<TAccountRewards>
     >,
     ResolvedInstructionAccountMeta<
+      TAccountBoard,
+      InstructionAccountInputAddress<TAccountBoard>
+    >,
+    ResolvedInstructionAccountMeta<
       TAccountSessionToken,
       InstructionAccountInputAddress<TAccountSessionToken>
     >
@@ -345,7 +593,9 @@ export type ParsedRevealCellInstruction<
     /** hidden stash's reward table is copied there. */
     monsters: TAccountMetas[4];
     rewards: TAccountMetas[5];
-    sessionToken?: TAccountMetas[6] | undefined;
+    /** leaves and the found secrets, written in place. */
+    board: TAccountMetas[6];
+    sessionToken?: TAccountMetas[7] | undefined;
   };
   data: RevealCellInstructionData;
 };
@@ -358,12 +608,12 @@ export function parseRevealCellInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
 ): ParsedRevealCellInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 7) {
+  if (instruction.accounts.length < 8) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 7,
+        expectedAccountMetas: 8,
       },
     );
   }
@@ -388,6 +638,7 @@ export function parseRevealCellInstruction<
       participation: getNextOptionalAccount(),
       monsters: getNextAccount(),
       rewards: getNextAccount(),
+      board: getNextAccount(),
       sessionToken: getNextOptionalAccount(),
     },
     data: getRevealCellInstructionDataDecoder().decode(instruction.data),

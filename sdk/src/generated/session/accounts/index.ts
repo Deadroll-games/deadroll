@@ -11,3 +11,4 @@ export * from "./gameSession.js";
 export * from "./monsterState.js";
 export * from "./participation.js";
 export * from "./rewardCache.js";
+export * from "./sessionBoard.js";

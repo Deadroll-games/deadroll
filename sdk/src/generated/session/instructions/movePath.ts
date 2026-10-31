@@ -37,13 +37,14 @@ import {
 } from "@solana/kit";
 import {
   getAccountMetaFactory,
+  getAddressFromResolvedInstructionAccount,
   type InstructionAccountInput,
   type InstructionAccountInputAddress,
   type InstructionSignerInput,
   type ResolvedInstructionAccount,
   type ResolvedInstructionAccountMeta,
 } from "@solana/program-client-core";
-import { findProgramIdentityPda } from "../pdas/index.js";
+import { findBoardPda, findProgramIdentityPda } from "../pdas/index.js";
 import { DEADROLL_SESSION_PROGRAM_ADDRESS } from "../programs/index.js";
 import {
   getCellDecoder,
@@ -67,6 +68,7 @@ export type MovePathInstruction<
   TAccountParticipation extends string | AccountMeta<string> = string,
   TAccountMonsters extends string | AccountMeta<string> = string,
   TAccountLayout extends string | AccountMeta<string> = string,
+  TAccountBoard extends string | AccountMeta<string> = string,
   TAccountSessionToken extends string | AccountMeta<string> = string,
   TAccountProgramIdentity extends string | AccountMeta<string> = string,
   TAccountOracleQueue extends string | AccountMeta<string> =
@@ -98,6 +100,9 @@ export type MovePathInstruction<
       TAccountLayout extends string
         ? ReadonlyAccount<TAccountLayout>
         : TAccountLayout,
+      TAccountBoard extends string
+        ? ReadonlyAccount<TAccountBoard>
+        : TAccountBoard,
       TAccountSessionToken extends string
         ? ReadonlyAccount<TAccountSessionToken>
         : TAccountSessionToken,
@@ -167,6 +172,7 @@ export type MovePathAsyncInput<
     InstructionAccountInput,
   TAccountMonsters extends InstructionAccountInput = InstructionAccountInput,
   TAccountLayout extends InstructionAccountInput = InstructionAccountInput,
+  TAccountBoard extends InstructionAccountInput = InstructionAccountInput,
   TAccountSessionToken extends InstructionAccountInput =
     InstructionAccountInput,
   TAccountProgramIdentity extends InstructionAccountInput =
@@ -188,6 +194,8 @@ export type MovePathAsyncInput<
   /** monster's move; a mutable `LazyAccount` would re-serialize the whole account on exit). */
   monsters: TAccountMonsters;
   layout: TAccountLayout;
+  /** doors and the revealed leaves. */
+  board?: TAccountBoard;
   /** MagicBlock `SessionTokenV2` of the actor's session key; none when the main wallet signs. */
   sessionToken?: TAccountSessionToken;
   programIdentity?: TAccountProgramIdentity;
@@ -205,6 +213,7 @@ export async function getMovePathInstructionAsync<
   TAccountParticipation extends InstructionAccountInput,
   TAccountMonsters extends InstructionAccountInput,
   TAccountLayout extends InstructionAccountInput,
+  TAccountBoard extends InstructionAccountInput,
   TAccountSessionToken extends InstructionAccountInput,
   TAccountProgramIdentity extends InstructionAccountInput,
   TAccountOracleQueue extends InstructionAccountInput,
@@ -219,6 +228,7 @@ export async function getMovePathInstructionAsync<
     TAccountParticipation,
     TAccountMonsters,
     TAccountLayout,
+    TAccountBoard,
     TAccountSessionToken,
     TAccountProgramIdentity,
     TAccountOracleQueue,
@@ -249,6 +259,10 @@ export async function getMovePathInstructionAsync<
     ResolvedInstructionAccountMeta<
       TAccountLayout,
       InstructionAccountInputAddress<TAccountLayout>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountBoard,
+      InstructionAccountInputAddress<TAccountBoard>
     >,
     ResolvedInstructionAccountMeta<
       TAccountSessionToken,
@@ -302,6 +316,7 @@ export async function getMovePathInstructionAsync<
       isWritable: true,
     },
     layout: { value: input.layout ?? null, isSigner: false, isWritable: false },
+    board: { value: input.board ?? null, isSigner: false, isWritable: false },
     sessionToken: {
       value: input.sessionToken ?? null,
       isSigner: false,
@@ -342,6 +357,17 @@ export async function getMovePathInstructionAsync<
   const args = { ...input };
 
   // Resolve default values.
+  if (!accounts.board.value) {
+    accounts.board.value = await findBoardPda(
+      {
+        session: getAddressFromResolvedInstructionAccount(
+          "session",
+          accounts.session.value,
+        ),
+      },
+      { programAddress },
+    );
+  }
   if (!accounts.programIdentity.value) {
     accounts.programIdentity.value = await findProgramIdentityPda({
       programAddress,
@@ -371,6 +397,7 @@ export async function getMovePathInstructionAsync<
       getAccountMeta("participation", accounts.participation),
       getAccountMeta("monsters", accounts.monsters),
       getAccountMeta("layout", accounts.layout),
+      getAccountMeta("board", accounts.board),
       getAccountMeta("sessionToken", accounts.sessionToken),
       getAccountMeta("programIdentity", accounts.programIdentity),
       getAccountMeta("oracleQueue", accounts.oracleQueue),
@@ -403,6 +430,10 @@ export async function getMovePathInstructionAsync<
     ResolvedInstructionAccountMeta<
       TAccountLayout,
       InstructionAccountInputAddress<TAccountLayout>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountBoard,
+      InstructionAccountInputAddress<TAccountBoard>
     >,
     ResolvedInstructionAccountMeta<
       TAccountSessionToken,
@@ -438,6 +469,7 @@ export type MovePathInput<
     InstructionAccountInput,
   TAccountMonsters extends InstructionAccountInput = InstructionAccountInput,
   TAccountLayout extends InstructionAccountInput = InstructionAccountInput,
+  TAccountBoard extends InstructionAccountInput = InstructionAccountInput,
   TAccountSessionToken extends InstructionAccountInput =
     InstructionAccountInput,
   TAccountProgramIdentity extends InstructionAccountInput =
@@ -459,6 +491,8 @@ export type MovePathInput<
   /** monster's move; a mutable `LazyAccount` would re-serialize the whole account on exit). */
   monsters: TAccountMonsters;
   layout: TAccountLayout;
+  /** doors and the revealed leaves. */
+  board: TAccountBoard;
   /** MagicBlock `SessionTokenV2` of the actor's session key; none when the main wallet signs. */
   sessionToken?: TAccountSessionToken;
   programIdentity: TAccountProgramIdentity;
@@ -476,6 +510,7 @@ export function getMovePathInstruction<
   TAccountParticipation extends InstructionAccountInput,
   TAccountMonsters extends InstructionAccountInput,
   TAccountLayout extends InstructionAccountInput,
+  TAccountBoard extends InstructionAccountInput,
   TAccountSessionToken extends InstructionAccountInput,
   TAccountProgramIdentity extends InstructionAccountInput,
   TAccountOracleQueue extends InstructionAccountInput,
@@ -490,6 +525,7 @@ export function getMovePathInstruction<
     TAccountParticipation,
     TAccountMonsters,
     TAccountLayout,
+    TAccountBoard,
     TAccountSessionToken,
     TAccountProgramIdentity,
     TAccountOracleQueue,
@@ -519,6 +555,10 @@ export function getMovePathInstruction<
   ResolvedInstructionAccountMeta<
     TAccountLayout,
     InstructionAccountInputAddress<TAccountLayout>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountBoard,
+    InstructionAccountInputAddress<TAccountBoard>
   >,
   ResolvedInstructionAccountMeta<
     TAccountSessionToken,
@@ -571,6 +611,7 @@ export function getMovePathInstruction<
       isWritable: true,
     },
     layout: { value: input.layout ?? null, isSigner: false, isWritable: false },
+    board: { value: input.board ?? null, isSigner: false, isWritable: false },
     sessionToken: {
       value: input.sessionToken ?? null,
       isSigner: false,
@@ -635,6 +676,7 @@ export function getMovePathInstruction<
       getAccountMeta("participation", accounts.participation),
       getAccountMeta("monsters", accounts.monsters),
       getAccountMeta("layout", accounts.layout),
+      getAccountMeta("board", accounts.board),
       getAccountMeta("sessionToken", accounts.sessionToken),
       getAccountMeta("programIdentity", accounts.programIdentity),
       getAccountMeta("oracleQueue", accounts.oracleQueue),
@@ -667,6 +709,10 @@ export function getMovePathInstruction<
     ResolvedInstructionAccountMeta<
       TAccountLayout,
       InstructionAccountInputAddress<TAccountLayout>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountBoard,
+      InstructionAccountInputAddress<TAccountBoard>
     >,
     ResolvedInstructionAccountMeta<
       TAccountSessionToken,
@@ -712,13 +758,15 @@ export type ParsedMovePathInstruction<
     /** monster's move; a mutable `LazyAccount` would re-serialize the whole account on exit). */
     monsters: TAccountMetas[3];
     layout: TAccountMetas[4];
+    /** doors and the revealed leaves. */
+    board: TAccountMetas[5];
     /** MagicBlock `SessionTokenV2` of the actor's session key; none when the main wallet signs. */
-    sessionToken?: TAccountMetas[5] | undefined;
-    programIdentity: TAccountMetas[6];
-    oracleQueue: TAccountMetas[7];
-    vrfProgram: TAccountMetas[8];
-    slotHashes: TAccountMetas[9];
-    systemProgram: TAccountMetas[10];
+    sessionToken?: TAccountMetas[6] | undefined;
+    programIdentity: TAccountMetas[7];
+    oracleQueue: TAccountMetas[8];
+    vrfProgram: TAccountMetas[9];
+    slotHashes: TAccountMetas[10];
+    systemProgram: TAccountMetas[11];
   };
   data: MovePathInstructionData;
 };
@@ -731,12 +779,12 @@ export function parseMovePathInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
 ): ParsedMovePathInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 11) {
+  if (instruction.accounts.length < 12) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 11,
+        expectedAccountMetas: 12,
       },
     );
   }
@@ -760,6 +808,7 @@ export function parseMovePathInstruction<
       participation: getNextOptionalAccount(),
       monsters: getNextAccount(),
       layout: getNextAccount(),
+      board: getNextAccount(),
       sessionToken: getNextOptionalAccount(),
       programIdentity: getNextAccount(),
       oracleQueue: getNextAccount(),

@@ -7,4 +7,3 @@
  */
 
 export * from "./map.js";
-export * from "./mapLayout.js";

@@ -487,6 +487,17 @@
         {
           "name": "character_program",
           "address": "9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL"
+        },
+        {
+          "name": "layout",
+          "docs": [
+            "by the last claim (patch D)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "dm",
+          "writable": true
         }
       ],
       "args": []
@@ -933,6 +944,30 @@
           "docs": [
             "its arena."
           ]
+        },
+        {
+          "name": "board",
+          "docs": [
+            "`BoardBytes::load`."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  97,
+                  114,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              }
+            ]
+          }
         }
       ],
       "args": []
@@ -1025,6 +1060,30 @@
           "docs": [
             "Read-only, never Borsh-decoded: owner and discriminator checked here, session in `Monsters`."
           ]
+        },
+        {
+          "name": "board",
+          "docs": [
+            "leaves."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  97,
+                  114,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              }
+            ]
+          }
         },
         {
           "name": "session_token",
@@ -1835,6 +1894,30 @@
           "name": "layout"
         },
         {
+          "name": "board",
+          "docs": [
+            "doors and the revealed leaves."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  97,
+                  114,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              }
+            ]
+          }
+        },
+        {
           "name": "session_token",
           "docs": [
             "MagicBlock `SessionTokenV2` of the actor's session key; none when the main wallet signs."
@@ -2386,6 +2469,32 @@
         {
           "name": "triples",
           "address": "sWao9CeLDqT7z3R1oVxED2SGwH9EUSySM1ftyS44b6e"
+        },
+        {
+          "name": "board",
+          "docs": [
+            "Patch D: what the party uncovers (`SessionBoard`), sized for the largest map; only its",
+            "header is written here, the rest starts zeroed."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  97,
+                  114,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              }
+            ]
+          }
         }
       ],
       "args": [
@@ -2601,6 +2710,31 @@
           "address": "FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK"
         },
         {
+          "name": "board",
+          "docs": [
+            "leaves and the found secrets, written in place."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  97,
+                  114,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              }
+            ]
+          }
+        },
+        {
           "name": "session_token",
           "optional": true
         }
@@ -2714,6 +2848,31 @@
         {
           "name": "rewards",
           "address": "FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK"
+        },
+        {
+          "name": "board",
+          "docs": [
+            "pack's monsters join its spawns."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  97,
+                  114,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              }
+            ]
+          }
         },
         {
           "name": "session_token",
@@ -3278,6 +3437,13 @@
         {
           "name": "character_program",
           "address": "9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL"
+        },
+        {
+          "name": "layout",
+          "docs": [
+            "by the map CPI (patch D)."
+          ],
+          "writable": true
         }
       ],
       "args": []
@@ -3633,6 +3799,19 @@
         42,
         107,
         152
+      ]
+    },
+    {
+      "name": "SessionBoard",
+      "discriminator": [
+        236,
+        104,
+        1,
+        55,
+        35,
+        193,
+        80,
+        96
       ]
     }
   ],
@@ -4834,6 +5013,16 @@
       "code": 6116,
       "name": "NotAdjacent",
       "msg": "Only a cell next to the character can be examined"
+    },
+    {
+      "code": 6117,
+      "name": "MapWithoutSizes",
+      "msg": "The map was finalized before the map sizes update"
+    },
+    {
+      "code": 6118,
+      "name": "InvalidBoard",
+      "msg": "Not the party board account"
     }
   ],
   "types": [
@@ -5134,7 +5323,7 @@
           },
           {
             "name": "dead_spawns",
-            "type": "u32"
+            "type": "u128"
           }
         ]
       }
@@ -6335,29 +6524,6 @@
       }
     },
     {
-      "name": "FoundSecret",
-      "docs": [
-        "A secret the party found (or the audit revealed): its leaf and contents."
-      ],
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "leaf",
-            "type": "u16"
-          },
-          {
-            "name": "secret",
-            "type": {
-              "defined": {
-                "name": "CellSecret"
-              }
-            }
-          }
-        ]
-      }
-    },
-    {
       "name": "GameSession",
       "docs": [
         "`[\"session\", map]`: one party on one map."
@@ -6680,7 +6846,8 @@
           {
             "name": "chests",
             "docs": [
-              "The visible chests: cell and reward table id; `0..chest_count` used."
+              "The visible chests: cell and reward table id; `0..chest_count` used. Patch D: the largest",
+              "class's chests, then its hidden stashes."
             ],
             "type": {
               "array": [
@@ -6689,7 +6856,7 @@
                     "name": "MapPoint"
                   }
                 },
-                4
+                32
               ]
             }
           },
@@ -6709,7 +6876,7 @@
             "docs": [
               "Bit per chest: opened (then it no longer occupies its cell)."
             ],
-            "type": "u8"
+            "type": "u32"
           },
           {
             "name": "pending_chest",
@@ -6807,7 +6974,7 @@
             "name": "packs",
             "docs": [
               "The map's packs, copied at `open_session`: the visible monster's map cell, the facing,",
-              "the arena size."
+              "the arena size. Patch D: the largest class's pack numbers."
             ],
             "type": {
               "array": [
@@ -6816,7 +6983,7 @@
                     "name": "PackLayout"
                   }
                 },
-                8
+                40
               ]
             }
           },
@@ -6825,7 +6992,7 @@
             "docs": [
               "Bit per pack number still on the map."
             ],
-            "type": "u8"
+            "type": "u64"
           },
           {
             "name": "map_width",
@@ -6926,22 +7093,22 @@
             "docs": [
               "Bit per pack number the party retreated from: on guard, it moves first from any side."
             ],
-            "type": "u8"
+            "type": "u64"
           },
           {
             "name": "packs_buffed",
             "docs": [
               "Bit per pack number whose next fight starts with the retreat buff (cleared when it starts)."
             ],
-            "type": "u8"
+            "type": "u64"
           },
           {
             "name": "dead_spawns",
             "docs": [
               "Bit per layout spawn killed in an arena the party retreated from: it stays dead.",
-              "Patch C: per revealed spawn (`spawns`)."
+              "Patch C: per revealed spawn (`SessionBoard` spawns)."
             ],
-            "type": "u32"
+            "type": "u128"
           },
           {
             "name": "secrets_root",
@@ -6974,26 +7141,15 @@
             "type": {
               "array": [
                 "u8",
-                8
-              ]
-            }
-          },
-          {
-            "name": "revealed",
-            "docs": [
-              "Bit per leaf the DM revealed."
-            ],
-            "type": {
-              "array": [
-                "u8",
-                273
+                40
               ]
             }
           },
           {
             "name": "found_counts",
             "docs": [
-              "Secrets of each type revealed (`SecretKind::counted`), never above `declared`."
+              "Secrets of each type revealed (`SecretKind::counted`), never above `declared`. Patch D:",
+              "the revealed leaves and the secrets themselves are in the `SessionBoard`."
             ],
             "type": {
               "array": [
@@ -7003,31 +7159,11 @@
             }
           },
           {
-            "name": "found",
-            "docs": [
-              "The secrets revealed, in order (`found_count` used): what the party sees."
-            ],
-            "type": {
-              "array": [
-                {
-                  "defined": {
-                    "name": "FoundSecret"
-                  }
-                },
-                16
-              ]
-            }
-          },
-          {
-            "name": "found_count",
-            "type": "u8"
-          },
-          {
             "name": "packs_revealed",
             "docs": [
               "Bit per pack number whose composition the DM revealed."
             ],
-            "type": "u8"
+            "type": "u64"
           },
           {
             "name": "obligations",
@@ -7051,27 +7187,6 @@
             "type": "u8"
           },
           {
-            "name": "spawns",
-            "docs": [
-              "The revealed packs' monsters, pack by pack in reveal order (`spawn_count` used): the",
-              "spawns `enter_arena` loads and `dead_spawns` counts."
-            ],
-            "type": {
-              "array": [
-                {
-                  "defined": {
-                    "name": "Spawn"
-                  }
-                },
-                24
-              ]
-            }
-          },
-          {
-            "name": "spawn_count",
-            "type": "u8"
-          },
-          {
             "name": "roster_totals",
             "docs": [
               "The map's totals over the revealed packs (`deadroll_mapcheck::roster::RosterTotals`):",
@@ -7088,6 +7203,13 @@
             "name": "visible_chests",
             "docs": [
               "The chests of the map; the hidden stashes found follow them in `chests`."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "map_class",
+            "docs": [
+              "The map's size class (`deadroll_rules::BalanceConfig.map_size`, the layout's `class`)."
             ],
             "type": "u8"
           }
@@ -10409,6 +10531,42 @@
           },
           {
             "name": "Door"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SessionBoard",
+      "docs": [
+        "`[\"board\", session]` (patch D, docs/MAP_DESCRIPTION.md 11, 17.6): what a party has uncovered",
+        "on its map, sized for the largest map class: a bit per leaf the DM revealed, the secrets found",
+        "and the revealed packs' monsters. Created with the session at `open_session`.",
+        "",
+        "Kept out of `GameSession` so that the session stays small enough to decode on the 4 KB stack",
+        "frame (`Account<GameSession>` decodes on the stack before boxing). Never decoded whole: the",
+        "struct is its header (what the IDL shows) and the instructions go through [`BoardBytes`]."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "found_count",
+            "docs": [
+              "Entries of `found` and `spawns` in use."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "spawn_count",
+            "type": "u8"
           }
         ]
       }

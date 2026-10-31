@@ -104,7 +104,7 @@ export function getWriteSecretsInstructionDataEncoder(): Encoder<WriteSecretsIns
       ["offset", getU16Encoder()],
       ["bytes", addEncoderSizePrefix(getBytesEncoder(), getU32Encoder())],
       ["len", getU16Encoder()],
-      ["threat", fixEncoderSize(getBytesEncoder(), 8)],
+      ["threat", addEncoderSizePrefix(getBytesEncoder(), getU32Encoder())],
       ["declared", fixEncoderSize(getBytesEncoder(), 4)],
     ]),
     (value) => ({ ...value, discriminator: WRITE_SECRETS_DISCRIMINATOR }),
@@ -117,7 +117,7 @@ export function getWriteSecretsInstructionDataDecoder(): Decoder<WriteSecretsIns
     ["offset", getU16Decoder()],
     ["bytes", addDecoderSizePrefix(getBytesDecoder(), getU32Decoder())],
     ["len", getU16Decoder()],
-    ["threat", fixDecoderSize(getBytesDecoder(), 8)],
+    ["threat", addDecoderSizePrefix(getBytesDecoder(), getU32Decoder())],
     ["declared", fixDecoderSize(getBytesDecoder(), 4)],
   ]);
 }

@@ -66,6 +66,8 @@ export type ClaimAfterTimeoutInstruction<
     "2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH",
   TAccountCharacterProgram extends string | AccountMeta<string> =
     "9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL",
+  TAccountLayout extends string | AccountMeta<string> = string,
+  TAccountDm extends string | AccountMeta<string> = string,
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
 > = Instruction<TProgram> &
   InstructionWithData<ReadonlyUint8Array> &
@@ -97,6 +99,10 @@ export type ClaimAfterTimeoutInstruction<
       TAccountCharacterProgram extends string
         ? ReadonlyAccount<TAccountCharacterProgram>
         : TAccountCharacterProgram,
+      TAccountLayout extends string
+        ? WritableAccount<TAccountLayout>
+        : TAccountLayout,
+      TAccountDm extends string ? WritableAccount<TAccountDm> : TAccountDm,
       ...TRemainingAccounts,
     ]
   >;
@@ -142,6 +148,8 @@ export type ClaimAfterTimeoutAsyncInput<
   TAccountMapProgram extends InstructionAccountInput = InstructionAccountInput,
   TAccountCharacterProgram extends InstructionAccountInput =
     InstructionAccountInput,
+  TAccountLayout extends InstructionAccountInput = InstructionAccountInput,
+  TAccountDm extends InstructionAccountInput = InstructionAccountInput,
 > = {
   /**
    * The player's main wallet (the participation's `player`): the refund goes here, so no
@@ -156,6 +164,9 @@ export type ClaimAfterTimeoutAsyncInput<
   config?: TAccountConfig;
   mapProgram?: TAccountMapProgram;
   characterProgram?: TAccountCharacterProgram;
+  /** by the last claim (patch D). */
+  layout: TAccountLayout;
+  dm: TAccountDm;
 };
 
 export async function getClaimAfterTimeoutInstructionAsync<
@@ -168,6 +179,8 @@ export async function getClaimAfterTimeoutInstructionAsync<
   TAccountConfig extends InstructionAccountInput,
   TAccountMapProgram extends InstructionAccountInput,
   TAccountCharacterProgram extends InstructionAccountInput,
+  TAccountLayout extends InstructionAccountInput,
+  TAccountDm extends InstructionAccountInput,
   TProgramAddress extends Address = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
 >(
   input: ClaimAfterTimeoutAsyncInput<
@@ -179,7 +192,9 @@ export async function getClaimAfterTimeoutInstructionAsync<
     TAccountSessionAuthority,
     TAccountConfig,
     TAccountMapProgram,
-    TAccountCharacterProgram
+    TAccountCharacterProgram,
+    TAccountLayout,
+    TAccountDm
   >,
   config?: { programAddress?: TProgramAddress },
 ): Promise<
@@ -220,6 +235,14 @@ export async function getClaimAfterTimeoutInstructionAsync<
     ResolvedInstructionAccountMeta<
       TAccountCharacterProgram,
       InstructionAccountInputAddress<TAccountCharacterProgram>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountLayout,
+      InstructionAccountInputAddress<TAccountLayout>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountDm,
+      InstructionAccountInputAddress<TAccountDm>
     >
   >
 > {
@@ -261,6 +284,8 @@ export async function getClaimAfterTimeoutInstructionAsync<
       isSigner: false,
       isWritable: false,
     },
+    layout: { value: input.layout ?? null, isSigner: false, isWritable: true },
+    dm: { value: input.dm ?? null, isSigner: false, isWritable: true },
   };
   const accounts = originalAccounts as Record<
     keyof typeof originalAccounts,
@@ -313,6 +338,8 @@ export async function getClaimAfterTimeoutInstructionAsync<
       getAccountMeta("config", accounts.config),
       getAccountMeta("mapProgram", accounts.mapProgram),
       getAccountMeta("characterProgram", accounts.characterProgram),
+      getAccountMeta("layout", accounts.layout),
+      getAccountMeta("dm", accounts.dm),
     ],
     data: getClaimAfterTimeoutInstructionDataEncoder().encode({}),
     programAddress,
@@ -353,6 +380,14 @@ export async function getClaimAfterTimeoutInstructionAsync<
     ResolvedInstructionAccountMeta<
       TAccountCharacterProgram,
       InstructionAccountInputAddress<TAccountCharacterProgram>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountLayout,
+      InstructionAccountInputAddress<TAccountLayout>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountDm,
+      InstructionAccountInputAddress<TAccountDm>
     >
   >);
 }
@@ -369,6 +404,8 @@ export type ClaimAfterTimeoutInput<
   TAccountMapProgram extends InstructionAccountInput = InstructionAccountInput,
   TAccountCharacterProgram extends InstructionAccountInput =
     InstructionAccountInput,
+  TAccountLayout extends InstructionAccountInput = InstructionAccountInput,
+  TAccountDm extends InstructionAccountInput = InstructionAccountInput,
 > = {
   /**
    * The player's main wallet (the participation's `player`): the refund goes here, so no
@@ -383,6 +420,9 @@ export type ClaimAfterTimeoutInput<
   config: TAccountConfig;
   mapProgram?: TAccountMapProgram;
   characterProgram?: TAccountCharacterProgram;
+  /** by the last claim (patch D). */
+  layout: TAccountLayout;
+  dm: TAccountDm;
 };
 
 export function getClaimAfterTimeoutInstruction<
@@ -395,6 +435,8 @@ export function getClaimAfterTimeoutInstruction<
   TAccountConfig extends InstructionAccountInput,
   TAccountMapProgram extends InstructionAccountInput,
   TAccountCharacterProgram extends InstructionAccountInput,
+  TAccountLayout extends InstructionAccountInput,
+  TAccountDm extends InstructionAccountInput,
   TProgramAddress extends Address = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
 >(
   input: ClaimAfterTimeoutInput<
@@ -406,7 +448,9 @@ export function getClaimAfterTimeoutInstruction<
     TAccountSessionAuthority,
     TAccountConfig,
     TAccountMapProgram,
-    TAccountCharacterProgram
+    TAccountCharacterProgram,
+    TAccountLayout,
+    TAccountDm
   >,
   config?: { programAddress?: TProgramAddress },
 ): ClaimAfterTimeoutInstruction<
@@ -446,6 +490,14 @@ export function getClaimAfterTimeoutInstruction<
   ResolvedInstructionAccountMeta<
     TAccountCharacterProgram,
     InstructionAccountInputAddress<TAccountCharacterProgram>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountLayout,
+    InstructionAccountInputAddress<TAccountLayout>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountDm,
+    InstructionAccountInputAddress<TAccountDm>
   >
 > {
   // Program address.
@@ -486,6 +538,8 @@ export function getClaimAfterTimeoutInstruction<
       isSigner: false,
       isWritable: false,
     },
+    layout: { value: input.layout ?? null, isSigner: false, isWritable: true },
+    dm: { value: input.dm ?? null, isSigner: false, isWritable: true },
   };
   const accounts = originalAccounts as Record<
     keyof typeof originalAccounts,
@@ -513,6 +567,8 @@ export function getClaimAfterTimeoutInstruction<
       getAccountMeta("config", accounts.config),
       getAccountMeta("mapProgram", accounts.mapProgram),
       getAccountMeta("characterProgram", accounts.characterProgram),
+      getAccountMeta("layout", accounts.layout),
+      getAccountMeta("dm", accounts.dm),
     ],
     data: getClaimAfterTimeoutInstructionDataEncoder().encode({}),
     programAddress,
@@ -553,6 +609,14 @@ export function getClaimAfterTimeoutInstruction<
     ResolvedInstructionAccountMeta<
       TAccountCharacterProgram,
       InstructionAccountInputAddress<TAccountCharacterProgram>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountLayout,
+      InstructionAccountInputAddress<TAccountLayout>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountDm,
+      InstructionAccountInputAddress<TAccountDm>
     >
   >);
 }
@@ -576,6 +640,9 @@ export type ParsedClaimAfterTimeoutInstruction<
     config: TAccountMetas[6];
     mapProgram: TAccountMetas[7];
     characterProgram: TAccountMetas[8];
+    /** by the last claim (patch D). */
+    layout: TAccountMetas[9];
+    dm: TAccountMetas[10];
   };
   data: ClaimAfterTimeoutInstructionData;
 };
@@ -588,12 +655,12 @@ export function parseClaimAfterTimeoutInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
 ): ParsedClaimAfterTimeoutInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 9) {
+  if (instruction.accounts.length < 11) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 9,
+        expectedAccountMetas: 11,
       },
     );
   }
@@ -615,6 +682,8 @@ export function parseClaimAfterTimeoutInstruction<
       config: getNextAccount(),
       mapProgram: getNextAccount(),
       characterProgram: getNextAccount(),
+      layout: getNextAccount(),
+      dm: getNextAccount(),
     },
     data: getClaimAfterTimeoutInstructionDataDecoder().decode(instruction.data),
   };

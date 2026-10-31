@@ -7,6 +7,8 @@
  */
 
 import {
+  addDecoderSizePrefix,
+  addEncoderSizePrefix,
   combineCodec,
   containsBytes,
   fixDecoderSize,
@@ -23,10 +25,12 @@ import {
   getStructEncoder,
   getU16Decoder,
   getU16Encoder,
+  getU32Decoder,
+  getU32Encoder,
   type Address,
-  type FixedSizeCodec,
-  type FixedSizeDecoder,
-  type FixedSizeEncoder,
+  type Codec,
+  type Decoder,
+  type Encoder,
   type ReadonlyUint8Array,
 } from "@solana/kit";
 
@@ -45,7 +49,10 @@ export type SecretsWrittenEvent = {
   len: number;
   /** The whole blob's length. */
   total: number;
-  /** Each pack's threat and the declared counts (the public part). */
+  /**
+   * Each pack's threat (patch D: one per pack number of the map's class) and the declared
+   * counts (the public part).
+   */
   threat: ReadonlyUint8Array;
   declared: ReadonlyUint8Array;
 };
@@ -53,14 +60,14 @@ export type SecretsWrittenEvent = {
 export type SecretsWrittenEventArgs = SecretsWrittenEvent;
 
 /** Gets the encoder for {@link SecretsWrittenEventArgs} event data. */
-export function getSecretsWrittenEventEncoder(): FixedSizeEncoder<SecretsWrittenEventArgs> {
+export function getSecretsWrittenEventEncoder(): Encoder<SecretsWrittenEventArgs> {
   return getHiddenPrefixEncoder(
     getStructEncoder([
       ["map", getAddressEncoder()],
       ["offset", getU16Encoder()],
       ["len", getU16Encoder()],
       ["total", getU16Encoder()],
-      ["threat", fixEncoderSize(getBytesEncoder(), 8)],
+      ["threat", addEncoderSizePrefix(getBytesEncoder(), getU32Encoder())],
       ["declared", fixEncoderSize(getBytesEncoder(), 4)],
     ]),
     [getConstantEncoder(SECRETS_WRITTEN_EVENT_DISCRIMINATOR)],
@@ -68,14 +75,14 @@ export function getSecretsWrittenEventEncoder(): FixedSizeEncoder<SecretsWritten
 }
 
 /** Gets the decoder for {@link SecretsWrittenEvent} event data. */
-export function getSecretsWrittenEventDecoder(): FixedSizeDecoder<SecretsWrittenEvent> {
+export function getSecretsWrittenEventDecoder(): Decoder<SecretsWrittenEvent> {
   return getHiddenPrefixDecoder(
     getStructDecoder([
       ["map", getAddressDecoder()],
       ["offset", getU16Decoder()],
       ["len", getU16Decoder()],
       ["total", getU16Decoder()],
-      ["threat", fixDecoderSize(getBytesDecoder(), 8)],
+      ["threat", addDecoderSizePrefix(getBytesDecoder(), getU32Decoder())],
       ["declared", fixDecoderSize(getBytesDecoder(), 4)],
     ]),
     [getConstantDecoder(SECRETS_WRITTEN_EVENT_DISCRIMINATOR)],
@@ -83,7 +90,7 @@ export function getSecretsWrittenEventDecoder(): FixedSizeDecoder<SecretsWritten
 }
 
 /** Gets the codec for {@link SecretsWrittenEvent} event data. */
-export function getSecretsWrittenEventCodec(): FixedSizeCodec<
+export function getSecretsWrittenEventCodec(): Codec<
   SecretsWrittenEventArgs,
   SecretsWrittenEvent
 > {

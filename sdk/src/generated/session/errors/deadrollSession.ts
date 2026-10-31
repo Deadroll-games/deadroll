@@ -248,6 +248,10 @@ export const DEADROLL_SESSION_ERROR__AUDIT_INCOMPLETE = 0x17e2; // 6114
 export const DEADROLL_SESSION_ERROR__TOO_MANY_OBLIGATIONS = 0x17e3; // 6115
 /** NotAdjacent: Only a cell next to the character can be examined */
 export const DEADROLL_SESSION_ERROR__NOT_ADJACENT = 0x17e4; // 6116
+/** MapWithoutSizes: The map was finalized before the map sizes update */
+export const DEADROLL_SESSION_ERROR__MAP_WITHOUT_SIZES = 0x17e5; // 6117
+/** InvalidBoard: Not the party board account */
+export const DEADROLL_SESSION_ERROR__INVALID_BOARD = 0x17e6; // 6118
 
 export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__ACTOR_MISMATCH
@@ -276,6 +280,7 @@ export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__INVALID_ACTION
   | typeof DEADROLL_SESSION_ERROR__INVALID_ALLY_TARGET
   | typeof DEADROLL_SESSION_ERROR__INVALID_ARENA_ACCOUNTS
+  | typeof DEADROLL_SESSION_ERROR__INVALID_BOARD
   | typeof DEADROLL_SESSION_ERROR__INVALID_CACHE_SESSIONS
   | typeof DEADROLL_SESSION_ERROR__INVALID_CHARACTER
   | typeof DEADROLL_SESSION_ERROR__INVALID_CHEST
@@ -305,6 +310,7 @@ export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__MAP_NOT_FINALIZED
   | typeof DEADROLL_SESSION_ERROR__MAP_WITHOUT_ARENAS
   | typeof DEADROLL_SESSION_ERROR__MAP_WITHOUT_SECRETS
+  | typeof DEADROLL_SESSION_ERROR__MAP_WITHOUT_SIZES
   | typeof DEADROLL_SESSION_ERROR__MONSTER_NEAR_CHEST
   | typeof DEADROLL_SESSION_ERROR__MONSTER_SKILL_MISSING
   | typeof DEADROLL_SESSION_ERROR__NO_PLAYERS
@@ -398,6 +404,7 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__INVALID_ACTION]: `Unknown monster action`,
     [DEADROLL_SESSION_ERROR__INVALID_ALLY_TARGET]: `Target is not a living ally`,
     [DEADROLL_SESSION_ERROR__INVALID_ARENA_ACCOUNTS]: `The remaining accounts are not the Participation of each living player, in slot order`,
+    [DEADROLL_SESSION_ERROR__INVALID_BOARD]: `Not the party board account`,
     [DEADROLL_SESSION_ERROR__INVALID_CACHE_SESSIONS]: `The remaining accounts are not the GameSession of each open reward cache entry, in entry order`,
     [DEADROLL_SESSION_ERROR__INVALID_CHARACTER]: `Account is not a Deadroll character`,
     [DEADROLL_SESSION_ERROR__INVALID_CHEST]: `No such chest on this map`,
@@ -427,6 +434,7 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__MAP_NOT_FINALIZED]: `Map is not finalized`,
     [DEADROLL_SESSION_ERROR__MAP_WITHOUT_ARENAS]: `The map has no arenas (finalized before the arena update): it cannot open a party`,
     [DEADROLL_SESSION_ERROR__MAP_WITHOUT_SECRETS]: `The map was finalized before the secrets update`,
+    [DEADROLL_SESSION_ERROR__MAP_WITHOUT_SIZES]: `The map was finalized before the map sizes update`,
     [DEADROLL_SESSION_ERROR__MONSTER_NEAR_CHEST]: `A living monster is too close to the chest or to you`,
     [DEADROLL_SESSION_ERROR__MONSTER_SKILL_MISSING]: `This monster has no active skill in that slot`,
     [DEADROLL_SESSION_ERROR__NO_PLAYERS]: `Party has no players`,

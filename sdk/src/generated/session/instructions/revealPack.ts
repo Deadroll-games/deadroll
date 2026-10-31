@@ -37,12 +37,14 @@ import {
 } from "@solana/kit";
 import {
   getAccountMetaFactory,
+  getAddressFromResolvedInstructionAccount,
   type InstructionAccountInput,
   type InstructionAccountInputAddress,
   type InstructionSignerInput,
   type ResolvedInstructionAccount,
   type ResolvedInstructionAccountMeta,
 } from "@solana/program-client-core";
+import { findBoardPda } from "../pdas/index.js";
 import { DEADROLL_SESSION_PROGRAM_ADDRESS } from "../programs/index.js";
 import {
   getSpawnDecoder,
@@ -71,6 +73,7 @@ export type RevealPackInstruction<
     "NQNEuKDUZhACnTJ9sD3dW49BoiPtJPatp6bpY61r81p",
   TAccountRewards extends string | AccountMeta<string> =
     "FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK",
+  TAccountBoard extends string | AccountMeta<string> = string,
   TAccountSessionToken extends string | AccountMeta<string> = string,
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
 > = Instruction<TProgram> &
@@ -99,6 +102,9 @@ export type RevealPackInstruction<
       TAccountRewards extends string
         ? ReadonlyAccount<TAccountRewards>
         : TAccountRewards,
+      TAccountBoard extends string
+        ? WritableAccount<TAccountBoard>
+        : TAccountBoard,
       TAccountSessionToken extends string
         ? ReadonlyAccount<TAccountSessionToken>
         : TAccountSessionToken,
@@ -158,7 +164,7 @@ export function getRevealPackInstructionDataCodec(): Codec<
   );
 }
 
-export type RevealPackInput<
+export type RevealPackAsyncInput<
   TAccountSigner extends InstructionSignerInput = InstructionSignerInput,
   TAccountSession extends InstructionAccountInput = InstructionAccountInput,
   TAccountLayout extends InstructionAccountInput = InstructionAccountInput,
@@ -167,6 +173,7 @@ export type RevealPackInput<
   TAccountMonsterSkills extends InstructionAccountInput =
     InstructionAccountInput,
   TAccountRewards extends InstructionAccountInput = InstructionAccountInput,
+  TAccountBoard extends InstructionAccountInput = InstructionAccountInput,
   TAccountSessionToken extends InstructionAccountInput =
     InstructionAccountInput,
 > = {
@@ -180,6 +187,239 @@ export type RevealPackInput<
   bestiary?: TAccountBestiary;
   monsterSkills?: TAccountMonsterSkills;
   rewards?: TAccountRewards;
+  /** pack's monsters join its spawns. */
+  board?: TAccountBoard;
+  sessionToken?: TAccountSessionToken;
+  pack: RevealPackInstructionDataArgs["pack"];
+  count: RevealPackInstructionDataArgs["count"];
+  spawns: RevealPackInstructionDataArgs["spawns"];
+  salt: RevealPackInstructionDataArgs["salt"];
+  proof: RevealPackInstructionDataArgs["proof"];
+};
+
+export async function getRevealPackInstructionAsync<
+  TAccountSigner extends InstructionSignerInput,
+  TAccountSession extends InstructionAccountInput,
+  TAccountLayout extends InstructionAccountInput,
+  TAccountMonsters extends InstructionAccountInput,
+  TAccountBestiary extends InstructionAccountInput,
+  TAccountMonsterSkills extends InstructionAccountInput,
+  TAccountRewards extends InstructionAccountInput,
+  TAccountBoard extends InstructionAccountInput,
+  TAccountSessionToken extends InstructionAccountInput,
+  TProgramAddress extends Address = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
+>(
+  input: RevealPackAsyncInput<
+    TAccountSigner,
+    TAccountSession,
+    TAccountLayout,
+    TAccountMonsters,
+    TAccountBestiary,
+    TAccountMonsterSkills,
+    TAccountRewards,
+    TAccountBoard,
+    TAccountSessionToken
+  >,
+  config?: { programAddress?: TProgramAddress },
+): Promise<
+  RevealPackInstruction<
+    TProgramAddress,
+    ResolvedInstructionAccountMeta<
+      TAccountSigner,
+      InstructionAccountInputAddress<TAccountSigner>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountSession,
+      InstructionAccountInputAddress<TAccountSession>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountLayout,
+      InstructionAccountInputAddress<TAccountLayout>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountMonsters,
+      InstructionAccountInputAddress<TAccountMonsters>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountBestiary,
+      InstructionAccountInputAddress<TAccountBestiary>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountMonsterSkills,
+      InstructionAccountInputAddress<TAccountMonsterSkills>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountRewards,
+      InstructionAccountInputAddress<TAccountRewards>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountBoard,
+      InstructionAccountInputAddress<TAccountBoard>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountSessionToken,
+      InstructionAccountInputAddress<TAccountSessionToken>
+    >
+  >
+> {
+  // Program address.
+  const programAddress =
+    config?.programAddress ?? DEADROLL_SESSION_PROGRAM_ADDRESS;
+
+  // Account meta helper.
+  const getAccountMeta = getAccountMetaFactory(programAddress, "programId");
+
+  // Original accounts.
+  const originalAccounts = {
+    signer: { value: input.signer ?? null, isSigner: true, isWritable: false },
+    session: {
+      value: input.session ?? null,
+      isSigner: false,
+      isWritable: true,
+    },
+    layout: { value: input.layout ?? null, isSigner: false, isWritable: false },
+    monsters: {
+      value: input.monsters ?? null,
+      isSigner: false,
+      isWritable: true,
+    },
+    bestiary: {
+      value: input.bestiary ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    monsterSkills: {
+      value: input.monsterSkills ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    rewards: {
+      value: input.rewards ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    board: { value: input.board ?? null, isSigner: false, isWritable: true },
+    sessionToken: {
+      value: input.sessionToken ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+  };
+  const accounts = originalAccounts as Record<
+    keyof typeof originalAccounts,
+    ResolvedInstructionAccount
+  >;
+
+  // Original args.
+  const args = { ...input };
+
+  // Resolve default values.
+  if (!accounts.bestiary.value) {
+    accounts.bestiary.value =
+      "3uJyWiz7NeVekP4w1iZkKxKnJ5pMbxC6ciz7kxN3MZtM" as Address<"3uJyWiz7NeVekP4w1iZkKxKnJ5pMbxC6ciz7kxN3MZtM">;
+  }
+  if (!accounts.monsterSkills.value) {
+    accounts.monsterSkills.value =
+      "NQNEuKDUZhACnTJ9sD3dW49BoiPtJPatp6bpY61r81p" as Address<"NQNEuKDUZhACnTJ9sD3dW49BoiPtJPatp6bpY61r81p">;
+  }
+  if (!accounts.rewards.value) {
+    accounts.rewards.value =
+      "FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK" as Address<"FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK">;
+  }
+  if (!accounts.board.value) {
+    accounts.board.value = await findBoardPda(
+      {
+        session: getAddressFromResolvedInstructionAccount(
+          "session",
+          accounts.session.value,
+        ),
+      },
+      { programAddress },
+    );
+  }
+
+  return Object.freeze({
+    accounts: [
+      getAccountMeta("signer", accounts.signer),
+      getAccountMeta("session", accounts.session),
+      getAccountMeta("layout", accounts.layout),
+      getAccountMeta("monsters", accounts.monsters),
+      getAccountMeta("bestiary", accounts.bestiary),
+      getAccountMeta("monsterSkills", accounts.monsterSkills),
+      getAccountMeta("rewards", accounts.rewards),
+      getAccountMeta("board", accounts.board),
+      getAccountMeta("sessionToken", accounts.sessionToken),
+    ],
+    data: getRevealPackInstructionDataEncoder().encode(
+      args as RevealPackInstructionDataArgs,
+    ),
+    programAddress,
+  } as RevealPackInstruction<
+    TProgramAddress,
+    ResolvedInstructionAccountMeta<
+      TAccountSigner,
+      InstructionAccountInputAddress<TAccountSigner>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountSession,
+      InstructionAccountInputAddress<TAccountSession>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountLayout,
+      InstructionAccountInputAddress<TAccountLayout>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountMonsters,
+      InstructionAccountInputAddress<TAccountMonsters>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountBestiary,
+      InstructionAccountInputAddress<TAccountBestiary>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountMonsterSkills,
+      InstructionAccountInputAddress<TAccountMonsterSkills>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountRewards,
+      InstructionAccountInputAddress<TAccountRewards>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountBoard,
+      InstructionAccountInputAddress<TAccountBoard>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountSessionToken,
+      InstructionAccountInputAddress<TAccountSessionToken>
+    >
+  >);
+}
+
+export type RevealPackInput<
+  TAccountSigner extends InstructionSignerInput = InstructionSignerInput,
+  TAccountSession extends InstructionAccountInput = InstructionAccountInput,
+  TAccountLayout extends InstructionAccountInput = InstructionAccountInput,
+  TAccountMonsters extends InstructionAccountInput = InstructionAccountInput,
+  TAccountBestiary extends InstructionAccountInput = InstructionAccountInput,
+  TAccountMonsterSkills extends InstructionAccountInput =
+    InstructionAccountInput,
+  TAccountRewards extends InstructionAccountInput = InstructionAccountInput,
+  TAccountBoard extends InstructionAccountInput = InstructionAccountInput,
+  TAccountSessionToken extends InstructionAccountInput =
+    InstructionAccountInput,
+> = {
+  /** The DM's main wallet or the DM's session key bound to this party. */
+  signer: TAccountSigner;
+  session: TAccountSession;
+  /** monster and its arena. */
+  layout: TAccountLayout;
+  /** pack's templates, skills and reward tables are copied there. */
+  monsters: TAccountMonsters;
+  bestiary?: TAccountBestiary;
+  monsterSkills?: TAccountMonsterSkills;
+  rewards?: TAccountRewards;
+  /** pack's monsters join its spawns. */
+  board: TAccountBoard;
   sessionToken?: TAccountSessionToken;
   pack: RevealPackInstructionDataArgs["pack"];
   count: RevealPackInstructionDataArgs["count"];
@@ -196,6 +436,7 @@ export function getRevealPackInstruction<
   TAccountBestiary extends InstructionAccountInput,
   TAccountMonsterSkills extends InstructionAccountInput,
   TAccountRewards extends InstructionAccountInput,
+  TAccountBoard extends InstructionAccountInput,
   TAccountSessionToken extends InstructionAccountInput,
   TProgramAddress extends Address = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
 >(
@@ -207,6 +448,7 @@ export function getRevealPackInstruction<
     TAccountBestiary,
     TAccountMonsterSkills,
     TAccountRewards,
+    TAccountBoard,
     TAccountSessionToken
   >,
   config?: { programAddress?: TProgramAddress },
@@ -239,6 +481,10 @@ export function getRevealPackInstruction<
   ResolvedInstructionAccountMeta<
     TAccountRewards,
     InstructionAccountInputAddress<TAccountRewards>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountBoard,
+    InstructionAccountInputAddress<TAccountBoard>
   >,
   ResolvedInstructionAccountMeta<
     TAccountSessionToken,
@@ -281,6 +527,7 @@ export function getRevealPackInstruction<
       isSigner: false,
       isWritable: false,
     },
+    board: { value: input.board ?? null, isSigner: false, isWritable: true },
     sessionToken: {
       value: input.sessionToken ?? null,
       isSigner: false,
@@ -318,6 +565,7 @@ export function getRevealPackInstruction<
       getAccountMeta("bestiary", accounts.bestiary),
       getAccountMeta("monsterSkills", accounts.monsterSkills),
       getAccountMeta("rewards", accounts.rewards),
+      getAccountMeta("board", accounts.board),
       getAccountMeta("sessionToken", accounts.sessionToken),
     ],
     data: getRevealPackInstructionDataEncoder().encode(
@@ -355,6 +603,10 @@ export function getRevealPackInstruction<
       InstructionAccountInputAddress<TAccountRewards>
     >,
     ResolvedInstructionAccountMeta<
+      TAccountBoard,
+      InstructionAccountInputAddress<TAccountBoard>
+    >,
+    ResolvedInstructionAccountMeta<
       TAccountSessionToken,
       InstructionAccountInputAddress<TAccountSessionToken>
     >
@@ -377,7 +629,9 @@ export type ParsedRevealPackInstruction<
     bestiary: TAccountMetas[4];
     monsterSkills: TAccountMetas[5];
     rewards: TAccountMetas[6];
-    sessionToken?: TAccountMetas[7] | undefined;
+    /** pack's monsters join its spawns. */
+    board: TAccountMetas[7];
+    sessionToken?: TAccountMetas[8] | undefined;
   };
   data: RevealPackInstructionData;
 };
@@ -390,12 +644,12 @@ export function parseRevealPackInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
 ): ParsedRevealPackInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 8) {
+  if (instruction.accounts.length < 9) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 8,
+        expectedAccountMetas: 9,
       },
     );
   }
@@ -421,6 +675,7 @@ export function parseRevealPackInstruction<
       bestiary: getNextAccount(),
       monsterSkills: getNextAccount(),
       rewards: getNextAccount(),
+      board: getNextAccount(),
       sessionToken: getNextOptionalAccount(),
     },
     data: getRevealPackInstructionDataDecoder().decode(instruction.data),

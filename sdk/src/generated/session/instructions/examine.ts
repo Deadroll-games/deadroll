@@ -35,12 +35,14 @@ import {
 } from "@solana/kit";
 import {
   getAccountMetaFactory,
+  getAddressFromResolvedInstructionAccount,
   type InstructionAccountInput,
   type InstructionAccountInputAddress,
   type InstructionSignerInput,
   type ResolvedInstructionAccount,
   type ResolvedInstructionAccountMeta,
 } from "@solana/program-client-core";
+import { findBoardPda } from "../pdas/index.js";
 import { DEADROLL_SESSION_PROGRAM_ADDRESS } from "../programs/index.js";
 
 export const EXAMINE_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Array([
@@ -57,6 +59,7 @@ export type ExamineInstruction<
   TAccountSession extends string | AccountMeta<string> = string,
   TAccountParticipation extends string | AccountMeta<string> = string,
   TAccountMonsters extends string | AccountMeta<string> = string,
+  TAccountBoard extends string | AccountMeta<string> = string,
   TAccountSessionToken extends string | AccountMeta<string> = string,
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
 > = Instruction<TProgram> &
@@ -76,6 +79,9 @@ export type ExamineInstruction<
       TAccountMonsters extends string
         ? ReadonlyAccount<TAccountMonsters>
         : TAccountMonsters,
+      TAccountBoard extends string
+        ? ReadonlyAccount<TAccountBoard>
+        : TAccountBoard,
       TAccountSessionToken extends string
         ? ReadonlyAccount<TAccountSessionToken>
         : TAccountSessionToken,
@@ -120,12 +126,13 @@ export function getExamineInstructionDataCodec(): FixedSizeCodec<
   );
 }
 
-export type ExamineInput<
+export type ExamineAsyncInput<
   TAccountSigner extends InstructionSignerInput = InstructionSignerInput,
   TAccountSession extends InstructionAccountInput = InstructionAccountInput,
   TAccountParticipation extends InstructionAccountInput =
     InstructionAccountInput,
   TAccountMonsters extends InstructionAccountInput = InstructionAccountInput,
+  TAccountBoard extends InstructionAccountInput = InstructionAccountInput,
   TAccountSessionToken extends InstructionAccountInput =
     InstructionAccountInput,
 > = {
@@ -135,6 +142,174 @@ export type ExamineInput<
   participation: TAccountParticipation;
   /** Read-only, never Borsh-decoded: owner and discriminator checked here, session in `Monsters`. */
   monsters: TAccountMonsters;
+  /** leaves. */
+  board?: TAccountBoard;
+  /** MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs. */
+  sessionToken?: TAccountSessionToken;
+  x: ExamineInstructionDataArgs["x"];
+  y: ExamineInstructionDataArgs["y"];
+};
+
+export async function getExamineInstructionAsync<
+  TAccountSigner extends InstructionSignerInput,
+  TAccountSession extends InstructionAccountInput,
+  TAccountParticipation extends InstructionAccountInput,
+  TAccountMonsters extends InstructionAccountInput,
+  TAccountBoard extends InstructionAccountInput,
+  TAccountSessionToken extends InstructionAccountInput,
+  TProgramAddress extends Address = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
+>(
+  input: ExamineAsyncInput<
+    TAccountSigner,
+    TAccountSession,
+    TAccountParticipation,
+    TAccountMonsters,
+    TAccountBoard,
+    TAccountSessionToken
+  >,
+  config?: { programAddress?: TProgramAddress },
+): Promise<
+  ExamineInstruction<
+    TProgramAddress,
+    ResolvedInstructionAccountMeta<
+      TAccountSigner,
+      InstructionAccountInputAddress<TAccountSigner>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountSession,
+      InstructionAccountInputAddress<TAccountSession>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountParticipation,
+      InstructionAccountInputAddress<TAccountParticipation>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountMonsters,
+      InstructionAccountInputAddress<TAccountMonsters>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountBoard,
+      InstructionAccountInputAddress<TAccountBoard>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountSessionToken,
+      InstructionAccountInputAddress<TAccountSessionToken>
+    >
+  >
+> {
+  // Program address.
+  const programAddress =
+    config?.programAddress ?? DEADROLL_SESSION_PROGRAM_ADDRESS;
+
+  // Account meta helper.
+  const getAccountMeta = getAccountMetaFactory(programAddress, "programId");
+
+  // Original accounts.
+  const originalAccounts = {
+    signer: { value: input.signer ?? null, isSigner: true, isWritable: false },
+    session: {
+      value: input.session ?? null,
+      isSigner: false,
+      isWritable: true,
+    },
+    participation: {
+      value: input.participation ?? null,
+      isSigner: false,
+      isWritable: true,
+    },
+    monsters: {
+      value: input.monsters ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+    board: { value: input.board ?? null, isSigner: false, isWritable: false },
+    sessionToken: {
+      value: input.sessionToken ?? null,
+      isSigner: false,
+      isWritable: false,
+    },
+  };
+  const accounts = originalAccounts as Record<
+    keyof typeof originalAccounts,
+    ResolvedInstructionAccount
+  >;
+
+  // Original args.
+  const args = { ...input };
+
+  // Resolve default values.
+  if (!accounts.board.value) {
+    accounts.board.value = await findBoardPda(
+      {
+        session: getAddressFromResolvedInstructionAccount(
+          "session",
+          accounts.session.value,
+        ),
+      },
+      { programAddress },
+    );
+  }
+
+  return Object.freeze({
+    accounts: [
+      getAccountMeta("signer", accounts.signer),
+      getAccountMeta("session", accounts.session),
+      getAccountMeta("participation", accounts.participation),
+      getAccountMeta("monsters", accounts.monsters),
+      getAccountMeta("board", accounts.board),
+      getAccountMeta("sessionToken", accounts.sessionToken),
+    ],
+    data: getExamineInstructionDataEncoder().encode(
+      args as ExamineInstructionDataArgs,
+    ),
+    programAddress,
+  } as ExamineInstruction<
+    TProgramAddress,
+    ResolvedInstructionAccountMeta<
+      TAccountSigner,
+      InstructionAccountInputAddress<TAccountSigner>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountSession,
+      InstructionAccountInputAddress<TAccountSession>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountParticipation,
+      InstructionAccountInputAddress<TAccountParticipation>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountMonsters,
+      InstructionAccountInputAddress<TAccountMonsters>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountBoard,
+      InstructionAccountInputAddress<TAccountBoard>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountSessionToken,
+      InstructionAccountInputAddress<TAccountSessionToken>
+    >
+  >);
+}
+
+export type ExamineInput<
+  TAccountSigner extends InstructionSignerInput = InstructionSignerInput,
+  TAccountSession extends InstructionAccountInput = InstructionAccountInput,
+  TAccountParticipation extends InstructionAccountInput =
+    InstructionAccountInput,
+  TAccountMonsters extends InstructionAccountInput = InstructionAccountInput,
+  TAccountBoard extends InstructionAccountInput = InstructionAccountInput,
+  TAccountSessionToken extends InstructionAccountInput =
+    InstructionAccountInput,
+> = {
+  /** Main wallet or the participation's session key. */
+  signer: TAccountSigner;
+  session: TAccountSession;
+  participation: TAccountParticipation;
+  /** Read-only, never Borsh-decoded: owner and discriminator checked here, session in `Monsters`. */
+  monsters: TAccountMonsters;
+  /** leaves. */
+  board: TAccountBoard;
   /** MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs. */
   sessionToken?: TAccountSessionToken;
   x: ExamineInstructionDataArgs["x"];
@@ -146,6 +321,7 @@ export function getExamineInstruction<
   TAccountSession extends InstructionAccountInput,
   TAccountParticipation extends InstructionAccountInput,
   TAccountMonsters extends InstructionAccountInput,
+  TAccountBoard extends InstructionAccountInput,
   TAccountSessionToken extends InstructionAccountInput,
   TProgramAddress extends Address = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
 >(
@@ -154,6 +330,7 @@ export function getExamineInstruction<
     TAccountSession,
     TAccountParticipation,
     TAccountMonsters,
+    TAccountBoard,
     TAccountSessionToken
   >,
   config?: { programAddress?: TProgramAddress },
@@ -174,6 +351,10 @@ export function getExamineInstruction<
   ResolvedInstructionAccountMeta<
     TAccountMonsters,
     InstructionAccountInputAddress<TAccountMonsters>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountBoard,
+    InstructionAccountInputAddress<TAccountBoard>
   >,
   ResolvedInstructionAccountMeta<
     TAccountSessionToken,
@@ -205,6 +386,7 @@ export function getExamineInstruction<
       isSigner: false,
       isWritable: false,
     },
+    board: { value: input.board ?? null, isSigner: false, isWritable: false },
     sessionToken: {
       value: input.sessionToken ?? null,
       isSigner: false,
@@ -225,6 +407,7 @@ export function getExamineInstruction<
       getAccountMeta("session", accounts.session),
       getAccountMeta("participation", accounts.participation),
       getAccountMeta("monsters", accounts.monsters),
+      getAccountMeta("board", accounts.board),
       getAccountMeta("sessionToken", accounts.sessionToken),
     ],
     data: getExamineInstructionDataEncoder().encode(
@@ -250,6 +433,10 @@ export function getExamineInstruction<
       InstructionAccountInputAddress<TAccountMonsters>
     >,
     ResolvedInstructionAccountMeta<
+      TAccountBoard,
+      InstructionAccountInputAddress<TAccountBoard>
+    >,
+    ResolvedInstructionAccountMeta<
       TAccountSessionToken,
       InstructionAccountInputAddress<TAccountSessionToken>
     >
@@ -268,8 +455,10 @@ export type ParsedExamineInstruction<
     participation: TAccountMetas[2];
     /** Read-only, never Borsh-decoded: owner and discriminator checked here, session in `Monsters`. */
     monsters: TAccountMetas[3];
+    /** leaves. */
+    board: TAccountMetas[4];
     /** MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs. */
-    sessionToken?: TAccountMetas[4] | undefined;
+    sessionToken?: TAccountMetas[5] | undefined;
   };
   data: ExamineInstructionData;
 };
@@ -282,12 +471,12 @@ export function parseExamineInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
 ): ParsedExamineInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 5) {
+  if (instruction.accounts.length < 6) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 5,
+        expectedAccountMetas: 6,
       },
     );
   }
@@ -310,6 +499,7 @@ export function parseExamineInstruction<
       session: getNextAccount(),
       participation: getNextAccount(),
       monsters: getNextAccount(),
+      board: getNextAccount(),
       sessionToken: getNextOptionalAccount(),
     },
     data: getExamineInstructionDataDecoder().decode(instruction.data),
