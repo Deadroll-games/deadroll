@@ -5,6 +5,7 @@ import { arenaMode } from "./game";
 import type { Address } from "@solana/kit";
 import { ACTIVE_MAX, NO_SKILL } from "./skillcheck";
 import { StateKind } from "@deadroll/sdk/session";
+import balance from "./balance.json";
 import { MONSTER_BASE, currentUnit, status, variantKey, type GameSessionAcc, type Party, type ParticipationAcc, type PartyPlayer } from "./game";
 
 /** start_turn ran for the current turn (states ticked, cooldowns counted down, AP granted). */
@@ -27,7 +28,7 @@ export function startTurnFor(p: Party, me: Address | null): TurnStart | null {
   const s = p.session;
   if (!me || status(s) !== "active" || s.core.pendingVrf) return null;
   // Arena update: between the map and an arena only the deaths are finalized.
-  const between = arenaMode(s) === "engaged" || arenaMode(s) === "won";
+  const between = arenaMode(s) === "engaged" || arenaMode(s) === "won" || arenaMode(s) === "retreated";
   if (between && !s.pendingDeaths) return null;
   const unit = currentUnit(s);
   if (unit === null) return null;
@@ -49,14 +50,42 @@ export function startTurnFor(p: Party, me: Address | null): TurnStart | null {
  * TurnTicked for `turnSeq` raise them at once (a use only ever raises a cooldown within a turn).
  */
 /** Arena update: the step between the map and an arena this tab sends (any party member's): enter
- * the engaged pack's arena, or leave a won one once its deaths are final. */
+ * the engaged pack's arena, or leave a won one (patch B: or one the party retreated from) once its
+ * deaths are final. */
 export function arenaStepFor(p: Party, me: Address | null): "enter" | "leave" | null {
   const s = p.session;
   if (!me || status(s) !== "active" || s.core.pendingVrf || s.pendingDeaths) return null;
   const inParty = s.core.dm === me || p.players.some((x) => x.part.player === me);
   if (!inParty) return null;
   const mode = arenaMode(s);
-  return mode === "engaged" ? "enter" : mode === "won" ? "leave" : null;
+  return mode === "engaged" ? "enter" : mode === "won" || mode === "retreated" ? "leave" : null;
+}
+
+/** Patch B: the Retreat or Escape proposal as the site shows it (docs/PARTY_AND_TURNS.md 7.5). */
+export interface ExitVoteView {
+  /** The proposal on the table, `null` = none. */
+  kind: "retreat" | "escape" | null;
+  /** Player slots that voted for it. */
+  voted: number[];
+  /** Living player slots still to vote. */
+  waiting: number[];
+  /** The vote passed: the monsters take their last moves. */
+  leaving: boolean;
+  /** Retreats the party has left (`ArenaTuning::retreats_max`). */
+  retreatsLeft: number;
+}
+export function exitVoteView(s: GameSessionAcc): ExitVoteView {
+  const kind = s.exitKind === 1 ? "retreat" : s.exitKind === 2 ? "escape" : null;
+  const slots = Array.from({ length: s.core.playerCount }, (_, i) => i);
+  const alive = slots.filter((i) => s.aliveMask & (1 << i));
+  const voted = kind ? alive.filter((i) => s.fleeMask & (1 << i)) : [];
+  return {
+    kind,
+    voted,
+    waiting: kind ? alive.filter((i) => !(s.fleeMask & (1 << i))) : [],
+    leaving: s.lastMoves !== 0,
+    retreatsLeft: Math.max(0, balance.arena.retreats_max - s.retreats),
+  };
 }
 
 export function skillCooldowns(part: ParticipationAcc, events: readonly { name: string; data: any }[], unit: number, turnSeq: number): number[] {
