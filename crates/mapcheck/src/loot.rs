@@ -4,13 +4,9 @@
 //! The numbers come from `deadroll_rules::LootTuning` and the registry `Rewards` table: this crate
 //! holds no balance numbers, the caller builds [`LootRules`] and `table_of`.
 
-use deadroll_types::{Cell, MapLayoutDataV2, CHESTS_MAX, NO_TABLE, PARTY_MAX};
+use deadroll_types::{Board, Cell, LayoutCore, CHESTS_CAP, NO_TABLE, PARTY_MAX};
 
-use crate::{
-    path::Reach,
-    tiles::{cell_index, in_bounds, TileRules},
-    MapCheckError,
-};
+use crate::{tiles::TileRules, MapCheckError, Reached};
 
 /// The loot limits of one map tier.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -43,8 +39,8 @@ pub struct MapLoot<R: Fn(u8) -> Option<TableRules>> {
 
 /// The cells of the closed chests: they block movement (patch 11), so the path checks treat
 /// them as walls. Cells past the count are left at the default and ignored by the caller.
-pub fn chest_cells(layout: &MapLayoutDataV2) -> ([Cell; CHESTS_MAX], usize) {
-    let mut cells = [Cell::default(); CHESTS_MAX];
+pub fn chest_cells(layout: &LayoutCore) -> ([Cell; CHESTS_CAP], usize) {
+    let mut cells = [Cell::default(); CHESTS_CAP];
     let mut count = 0;
     for (c, p) in cells.iter_mut().zip(layout.chests()) {
         *c = p.cell();
@@ -69,7 +65,7 @@ pub fn check_tables<R: Fn(u8) -> Option<TableRules>>(
         return Err(E::MinPlayersOutOfRange);
     }
     let count = chest_tables.len();
-    if count > CHESTS_MAX || count > loot.rules.chests as usize {
+    if count > CHESTS_CAP || count > loot.rules.chests as usize {
         return Err(E::TooManyChests);
     }
     let allowed = |id: u8| allowed_table(level_cap, id, loot);
@@ -134,10 +130,9 @@ pub fn check_stash_budget<R: Fn(u8) -> Option<TableRules>>(
 
 /// Chest placement, then [`check_tables`]. `ends` are the entrance and the exit.
 pub(crate) fn check_chests<R: Fn(u8) -> Option<TableRules>>(
-    width: u8,
-    height: u8,
+    board: &Board,
     level_cap: u8,
-    layout: &MapLayoutDataV2,
+    layout: &LayoutCore,
     tiles: &TileRules,
     ends: [Cell; 2],
     loot: &MapLoot<R>,
@@ -148,19 +143,18 @@ pub(crate) fn check_chests<R: Fn(u8) -> Option<TableRules>>(
         return Err(E::MinPlayersOutOfRange);
     }
     let count = layout.chests().count();
-    if count > CHESTS_MAX || count > loot.rules.chests as usize {
+    if count > CHESTS_CAP || count > loot.rules.chests as usize {
         return Err(E::TooManyChests);
     }
 
     let (cells, _) = chest_cells(layout);
-    let mut tables = [NO_TABLE; CHESTS_MAX];
+    let mut tables = [NO_TABLE; CHESTS_CAP];
     for (i, chest) in layout.chests().enumerate() {
         let cell = chest.cell();
-        if !in_bounds(cell, width, height) {
-            return Err(E::ChestOutOfBounds);
-        }
-        if !tiles.is_passable(layout.cells[cell_index(cell.x, cell.y)]) {
-            return Err(E::ChestNotPassable);
+        match board.get(cell) {
+            None => return Err(E::ChestOutOfBounds),
+            Some(b) if !tiles.is_passable(b) => return Err(E::ChestNotPassable),
+            Some(_) => {}
         }
         // A chest on a pack's map cell is the pack's `PackOverlap` (arena update).
         let taken = ends.contains(&cell) || cells[..i].contains(&cell);
@@ -174,14 +168,13 @@ pub(crate) fn check_chests<R: Fn(u8) -> Option<TableRules>>(
 
 /// Every chest has a neighbor (Chebyshev 1) the party can reach: it is opened from there.
 pub(crate) fn check_chest_access(
-    width: u8,
-    height: u8,
-    layout: &MapLayoutDataV2,
-    reach: &Reach,
+    board: &Board,
+    layout: &LayoutCore,
+    reach: &dyn Reached,
 ) -> Result<(), MapCheckError> {
     for chest in layout.chests() {
         let open = neighbors(chest.cell())
-            .filter(|c| in_bounds(*c, width, height))
+            .filter(|c| board.contains(*c))
             .any(|c| reach.contains(c));
         if !open {
             return Err(MapCheckError::ChestUnreachable);

@@ -64,6 +64,7 @@ macro_rules! u8_enum {
 pub mod accounts;
 pub mod consts;
 pub mod enums;
+pub mod map_size;
 pub mod render;
 pub mod seeds;
 // Not glob-exported: `Target`, `Effect` and `Category` are too generic for the crate root.
@@ -72,6 +73,7 @@ pub mod skill;
 pub use accounts::*;
 pub use consts::*;
 pub use enums::*;
+pub use map_size::{Board, LayoutArenas, LayoutCore, LayoutGeom, LayoutSecrets, LAYOUT_V5};
 pub use render::*;
 pub use solana_pubkey::Pubkey;
 

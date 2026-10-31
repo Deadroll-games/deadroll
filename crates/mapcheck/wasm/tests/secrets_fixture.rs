@@ -26,7 +26,7 @@ fn secrets_fixture_is_fresh() {
         |i: u16| -> [u8; 16] { core::array::from_fn(|j| (i as u8).wrapping_mul(31) ^ j as u8) };
 
     // A 10x9 map with packs 1 (6x7 arena) and 4 (8x6, an ambush).
-    let mut packs = [PackLayout::EMPTY; PACKS_MAX];
+    let mut packs = [PackLayout::EMPTY; deadroll_types::PACKS_CAP];
     packs[1] = PackLayout {
         visible: 0,
         x: 3,
@@ -43,7 +43,7 @@ fn secrets_fixture_is_fresh() {
         width: 8,
         height: 6,
     };
-    let leaves = Leaves::new(10, 9, &packs);
+    let leaves = Leaves::new(10, 9, 0, &packs);
 
     let mut roster = PackRoster {
         count: 2,

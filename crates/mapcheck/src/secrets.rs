@@ -18,8 +18,8 @@
 
 use deadroll_types::{Cell, NO_SPAWN};
 use deadroll_types::{
-    CellSecret, PackLayout, PackRoster, SecretKind, Spawn, ARENA_SIDE_MAX, PACKS_MAX, PACK_LEAVES,
-    SECRET_DEPTH_MAX, SECRET_SALT_LEN, SECRET_TYPES, SPAWN_ELITE,
+    CellSecret, PackLayout, PackRoster, SecretKind, Spawn, ARENA_SIDE_MAX, CLASS_PACKS,
+    MAP_CLASSES, PACKS_CAP, SECRET_DEPTH_CAP, SECRET_SALT_LEN, SECRET_TYPES, SPAWN_ELITE,
 };
 
 use crate::{roster::Role, tiles::TileRules, MapCheckError};
@@ -70,7 +70,7 @@ pub const fn depth(count: u16) -> usize {
 
 /// `leaf` is leaf `index` of the tree of `count` leaves with this `root`.
 pub fn verify(root: &Hash, leaf: Hash, index: u16, count: u16, proof: &[Hash]) -> bool {
-    if index >= count || proof.len() != depth(count) || proof.len() > SECRET_DEPTH_MAX {
+    if index >= count || proof.len() != depth(count) || proof.len() > SECRET_DEPTH_CAP {
         return false;
     }
     let mut at = index;
@@ -124,24 +124,31 @@ pub struct Leaves {
     pub width: u8,
     pub height: u8,
     /// Each pack's arena size (`0` for an unused pack number) and its first leaf.
-    pub arena_w: [u8; PACKS_MAX],
-    pub arena_h: [u8; PACKS_MAX],
-    pub arena_at: [u16; PACKS_MAX],
+    pub arena_w: [u8; PACKS_CAP],
+    pub arena_h: [u8; PACKS_CAP],
+    pub arena_at: [u16; PACKS_CAP],
     pub count: u16,
+    /// Patch D: the leaves before the map cells, one per pack number of the size class.
+    pub pack_leaves: u16,
 }
 
 impl Leaves {
-    pub fn new(width: u8, height: u8, packs: &[PackLayout; PACKS_MAX]) -> Leaves {
-        let mut at = PACK_LEAVES as u16 + width as u16 * height as u16;
+    /// The numbering of a `width` x `height` map of size class `class` with these packs (patch
+    /// D: `CLASS_PACKS[class]` pack leaves; a Small map numbers as before).
+    pub fn new(width: u8, height: u8, class: u8, packs: &[PackLayout; PACKS_CAP]) -> Leaves {
+        let class_packs = CLASS_PACKS[(class as usize).min(MAP_CLASSES - 1)];
+        let pack_leaves = class_packs as u16;
+        let mut at = pack_leaves + width as u16 * height as u16;
         let mut out = Leaves {
             width,
             height,
-            arena_w: [0; PACKS_MAX],
-            arena_h: [0; PACKS_MAX],
-            arena_at: [0; PACKS_MAX],
+            arena_w: [0; PACKS_CAP],
+            arena_h: [0; PACKS_CAP],
+            arena_at: [0; PACKS_CAP],
             count: 0,
+            pack_leaves,
         };
-        for (n, p) in packs.iter().enumerate() {
+        for (n, p) in packs.iter().enumerate().take(class_packs) {
             if !p.is_used() {
                 continue;
             }
@@ -161,9 +168,9 @@ impl Leaves {
     /// The leaf of a place (`None` outside the map, the arena, or for an unused pack's arena).
     pub fn of(&self, board: Board) -> Option<u16> {
         match board {
-            Board::Pack(n) => ((n as usize) < PACK_LEAVES).then_some(n as u16),
+            Board::Pack(n) => ((n as u16) < self.pack_leaves).then_some(n as u16),
             Board::Map(c) => (c.x < self.width && c.y < self.height)
-                .then(|| PACK_LEAVES as u16 + c.y as u16 * self.width as u16 + c.x as u16),
+                .then(|| self.pack_leaves + c.y as u16 * self.width as u16 + c.x as u16),
             Board::Arena(n, c) => {
                 let n = n as usize;
                 let (w, h) = (*self.arena_w.get(n)?, *self.arena_h.get(n)?);
@@ -177,10 +184,10 @@ impl Leaves {
         if leaf >= self.count {
             return None;
         }
-        if (leaf as usize) < PACK_LEAVES {
+        if leaf < self.pack_leaves {
             return Some(Board::Pack(leaf as u8));
         }
-        let map = leaf - PACK_LEAVES as u16;
+        let map = leaf - self.pack_leaves;
         let cells = self.width as u16 * self.height as u16;
         if map < cells {
             let w = self.width as u16;
@@ -189,7 +196,7 @@ impl Leaves {
                 y: (map / w) as u8,
             }));
         }
-        for n in 0..PACKS_MAX {
+        for n in 0..PACKS_CAP {
             let (w, h) = (self.arena_w[n] as u16, self.arena_h[n] as u16);
             let at = self.arena_at[n];
             if w != 0 && leaf >= at && leaf < at + w * h {
@@ -271,7 +278,7 @@ pub fn check_declared(
 }
 
 /// The bit of every used pack with no monster on the map (an ambush pack).
-pub fn ambush_mask(packs: &[PackLayout; PACKS_MAX]) -> u8 {
+pub fn ambush_mask(packs: &[PackLayout; PACKS_CAP]) -> u64 {
     packs
         .iter()
         .enumerate()
@@ -297,7 +304,7 @@ pub fn check_secret(
     secret: &CellSecret,
     tiles: &TileRules,
     limits: &SecretLimits,
-    ambush_packs: u8,
+    ambush_packs: u64,
     table_ok: impl Fn(u8) -> Result<(), MapCheckError>,
 ) -> Result<(), MapCheckError> {
     use MapCheckError as E;
@@ -336,7 +343,7 @@ pub fn check_secret(
             if secret.b | secret.c != 0 {
                 return Err(E::SecretInvalid);
             }
-            if secret.a as usize >= PACKS_MAX || ambush_packs & (1 << secret.a) == 0 {
+            if secret.a as usize >= PACKS_CAP || ambush_packs & (1 << secret.a) == 0 {
                 return Err(E::AmbushPackInvalid);
             }
             free()?;
@@ -365,7 +372,10 @@ pub fn check_secret(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use deadroll_types::{cell_byte, Facing, TileKind};
+    use deadroll_types::{
+        cell_byte, Facing, TileKind, MAP_CELLS_CAP, PACKS_MAX, PACK_LEAVES, SECRET_DEPTH_MAX,
+        SECRET_LEAVES_CAP,
+    };
 
     const MAP: [u8; 32] = [7; 32];
 
@@ -497,10 +507,10 @@ mod tests {
 
     #[test]
     fn leaves_number_packs_map_then_arenas() {
-        let mut packs = [PackLayout::EMPTY; PACKS_MAX];
+        let mut packs = [PackLayout::EMPTY; PACKS_CAP];
         packs[1] = pack(6, 7);
         packs[4] = pack(8, 6);
-        let l = Leaves::new(10, 9, &packs);
+        let l = Leaves::new(10, 9, 0, &packs);
         let map0 = PACK_LEAVES as u16;
         assert_eq!(l.count, map0 + 90 + 42 + 48);
         assert_eq!(l.of(Board::Pack(3)), Some(3));
@@ -519,6 +529,35 @@ mod tests {
             assert_eq!(l.of(b), Some(leaf));
         }
         assert_eq!(l.board(l.count), None);
+    }
+
+    /// Patch D: a Dungeon has 40 pack leaves, its 143x143 cells, then its arenas; a pack number
+    /// past the class is no leaf.
+    #[test]
+    fn a_dungeon_numbers_its_class_packs() {
+        let mut packs = [PackLayout::EMPTY; PACKS_CAP];
+        for p in packs.iter_mut() {
+            *p = pack(12, 12);
+        }
+        let l = Leaves::new(143, 143, 3, &packs);
+        assert_eq!(l.pack_leaves, 40);
+        assert_eq!(l.count as usize, SECRET_LEAVES_CAP);
+        assert_eq!(depth(l.count), SECRET_DEPTH_CAP);
+        assert_eq!(l.of(Board::Pack(39)), Some(39));
+        assert_eq!(l.of(Board::Pack(40)), None);
+        assert_eq!(
+            l.of(Board::Map(Cell { x: 142, y: 142 })),
+            Some(40 + MAP_CELLS_CAP as u16 - 1)
+        );
+        assert_eq!(l.board(40), Some(Board::Map(Cell { x: 0, y: 0 })));
+        assert_eq!(
+            l.board(l.count - 1),
+            Some(Board::Arena(39, Cell { x: 11, y: 11 }))
+        );
+        // A Medium map stores 16 pack numbers: the 17th pack is not numbered.
+        let m = Leaves::new(72, 72, 1, &packs);
+        assert_eq!(m.pack_leaves, 16);
+        assert_eq!(m.count, 16 + 72 * 72 + 16 * 144);
     }
 
     #[test]
@@ -564,7 +603,7 @@ mod tests {
             check_declared(&[1, 1, 0, 0], &LIMITS, 0),
             Err(MapCheckError::AmbushUnlinked)
         );
-        let mut packs = [PackLayout::EMPTY; PACKS_MAX];
+        let mut packs = [PackLayout::EMPTY; PACKS_CAP];
         packs[2] = pack(6, 6);
         packs[2].visible = NO_SPAWN;
         packs[3] = pack(6, 6);

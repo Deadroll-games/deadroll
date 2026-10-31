@@ -96,3 +96,38 @@ pub const SECRET_LEAVES_MAX: usize = PACK_LEAVES + MAP_CELLS + PACKS_MAX * ARENA
 pub const SECRET_DEPTH_MAX: usize = 12;
 /// `PackLayout.visible` of an ambush pack: no monster on the map.
 pub const NO_SPAWN: u8 = 0xFF;
+// Patch D: map sizes (docs/MAP_DESCRIPTION.md 17.6). The size class of a map follows from its
+// area (`deadroll_rules::BalanceConfig.map_size`); each class has its own storage caps, and a
+// `MapLayout` is as big as its class and sides need (`map_size::LayoutGeom`).
+/// Size classes: Small, Medium, Big, Dungeon.
+pub const MAP_CLASSES: usize = 4;
+/// Largest map side of any class.
+pub const MAP_SIDE_CAP: usize = 143;
+/// Most cells of any map (the Dungeon class).
+pub const MAP_CELLS_CAP: usize = MAP_SIDE_CAP * MAP_SIDE_CAP;
+/// Pack numbers a map of each class can store (its arenas, threats, visible monsters, rosters).
+pub const CLASS_PACKS: [usize; MAP_CLASSES] = [8, 16, 24, 40];
+/// Visible chests a map of each class can store.
+pub const CLASS_CHESTS: [usize; MAP_CLASSES] = [4, 8, 12, 16];
+/// Secrets a map of each class can hold (the encrypted list, the session's found list).
+pub const CLASS_SECRETS: [usize; MAP_CLASSES] = [16, 48, 80, 96];
+/// Bytes of the DM's encrypted secrets a map of each class can store.
+pub const CLASS_BLOB: [usize; MAP_CLASSES] = [800, 1600, 2400, 3600];
+/// Pack numbers of the largest class: a session stores this many.
+pub const PACKS_CAP: usize = CLASS_PACKS[MAP_CLASSES - 1];
+/// Visible chests of the largest class.
+pub const CHESTS_CAP: usize = CLASS_CHESTS[MAP_CLASSES - 1];
+/// Points of the largest class: the entrance, the exit and the chests.
+pub const POINTS_CAP: usize = 2 + CHESTS_CAP;
+/// Secrets of the largest class.
+pub const SECRETS_CAP: usize = CLASS_SECRETS[MAP_CLASSES - 1];
+/// Monsters one session can hold revealed: every pack's roster on the largest map.
+pub const MONSTERS_CAP: usize = 80;
+/// Leaves of the largest map: its packs, its cells and every arena at full size.
+pub const SECRET_LEAVES_CAP: usize = PACKS_CAP + MAP_CELLS_CAP + PACKS_CAP * ARENA_CELLS;
+/// Hashes in the longest proof of any map (`SECRET_LEAVES_CAP` padded to a power of two).
+pub const SECRET_DEPTH_CAP: usize = 15;
+/// `u64` words of one map row in the reachability check (`MAP_SIDE_CAP` bits).
+pub const MAP_ROW_WORDS: usize = MAP_SIDE_CAP.div_ceil(64);
+/// Hidden stashes one map can hold (patch D: the session keeps them after the visible chests).
+pub const STASHES_CAP: usize = 16;

@@ -6,55 +6,58 @@
 //! [`split`] keeps only the visible monsters in the public list (renumbering `visible`) and gives
 //! each pack's composition with the visible monster first, then the others in list order; the
 //! program checks that order when the pack is revealed ([`crate::arena::check_roster`]).
+//!
+//! Patch D: a design of any size class ([`MapParts`] with every spawn), checked off-chain only
+//! (the reachability check runs on the caller's stack, [`crate::with_reach`]).
 
 use deadroll_types::{
-    Cell, FoundSecret, MapArenasData, MapLayoutDataV2, MapSecretsData, PackLayout, PackRoster,
-    PointKind, SecretKind, Spawn, ARENA_MONSTERS_MAX, CHESTS_MAX, NO_SPAWN, NO_TABLE, PACKS_MAX,
-    SECRETS_MAX, SECRET_LEAVES_MAX, SECRET_TYPES,
+    Cell, FoundSecret, LayoutArenas, LayoutCore, LayoutSecrets, PackLayout, PackRoster, PointKind,
+    SecretKind, Spawn, ARENA_MONSTERS_MAX, CHESTS_CAP, CLASS_SECRETS, MAP_CLASSES, NO_SPAWN,
+    NO_TABLE, PACKS_CAP, SECRETS_CAP, SECRET_LEAVES_CAP, SECRET_TYPES,
 };
 
 use crate::{
     arena::{arena_byte, check_roster, ArenaLimits},
-    check_map, check_public,
-    limits::tier_limits,
+    check_design_map, check_public_map,
+    limits::{tier_limits, SizeScale},
     loot::{allowed_table, check_stash_budget, MapLoot, TableRules},
     roster::{RosterTotals, SpawnRules},
     secrets::{check_secret, threat, Board, Leaves, SecretLimits, SecretPlace, ThreatWeights},
-    tiles::{cell_index, TileRules},
-    MapCheckError,
+    tiles::TileRules,
+    with_reach, MapCheckError, MapParts,
 };
 
 /// A design split for publishing.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Split {
-    /// The layout with only the visible monsters in `spawns`.
-    pub public: MapLayoutDataV2,
+    /// The points and boss table, with only the visible monsters in `spawns`.
+    pub public: LayoutCore,
     /// The packs with `visible` into the public spawns (`NO_SPAWN` for an ambush pack).
-    pub packs: [PackLayout; PACKS_MAX],
+    pub packs: [PackLayout; PACKS_CAP],
     /// Each pack's composition (`count == 0` for an unused pack number).
-    pub rosters: [PackRoster; PACKS_MAX],
+    pub rosters: [PackRoster; PACKS_CAP],
     /// Each pack's threat (0 for an unused pack number).
-    pub threat: [u8; PACKS_MAX],
+    pub threat: [u8; PACKS_CAP],
 }
 
-/// Splits a design (module docs). `packs` are the design's packs, `visible` into
-/// `layout.spawns`.
+/// Splits a design (module docs). `spawns` are every monster, `packs` the design's packs with
+/// `visible` into `spawns`; `core` gives the points and the boss table.
 pub fn split(
-    layout: &MapLayoutDataV2,
-    packs: &[PackLayout; PACKS_MAX],
+    core: &LayoutCore,
+    spawns: &[Spawn],
+    packs: &[PackLayout; PACKS_CAP],
     template_of: impl Fn(u8) -> Option<SpawnRules>,
     weights: ThreatWeights,
 ) -> Result<Split, MapCheckError> {
     use MapCheckError as E;
-    let spawns = &layout.spawns[..(layout.spawn_count as usize).min(layout.spawns.len())];
-    let mut public = layout.clone();
-    public.spawns = [Spawn::default(); deadroll_types::SPAWNS_MAX];
+    let mut public = core.clone();
+    public.spawns = [Spawn::default(); PACKS_CAP];
     public.spawn_count = 0;
     let mut out = Split {
         public,
         packs: *packs,
-        rosters: [PackRoster::default(); PACKS_MAX],
-        threat: [0; PACKS_MAX],
+        rosters: [PackRoster::default(); PACKS_CAP],
+        threat: [0; PACKS_CAP],
     };
     for (n, p) in packs.iter().enumerate() {
         if !p.is_used() {
@@ -92,17 +95,16 @@ pub fn split(
     Ok(out)
 }
 
-/// Every rule of a design: the whole layout ([`check_map`]), its public part ([`check_public`]),
-/// each pack as the program checks it when revealed and the map's totals, and every secret
-/// (`secrets`: the cells that hide something, by leaf) against the declared counts, its place
-/// and the reward budget. Returns the split to publish.
+/// Every rule of a design: the whole layout ([`check_design_map`]), its public part
+/// ([`check_public_map`]), each pack as the program checks it when revealed and the map's totals,
+/// and every secret (`secrets`: the cells that hide something, by leaf) against the declared
+/// counts, its place and the reward budget. `parts.spawns` are every monster; `secret_limits`
+/// and `loot` are the tier's at this size. Returns the split to publish.
 #[allow(clippy::too_many_arguments)]
 pub fn check_design<R: Fn(u8) -> Option<TableRules>>(
-    width: u8,
-    height: u8,
+    parts: &MapParts,
     tier: u8,
-    layout: &MapLayoutDataV2,
-    arenas: &MapArenasData,
+    scale: SizeScale,
     declared: &[u8; SECRET_TYPES],
     secrets: &[FoundSecret],
     arena_limits: ArenaLimits,
@@ -113,81 +115,91 @@ pub fn check_design<R: Fn(u8) -> Option<TableRules>>(
     loot: &MapLoot<R>,
 ) -> Result<Split, MapCheckError> {
     use MapCheckError as E;
-    check_map(
-        width,
-        height,
-        tier,
-        layout,
-        arenas,
-        arena_limits,
-        tiles,
-        &template_of,
-        loot,
-    )?;
-    let out = split(layout, &arenas.packs, &template_of, weights)?;
-    let mut public_arenas = arenas.clone();
-    public_arenas.packs = out.packs;
-    let mut public_secrets = MapSecretsData::EMPTY;
-    public_secrets.threat = out.threat;
-    public_secrets.declared = *declared;
-    check_public(
-        width,
-        height,
-        tier,
-        &out.public,
-        &public_arenas,
-        &public_secrets,
-        arena_limits,
-        secret_limits,
-        tiles,
-        &template_of,
-        loot,
-    )?;
-
-    let limits = tier_limits(tier).ok_or(E::TierOutOfRange)?;
-    let mut totals = RosterTotals::default();
-    for (n, p) in out.packs.iter().enumerate() {
-        if !p.is_used() {
-            continue;
-        }
-        let visible = (p.visible != NO_SPAWN).then(|| &out.public.spawns[p.visible as usize]);
-        let count = check_roster(
+    with_reach(&parts.board, parts.core, tiles, |reach| {
+        check_design_map(
+            parts,
             tier,
-            n as u8,
-            &out.rosters[n],
-            visible,
-            &public_arenas,
+            scale,
+            arena_limits,
             tiles,
             &template_of,
-            weights,
-            out.threat[n],
+            loot,
+            reach,
         )?;
-        totals.add(&count, &limits)?;
-    }
-    totals.finish()?;
+        let out = split(
+            parts.core,
+            parts.spawns,
+            &parts.arenas.packs,
+            &template_of,
+            weights,
+        )?;
+        let mut public_arenas = parts.arenas.clone();
+        public_arenas.packs = out.packs;
+        let mut public_secrets = LayoutSecrets::EMPTY;
+        public_secrets.threat = out.threat;
+        public_secrets.declared = *declared;
+        let public = MapParts {
+            board: parts.board,
+            core: &out.public,
+            spawns: out.public.spawn_list(),
+            arenas: &public_arenas,
+        };
+        check_public_map(
+            &public,
+            tier,
+            scale,
+            &public_secrets,
+            arena_limits,
+            secret_limits,
+            tiles,
+            &template_of,
+            loot,
+            reach,
+        )?;
 
-    check_cells(
-        width,
-        height,
-        &out,
-        &public_arenas,
-        declared,
-        secrets,
-        secret_limits,
-        tiles,
-        limits.level_max,
-        loot,
-    )?;
-    Ok(out)
+        let limits = tier_limits(tier).ok_or(E::TierOutOfRange)?.scaled(scale);
+        let mut totals = RosterTotals::default();
+        for (n, p) in out.packs.iter().enumerate() {
+            if !p.is_used() {
+                continue;
+            }
+            let visible = (p.visible != NO_SPAWN).then(|| &out.public.spawns[p.visible as usize]);
+            let count = check_roster(
+                tier,
+                n as u8,
+                &out.rosters[n],
+                visible,
+                &public_arenas,
+                tiles,
+                &template_of,
+                weights,
+                out.threat[n],
+            )?;
+            totals.add(&count, &limits)?;
+        }
+        totals.finish()?;
+
+        check_cells(
+            &public,
+            scale,
+            &out,
+            declared,
+            secrets,
+            secret_limits,
+            tiles,
+            limits.level_max,
+            loot,
+        )?;
+        Ok(out)
+    })?
 }
 
 /// The secrets of a design: places, kinds, counts, one ambush per ambush pack, the budget.
 #[allow(clippy::too_many_arguments)]
 fn check_cells<R: Fn(u8) -> Option<TableRules>>(
-    width: u8,
-    height: u8,
+    public: &MapParts,
+    scale: SizeScale,
     out: &Split,
-    arenas: &MapArenasData,
     declared: &[u8; SECRET_TYPES],
     secrets: &[FoundSecret],
     limits: &SecretLimits,
@@ -196,15 +208,17 @@ fn check_cells<R: Fn(u8) -> Option<TableRules>>(
     loot: &MapLoot<R>,
 ) -> Result<(), MapCheckError> {
     use MapCheckError as E;
-    if secrets.len() > SECRETS_MAX {
+    let class = (scale.class as usize).min(MAP_CLASSES - 1);
+    if secrets.len() > CLASS_SECRETS[class] {
         return Err(E::TooManySecrets);
     }
-    let leaves = Leaves::new(width, height, &out.packs);
+    let (width, height) = (public.board.width, public.board.height);
+    let leaves = Leaves::new(width, height, scale.class, &out.packs);
     let ambush = crate::secrets::ambush_mask(&out.packs);
-    let mut seen = [0u8; SECRET_LEAVES_MAX.div_ceil(8)];
+    let mut seen = [0u8; SECRET_LEAVES_CAP.div_ceil(8)];
     let mut counts = [0u8; SECRET_TYPES];
-    let mut linked = 0u8;
-    let mut stashes = [NO_TABLE; SECRETS_MAX];
+    let mut linked = 0u64;
+    let mut stashes = [NO_TABLE; SECRETS_CAP];
     let mut stash_count = 0;
     for f in secrets {
         let board = leaves.board(f.leaf).ok_or(E::SecretInvalid)?;
@@ -214,11 +228,11 @@ fn check_cells<R: Fn(u8) -> Option<TableRules>>(
             return Err(E::DuplicateSecret);
         }
         seen[f.leaf as usize / 8] |= bit;
-        let place = place_of(board, &out.public, arenas, &out.packs);
+        let place = place_of(board, &public.board, &out.public, public.arenas, &out.packs);
         check_secret(&place, &f.secret, tiles, limits, ambush, |id| {
             allowed_table(level_cap, id, loot).map(|_| ())
         })?;
-        counts[k] += 1;
+        counts[k] = counts[k].saturating_add(1);
         match f.secret.kind {
             SecretKind::Ambush => {
                 if linked & (1 << f.secret.a) != 0 {
@@ -241,9 +255,9 @@ fn check_cells<R: Fn(u8) -> Option<TableRules>>(
             return Err(E::TooFewSecrets);
         }
     }
-    let mut chests = [NO_TABLE; CHESTS_MAX];
+    let mut chests = [NO_TABLE; CHESTS_CAP];
     let mut chest_count = 0;
-    for c in out.public.chests().take(CHESTS_MAX) {
+    for c in out.public.chests().take(CHESTS_CAP) {
         chests[chest_count] = c.data;
         chest_count += 1;
     }
@@ -260,14 +274,15 @@ fn check_cells<R: Fn(u8) -> Option<TableRules>>(
 /// entrance, the exit, a visible chest or a pack's map cell.
 pub fn place_of(
     board: Board,
-    public: &MapLayoutDataV2,
-    arenas: &MapArenasData,
-    packs: &[PackLayout; PACKS_MAX],
+    map: &deadroll_types::Board,
+    public: &LayoutCore,
+    arenas: &LayoutArenas,
+    packs: &[PackLayout; PACKS_CAP],
 ) -> SecretPlace {
     match board {
         Board::Map(c) => SecretPlace {
             board,
-            byte: public.cells[cell_index(c.x, c.y)],
+            byte: map.byte(c.x as usize, c.y as usize),
             occupied: occupied(c, public, packs),
         },
         Board::Arena(n, c) => SecretPlace {
@@ -285,11 +300,8 @@ pub fn place_of(
 
 /// A map cell taken by a point (the entrance, the exit, a visible chest) or a pack's visible
 /// monster.
-pub fn occupied(c: Cell, public: &MapLayoutDataV2, packs: &[PackLayout; PACKS_MAX]) -> bool {
-    let ends = [
-        public.entrance().unwrap_or(c),
-        public.exit().unwrap_or(c),
-    ];
+pub fn occupied(c: Cell, public: &LayoutCore, packs: &[PackLayout; PACKS_CAP]) -> bool {
+    let ends = [public.entrance().unwrap_or(c), public.exit().unwrap_or(c)];
     let chests = public
         .point_list()
         .iter()
@@ -304,7 +316,7 @@ pub fn occupied_cell(
     c: Cell,
     ends: [Cell; 2],
     mut chests: impl Iterator<Item = Cell>,
-    packs: &[PackLayout; PACKS_MAX],
+    packs: &[PackLayout; PACKS_CAP],
 ) -> bool {
     ends.contains(&c)
         || chests.any(|p| p == c)

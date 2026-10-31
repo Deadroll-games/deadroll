@@ -38,12 +38,14 @@ use deadroll_mapcheck::{
     loot::MapLoot,
     secrets::{Board, Leaves},
     tiles::cell_index,
+    MapParts,
 };
 use deadroll_rules::{loot::map_rules, registry::Registry, tiles::tile_rules, BalanceConfig};
 use deadroll_types::{
-    cell_byte, Biome, Cell, CellSecret, Facing, FoundSecret, MapArenasData, MapLayoutDataV2,
-    MapPoint, PackLayout, PointKind, Pubkey, SecretKind, Spawn, TileKind, ARENA_SIDE_MAX,
-    CHESTS_MAX, MAP_CELLS, POINTS_MAX, SECRET_TYPES, SPAWNS_MAX,
+    cell_byte, Biome, Board as Grid, Cell, CellSecret, Facing, FoundSecret, LayoutArenas,
+    LayoutCore, MapArenasData, MapLayoutDataV2, MapPoint, PackLayout, PointKind, Pubkey,
+    SecretKind, Spawn, TileKind, ARENA_SIDE_MAX, CHESTS_MAX, MAP_CELLS, MAP_MAX, POINTS_MAX,
+    SECRET_TYPES, SPAWNS_MAX,
 };
 use serde_json::Value;
 
@@ -228,7 +230,7 @@ fn load_secrets(
     height: u8,
     arenas: &MapArenasData,
 ) -> (Vec<FoundSecret>, [u8; SECRET_TYPES]) {
-    let leaves = Leaves::new(width, height, &arenas.packs);
+    let leaves = Leaves::new(width, height, 0, &LayoutArenas::from_v1(arenas).packs);
     let mut declared = [0u8; SECRET_TYPES];
     let mut out = Vec::new();
     for s in json["secrets"].as_array().map_or(&[][..], |v| v.as_slice()) {
@@ -274,16 +276,33 @@ fn every_preset_passes_the_builder_rules() {
                 rules: map_rules(&cfg.loot, tier),
                 table_of: |id: u8| reg.reward_table(id).map(|t| t.rules()),
             };
+            let class = cfg.map_size.class_of(width, height).expect("a size class");
+            let loot = MapLoot {
+                rules: cfg.map_size.loot(loot.rules, class),
+                ..loot
+            };
+            let core = LayoutCore::from_v2(&layout);
+            let arenas = LayoutArenas::from_v1(&arenas);
+            let parts = MapParts {
+                board: Grid {
+                    width,
+                    height,
+                    stride: MAP_MAX,
+                    cells: &layout.cells,
+                },
+                core: &core,
+                spawns: &layout.spawns[..layout.spawn_count as usize],
+                arenas: &arenas,
+            };
             let verdict = check_design(
-                width,
-                height,
+                &parts,
                 tier,
-                &layout,
-                &arenas,
+                cfg.map_size.scale(class),
                 &declared,
                 &secrets,
                 cfg.arena.limits(),
-                &cfg.secrets.limits(tier).expect("tier"),
+                &cfg.map_size
+                    .secrets(cfg.secrets.limits(tier).expect("tier"), class),
                 cfg.secrets.threat(),
                 &tiles,
                 |id| reg.spawn_rules(id, &cfg.monsters),
