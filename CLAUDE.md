@@ -141,6 +141,7 @@ Keep command output short, it fills the context:
 - `delegate-to-grok`: handing a bounded task to the Grok CLI and reviewing the result.
 - `deploy`: local deploy, devnet upgrade, smoke test, build rules for deploy.
 - `docs-pass`: proposing changes to `docs/` in a copy for the user.
+- `pr-check`: before a PR and every push, run locally all CI checks, then watch CI until green.
 
 ## 8. What is live
 
@@ -165,4 +166,5 @@ Next: session key in one transaction, loot, craft, city.
 2. Plan in 5-10 lines (files, accounts, CPI, tests) and post it before coding.
 3. Implement, test, fix until green. Delegate bounded subtasks to Grok when they are faster there.
 4. Conventional Commits: `feat(session): attack instruction`. Open a PR, list what changed in `crates/types` and `CONTRACTS.md`, and say "needs devnet upgrade" if programs changed.
+   Before a PR and before every push run skill `pr-check`; a PR without green CI is not ready.
 5. Instructions for the user (dashboards, manual steps) go in the chat, never in the PR or repo files.
