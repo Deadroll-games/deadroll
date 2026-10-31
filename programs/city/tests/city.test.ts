@@ -15,7 +15,8 @@ import { existsSync, readFileSync } from "node:fs";
 import anchor from "@anchor-lang/core";
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
 import { MPL_CORE_PROGRAM, PROGRAMS, VRF } from "@deadroll/sdk";
-import { layoutBytes, loadMapPreset, presetPoints } from "../../../tools/scripts/lib/demo-map.ts";
+import { FACINGS, layoutBytes, loadMapPreset, presetPoints, presetSecrets, secretChunks } from "../../../tools/scripts/lib/demo-map.ts";
+import { address as kitAddress, createKeyPairSignerFromBytes } from "@solana/kit";
 import { extOf } from "../../../tests/skill_ext.ts";
 
 const { AnchorProvider, BN, EventParser, Program } = anchor;
@@ -221,12 +222,22 @@ async function finalizedMap(dm: Keypair): Promise<{ map: PublicKey; layout: Publ
     .signers([dm])
     .rpc();
   await mapProgram.methods.writeLayout(0, Buffer.from(layoutBytes(preset))).accountsStrict(edit).signers([dm]).rpc();
-  await mapProgram.methods.writeSpawns(preset.spawns).accountsStrict(edit).signers([dm]).rpc();
+  // Patch C: the visible monsters in the open, the rest under the root (arena update: each pack's
+  // arena).
+  const { design, commitment, blob } = await presetSecrets(preset, kitAddress(map.toBase58()), await createKeyPairSignerFromBytes(dm.secretKey));
+  await mapProgram.methods.writeSpawns(design.spawns).accountsStrict(edit).signers([dm]).rpc();
   const kinds = [e("chest"), e("entrance"), e("exit")];
   const points = presetPoints(preset).map((p) => ({ ...p, kind: kinds[p.kind] }));
   await mapProgram.methods.writePoints(points, preset.bossTable).accountsStrict(edit).signers([dm]).rpc();
+  for (const pk of design.packs) {
+    const record = { visible: pk.visible, x: pk.x, y: pk.y, facing: e(FACINGS[pk.facing].toLowerCase()), width: pk.width, height: pk.height };
+    await mapProgram.methods.writeArena(pk.pack, record, Buffer.from(pk.cells)).accountsStrict(edit).signers([dm]).rpc();
+  }
+  for (const c of secretChunks(blob, design)) {
+    await mapProgram.methods.writeSecrets(c.offset, Buffer.from(c.bytes), c.len, c.threat, c.declared).accountsStrict(edit).signers([dm]).rpc();
+  }
   await mapProgram.methods
-    .finalizeMap(new Array(32).fill(0))
+    .finalizeMap(Array.from(commitment.root))
     .accountsStrict({
       ...edit,
       bestiary: registryTable("bestiary"),

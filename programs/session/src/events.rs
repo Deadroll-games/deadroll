@@ -574,3 +574,62 @@ pub struct ArenaRetreated {
     pub retreats: u8,
     pub dead_spawns: u32,
 }
+
+/// Patch C: steps or a look uncovered `count` cells the DM must reveal before the next action
+/// (docs/MAP_DESCRIPTION.md 8.5); `slot` is the player who uncovered them.
+#[event]
+pub struct RevealsOwed {
+    pub session: Pubkey,
+    pub slot: u8,
+    pub count: u8,
+}
+
+/// Patch C: the DM revealed leaf `leaf` and its contents (`deadroll_types::SecretKind` as `kind`).
+/// `audit`: in the final audit, without effects.
+#[event]
+pub struct CellRevealed {
+    pub session: Pubkey,
+    pub leaf: u16,
+    pub kind: u8,
+    pub a: u8,
+    pub b: u8,
+    pub c: u8,
+    pub audit: bool,
+}
+
+/// Patch C: a revealed trap hit player `slot` for `damage` (no dice, no resistances).
+#[event]
+pub struct TrapTriggered {
+    pub session: Pubkey,
+    pub slot: u8,
+    pub damage: u8,
+    pub hp: u32,
+}
+
+/// Patch C: the DM revealed the composition of pack `pack` (`count` monsters, its threat checked).
+#[event]
+pub struct PackRevealed {
+    pub session: Pubkey,
+    pub pack: u8,
+    pub count: u8,
+    pub threat: u8,
+    pub audit: bool,
+}
+
+/// Patch C: player `slot` examined a cell next to them (`examine`).
+#[event]
+pub struct CellExamined {
+    pub session: Pubkey,
+    pub slot: u8,
+    pub x: u8,
+    pub y: u8,
+    pub action_points: u8,
+}
+
+/// Patch C: an ambush trap took the party toward pack `pack`; the monsters move first.
+#[event]
+pub struct AmbushSprung {
+    pub session: Pubkey,
+    pub pack: u8,
+    pub slot: u8,
+}

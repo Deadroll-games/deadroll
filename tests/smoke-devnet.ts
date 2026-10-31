@@ -21,6 +21,8 @@ import { randomBytes } from "node:crypto";
 import { MAP_STRIDE, Tile, cellByte } from "../tools/scripts/lib/demo-map.ts";
 import { newSkill } from "./skill_ext.ts";
 import { MPL_CORE_PROGRAM, PROGRAMS, VRF } from "@deadroll/sdk";
+import { Secret, commit, declaredOf, deriveKeys, sealSecrets, splitDesign, threat as threatOf, Leaves } from "@deadroll/sdk/secrets";
+import { createHash } from "node:crypto";
 
 const { AnchorProvider, BN, EventParser, Program } = anchor;
 
@@ -226,16 +228,28 @@ const spawns = CAMP.map((s) => ({ bestiaryId: s.id, x: s.x, y: s.y, level: 1, sk
 // Patch 11: the DM's settings (devnet takes at least 10 minutes to settle).
 await mapProgram.methods.createMap(index, 16, 16, 1, { minPlayers: 1, chestRadius: 3, settleTimeoutSecs: 600, biome: 0 }).accountsStrict({ ...edit, systemProgram: SystemProgram.programId }).signers([dm]).rpc();
 await mapProgram.methods.writeLayout(0, Buffer.from(tiles)).accountsStrict(edit).signers([dm]).rpc();
-await mapProgram.methods.writeSpawns(spawns).accountsStrict(edit).signers([dm]).rpc();
+// Patch C: only the visible monster of each pack is public; the rest and one trap (tier 1 needs
+// one) go under the root, encrypted on chain with a key the DM's wallet derives.
+const records = Array.from({ length: 8 }, (_, n) => (CAMP.some((x) => x.pack === n) ? { visible: CAMP.findIndex((x) => x.pack === n), x: 0, y: 0, facing: 0, width: ARENA_SIDE, height: ARENA_SIDE } : null));
+const split = splitDesign(spawns, records);
+const shapes = records.map((r) => (r ? { width: r.width, height: r.height } : null));
+const cells = [{ leaf: new Leaves(16, 16, shapes).of({ kind: "map", x: 14, y: 1 })!, secret: { kind: Secret.Trap, a: 4, b: 10, c: 0 } as any }];
+const keys = await deriveKeys(createHash("sha512").update(dm.secretKey).digest(), map.toBytes());
+const commitment = await commit(map.toBytes(), keys, 16, 16, shapes, { rosters: split.rosters, cells });
+const blob = await sealSecrets(keys, map.toBytes(), { rosters: split.rosters, cells });
+const isBoss = (id: number) => id === CHIEFTAIN;
+await mapProgram.methods.writeSpawns(split.spawns).accountsStrict(edit).signers([dm]).rpc();
 // Patch 11: no chests, the tier 1 boss table of assets/registry/reward_tables.json.
 await mapProgram.methods.writePoints(points, 1).accountsStrict(edit).signers([dm]).rpc();
 for (const pack of [3, 1, 2]) {
-  const record = { visible: CAMP.findIndex((x) => x.pack === pack), ...PACK_CELLS[pack]!, facing: { se: {} }, width: ARENA_SIDE, height: ARENA_SIDE };
+  const record = { visible: split.packs[pack]!.visible, ...PACK_CELLS[pack]!, facing: { se: {} }, width: ARENA_SIDE, height: ARENA_SIDE };
   const cells = Buffer.alloc(ARENA_SIDE * ARENA_SIDE, cellByte(Tile.StoneFloor));
   await mapProgram.methods.writeArena(pack, record, cells).accountsStrict(edit).signers([dm]).rpc();
 }
 const tileset = pda([Buffer.from("tileset")], REGISTRY);
-await mapProgram.methods.finalizeMap(new Array(32).fill(0)).accountsStrict({ ...edit, bestiary, monsterSkills, rewards, tileset }).signers([dm]).rpc();
+const threat = split.rosters.map((r) => threatOf(r.spawns.slice(0, r.count), isBoss));
+await mapProgram.methods.writeSecrets(0, Buffer.from(blob), blob.length, threat, declaredOf(cells)).accountsStrict(edit).signers([dm]).rpc();
+await mapProgram.methods.finalizeMap(Array.from(commitment.root)).accountsStrict({ ...edit, bestiary, monsterSkills, rewards, tileset }).signers([dm]).rpc();
 
 // session
 const sessionPda = pda([Buffer.from("session"), map.toBuffer()], SESSION);
@@ -366,6 +380,26 @@ for (let guard = 0; guard < 6; guard++) {
     .accountsStrict({ signer: h.wallet.publicKey, session: sessionPda, participation: h.participation, monsters, layout, sessionToken: null, ...vrfAccounts })
     .signers([h.wallet])
     .rpc({ commitment: "confirmed" });
+  // Patch C: the DM reveals the cell stepped on, then the engaged pack.
+  const leaf = 8 + 2 * 16 + 2;
+  const r = await commitment.cell(leaf);
+  const cellSig = await session.methods
+    .revealCell(leaf, { kind: { none: {} }, a: 0, b: 0, c: 0 } as any, Array.from(r.salt), r.proof.map((x) => Array.from(x)))
+    .accountsStrict({ signer: dm.publicKey, session: sessionPda, layout, participation: h.participation, monsters, rewards, sessionToken: null })
+    .signers([dm])
+    .rpc({ commitment: "confirmed" });
+  console.log("reveal_cell:", explorer(cellSig));
+}
+{
+  const pack = (await state()).arenaPack;
+  const r = await commitment.pack(pack);
+  const packSig = await session.methods
+    .revealPack(pack, r.roster as any, Array.from(r.salt), r.proof.map((x) => Array.from(x)))
+    .accountsStrict({ signer: dm.publicKey, session: sessionPda, layout, monsters, bestiary, monsterSkills, rewards, sessionToken: null })
+    .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 600_000 })])
+    .signers([dm])
+    .rpc({ commitment: "confirmed" });
+  console.log("reveal_pack:", explorer(packSig));
 }
 const living = heroes.map((h) => ({ pubkey: h.participation, isSigner: false, isWritable: true }));
 const enterSig = await session.methods

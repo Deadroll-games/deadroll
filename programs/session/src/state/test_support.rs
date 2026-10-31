@@ -105,6 +105,12 @@ pub fn layout_account(map: Pubkey) -> TestAccount {
     let mut data = MAP_LAYOUT_DISCRIMINATOR.to_vec();
     layout.serialize(&mut data).unwrap();
     arenas.serialize(&mut data).unwrap();
+    // Patch C: pack 0 declared at threat 2, one trap.
+    let mut secrets = deadroll_types::MapSecretsData::EMPTY;
+    secrets.threat[0] = 2;
+    secrets.declared[0] = 1;
+    secrets.blob_len = 1;
+    secrets.serialize(&mut data).unwrap();
     data.extend_from_slice(&[0; 16]);
     TestAccount::new(deadroll_map::ID, data)
 }
@@ -281,6 +287,22 @@ pub fn session(players: &[Cell]) -> GameSession {
         packs_guarded: 0,
         packs_buffed: 0,
         dead_spawns: 0,
+        secrets_root: [0; 32],
+        leaf_count: 0,
+        declared: [0; deadroll_types::SECRET_TYPES],
+        threat: [0; deadroll_types::PACKS_MAX],
+        revealed: [0; super::REVEALED_BYTES],
+        found_counts: [0; deadroll_types::SECRET_TYPES],
+        found: [deadroll_types::FoundSecret::default(); deadroll_types::SECRETS_MAX],
+        found_count: 0,
+        packs_revealed: 0,
+        obligations: [0; deadroll_types::OBLIGATIONS_MAX],
+        obligation_count: 0,
+        obliged_by: 0,
+        spawns: [deadroll_types::Spawn::default(); deadroll_types::SPAWNS_MAX],
+        spawn_count: 0,
+        roster_totals: [0; 4],
+        visible_chests: 0,
     }
 }
 

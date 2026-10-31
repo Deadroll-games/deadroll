@@ -22,7 +22,9 @@ import {
   ComputeBudgetProgram,
   TransactionInstruction,
 } from "@solana/web3.js";
-import { MAP_STRIDE, cellKind, layoutBytes, loadMapPreset, presetPoints } from "../tools/scripts/lib/demo-map.ts";
+import { MAP_STRIDE, cellKind, layoutBytes, loadMapPreset, presetPoints, presetSecrets, secretChunks } from "../tools/scripts/lib/demo-map.ts";
+import { address as kitAddress, createKeyPairSignerFromBytes } from "@solana/kit";
+import type { Commitment, Roster, CellEntry } from "@deadroll/sdk/secrets";
 
 /** `PointKind` as the Anchor client encodes it, by discriminant. */
 const POINT_KIND = [{ chest: {} }, { entrance: {} }, { exit: {} }];
@@ -330,6 +332,10 @@ class Demo {
   dm!: Keypair;
   dmActor!: Keypair;
   dmToken!: PublicKey;
+  /** Patch C: what the DM committed (its client opens the encrypted copy with the wallet's key). */
+  commitment!: Commitment;
+  rosters!: Roster[];
+  cells!: CellEntry[];
   map!: PublicKey;
   layout!: PublicKey;
   acc!: { session: PublicKey; monsters: PublicKey; escrow: PublicKey };
@@ -393,16 +399,25 @@ class Demo {
       .rpc()
       .then(track("create_map"));
     await mapProgram.methods.writeLayout(0, Buffer.from(layoutBytes(preset))).accountsStrict(edit).signers([this.dm]).rpc().then(track("write_layout"));
-    await mapProgram.methods.writeSpawns(preset.spawns).accountsStrict(edit).signers([this.dm]).rpc().then(track("write_spawns"));
+    // Patch C: only the visible monsters in the open; the rosters and the secrets under the root,
+    // encrypted on chain with the DM's key.
+    const { design, commitment, blob } = await presetSecrets(preset, kitAddress(this.map.toBase58()), await createKeyPairSignerFromBytes(this.dm.secretKey));
+    this.commitment = commitment;
+    this.rosters = design.rosters;
+    this.cells = design.cells;
+    await mapProgram.methods.writeSpawns(design.spawns).accountsStrict(edit).signers([this.dm]).rpc().then(track("write_spawns"));
     const points = presetPoints(preset).map((p) => ({ ...p, kind: POINT_KIND[p.kind] }));
     await mapProgram.methods.writePoints(points, preset.bossTable).accountsStrict(edit).signers([this.dm]).rpc().then(track("write_points"));
     // Arena update: every pack's monster on the map, its facing and its arena.
-    for (const pk of preset.packs) {
+    for (const pk of design.packs) {
       const record = { visible: pk.visible, x: pk.x, y: pk.y, facing: FACING_KIND[pk.facing], width: pk.width, height: pk.height };
       await mapProgram.methods.writeArena(pk.pack, record, Buffer.from(pk.cells)).accountsStrict(edit).signers([this.dm]).rpc().then(track("write_arena"));
     }
+    for (const c of secretChunks(blob, design)) {
+      await mapProgram.methods.writeSecrets(c.offset, Buffer.from(c.bytes), c.len, c.threat, c.declared).accountsStrict(edit).signers([this.dm]).rpc().then(track("write_secrets"));
+    }
     await mapProgram.methods
-      .finalizeMap(new Array(32).fill(0))
+      .finalizeMap(Array.from(commitment.root))
       .accountsStrict({ ...edit, bestiary, monsterSkills, rewards, tileset })
       .signers([this.dm])
       .rpc()
@@ -457,8 +472,57 @@ class Demo {
         ...vrfAccounts,
       })
       .signers([pl.actor])
-      .rpc()
-      .then(track(`move ${pl.kind}`));
+      .rpc({ commitment: "confirmed" })
+      .then(track(`move ${pl.kind}`))
+      .then(async (sig: string) => {
+        await this.revealOwed();
+        return sig;
+      });
+  }
+  /** Patch C: the DM's client reveals what the party uncovered, with the DM's session key. */
+  async revealOwed() {
+    for (let i = 0; i < 40; i++) {
+      const s = await this.state();
+      if (s.core.pendingVrf) return;
+      if (s.obligationCount > 0) {
+        await this.revealCell(s.obligations[0], this.players[s.obligedBy]?.participation ?? null, true);
+        continue;
+      }
+      if (modeOf(s) === "engaged" && !(s.packsRevealed & (1 << s.arenaPack))) {
+        await this.revealPack(s.arenaPack, true);
+        continue;
+      }
+      return;
+    }
+    throw new Error("reveals never ended");
+  }
+  async revealCell(leaf: number, participation: PublicKey | null, key: boolean) {
+    const r = await this.commitment.cell(leaf);
+    const names = ["none", "trap", "ambush", "stash", "door"];
+    const signer = key ? this.dmActor : this.dm;
+    return session.methods
+      .revealCell(leaf, { kind: { [names[r.secret.kind as number]]: {} }, a: r.secret.a, b: r.secret.b, c: r.secret.c } as any, Array.from(r.salt), r.proof.map((h) => Array.from(h)))
+      .accountsStrict({ signer: signer.publicKey, session: this.acc.session, layout: this.layout, participation, monsters: this.acc.monsters, rewards, sessionToken: key ? this.dmToken : null })
+      .signers([signer])
+      .rpc({ commitment: "confirmed" })
+      .then(track("reveal_cell"));
+  }
+  async revealPack(pack: number, key: boolean) {
+    const r = await this.commitment.pack(pack);
+    const signer = key ? this.dmActor : this.dm;
+    return session.methods
+      .revealPack(pack, r.roster as any, Array.from(r.salt), r.proof.map((h) => Array.from(h)))
+      .accountsStrict({ signer: signer.publicKey, session: this.acc.session, layout: this.layout, monsters: this.acc.monsters, bestiary, monsterSkills, rewards, sessionToken: key ? this.dmToken : null })
+      .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 600_000 })])
+      .signers([signer])
+      .rpc({ commitment: "confirmed" })
+      .then(track("reveal_pack"));
+  }
+  /** Patch C: the DM's final audit: every declared secret and pack not revealed yet (main wallet). */
+  async audit() {
+    const s = await this.state();
+    for (const c of this.cells) if (!(s.revealed[c.leaf >> 3] & (1 << (c.leaf & 7)))) await this.revealCell(c.leaf, null, false);
+    for (let n = 0; n < 8; n++) if (this.rosters[n].count && !(s.packsRevealed & (1 << n))) await this.revealPack(n, false);
   }
   act(who: number, slot: number, monster: number) {
     const pl = this.players[who];
@@ -614,6 +678,7 @@ class Demo {
         // Read back at once: the shared validator keeps ~100 slots of transaction history.
         const names = (await eventsOf(sig)).map((x) => x.name);
         publicRolls.push({ sig, ok: ["hitResolved", "initiativeRolled", "reactiveTriggered"].some((n) => names.includes(n)) });
+        if ((await this.state()).core.status.active) await this.revealOwed();
         return sig;
       });
   }
@@ -632,6 +697,7 @@ class Demo {
   }
   /** `enter_arena` or `leave_arena`: permissionless, sent here by the provider wallet. */
   async enterArena() {
+    await this.revealOwed();
     return session.methods
       .enterArena()
       .accountsStrict({ payer: provider.wallet.publicKey, session: this.acc.session, monsters: this.acc.monsters, layout: this.layout })
@@ -869,7 +935,8 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
       .signers([demo.dm])
       .rpc({ commitment: "confirmed" })
       .then(track("open_session"));
-    assert.equal((await eventOf(sig, "sessionOpened")).monsters, preset.spawns.length);
+    // Patch C: only the monster each pack shows is public.
+    assert.equal((await eventOf(sig, "sessionOpened")).monsters, preset.packs.length);
     assert.ok((await mapProgram.account.map.fetch(demo.map)).core.status.inSession);
 
     const escrowBefore = await connection.getBalance(demo.acc.escrow);
@@ -1150,6 +1217,8 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
     const players = demo.players.flatMap((pl) =>
       [pl.participation, pl.rewardCache, pl.character].map((pubkey) => ({ pubkey, isSigner: false, isWritable: true })),
     );
+    // Patch C: the escrow waits for the final audit (docs/PARTY_AND_TURNS.md 3.2).
+    await demo.audit();
     const sig = await session.methods
       .settleParty()
       .accountsStrict({
