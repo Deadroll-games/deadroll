@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use deadroll_types::{seeds, MapStatus, PARTY_MAX};
+use deadroll_types::{seeds, PARTY_MAX};
 
 use crate::{
     cpi_out::{self, SessionSigner},
@@ -41,13 +41,21 @@ pub struct ClaimAfterTimeout<'info> {
     /// CHECK: the character program.
     #[account(address = deadroll_character::ID)]
     pub character_program: UncheckedAccount<'info>,
+    /// CHECK: the session's `MapLayout` (address pinned at `open_session`), closed with the map
+    /// by the last claim (patch D).
+    #[account(mut, address = session.layout @ SessionError::InvalidLayout)]
+    pub layout: UncheckedAccount<'info>,
+    /// CHECK: the party's DM: the map's deposits go back to them with the last claim (patch D).
+    #[account(mut, address = session.core.dm @ SessionError::NotDm)]
+    pub dm: UncheckedAccount<'info>,
 }
 
 /// Patch 11: the DM did not settle the party before the deadline (`ended_at +
 /// settle_timeout_secs`). Each player settles their own character the same way
 /// (`crate::settlement`) and takes their contribution back from the escrow, a dead character's
 /// owner too (docs/PARTY_AND_TURNS.md 3.2: the DM did not finish the party). The DM can no longer
-/// settle; the map goes `Finished` with the last claim.
+/// settle. Patch D: the last claim closes the map; its deposits go back to the DM
+/// (docs/MAP_DESCRIPTION.md 17.7).
 ///
 /// `remaining_accounts`: the player's writable `(Participation, RewardCache, Character)`, then a
 /// `(Character, SkillSet, Bag)` triple per pending death (finalized first).
@@ -112,7 +120,7 @@ pub fn handler<'info>(ctx: Context<'info, ClaimAfterTimeout<'info>>) -> Result<(
     settlement::settle_player(session, key, slot, &mut player, &signer)?;
 
     if session.settled_mask == session.full_mask() {
-        cpi_out::map::set_status(&signer, &accounts.map, MapStatus::Finished)?;
+        cpi_out::map::close_map(&signer, &accounts.map, &accounts.layout, &accounts.dm)?;
     }
     let amount = player.participation.contribution;
     escrow.sub_lamports(amount)?;

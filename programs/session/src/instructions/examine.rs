@@ -8,7 +8,7 @@ use crate::{
     events::CellExamined,
     rules::{Unit, BALANCE},
     secrets::oblige_cells,
-    state::{GameSession, MonsterState, Monsters, Participation},
+    state::{BoardBytes, GameSession, MonsterState, Monsters, Participation},
 };
 
 #[derive(Accounts, Session)]
@@ -33,6 +33,10 @@ pub struct Examine<'info> {
     pub participation: Box<Account<'info, Participation>>,
     /// Read-only, never Borsh-decoded: owner and discriminator checked here, session in `Monsters`.
     pub monsters: LazyAccount<'info, MonsterState>,
+    /// CHECK: the session's `SessionBoard` (patch D), checked by `BoardBytes::load`: the revealed
+    /// leaves.
+    #[account(seeds = [seeds::BOARD, session.key().as_ref()], bump)]
+    pub board: UncheckedAccount<'info>,
     /// MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs.
     #[session(signer = signer, authority = participation.player)]
     pub session_token: Option<Account<'info, SessionTokenV2>>,
@@ -101,7 +105,8 @@ pub fn handler(ctx: Context<Examine>, x: u8, y: u8) -> Result<()> {
     // Any other action cancels a Retreat or Escape proposal (docs/PARTY_AND_TURNS.md 7.5).
     let key = session.key();
     crate::exit_vote::cancel(session, key, slot);
-    oblige_cells(session, key, slot, &[cell])?;
+    let board = BoardBytes::load(&accounts.board, &key)?;
+    oblige_cells(session, &board, key, slot, &[cell])?;
     emit!(CellExamined {
         session: key,
         slot,

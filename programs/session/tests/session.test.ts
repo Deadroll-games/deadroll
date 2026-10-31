@@ -29,6 +29,10 @@ import {
 } from "@solana/web3.js";
 import { MPL_CORE_PROGRAM, PROGRAMS, SESSION_KEYS_PROGRAM, VRF } from "@deadroll/sdk";
 import { NO_SPAWN, Secret, commit, declaredOf, deriveKeys, splitDesign, threat as threatOf, Leaves, type CellEntry, type Commitment, type Roster } from "@deadroll/sdk/secrets";
+import { decodeSessionBoard } from "@deadroll/sdk/session";
+import { layoutGeom } from "@deadroll/sdk/map";
+/** `Map` account size (programs/map: discriminator, `MapData`, the settings, the biome). */
+const MAP_ACCOUNT_SIZE = 8 + 105 + 1 + 1 + 1 + 4 + 1;
 
 const { AnchorProvider, BN, EventParser, Program } = anchor;
 
@@ -121,6 +125,16 @@ function sessionAccounts(map: PublicKey) {
     escrow: pda([Buffer.from("escrow"), session.toBuffer()], SESSION),
   };
 }
+
+/** Patch D: what the party uncovered (`SessionBoard`, `["board", session]`). */
+const boardOf = (session: PublicKey) => pda([Buffer.from("board"), session.toBuffer()], SESSION);
+/** Patch D: the board's revealed leaves, found secrets and revealed spawns. */
+async function readBoard(session: PublicKey) {
+  const info = await provider.connection.getAccountInfo(boardOf(session), "confirmed");
+  return decodeSessionBoard(Uint8Array.from(info!.data));
+}
+/** Patch D: a `u64`/`u128` mask (a BN) has bit `n`. */
+const bit = (mask: any, n: number) => new BN(mask.toString()).testn(n);
 
 
 function playerAccounts(session: PublicKey, character: PublicKey) {
@@ -349,6 +363,7 @@ function openSession(dm: Keypair, map: PublicKey, layout: PublicKey, price: BN, 
       monsterSkills,
       rewards,
       triples,
+      board: boardOf(sessionAccounts(map).session),
     })
     .signers([dm]);
 }
@@ -555,9 +570,9 @@ describe("deadroll_session: deployed program", () => {
         layout: Keypair.generate().publicKey,
       }),
     );
-    const ends = { session, escrow, monsters, map: Keypair.generate().publicKey, sessionAuthority, config, mapProgram: MAP, characterProgram: CHARACTER };
+    const ends = { session, escrow, monsters, map: Keypair.generate().publicKey, sessionAuthority, config, mapProgram: MAP, characterProgram: CHARACTER, layout: Keypair.generate().publicKey };
     await run(program.methods.settleParty().accountsStrict({ dm: signer.publicKey, ...ends }));
-    await run(program.methods.claimAfterTimeout().accountsStrict({ player: signer.publicKey, ...ends }));
+    await run(program.methods.claimAfterTimeout().accountsStrict({ player: signer.publicKey, ...ends, dm: Keypair.generate().publicKey }));
     await run(
       program.methods.closeCache(session, emptyBagLayout()).accountsStrict({
         owner: signer.publicKey,
@@ -778,9 +793,10 @@ async function createFinalizedMap(dm: Keypair, bossLevel = 1, roster: SpawnDef[]
     .accountsStrict({ ...edit, systemProgram: SystemProgram.programId })
     .signers([dm])
     .rpc();
-  const tiles = new Array(15 * 32 + 16).fill(cellByte(TILE.Wall));
-  for (let y = 1; y < 15; y++) for (let x = 1; x < 15; x++) tiles[y * 32 + x] = cellByte(TILE.StoneFloor, (x + y) % 8);
-  for (const w of loot.walls ?? []) tiles[w.y * 32 + w.x] = cellByte(TILE.Wall);
+  // Patch D: the cells are `width` per row.
+  const tiles = new Array(16 * 16).fill(cellByte(TILE.Wall));
+  for (let y = 1; y < 15; y++) for (let x = 1; x < 15; x++) tiles[y * 16 + x] = cellByte(TILE.StoneFloor, (x + y) % 8);
+  for (const w of loot.walls ?? []) tiles[w.y * 16 + w.x] = cellByte(TILE.Wall);
   await mapProgram.methods.writeLayout(0, Buffer.from(tiles)).accountsStrict(edit).signers([dm]).rpc();
   const spawns = roster.map((s) => ({
     bestiaryId: s.id,
@@ -837,7 +853,7 @@ async function createFinalizedMap(dm: Keypair, bossLevel = 1, roster: SpawnDef[]
   const commitment = await commit(map.toBytes(), keys, 16, 16, shapes, { rosters: split.rosters, cells });
   const threat = loot.threat ?? split.rosters.map((r) => threatOf(r.spawns.slice(0, r.count), (id) => id === CHIEFTAIN));
   const declared = loot.declared ?? declaredOf(cells);
-  await mapProgram.methods.writeSecrets(0, Buffer.from([1, 2, 3]), 3, threat, declared).accountsStrict(edit).signers([dm]).rpc();
+  await mapProgram.methods.writeSecrets(0, Buffer.from([1, 2, 3]), 3, Buffer.from(threat), declared).accountsStrict(edit).signers([dm]).rpc();
   await mapProgram.methods
     .finalizeMap(Array.from(commitment.root))
     .accountsStrict({ ...edit, bestiary, monsterSkills, rewards, tileset })
@@ -1004,15 +1020,15 @@ const finalizeBudget = (deaths: unknown[]) => (deaths.length ? [ComputeBudgetPro
 function mapPath(s: any, from: Cell, to: Cell, pack: number): Cell[] {
   const blocked = (c: Cell) => {
     if (c.x < 1 || c.y < 1 || c.x > 14 || c.y > 14) return true;
-    for (let n = 0; n < 8; n++) {
+    for (let n = 0; n < s.packs.length; n++) {
       const p = s.packs[n];
-      if (!p.width || !(s.packsAlive & (1 << n))) continue;
+      if (!p.width || !bit(s.packsAlive, n)) continue;
       const d = cheb(c, p);
       if (d === 0 || (d === 1 && n !== pack)) return true;
     }
     return s.chests.slice(0, s.chestCount).some((ch: any, i: number) => !(s.chestsOpened & (1 << i)) && ch.x === c.x && ch.y === c.y);
   };
-  const key = (c: Cell) => c.y * 32 + c.x;
+  const key = (c: Cell) => c.y * 256 + c.x;
   const prev = new Map<number, Cell | null>([[key(from), null]]);
   const queue: Cell[] = [from];
   while (queue.length) {
@@ -1192,7 +1208,7 @@ class Party {
     await this.revealOwed();
     return program.methods
       .enterArena()
-      .accountsStrict({ payer: provider.wallet.publicKey, session: this.acc.session, monsters: this.acc.monsters, layout: this.fixture.layout })
+      .accountsStrict({ payer: provider.wallet.publicKey, session: this.acc.session, monsters: this.acc.monsters, layout: this.fixture.layout, board: boardOf(this.acc.session) })
       .remainingAccounts(parts ?? (await this.livingParts()))
       .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 600_000 })]);
   }
@@ -1388,6 +1404,7 @@ class Party {
         participation,
         monsters: this.acc.monsters,
         layout: this.fixture.layout,
+        board: boardOf(this.acc.session),
         sessionToken: token,
         // Stepping next to an enemy can trigger its reactive skill (a VRF roll).
         ...vrfAccounts,
@@ -1415,6 +1432,7 @@ class Party {
         participation: over.participation === undefined ? (by?.participation ?? null) : over.participation,
         monsters: this.acc.monsters,
         rewards,
+        board: boardOf(this.acc.session),
         sessionToken: over.token ?? null,
       })
       .signers([signer])
@@ -1434,6 +1452,7 @@ class Party {
         bestiary,
         monsterSkills,
         rewards,
+        board: boardOf(this.acc.session),
         sessionToken: over.token ?? null,
       })
       .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 600_000 })])
@@ -1449,7 +1468,7 @@ class Party {
         await this.revealCellCall(s.obligations[0]);
         continue;
       }
-      if (modeOf(s) === ArenaMode.engaged && !(s.packsRevealed & (1 << s.arenaPack))) {
+      if (modeOf(s) === ArenaMode.engaged && !bit(s.packsRevealed, s.arenaPack)) {
         await this.revealPackCall(s.arenaPack);
         continue;
       }
@@ -1460,11 +1479,13 @@ class Party {
   /** Patch C: the final audit: every declared secret and every pack not revealed yet. */
   async audit() {
     const s = await this.state();
+    // Patch D: the revealed leaves are on the board.
+    const board = await readBoard(this.acc.session);
     for (const c of this.fixture.cells) {
-      if (!(s.revealed[c.leaf >> 3] & (1 << (c.leaf & 7)))) await this.revealCellCall(c.leaf, { participation: null });
+      if (!board.revealed(c.leaf)) await this.revealCellCall(c.leaf, { participation: null });
     }
     for (let n = 0; n < 8; n++) {
-      if (this.fixture.rosters[n].count && !(s.packsRevealed & (1 << n))) await this.revealPackCall(n);
+      if (this.fixture.rosters[n].count && !bit(s.packsRevealed, n)) await this.revealPackCall(n);
     }
   }
   endTurn(signer: Keypair, who: number | null, token: PublicKey | null = null) {
@@ -1656,6 +1677,8 @@ class Party {
       config,
       mapProgram: MAP,
       characterProgram: CHARACTER,
+      // Patch D: the played map closes with its layout.
+      layout: this.fixture.layout,
     };
   }
   /** Patch 11: `settle_party`, the DM's main wallet unless another signer is given. */
@@ -1679,7 +1702,7 @@ class Party {
     const own = [pl.participation, pl.rewardCache, pl.character].map((pubkey) => ({ pubkey, isSigner: false, isWritable: true }));
     return program.methods
       .claimAfterTimeout()
-      .accountsStrict({ player: signer.publicKey, ...this.endAccounts() })
+      .accountsStrict({ player: signer.publicKey, ...this.endAccounts(), dm: this.dm.publicKey })
       .remainingAccounts([...own, ...queue])
       .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 1_000_000 })])
       .signers([signer])
@@ -1879,7 +1902,7 @@ describe("deadroll_session: lobby, auth and movement on the demo map", { skip: S
     assert.equal(m.core.count, 0);
     assert.equal(modeOf(s), ArenaMode.map);
     assert.equal(s.arenaPack, 0xff);
-    assert.equal(s.packsAlive, 0b1110);
+    assert.equal(s.packsAlive.toString(), String(0b1110));
     assert.deepEqual([s.packs[1].x, s.packs[1].y, s.packs[1].visible, s.packs[1].width], [FRONT.x, FRONT.y, 0, ARENA_SIDE]);
     // Patch C: `visible` counts in the public spawns (one per pack: wolves, goblins, chieftain).
     assert.deepEqual([s.packs[3].x, s.packs[3].y, s.packs[3].visible], [FAR[1].x, FAR[1].y, 2]);
@@ -2469,10 +2492,14 @@ describe("deadroll_session: combat, death, victory and payouts", { skip: SKIP_PA
     // The bag did not change: the cache waits for "Done".
     const bag = await characterProgram.account.bag.fetch(party.players[0].bag);
     assert.ok(bag.layout.resources.every((r: any) => r.qty === 0));
+    // Patch D: the map is played once: it and its layout closed, their deposits went to the DM
+    // with the escrow (docs/MAP_DESCRIPTION.md 17.7).
+    const deposits = (await connection.getMinimumBalanceForRentExemption(MAP_ACCOUNT_SIZE)) + (await connection.getMinimumBalanceForRentExemption(layoutGeom(16, 16, 0).end));
     const gained = (await connection.getBalance(party.dm.publicKey)) - dmBefore;
-    assert.ok(gained > PRICE.toNumber() - 10_000, `DM got ${gained}`);
-    const map = await mapProgram.account.map.fetch(party.fixture.map);
-    assert.ok(map.core.status.finished);
+    assert.ok(gained > PRICE.toNumber() + deposits - 10_000, `DM got ${gained}`);
+    assert.equal(await connection.getAccountInfo(party.fixture.map, "confirmed"), null, "the map closed");
+    assert.equal(await connection.getAccountInfo(party.fixture.layout, "confirmed"), null, "the layout closed");
+    console.log(`    deposits back to the DM at settle_party: ${deposits} lamports`);
     await rejects(party.settleParty(), "AlreadyClaimed");
     await rejects(party.claimAfterTimeout(0), "AlreadyClaimed");
     const p1 = party.players[1];
@@ -3479,7 +3506,7 @@ describe("deadroll_session: the map and a pack's arena (arena update)", { skip: 
     assert.deepEqual(ev.xp.slice(0, 2), [wolfXp, wolfXp]);
     const s = await party.state();
     assert.equal(modeOf(s), ArenaMode.map);
-    assert.deepEqual([s.arenaPack, s.packsAlive & 0b10, s.width], [0xff, 0, 16]);
+    assert.deepEqual([s.arenaPack, bit(s.packsAlive, 1), s.width], [0xff, false, 16]);
     assert.deepEqual([s.playerPos[0], s.playerPos[1]], [{ x: 2, y: 2 }, ENTRANCE]);
     const after = [await party.part(0), await party.part(1)];
     for (const i of [0, 1]) {
@@ -3606,12 +3633,12 @@ describe("deadroll_session: Retreat and Escape from an arena (patch B)", { skip:
     assert.deepEqual(left.xp.slice(0, 2), [0, 0], "no experience for the fight, not even the kill");
     const m = await party.monsters();
     const spawn = 1 << killed; // the wolves of pack 1 are layout spawns 0 and 1, in arena slot order
-    assert.deepEqual([ev.pack, ev.retreats, ev.deadSpawns], [1, 1, spawn]);
+    assert.deepEqual([ev.pack, ev.retreats, Number(ev.deadSpawns.toString())], [1, 1, spawn]);
     const after1 = await party.state();
     assert.equal(modeOf(after1), ArenaMode.map);
     assert.deepEqual(
-      [after1.retreats, after1.packsGuarded, after1.packsBuffed, after1.deadSpawns, after1.packsAlive & 0b10],
-      [1, 0b10, 0b10, spawn, 0b10],
+      [after1.retreats, Number(after1.packsGuarded.toString()), Number(after1.packsBuffed.toString()), Number(after1.deadSpawns.toString()), bit(after1.packsAlive, 1)],
+      [1, 0b10, 0b10, spawn, true],
       "the pack stays, on guard and buffed",
     );
     assert.deepEqual(after1.playerPos[0], { x: 2, y: 2 }, "back on the cell before the fight");
@@ -3631,8 +3658,8 @@ describe("deadroll_session: Retreat and Escape from an arena (patch B)", { skip:
     const kinds = m.mods[0].filter((x: any) => x.turns > 0).map((x: any) => Object.keys(x.kind)[0]).sort();
     assert.deepEqual(kinds, ["empowerment", "protection"]);
     const s = await party.state();
-    assert.equal(s.packsBuffed, 0, "the buff is for the next fight only");
-    assert.equal(s.packsGuarded, 0b10, "on guard stays");
+    assert.equal(s.packsBuffed.toString(), "0", "the buff is for the next fight only");
+    assert.equal(s.packsGuarded.toString(), String(0b10), "on guard stays");
     assert.equal(s.unitTime[MONSTER_BASE], 0);
     assert.ok(s.unitTime[0] > 0 && s.unitTime[1] > 0);
   });
@@ -4170,10 +4197,13 @@ describe("deadroll_session: the DM's deadline (patch 11)", { skip: SKIP_PARTY },
     assert.equal((await party.character(0)).core.inSession, null);
     assert.ok((await party.entry(0)).status.claimed !== undefined);
     await rejects(party.claimAfterTimeout(0), "AlreadySettled");
-    // The map is finished with the last claim.
+    // Patch D: the last claim closes the map, its deposits go to the DM.
     assert.ok((await mapProgram.account.map.fetch(party.fixture.map)).core.status.inSession);
+    const dmBefore = await connection.getBalance(party.dm.publicKey);
     await party.claimAfterTimeout(1);
-    assert.ok((await mapProgram.account.map.fetch(party.fixture.map)).core.status.finished);
+    assert.equal(await connection.getAccountInfo(party.fixture.map, "confirmed"), null, "the map closed");
+    assert.equal(await connection.getAccountInfo(party.fixture.layout, "confirmed"), null, "the layout closed");
+    assert.ok((await connection.getBalance(party.dm.publicKey)) > dmBefore, "the deposits went to the DM");
   });
 
   it("join_session burns a settled cache left without Done", async () => {
@@ -4526,7 +4556,7 @@ describe("deadroll_session: the 2x2 chieftain (patch B)", { skip: SKIP_PARTY }, 
 function examineCall(party: Party, who: number, x: number, y: number, signer: Keypair = party.players[who].wallet) {
   return program.methods
     .examine(x, y)
-    .accountsStrict({ signer: signer.publicKey, session: party.acc.session, participation: party.players[who].participation, monsters: party.acc.monsters, sessionToken: null })
+    .accountsStrict({ signer: signer.publicKey, session: party.acc.session, participation: party.players[who].participation, monsters: party.acc.monsters, board: boardOf(party.acc.session), sessionToken: null })
     .signers([signer])
     .rpc({ commitment: "confirmed" });
 }
@@ -4586,7 +4616,7 @@ describe("deadroll_session: reveals, traps, doors and stashes (patch C)", { skip
     assert.deepEqual([ev.slot, ev.damage, ev.hp], [0, 3, hp - 3]);
     assert.equal((await party.part(0)).core.hp, hp - 3);
     const s = await party.state();
-    assert.deepEqual([s.foundCount, s.foundCounts[0]], [1, 1]);
+    assert.deepEqual([(await readBoard(party.acc.session)).found.length, s.foundCounts[0]], [1, 1]);
   });
 
   it("examine: a secret door in the wall opens the way, a hidden stash becomes a chest", async () => {
@@ -4647,7 +4677,7 @@ describe("deadroll_session: a pack is revealed when the party meets it, and the 
     const ev = await eventOf(sig, "packRevealed");
     assert.deepEqual([ev.pack, ev.count, ev.threat, ev.audit], [1, 2, 2, false]);
     const s = await party.state();
-    assert.deepEqual([s.packsRevealed, s.spawnCount], [0b10, 2]);
+    assert.deepEqual([s.packsRevealed.toString(), (await readBoard(party.acc.session)).spawns.length], [String(0b10), 2]);
     await rejects(party.revealPackCall(1), "PackNotToReveal");
     await (await enterArenaRaw(party)).rpc({ commitment: "confirmed" });
     assert.equal((await party.monsters()).core.count, 2);
@@ -4662,7 +4692,7 @@ describe("deadroll_session: a pack is revealed when the party meets it, and the 
     // The audit: the corner trap and the two packs left, with the DM's main wallet.
     await party.audit();
     const s = await party.state();
-    assert.deepEqual([Array.from(s.foundCounts), s.packsRevealed], [[1, 0, 0, 0], 0b1110]);
+    assert.deepEqual([Array.from(s.foundCounts), s.packsRevealed.toString()], [[1, 0, 0, 0], String(0b1110)]);
     await rejects(party.revealCellCall(CORNER_LEAF, { participation: null }), "AlreadyRevealed");
     await party.settleParty();
   });
@@ -4675,7 +4705,7 @@ const CORNER_LEAF = mapLeaf(CORNER_TRAP.x, CORNER_TRAP.y);
 async function enterArenaRaw(party: Party) {
   return program.methods
     .enterArena()
-    .accountsStrict({ payer: provider.wallet.publicKey, session: party.acc.session, monsters: party.acc.monsters, layout: party.fixture.layout })
+    .accountsStrict({ payer: provider.wallet.publicKey, session: party.acc.session, monsters: party.acc.monsters, layout: party.fixture.layout, board: boardOf(party.acc.session) })
     .remainingAccounts(await party.livingParts())
     .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 600_000 })]);
 }

@@ -572,7 +572,7 @@ pub struct ArenaRetreated {
     pub session: Pubkey,
     pub pack: u8,
     pub retreats: u8,
-    pub dead_spawns: u32,
+    pub dead_spawns: u128,
 }
 
 /// Patch C: steps or a look uncovered `count` cells the DM must reveal before the next action

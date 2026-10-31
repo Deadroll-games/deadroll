@@ -4,8 +4,8 @@ use deadroll_registry::state::TableKind;
 use deadroll_rules::{loot::settle_timeout_ok, MonsterTemplate};
 use deadroll_skillcheck::monster::POOL_MAX;
 use deadroll_types::{
-    seeds, GameSessionData, MapStatus, SessionStatus, Spawn, MAP_MAX, MONSTERS_MAX, NO_TABLE,
-    PACKS_MAX, PARTY_MAX, TURN_ORDER_MAX,
+    seeds, GameSessionData, MapPoint, MapStatus, SessionStatus, Spawn, CHESTS_CAP, NO_TABLE,
+    PACKS_CAP, PARTY_MAX, TURN_ORDER_MAX,
 };
 
 use crate::{
@@ -19,8 +19,9 @@ use crate::{
             MapLayoutView, ASPECTS_TABLE, BESTIARY_TABLE, MONSTER_SKILLS_TABLE, RESONANCES_TABLE,
             REWARDS_TABLE, TILESET_TABLE, TRAITS_TABLE, TRIPLES_TABLE,
         },
-        ArenaMode, Escrow, GameSession, Monsters, ACCOUNT_VERSION, NO_CHEST, NO_PACK,
-        RES_ASPECTS_LEN, RES_PAIRS_LEN, RES_TRAITS_LEN, RES_TRIPLES_LEN,
+        ArenaMode, Escrow, GameSession, Monsters, SessionBoard, ACCOUNT_VERSION, BOARD_SPACE,
+        CHEST_SLOTS, NO_CHEST, NO_PACK, RES_ASPECTS_LEN, RES_PAIRS_LEN, RES_TRAITS_LEN,
+        RES_TRIPLES_LEN,
     },
 };
 
@@ -89,6 +90,16 @@ pub struct OpenSession<'info> {
     /// CHECK: registry `["triples"]` table (triples pass), copied into `MonsterState`.
     #[account(address = TRIPLES_TABLE @ SessionError::InvalidRegistryTable)]
     pub triples: UncheckedAccount<'info>,
+    /// Patch D: what the party uncovers (`SessionBoard`), sized for the largest map; only its
+    /// header is written here, the rest starts zeroed.
+    #[account(
+        init,
+        payer = dm,
+        space = BOARD_SPACE,
+        seeds = [seeds::BOARD, session.key().as_ref()],
+        bump,
+    )]
+    pub board: Box<Account<'info, SessionBoard>>,
 }
 
 pub fn handler(ctx: Context<OpenSession>, price_lamports: u64, dm_actor: Pubkey) -> Result<()> {
@@ -111,10 +122,6 @@ pub fn handler(ctx: Context<OpenSession>, price_lamports: u64, dm_actor: Pubkey)
         SessionError::MapNotFinalized
     );
     require!(
-        map.width as usize <= MAP_MAX && map.height as usize <= MAP_MAX,
-        SessionError::InvalidMap
-    );
-    require!(
         price_lamports >= MIN_PRICE_LAMPORTS,
         SessionError::PriceTooLow
     );
@@ -126,9 +133,15 @@ pub fn handler(ctx: Context<OpenSession>, price_lamports: u64, dm_actor: Pubkey)
         accounts.map.key(),
         SessionError::InvalidLayout
     );
+    // Patch D: the layout's sides are the map's, its class stores the visible monsters.
+    let geom = layout.geom();
+    require!(
+        (geom.width, geom.height) == (map.width, map.height),
+        SessionError::InvalidLayout
+    );
     let spawn_count = layout.spawn_count();
     require!(
-        spawn_count as usize <= MONSTERS_MAX,
+        spawn_count as usize <= geom.packs,
         SessionError::InvalidLayout
     );
 
@@ -161,7 +174,10 @@ pub fn handler(ctx: Context<OpenSession>, price_lamports: u64, dm_actor: Pubkey)
     session.min_players = full.min_players;
     session.chest_radius = full.chest_radius;
     session.settle_timeout_secs = full.settle_timeout_secs;
-    (session.chests, session.chest_count) = layout.chests()?;
+    let (chests, chest_count) = layout.chests()?;
+    session.chests = [MapPoint::default(); CHEST_SLOTS];
+    session.chests[..CHESTS_CAP].copy_from_slice(&chests);
+    session.chest_count = chest_count;
     session.visible_chests = session.chest_count;
     session.boss_table = layout.boss_table();
     session.pending_chest = NO_CHEST;
@@ -170,7 +186,8 @@ pub fn handler(ctx: Context<OpenSession>, price_lamports: u64, dm_actor: Pubkey)
     session.mode = ArenaMode::Map;
     session.arena_pack = NO_PACK;
     session.packs_alive = 0;
-    for n in 0..PACKS_MAX as u8 {
+    session.map_class = geom.class;
+    for n in 0..PACKS_CAP as u8 {
         let p = layout.pack(n)?;
         session.packs[n as usize] = p;
         if p.is_used() {
@@ -210,6 +227,12 @@ pub fn handler(ctx: Context<OpenSession>, price_lamports: u64, dm_actor: Pubkey)
         copy_loot_table(&monsters, &accounts.rewards, id)?;
     }
     drop(layout);
+
+    let board = &mut accounts.board;
+    board.version = ACCOUNT_VERSION;
+    board.session = session_key;
+    board.found_count = 0;
+    board.spawn_count = 0;
 
     let escrow = &mut accounts.escrow;
     escrow.version = ACCOUNT_VERSION;

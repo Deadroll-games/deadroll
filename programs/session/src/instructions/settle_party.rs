@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use deadroll_types::{seeds, MapStatus, PARTY_MAX};
+use deadroll_types::{seeds, PARTY_MAX};
 
 use crate::{
     cpi_out::{self, SessionSigner},
@@ -42,11 +42,16 @@ pub struct SettleParty<'info> {
     /// CHECK: the character program (deaths, experience, unlock).
     #[account(address = deadroll_character::ID)]
     pub character_program: UncheckedAccount<'info>,
+    /// CHECK: the session's `MapLayout` (address pinned at `open_session`), closed with the map
+    /// by the map CPI (patch D).
+    #[account(mut, address = session.layout @ SessionError::InvalidLayout)]
+    pub layout: UncheckedAccount<'info>,
 }
 
 /// Patch 11 (replaces `claim_rewards` and `claim_escrow`): once the party ended and before the
-/// DM's deadline, the DM settles every player at once (`crate::settlement`) and takes the escrow;
-/// the map goes `Finished`.
+/// DM's deadline, the DM settles every player at once (`crate::settlement`) and takes the escrow.
+/// Patch D: the map is played once: it closes, and its and its layout's deposits go back to the
+/// DM (docs/MAP_DESCRIPTION.md 17.7).
 ///
 /// `remaining_accounts`: a `(Character, SkillSet, Bag)` triple per pending death (finalized
 /// first), then a writable `(Participation, RewardCache, Character)` triple per player, in slot
@@ -122,7 +127,12 @@ pub fn handler<'info>(ctx: Context<'info, SettleParty<'info>>) -> Result<()> {
     }
     session.settled_mask = session.full_mask();
 
-    cpi_out::map::set_status(&signer, &accounts.map, MapStatus::Finished)?;
+    cpi_out::map::close_map(
+        &signer,
+        &accounts.map,
+        &accounts.layout,
+        &accounts.dm.to_account_info(),
+    )?;
     // Lamports move last, after the CPIs: escrow is owned by this program, the DM is a signer.
     let amount = escrow.collected;
     escrow.sub_lamports(amount)?;

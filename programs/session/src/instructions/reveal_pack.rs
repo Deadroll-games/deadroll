@@ -6,7 +6,7 @@ use deadroll_mapcheck::{
 };
 use deadroll_registry::state::{records::BESTIARY_MAX, view::table_body, TableKind};
 use deadroll_rules::map_tables;
-use deadroll_types::{seeds, PackRoster, NO_SPAWN, SECRET_SALT_LEN, SPAWNS_MAX};
+use deadroll_types::{seeds, PackRoster, NO_SPAWN, SECRET_SALT_LEN};
 use session_keys::{session_auth_or, Session, SessionTokenV2};
 
 use crate::{
@@ -20,7 +20,7 @@ use crate::{
         external::{
             read_bestiary, MapLayoutView, BESTIARY_TABLE, MONSTER_SKILLS_TABLE, REWARDS_TABLE,
         },
-        ArenaMode, GameSession, Monsters,
+        ArenaMode, BoardBytes, GameSession, Monsters,
     },
 };
 
@@ -51,6 +51,10 @@ pub struct RevealPack<'info> {
     /// CHECK: registry `["rewards"]` table, read in place: the monsters' body tables.
     #[account(address = REWARDS_TABLE @ SessionError::InvalidRegistryTable)]
     pub rewards: UncheckedAccount<'info>,
+    /// CHECK: the session's `SessionBoard` (patch D), checked by `BoardBytes::load`: the revealed
+    /// pack's monsters join its spawns.
+    #[account(mut, seeds = [seeds::BOARD, session.key().as_ref()], bump)]
+    pub board: UncheckedAccount<'info>,
     #[session(signer = signer, authority = session.core.dm)]
     pub session_token: Option<Account<'info, SessionTokenV2>>,
 }
@@ -99,7 +103,7 @@ pub fn handler(
     let session_key = session.key();
     auth::check_bound(accounts.signer.key, &session.core.dm, &session.dm_actor)?;
     let audit = audit_mode(session)?;
-    let bit = 1u8.checked_shl(pack as u32).unwrap_or(0);
+    let bit = 1u64.checked_shl(pack as u32).unwrap_or(0);
     require!(
         bit != 0 && session.used_packs() & bit != 0 && session.packs_revealed & bit == 0,
         SessionError::PackNotToReveal
@@ -140,17 +144,20 @@ pub fn handler(
         bosses,
         packs,
     };
-    let limits = tier_limits(session.tier).ok_or(SessionError::SecretRejected)?;
+    // Patch D: the tier's totals at the map's size.
+    let limits = tier_limits(session.tier)
+        .ok_or(SessionError::SecretRejected)?
+        .scaled(BALANCE.map_size.scale(session.map_class));
     totals.add(&count, &limits).map_err(rejected)?;
     session.roster_totals = [totals.monsters, totals.elites, totals.bosses, totals.packs];
     session.packs_revealed |= bit;
 
     if !audit {
         let list = roster.list();
-        let at = session.spawn_count as usize;
-        require!(at + list.len() <= SPAWNS_MAX, SessionError::InvalidLayout);
-        session.spawns[at..at + list.len()].copy_from_slice(list);
-        session.spawn_count += list.len() as u8;
+        let board = BoardBytes::load(&accounts.board, &session_key)?;
+        for spawn in list {
+            require!(board.push_spawn(spawn)?, SessionError::InvalidLayout);
+        }
         let monsters = Monsters::load(&accounts.monsters, &session_key)?;
         for spawn in list {
             let (record, template) = read_bestiary(&accounts.bestiary, spawn.bestiary_id)?;
