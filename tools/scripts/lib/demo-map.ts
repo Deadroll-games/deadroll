@@ -1,6 +1,8 @@
 // Map presets (assets/registry/maps/*.json) as the map program stores them.
 // Format and legend: crates/rules/tests/demo_preset.rs (the Rust check of the same files).
 import { readFileSync } from "node:fs";
+import { getAddressEncoder, signBytes, type Address, type KeyPairSigner } from "@solana/kit";
+import { NO_SPAWN, Secret, UNLOCK_MESSAGE, commit, declaredOf, deriveKeys, sealSecrets, splitDesign, threat, Leaves, type CellEntry, type Commitment, type Roster } from "@deadroll/sdk/secrets";
 
 /** `MAP_MAX`: tiles are row-major with this stride whatever the map width. */
 export const MAP_STRIDE = 32;
@@ -104,7 +106,11 @@ export type MapPreset = {
   /** Arena update: a spawn's `x`, `y` are its cell in its pack's arena. */
   spawns: Spawn[];
   packs: Pack[];
+  /** Patch C: the cells that hide something (`"secrets"`, crates/rules/tests/demo_preset.rs). */
+  secrets: PresetSecret[];
 };
+/** Patch C: a secret of a preset; `pack` set: a cell of that pack's arena. */
+export type PresetSecret = { kind: "trap" | "ambush" | "stash" | "door"; x: number; y: number; pack?: number; damage?: number; difficulty?: number; target?: number; table?: number };
 
 export const DEMO_MAP_PATH = new URL("../../../assets/registry/maps/demo_16x16.json", import.meta.url);
 
@@ -196,7 +202,8 @@ export function parseMapPreset(json: any): MapPreset {
   const chestRadius = u8(json.chest_radius ?? 3, "chest_radius");
   const settleTimeoutSecs = Number(json.settle_timeout_secs ?? 3600);
   if (!Number.isInteger(settleTimeoutSecs) || settleTimeoutSecs < 1) throw new Error("settle_timeout_secs must be a positive integer");
-  return { name: String(json.name ?? ""), width, height, tier, biome, minPlayers, chestRadius, settleTimeoutSecs, bossTable, chests, tiles, entrance, exit, spawns, packs };
+  const secrets: PresetSecret[] = (json.secrets ?? []).map((x: any) => ({ ...x }));
+  return { name: String(json.name ?? ""), width, height, tier, biome, minPlayers, chestRadius, settleTimeoutSecs, bossTable, chests, tiles, entrance, exit, spawns, packs, secrets };
 }
 
 export function loadMapPreset(path: string | URL = DEMO_MAP_PATH): MapPreset {
@@ -216,3 +223,76 @@ export function presetPoints(preset: MapPreset): { kind: number; x: number; y: n
 export function layoutBytes(preset: MapPreset): Uint8Array {
   return preset.tiles.slice(0, (preset.height - 1) * MAP_STRIDE + preset.width);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Patch C: the preset as the DM publishes it (docs/MAP_DESCRIPTION.md 8, 17.5): only the visible
+// monsters in the open, the packs' rosters and the secrets under the Merkle root, an encrypted copy
+// on chain under a key from the DM's signature of UNLOCK_MESSAGE.
+
+const BESTIARY_PATH = new URL("../../../assets/registry/bestiary.json", import.meta.url);
+/** The bestiary ids with the Boss role (the threat counts a boss's level 3 times). */
+export function bossIds(): Set<number> {
+  const json = JSON.parse(readFileSync(BESTIARY_PATH, "utf8"));
+  const list: any[] = Array.isArray(json) ? json : (json.records ?? []);
+  return new Set(list.map((m, i) => [m.id ?? i, m.role] as const).filter(([, r]) => r === "Boss").map(([id]) => id));
+}
+
+/** The arena shapes by pack number, for the leaf numbering. */
+export const packShapes = (packs: Pack[]) => Array.from({ length: PACKS_MAX }, (_, n) => {
+  const p = packs.find((q) => q.pack === n);
+  return p ? { width: p.width, height: p.height } : null;
+});
+
+export type PresetDesign = {
+  /** The public spawns and the pack records with `visible` into them. */
+  spawns: Spawn[];
+  packs: Pack[];
+  rosters: Roster[];
+  threat: number[];
+  cells: CellEntry[];
+  declared: number[];
+};
+
+export function presetDesign(preset: MapPreset, bosses = bossIds()): PresetDesign {
+  const records = Array.from({ length: PACKS_MAX }, (_, n) => preset.packs.find((p) => p.pack === n) ?? null);
+  const split = splitDesign(preset.spawns, records);
+  const packs = preset.packs.map((p) => ({ ...p, visible: split.packs[p.pack]!.visible }));
+  const leaves = new Leaves(preset.width, preset.height, packShapes(preset.packs));
+  const cells: CellEntry[] = preset.secrets.map((x) => {
+    const board = x.pack === undefined ? { kind: "map" as const, x: x.x, y: x.y } : { kind: "arena" as const, pack: x.pack, x: x.x, y: x.y };
+    const leaf = leaves.of(board);
+    if (leaf === null) throw new Error(`secret at ${x.x},${x.y} is outside its board`);
+    const secret =
+      x.kind === "trap" ? { kind: Secret.Trap, a: x.damage ?? 1, b: x.difficulty ?? 0, c: 0 }
+      : x.kind === "ambush" ? { kind: Secret.Ambush, a: x.target ?? 0, b: 0, c: 0 }
+      : x.kind === "stash" ? { kind: Secret.Stash, a: x.table ?? 0, b: 0, c: 0 }
+      : { kind: Secret.Door, a: 0, b: 0, c: 0 };
+    return { leaf, secret: secret as CellEntry["secret"] };
+  });
+  const threats = split.rosters.map((r) => threat(r.spawns.slice(0, r.count), (id) => bosses.has(id)));
+  return { spawns: split.spawns, packs, rosters: split.rosters, threat: threats, cells, declared: declaredOf(cells) };
+}
+
+/** The DM's signature of UNLOCK_MESSAGE with a keypair (what the wallet's signMessage gives). */
+export async function unlockSignature(dm: KeyPairSigner): Promise<Uint8Array> {
+  return new Uint8Array(await signBytes(dm.keyPair.privateKey, new TextEncoder().encode(UNLOCK_MESSAGE)));
+}
+
+/** The commitment of a preset on map `map`, its encrypted copy and public part, for a DM keypair. */
+export async function presetSecrets(preset: MapPreset, map: Address, dm: KeyPairSigner): Promise<{ design: PresetDesign; commitment: Commitment; blob: Uint8Array }> {
+  const design = presetDesign(preset);
+  const mapBytes = new Uint8Array(getAddressEncoder().encode(map));
+  const keys = await deriveKeys(await unlockSignature(dm), mapBytes);
+  const secrets = { rosters: design.rosters, cells: design.cells };
+  const commitment = await commit(mapBytes, keys, preset.width, preset.height, packShapes(preset.packs), secrets);
+  return { design, commitment, blob: await sealSecrets(keys, mapBytes, secrets) };
+}
+
+/** `write_secrets` chunks of the encrypted copy (each with the public part). */
+export function secretChunks(blob: Uint8Array, design: PresetDesign, size = 600) {
+  const out: { offset: number; bytes: Uint8Array; len: number; threat: number[]; declared: number[] }[] = [];
+  for (let at = 0; at < blob.length; at += size) out.push({ offset: at, bytes: blob.slice(at, at + size), len: blob.length, threat: design.threat, declared: design.declared });
+  return out;
+}
+
+export { NO_SPAWN };
