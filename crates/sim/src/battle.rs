@@ -32,6 +32,7 @@ use deadroll_rules::{
         monster_passive_aura, passive_aura, tick_auras, Aura, AuraField, MonsterAuraField,
         MonsterAuras, MonsterBearer, PartyAuras, PlayerAuras, PASSIVE_AURA, REACTIVE_AURA,
     },
+    exit::retreat_buff,
     input::hero,
     input::{effect_action, EffectAction, SkillStats},
     line::{line_cells, line_ends, targets_on_line},
@@ -426,7 +427,14 @@ impl<'a> Battle<'a> {
                         flags: s.flags,
                         ..Monster::default()
                     },
-                    mods: NO_MODS,
+                    mods: {
+                        // Patch B: a pack the party retreated from starts buffed.
+                        let mut mods = NO_MODS;
+                        if fight.guarded {
+                            retreat_buff(&mut mods, Unit::Monster(i as u8).id(), &cfg.arena);
+                        }
+                        mods
+                    },
                     defense: t.defense,
                     profile,
                     boss: t.is_boss(),
@@ -1826,6 +1834,30 @@ mod tests {
             tables: registry().tables,
             first: FirstSide::Monsters,
             then: Vec::new(),
+            guarded: false,
+        }
+    }
+
+    #[test]
+    fn a_pack_on_guard_starts_with_the_retreat_buff() {
+        use deadroll_combat::support::{mod_power, ModKind};
+        let party = [hero(Class::Warrior, vec![])];
+        let fresh = Battle::new(CFG, &party, &goblins(2), Settings::default(), 1);
+        assert!(fresh.foes.iter().all(|f| f.mods == NO_MODS));
+        let guarded = Fight {
+            guarded: true,
+            ..goblins(2)
+        };
+        let b = Battle::new(CFG, &party, &guarded, Settings::default(), 1);
+        for f in &b.foes {
+            assert_eq!(
+                mod_power(&f.mods, ModKind::Empowerment),
+                CFG.arena.retreat_empower_bp
+            );
+            assert_eq!(
+                mod_power(&f.mods, ModKind::Protection),
+                CFG.arena.retreat_protect_bp
+            );
         }
     }
 
@@ -2298,6 +2330,7 @@ mod tests {
             tables: reg.tables,
             first: FirstSide::Monsters,
             then: Vec::new(),
+            guarded: false,
         }
     }
 
