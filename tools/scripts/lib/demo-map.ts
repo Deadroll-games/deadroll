@@ -219,9 +219,12 @@ export function presetPoints(preset: MapPreset): { kind: number; x: number; y: n
   ];
 }
 
-/** The cell bytes `write_layout(0, ...)` needs: rows 0..height at stride 32, last row cut at width. */
+/** The cell bytes `write_layout(0, ...)` needs: patch D, `width` per row (the preset keeps them
+ * at stride 32). */
 export function layoutBytes(preset: MapPreset): Uint8Array {
-  return preset.tiles.slice(0, (preset.height - 1) * MAP_STRIDE + preset.width);
+  const out = new Uint8Array(preset.width * preset.height);
+  for (let y = 0; y < preset.height; y++) out.set(preset.tiles.subarray(y * MAP_STRIDE, y * MAP_STRIDE + preset.width), y * preset.width);
+  return out;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -291,7 +294,9 @@ export async function presetSecrets(preset: MapPreset, map: Address, dm: KeyPair
 /** `write_secrets` chunks of the encrypted copy (each with the public part). */
 export function secretChunks(blob: Uint8Array, design: PresetDesign, size = 600) {
   const out: { offset: number; bytes: Uint8Array; len: number; threat: number[]; declared: number[] }[] = [];
-  for (let at = 0; at < blob.length; at += size) out.push({ offset: at, bytes: blob.slice(at, at + size), len: blob.length, threat: design.threat, declared: design.declared });
+  // Patch D: one threat per pack number of the class (8 on a Small map).
+  const threat = Array.from({ length: 8 }, (_, n) => design.threat[n] ?? 0);
+  for (let at = 0; at < blob.length; at += size) out.push({ offset: at, bytes: blob.slice(at, at + size), len: blob.length, threat, declared: design.declared });
   return out;
 }
 
