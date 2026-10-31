@@ -72,14 +72,7 @@ pub fn check_tables<R: Fn(u8) -> Option<TableRules>>(
     if count > CHESTS_MAX || count > loot.rules.chests as usize {
         return Err(E::TooManyChests);
     }
-    let allowed = |id: u8| -> Result<TableRules, MapCheckError> {
-        let t = (loot.table_of)(id).ok_or(E::UnknownTable)?;
-        let in_mask = id < 64 && loot.rules.allowed & (1 << id) != 0;
-        if !in_mask || t.level_max > level_cap {
-            return Err(E::TableNotAllowed);
-        }
-        Ok(t)
-    };
+    let allowed = |id: u8| allowed_table(level_cap, id, loot);
     let mut spent = 0u32;
     for &id in chest_tables {
         spent += allowed(id)?.cost as u32;
@@ -97,6 +90,46 @@ pub fn check_tables<R: Fn(u8) -> Option<TableRules>>(
         return Err(E::OverBudget);
     }
     Ok(spent)
+}
+
+/// A reward table the map's tier allows: known, in the tier's mask, not above `level_cap`.
+pub fn allowed_table<R: Fn(u8) -> Option<TableRules>>(
+    level_cap: u8,
+    id: u8,
+    loot: &MapLoot<R>,
+) -> Result<TableRules, MapCheckError> {
+    use MapCheckError as E;
+    let t = (loot.table_of)(id).ok_or(E::UnknownTable)?;
+    let in_mask = id < 64 && loot.rules.allowed & (1 << id) != 0;
+    if !in_mask || t.level_max > level_cap {
+        return Err(E::TableNotAllowed);
+    }
+    Ok(t)
+}
+
+/// Patch C: the reward budget with the hidden stashes found so far (docs/PARTY_AND_TURNS.md 9.2:
+/// the DM assigns tables to chests, hidden stashes and the boss). [`check_tables`] passed for the
+/// chests and the boss at `finalize_map`; every stash table must be allowed and the sum within
+/// the budget for the map's minimum players.
+pub fn check_stash_budget<R: Fn(u8) -> Option<TableRules>>(
+    level_cap: u8,
+    chest_tables: &[u8],
+    boss_table: u8,
+    stash_tables: &[u8],
+    loot: &MapLoot<R>,
+) -> Result<(), MapCheckError> {
+    use MapCheckError as E;
+    if loot.min_players == 0 || loot.min_players as usize > PARTY_MAX {
+        return Err(E::MinPlayersOutOfRange);
+    }
+    let mut spent = 0u32;
+    for &id in chest_tables.iter().chain(stash_tables).chain([&boss_table]) {
+        spent += allowed_table(level_cap, id, loot)?.cost as u32;
+    }
+    if spent > loot.rules.budget[loot.min_players as usize - 1] as u32 {
+        return Err(E::OverBudget);
+    }
+    Ok(())
 }
 
 /// Chest placement, then [`check_tables`]. `ends` are the entrance and the exit.

@@ -4,6 +4,11 @@
 //! the bestiary.
 use deadroll_skillcheck::{monster::POOL_MAX, Category};
 
+use crate::{
+    limits::{TierLimits, BOSSES},
+    MapCheckError,
+};
+
 /// How a monster template enters a pack.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Role {
@@ -61,5 +66,58 @@ impl SpawnRules {
             (_, true) => self.slots[1],
             (_, false) => self.slots[0],
         }
+    }
+}
+
+/// Patch C: what one revealed pack adds to the map's totals (`crate::arena::check_roster`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RosterCount {
+    /// Monsters outside the boss pack (loners included).
+    pub regular: u8,
+    pub loners: u8,
+    pub elites: u8,
+    pub bosses: u8,
+    pub helpers: u8,
+}
+
+/// Patch C: the map-wide limits over the packs revealed so far (docs/MAP_DESCRIPTION.md 10.2):
+/// the program adds a pack at each reveal, the audit [`RosterTotals::finish`]es after the last.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RosterTotals {
+    pub monsters: u8,
+    pub elites: u8,
+    pub bosses: u8,
+    /// Packs with regular monsters.
+    pub packs: u8,
+}
+
+impl RosterTotals {
+    pub fn add(&mut self, count: &RosterCount, limits: &TierLimits) -> Result<(), MapCheckError> {
+        use MapCheckError as E;
+        self.monsters = self.monsters.saturating_add(count.regular);
+        self.elites = self.elites.saturating_add(count.elites);
+        self.bosses = self.bosses.saturating_add(count.bosses);
+        self.packs = self.packs.saturating_add((count.regular > 0) as u8);
+        if self.monsters > limits.monsters {
+            return Err(E::TooManyMonsters);
+        }
+        if self.elites > limits.elites {
+            return Err(E::TooManyElites);
+        }
+        if self.packs > limits.packs {
+            return Err(E::TooManyPacks);
+        }
+        if self.bosses > BOSSES {
+            return Err(E::BossCount);
+        }
+        Ok(())
+    }
+
+    /// Every pack is in: exactly one boss.
+    pub fn finish(&self) -> Result<(), MapCheckError> {
+        if self.bosses != BOSSES {
+            return Err(MapCheckError::BossCount);
+        }
+        Ok(())
     }
 }

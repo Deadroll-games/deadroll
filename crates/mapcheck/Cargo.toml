@@ -11,4 +11,6 @@ publish.workspace = true
 deadroll-types.workspace = true
 # Monster skill slots and the pool choice (docs/BESTIARY.md 3.2).
 deadroll-skillcheck.workspace = true
+# Patch C: the secrets' Merkle tree (`secrets`): the SHA-256 syscall on chain, sha2 elsewhere.
+solana-sha256-hasher = { version = "3.1", features = ["sha2"] }
 

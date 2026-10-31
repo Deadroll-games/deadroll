@@ -198,3 +198,23 @@ u8_enum!(
     /// `x + 1`, clockwise. Coming from its back the party moves first in the arena.
     Facing { N, NE, E, SE, S, SW, W, NW }
 );
+
+// Patch C (docs/MAP_DESCRIPTION.md 8.1, 17.4).
+u8_enum!(
+    /// What a cell hides (`CellSecret.kind`). `Ambush` is the trap that starts a hidden pack's
+    /// fight; `Door` turns a wall into a door once found.
+    SecretKind { None, Trap, Ambush, Stash, Door }
+);
+
+impl SecretKind {
+    /// Index into the declared counts (`None` has none).
+    pub const fn counted(self) -> Option<usize> {
+        match self {
+            SecretKind::None => None,
+            SecretKind::Trap => Some(0),
+            SecretKind::Ambush => Some(1),
+            SecretKind::Stash => Some(2),
+            SecretKind::Door => Some(3),
+        }
+    }
+}

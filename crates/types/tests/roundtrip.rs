@@ -677,3 +677,64 @@ fn arena_sizes_match_anchor_init_space() {
     assert_eq!(PackLayout::SIZE, PackLayout::INIT_SPACE);
     assert_eq!(MapArenasData::SIZE, MapArenasData::INIT_SPACE);
 }
+
+/// Patch C: a cell's secret, a pack's roster, a found secret and the map's secrets tail.
+#[test]
+fn secrets_layout() {
+    let trap = CellSecret::trap(9, 14);
+    assert_eq!(check(&trap, CellSecret::SIZE), trap.bytes());
+    assert_eq!(CellSecret::NONE.bytes(), [0; 4]);
+    assert_eq!(CellSecret::ambush(3).bytes(), [SecretKind::Ambush as u8, 3, 0, 0]);
+    assert_eq!(CellSecret::stash(7).bytes(), [SecretKind::Stash as u8, 7, 0, 0]);
+    assert_eq!(CellSecret::door().bytes(), [SecretKind::Door as u8, 0, 0, 0]);
+    assert!(SecretKind::try_from(SecretKind::COUNT as u8).is_err());
+    assert_eq!(SecretKind::None.counted(), None);
+    let counted: Vec<_> = SecretKind::ALL.iter().filter_map(|k| k.counted()).collect();
+    assert_eq!(counted, (0..SECRET_TYPES).collect::<Vec<_>>());
+
+    let mut roster = PackRoster {
+        count: 2,
+        ..PackRoster::default()
+    };
+    roster.spawns[1] = Spawn {
+        bestiary_id: 4,
+        x: 1,
+        y: 2,
+        level: 3,
+        skills: 0x0102,
+        flags: SPAWN_ELITE,
+        aspects: 5,
+        pack: 6,
+    };
+    let bytes = check(&roster, PackRoster::SIZE);
+    assert_eq!(bytes.as_slice(), roster.bytes().as_slice());
+    assert_eq!(roster.list().len(), 2);
+
+    let found = FoundSecret {
+        leaf: 0x0203,
+        secret: trap,
+    };
+    assert_eq!(check(&found, FoundSecret::SIZE)[..2], [3, 2]);
+
+    let mut secrets = MapSecretsData::EMPTY;
+    secrets.threat[PACKS_MAX - 1] = 12;
+    secrets.declared[SECRET_TYPES - 1] = 2;
+    secrets.blob_len = 0x0304;
+    secrets.blob[SECRETS_BLOB_MAX - 1] = 0xEE;
+    let bytes = check(&secrets, MapSecretsData::SIZE);
+    assert_eq!(bytes[PACKS_MAX - 1], 12);
+    assert_eq!(bytes[PACKS_MAX + SECRET_TYPES - 1], 2);
+    assert_eq!(bytes[PACKS_MAX + SECRET_TYPES..][..2], [4, 3]);
+    assert_eq!(bytes[MapSecretsData::SIZE - 1], 0xEE);
+    const _: () = assert!(SECRET_LEAVES_MAX <= 1 << SECRET_DEPTH_MAX);
+}
+
+#[cfg(feature = "anchor")]
+#[test]
+fn secret_sizes_match_anchor_init_space() {
+    use anchor_lang::Space;
+    assert_eq!(CellSecret::SIZE, CellSecret::INIT_SPACE);
+    assert_eq!(PackRoster::SIZE, PackRoster::INIT_SPACE);
+    assert_eq!(FoundSecret::SIZE, FoundSecret::INIT_SPACE);
+    assert_eq!(MapSecretsData::SIZE, MapSecretsData::INIT_SPACE);
+}
