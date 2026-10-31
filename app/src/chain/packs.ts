@@ -20,7 +20,8 @@ const floor = (side: number) => new Uint8Array(side * side).fill(cellByte(Tile.S
 
 /** The pack whose visible monster stands on map cell `c`, or null. */
 export function packAt(d: Pick<PackEdit, "packs">, c: Cell): number | null {
-  const n = d.packs.findIndex((pk) => pk !== null && pk.x === c.x && pk.y === c.y);
+  // Patch C: an ambush pack has no map cell.
+  const n = d.packs.findIndex((pk) => pk !== null && pk.visible !== 0xff && pk.x === c.x && pk.y === c.y);
   return n < 0 ? null : n;
 }
 

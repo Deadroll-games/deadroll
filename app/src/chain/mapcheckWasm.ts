@@ -9,8 +9,9 @@ import { useEffect, useState } from "react";
 import wasmUrl from "./wasm/mapcheck.wasm?url";
 import { MAP_CELLS, PointKind, SPAWNS_MAX, type Cell, type Spawn } from "./types";
 
-/** `ABI_VERSION` of the module this wrapper speaks (2: the arenas, arena update). */
-export const MAPCHECK_ABI = 2;
+/** `ABI_VERSION` of the module this wrapper speaks (2: the arenas, arena update; 3: patch C, the
+ * whole design with its secrets, `check_design`). */
+export const MAPCHECK_ABI = 3;
 /** `POINTS_MAX`: the entrance, the exit and up to 4 chests. */
 export const POINTS_MAX = 6;
 /** Arena update: `PACKS_MAX`, `ARENA_SIDE_MAX` (crates/types). */
@@ -82,6 +83,25 @@ export const MAPCHECK_ERRORS = [
   "ArenaNoRoom",
   "ArenaUnreachable",
   "TooManyTemplates",
+  // Patch C: secrets and hidden packs.
+  "SecretInvalid",
+  "SecretNotPassable",
+  "SecretOnPoint",
+  "TrapDamageOutOfRange",
+  "AmbushPackInvalid",
+  "AmbushInArena",
+  "StashInArena",
+  "DoorNotWall",
+  "TooManySecrets",
+  "TooFewTraps",
+  "AmbushUnlinked",
+  "ThreatOutOfRange",
+  "ThreatMismatch",
+  "RosterInvalid",
+  "VisibleMismatch",
+  "SpawnNotVisible",
+  "TooFewSecrets",
+  "DuplicateSecret",
 ] as const;
 export type MapCheckError = (typeof MAPCHECK_ERRORS)[number];
 
@@ -146,6 +166,24 @@ export const MAPCHECK_MESSAGES: Record<MapCheckError, string> = {
   ArenaNoRoom: "From some side an arena has no room for a party of 4",
   ArenaUnreachable: "From some side the party in an arena is split or cannot reach a monster",
   TooManyTemplates: "Too many different monsters for one party",
+  SecretInvalid: "A secret does not fit its cell",
+  SecretNotPassable: "A trap or an ambush must lie on a cell that can be entered",
+  SecretOnPoint: "A trap or an ambush cannot lie on the entrance, the exit, a chest or a pack",
+  TrapDamageOutOfRange: "Trap damage must be from 1 to the map tier's limit",
+  AmbushPackInvalid: "An ambush must lead to a pack with no monster on the map",
+  AmbushInArena: "An ambush trap lies on the map, not in an arena",
+  StashInArena: "A hidden stash lies on the map, not in an arena",
+  DoorNotWall: "A secret door goes in a wall",
+  TooManySecrets: "Too many secrets for this map tier",
+  TooFewTraps: "This map tier needs at least one trap",
+  AmbushUnlinked: "Each ambush pack needs exactly one ambush trap",
+  ThreatOutOfRange: "A pack's threat does not fit",
+  ThreatMismatch: "A pack's threat does not match its monsters",
+  RosterInvalid: "A pack has no monsters or too many",
+  VisibleMismatch: "Pick the monster shown on the map from its own pack",
+  SpawnNotVisible: "Only the monster each pack shows may stand on the map",
+  TooFewSecrets: "Fewer secrets than declared",
+  DuplicateSecret: "Two secrets on one cell",
 };
 
 /** The registry tables finalize_map reads, as written on chain (`set_table` kinds 0-3). */
@@ -221,6 +259,25 @@ export function encodeMapCheck(d: MapCheckDraft): Uint8Array {
   return out;
 }
 
+/** Patch C: a secret of a draft, by leaf (`@deadroll/sdk/secrets` `Leaves`). */
+export type DraftSecret = { leaf: number; kind: number; a: number; b: number; c: number };
+
+/** Patch C: the borsh `DesignRequest`: the map request, the declared counts, the secrets. */
+export function encodeDesign(d: MapCheckDraft, declared: number[], secrets: DraftSecret[]): Uint8Array {
+  const map = encodeMapCheck(d);
+  const out = new Uint8Array(map.length + 4 + 4 + secrets.length * 6);
+  out.set(map, 0);
+  let at = map.length;
+  for (let i = 0; i < 4; i++) out[at++] = declared[i] ?? 0;
+  new DataView(out.buffer).setUint32(at, secrets.length, true);
+  at += 4;
+  for (const x of secrets) {
+    out.set([x.leaf & 0xff, x.leaf >> 8, x.kind, x.a, x.b, x.c], at);
+    at += 6;
+  }
+  return out;
+}
+
 type Exports = {
   memory: WebAssembly.Memory;
   abi_version(): number;
@@ -228,6 +285,7 @@ type Exports = {
   input_ptr(): number;
   set_table(kind: number, len: number): number;
   check_map(len: number): number;
+  check_design(len: number): number;
 };
 
 const TABLE_KINDS: (keyof MapcheckTables)[] = ["bestiary", "monsterSkills", "rewards", "tileset"];
@@ -267,6 +325,22 @@ export class MapcheckWasm {
     const name = MAPCHECK_ERRORS[r - 1];
     if (!name) throw new Error(`mapcheck wasm: unknown rule ${r - 1}`);
     return name;
+  }
+
+  /** Patch C: the first broken rule of the whole design (every spawn, every secret), or null. */
+  checkDesign(d: MapCheckDraft, declared: number[], secrets: DraftSecret[]): MapCheckError | null {
+    const r = this.designVerdict(encodeDesign(d, declared, secrets));
+    if (r < 0) throw new Error(`mapcheck wasm: error ${r}`);
+    if (r === 0) return null;
+    const name = MAPCHECK_ERRORS[r - 1];
+    if (!name) throw new Error(`mapcheck wasm: unknown rule ${r - 1}`);
+    return name;
+  }
+
+  /** Patch C: the raw verdict of a design request. */
+  designVerdict(input: Uint8Array): number {
+    this.write(input);
+    return this.x.check_design(input.length);
   }
 
   /** The raw verdict: 0 valid, `1 + code` (tests compare it with the fixture). */

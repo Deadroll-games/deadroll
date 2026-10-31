@@ -4,6 +4,7 @@
 // party is opened from the Tavern's DM table (game/tavern). The calls mirror tests/demo.test.ts.
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Address, Instruction, TransactionSigner } from "@solana/kit";
+import balance from "../chain/balance.json";
 import { HitCard } from "../components/dice/HitCard";
 import { CHEST_OPEN_AP, cacheRewards, chestsOf, levelsLabel, rewardLabel, rewardTables, settleDeadline, settleLabel } from "../chain/loot";
 
@@ -70,6 +71,12 @@ import {
   enterArenaIx,
   leaveArenaIx,
   visiblePacks,
+  examineIx,
+  foundSecrets,
+  openDmSecrets,
+  revealCellIx,
+  revealPackIx,
+  type DmSecrets,
 } from "../chain/game";
 import { FACING_NAMES } from "../chain/mock";
 import { toHitResolved, toResonanceSpread } from "../chain/hit";
@@ -91,7 +98,7 @@ import {
 import { ACTIVE_SLOTS, REACTIVE_SLOT, kinOf, monsterBearersOf, sizeOf, squareOf, monsterSkillName, monsterSkillsOf, skillAction, useBuilderRegistry, useMonsterSkillTable, type MonsterSkill } from "../chain/monsters";
 import { errorName } from "../chain/send";
 import { statusLabel, type SubStatus } from "../chain/subscribe";
-import { cooldownLabel, exitVoteView, skillCooldowns, skillUsedText, skipText, arenaStepFor, startTurnFor, takenOntoMap, tickText, turnActed, turnStarted } from "../chain/turns";
+import { auditLeft, cooldownLabel, exitVoteView, revealStepFor, skillCooldowns, skillUsedText, skipText, arenaStepFor, startTurnFor, takenOntoMap, tickText, turnActed, turnStarted } from "../chain/turns";
 import { skillSetPda } from "../chain/pda";
 import { affordable, cheb, extendPath, pathCost, reachable, route, type Step } from "../chain/route";
 import { cellsOf, covers, footprint, lineEnds, squareDistance, type Footprint } from "../chain/footprint";
@@ -496,6 +503,66 @@ export function PartyView({ address }: { address: Address }) {
     })();
   }, [party, me, payer, send, ingest, refresh, address]);
 
+  // ---- Patch C: the DM's secrets, opened with the DM's wallet on any device (nothing is stored),
+  // and the reveals the DM's client sends by itself with the DM's session key (docs/MAP_DESCRIPTION.md
+  // 8.5, 17.5): a cell a step or a look uncovered, the pack the party engaged.
+  const [dmSecrets, setDmSecrets] = useState<DmSecrets | null>(null);
+  const [unlockError, setUnlockError] = useState<string | null>(null);
+  const unlockSecrets = useCallback(async () => {
+    if (!party || !wallet.messageSigner) return;
+    setUnlockError(null);
+    try {
+      setDmSecrets(await openDmSecrets(party, wallet.messageSigner));
+    } catch (e) {
+      setUnlockError(e instanceof Error ? e.message : String(e));
+    }
+  }, [party, wallet.messageSigner]);
+  const revealRun = useRef(false);
+  useEffect(() => {
+    if (!party || !dmSecrets || revealRun.current) return;
+    const step = revealStepFor(party, me ?? null);
+    if (!step) return;
+    const dm = actorFor(party.session.dmActor);
+    if (!dm) return;
+    revealRun.current = true;
+    void (async () => {
+      try {
+        const by = step.kind === "cell" ? (party.players.find((x) => x.slot === step.by)?.participation ?? null) : null;
+        const res = await send(
+          step.kind === "cell" ? "reveal a cell" : "reveal a pack",
+          dm.signer,
+          async () =>
+            step.kind === "cell"
+              ? [await revealCellIx(dm, party.address, party.session, step.leaf, await dmSecrets.commitment.cell(step.leaf), by)]
+              : revealPackIx(dm, party.address, party.session, step.pack, await dmSecrets.commitment.pack(step.pack)),
+          // Another tab of the DM sent it first.
+          { quiet: true, onError: (m) => ["NotObligated", "AlreadyRevealed", "PackNotToReveal"].includes(errorName(m) ?? "") },
+        );
+        if (res) ingest(res.signature, res.events);
+        await refresh();
+      } finally {
+        revealRun.current = false;
+      }
+    })();
+  }, [party, me, dmSecrets, actorFor, send, ingest, refresh]);
+  /** Patch C: the final audit (docs/PARTY_AND_TURNS.md 3.2): every secret and pack still hidden. */
+  const runAudit = useCallback(async () => {
+    if (!party || !dmSecrets) return false;
+    const dm = actorFor(party.session.dmActor);
+    if (!dm) return false;
+    const left = auditLeft(party.session, dmSecrets.leaves, dmSecrets.packs);
+    for (const leaf of left.cells) {
+      const res = await send("audit: reveal a secret", dm.signer, async () => [await revealCellIx(dm, party.address, party.session, leaf, await dmSecrets.commitment.cell(leaf), null)]);
+      if (!res) return false;
+    }
+    for (const pack of left.packs) {
+      const res = await send("audit: reveal a pack", dm.signer, async () => revealPackIx(dm, party.address, party.session, pack, await dmSecrets.commitment.pack(pack)));
+      if (!res) return false;
+    }
+    await refresh();
+    return true;
+  }, [party, dmSecrets, actorFor, send, refresh]);
+
   /** Sends one game action, then (localnet) answers its VRF request at once. */
   const act = async (what: string, signer: TransactionSigner | null, ixs: () => Promise<Parameters<typeof send>[2]>, needsRoll: boolean) => {
     if (lock.current) return;
@@ -581,7 +648,9 @@ export function PartyView({ address }: { address: Address }) {
         hp: 1,
         hpMax: 1,
         alive: true,
-        label: `${bestiaryName(v.bestiaryId)}: pack ${v.pack}, looking ${FACING_NAMES[v.facing] ?? "?"}`,
+        label: `${bestiaryName(v.bestiaryId)}: pack ${v.pack}, threat ${v.threat}, looking ${FACING_NAMES[v.facing] ?? "?"}`,
+        // Patch C: the pack's threat, declared by the DM and checked when the pack is revealed.
+        badge: String(v.threat),
       })),
     ];
   }, [party]);
@@ -698,6 +767,14 @@ export function PartyView({ address }: { address: Address }) {
     myTurn && activePlayer && started && !s?.core.pendingVrf && partyClear
       ? chests.find((c) => !c.opened && cheb(c, activePlayer.part.core) === 1 && !monsterNear(c))
       : undefined;
+  // Patch C: a look at the cell next to the player (a secret door, a hidden stash): the DM reveals it.
+  const [examining, setExamining] = useState(false);
+  const examine = (c: { x: number; y: number }) => {
+    setExamining(false);
+    if (!activePlayer || !s || cheb(c, activePlayer.part.core) !== 1) return;
+    const actor = actorFor(activePlayer.part.core.sessionKey);
+    void act(`examine (${c.x}, ${c.y})`, actor?.signer ?? null, async () => [await examineIx(actor!, address, activePlayer.character, c.x, c.y)], false);
+  };
   const openChest = (chest: number) => {
     if (!activePlayer || !s) return;
     const actor = actorFor(activePlayer.part.core.sessionKey);
@@ -1199,6 +1276,7 @@ export function PartyView({ address }: { address: Address }) {
             auras={gridAuras}
             chests={onMap ? gridChests : []}
             points={onMap ? party.points : []}
+            secrets={foundSecrets(s)}
             pointSprite={pointSprite}
             chestSprite={chestSprite}
             line={!ended ? lineCells : []}
@@ -1207,7 +1285,7 @@ export function PartyView({ address }: { address: Address }) {
             unitSprite={unitSprite}
             tileSprite={tileSprite}
             onCellHover={setHover}
-            onCellClick={(c) => (canMove && (myTurn || (monsterTurn && isDm)) ? markCell(c) : undefined)}
+            onCellClick={(c) => (examining && myTurn ? examine(c) : canMove && (myTurn || (monsterTurn && isDm)) ? markCell(c) : undefined)}
             onUnitClick={(u) => {
               if (!canAttack || u.id >= PACK_UNIT_BASE) return;
               if (myTurn && chosenSide === "enemy" && u.kind === "monster" && u.alive) attack(u.id - MONSTER_BASE);
@@ -1239,6 +1317,12 @@ export function PartyView({ address }: { address: Address }) {
                 {s.core.pendingVrf && <span className="muted"> · waiting for the VRF roll</span>}
                 {unit !== null && !started && !s.core.pendingVrf && <span className="muted"> · {controls ? "starting the turn..." : "waiting for the turn to start"}</span>}
               </p>
+              {myTurn && started && !s.core.pendingVrf && s.obligationCount === 0 && (
+                <button className="btn" aria-pressed={examining} disabled={busy !== null || moverAp < EXAMINE_AP} onClick={() => setExamining(!examining)}>
+                  {examining ? "Click a cell next to you" : "Examine a cell"} <span className="muted ap"> · {EXAMINE_AP} AP</span>
+                </button>
+              )}
+              {s.obligationCount > 0 && <p className="muted">The DM reveals what the party uncovered...</p>}
               {nextChest && (
                 <button className="btn" disabled={busy !== null || moverAp < CHEST_OPEN_AP} onClick={() => openChest(nextChest.index)}>
                   Open the chest <span className="muted ap"> · {CHEST_OPEN_AP} AP</span>
@@ -1408,7 +1492,18 @@ export function PartyView({ address }: { address: Address }) {
             />
           )}
           <StatsPanel units={statsUnits(party, label, combat)} />
-          {ended && <Claims party={party} isDm={isDm} me={me} actorFor={actorFor} payer={wallet.signer} send={send} ingest={ingest} busy={busy} />}
+          {isDm && party.secretsBlob && !dmSecrets && (
+            <div className="panel">
+              <p className="muted">
+                Your map's secrets are on chain, encrypted with your wallet's key. Unlock them in this tab to reveal what the party uncovers and to pass the final audit.
+              </p>
+              <button className="btn primary" disabled={!wallet.messageSigner} onClick={() => void unlockSecrets()}>
+                Unlock the map secrets
+              </button>
+              {unlockError && <p className="error">{unlockError}</p>}
+            </div>
+          )}
+          {ended && <Claims party={party} isDm={isDm} me={me} actorFor={actorFor} payer={wallet.signer} send={send} ingest={ingest} busy={busy} audit={isDm ? { ready: dmSecrets !== null, left: dmSecrets ? auditCount(party, dmSecrets) : null, run: runAudit } : null} />}
           {tombLog.length > 0 && (
             <div className="panel">
               <h3>Tombstones</h3>
@@ -1442,6 +1537,7 @@ export function Claims({
   send,
   ingest,
   busy,
+  audit,
 }: {
   party: Party;
   isDm: boolean;
@@ -1451,6 +1547,9 @@ export function Claims({
   send: ReturnType<typeof useTx>["send"];
   ingest: (sig: string, evs: never[]) => void;
   busy: string | null;
+  /** Patch C: the DM's final audit before the escrow: `left` secrets and packs still hidden
+   * (`null` until the DM unlocks the map secrets). */
+  audit?: { ready: boolean; left: number | null; run: () => Promise<boolean> } | null;
 }) {
   const s = party.session;
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
@@ -1463,6 +1562,11 @@ export function Claims({
   const dmSettled = party.escrow?.claimed ?? false;
   const run = (what: string, ix: () => Promise<Instruction>) =>
     void send(what, payer, async () => [computeLimitIx(SETTLE_CU), await ix()]).then((r) => r && ingest(r.signature, r.events as never[]));
+  // Patch C: the escrow waits for the audit (docs/PARTY_AND_TURNS.md 3.2).
+  const auditThenSettle = async () => {
+    if (audit && audit.left !== 0 && !(await audit.run())) return;
+    run(`settle_party ${formatSol(party.escrow!.collected)}`, () => settlePartyIx(payer!, party.address, s));
+  };
   return (
     <div className="panel">
       <h3>{status(s) === "victory" ? "Victory" : "The party is over"}</h3>
@@ -1503,17 +1607,33 @@ export function Claims({
         </p>
       )}
       {isDm && party.escrow && !dmSettled && left > 0 && (
-        <button
-          className="btn primary"
-          disabled={busy !== null}
-          onClick={() => run(`settle_party ${formatSol(party.escrow!.collected)}`, () => settlePartyIx(payer!, party.address, s))}
-        >
-          Hand out the rewards and take {formatSol(party.escrow.collected)}
-        </button>
+        <>
+          {audit && (
+            <p className="muted">
+              {!audit.ready
+                ? "Unlock the map secrets first: the escrow is paid after the final audit reveals every secret and pack."
+                : audit.left
+                  ? `Final audit: ${audit.left} secrets and packs to reveal first (sent with your session key).`
+                  : "Final audit done."}
+            </p>
+          )}
+          <button className="btn primary" disabled={busy !== null || (audit !== null && audit !== undefined && !audit.ready)} onClick={() => void auditThenSettle()}>
+            {audit?.left ? "Audit, then hand out" : "Hand out"} the rewards and take {formatSol(party.escrow.collected)}
+          </button>
+        </>
       )}
       {dmSettled && <p className="ok">The DM handed out the rewards and took {formatSol(party.escrow!.collected)}; the map is finished.</p>}
     </div>
   );
+}
+
+/** Patch C: `SecretTuning.examine_ap` (balance.json, the program defaults). */
+const EXAMINE_AP = balance.secrets.examine_ap;
+
+/** Patch C: the secrets and packs the final audit still has to reveal. */
+function auditCount(party: Party, d: DmSecrets): number {
+  const left = auditLeft(party.session, d.leaves, d.packs);
+  return left.cells.length + left.packs.length;
 }
 
 /** `h:mm:ss` of `secs`. */

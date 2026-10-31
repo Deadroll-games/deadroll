@@ -16,7 +16,16 @@ export type GridUnit = {
   label: string;
   /** Footprint in cells (1, or 2 for big monsters). The sprite is drawn bottom-center on its cell at the tile pixel scale. */
   size?: 1 | 2;
+  /** Patch C: a short tag drawn at the unit's top-right corner (a pack's threat level). */
+  badge?: string;
 };
+/**
+ * Patch C: a secret cell (docs/MAP_DESCRIPTION.md 8.1, 17.5). Until it is found it is not given at
+ * all (it looks like the floor or the wall it is); a found one is highlighted. The DM's own view
+ * passes the unfound ones too, `found: false`, drawn faint.
+ */
+export type GridSecretKind = "trap" | "ambush" | "stash" | "door";
+export type GridSecret = { x: number; y: number; kind: GridSecretKind; found: boolean; label: string };
 
 /**
  * Patch 11: a visible chest (docs/MAP_DESCRIPTION.md 7.1). A closed chest occupies its cell; an
@@ -68,6 +77,8 @@ export type GridProps = {
   chests?: GridChest[];
   /** Patch 13: the entrance and the exit. */
   points?: GridPoint[];
+  /** Patch C: secret cells, drawn over the floor under the units; the canvas title shows the hovered one's label. */
+  secrets?: GridSecret[];
   /**
    * CSS pixel size of one cell on screen. Default 48. With sprites it is rounded down to a whole
    * multiple of the 64 px tile (minimum 64), so the canvas is never resized by CSS and sprites scale

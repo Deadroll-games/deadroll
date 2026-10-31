@@ -7,7 +7,8 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { generateKeyPairSigner, lamports, type Address, type KeyPairSigner } from "@solana/kit";
+import { generateKeyPairSigner, getAddressEncoder, lamports, signBytes, type Address, type KeyPairSigner } from "@solana/kit";
+import { isBoss, mapKeys, type MessageSigner } from "./secrets";
 import demoMap from "../../../assets/registry/maps/demo_16x16.json";
 import { chestsOf } from "./loot";
 import { PROGRAMS } from "../config";
@@ -62,6 +63,9 @@ import {
   enterArenaIx,
   leaveArenaIx,
   visiblePacks,
+  openDmSecrets,
+  revealCellIx,
+  revealPackIx,
 } from "./game";
 import { MAP_PRESETS, presetToLayout, type MapPresetData } from "./mock";
 import { equipIx, equipmentOf, inventory, unequipIx } from "./items";
@@ -72,7 +76,7 @@ import { MapcheckWasm } from "./mapcheckWasm";
 import { toHitResolved } from "./hit";
 import { Category, Effect, defaultMapSelection, type NamedSkill } from "./skillcheck";
 import { activeMods, toEffectResolved } from "./support";
-import { turnStarted } from "./turns";
+import { auditLeft, revealStepFor, turnStarted } from "./turns";
 import { Applied, Aspect, Class, HitOutcome, MAP_MAX, ModKind, Race, Tile, cellByte } from "./types";
 
 const ON = process.env.DEADROLL_LOCALNET === "1";
@@ -100,6 +104,11 @@ async function mapSelection(character: Address): Promise<number[]> {
   const set = (await getAccount("SkillSet", await skillSetPda(character)))!;
   return defaultMapSelection(set.skills.slice(0, set.count).map((k) => k.blocks.category as Category));
 }
+
+/** Patch C: a key pair as the wallet's message signer (the DM's unlock of the map secrets). */
+const messageSigner = (k: KeyPairSigner): MessageSigner => ({ address: k.address, signMessage: async (m) => new Uint8Array(await signBytes(k.keyPair.privateKey, m)) });
+/** Patch C: `buildMapIxs`'s keys of a DM key pair. */
+const keysOf = (dm: KeyPairSigner) => (map: Address) => mapKeys(messageSigner(dm), new Uint8Array(getAddressEncoder().encode(map)));
 
 async function send(payer: KeyPairSigner, ixs: Parameters<typeof sendTx>[1]): Promise<ChainEvent[]> {
   const { logs } = await sendTx(payer, ixs);
@@ -143,7 +152,7 @@ async function openParty(specs: Spec[]) {
 
     // 2. map from the preset
     const layout = presetToLayout(preset);
-    const built = await buildMapIxs(dm, { width: preset.width, height: preset.height, tier: preset.tier, ...layout });
+    const built = await buildMapIxs(dm, { width: preset.width, height: preset.height, tier: preset.tier, ...layout }, keysOf(dm), isBoss);
     // Five transactions, one signature, sent in order (MapBuilder's publish).
     await sendBatch(dm, built.ixs.map((ix) => [ix]));
     const acc = await sessionAccounts(built.map);
@@ -195,7 +204,32 @@ async function openParty(specs: Spec[]) {
     };
     const init = await oracle(await pickSeed("random"));
     expect(init.some((e) => e.name === "InitiativeRolled")).toBe(true);
-    return { preset, dm, dmKey, dmActor, players, built, acc, oracle, finalize, party };
+    // Patch C: the DM's client opens the map secrets with the DM's wallet and reveals by itself,
+    // with the DM's session key, what the party uncovers (the site's PartyChain loop).
+    const secrets = await openDmSecrets(party, messageSigner(dm));
+    const reveal = async (p: Party): Promise<boolean> => {
+      const step = revealStepFor(p, p.session.core.dm);
+      if (!step) return false;
+      if (step.kind === "cell") {
+        const by = p.players.find((x) => x.slot === step.by)?.participation ?? null;
+        await send(dmKey, [await revealCellIx(dmActor, acc.session, p.session, step.leaf, await secrets.commitment.cell(step.leaf), by)]);
+      } else {
+        await send(dmKey, await revealPackIx(dmActor, acc.session, p.session, step.pack, await secrets.commitment.pack(step.pack)));
+      }
+      return true;
+    };
+    /** Patch C: the final audit, with the DM's session key. */
+    const audit = async () => {
+      const p = (await readParty(acc.session))!;
+      const left = auditLeft(p.session, secrets.leaves, secrets.packs);
+      for (const leaf of left.cells) await send(dmKey, [await revealCellIx(dmActor, acc.session, p.session, leaf, await secrets.commitment.cell(leaf), null)]);
+      for (const pack of left.packs) await send(dmKey, await revealPackIx(dmActor, acc.session, p.session, pack, await secrets.commitment.pack(pack)));
+    };
+    /** Patch C: every reveal the DM owes now (what the site's loop sends between actions). */
+    const revealAll = async () => {
+      while (await reveal((await readParty(acc.session))!));
+    };
+    return { preset, dm, dmKey, dmActor, players, built, acc, oracle, finalize, party, reveal, revealAll, audit };
   }
 }
 
@@ -220,7 +254,7 @@ const tileCost = (p: Party) => Array.from(p.session.tileCost);
 /** Arena update: the first living player walks the map next to pack `pack`'s monster (the others
  * pass), `enter_arena` follows; returns the party in the arena. */
 async function enterPack(opened: Awaited<ReturnType<typeof openParty>>, pack: number): Promise<Party> {
-  const { acc, players, dmKey, oracle, finalize } = opened;
+  const { acc, players, dmKey, oracle, finalize, reveal, revealAll } = opened;
   for (let guard = 0; guard < 100; guard++) {
     const party = (await readParty(acc.session))!;
     const s = party.session;
@@ -228,6 +262,8 @@ async function enterPack(opened: Awaited<ReturnType<typeof openParty>>, pack: nu
       await oracle(await pickSeed("miss"));
       continue;
     }
+    // Patch C: the DM's reveals come first (the next turn waits for them).
+    if (await reveal(party)) continue;
     if (s.pendingDeaths) {
       await finalize(dmKey);
       continue;
@@ -252,6 +288,7 @@ async function enterPack(opened: Awaited<ReturnType<typeof openParty>>, pack: nu
       const steps = route({ from, goal: (x, y) => cheb({ x, y }, target) === 1, tiles: party.ground!, width: s.width, height: s.height, tileCost: tileCost(party), taken: taken(party, unit, pack) });
       const take = steps ? affordable(steps, playerAp(me.part, s), 0) : [];
       if (take.length) await send(pl.key, [await movePathIx(pl.actor, acc.session, s.layout, { kind: "player", slot: unit, character: pl.character }, take)]);
+              await revealAll();
     }
     if (arenaMode((await readParty(acc.session))!.session) === "map") await send(pl.key, [await endTurnIx(pl.actor, acc.session, pl.character)]);
   }
@@ -269,7 +306,7 @@ const afterMonsterMove = async (session: Address, tiles: Uint8Array, mi: number,
 
 describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
   it("plays create -> map -> party -> fight -> death -> victory -> claims", { timeout: 15 * 60_000 }, async () => {
-    const { preset, dm, dmKey, dmActor, players, acc, oracle, finalize, party: first } = await openParty([
+    const { preset, dm, dmKey, dmActor, players, acc, oracle, finalize, party: first, reveal, revealAll, audit } = await openParty([
       { cls: Class.Warrior, race: Race.Human, pred: Aspect.Piercing, stats: [10, 7, 5, 8], name: "Bran" },
       { cls: Class.Mage, race: Race.ForestElf, pred: Aspect.Cold, stats: [5, 7, 13, 5], name: "Ilyra" },
     ]);
@@ -302,6 +339,8 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
         await oracle(await pickSeed("miss"));
         continue;
       }
+      // Patch C: the DM's reveals come first (the next turn waits for them).
+      if (await reveal(party)) continue;
       if (s.pendingDeaths) {
         await finalize(dmKey);
         continue;
@@ -349,6 +388,7 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
           const steps = route({ from, goal: (x, y) => cheb({ x, y }, target) === 1, tiles: party.ground!, width: s.width, height: s.height, tileCost: tileCost(party), taken: taken(party, unit, goal) });
           const take = steps ? affordable(steps, playerAp(me.part, s), 0) : [];
           if (take.length) await send(pl.key, [await movePathIx(pl.actor, acc.session, s.layout, { kind: "player", slot: unit, character: pl.character }, take)]);
+              await revealAll();
         }
         if (arenaMode((await readParty(acc.session, tiles))!.session) === "map") await send(pl.key, [await endTurnIx(pl.actor, acc.session, pl.character)]);
         continue;
@@ -378,6 +418,7 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
             const take = steps ? affordable(steps, ap, 2) : [];
             if (take.length) {
               await send(pl.key, [await movePathIx(pl.actor, acc.session, s.layout, { kind: "player", slot: unit, character: pl.character }, take)]);
+              await revealAll();
               ap -= take.reduce((n, st) => n + st.cost, 0);
             }
           }
@@ -452,6 +493,10 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
     const settle = async (signer: typeof dm) => [computeLimitIx(1_000_000), await settlePartyIx(signer, acc.session, party!.session)];
     await expect(send(dmKey, await settle(dmKey))).rejects.toThrow(/DmMainWalletOnly/);
     await expect(send(owner1.wallet, await settle(owner1.wallet))).rejects.toThrow(/NotDm/);
+    // Patch C: the escrow waits for the final audit.
+    await expect(send(dm, await settle(dm))).rejects.toThrow(/AuditIncomplete/);
+    await audit();
+    party = (await readParty(acc.session))!;
     const evs = await send(dm, await settle(dm));
     expect(BigInt(evs.find((e) => e.name === "EscrowClaimed")!.data.amount)).toBe(PRICE);
     expect(evs.filter((e) => e.name === "CacheSettled").length).toBe(2);
@@ -470,7 +515,7 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
       { cls: Class.Warrior, race: Race.Human, pred: Aspect.Piercing, stats: [10, 7, 5, 8], name: "Bran" },
       { cls: Class.Support, race: Race.Human, pred: Aspect.Blood, stats: [5, 7, 13, 5], name: "Mira", skills: supportSkills },
     ]);
-    const { dmKey, dmActor, players, acc, oracle, finalize } = opened;
+    const { dmKey, dmActor, players, acc, oracle, finalize, reveal } = opened;
     // Arena update: the wolves are fought in their arena.
     const first = await enterPack(opened, 1);
     const SUPPORT = 1;
@@ -492,6 +537,8 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
         await oracle(await pickSeed("miss"));
         continue;
       }
+      // Patch C: the DM's reveals come first (the next turn waits for them).
+      if (await reveal(party)) continue;
       if (s.pendingDeaths) {
         await finalize(dmKey);
         continue;
@@ -596,7 +643,7 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
       { cls: Class.Warrior, race: Race.ForestElf, pred: Aspect.Fire, stats: [10, 7, 5, 8], name: "Bran" },
       { cls: Class.Support, race: Race.Human, pred: Aspect.Blood, stats: [5, 7, 13, 5], name: "Mira", skills: supportSkills },
     ]);
-    const { dmKey, dmActor, players, acc, oracle, finalize } = opened;
+    const { dmKey, dmActor, players, acc, oracle, finalize, reveal } = opened;
     // Arena update: the wolves are fought in their arena.
     const first = await enterPack(opened, 1);
     const SUPPORT = 1;
@@ -617,6 +664,8 @@ describe.skipIf(!ON)("localnet: the demo through the app builders", () => {
         await oracle(await pickSeed("miss"));
         continue;
       }
+      // Patch C: the DM's reveals come first (the next turn waits for them).
+      if (await reveal(party)) continue;
       if (s.pendingDeaths) {
         await finalize(dmKey);
         continue;
@@ -735,7 +784,7 @@ describe.skipIf(!ON)("localnet: the builder's verdict is finalize_map's", () => 
       const d = draft();
       edit(d);
       const verdict = wasm.check(d);
-      const built = await buildMapIxs(dm, d);
+      const built = await buildMapIxs(dm, d, keysOf(dm), isBoss);
       const fin = built.ixs.pop()!;
       // create_map refuses minimum players 0 itself (the same rule, its own error).
       if (name === "minimum players 0") {
@@ -758,7 +807,7 @@ describe.skipIf(!ON)("localnet: the builder templates", () => {
     const dm = await funded(20);
     for (const p of MAP_PRESETS.filter((m) => m.biome !== undefined)) {
       const layout = presetToLayout(p);
-      const built = await buildMapIxs(dm, { width: p.width, height: p.height, tier: p.tier ?? 1, ...layout });
+      const built = await buildMapIxs(dm, { width: p.width, height: p.height, tier: p.tier ?? 1, ...layout }, keysOf(dm), isBoss);
       for (const ix of built.ixs) await send(dm, [ix]);
       const map = (await getAccount("Map", built.map))!;
       expect([map.biome, map.core.version, mapStatus(map)], p.name).toEqual([p.biome, 2, "finalized"]);

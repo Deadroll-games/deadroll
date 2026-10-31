@@ -45,6 +45,10 @@ export type BuilderTool =
   /** Patch 13: move the entrance or the exit point (one of each). */
   | { kind: "entrance" }
   | { kind: "exit" }
+  /** Patch C: hide a secret in the cell (`@deadroll/sdk/secrets` `Secret`): a trap (`a` damage,
+   * `b` detection difficulty), an ambush (`a` the pack), a hidden stash (`a` its reward table), a
+   * secret door; the same click on the same secret removes it. */
+  | { kind: "secret"; secret: number; a: number; b: number }
   | { kind: "erase" };
 
 export type BestiaryEntry = { id: number; name: string };

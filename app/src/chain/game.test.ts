@@ -7,6 +7,7 @@ import { AccountRole, generateKeyPairSigner, getAddressDecoder, getAddressEncode
 import { decodeEvent } from "@deadroll/sdk";
 import { getBagDecoder, getBagEncoder, getCreateCharacterInstructionDataEncoder } from "@deadroll/sdk/character";
 import { getMapDecoder, getMapEncoder } from "@deadroll/sdk/map";
+import { Secret, deriveKeys } from "@deadroll/sdk/secrets";
 import {
   ItemBase,
   SessionStatus,
@@ -428,10 +429,16 @@ describe("map builders", () => {
     // Arena update: pack 2, a 2x2 arena; the other numbers unused.
     const packs = new Array(8).fill(null);
     packs[2] = { visible: 0, x: 3, y: 2, facing: 5, width: 2, height: 2, cells: Uint8Array.of(8, 9, 10, 11) };
-    const draft = { width: 4, height: 3, tier: 1, minPlayers: 3, chestRadius: 4, settleTimeoutSecs: 7200, biome: Biome.Crypt, tiles, entrance: { x: 0, y: 0 }, exit: { x: 3, y: 0 }, spawns: [], chests, bossTable: 1, packs };
-    const b = await buildMapIxs(dm, draft);
-    expect(b.ixs.length).toBe(6);
-    const [create, layout, spawns, writePoints, arena, finalize] = b.ixs as [Instruction, Instruction, Instruction, Instruction, Instruction, Instruction];
+    // Patch C: two goblins in pack 2, the second hidden; a trap on the map.
+    const goblin = { bestiaryId: 1, x: 0, y: 0, level: 1, skills: 3, flags: 0, aspects: 0, pack: 2 };
+    const spawnList = [goblin, { ...goblin, x: 1, level: 2 }];
+    const secrets = [{ pack: null, x: 2, y: 2, kind: Secret.Trap, a: 4, b: 9 }];
+    const draft = { width: 4, height: 3, tier: 1, minPlayers: 3, chestRadius: 4, settleTimeoutSecs: 7200, biome: Biome.Crypt, tiles, entrance: { x: 0, y: 0 }, exit: { x: 3, y: 0 }, spawns: spawnList, chests, bossTable: 1, packs, secrets };
+    const keysFor = async (map: string) => deriveKeys(new Uint8Array(64).fill(3), new Uint8Array(getAddressEncoder().encode(map as never)));
+    const b = await buildMapIxs(dm, draft, keysFor, () => false);
+    // The encrypted copy (~630 bytes) goes in two write_secrets chunks.
+    expect(b.ixs.length).toBe(8);
+    const [create, layout, spawns, writePoints, arena, secretsIx, , finalize] = b.ixs as Instruction[] as [Instruction, Instruction, Instruction, Instruction, Instruction, Instruction, Instruction, Instruction];
     // write_arena: pack u8, PackLayout (visible, x, y, facing, width, height), Vec<u8> of the rows.
     expect(toHex(arena.data as Uint8Array)).toBe(toHex(concat(ixDisc("write_arena"), Uint8Array.of(2, 0, 3, 2, 5, 2, 2, 4, 0, 0, 0, 8, 9, 10, 11))));
     const index = new Uint8Array(4);
@@ -442,8 +449,17 @@ describe("map builders", () => {
     const cells = (layout.data as Uint8Array).slice(8 + 2 + 4);
     expect(cells.length).toBe(2 * 32 + 4);
     expect(cells[1]).toBe((Tile.Rubble << 3) | 6);
-    // write_spawns: only the spawns now (an empty Vec).
-    expect(toHex(spawns.data as Uint8Array)).toBe(toHex(concat(ixDisc("write_spawns"), Uint8Array.of(0, 0, 0, 0))));
+    // write_spawns: patch C, only the visible goblin.
+    expect(toHex(spawns.data as Uint8Array)).toBe(toHex(concat(ixDisc("write_spawns"), Uint8Array.of(1, 0, 0, 0, 1, 0, 0, 1, 3, 0, 0, 0, 2))));
+    // write_secrets: offset u16, Vec<u8> of the blob, len u16, the threats (pack 2: levels 1 + 2), the
+    // declared counts (one trap).
+    const sd = secretsIx.data as Uint8Array;
+    expect(toHex(sd.slice(0, 8))).toBe(toHex(ixDisc("write_secrets")));
+    const blobLen = new DataView(sd.buffer, sd.byteOffset).getUint32(10, true);
+    expect(Array.from(sd.slice(8, 10))).toEqual([0, 0]);
+    expect(Array.from(sd.slice(14 + blobLen + 2))).toEqual([0, 0, 3, 0, 0, 0, 0, 0, 1, 0, 0, 0]);
+    // finalize_map: a nonzero root.
+    expect((finalize.data as Uint8Array).slice(8).some((x) => x !== 0)).toBe(true);
     // Vec<MapPoint>: u32 LE count, then (kind, x, y, data): entrance (1), exit (2), the chests (0) with
     // their tables; boss table u8.
     const points = Uint8Array.of(4, 0, 0, 0, 1, 0, 0, 0, 2, 3, 0, 0, 0, 1, 2, 0, 0, 3, 1, 5);
@@ -454,7 +470,7 @@ describe("map builders", () => {
       [b.layout, AccountRole.WRITABLE],
     ]);
     expect(finalize.accounts!.map((a) => a.address).slice(3)).toEqual([await bestiaryPda(), await monsterSkillsPda(), await rewardsPda(), await tilesetPda()]);
-    await expect(buildMapIxs(dm, { ...draft, exit: null })).rejects.toThrow(/entrance and an exit/);
+    await expect(buildMapIxs(dm, { ...draft, exit: null }, keysFor, () => false)).rejects.toThrow(/entrance and an exit/);
   });
 });
 
@@ -546,7 +562,19 @@ describe("decoders", () => {
       v.packsGuarded = 0b10;
       v.packsBuffed = 0b100;
       v.deadSpawns = 0x0102_0304;
+      v.leafCount = 0x0304;
+      v.obligationCount = 1;
+      v.obligedBy = 2;
+      v.packsRevealed = 0b110;
+      v.visibleChests = 3;
     });
+    // Patch C appends the secrets: root 32, leaf_count u16, declared 4, threat 8, revealed 273,
+    // found_counts 4, found 16 x 6, found_count, packs_revealed, obligations 16 x u16,
+    // obligation_count, obliged_by, spawns 24 x 9, spawn_count, roster_totals 4, visible_chests.
+    const PATCH_C = 32 + 2 + 4 + 8 + 273 + 4 + 96 + 1 + 1 + 32 + 1 + 1 + 216 + 1 + 4 + 1;
+    expect(s.bytes.subarray(-1)[0]).toBe(3);
+    expect([s.back.leafCount, s.back.obligationCount, s.back.obligedBy, s.back.packsRevealed, s.back.visibleChests]).toEqual([0x0304, 1, 2, 0b110, 3]);
+    s.bytes = s.bytes.subarray(0, -PATCH_C);
     // Patch B appends exit_kind, last_moves, retreats, packs_guarded, packs_buffed (u8 each) and
     // dead_spawns (u32): 9 bytes.
     expect(Array.from(s.bytes.subarray(-9))).toEqual([1, 0b101, 2, 0b10, 0b100, 4, 3, 2, 1]);
