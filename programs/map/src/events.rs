@@ -53,6 +53,19 @@ pub struct PointsWritten {
     pub boss_table: u8,
 }
 
+/// Patch C: a chunk of the DM's encrypted secrets was written (`write_secrets`).
+#[event]
+pub struct SecretsWritten {
+    pub map: Pubkey,
+    pub offset: u16,
+    pub len: u16,
+    /// The whole blob's length.
+    pub total: u16,
+    /// Each pack's threat and the declared counts (the public part).
+    pub threat: [u8; 8],
+    pub declared: [u8; 4],
+}
+
 /// Arena update: a pack's record and arena were written (`write_arena`).
 #[event]
 pub struct ArenaWritten {

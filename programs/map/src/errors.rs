@@ -152,6 +152,48 @@ pub enum MapError {
     ArenaCellsMismatch,
     #[msg("Not a map layout of this program in the current format")]
     InvalidLayout,
+    // Patch C: secrets and hidden packs (deadroll_mapcheck::MapCheckError, same order).
+    #[msg("A secret has a bad kind for its place or unused bytes set")]
+    SecretInvalid,
+    #[msg("A trap or an ambush is on a cell that cannot be entered")]
+    SecretNotPassable,
+    #[msg("A trap or an ambush is on the entrance, the exit, a chest or a pack")]
+    SecretOnPoint,
+    #[msg("Trap damage is 0 or above the tier's limit")]
+    TrapDamageOutOfRange,
+    #[msg("An ambush is linked to a pack that is not an ambush pack")]
+    AmbushPackInvalid,
+    #[msg("An ambush trap is in an arena")]
+    AmbushInArena,
+    #[msg("A hidden stash is in an arena")]
+    StashInArena,
+    #[msg("A secret door is on a cell that can be entered")]
+    DoorNotWall,
+    #[msg("More secrets than the tier allows or than declared")]
+    TooManySecrets,
+    #[msg("Fewer declared traps than the tier needs")]
+    TooFewTraps,
+    #[msg("Not exactly one ambush trap per ambush pack")]
+    AmbushUnlinked,
+    #[msg("A used pack has threat 0, or an unused one a threat")]
+    ThreatOutOfRange,
+    #[msg("The pack's composition does not give its declared threat")]
+    ThreatMismatch,
+    #[msg("A pack composition is empty, too big or has a monster of another pack")]
+    RosterInvalid,
+    #[msg("A pack composition does not start with the pack's public monster")]
+    VisibleMismatch,
+    #[msg("A public spawn is not the visible monster of its pack")]
+    SpawnNotVisible,
+    #[msg("Fewer secrets of a type than declared")]
+    TooFewSecrets,
+    #[msg("Two secrets on one cell")]
+    DuplicateSecret,
+    // The program's own (patch C).
+    #[msg("Encrypted secrets chunk goes past the end of the blob")]
+    SecretsOutOfRange,
+    #[msg("The map has no secrets root or no encrypted secrets")]
+    SecretsMissing,
 }
 
 impl From<MapCheckError> for MapError {
@@ -217,6 +259,24 @@ impl From<MapCheckError> for MapError {
             C::ArenaNoRoom => MapError::ArenaNoRoom,
             C::ArenaUnreachable => MapError::ArenaUnreachable,
             C::TooManyTemplates => MapError::TooManyTemplates,
+            C::SecretInvalid => MapError::SecretInvalid,
+            C::SecretNotPassable => MapError::SecretNotPassable,
+            C::SecretOnPoint => MapError::SecretOnPoint,
+            C::TrapDamageOutOfRange => MapError::TrapDamageOutOfRange,
+            C::AmbushPackInvalid => MapError::AmbushPackInvalid,
+            C::AmbushInArena => MapError::AmbushInArena,
+            C::StashInArena => MapError::StashInArena,
+            C::DoorNotWall => MapError::DoorNotWall,
+            C::TooManySecrets => MapError::TooManySecrets,
+            C::TooFewTraps => MapError::TooFewTraps,
+            C::AmbushUnlinked => MapError::AmbushUnlinked,
+            C::ThreatOutOfRange => MapError::ThreatOutOfRange,
+            C::ThreatMismatch => MapError::ThreatMismatch,
+            C::RosterInvalid => MapError::RosterInvalid,
+            C::VisibleMismatch => MapError::VisibleMismatch,
+            C::SpawnNotVisible => MapError::SpawnNotVisible,
+            C::TooFewSecrets => MapError::TooFewSecrets,
+            C::DuplicateSecret => MapError::DuplicateSecret,
         }
     }
 }

@@ -36,6 +36,7 @@ import {
   getWriteLayoutInstruction,
   getWritePointsInstruction,
   getWriteSpawnsInstruction,
+  getWriteSecretsInstruction,
   type MapStatus,
 } from "@deadroll/sdk/map";
 import { findConfigPda, findTablePda } from "@deadroll/sdk/registry";
@@ -80,6 +81,18 @@ const PACKS_MAX = 8;
 const ARENA_SIDE_MAX = 12;
 const ARENAS_SIZE = PACKS_MAX * 6 + PACKS_MAX * ARENA_SIDE_MAX * ARENA_SIDE_MAX;
 const FACING = { N: 0, NE: 1, E: 2, SE: 3, S: 4, SW: 5, W: 6, NW: 7 };
+/** Patch C: `MapSecretsData` after the arenas: threats, declared counts, blob length, the blob. */
+const SECRET_TYPES = 4;
+const SECRETS_BLOB_MAX = 800;
+/** The bytes `layout_hash` covers: the core, the arenas, the threats and the declared counts. */
+const HASHED_SIZE = LAYOUT_CORE_SIZE + ARENAS_SIZE + PACKS_MAX + SECRET_TYPES;
+/** `PackLayout.visible` of an ambush pack. */
+const NO_SPAWN = 0xff;
+/** Any nonzero root: the map program never opens the tree. */
+const ROOT = new Array(32).fill(1);
+/** The demo packs' threats (levels; the boss 3 times) and one declared trap (tier 1 needs one). */
+const DEMO_THREAT = [0, 2, 2, 5, 0, 0, 0, 0];
+const DEMO_DECLARED = [1, 0, 0, 0];
 /** Offset of `points` in the layout account. */
 const POINTS_AT = 8 + 1 + 32 + MAP_CELLS + SPAWNS_MAX * 9 + 1;
 /** Anchor `ConstraintSeeds`. */
@@ -171,6 +184,19 @@ async function writeChestsIx(dm: Signer, map: string, chests: Chest[], bossTable
 
 /** Patch 6, 11 and 13: the registry bestiary, monster skills, rewards and tileset tables follow the
  * layout; `tables` overrides them. */
+/** Patch C: a chunk of the encrypted secrets and the public part. */
+async function writeSecretsIx(dm: Signer, map: string, opts: { offset?: number; bytes?: number[]; len?: number; threat?: number[]; declared?: number[] } = {}) {
+  const bytes = opts.bytes ?? [1, 2, 3, 4];
+  return getWriteSecretsInstruction({
+    ...(await editAccounts(dm, map)),
+    offset: opts.offset ?? 0,
+    bytes: Uint8Array.from(bytes),
+    len: opts.len ?? bytes.length,
+    threat: opts.threat ?? DEMO_THREAT,
+    declared: opts.declared ?? DEMO_DECLARED,
+  });
+}
+
 async function finalizeIx(dm: Signer, map: string, root: number[], tables: string[] | null = null) {
   const [bestiary, skills, rewards, tileset] = tables ?? [await tableAddress("bestiary"), await tableAddress("monster_skills"), await tableAddress("rewards"), await tableAddress("tileset")];
   return getFinalizeMapInstruction({
@@ -307,14 +333,20 @@ const demoSpawns = (): Spawn[] => [
   { id: SHAMAN, x: 4, y: 3, pack: 3, skills: 0b111 },
 ];
 
+/** Patch C: the public spawns, the visible monster of each pack (the rest is under the root). */
+const publicSpawns = (): Spawn[] => {
+  const all = demoSpawns();
+  return [all[0], all[2], all[4]];
+};
+
 /** Arena update: a pack's record (`PackLayout`) and its arena, row by row. */
 type Pack = { pack: number; visible: number; x: number; y: number; facing: number; width: number; height: number; cells: number[] };
 const openArena = (w = 8, h = 8) => new Array(w * h).fill(FLOOR);
 /** The demo packs: the visible monster's map cell and facing, an open 8x8 arena each. */
 const DEMO_PACKS = (): Pack[] => [
   { pack: 1, visible: 0, x: 6, y: 2, facing: FACING.S, width: 8, height: 8, cells: openArena() },
-  { pack: 2, visible: 2, x: 2, y: 10, facing: FACING.E, width: 8, height: 8, cells: openArena() },
-  { pack: 3, visible: 4, x: 12, y: 12, facing: FACING.N, width: 8, height: 8, cells: openArena() },
+  { pack: 2, visible: 1, x: 2, y: 10, facing: FACING.E, width: 8, height: 8, cells: openArena() },
+  { pack: 3, visible: 2, x: 12, y: 12, facing: FACING.N, width: 8, height: 8, cells: openArena() },
 ];
 
 async function writeArenaIx(dm: Signer, map: string, p: Pack) {
@@ -338,15 +370,16 @@ async function create(dm: Signer, index = 0, width = 16, height = 16, tier = 1, 
 async function demoDraft(dm: Signer, index = 0) {
   const accounts = await create(dm, index);
   await send(dm, [await writeLayoutIx(dm, accounts.map, 0, demoTiles())]);
-  await send(dm, [await writeSpawnsIx(dm, accounts.map, demoSpawns())]);
+  await send(dm, [await writeSpawnsIx(dm, accounts.map, publicSpawns())]);
   await send(dm, [await writeChestsIx(dm, accounts.map, DEMO_CHESTS, T1_BOSS)]);
   await writeDemoArenas(dm, accounts.map);
+  await send(dm, [await writeSecretsIx(dm, accounts.map)]);
   return accounts;
 }
 
 async function demoFinal(dm: Signer, index = 0) {
   const accounts = await demoDraft(dm, index);
-  await send(dm, [await finalizeIx(dm, accounts.map, new Array(32).fill(7))]);
+  await send(dm, [await finalizeIx(dm, accounts.map, ROOT)]);
   return accounts;
 }
 
@@ -367,7 +400,7 @@ describe("map: create_map", () => {
     assert.equal(m.tier, 2);
     const l = await readLayout(layout);
     // Patch 13: every cell Void (0), no points. Arena update: layout version 3.
-    assert.equal(l.version, 3);
+    assert.equal(l.version, 4);
     assert.deepEqual(l.map, Uint8Array.from(enc.encode(address(map))));
     assert.equal(l.spawnCount, 0);
     assert.equal(l.points.length, 0);
@@ -541,8 +574,9 @@ describe("map: finalize_map", () => {
     assert.deepEqual(m.secretsRoot, new Array(32).fill(9));
     // Anyone can check the hash against the layout account bytes.
     const raw = (await readLayout(layout)).raw;
-    // Arena update: the hash covers the arenas too.
-    const expected = createHash("sha256").update(raw.slice(8, 8 + LAYOUT_CORE_SIZE + ARENAS_SIZE)).digest();
+    // Arena update: the hash covers the arenas too. Patch C: and the public part of the secrets,
+    // not the encrypted copy.
+    const expected = createHash("sha256").update(raw.slice(8, 8 + HASHED_SIZE)).digest();
     assert.deepEqual(m.layoutHash, Array.from(expected));
   });
 
@@ -554,10 +588,11 @@ describe("map: finalize_map", () => {
     const grid = Array.from({ length: MAP_CELLS }, (_, i) => cell(floors[i % floors.length], i % 8));
     await send(dm, [await writeLayoutIx(dm, map, 0, grid.slice(0, 512))]);
     await send(dm, [await writeLayoutIx(dm, map, 512, grid.slice(512))]);
-    await send(dm, [await writeSpawnsIx(dm, map, demoSpawns())]);
+    await send(dm, [await writeSpawnsIx(dm, map, publicSpawns())]);
     await send(dm, [await writePointsIx(dm, map, points({ x: 0, y: 0 }, { x: 31, y: 31 }, DEMO_CHESTS), T1_BOSS)]);
     await writeDemoArenas(dm, map);
-    const cu = await send(dm, [await finalizeIx(dm, map, new Array(32).fill(0))]);
+    await send(dm, [await writeSecretsIx(dm, map)]);
+    const cu = await send(dm, [await finalizeIx(dm, map, ROOT)]);
     console.log(`finalize 32x32: ${cu} CU`);
     assert.ok(cu < 200_000, `${cu} CU`);
     assert.equal((await readMap(map)).status, STATUS.Finalized);
@@ -568,12 +603,12 @@ describe("map: finalize_map", () => {
     const { map } = await demoDraft(dm);
     // A wall across row 13 cuts the exit off.
     await send(dm, [await writeLayoutIx(dm, map, 13 * MAP_MAX + 1, new Array(14).fill(WALL))]);
-    await expectErr(send(dm, [await finalizeIx(dm, map, new Array(32).fill(0))]), err("ExitUnreachable"));
+    await expectErr(send(dm, [await finalizeIx(dm, map, ROOT)]), err("ExitUnreachable"));
     assert.equal((await readMap(map)).status, STATUS.Draft);
     // Deep water and a chasm cut it off too; rubble and shallow water do not.
     for (const [kind, ok] of [[KIND.DeepWater, false], [KIND.Chasm, false], [KIND.Rubble, true], [KIND.ShallowWater, true]] as const) {
       await send(dm, [await writeLayoutIx(dm, map, 13 * MAP_MAX + 1, new Array(14).fill(cell(kind, 2)))]);
-      const run = send(dm, [await finalizeIx(dm, map, new Array(32).fill(0))]);
+      const run = send(dm, [await finalizeIx(dm, map, ROOT)]);
       if (ok) await run;
       else await expectErr(run, err("ExitUnreachable"));
       if (ok) break;
@@ -589,31 +624,65 @@ describe("map: finalize_map", () => {
     const row = (y: number, open: number[]) => writeLayoutIx(dm, map, y * MAP_MAX + 1, Array.from({ length: 14 }, (_, i) => (open.includes(i + 1) ? FLOOR : WALL)));
     await send(dm, [await row(8, [7])]);
     await send(dm, [await row(9, [8])]);
-    await expectErr(send(dm, [await finalizeIx(dm, map, new Array(32).fill(0))]), err("ExitUnreachable"));
+    await expectErr(send(dm, [await finalizeIx(dm, map, ROOT)]), err("ExitUnreachable"));
     // A single impassable cell at the corner still blocks: (8, 8) deep water, (7, 9) a wall.
     await send(dm, [await writeLayoutIx(dm, map, 8 * MAP_MAX + 8, [cell(KIND.DeepWater)])]);
-    await expectErr(send(dm, [await finalizeIx(dm, map, new Array(32).fill(0))]), err("ExitUnreachable"));
+    await expectErr(send(dm, [await finalizeIx(dm, map, ROOT)]), err("ExitUnreachable"));
     // Both corners passable: the way is open.
     await send(dm, [await writeLayoutIx(dm, map, 8 * MAP_MAX + 8, [cell(KIND.Rubble)])]);
-    await send(dm, [await finalizeIx(dm, map, new Array(32).fill(0))]);
+    await send(dm, [await finalizeIx(dm, map, ROOT)]);
     assert.equal((await readMap(map)).status, STATUS.Finalized);
   });
 
-  it("rejects a map without a boss", async () => {
+  it("patch C: only the visible monsters are public; the threats and the declared counts", async () => {
     const dm = await funded();
     const { map } = await demoDraft(dm);
-    await send(dm, [await writeSpawnsIx(dm, map, demoSpawns().slice(0, 4))]);
-    await expectErr(send(dm, [await finalizeIx(dm, map, new Array(32).fill(0))]), err("BossCount"));
+    // A hidden monster left in the public list.
+    await send(dm, [await writeSpawnsIx(dm, map, [...publicSpawns(), demoSpawns()[1]])]);
+    await expectErr(send(dm, [await finalizeIx(dm, map, ROOT)]), err("SpawnNotVisible"));
+    await send(dm, [await writeSpawnsIx(dm, map, publicSpawns())]);
+    // A used pack with threat 0, an unused one with a threat.
+    for (const [t, name] of [[[0, 0, 2, 5, 0, 0, 0, 0], "ThreatOutOfRange"], [[1, 2, 2, 5, 0, 0, 0, 0], "ThreatOutOfRange"]] as const) {
+      await send(dm, [await writeSecretsIx(dm, map, { threat: [...t] })]);
+      await expectErr(send(dm, [await finalizeIx(dm, map, ROOT)]), err(name));
+    }
+    // Tier 1: at least one trap, at most two (ambush traps included), one stash, one ambush per
+    // ambush pack (none here).
+    for (const [d, name] of [[[0, 0, 0, 0], "TooFewTraps"], [[3, 0, 0, 0], "TooManySecrets"], [[1, 0, 2, 0], "TooManySecrets"], [[1, 1, 0, 0], "AmbushUnlinked"]] as const) {
+      await send(dm, [await writeSecretsIx(dm, map, { declared: [...d] })]);
+      await expectErr(send(dm, [await finalizeIx(dm, map, ROOT)]), err(name));
+    }
+    await send(dm, [await writeSecretsIx(dm, map)]);
+    // No root.
+    await expectErr(send(dm, [await finalizeIx(dm, map, new Array(32).fill(0))]), err("SecretsMissing"));
+    await send(dm, [await finalizeIx(dm, map, ROOT)]);
+    assert.equal((await readMap(map)).status, STATUS.Finalized);
+  });
+
+  it("patch C: an ambush pack shows no monster and needs its declared ambush", async () => {
+    const dm = await funded();
+    const { map } = await demoDraft(dm);
+    // Pack 2 becomes an ambush pack: its goblin leaves the public list.
+    const ambush = { ...DEMO_PACKS()[1], visible: NO_SPAWN, x: 0, y: 0 };
+    await send(dm, [await writeArenaIx(dm, map, ambush)]);
+    const spawns = publicSpawns();
+    await send(dm, [await writeSpawnsIx(dm, map, [spawns[0], spawns[2]])]);
+    const pack3 = { ...DEMO_PACKS()[2], visible: 1 };
+    await send(dm, [await writeArenaIx(dm, map, pack3)]);
+    await expectErr(send(dm, [await finalizeIx(dm, map, ROOT)]), err("AmbushUnlinked"));
+    await send(dm, [await writeSecretsIx(dm, map, { declared: [0, 1, 0, 0] })]);
+    await send(dm, [await finalizeIx(dm, map, ROOT)]);
+    assert.equal((await readMap(map)).status, STATUS.Finalized);
   });
 
   it("patch 6: the spawns' skills, elite flags and the registry tables", async () => {
     const dm = await funded();
     const { map } = await demoDraft(dm);
     const finalizeWith = async (edit: (s: Spawn[]) => void) => {
-      const spawns = demoSpawns();
+      const spawns = publicSpawns();
       edit(spawns);
       await send(dm, [await writeSpawnsIx(dm, map, spawns)]);
-      return send(dm, [await finalizeIx(dm, map, new Array(32).fill(0))]);
+      return send(dm, [await finalizeIx(dm, map, ROOT)]);
     };
     // The wolf's pool has 4 skills: bit 4 is past it.
     await expectErr(finalizeWith((s) => (s[0].skills = 0b10111)), err("MonsterSkillUnknown"));
@@ -622,24 +691,16 @@ describe("map: finalize_map", () => {
     await expectErr(finalizeWith((s) => (s[0].skills = 0b1111)), err("MonsterSkillCount"));
     // Elite: one more active slot; never a boss; one per tier-1 map.
     await expectErr(finalizeWith((s) => (s[0].flags = 1)), err("MonsterSkillCount"));
-    await expectErr(finalizeWith((s) => (s[4].flags = 1)), err("EliteBoss"));
-    await expectErr(
-      finalizeWith((s) => {
-        s[0].flags = 1;
-        s[0].skills = 0b1111;
-        s[1].flags = 1;
-        s[1].skills = 0b1111;
-      }),
-      err("TooManyElites"),
-    );
+    await expectErr(finalizeWith((s) => (s[2].flags = 1)), err("EliteBoss"));
+    // Patch C: the elites over the map are counted when the packs are revealed (the session).
     // Other accounts in place of the registry tables.
-    await send(dm, [await writeSpawnsIx(dm, map, demoSpawns())]);
+    await send(dm, [await writeSpawnsIx(dm, map, publicSpawns())]);
     const tileset = await tableAddress("tileset");
     const skills = await tableAddress("monster_skills");
     const rewards = await tableAddress("rewards");
-    await expectErr(send(dm, [await finalizeIx(dm, map, new Array(32).fill(0), [tileset, skills, rewards, tileset])]), err("InvalidRegistryTable"));
+    await expectErr(send(dm, [await finalizeIx(dm, map, ROOT, [tileset, skills, rewards, tileset])]), err("InvalidRegistryTable"));
     // Patch 13: another table in place of the tileset.
-    await expectErr(send(dm, [await finalizeIx(dm, map, new Array(32).fill(0), [await tableAddress("bestiary"), skills, rewards, rewards])]), err("InvalidRegistryTable"));
+    await expectErr(send(dm, [await finalizeIx(dm, map, ROOT, [await tableAddress("bestiary"), skills, rewards, rewards])]), err("InvalidRegistryTable"));
     // An elite wolf with all 4 skills finalizes.
     const cu = await finalizeWith((s) => {
       s[0].flags = 1;
@@ -652,13 +713,13 @@ describe("map: finalize_map", () => {
   it("rejects an empty draft: void cells, no entrance", async () => {
     const dm = await funded();
     const { map } = await create(dm);
-    await expectErr(send(dm, [await finalizeIx(dm, map, new Array(32).fill(0))]), err("EntranceCount"));
+    await expectErr(send(dm, [await finalizeIx(dm, map, ROOT)]), err("EntranceCount"));
   });
 
   it("patch 13: the entrance and the exit points", async () => {
     const dm = await funded();
     const { map } = await demoDraft(dm);
-    const root = new Array(32).fill(0);
+    const root = ROOT;
     const finalizeWith = async (list: Point[]) => {
       await send(dm, [await writePointsIx(dm, map, list, T1_BOSS)]);
       return send(dm, [await finalizeIx(dm, map, root)]);
@@ -684,11 +745,11 @@ describe("map: finalize_map", () => {
     const dm = await funded();
     const { map } = await demoDraft(dm);
     await send(dm, [await writeLayoutIx(dm, map, 5 * MAP_MAX + 9, [cell(11), cell(31, 7)])]);
-    await expectErr(send(dm, [await finalizeIx(dm, map, new Array(32).fill(0))]), err("InvalidTile"));
+    await expectErr(send(dm, [await finalizeIx(dm, map, ROOT)]), err("InvalidTile"));
     // Outside the map any byte is ignored.
     await send(dm, [await writeLayoutIx(dm, map, 5 * MAP_MAX + 9, [FLOOR, FLOOR])]);
     await send(dm, [await writeLayoutIx(dm, map, 5 * MAP_MAX + 20, [0xff])]);
-    await send(dm, [await finalizeIx(dm, map, new Array(32).fill(0))]);
+    await send(dm, [await finalizeIx(dm, map, ROOT)]);
     assert.equal((await readMap(map)).status, STATUS.Finalized);
   });
 
@@ -703,7 +764,7 @@ describe("map: finalize_map", () => {
     const dm = await funded();
     const { map } = await demoFinal(dm);
     await expectErr(send(dm, [await finalizeIx(dm, map, new Array(32).fill(1))]), err("NotDraft"));
-    assert.deepEqual((await readMap(map)).secretsRoot, new Array(32).fill(7));
+    assert.deepEqual((await readMap(map)).secretsRoot, ROOT);
   });
 });
 
@@ -770,7 +831,7 @@ describe("map: write_points (patch 13)", () => {
 });
 
 describe("map: finalize_map chests and rewards (patch 11)", () => {
-  const root = new Array(32).fill(0);
+  const root = ROOT;
 
   it("checks the chest rules of the builder", async () => {
     const dm = await funded();
@@ -828,7 +889,7 @@ describe("map: finalize_map chests and rewards (patch 11)", () => {
   it("the budget grows with the map's minimum players", async () => {
     // Tier 2: two chests (4 + 4) and the boss (6) cost 14; the budget is 10 for one player and 16
     // for three (LootTuning::DEFAULT).
-    const spawns = demoSpawns().map((s) => ({ ...s, level: 3 }));
+    const spawns = publicSpawns().map((s) => ({ ...s, level: 3 }));
     const chests = [{ x: 5, y: 5, table: T2_CHEST }, { x: 8, y: 8, table: T2_CHEST }];
     for (const [min, ok] of [[1, false], [3, true]] as const) {
       const dm = await funded();
@@ -837,6 +898,7 @@ describe("map: finalize_map chests and rewards (patch 11)", () => {
       await send(dm, [await writeSpawnsIx(dm, map, spawns)]);
       await send(dm, [await writeChestsIx(dm, map, chests, T2_BOSS)]);
       await writeDemoArenas(dm, map);
+      await send(dm, [await writeSecretsIx(dm, map, { threat: [0, 6, 6, 15, 0, 0, 0, 0], declared: [0, 0, 0, 0] })]);
       const run = send(dm, [await finalizeIx(dm, map, root)]);
       if (ok) {
         await run;
@@ -849,7 +911,7 @@ describe("map: finalize_map chests and rewards (patch 11)", () => {
 });
 
 describe("map: write_arena (arena update)", () => {
-  const root = new Array(32).fill(0);
+  const root = ROOT;
 
   it("writes a pack's record and arena rows, then replaces and clears them", async () => {
     const dm = await funded();
@@ -903,9 +965,11 @@ describe("map: write_arena (arena update)", () => {
     };
     const [wolves] = DEMO_PACKS();
     await expectErr(finalizeWith({ ...wolves, width: 0, height: 0, cells: [] }), err("PackWithoutArena"));
-    await expectErr(finalizeWith({ ...wolves, width: 5, height: 8, cells: openArena(5, 8) }), err("SpawnOutOfBounds"));
+    await expectErr(finalizeWith({ ...wolves, width: 4, height: 8, cells: openArena(4, 8) }), err("SpawnOutOfBounds"));
+    await expectErr(finalizeWith({ ...wolves, width: 5, height: 8, cells: openArena(5, 8) }), err("ArenaSizeOutOfRange"));
     await expectErr(finalizeWith({ ...wolves, width: 8, height: 5, cells: openArena(8, 5) }), err("ArenaSizeOutOfRange"));
-    await expectErr(finalizeWith({ ...wolves, visible: 2 }), err("VisibleNotInPack"));
+    // Patch C: the public list holds only visible monsters, so another one is not this pack's.
+    await expectErr(finalizeWith({ ...wolves, visible: 2 }), err("SpawnNotVisible"));
     await expectErr(finalizeWith({ ...wolves, x: 2, y: 2 }), err("PackAtEntrance"));
     await expectErr(finalizeWith({ ...wolves, x: 2, y: 10 }), err("PackOverlap"));
     await expectErr(finalizeWith({ ...wolves, x: 0, y: 5 }), err("PackNotPassable"));
@@ -916,5 +980,44 @@ describe("map: write_arena (arena update)", () => {
     const cu = await finalizeWith(wolves);
     console.log(`finalize 16x16 with 3 arenas: ${cu} CU`);
     assert.equal((await readMap(map)).status, STATUS.Finalized);
+  });
+});
+
+describe("map: write_secrets (patch C)", () => {
+  it("writes the encrypted copy in chunks with the public part", async () => {
+    const dm = await funded();
+    const { map, layout } = await demoDraft(dm);
+    const blob = Array.from({ length: 700 }, (_, i) => (i * 7) & 0xff);
+    const cu = await send(dm, [await writeSecretsIx(dm, map, { offset: 0, bytes: blob.slice(0, 600), len: 700, declared: [2, 0, 1, 1] })]);
+    console.log(`write_secrets 600 bytes: ${cu} CU`);
+    await send(dm, [await writeSecretsIx(dm, map, { offset: 600, bytes: blob.slice(600), len: 700, declared: [2, 0, 1, 1] })]);
+    const { secrets } = getMapLayoutDecoder().decode(await data(layout));
+    assert.deepEqual(Array.from(secrets.threat), DEMO_THREAT);
+    assert.deepEqual(Array.from(secrets.declared), [2, 0, 1, 1]);
+    assert.equal(secrets.blobLen, 700);
+    assert.deepEqual(Array.from(secrets.blob.slice(0, 700)), blob);
+  });
+
+  it("rejects a chunk past the blob, a signer that is not the DM, and writes after finalize", async () => {
+    const dm = await funded();
+    const stranger = await funded();
+    const { map } = await demoDraft(dm);
+    await expectErr(send(dm, [await writeSecretsIx(dm, map, { offset: 3, bytes: [1, 2], len: 4 })]), err("SecretsOutOfRange"));
+    await expectErr(send(dm, [await writeSecretsIx(dm, map, { bytes: [], len: SECRETS_BLOB_MAX + 1 })]), err("SecretsOutOfRange"));
+    await expectErr(send(stranger, [await writeSecretsIx(stranger, map)]), err("NotDm"));
+    await send(dm, [await finalizeIx(dm, map, ROOT)]);
+    await expectErr(send(dm, [await writeSecretsIx(dm, map)]), err("NotDraft"));
+  });
+
+  it("finalize_map needs the encrypted copy", async () => {
+    const dm = await funded();
+    const { map } = await create(dm);
+    await send(dm, [await writeLayoutIx(dm, map, 0, demoTiles())]);
+    await send(dm, [await writeSpawnsIx(dm, map, publicSpawns())]);
+    await send(dm, [await writeChestsIx(dm, map, DEMO_CHESTS, T1_BOSS)]);
+    await writeDemoArenas(dm, map);
+    // The public part without the encrypted copy.
+    await send(dm, [await writeSecretsIx(dm, map, { bytes: [], len: 0 })]);
+    await expectErr(send(dm, [await finalizeIx(dm, map, ROOT)]), err("SecretsMissing"));
   });
 });

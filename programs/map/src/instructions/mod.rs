@@ -5,6 +5,7 @@ pub mod set_status;
 pub mod write_arena;
 pub mod write_layout;
 pub mod write_points;
+pub mod write_secrets;
 pub mod write_spawns;
 
 // Globs: `#[program]` needs the `__client_accounts_*` modules generated next to each
