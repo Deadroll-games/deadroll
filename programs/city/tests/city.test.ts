@@ -234,7 +234,7 @@ async function finalizedMap(dm: Keypair): Promise<{ map: PublicKey; layout: Publ
     await mapProgram.methods.writeArena(pk.pack, record, Buffer.from(pk.cells)).accountsStrict(edit).signers([dm]).rpc();
   }
   for (const c of secretChunks(blob, design)) {
-    await mapProgram.methods.writeSecrets(c.offset, Buffer.from(c.bytes), c.len, c.threat, c.declared).accountsStrict(edit).signers([dm]).rpc();
+    await mapProgram.methods.writeSecrets(c.offset, Buffer.from(c.bytes), c.len, Buffer.from(c.threat), c.declared).accountsStrict(edit).signers([dm]).rpc();
   }
   await mapProgram.methods
     .finalizeMap(Array.from(commitment.root))
@@ -256,6 +256,7 @@ function partyOf(map: PublicKey) {
     session: s,
     monsters: pda([Buffer.from("monsters"), s.toBuffer()], SESSION),
     escrow: pda([Buffer.from("escrow"), s.toBuffer()], SESSION),
+    board: pda([Buffer.from("board"), s.toBuffer()], SESSION),
   };
 }
 
