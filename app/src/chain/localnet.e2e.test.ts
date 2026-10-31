@@ -8,7 +8,8 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { generateKeyPairSigner, getAddressEncoder, lamports, signBytes, type Address, type KeyPairSigner } from "@solana/kit";
-import { isBoss, mapKeys, type MessageSigner } from "./secrets";
+import { declaredOfDraft, isBoss, mapKeys, secretLeaves, type MessageSigner } from "./secrets";
+import { resizeLayout } from "../routes/MapBuilder";
 import demoMap from "../../../assets/registry/maps/demo_16x16.json";
 import { chestsOf } from "./loot";
 import { PROGRAMS } from "../config";
@@ -77,7 +78,7 @@ import { toHitResolved } from "./hit";
 import { Category, Effect, defaultMapSelection, type NamedSkill } from "./skillcheck";
 import { activeMods, toEffectResolved } from "./support";
 import { auditLeft, revealStepFor, turnStarted } from "./turns";
-import { Applied, Aspect, Class, HitOutcome, MAP_MAX, ModKind, Race, Tile, cellByte } from "./types";
+import { Applied, Aspect, Class, HitOutcome, ModKind, Race, Tile, cellByte, cellKey } from "./types";
 
 const ON = process.env.DEADROLL_LOCALNET === "1";
 const WARRIOR = 0;
@@ -221,7 +222,7 @@ async function openParty(specs: Spec[]) {
     /** Patch C: the final audit, with the DM's session key. */
     const audit = async () => {
       const p = (await readParty(acc.session))!;
-      const left = auditLeft(p.session, secrets.leaves, secrets.packs);
+      const left = auditLeft(p.session, p.board, secrets.leaves, secrets.packs);
       for (const leaf of left.cells) await send(dmKey, [await revealCellIx(dmActor, acc.session, p.session, leaf, await secrets.commitment.cell(leaf), null)]);
       for (const pack of left.packs) await send(dmKey, await revealPackIx(dmActor, acc.session, p.session, pack, await secrets.commitment.pack(pack)));
     };
@@ -237,14 +238,14 @@ async function openParty(specs: Spec[]) {
  * are kept out (stepping there engages it). */
 const taken = (p: Party, moverUnit: number, toward = -1) => {
   const t = new Set<number>();
-  p.monsters.forEach((m, i) => m.alive && MONSTER_BASE + i !== moverUnit && t.add(m.y * MAP_MAX + m.x));
-  p.players.forEach((pl) => p.session.aliveMask & (1 << pl.slot) && pl.slot !== moverUnit && t.add(pl.part.core.y * MAP_MAX + pl.part.core.x));
+  p.monsters.forEach((m, i) => m.alive && MONSTER_BASE + i !== moverUnit && t.add(cellKey(m.x, m.y)));
+  p.players.forEach((pl) => p.session.aliveMask & (1 << pl.slot) && pl.slot !== moverUnit && t.add(cellKey(pl.part.core.x, pl.part.core.y)));
   // Patch 11: a closed chest occupies its cell; arena update: on the map only, with the packs.
   if (arenaMode(p.session) === "map") {
-    for (const c of chestsOf(p.session)) if (!c.opened) t.add(c.y * MAP_MAX + c.x);
+    for (const c of chestsOf(p.session)) if (!c.opened) t.add(cellKey(c.x, c.y));
     for (const v of visiblePacks(p)) {
-      t.add(v.y * MAP_MAX + v.x);
-      if (v.pack !== toward) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) t.add((v.y + dy) * MAP_MAX + v.x + dx);
+      t.add(cellKey(v.x, v.y));
+      if (v.pack !== toward) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) t.add(cellKey(v.x + dx, v.y + dy));
     }
   }
   return t;
@@ -764,8 +765,8 @@ describe.skipIf(!ON)("localnet: the builder's verdict is finalize_map's", () => 
     const [bestiary, monsterSkills, rewards, tileset] = await Promise.all([registryBestiary(), registryMonsterSkills(), registryRewards(), registryTileset()]);
     wasm.setTables({ bestiary: bestiary!, monsterSkills: monsterSkills!, rewards: rewards!, tileset: tileset! });
     const preset = demoMap as MapPresetData & { tier: number };
-    const draft = () => ({ width: preset.width, height: preset.height, tier: preset.tier, ...presetToLayout(preset) });
-    const at = (d: ReturnType<typeof draft>, x: number, y: number, kind: number, variant = 0) => (d.tiles[y * MAP_MAX + x] = cellByte(kind, variant));
+    const draft = () => ({ width: preset.width, height: preset.height, tier: preset.tier, sizeClass: 0, ...presetToLayout(preset) });
+    const at = (d: ReturnType<typeof draft>, x: number, y: number, kind: number, variant = 0) => (d.tiles[y * d.width + x] = cellByte(kind, variant));
     const cases: [string, (d: ReturnType<typeof draft>) => void][] = [
       ["demo", () => {}],
       ["exit on a chasm", (d) => at(d, d.exit!.x, d.exit!.y, Tile.Chasm)],
@@ -785,7 +786,8 @@ describe.skipIf(!ON)("localnet: the builder's verdict is finalize_map's", () => 
       edit(d);
       const verdict = wasm.check(d);
       const built = await buildMapIxs(dm, d, keysOf(dm), isBoss);
-      const fin = built.ixs.pop()!;
+      // Patch D: the compute limit and finalize_map.
+      const fin = built.ixs.splice(-2);
       // create_map refuses minimum players 0 itself (the same rule, its own error).
       if (name === "minimum players 0") {
         expect(verdict, name).toBe("MinPlayersOutOfRange");
@@ -793,7 +795,7 @@ describe.skipIf(!ON)("localnet: the builder's verdict is finalize_map's", () => 
         continue;
       }
       for (const ix of built.ixs) await send(dm, [ix]);
-      const chain = await send(dm, [fin]).then(
+      const chain = await send(dm, fin).then(
         () => null,
         (e: unknown) => errorName(e instanceof Error ? e.message : String(e)),
       );
@@ -814,5 +816,36 @@ describe.skipIf(!ON)("localnet: the builder templates", () => {
       // The cells keep the variants the template picked.
       expect(Array.from((await mapTiles(built.layout))!), p.name).toEqual(Array.from(chainTiles({ ...layout, width: p.width, height: p.height, tier: 1 })));
     }
+  });
+});
+
+// Patch D: a Dungeon built and published the way the builder does it: the demo in the corner of an
+// open hall, the step count from mapcheck.wasm, the creation, the writes side by side, the checks
+// and finalize_map in one signed batch; then the site reads it back.
+describe.skipIf(!ON)("localnet: a Dungeon published by the builder (patch D)", () => {
+  it("one batch, read back whole", { timeout: 10 * 60_000 }, async () => {
+    const wasm = await MapcheckWasm.instantiate(readFileSync(resolve(import.meta.dirname, "wasm/mapcheck.wasm")));
+    const [bestiary, monsterSkills, rewards, tileset] = await Promise.all([registryBestiary(), registryMonsterSkills(), registryRewards(), registryTileset()]);
+    wasm.setTables({ bestiary: bestiary!, monsterSkills: monsterSkills!, rewards: rewards!, tileset: tileset! });
+    const preset = demoMap as MapPresetData & { tier: number };
+    const layout = presetToLayout(preset);
+    const grown = resizeLayout(layout, { width: preset.width, height: preset.height }, { width: 143, height: 143 });
+    const tiles = grown.tiles.slice();
+    for (let y = 1; y < 142; y++) for (let x = 1; x < 142; x++) if (x >= preset.width || y >= preset.height) tiles[y * 143 + x] = cellByte(Tile.StoneFloor);
+    for (let y = 1; y < preset.height - 1; y++) tiles[y * 143 + preset.width - 1] = cellByte(Tile.StoneFloor);
+    const draft = { width: 143, height: 143, tier: preset.tier, ...grown, tiles, exit: { x: 141, y: 141 } };
+    expect(wasm.checkDesign({ ...draft, sizeClass: 3 }, declaredOfDraft(draft.secrets), secretLeaves(143, 143, draft.packs, draft.secrets))).toBeNull();
+    const steps = wasm.steps({ ...draft, sizeClass: 3 });
+    expect(steps).toBeGreaterThan(0);
+    const dm = await funded(20);
+    const b = await buildMapIxs(dm, draft, keysOf(dm), isBoss, steps);
+    const groups = [b.create, ...b.writes, ...b.checks, b.finalize];
+    const waves = [1, b.writes.length, ...b.checks.map(() => 1), 1];
+    const started = Date.now();
+    await sendBatch(dm, groups, undefined, waves);
+    console.log(`Dungeon publish: ${groups.length} transactions (${b.writes.length} writes side by side, ${steps} check_step), ${Date.now() - started} ms`);
+    const map = (await getAccount("Map", b.map))!;
+    expect(mapStatus(map)).toBe("finalized");
+    expect(Array.from((await mapTiles(b.layout))!)).toEqual(Array.from(tiles));
   });
 });

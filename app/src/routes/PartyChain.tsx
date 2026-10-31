@@ -108,7 +108,7 @@ import { BASIC_ATTACK_AP, Purpose, inReach, rangeReach, type RangeTag } from "..
 import { monsterBaseAp, monsterDefense, playerDefense, unitStats } from "../chain/stats";
 import { activeMods, combatSkill, effectText, modLabel, modsAt, modsTickText, toEffectResolved, type CombatSkill, type EffectResolved } from "../chain/support";
 import { useTx } from "../chain/useTx";
-import { MAP_MAX, PARTY_MAX, type Cell, type Class, type HitResult, type Race } from "../chain/types";
+import { PARTY_MAX, cellKey, type Cell, type Class, type HitResult, type Race } from "../chain/types";
 import { DATA_SOURCE, MOCK_VRF, PROGRAMS, explorerUrl } from "../config";
 import { useSprites } from "../raster/useSprites";
 import { fetchSessionToken, revokeSessionInstruction } from "../session-key/magicblock";
@@ -550,7 +550,7 @@ export function PartyView({ address }: { address: Address }) {
     if (!party || !dmSecrets) return false;
     const dm = actorFor(party.session.dmActor);
     if (!dm) return false;
-    const left = auditLeft(party.session, dmSecrets.leaves, dmSecrets.packs);
+    const left = auditLeft(party.session, party.board, dmSecrets.leaves, dmSecrets.packs);
     for (const leaf of left.cells) {
       const res = await send("audit: reveal a secret", dm.signer, async () => [await revealCellIx(dm, party.address, party.session, leaf, await dmSecrets.commitment.cell(leaf), null)]);
       if (!res) return false;
@@ -595,15 +595,15 @@ export function PartyView({ address }: { address: Address }) {
       const t = new Set<number>();
       // Patch B: a 2x2 monster holds every cell of its square.
       p.monsters.forEach((m, i) => {
-        if (m.alive && MONSTER_BASE + i !== mover) for (const c of cellsOf(squareOf(p, i))) t.add(c.y * MAP_MAX + c.x);
+        if (m.alive && MONSTER_BASE + i !== mover) for (const c of cellsOf(squareOf(p, i))) t.add(cellKey(c.x, c.y));
       });
-      p.players.forEach((pl) => p.session.aliveMask & (1 << pl.slot) && pl.slot !== mover && t.add(pl.part.core.y * MAP_MAX + pl.part.core.x));
+      p.players.forEach((pl) => p.session.aliveMask & (1 << pl.slot) && pl.slot !== mover && t.add(cellKey(pl.part.core.x, pl.part.core.y)));
       // Patch 11: a closed chest occupies its cell; arena update: on the map only, with the packs'
       // visible monsters.
       const mode = arenaMode(p.session);
       if (mode === "map" || mode === "engaged") {
-        for (const c of chestsOf(p.session)) if (!c.opened) t.add(c.y * MAP_MAX + c.x);
-        for (const v of visiblePacks(p)) t.add(v.y * MAP_MAX + v.x);
+        for (const c of chestsOf(p.session)) if (!c.opened) t.add(cellKey(c.x, c.y));
+        for (const v of visiblePacks(p)) t.add(cellKey(v.x, v.y));
       }
       return t;
     },
@@ -963,7 +963,7 @@ export function PartyView({ address }: { address: Address }) {
   if (error && !party) return <p className="error">{error}</p>;
   if (!party || !s) return <p className="muted">Loading party {shortAddress(address)}...</p>;
 
-  const tiles = party.ground ?? new Uint8Array(MAP_MAX * MAP_MAX);
+  const tiles = party.ground ?? new Uint8Array(s.width * s.height);
   // Arena update: chests and points are on the map.
   const onMap = arenaMode(s) === "map" || arenaMode(s) === "engaged";
   const unitSprite = (u: GridUnit) => {
@@ -1270,13 +1270,14 @@ export function PartyView({ address }: { address: Address }) {
             tiles={tiles}
             units={units}
             activeUnitId={unit}
+            follow={units.find((u) => u.id === unit) ?? null}
             reachable={!ended && canMove ? reach : []}
             targets={!ended ? monsterTargets : []}
             path={preview}
             auras={gridAuras}
             chests={onMap ? gridChests : []}
             points={onMap ? party.points : []}
-            secrets={foundSecrets(s)}
+            secrets={foundSecrets(s, party.board)}
             pointSprite={pointSprite}
             chestSprite={chestSprite}
             line={!ended ? lineCells : []}
@@ -1632,7 +1633,7 @@ const EXAMINE_AP = balance.secrets.examine_ap;
 
 /** Patch C: the secrets and packs the final audit still has to reveal. */
 function auditCount(party: Party, d: DmSecrets): number {
-  const left = auditLeft(party.session, d.leaves, d.packs);
+  const left = auditLeft(party.session, party.board, d.leaves, d.packs);
   return left.cells.length + left.packs.length;
 }
 

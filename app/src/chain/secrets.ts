@@ -5,6 +5,7 @@
 // wallet opens the secrets again.
 import { Leaves, Secret, UNLOCK_MESSAGE, declaredOf, deriveKeys, type PackShape, type SecretKeys } from "@deadroll/sdk/secrets";
 import type { DraftSecret, PackDraft } from "./mapcheckWasm";
+import { classOf } from "./types";
 import bestiary from "../../../assets/registry/bestiary.json";
 
 /** The bestiary ids with the Boss role (the registry table is seeded from this file): a pack's
@@ -28,7 +29,7 @@ export const packShapes = (packs: (PackDraft | null)[]): PackShape[] => packs.ma
 
 /** The draft's secrets by leaf (a secret outside its board is left out: the builder moves it). */
 export function secretLeaves(width: number, height: number, packs: (PackDraft | null)[], list: BoardSecret[]): DraftSecret[] {
-  const leaves = new Leaves(width, height, packShapes(packs));
+  const leaves = new Leaves(width, height, packShapes(packs), classOf(width, height) ?? 0);
   const out: DraftSecret[] = [];
   for (const s of list) {
     const leaf = s.pack === null ? leaves.of({ kind: "map", x: s.x, y: s.y }) : leaves.of({ kind: "arena", pack: s.pack, x: s.x, y: s.y });

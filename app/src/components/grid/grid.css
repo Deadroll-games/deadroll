@@ -48,3 +48,28 @@
     animation: none;
   }
 }
+
+/* Patch D: a big map through a window, the whole of it on the parchment beside. */
+.grid-view {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.parchment-minimap {
+  position: relative;
+  flex: none;
+  width: 384px;
+  height: 256px;
+  background: none no-repeat;
+  background-size: 384px 256px;
+  background-color: #c9b48a;
+  image-rendering: pixelated;
+}
+
+.parchment-minimap canvas {
+  position: absolute;
+  image-rendering: pixelated;
+  cursor: pointer;
+}

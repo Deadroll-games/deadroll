@@ -16,7 +16,7 @@ import { bestiaryName } from "../chain/names";
 import { useAutoFreezeTombstone } from "../chain/useAutoFreezeTombstone";
 import type { TombstoneLog } from "../chain/tombstone";
 import { monsterDefense, playerDefense, unitStats } from "../chain/stats";
-import { Aspect, Class, MAP_MAX, ModKind, PARTY_MAX, Tile, cellByte, type HitResult, type TimedMod } from "../chain/types";
+import { Aspect, Class, ModKind, PARTY_MAX, type HitResult, type TimedMod } from "../chain/types";
 import { DATA_SOURCE } from "../config";
 import { client } from "../wallet/client";
 import { PartyView } from "./PartyChain";
@@ -42,12 +42,10 @@ function initialUnits(pack: number | null = null): GridUnit[] {
   return [...players, ...DEMO_MAP.spawns.flatMap((sp, i) => (sp.pack === pack ? [monster(i, sp.x, sp.y)] : []))];
 }
 
-/** The cells of pack `pack`'s arena at the map's stride (32), the rest walls. */
+/** The cells of pack `pack`'s arena (`width` per row). */
 function arenaTiles(pack: number): Uint8Array {
   const pk = DEMO_MAP.packs[pack]!;
-  const out = new Uint8Array(MAP_MAX * MAP_MAX).fill(cellByte(Tile.Wall));
-  for (let y = 0; y < pk.height; y++) for (let x = 0; x < pk.width; x++) out[y * MAP_MAX + x] = pk.cells[y * pk.width + x]!;
-  return out;
+  return pk.cells.slice(0, pk.width * pk.height);
 }
 
 /** Mock buffs and debuffs: Bran empowered, Aria hasted, the first wolf exposed to Fire. */

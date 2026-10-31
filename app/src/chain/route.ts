@@ -3,7 +3,7 @@
 // tiles, units and chests do not count), passable cells not taken by a living unit or a closed chest,
 // step costs from the Tileset (`GameSession.tile_cost` by tile type, a cell byte's bits 7-3). The
 // chain checks the path itself (deadroll_mapcheck::walk); this only plans it.
-import { MAP_MAX, Tile, cellByte, cellKind, type Cell } from "./types";
+import { Tile, cellByte, cellKey, cellKind, type Cell } from "./types";
 
 export const MAX_PATH = 16;
 const WALL = cellByte(Tile.Wall);
@@ -26,7 +26,7 @@ export type Ground = {
   width: number;
   height: number;
   tileCost: ArrayLike<number>;
-  /** Cells held by a living unit (not the mover) or a closed chest, as `y * 32 + x`. */
+  /** Cells held by a living unit (not the mover) or a closed chest, as `cellKey`. */
   taken: Set<number>;
   /** Patch B: the mover's cells per side (a 2x2 monster walks its whole square), default 1. */
   size?: number;
@@ -39,13 +39,13 @@ export const adjacent = (a: Cell, b: Cell) => cheb(a, b) === 1;
 /** The tile at `(x, y)` can be entered (by the Tileset; units and chests aside). */
 function tileOpen(g: Ground, x: number, y: number): boolean {
   if (x < 0 || y < 0 || x >= g.width || y >= g.height) return false;
-  return (g.tileCost[cellKind(g.tiles[y * MAP_MAX + x] ?? WALL)] ?? 0) > 0;
+  return (g.tileCost[cellKind(g.tiles[y * g.width + x] ?? WALL)] ?? 0) > 0;
 }
 
 /** Action points to step onto `(x, y)`, 0 = cannot. */
 export function costAt(g: Ground, x: number, y: number): number {
-  if (!tileOpen(g, x, y) || g.taken.has(y * MAP_MAX + x)) return 0;
-  return g.tileCost[cellKind(g.tiles[y * MAP_MAX + x] ?? WALL)] ?? 0;
+  if (!tileOpen(g, x, y) || g.taken.has(cellKey(x, y))) return 0;
+  return g.tileCost[cellKind(g.tiles[y * g.width + x] ?? WALL)] ?? 0;
 }
 
 /** Every cell of the mover's square on `(x, y)` can be entered by its tile. */
@@ -79,7 +79,7 @@ export function stepCost(g: Ground, from: Cell, to: Cell): number {
 /** Cheapest steps from `from` to the first cell where `goal` holds. */
 export function route(opts: Ground & { from: Cell; goal: (x: number, y: number) => boolean }): Step[] | null {
   const { from, goal } = opts;
-  const start = from.y * MAP_MAX + from.x;
+  const start = cellKey(from.x, from.y);
   const dist = new Map<number, number>([[start, 0]]);
   const prev = new Map<number, [number, number]>();
   const done = new Set<number>();
@@ -88,19 +88,19 @@ export function route(opts: Ground & { from: Cell; goal: (x: number, y: number) 
     for (const [k, d] of dist) if (!done.has(k) && (best < 0 || d < dist.get(best)!)) best = k;
     if (best < 0) return null;
     done.add(best);
-    const x = best % MAP_MAX;
-    const y = Math.floor(best / MAP_MAX);
+    const x = best % 256;
+    const y = Math.floor(best / 256);
     if (goal(x, y)) {
       const steps: Step[] = [];
       for (let k = best; prev.has(k); k = prev.get(k)![0]) {
-        steps.unshift({ cost: prev.get(k)![1], to: { x: k % MAP_MAX, y: Math.floor(k / MAP_MAX) } });
+        steps.unshift({ cost: prev.get(k)![1], to: { x: k % 256, y: Math.floor(k / 256) } });
       }
       return steps;
     }
     for (const [dx, dy] of DIRS) {
       const c = stepCost(opts, { x, y }, { x: x + dx, y: y + dy });
       if (!c) continue;
-      const k = (y + dy) * MAP_MAX + x + dx;
+      const k = cellKey(x + dx, y + dy);
       const d = dist.get(best)! + c;
       if (!dist.has(k) || d < dist.get(k)!) {
         dist.set(k, d);
@@ -148,23 +148,23 @@ export function extendPath(g: Ground, from: Cell, path: Step[], to: Cell, ap: nu
 /** Cells reachable from `from` with at most `ap` action points (for the move highlight). */
 export function reachable(opts: Ground & { from: Cell; ap: number }): Cell[] {
   const { from, ap } = opts;
-  const dist = new Map<number, number>([[from.y * MAP_MAX + from.x, 0]]);
-  const queue = [from.y * MAP_MAX + from.x];
+  const dist = new Map<number, number>([[cellKey(from.x, from.y), 0]]);
+  const queue = [cellKey(from.x, from.y)];
   while (queue.length) {
     queue.sort((a, b) => dist.get(a)! - dist.get(b)!);
     const k = queue.shift()!;
-    const x = k % MAP_MAX;
-    const y = Math.floor(k / MAP_MAX);
+    const x = k % 256;
+    const y = Math.floor(k / 256);
     for (const [dx, dy] of DIRS) {
       const c = stepCost(opts, { x, y }, { x: x + dx, y: y + dy });
       if (!c) continue;
-      const nk = (y + dy) * MAP_MAX + x + dx;
+      const nk = cellKey(x + dx, y + dy);
       const d = dist.get(k)! + c;
       if (d > ap || (dist.has(nk) && dist.get(nk)! <= d)) continue;
       dist.set(nk, d);
       queue.push(nk);
     }
   }
-  dist.delete(from.y * MAP_MAX + from.x);
-  return [...dist.keys()].map((k) => ({ x: k % MAP_MAX, y: Math.floor(k / MAP_MAX) }));
+  dist.delete(cellKey(from.x, from.y));
+  return [...dist.keys()].map((k) => ({ x: k % 256, y: Math.floor(k / 256) }));
 }

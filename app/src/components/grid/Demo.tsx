@@ -39,7 +39,7 @@ function reachableCells(units: readonly GridUnit[], active: GridUnit): Cell[] {
     for (let x = 0; x < MAP_W; x++) {
       const dist = Math.abs(x - active.x) + Math.abs(y - active.y);
       if (dist === 0 || dist > MOVE) continue;
-      if (!SHIPPED_TILE_COST[cellKind(DEMO_MAP.tiles[cellIndex(x, y)] ?? 0)]) continue;
+      if (!SHIPPED_TILE_COST[cellKind(DEMO_MAP.tiles[cellIndex(x, y, MAP_W)] ?? 0)]) continue;
       if (units.some((unit) => unit.x === x && unit.y === y)) continue;
       cells.push({ x, y });
     }

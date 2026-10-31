@@ -1,14 +1,14 @@
 // Patch B: a 2x2 mover plans with its whole square, as `deadroll_mapcheck::walk::walk_sized`.
 import { describe, expect, it } from "vitest";
 import { reachable, route, stepCost, type Ground } from "./route";
-import { MAP_MAX, Tile, cellByte } from "./types";
+import { Tile, cellByte, cellKey } from "./types";
 
 function ground(walls: [number, number][], taken: [number, number][] = [], size = 1): Ground {
-  const tiles = new Uint8Array(MAP_MAX * MAP_MAX).fill(cellByte(Tile.StoneFloor));
-  for (const [x, y] of walls) tiles[y * MAP_MAX + x] = cellByte(Tile.Wall);
+  const tiles = new Uint8Array(8 * 8).fill(cellByte(Tile.StoneFloor));
+  for (const [x, y] of walls) tiles[y * 8 + x] = cellByte(Tile.Wall);
   const tileCost = new Array(32).fill(1);
   tileCost[Tile.Wall] = 0;
-  return { tiles, width: 8, height: 8, tileCost, taken: new Set(taken.map(([x, y]) => y * MAP_MAX + x)), size };
+  return { tiles, width: 8, height: 8, tileCost, taken: new Set(taken.map(([x, y]) => cellKey(x, y))), size };
 }
 
 describe("route for a 2x2 mover", () => {

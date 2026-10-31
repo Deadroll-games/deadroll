@@ -72,10 +72,10 @@ import {
 import { toHitResolved } from "./hit";
 import { toEffectResolved } from "./support";
 import { Effect } from "./skillcheck";
-import { bagPda, bestiaryPda, gameConfigPda, monsterSkillsPda, rewardCachePda, rewardsPda, monstersPda, participationPda, programIdentityPda, sessionAuthorityPda, sessionTokenPda, skillExtrasPda, skillSetPda, tilesetPda } from "./pda";
+import { bagPda, bestiaryPda, boardPda, gameConfigPda, monsterSkillsPda, rewardCachePda, rewardsPda, monstersPda, participationPda, programIdentityPda, sessionAuthorityPda, sessionTokenPda, skillExtrasPda, skillSetPda, tilesetPda } from "./pda";
 import { affordable, extendPath, reachable, route } from "./route";
 import { explainFailure } from "./send";
-import { Applied, Aspect, Biome, Class, HitOutcome, JumpMode, MAP_MAX, ModKind, OpKind, StateKind, Tile, cellByte } from "./types";
+import { Applied, Aspect, Biome, Class, HitOutcome, JumpMode, ModKind, OpKind, StateKind, Tile, cellByte, cellKey } from "./types";
 import { SHIPPED_TILE_COST } from "./tiles";
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex").slice(0, 16);
@@ -163,6 +163,7 @@ describe("session builders", () => {
       [await participationPda(session, character), AccountRole.WRITABLE],
       [await monstersPda(session), AccountRole.WRITABLE],
       [addrOf(10), AccountRole.READONLY],
+      [await boardPda(session), AccountRole.READONLY],
       [addrOf(9), AccountRole.READONLY],
       ...(await vrf()),
     ]);
@@ -172,7 +173,8 @@ describe("session builders", () => {
     expect(toHex(monster.data as Uint8Array)).toBe(toHex(concat(ixDisc("move_path"), Uint8Array.of(7, 1, 0, 0, 0, 1, 2))));
     const roles = monster.accounts!.map((a) => a.address);
     expect(roles[2]).toBe(PROGRAMS.session);
-    expect(roles[5]).toBe(PROGRAMS.session);
+    // Patch D: the board comes before the session token.
+    expect(roles[6]).toBe(PROGRAMS.session);
   });
 
   it("act: skill slot and target, VRF accounts after the session token, the map layout last", async () => {
@@ -420,7 +422,8 @@ describe("session builders", () => {
 describe("map builders", () => {
   it("patch 13: create_map takes min_players, write_points sends the entrance, the exit, the chests and the boss table, finalize_map reads the rewards and the tileset", async () => {
     const dm = await generateKeyPairSigner();
-    const tiles = new Uint8Array(1024).fill(cellByte(Tile.StoneFloor));
+    // Patch D: the cells are `width` per row.
+    const tiles = new Uint8Array(4 * 3).fill(cellByte(Tile.StoneFloor));
     tiles[1] = cellByte(Tile.Rubble, 6);
     const chests = [
       { x: 1, y: 2, table: 0 },
@@ -436,28 +439,30 @@ describe("map builders", () => {
     const draft = { width: 4, height: 3, tier: 1, minPlayers: 3, chestRadius: 4, settleTimeoutSecs: 7200, biome: Biome.Crypt, tiles, entrance: { x: 0, y: 0 }, exit: { x: 3, y: 0 }, spawns: spawnList, chests, bossTable: 1, packs, secrets };
     const keysFor = async (map: string) => deriveKeys(new Uint8Array(64).fill(3), new Uint8Array(getAddressEncoder().encode(map as never)));
     const b = await buildMapIxs(dm, draft, keysFor, () => false);
-    // The encrypted copy (~630 bytes) goes in two write_secrets chunks.
-    expect(b.ixs.length).toBe(8);
-    const [create, layout, spawns, writePoints, arena, secretsIx, , finalize] = b.ixs as Instruction[] as [Instruction, Instruction, Instruction, Instruction, Instruction, Instruction, Instruction, Instruction];
+    // The encrypted copy (~630 bytes) goes in two write_secrets chunks; patch D: a compute limit
+    // before finalize_map, no grow_layout and no check_step on a map this small.
+    expect(b.ixs.length).toBe(9);
+    expect([b.create.length, b.writes.length, b.checks.length, b.finalize.length]).toEqual([1, 5, 0, 2]);
+    const [create, layout, spawns, writePoints, arena, secretsIx, , , finalize] = b.ixs as Instruction[] as [Instruction, Instruction, Instruction, Instruction, Instruction, Instruction, Instruction, Instruction, Instruction];
     // write_arena: pack u8, PackLayout (visible, x, y, facing, width, height), Vec<u8> of the rows.
     expect(toHex(arena.data as Uint8Array)).toBe(toHex(concat(ixDisc("write_arena"), Uint8Array.of(2, 0, 3, 2, 5, 2, 2, 4, 0, 0, 0, 8, 9, 10, 11))));
     const index = new Uint8Array(4);
     new DataView(index.buffer).setUint32(0, b.index, true);
     // MapSettings: min_players, chest_radius, settle_timeout_secs (u32 LE, 7200 = 0x1c20), biome (Crypt = 2).
     expect(toHex(create.data as Uint8Array)).toBe(toHex(concat(ixDisc("create_map"), index, Uint8Array.of(4, 3, 1, 3, 4, 0x20, 0x1c, 0, 0, 2))));
-    // write_layout: offset u16, Vec<u8> of cell bytes up to the last cell of the map (2 rows of 32 + 4).
+    // write_layout: offset u16, Vec<u8> of the cell bytes, `width` per row (patch D).
     const cells = (layout.data as Uint8Array).slice(8 + 2 + 4);
-    expect(cells.length).toBe(2 * 32 + 4);
+    expect(cells.length).toBe(4 * 3);
     expect(cells[1]).toBe((Tile.Rubble << 3) | 6);
     // write_spawns: patch C, only the visible goblin.
     expect(toHex(spawns.data as Uint8Array)).toBe(toHex(concat(ixDisc("write_spawns"), Uint8Array.of(1, 0, 0, 0, 1, 0, 0, 1, 3, 0, 0, 0, 2))));
-    // write_secrets: offset u16, Vec<u8> of the blob, len u16, the threats (pack 2: levels 1 + 2), the
-    // declared counts (one trap).
+    // write_secrets: offset u16, Vec<u8> of the blob, len u16, the threats (patch D: a Vec, one per
+    // pack number of the class; pack 2: levels 1 + 2), the declared counts (one trap).
     const sd = secretsIx.data as Uint8Array;
     expect(toHex(sd.slice(0, 8))).toBe(toHex(ixDisc("write_secrets")));
     const blobLen = new DataView(sd.buffer, sd.byteOffset).getUint32(10, true);
     expect(Array.from(sd.slice(8, 10))).toEqual([0, 0]);
-    expect(Array.from(sd.slice(14 + blobLen + 2))).toEqual([0, 0, 3, 0, 0, 0, 0, 0, 1, 0, 0, 0]);
+    expect(Array.from(sd.slice(14 + blobLen + 2))).toEqual([8, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 1, 0, 0, 0]);
     // finalize_map: a nonzero root.
     expect((finalize.data as Uint8Array).slice(8).some((x) => x !== 0)).toBe(true);
     // Vec<MapPoint>: u32 LE count, then (kind, x, y, data): entrance (1), exit (2), the chests (0) with
@@ -553,57 +558,44 @@ describe("decoders", () => {
       v.mode = 2;
       v.arenaPack = 3;
       v.packs[3] = { visible: 4, x: 12, y: 13, facing: 5, width: 8, height: 9 };
-      v.packsAlive = 0b1110;
+      v.packsAlive = 0b1110n;
       v.unitTime[11] = 0x0201;
       v.playerDex[3] = 0x0403;
       v.exitKind = 1;
       v.lastMoves = 0b101;
       v.retreats = 2;
-      v.packsGuarded = 0b10;
-      v.packsBuffed = 0b100;
-      v.deadSpawns = 0x0102_0304;
+      v.packsGuarded = 0b10n;
+      v.packsBuffed = 0b100n;
+      v.deadSpawns = 0x0102_0304n;
       v.leafCount = 0x0304;
       v.obligationCount = 1;
       v.obligedBy = 2;
-      v.packsRevealed = 0b110;
+      v.packsRevealed = 0b110n;
       v.visibleChests = 3;
+      v.mapClass = 2;
     });
-    // Patch C appends the secrets: root 32, leaf_count u16, declared 4, threat 8, revealed 273,
-    // found_counts 4, found 16 x 6, found_count, packs_revealed, obligations 16 x u16,
-    // obligation_count, obliged_by, spawns 24 x 9, spawn_count, roster_totals 4, visible_chests.
-    const PATCH_C = 32 + 2 + 4 + 8 + 273 + 4 + 96 + 1 + 1 + 32 + 1 + 1 + 216 + 1 + 4 + 1;
-    expect(s.bytes.subarray(-1)[0]).toBe(3);
-    expect([s.back.leafCount, s.back.obligationCount, s.back.obligedBy, s.back.packsRevealed, s.back.visibleChests]).toEqual([0x0304, 1, 2, 0b110, 3]);
-    s.bytes = s.bytes.subarray(0, -PATCH_C);
-    // Patch B appends exit_kind, last_moves, retreats, packs_guarded, packs_buffed (u8 each) and
-    // dead_spawns (u32): 9 bytes.
-    expect(Array.from(s.bytes.subarray(-9))).toEqual([1, 0b101, 2, 0b10, 0b100, 4, 3, 2, 1]);
-    expect([s.back.exitKind, s.back.lastMoves, s.back.retreats, s.back.packsGuarded, s.back.packsBuffed, s.back.deadSpawns]).toEqual([1, 0b101, 2, 0b10, 0b100, 0x0102_0304]);
-    s.bytes = s.bytes.subarray(0, -9);
-    // Arena update appends mode, arena_pack, engaged_by, packs (8 x 6), packs_alive, map_width,
-    // map_height, map_pos (4 x 2), map_order (4), map_order_len, map_turn_index, map_round (u16),
-    // unit_time (12 x u32), player_dex (4 x u16): 126 bytes.
-    const arena = 3 + 48 + 1 + 2 + 8 + 4 + 2 + 2 + 48 + 8;
-    expect(arena).toBe(126);
-    expect(Array.from(s.bytes.subarray(-arena, -arena + 2))).toEqual([2, 3]);
-    expect(Array.from(s.bytes.subarray(-arena + 3 + 18, -arena + 3 + 24))).toEqual([4, 12, 13, 5, 8, 9]);
-    expect(s.bytes[s.bytes.length - arena + 51]).toBe(0b1110);
-    expect(Array.from(s.bytes.subarray(-12, -8))).toEqual([1, 2, 0, 0]);
-    expect(Array.from(s.bytes.subarray(-2))).toEqual([3, 4]);
-    expect([s.back.mode, s.back.arenaPack, s.back.packs[3].y, s.back.unitTime[11], s.back.playerDex[3]]).toEqual([2, 3, 13, 0x0201, 0x0403]);
-    s.bytes = s.bytes.subarray(0, -arena);
-    // Patch 13 appends tile_cost by tile type (32 bytes) and drops the patch 1 `[u8; 7]`.
-    expect(s.bytes[s.bytes.length - 32 + 10]).toBe(7);
+    // Patch D: map_class appended; the packs (40), the chests (32 slots), the threats (40) and
+    // the masks (packs u64, dead spawns u128, chests opened u32) grew in place; the revealed
+    // leaves, the found secrets and the revealed spawns moved to the SessionBoard.
+    expect(s.bytes.subarray(-1)[0]).toBe(2);
+    expect([s.back.leafCount, s.back.obligationCount, s.back.obligedBy, s.back.packsRevealed, s.back.visibleChests]).toEqual([0x0304, 1, 2, 0b110n, 3]);
+    expect([s.back.exitKind, s.back.lastMoves, s.back.retreats, s.back.packsGuarded, s.back.packsBuffed, s.back.deadSpawns]).toEqual([1, 0b101, 2, 0b10n, 0b100n, 0x0102_0304n]);
+    expect([s.back.mode, s.back.arenaPack, s.back.packs[3].y, s.back.packs.length, s.back.packsAlive, s.back.unitTime[11], s.back.playerDex[3]]).toEqual([2, 3, 13, 40, 0b1110n, 0x0201, 0x0403]);
     expect(s.back.tileCost[10]).toBe(7);
-    s.bytes = s.bytes.subarray(0, -32);
-    // Patch 11 appends tier, min_players, chests (4 x 4), chest_count, boss_table, chests_opened,
-    // pending_chest, xp_bp (4 x u16), loot_mask, unpaid_kills (u32), ended_at (i64), chest_radius
-    // and settle_timeout_secs (u32): 48 bytes.
-    const p11 = 48;
-    expect(Array.from(s.bytes.subarray(-5))).toEqual([4, 0x58, 0x02, 0, 0]);
-    expect(Array.from(s.bytes.subarray(-13, -11))).toEqual([2, 1]);
     expect(s.back.endedAt).toBe(0x0102n);
-    s.bytes = s.bytes.subarray(0, -p11);
+    expect(s.back.mapClass).toBe(2);
+    // Patch D 1; patch C: root 32, leaf_count 2, declared 4, threat 40, found_counts 4,
+    // packs_revealed 8, obligations 32, obligation_count, obliged_by, roster_totals 4,
+    // visible_chests; patch B: exit_kind, last_moves, retreats, packs_guarded 8, packs_buffed 8,
+    // dead_spawns 16; arena update: mode, arena_pack, engaged_by, packs 240, packs_alive 8,
+    // map_width, map_height, map_pos 8, map_order 4, map_order_len, map_turn_index, map_round 2,
+    // unit_time 48, player_dex 8; patch 13: tile_cost 32; patch 11: tier, min_players, chests 128,
+    // chest_count, boss_table, chests_opened 4, pending_chest, xp_bp 8, loot_mask, unpaid_kills 4,
+    // ended_at 8, chest_radius, settle_timeout_secs 4.
+    const appended = 1 + 129 + 35 + 325 + 32 + 163;
+    // Patch 11 ends with chest_radius and settle_timeout_secs (600).
+    expect(Array.from(s.bytes.subarray(-appended + 158, -appended + 163))).toEqual([4, 0x58, 0x02, 0, 0]);
+    s.bytes = s.bytes.subarray(0, -appended);
     // Patch 9 appends aura_weights (4 x 2 x 6); the offsets below count from before them.
     const p9 = 4 * 2 * 6;
     expect(Array.from(s.bytes.subarray(-p9 + 18, -p9 + 24))).toEqual([0, 100, 0, 65, 0, 0]);
@@ -897,11 +889,11 @@ describe("decoders", () => {
 
 describe("route", () => {
   // 5x3 room, a wall in the middle column except the bottom row, water costs 2 (the shipped tileset).
-  const tiles = new Uint8Array(MAP_MAX * MAP_MAX).fill(cellByte(Tile.Wall));
-  for (let y = 0; y < 3; y++) for (let x = 0; x < 5; x++) tiles[y * MAP_MAX + x] = cellByte(Tile.StoneFloor, x);
-  tiles[0 * MAP_MAX + 2] = cellByte(Tile.Wall);
-  tiles[1 * MAP_MAX + 2] = cellByte(Tile.Wall);
-  tiles[2 * MAP_MAX + 3] = cellByte(Tile.ShallowWater, 7);
+  const tiles = new Uint8Array(5 * 3).fill(cellByte(Tile.Wall));
+  for (let y = 0; y < 3; y++) for (let x = 0; x < 5; x++) tiles[y * 5 + x] = cellByte(Tile.StoneFloor, x);
+  tiles[0 * 5 + 2] = cellByte(Tile.Wall);
+  tiles[1 * 5 + 2] = cellByte(Tile.Wall);
+  tiles[2 * 5 + 3] = cellByte(Tile.ShallowWater, 7);
   const tileCost = SHIPPED_TILE_COST;
   const base = { tiles, width: 5, height: 3, tileCost, taken: new Set<number>() };
 
@@ -919,7 +911,7 @@ describe("route", () => {
       if (a.x !== b.x && a.y !== b.y) expect([a.x, b.x].includes(2) && [a.y, b.y].includes(1)).toBe(false);
     }
     // With (3,1) taken the only way is the water, which costs 2.
-    const around = route({ ...base, taken: new Set([1 * MAP_MAX + 3]), from: { x: 0, y: 0 }, goal: (x, y) => x === 4 && y === 0 })!;
+    const around = route({ ...base, taken: new Set([cellKey(3, 1)]), from: { x: 0, y: 0 }, goal: (x, y) => x === 4 && y === 0 })!;
     expect(around.find((s) => s.to.x === 3 && s.to.y === 2)?.cost).toBe(2);
   });
 
@@ -927,15 +919,15 @@ describe("route", () => {
     // (1,1) -> (2,2) passes (2,1), a wall: refused; (1,2) -> (2,2) is straight.
     expect(extendPath(base, { x: 1, y: 1 }, [], { x: 2, y: 2 }, 9)!.map((s) => s.to)).toEqual([{ x: 1, y: 2 }, { x: 2, y: 2 }]);
     // Between two walls touching at the corner: no way at all.
-    const corner = new Uint8Array(MAP_MAX * MAP_MAX).fill(cellByte(Tile.Wall));
+    const corner = new Uint8Array(2 * 2).fill(cellByte(Tile.Wall));
     corner[0] = cellByte(Tile.StoneFloor);
-    corner[MAP_MAX + 1] = cellByte(Tile.StoneFloor);
+    corner[2 + 1] = cellByte(Tile.StoneFloor);
     const g = { tiles: corner, width: 2, height: 2, tileCost, taken: new Set<number>() };
     expect(extendPath(g, { x: 0, y: 0 }, [], { x: 1, y: 1 }, 9)).toBeNull();
     expect(reachable({ ...g, from: { x: 0, y: 0 }, ap: 9 })).toEqual([]);
     // Open on both sides (a unit on one does not matter): one step.
-    const open = new Uint8Array(MAP_MAX * MAP_MAX).fill(cellByte(Tile.StoneFloor));
-    const g2 = { tiles: open, width: 2, height: 2, tileCost, taken: new Set<number>([1]) };
+    const open = new Uint8Array(2 * 2).fill(cellByte(Tile.StoneFloor));
+    const g2 = { tiles: open, width: 2, height: 2, tileCost, taken: new Set<number>([cellKey(1, 0)]) };
     expect(extendPath(g2, { x: 0, y: 0 }, [], { x: 1, y: 1 }, 9)).toEqual([{ cost: 1, to: { x: 1, y: 1 } }]);
   });
 
@@ -969,7 +961,7 @@ describe("route", () => {
   });
 
   it("reachable stays within the action points and off taken cells", () => {
-    const cells = reachable({ ...base, from: { x: 0, y: 0 }, ap: 2, taken: new Set([1 * MAP_MAX + 0]) });
+    const cells = reachable({ ...base, from: { x: 0, y: 0 }, ap: 2, taken: new Set([cellKey(0, 1)]) });
     expect(cells).toContainEqual({ x: 1, y: 0 });
     expect(cells).toContainEqual({ x: 1, y: 1 });
     expect(cells).not.toContainEqual({ x: 0, y: 1 });

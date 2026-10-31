@@ -20,7 +20,7 @@ beforeAll(async () => {
 
 function demo(): MapCheckDraft {
   const p = MAP_PRESETS[0]!;
-  return { width: p.width, height: p.height, tier: p.tier ?? 1, ...presetToLayout(p) };
+  return { width: p.width, height: p.height, tier: p.tier ?? 1, sizeClass: 0, ...presetToLayout(p) };
 }
 
 describe("mapcheck wasm", () => {
@@ -38,12 +38,18 @@ describe("mapcheck wasm", () => {
     for (const c of fixtures.cases) expect(wasm.verdict(bytes(c.input)), c.name).toBe(c.verdict);
   });
 
+  it("patch D: counts the check_step calls of every case as crates/mapcheck", () => {
+    for (const c of fixtures.cases) expect(wasm.stepsOf(bytes(c.input)), c.name).toBe(c.steps);
+    expect(fixtures.cases.find((c) => c.name === "dungeon 143x143")!.steps).toBeGreaterThan(0);
+    expect(wasm.steps(demo())).toBe(0);
+  });
+
   it("names the rule from a draft", () => {
     expect(wasm.check(demo())).toBeNull();
     expect(wasm.check({ ...demo(), entrance: null })).toBe("EntranceCount");
     const d = demo();
     const tiles = d.tiles.slice();
-    tiles[d.exit!.y * 32 + d.exit!.x] = cellByte(Tile.Chasm);
+    tiles[d.exit!.y * d.width + d.exit!.x] = cellByte(Tile.Chasm);
     expect(wasm.check({ ...d, tiles })).toBe("PointNotPassable");
     expect(wasm.check({ ...d, width: 7 })).toBe("SizeOutOfRange");
   });
