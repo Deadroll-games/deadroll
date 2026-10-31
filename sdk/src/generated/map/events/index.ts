@@ -12,4 +12,5 @@ export * from "./mapCreated.js";
 export * from "./mapFinalized.js";
 export * from "./mapStatusChanged.js";
 export * from "./pointsWritten.js";
+export * from "./secretsWritten.js";
 export * from "./spawnsWritten.js";

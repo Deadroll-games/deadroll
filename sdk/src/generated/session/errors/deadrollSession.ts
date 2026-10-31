@@ -222,15 +222,44 @@ export const DEADROLL_SESSION_ERROR__NOT_IN_ARENA = 0x17d5; // 6101
 export const DEADROLL_SESSION_ERROR__RETREAT_LIMIT = 0x17d6; // 6102
 /** InvalidExit: No Retreat or Escape vote has passed */
 export const DEADROLL_SESSION_ERROR__INVALID_EXIT = 0x17d7; // 6103
+/** MapWithoutSecrets: The map was finalized before the secrets update */
+export const DEADROLL_SESSION_ERROR__MAP_WITHOUT_SECRETS = 0x17d8; // 6104
+/** RevealsPending: The DM must reveal the cells a step or a look uncovered first */
+export const DEADROLL_SESSION_ERROR__REVEALS_PENDING = 0x17d9; // 6105
+/** BadProof: The proof does not lead to the map secrets root */
+export const DEADROLL_SESSION_ERROR__BAD_PROOF = 0x17da; // 6106
+/** AlreadyRevealed: This cell is already revealed */
+export const DEADROLL_SESSION_ERROR__ALREADY_REVEALED = 0x17db; // 6107
+/** NotObligated: Nothing obliges the DM to reveal this cell now */
+export const DEADROLL_SESSION_ERROR__NOT_OBLIGATED = 0x17dc; // 6108
+/** PackHidden: The pack composition is not revealed yet */
+export const DEADROLL_SESSION_ERROR__PACK_HIDDEN = 0x17dd; // 6109
+/** PackNotToReveal: This pack is already revealed, or not the one to reveal now */
+export const DEADROLL_SESSION_ERROR__PACK_NOT_TO_REVEAL = 0x17de; // 6110
+/** ThreatMismatch: The revealed pack does not give its declared threat */
+export const DEADROLL_SESSION_ERROR__THREAT_MISMATCH = 0x17df; // 6111
+/** TooManySecrets: More secrets of this type than the map declared */
+export const DEADROLL_SESSION_ERROR__TOO_MANY_SECRETS = 0x17e0; // 6112
+/** SecretRejected: The revealed contents break a map rule */
+export const DEADROLL_SESSION_ERROR__SECRET_REJECTED = 0x17e1; // 6113
+/** AuditIncomplete: The final audit is not done: every declared secret and pack must be revealed */
+export const DEADROLL_SESSION_ERROR__AUDIT_INCOMPLETE = 0x17e2; // 6114
+/** TooManyObligations: Too many cells to reveal at once */
+export const DEADROLL_SESSION_ERROR__TOO_MANY_OBLIGATIONS = 0x17e3; // 6115
+/** NotAdjacent: Only a cell next to the character can be examined */
+export const DEADROLL_SESSION_ERROR__NOT_ADJACENT = 0x17e4; // 6116
 
 export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__ACTOR_MISMATCH
   | typeof DEADROLL_SESSION_ERROR__ALLY_ACCOUNT_MISSING
   | typeof DEADROLL_SESSION_ERROR__ALREADY_ACTED
   | typeof DEADROLL_SESSION_ERROR__ALREADY_CLAIMED
+  | typeof DEADROLL_SESSION_ERROR__ALREADY_REVEALED
   | typeof DEADROLL_SESSION_ERROR__ALREADY_SETTLED
   | typeof DEADROLL_SESSION_ERROR__ARENA_NOT_WON
   | typeof DEADROLL_SESSION_ERROR__ARENA_TRANSITION
+  | typeof DEADROLL_SESSION_ERROR__AUDIT_INCOMPLETE
+  | typeof DEADROLL_SESSION_ERROR__BAD_PROOF
   | typeof DEADROLL_SESSION_ERROR__CACHE_NOT_CLAIMED
   | typeof DEADROLL_SESSION_ERROR__CELL_BLOCKED
   | typeof DEADROLL_SESSION_ERROR__CELL_OCCUPIED
@@ -275,11 +304,13 @@ export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__LINE_BLOCKED
   | typeof DEADROLL_SESSION_ERROR__MAP_NOT_FINALIZED
   | typeof DEADROLL_SESSION_ERROR__MAP_WITHOUT_ARENAS
+  | typeof DEADROLL_SESSION_ERROR__MAP_WITHOUT_SECRETS
   | typeof DEADROLL_SESSION_ERROR__MONSTER_NEAR_CHEST
   | typeof DEADROLL_SESSION_ERROR__MONSTER_SKILL_MISSING
   | typeof DEADROLL_SESSION_ERROR__NO_PLAYERS
   | typeof DEADROLL_SESSION_ERROR__NO_ROLL_PENDING
   | typeof DEADROLL_SESSION_ERROR__NOT_ACTIVE
+  | typeof DEADROLL_SESSION_ERROR__NOT_ADJACENT
   | typeof DEADROLL_SESSION_ERROR__NOT_ALL_READY
   | typeof DEADROLL_SESSION_ERROR__NOT_CACHE_OWNER
   | typeof DEADROLL_SESSION_ERROR__NOT_CHARACTER_OWNER
@@ -291,6 +322,7 @@ export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__NOT_IN_ARENA
   | typeof DEADROLL_SESSION_ERROR__NOT_IN_LOBBY
   | typeof DEADROLL_SESSION_ERROR__NOT_LOCKED_HERE
+  | typeof DEADROLL_SESSION_ERROR__NOT_OBLIGATED
   | typeof DEADROLL_SESSION_ERROR__NOT_PLAYER
   | typeof DEADROLL_SESSION_ERROR__NOT_REWARD_OWNER
   | typeof DEADROLL_SESSION_ERROR__NOT_SAME_KIN
@@ -298,6 +330,8 @@ export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__OUT_OF_BOUNDS
   | typeof DEADROLL_SESSION_ERROR__OUT_OF_RANGE
   | typeof DEADROLL_SESSION_ERROR__OVERFLOW
+  | typeof DEADROLL_SESSION_ERROR__PACK_HIDDEN
+  | typeof DEADROLL_SESSION_ERROR__PACK_NOT_TO_REVEAL
   | typeof DEADROLL_SESSION_ERROR__PARTICIPATION_MISSING
   | typeof DEADROLL_SESSION_ERROR__PARTY_ENDED
   | typeof DEADROLL_SESSION_ERROR__PARTY_FULL
@@ -307,8 +341,10 @@ export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__REACTIVE_ACCOUNTS_MISSING
   | typeof DEADROLL_SESSION_ERROR__READY_UNCHANGED
   | typeof DEADROLL_SESSION_ERROR__RETREAT_LIMIT
+  | typeof DEADROLL_SESSION_ERROR__REVEALS_PENDING
   | typeof DEADROLL_SESSION_ERROR__ROLL_PENDING
   | typeof DEADROLL_SESSION_ERROR__ROOTED
+  | typeof DEADROLL_SESSION_ERROR__SECRET_REJECTED
   | typeof DEADROLL_SESSION_ERROR__SESSION_KEY_AT_READY
   | typeof DEADROLL_SESSION_ERROR__SESSION_TOKEN_EXPIRED
   | typeof DEADROLL_SESSION_ERROR__SESSION_TOKEN_MISSING
@@ -318,9 +354,12 @@ export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__SILENCED
   | typeof DEADROLL_SESSION_ERROR__SKILL_NOT_SELECTED
   | typeof DEADROLL_SESSION_ERROR__SKILL_ON_COOLDOWN
+  | typeof DEADROLL_SESSION_ERROR__THREAT_MISMATCH
   | typeof DEADROLL_SESSION_ERROR__TOO_MANY_LOOT_TABLES
   | typeof DEADROLL_SESSION_ERROR__TOO_MANY_MONSTER_SKILLS
+  | typeof DEADROLL_SESSION_ERROR__TOO_MANY_OBLIGATIONS
   | typeof DEADROLL_SESSION_ERROR__TOO_MANY_PENDING_PARTIES
+  | typeof DEADROLL_SESSION_ERROR__TOO_MANY_SECRETS
   | typeof DEADROLL_SESSION_ERROR__TOO_MANY_TEMPLATES
   | typeof DEADROLL_SESSION_ERROR__TURN_ALREADY_STARTED
   | typeof DEADROLL_SESSION_ERROR__TURN_NOT_STARTED
@@ -337,9 +376,12 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__ALLY_ACCOUNT_MISSING]: `A heal or buff on another ally needs that ally's participation`,
     [DEADROLL_SESSION_ERROR__ALREADY_ACTED]: `Only one attack or active skill per turn`,
     [DEADROLL_SESSION_ERROR__ALREADY_CLAIMED]: `Escrow is already claimed`,
+    [DEADROLL_SESSION_ERROR__ALREADY_REVEALED]: `This cell is already revealed`,
     [DEADROLL_SESSION_ERROR__ALREADY_SETTLED]: `Rewards of this character are already settled`,
     [DEADROLL_SESSION_ERROR__ARENA_NOT_WON]: `The arena's pack is not dead yet`,
     [DEADROLL_SESSION_ERROR__ARENA_TRANSITION]: `The party is between the map and an arena: enter_arena or leave_arena comes first`,
+    [DEADROLL_SESSION_ERROR__AUDIT_INCOMPLETE]: `The final audit is not done: every declared secret and pack must be revealed`,
+    [DEADROLL_SESSION_ERROR__BAD_PROOF]: `The proof does not lead to the map secrets root`,
     [DEADROLL_SESSION_ERROR__CACHE_NOT_CLAIMED]: `This cache is not settled yet`,
     [DEADROLL_SESSION_ERROR__CELL_BLOCKED]: `Cell cannot be entered`,
     [DEADROLL_SESSION_ERROR__CELL_OCCUPIED]: `Cell is occupied`,
@@ -384,11 +426,13 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__LINE_BLOCKED]: `A wall cuts the line before the target`,
     [DEADROLL_SESSION_ERROR__MAP_NOT_FINALIZED]: `Map is not finalized`,
     [DEADROLL_SESSION_ERROR__MAP_WITHOUT_ARENAS]: `The map has no arenas (finalized before the arena update): it cannot open a party`,
+    [DEADROLL_SESSION_ERROR__MAP_WITHOUT_SECRETS]: `The map was finalized before the secrets update`,
     [DEADROLL_SESSION_ERROR__MONSTER_NEAR_CHEST]: `A living monster is too close to the chest or to you`,
     [DEADROLL_SESSION_ERROR__MONSTER_SKILL_MISSING]: `This monster has no active skill in that slot`,
     [DEADROLL_SESSION_ERROR__NO_PLAYERS]: `Party has no players`,
     [DEADROLL_SESSION_ERROR__NO_ROLL_PENDING]: `No dice roll is pending`,
     [DEADROLL_SESSION_ERROR__NOT_ACTIVE]: `Session is not active`,
+    [DEADROLL_SESSION_ERROR__NOT_ADJACENT]: `Only a cell next to the character can be examined`,
     [DEADROLL_SESSION_ERROR__NOT_ALL_READY]: `Not every player is ready`,
     [DEADROLL_SESSION_ERROR__NOT_CACHE_OWNER]: `Only the character's owner, with the main wallet, closes its cache`,
     [DEADROLL_SESSION_ERROR__NOT_CHARACTER_OWNER]: `Character does not belong to the signer`,
@@ -400,6 +444,7 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__NOT_IN_ARENA]: `Retreat and Escape are decided in an arena`,
     [DEADROLL_SESSION_ERROR__NOT_IN_LOBBY]: `Session is not in the lobby`,
     [DEADROLL_SESSION_ERROR__NOT_LOCKED_HERE]: `The character is not locked in this party`,
+    [DEADROLL_SESSION_ERROR__NOT_OBLIGATED]: `Nothing obliges the DM to reveal this cell now`,
     [DEADROLL_SESSION_ERROR__NOT_PLAYER]: `Only the player who joined with this character can do this`,
     [DEADROLL_SESSION_ERROR__NOT_REWARD_OWNER]: `Only the character's owner or their session key can claim its rewards`,
     [DEADROLL_SESSION_ERROR__NOT_SAME_KIN]: `A kin-only monster skill reaches allies of its own kin only`,
@@ -407,6 +452,8 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__OUT_OF_BOUNDS]: `Step leaves the map`,
     [DEADROLL_SESSION_ERROR__OUT_OF_RANGE]: `Target is out of range`,
     [DEADROLL_SESSION_ERROR__OVERFLOW]: `Arithmetic overflow`,
+    [DEADROLL_SESSION_ERROR__PACK_HIDDEN]: `The pack composition is not revealed yet`,
+    [DEADROLL_SESSION_ERROR__PACK_NOT_TO_REVEAL]: `This pack is already revealed, or not the one to reveal now`,
     [DEADROLL_SESSION_ERROR__PARTICIPATION_MISSING]: `Participation account is required on a player's turn`,
     [DEADROLL_SESSION_ERROR__PARTY_ENDED]: `The party is over: its session key can no longer be set`,
     [DEADROLL_SESSION_ERROR__PARTY_FULL]: `Party is full`,
@@ -416,8 +463,10 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__REACTIVE_ACCOUNTS_MISSING]: `A reactive skill triggers here: the VRF accounts and the payer are required`,
     [DEADROLL_SESSION_ERROR__READY_UNCHANGED]: `Already in that ready state`,
     [DEADROLL_SESSION_ERROR__RETREAT_LIMIT]: `The party used all its retreats`,
+    [DEADROLL_SESSION_ERROR__REVEALS_PENDING]: `The DM must reveal the cells a step or a look uncovered first`,
     [DEADROLL_SESSION_ERROR__ROLL_PENDING]: `Waiting for a dice roll`,
     [DEADROLL_SESSION_ERROR__ROOTED]: `The unit is rooted and cannot move`,
+    [DEADROLL_SESSION_ERROR__SECRET_REJECTED]: `The revealed contents break a map rule`,
     [DEADROLL_SESSION_ERROR__SESSION_KEY_AT_READY]: `Joining binds no session key: the key and its prepayment come with Ready`,
     [DEADROLL_SESSION_ERROR__SESSION_TOKEN_EXPIRED]: `Session token has expired`,
     [DEADROLL_SESSION_ERROR__SESSION_TOKEN_MISSING]: `Session key used without a session token`,
@@ -427,9 +476,12 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__SILENCED]: `The unit is silenced: it can only use its basic attack`,
     [DEADROLL_SESSION_ERROR__SKILL_NOT_SELECTED]: `This skill was not taken onto the map (set_ready selection)`,
     [DEADROLL_SESSION_ERROR__SKILL_ON_COOLDOWN]: `Skill is on cooldown`,
+    [DEADROLL_SESSION_ERROR__THREAT_MISMATCH]: `The revealed pack does not give its declared threat`,
     [DEADROLL_SESSION_ERROR__TOO_MANY_LOOT_TABLES]: `Too many different reward tables for one party`,
     [DEADROLL_SESSION_ERROR__TOO_MANY_MONSTER_SKILLS]: `Too many different monster skills for one party`,
+    [DEADROLL_SESSION_ERROR__TOO_MANY_OBLIGATIONS]: `Too many cells to reveal at once`,
     [DEADROLL_SESSION_ERROR__TOO_MANY_PENDING_PARTIES]: `Too many parties wait for this character's rewards: claim one, or wait for its deadline`,
+    [DEADROLL_SESSION_ERROR__TOO_MANY_SECRETS]: `More secrets of this type than the map declared`,
     [DEADROLL_SESSION_ERROR__TOO_MANY_TEMPLATES]: `Too many distinct monster templates for one party`,
     [DEADROLL_SESSION_ERROR__TURN_ALREADY_STARTED]: `This turn has already started`,
     [DEADROLL_SESSION_ERROR__TURN_NOT_STARTED]: `The turn has not started: call start_turn first`,

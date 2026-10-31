@@ -47,6 +47,10 @@
     "./city": {
       "types": "./dist/city.d.ts",
       "default": "./dist/city.js"
+    },
+    "./secrets": {
+      "types": "./dist/secrets.d.ts",
+      "default": "./dist/secrets.js"
     }
   },
   "files": [

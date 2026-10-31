@@ -938,6 +938,114 @@
       "args": []
     },
     {
+      "name": "examine",
+      "docs": [
+        "Patch C: a player examines the cell next to them on their turn (AP); the DM must reveal it."
+      ],
+      "discriminator": [
+        47,
+        32,
+        144,
+        85,
+        130,
+        172,
+        176,
+        211
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "docs": [
+            "Main wallet or the participation's session key."
+          ],
+          "signer": true
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.core.map",
+                "account": "GameSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "participation",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  114,
+                  116,
+                  105,
+                  99,
+                  105,
+                  112,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              },
+              {
+                "kind": "account",
+                "path": "participation.core.character",
+                "account": "Participation"
+              }
+            ]
+          }
+        },
+        {
+          "name": "monsters",
+          "docs": [
+            "Read-only, never Borsh-decoded: owner and discriminator checked here, session in `Monsters`."
+          ]
+        },
+        {
+          "name": "session_token",
+          "docs": [
+            "MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs."
+          ],
+          "optional": true
+        }
+      ],
+      "args": [
+        {
+          "name": "x",
+          "type": "u8"
+        },
+        {
+          "name": "y",
+          "type": "u8"
+        }
+      ]
+    },
+    {
       "name": "flee",
       "docs": [
         "Player proposes or confirms \"Escape\" in an arena on their turn; when every living player",
@@ -2389,6 +2497,265 @@
       "args": []
     },
     {
+      "name": "reveal_cell",
+      "docs": [
+        "Patch C: the DM (main wallet or session key) reveals a leaf of the map's secrets with its",
+        "Merkle proof: an obligation during the party (its trap, ambush, stash or door takes",
+        "effect), any leaf in the final audit."
+      ],
+      "discriminator": [
+        170,
+        179,
+        0,
+        236,
+        214,
+        31,
+        40,
+        164
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "docs": [
+            "The DM's main wallet or the DM's session key bound to this party."
+          ],
+          "signer": true
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.core.map",
+                "account": "GameSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "layout"
+        },
+        {
+          "name": "participation",
+          "docs": [
+            "The player whose step uncovered the cell (`GameSession.obliged_by`): a trap hits them.",
+            "Needed only for a trap during the party."
+          ],
+          "writable": true,
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  114,
+                  116,
+                  105,
+                  99,
+                  105,
+                  112,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              },
+              {
+                "kind": "account",
+                "path": "participation.core.character",
+                "account": "Participation"
+              }
+            ]
+          }
+        },
+        {
+          "name": "monsters",
+          "docs": [
+            "hidden stash's reward table is copied there."
+          ],
+          "writable": true
+        },
+        {
+          "name": "rewards",
+          "address": "FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK"
+        },
+        {
+          "name": "session_token",
+          "optional": true
+        }
+      ],
+      "args": [
+        {
+          "name": "leaf",
+          "type": "u16"
+        },
+        {
+          "name": "secret",
+          "type": {
+            "defined": {
+              "name": "CellSecret"
+            }
+          }
+        },
+        {
+          "name": "salt",
+          "type": {
+            "array": [
+              "u8",
+              16
+            ]
+          }
+        },
+        {
+          "name": "proof",
+          "type": {
+            "vec": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "reveal_pack",
+      "docs": [
+        "Patch C: the DM (main wallet or session key) reveals a pack's composition with its Merkle",
+        "proof: the engaged pack during the party, any pack left in the final audit; its threat is",
+        "checked."
+      ],
+      "discriminator": [
+        224,
+        204,
+        1,
+        112,
+        66,
+        170,
+        24,
+        11
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "docs": [
+            "The DM's main wallet or the DM's session key bound to this party."
+          ],
+          "signer": true
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.core.map",
+                "account": "GameSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "layout",
+          "docs": [
+            "monster and its arena."
+          ]
+        },
+        {
+          "name": "monsters",
+          "docs": [
+            "pack's templates, skills and reward tables are copied there."
+          ],
+          "writable": true
+        },
+        {
+          "name": "bestiary",
+          "address": "3uJyWiz7NeVekP4w1iZkKxKnJ5pMbxC6ciz7kxN3MZtM"
+        },
+        {
+          "name": "monster_skills",
+          "address": "NQNEuKDUZhACnTJ9sD3dW49BoiPtJPatp6bpY61r81p"
+        },
+        {
+          "name": "rewards",
+          "address": "FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK"
+        },
+        {
+          "name": "session_token",
+          "optional": true
+        }
+      ],
+      "args": [
+        {
+          "name": "pack",
+          "type": "u8"
+        },
+        {
+          "name": "roster",
+          "type": {
+            "defined": {
+              "name": "PackRoster"
+            }
+          }
+        },
+        {
+          "name": "salt",
+          "type": {
+            "array": [
+              "u8",
+              16
+            ]
+          }
+        },
+        {
+          "name": "proof",
+          "type": {
+            "vec": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "set_ready",
       "docs": [
         "Player marks (or unmarks) ready in the lobby, main wallet only. Ready takes `selection`",
@@ -3284,6 +3651,19 @@
       ]
     },
     {
+      "name": "AmbushSprung",
+      "discriminator": [
+        144,
+        85,
+        181,
+        83,
+        87,
+        230,
+        150,
+        5
+      ]
+    },
+    {
       "name": "ArenaEntered",
       "discriminator": [
         97,
@@ -3385,6 +3765,32 @@
         237,
         180,
         116
+      ]
+    },
+    {
+      "name": "CellExamined",
+      "discriminator": [
+        157,
+        207,
+        252,
+        8,
+        71,
+        28,
+        148,
+        9
+      ]
+    },
+    {
+      "name": "CellRevealed",
+      "discriminator": [
+        203,
+        206,
+        218,
+        96,
+        88,
+        70,
+        243,
+        232
       ]
     },
     {
@@ -3609,6 +4015,19 @@
       ]
     },
     {
+      "name": "PackRevealed",
+      "discriminator": [
+        152,
+        85,
+        14,
+        60,
+        105,
+        201,
+        31,
+        169
+      ]
+    },
+    {
       "name": "PartyLeft",
       "discriminator": [
         34,
@@ -3700,6 +4119,19 @@
       ]
     },
     {
+      "name": "RevealsOwed",
+      "discriminator": [
+        78,
+        141,
+        220,
+        14,
+        203,
+        151,
+        114,
+        17
+      ]
+    },
+    {
       "name": "RewardsRolled",
       "discriminator": [
         160,
@@ -3762,6 +4194,19 @@
         226,
         206,
         25
+      ]
+    },
+    {
+      "name": "TrapTriggered",
+      "discriminator": [
+        254,
+        10,
+        186,
+        118,
+        67,
+        114,
+        31,
+        191
       ]
     },
     {
@@ -4324,6 +4769,71 @@
       "code": 6103,
       "name": "InvalidExit",
       "msg": "No Retreat or Escape vote has passed"
+    },
+    {
+      "code": 6104,
+      "name": "MapWithoutSecrets",
+      "msg": "The map was finalized before the secrets update"
+    },
+    {
+      "code": 6105,
+      "name": "RevealsPending",
+      "msg": "The DM must reveal the cells a step or a look uncovered first"
+    },
+    {
+      "code": 6106,
+      "name": "BadProof",
+      "msg": "The proof does not lead to the map secrets root"
+    },
+    {
+      "code": 6107,
+      "name": "AlreadyRevealed",
+      "msg": "This cell is already revealed"
+    },
+    {
+      "code": 6108,
+      "name": "NotObligated",
+      "msg": "Nothing obliges the DM to reveal this cell now"
+    },
+    {
+      "code": 6109,
+      "name": "PackHidden",
+      "msg": "The pack composition is not revealed yet"
+    },
+    {
+      "code": 6110,
+      "name": "PackNotToReveal",
+      "msg": "This pack is already revealed, or not the one to reveal now"
+    },
+    {
+      "code": 6111,
+      "name": "ThreatMismatch",
+      "msg": "The revealed pack does not give its declared threat"
+    },
+    {
+      "code": 6112,
+      "name": "TooManySecrets",
+      "msg": "More secrets of this type than the map declared"
+    },
+    {
+      "code": 6113,
+      "name": "SecretRejected",
+      "msg": "The revealed contents break a map rule"
+    },
+    {
+      "code": 6114,
+      "name": "AuditIncomplete",
+      "msg": "The final audit is not done: every declared secret and pack must be revealed"
+    },
+    {
+      "code": 6115,
+      "name": "TooManyObligations",
+      "msg": "Too many cells to reveal at once"
+    },
+    {
+      "code": 6116,
+      "name": "NotAdjacent",
+      "msg": "Only a cell next to the character can be examined"
     }
   ],
   "types": [
@@ -4436,6 +4946,29 @@
             "docs": [
               "Turn-order slot of the unit that applied it."
             ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AmbushSprung",
+      "docs": [
+        "Patch C: an ambush trap took the party toward pack `pack`; the monsters move first."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "pack",
+            "type": "u8"
+          },
+          {
+            "name": "slot",
             "type": "u8"
           }
         ]
@@ -5139,6 +5672,110 @@
       }
     },
     {
+      "name": "CellExamined",
+      "docs": [
+        "Patch C: player `slot` examined a cell next to them (`examine`)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "slot",
+            "type": "u8"
+          },
+          {
+            "name": "x",
+            "type": "u8"
+          },
+          {
+            "name": "y",
+            "type": "u8"
+          },
+          {
+            "name": "action_points",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CellRevealed",
+      "docs": [
+        "Patch C: the DM revealed leaf `leaf` and its contents (`deadroll_types::SecretKind` as `kind`).",
+        "`audit`: in the final audit, without effects."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "leaf",
+            "type": "u16"
+          },
+          {
+            "name": "kind",
+            "type": "u8"
+          },
+          {
+            "name": "a",
+            "type": "u8"
+          },
+          {
+            "name": "b",
+            "type": "u8"
+          },
+          {
+            "name": "c",
+            "type": "u8"
+          },
+          {
+            "name": "audit",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CellSecret",
+      "docs": [
+        "What one cell hides: the contents of its leaf. `a`, `b`, `c` by kind: a trap's damage and",
+        "detection difficulty; an ambush's pack number; a hidden stash's reward table id; nothing",
+        "for a secret door. `kind == None`: the cell hides nothing (every byte 0)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "kind",
+            "type": {
+              "defined": {
+                "name": "SecretKind"
+              }
+            }
+          },
+          {
+            "name": "a",
+            "type": "u8"
+          },
+          {
+            "name": "b",
+            "type": "u8"
+          },
+          {
+            "name": "c",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
       "name": "ChestOpenRequested",
       "docs": [
         "Patch 11: a player opens a visible chest; the roll is pending."
@@ -5693,6 +6330,29 @@
           },
           {
             "name": "Projectile"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FoundSecret",
+      "docs": [
+        "A secret the party found (or the audit revealed): its leaf and contents."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "leaf",
+            "type": "u16"
+          },
+          {
+            "name": "secret",
+            "type": {
+              "defined": {
+                "name": "CellSecret"
+              }
+            }
           }
         ]
       }
@@ -6278,9 +6938,158 @@
           {
             "name": "dead_spawns",
             "docs": [
-              "Bit per layout spawn killed in an arena the party retreated from: it stays dead."
+              "Bit per layout spawn killed in an arena the party retreated from: it stays dead.",
+              "Patch C: per revealed spawn (`spawns`)."
             ],
             "type": "u32"
+          },
+          {
+            "name": "secrets_root",
+            "docs": [
+              "The map's `secrets_root`, its leaf count (`deadroll_mapcheck::secrets::Leaves`) and the",
+              "public part: each pack's threat, the declared counts (copied at `open_session`)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "leaf_count",
+            "type": "u16"
+          },
+          {
+            "name": "declared",
+            "type": {
+              "array": [
+                "u8",
+                4
+              ]
+            }
+          },
+          {
+            "name": "threat",
+            "type": {
+              "array": [
+                "u8",
+                8
+              ]
+            }
+          },
+          {
+            "name": "revealed",
+            "docs": [
+              "Bit per leaf the DM revealed."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                273
+              ]
+            }
+          },
+          {
+            "name": "found_counts",
+            "docs": [
+              "Secrets of each type revealed (`SecretKind::counted`), never above `declared`."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                4
+              ]
+            }
+          },
+          {
+            "name": "found",
+            "docs": [
+              "The secrets revealed, in order (`found_count` used): what the party sees."
+            ],
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "FoundSecret"
+                  }
+                },
+                16
+              ]
+            }
+          },
+          {
+            "name": "found_count",
+            "type": "u8"
+          },
+          {
+            "name": "packs_revealed",
+            "docs": [
+              "Bit per pack number whose composition the DM revealed."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "obligations",
+            "docs": [
+              "The DM's obligations (MAP 8.5): leaves to reveal before any other action",
+              "(`obligation_count` used), and the player whose step or look made them."
+            ],
+            "type": {
+              "array": [
+                "u16",
+                16
+              ]
+            }
+          },
+          {
+            "name": "obligation_count",
+            "type": "u8"
+          },
+          {
+            "name": "obliged_by",
+            "type": "u8"
+          },
+          {
+            "name": "spawns",
+            "docs": [
+              "The revealed packs' monsters, pack by pack in reveal order (`spawn_count` used): the",
+              "spawns `enter_arena` loads and `dead_spawns` counts."
+            ],
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "Spawn"
+                  }
+                },
+                24
+              ]
+            }
+          },
+          {
+            "name": "spawn_count",
+            "type": "u8"
+          },
+          {
+            "name": "roster_totals",
+            "docs": [
+              "The map's totals over the revealed packs (`deadroll_mapcheck::roster::RosterTotals`):",
+              "monsters, elites, bosses, packs."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                4
+              ]
+            }
+          },
+          {
+            "name": "visible_chests",
+            "docs": [
+              "The chests of the map; the hidden stashes found follow them in `chests`."
+            ],
+            "type": "u8"
           }
         ]
       }
@@ -8194,6 +9003,66 @@
       }
     },
     {
+      "name": "PackRevealed",
+      "docs": [
+        "Patch C: the DM revealed the composition of pack `pack` (`count` monsters, its threat checked)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "pack",
+            "type": "u8"
+          },
+          {
+            "name": "count",
+            "type": "u8"
+          },
+          {
+            "name": "threat",
+            "type": "u8"
+          },
+          {
+            "name": "audit",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PackRoster",
+      "docs": [
+        "A pack's composition, the contents of its leaf: `spawns[..count]`, the monster shown on the",
+        "map first (equal to its public spawn). The unused entries are all zero."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "count",
+            "type": "u8"
+          },
+          {
+            "name": "spawns",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "Spawn"
+                  }
+                },
+                8
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
       "name": "PacketResultData",
       "docs": [
         "`deadroll_combat::PacketResult`. Damage values are scaled x10_000."
@@ -9309,6 +10178,30 @@
       }
     },
     {
+      "name": "RevealsOwed",
+      "docs": [
+        "Patch C: steps or a look uncovered `count` cells the DM must reveal before the next action",
+        "(docs/MAP_DESCRIPTION.md 8.5); `slot` is the player who uncovered them."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "slot",
+            "type": "u8"
+          },
+          {
+            "name": "count",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
       "name": "RewardCache",
       "docs": [
         "`[\"cache\", character]` (patch 11): a character's temporary caches once its parties end, until",
@@ -9486,6 +10379,36 @@
               "Bit per player slot whose cache was full: what did not fit is lost."
             ],
             "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SecretKind",
+      "docs": [
+        "What a cell hides (`CellSecret.kind`). `Ambush` is the trap that starts a hidden pack's",
+        "fight; `Door` turns a wall into a door once found."
+      ],
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "None"
+          },
+          {
+            "name": "Trap"
+          },
+          {
+            "name": "Ambush"
+          },
+          {
+            "name": "Stash"
+          },
+          {
+            "name": "Door"
           }
         ]
       }
@@ -9837,6 +10760,49 @@
       }
     },
     {
+      "name": "Spawn",
+      "docs": [
+        "A monster spawn point in a map layout."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bestiary_id",
+            "type": "u8"
+          },
+          {
+            "name": "x",
+            "type": "u8"
+          },
+          {
+            "name": "y",
+            "type": "u8"
+          },
+          {
+            "name": "level",
+            "type": "u8"
+          },
+          {
+            "name": "skills",
+            "type": "u16"
+          },
+          {
+            "name": "flags",
+            "type": "u8"
+          },
+          {
+            "name": "aspects",
+            "type": "u8"
+          },
+          {
+            "name": "pack",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
       "name": "SplashData",
       "docs": [
         "`deadroll_combat::Splash`."
@@ -10166,6 +11132,33 @@
           {
             "name": "success",
             "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TrapTriggered",
+      "docs": [
+        "Patch C: a revealed trap hit player `slot` for `damage` (no dice, no resistances)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "slot",
+            "type": "u8"
+          },
+          {
+            "name": "damage",
+            "type": "u8"
+          },
+          {
+            "name": "hp",
+            "type": "u32"
           }
         ]
       }

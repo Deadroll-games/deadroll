@@ -12,4 +12,5 @@ export * from "./setStatus.js";
 export * from "./writeArena.js";
 export * from "./writeLayout.js";
 export * from "./writePoints.js";
+export * from "./writeSecrets.js";
 export * from "./writeSpawns.js";
