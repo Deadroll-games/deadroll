@@ -60,6 +60,8 @@ pub fn handler<'info>(ctx: Context<'info, SettleParty<'info>>) -> Result<()> {
         return err!(SessionError::NotDm);
     }
     settlement::require_ended(session)?;
+    // Patch C: the escrow is paid only after the final audit (docs/PARTY_AND_TURNS.md 3.2).
+    require!(session.audit_done(), SessionError::AuditIncomplete);
     let escrow = &mut accounts.escrow;
     require!(!escrow.claimed, SessionError::AlreadyClaimed);
     require!(

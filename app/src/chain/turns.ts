@@ -58,7 +58,28 @@ export function arenaStepFor(p: Party, me: Address | null): "enter" | "leave" | 
   const inParty = s.core.dm === me || p.players.some((x) => x.part.player === me);
   if (!inParty) return null;
   const mode = arenaMode(s);
-  return mode === "engaged" ? "enter" : mode === "won" || mode === "retreated" ? "leave" : null;
+  // Patch C: into an arena once the DM revealed the pack and every cell the step uncovered.
+  if (mode === "engaged") return s.obligationCount === 0 && s.packsRevealed & (1 << s.arenaPack) ? "enter" : null;
+  return mode === "won" || mode === "retreated" ? "leave" : null;
+}
+
+/** Patch C: the next reveal the DM's client sends by itself (docs/MAP_DESCRIPTION.md 8.5): a cell
+ * a step or a look uncovered (`by`: the player's slot, a trap hits them), then the engaged pack. */
+export type RevealStep = { kind: "cell"; leaf: number; by: number } | { kind: "pack"; pack: number };
+export function revealStepFor(p: Party, me: Address | null): RevealStep | null {
+  const s = p.session;
+  if (!me || s.core.dm !== me || status(s) !== "active" || s.core.pendingVrf) return null;
+  if (s.obligationCount > 0) return { kind: "cell", leaf: s.obligations[0]!, by: s.obligedBy };
+  if (arenaMode(s) === "engaged" && !(s.packsRevealed & (1 << s.arenaPack))) return { kind: "pack", pack: s.arenaPack };
+  return null;
+}
+
+/** Patch C: the DM's final audit (docs/PARTY_AND_TURNS.md 3.2): the secret leaves and the packs not
+ * revealed yet, after the party ended. `leaves`: every secret cell of the DM's copy; `packs`: the
+ * used pack numbers. */
+export function auditLeft(s: GameSessionAcc, leaves: number[], packs: number[]): { cells: number[]; packs: number[] } {
+  const revealed = (leaf: number) => (s.revealed[leaf >> 3]! & (1 << (leaf & 7))) !== 0;
+  return { cells: leaves.filter((l) => !revealed(l)), packs: packs.filter((n) => !(s.packsRevealed & (1 << n))) };
 }
 
 /** Patch B: the Retreat or Escape proposal as the site shows it (docs/PARTY_AND_TURNS.md 7.5). */

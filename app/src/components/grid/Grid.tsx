@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { TILE_COUNT, Tile, cellIndex, cellKind, cellVariant, type Cell } from "../../chain/types";
 import { wallMask } from "../../chain/tiles";
 import { TILE_PX } from "../../raster/SpriteCanvas";
-import type { GridPoint, GridProps, GridUnit } from "./types";
+import type { GridPoint, GridProps, GridSecret, GridUnit } from "./types";
 import "./grid.css";
 
 const FLOOR = "#3b3043";
@@ -251,6 +251,51 @@ function drawMarker(ctx: CanvasRenderingContext2D, unit: GridUnit, cell: number)
   ctx.fillText(letter, cx, cy + 1);
 }
 
+/** Patch C: what a secret looks like, its frame color and letter. */
+const SECRET_LOOK: Record<GridSecret["kind"], { color: string; letter: string }> = {
+  trap: { color: "#e0523c", letter: "T" },
+  ambush: { color: "#c03ad8", letter: "A" },
+  stash: { color: "#e2b53a", letter: "$" },
+  door: { color: "#4fb3e0", letter: "D" },
+};
+
+/** Patch C: a found secret highlighted (a colored frame and letter); an unfound one (the DM's view) faint. */
+function drawSecret(ctx: CanvasRenderingContext2D, s: GridSecret, cell: number) {
+  const look = SECRET_LOOK[s.kind];
+  const x = s.x * cell;
+  const y = s.y * cell;
+  ctx.save();
+  ctx.globalAlpha = s.found ? 1 : 0.45;
+  ctx.fillStyle = look.color + (s.found ? "55" : "22");
+  ctx.fillRect(x, y, cell, cell);
+  paintOutline(ctx, x, y, cell, 1, Math.max(1, Math.floor(cell / 16)), look.color);
+  ctx.fillStyle = look.color;
+  ctx.font = `bold ${Math.max(9, Math.floor(cell * 0.3))}px "Inter", system-ui, sans-serif`;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  ctx.fillText(look.letter, x + 3, y + 2);
+  ctx.restore();
+}
+
+/** Patch C: a unit's badge (a pack's threat) at its top-right corner. */
+function drawBadge(ctx: CanvasRenderingContext2D, unit: GridUnit, cell: number) {
+  if (!unit.badge) return;
+  const size = Math.max(10, Math.floor(cell * 0.32));
+  const right = (unit.x + sideOf(unit)) * cell;
+  const top = unit.y * cell;
+  ctx.font = `bold ${size}px "Inter", system-ui, sans-serif`;
+  const w = Math.ceil(ctx.measureText(unit.badge).width) + 6;
+  ctx.fillStyle = "#1b1d24";
+  ctx.fillRect(right - w, top, w, size + 4);
+  ctx.strokeStyle = "#e0523c";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(right - w + 0.5, top + 0.5, w - 1, size + 3);
+  ctx.fillStyle = "#f2f2f2";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  ctx.fillText(unit.badge, right - w / 2, top + 2);
+}
+
 function drawUnit(
   ctx: CanvasRenderingContext2D,
   scratch: HTMLCanvasElement,
@@ -362,6 +407,11 @@ function drawGrid(ctx: CanvasRenderingContext2D, props: GridProps, cell: number)
     drawPoint(ctx, scratch, point, props.pointSprite?.(point.kind) ?? null, cell);
   }
 
+  // Patch C: the secrets the viewer may see, over the floor.
+  for (const s of props.secrets ?? []) {
+    if (inMap(s, width, height)) drawSecret(ctx, s, cell);
+  }
+
   // Chests: the sprite when there is one; otherwise a brown square while closed, only its outline
   // once opened.
   const inset = Math.max(2, Math.floor(cell / 5));
@@ -395,6 +445,7 @@ function drawGrid(ctx: CanvasRenderingContext2D, props: GridProps, cell: number)
     const sprite = props.unitSprite?.(unit) ?? null;
     drawUnit(ctx, scratch, unit, cell, sprite, unit.id === props.activeUnitId, unit.id === props.selectedUnitId);
   }
+  for (const unit of units) if (unit.alive) drawBadge(ctx, unit, cell);
 
   for (const spot of targets) {
     if (!inMap(spot, width, height)) continue;
@@ -417,6 +468,7 @@ export function Grid(props: GridProps) {
   const hoverKey = useRef<string | null>(null);
   const [hovered, setHovered] = useState<Cell | null>(null);
   const hoveredChest = hovered ? props.chests?.find((c) => c.x === hovered.x && c.y === hovered.y) : undefined;
+  const hoveredSecret = hovered ? props.secrets?.find((c) => c.x === hovered.x && c.y === hovered.y) : undefined;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -458,7 +510,7 @@ export function Grid(props: GridProps) {
       style={{ width: width * shownCell, height: height * shownCell }}
       role="img"
       aria-label={`Battle map, ${width} by ${height} cells`}
-      title={hoveredChest?.label}
+      title={hoveredChest?.label ?? hoveredSecret?.label}
       onClick={handleClick}
       onMouseMove={handleMove}
       onMouseLeave={handleLeave}

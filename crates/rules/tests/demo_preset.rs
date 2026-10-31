@@ -24,15 +24,26 @@
 //! Optional, for the builder templates: `"biome"` (`Biome`, 0 Caves when absent) and `"variants"`,
 //! one row of digits 0-7 per map row: the variant (bits 2-0) of each cell, 0 when absent. The
 //! variant only picks the picture, the rules ignore it.
+//!
+//! Patch C: `"secrets"`, the cells that hide something (docs/MAP_DESCRIPTION.md 8.1, 17.4):
+//! `{ "kind": "trap", "x": 9, "y": 9, "damage": 4, "difficulty": 10 }`, `{ "kind": "door", ... }`,
+//! `{ "kind": "stash", ..., "table": 0 }`, `{ "kind": "ambush", ..., "target": 2 }`; with
+//! `"pack": n` the cell is in pack `n`'s arena. The declared counts are the counts of the list. A
+//! pack with `"visible": 255` is an ambush pack. The whole design passes `check_design`.
 
 use std::path::PathBuf;
 
-use deadroll_mapcheck::{check_map, loot::MapLoot, tiles::cell_index};
+use deadroll_mapcheck::{
+    design::check_design,
+    loot::MapLoot,
+    secrets::{Board, Leaves},
+    tiles::cell_index,
+};
 use deadroll_rules::{loot::map_rules, registry::Registry, tiles::tile_rules, BalanceConfig};
 use deadroll_types::{
-    cell_byte, Biome, Cell, Facing, MapArenasData, MapLayoutDataV2, MapPoint, PackLayout,
-    PointKind, Pubkey, Spawn, TileKind, ARENA_SIDE_MAX, CHESTS_MAX, MAP_CELLS, POINTS_MAX,
-    SPAWNS_MAX,
+    cell_byte, Biome, Cell, CellSecret, Facing, FoundSecret, MapArenasData, MapLayoutDataV2,
+    MapPoint, PackLayout, PointKind, Pubkey, SecretKind, Spawn, TileKind, ARENA_SIDE_MAX,
+    CHESTS_MAX, MAP_CELLS, POINTS_MAX, SECRET_TYPES, SPAWNS_MAX,
 };
 use serde_json::Value;
 
@@ -210,6 +221,40 @@ fn load(path: &PathBuf) -> (u8, u8, u8, u8, MapLayoutDataV2, MapArenasData) {
     )
 }
 
+/// The secrets of a preset by leaf, and the declared counts (patch C).
+fn load_secrets(
+    json: &Value,
+    width: u8,
+    height: u8,
+    arenas: &MapArenasData,
+) -> (Vec<FoundSecret>, [u8; SECRET_TYPES]) {
+    let leaves = Leaves::new(width, height, &arenas.packs);
+    let mut declared = [0u8; SECRET_TYPES];
+    let mut out = Vec::new();
+    for s in json["secrets"].as_array().map_or(&[][..], |v| v.as_slice()) {
+        let cell = Cell {
+            x: u8_field(s, "x"),
+            y: u8_field(s, "y"),
+        };
+        let board = match s.get("pack") {
+            Some(_) => Board::Arena(u8_field(s, "pack"), cell),
+            None => Board::Map(cell),
+        };
+        let secret = match s["kind"].as_str().expect("secret kind") {
+            "trap" => CellSecret::trap(u8_field(s, "damage"), u8_field(s, "difficulty")),
+            "ambush" => CellSecret::ambush(u8_field(s, "target")),
+            "stash" => CellSecret::stash(u8_field(s, "table")),
+            "door" => CellSecret::door(),
+            other => panic!("unknown secret kind {other}"),
+        };
+        declared[secret.kind.counted().expect("a secret")] += 1;
+        let leaf = leaves.of(board).expect("secret inside its board");
+        out.push(FoundSecret { leaf, secret });
+    }
+    assert!(out.iter().all(|f| f.secret.kind != SecretKind::None));
+    (out, declared)
+}
+
 #[test]
 fn every_preset_passes_the_builder_rules() {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/registry/maps");
@@ -221,27 +266,30 @@ fn every_preset_passes_the_builder_rules() {
         let path = entry.unwrap().path();
         if path.extension().is_some_and(|e| e == "json") {
             let (width, height, tier, min_players, layout, arenas) = load(&path);
+            let json: Value =
+                serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            let (secrets, declared) = load_secrets(&json, width, height, &arenas);
             let loot = MapLoot {
                 min_players,
                 rules: map_rules(&cfg.loot, tier),
                 table_of: |id: u8| reg.reward_table(id).map(|t| t.rules()),
             };
-            assert_eq!(
-                check_map(
-                    width,
-                    height,
-                    tier,
-                    &layout,
-                    &arenas,
-                    cfg.arena.limits(),
-                    &tiles,
-                    |id| reg.spawn_rules(id, &cfg.monsters),
-                    &loot
-                ),
-                Ok(()),
-                "{}",
-                path.display()
+            let verdict = check_design(
+                width,
+                height,
+                tier,
+                &layout,
+                &arenas,
+                &declared,
+                &secrets,
+                cfg.arena.limits(),
+                &cfg.secrets.limits(tier).expect("tier"),
+                cfg.secrets.threat(),
+                &tiles,
+                |id| reg.spawn_rules(id, &cfg.monsters),
+                &loot,
             );
+            assert!(verdict.is_ok(), "{}: {:?}", path.display(), verdict.err());
             checked += 1;
         }
     }

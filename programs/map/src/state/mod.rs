@@ -10,8 +10,9 @@ pub use map_layout::*;
 /// Layout version written into every map account. 2: `Map.biome` appended (a version 1 map has
 /// no biome byte and reads as `Biome::Caves`).
 pub const ACCOUNT_VERSION: u8 = 2;
-/// Patch 13: `MapLayout.core.version` of the `MapLayoutDataV2` format.
-pub const LAYOUT_VERSION: u8 = 3;
+/// Patch 13: `MapLayout.core.version` of the `MapLayoutDataV2` format. Arena update: 3.
+/// Patch C: 4, the secrets after the arenas.
+pub const LAYOUT_VERSION: u8 = 4;
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -33,7 +34,9 @@ pub(crate) mod tests {
         );
         assert_eq!(
             MapLayout::INIT_SPACE,
-            MapLayoutDataV2::SIZE + deadroll_types::MapArenasData::SIZE
+            MapLayoutDataV2::SIZE
+                + deadroll_types::MapArenasData::SIZE
+                + deadroll_types::MapSecretsData::SIZE
         );
         // tier, then patch 11: min_players, chest_radius, settle_timeout_secs (u32), then biome.
         assert_eq!(Map::INIT_SPACE, MapData::SIZE + 1 + 1 + 1 + 4 + 1);

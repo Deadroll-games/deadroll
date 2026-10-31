@@ -225,4 +225,31 @@ pub enum SessionError {
     RetreatLimit,
     #[msg("No Retreat or Escape vote has passed")]
     InvalidExit,
+    // Patch C: secrets under the Merkle root (docs/MAP_DESCRIPTION.md 8, 17.5; PARTY_AND_TURNS.md 3.2).
+    #[msg("The map was finalized before the secrets update")]
+    MapWithoutSecrets,
+    #[msg("The DM must reveal the cells a step or a look uncovered first")]
+    RevealsPending,
+    #[msg("The proof does not lead to the map secrets root")]
+    BadProof,
+    #[msg("This cell is already revealed")]
+    AlreadyRevealed,
+    #[msg("Nothing obliges the DM to reveal this cell now")]
+    NotObligated,
+    #[msg("The pack composition is not revealed yet")]
+    PackHidden,
+    #[msg("This pack is already revealed, or not the one to reveal now")]
+    PackNotToReveal,
+    #[msg("The revealed pack does not give its declared threat")]
+    ThreatMismatch,
+    #[msg("More secrets of this type than the map declared")]
+    TooManySecrets,
+    #[msg("The revealed contents break a map rule")]
+    SecretRejected,
+    #[msg("The final audit is not done: every declared secret and pack must be revealed")]
+    AuditIncomplete,
+    #[msg("Too many cells to reveal at once")]
+    TooManyObligations,
+    #[msg("Only a cell next to the character can be examined")]
+    NotAdjacent,
 }

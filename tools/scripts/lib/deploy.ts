@@ -25,7 +25,7 @@ import {
   type KeyPairSigner,
 } from "@solana/kit";
 import { PROGRAM_CRATES, PROGRAMS as SDK_PROGRAMS, type ProgramName } from "@deadroll/sdk";
-import { MapStatus, findLayoutPda, findMapPda, getCreateMapInstruction, getFinalizeMapInstruction, getMapDecoder, getWriteLayoutInstruction, getWriteArenaInstruction, getWritePointsInstruction, getWriteSpawnsInstruction } from "@deadroll/sdk/map";
+import { MapStatus, findLayoutPda, findMapPda, getCreateMapInstruction, getFinalizeMapInstruction, getMapDecoder, getWriteLayoutInstruction, getWriteArenaInstruction, getWritePointsInstruction, getWriteSpawnsInstruction, getWriteSecretsInstruction } from "@deadroll/sdk/map";
 import {
   findTablePda,
   getGameConfigDataDecoder,
@@ -39,7 +39,7 @@ import {
   getSetUriBaseInstruction,
 } from "@deadroll/sdk/registry";
 import { GAME_CONFIG, blobFits, connect, pda as blobPda, parseHeader } from "./render-program.ts";
-import { MAP_STRIDE, layoutBytes, loadMapPreset, presetPoints, type MapPreset } from "./demo-map.ts";
+import { MAP_STRIDE, layoutBytes, loadMapPreset, presetPoints, presetSecrets, secretChunks, type MapPreset } from "./demo-map.ts";
 import { GATED_SYSCALLS, featureActive, syscallProblems, type GatedSyscall } from "./syscalls.ts";
 
 export const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
@@ -636,21 +636,25 @@ async function ensureDemoMap(conn: Rpc, opts: DeployOptions, wallet: KeyPairSign
   }
   if (MAP_STRIDE !== 32) throw new Error("unexpected stride");
   await send(conn, wallet, [getWriteLayoutInstruction({ ...edit, offset: 0, cells: layoutBytes(preset) })]);
-  await send(conn, wallet, [getWriteSpawnsInstruction({ ...edit, spawns: preset.spawns })]);
+  // Patch C: only the visible monsters in the open; the rosters and the secrets under the root,
+  // their encrypted copy under the deploy wallet's key (docs/MAP_DESCRIPTION.md 17.5).
+  const { design, commitment, blob } = await presetSecrets(preset, map, wallet);
+  await send(conn, wallet, [getWriteSpawnsInstruction({ ...edit, spawns: design.spawns })]);
   await send(conn, wallet, [getWritePointsInstruction({ ...edit, points: presetPoints(preset), bossTable: preset.bossTable })]);
   // Arena update: every pack's record and arena.
-  for (const p of preset.packs) {
+  for (const p of design.packs) {
     const record = { visible: p.visible, x: p.x, y: p.y, facing: p.facing, width: p.width, height: p.height };
     await send(conn, wallet, [getWriteArenaInstruction({ ...edit, pack: p.pack, record, cells: p.cells })]);
   }
-  // No secret cells in the demo preset; a fixed root keeps reruns identical. The builder rules
-  // read the registry bestiary, monster skills (roles, pools, slots), reward tables and tileset.
+  for (const c of secretChunks(blob, design)) await send(conn, wallet, [getWriteSecretsInstruction({ ...edit, ...c })]);
+  // The builder rules read the registry bestiary, monster skills (roles, pools, slots), reward
+  // tables and tileset.
   const table = async (seed: string) => (await findTablePda({ seed }))[0];
-  const secretsRoot = sha256(enc.encode(`deadroll:${preset.name}:no-secrets`));
+  const secretsRoot = commitment.root;
   await send(conn, wallet, [
     getFinalizeMapInstruction({ ...edit, bestiary: await table("bestiary"), monsterSkills: await table("monster_skills"), rewards: await table("rewards"), tileset: await table("tileset"), secretsRoot }),
   ]);
-  console.log(`write_layout, write_spawns, write_points, write_arena x${preset.packs.length}, finalize_map: ${map} Finalized`);
+  console.log(`write_layout, write_spawns, write_points, write_arena x${preset.packs.length}, write_secrets, finalize_map: ${map} Finalized`);
   return { map, layout, status: "Finalized", preset };
 }
 

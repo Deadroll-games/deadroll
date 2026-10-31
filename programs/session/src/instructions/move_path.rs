@@ -112,6 +112,7 @@ pub fn handler(ctx: Context<MovePath>, unit: u8, path: Vec<Cell>) -> Result<()> 
     require!(!session.core.pending_vrf, SessionError::RollPending);
     // Patch 6: a player down in the last callback is finalized first (`start_turn`).
     require!(session.pending_deaths == 0, SessionError::DeathsPending);
+    session.require_no_reveals()?;
     let session_key = session.key();
     let monsters = Monsters::load(&accounts.monsters, &session_key)?;
     if let Unit::Monster(index) = mover {
@@ -222,6 +223,9 @@ pub fn handler(ctx: Context<MovePath>, unit: u8, path: Vec<Cell>) -> Result<()> 
             p.core.y = walked.end.y;
             p.core.action_points = walked.ap_left;
             session.player_pos[slot as usize] = walked.end;
+            // Patch C: every cell the character stepped on that the DM has not revealed yet
+            // (docs/MAP_DESCRIPTION.md 8.4).
+            crate::secrets::oblige_cells(session, session_key, slot, &path[..walked.steps])?;
             // Moving is another action: it cancels a Retreat or Escape proposal
             // (docs/PARTY_AND_TURNS.md 7.5).
             crate::exit_vote::cancel(session, session_key, slot);

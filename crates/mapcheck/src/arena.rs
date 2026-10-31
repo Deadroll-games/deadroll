@@ -7,13 +7,17 @@
 //! from ([`entry_cells`]); the monsters stand where the DM put them.
 
 use deadroll_types::{
-    Cell, Facing, MapArenasData, MapLayoutDataV2, PackLayout, Spawn, ARENA_MONSTERS_MAX,
-    ARENA_SIDE_MAX, PACKS_MAX, PARTY_MAX,
+    Cell, Facing, MapArenasData, MapLayoutDataV2, PackLayout, PackRoster, Spawn,
+    ARENA_MONSTERS_MAX, ARENA_SIDE_MAX, NO_SPAWN, PACKS_MAX, PARTY_MAX,
 };
 
 use crate::{
+    check_spawn,
     footprint::Footprint,
+    limits::{tier_limits, BOSSES, BOSS_HELPERS},
     path::{reachable_over, Reach},
+    roster::{Role, RosterCount, SpawnRules},
+    secrets::{threat, ThreatWeights},
     tiles::{in_bounds, TileRules},
     MapCheckError,
 };
@@ -278,9 +282,55 @@ pub(crate) fn check_arenas(
 ) -> Result<(), MapCheckError> {
     use MapCheckError as E;
     let spawns = &layout.spawns[..(layout.spawn_count as usize).min(layout.spawns.len())];
-    let footprint = |s: &Spawn| Footprint::new(Cell { x: s.x, y: s.y }, size_of(s.bestiary_id));
+    check_spawn_cells(arenas, tiles, spawns, size_of)?;
 
-    // Every monster stands in its pack's arena, with every cell of its footprint (patch B).
+    let side_max = limits.side_max.min(ARENA_SIDE_MAX as u8);
+    let entrance = ends[0];
+    for (n, p) in arenas.packs.iter().enumerate() {
+        if !p.is_used() {
+            continue;
+        }
+        let pack = n as u8;
+        let side_ok = |side: u8| (limits.side_min..=side_max).contains(&side);
+        if !side_ok(p.width) || !side_ok(p.height) {
+            return Err(E::ArenaSizeOutOfRange);
+        }
+        for y in 0..p.height as usize {
+            for x in 0..p.width as usize {
+                if !tiles.knows(arena_byte(arenas, pack, x, y)) {
+                    return Err(E::ArenaInvalidTile);
+                }
+            }
+        }
+        // Patch C: an ambush pack shows no monster on the map; its trap starts the fight.
+        if p.visible != NO_SPAWN {
+            match spawns.get(p.visible as usize) {
+                Some(s) if s.pack == pack => {}
+                _ => return Err(E::VisibleNotInPack),
+            }
+            check_pack_cell(width, height, layout, arenas, p, n, tiles, ends, chests)?;
+            if chebyshev(entrance, p.cell()) <= 1 {
+                return Err(E::PackAtEntrance);
+            }
+            if !neighbors(p.cell(), width, height).any(|c| map_reach.contains(c)) {
+                return Err(E::PackUnreachable);
+            }
+        }
+        check_entries(arenas, pack, tiles, spawns, size_of)?;
+    }
+    Ok(())
+}
+
+/// Every monster stands in its pack's arena, with every cell of its footprint (patch B), apart
+/// from the others of its pack, at most `ARENA_MONSTERS_MAX` in a pack.
+fn check_spawn_cells(
+    arenas: &MapArenasData,
+    tiles: &TileRules,
+    spawns: &[Spawn],
+    size_of: &dyn Fn(u8) -> u8,
+) -> Result<(), MapCheckError> {
+    use MapCheckError as E;
+    let footprint = |s: &Spawn| Footprint::new(Cell { x: s.x, y: s.y }, size_of(s.bestiary_id));
     let mut in_pack = [0u8; PACKS_MAX];
     for (i, s) in spawns.iter().enumerate() {
         let p = arenas.packs.get(s.pack as usize).ok_or(E::PackOutOfRange)?;
@@ -308,39 +358,84 @@ pub(crate) fn check_arenas(
             return Err(E::PackTooBig);
         }
     }
-
-    let side_max = limits.side_max.min(ARENA_SIDE_MAX as u8);
-    let entrance = ends[0];
-    for (n, p) in arenas.packs.iter().enumerate() {
-        if !p.is_used() {
-            continue;
-        }
-        let pack = n as u8;
-        let side_ok = |side: u8| (limits.side_min..=side_max).contains(&side);
-        if !side_ok(p.width) || !side_ok(p.height) {
-            return Err(E::ArenaSizeOutOfRange);
-        }
-        for y in 0..p.height as usize {
-            for x in 0..p.width as usize {
-                if !tiles.knows(arena_byte(arenas, pack, x, y)) {
-                    return Err(E::ArenaInvalidTile);
-                }
-            }
-        }
-        match spawns.get(p.visible as usize) {
-            Some(s) if s.pack == pack => {}
-            _ => return Err(E::VisibleNotInPack),
-        }
-        check_pack_cell(width, height, layout, arenas, p, n, tiles, ends, chests)?;
-        if chebyshev(entrance, p.cell()) <= 1 {
-            return Err(E::PackAtEntrance);
-        }
-        if !neighbors(p.cell(), width, height).any(|c| map_reach.contains(c)) {
-            return Err(E::PackUnreachable);
-        }
-        check_entries(arenas, pack, tiles, spawns, size_of)?;
-    }
     Ok(())
+}
+
+/// Patch C: a pack's composition when the DM reveals it (docs/MAP_DESCRIPTION.md 17.2, 17.5):
+/// one to `ARENA_MONSTERS_MAX` monsters of this pack, the public `visible` one first (none for an
+/// ambush pack), each spawn's own rules, the roles a pack may mix (a boss with its helpers only,
+/// one loner), the monsters' arena cells and the party's room from every side, and the declared
+/// threat. Returns what it adds to the map's totals (`RosterTotals`).
+#[allow(clippy::too_many_arguments)]
+pub fn check_roster(
+    tier: u8,
+    pack: u8,
+    roster: &PackRoster,
+    visible: Option<&Spawn>,
+    arenas: &MapArenasData,
+    tiles: &TileRules,
+    template_of: impl Fn(u8) -> Option<SpawnRules>,
+    weights: ThreatWeights,
+    declared_threat: u8,
+) -> Result<RosterCount, MapCheckError> {
+    use MapCheckError as E;
+    let limits = tier_limits(tier).ok_or(E::TierOutOfRange)?;
+    let count = roster.count as usize;
+    if count == 0 || count > ARENA_MONSTERS_MAX {
+        return Err(E::RosterInvalid);
+    }
+    let spawns = roster.list();
+    if spawns.iter().any(|s| s.pack != pack) {
+        return Err(E::RosterInvalid);
+    }
+    match arenas.pack(pack) {
+        Some(p) if (p.visible == NO_SPAWN) == visible.is_none() => {}
+        Some(_) => return Err(E::VisibleMismatch),
+        None => return Err(E::PackWithoutArena),
+    }
+    if let Some(v) = visible {
+        if spawns[0] != *v {
+            return Err(E::VisibleMismatch);
+        }
+    }
+    let mut out = RosterCount::default();
+    for s in spawns {
+        let t = template_of(s.bestiary_id).ok_or(E::UnknownMonster)?;
+        let elite = check_spawn(tier, &limits, s, &t)?;
+        out.elites += elite as u8;
+        match t.role {
+            Role::Boss => out.bosses += 1,
+            Role::Helper => out.helpers += 1,
+            Role::Loner => {
+                out.loners += 1;
+                out.regular += 1;
+            }
+            Role::Swarm | Role::Fast | Role::Tank => out.regular += 1,
+        }
+    }
+    if out.bosses > BOSSES {
+        return Err(E::BossCount);
+    }
+    if out.bosses == 0 && out.helpers > 0 {
+        return Err(E::HelperOutsideBossPack);
+    }
+    if out.bosses > 0 && out.regular > 0 {
+        return Err(E::BossPackMixed);
+    }
+    if out.helpers > BOSS_HELPERS {
+        return Err(E::TooManyHelpers);
+    }
+    if out.loners > 1 {
+        return Err(E::TwoLoners);
+    }
+    let size_of = |id: u8| template_of(id).map_or(1, |t| t.size);
+    check_spawn_cells(arenas, tiles, spawns, &size_of)?;
+    check_entries(arenas, pack, tiles, spawns, &size_of)?;
+    let role_of = |id: u8| template_of(id).map(|t| t.role);
+    if threat(spawns, role_of, weights) != declared_threat as u16 {
+        return Err(E::ThreatMismatch);
+    }
+    Ok(out)
 }
 
 /// The visible monster's map cell: on the map, can be entered, not on a point, a chest or another
@@ -369,7 +464,7 @@ fn check_pack_cell(
         || chests.contains(&cell)
         || arenas.packs[..n]
             .iter()
-            .any(|o| o.is_used() && o.cell() == cell);
+            .any(|o| o.is_used() && o.visible != NO_SPAWN && o.cell() == cell);
     if taken {
         return Err(E::PackOverlap);
     }

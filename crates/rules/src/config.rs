@@ -7,7 +7,8 @@
 use deadroll_combat::{Balance, SupportBalance};
 use deadroll_skillcheck::SkillTuning;
 use deadroll_types::{
-    Aspect, Class, EquipSlot, Form, ItemBase, Race, RangeTag, StateKind, PARTY_MAX, STATS_COUNT,
+    Aspect, Class, EquipSlot, Form, ItemBase, Race, RangeTag, StateKind, PARTY_MAX, SECRET_TYPES,
+    STATS_COUNT,
 };
 
 use crate::items::KIT_MAX;
@@ -44,6 +45,10 @@ pub struct BalanceConfig {
     /// file saved before it: the defaults.
     #[cfg_attr(feature = "serde", serde(default))]
     pub arena: ArenaTuning,
+    /// Patch C: secrets and pack threat (`deadroll_mapcheck::secrets`). Missing in a bench file
+    /// saved before it: the defaults.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub secrets: SecretTuning,
 }
 
 impl BalanceConfig {
@@ -57,6 +62,7 @@ impl BalanceConfig {
         fees: FeeTuning::DEFAULT,
         loot: LootTuning::DEFAULT,
         arena: ArenaTuning::DEFAULT,
+        secrets: SecretTuning::DEFAULT,
     };
 }
 
@@ -629,6 +635,68 @@ impl Default for ArenaTuning {
 }
 
 const _: () = assert!(ArenaTuning::DEFAULT.side_max as usize <= deadroll_types::ARENA_SIDE_MAX);
+
+
+/// Patch C: secrets and pack threat (docs/MAP_DESCRIPTION.md 8 and 10.2, 17.2 and 17.4).
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SecretTuning {
+    /// Traps a map declares, ambush traps included, by map tier, inclusive (MAP 10.2).
+    pub traps_min: [u8; MAP_TIERS],
+    pub traps_max: [u8; MAP_TIERS],
+    /// Most declared secrets of each type (`deadroll_types::SecretKind::counted`: trap, ambush,
+    /// hidden stash, secret door), by map tier.
+    pub declared_max: [[u8; SECRET_TYPES]; MAP_TIERS],
+    /// The most damage a DM gives a trap, by map tier (at least 1). It comes off HP as it is:
+    /// no dice, no resistances (Ivan's decision).
+    pub trap_damage_max: [u8; MAP_TIERS],
+    /// Action points to examine a cell next to the character (MAP 8.4).
+    pub examine_ap: u8,
+    /// A pack's threat is the sum of its monsters' levels, an elite's counted this many times,
+    /// a boss's this many times (Ivan's decision); a regular monster's once.
+    pub threat_elite: u8,
+    pub threat_boss: u8,
+}
+
+impl SecretTuning {
+    pub const DEFAULT: SecretTuning = SecretTuning {
+        traps_min: [1, 0],
+        traps_max: [2, 4],
+        declared_max: [[2, 1, 1, 2], [4, 2, 2, 4]],
+        trap_damage_max: [8, 14],
+        examine_ap: 1,
+        threat_elite: 2,
+        threat_boss: 3,
+    };
+
+    /// The limits of map tier `tier` as the map check takes them (`None`: no such tier).
+    pub const fn limits(&self, tier: u8) -> Option<deadroll_mapcheck::secrets::SecretLimits> {
+        if tier == 0 || tier as usize > MAP_TIERS {
+            return None;
+        }
+        let t = tier as usize - 1;
+        Some(deadroll_mapcheck::secrets::SecretLimits {
+            traps_min: self.traps_min[t],
+            traps_max: self.traps_max[t],
+            declared_max: self.declared_max[t],
+            trap_damage_max: self.trap_damage_max[t],
+        })
+    }
+
+    /// The threat weights as the map check takes them.
+    pub const fn threat(&self) -> deadroll_mapcheck::secrets::ThreatWeights {
+        deadroll_mapcheck::secrets::ThreatWeights {
+            elite: self.threat_elite,
+            boss: self.threat_boss,
+        }
+    }
+}
+
+impl Default for SecretTuning {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
 
 /// Enums by variant name in JSON (the name is the `Debug` text, the list is the enum's `ALL`).
 #[cfg(feature = "serde")]

@@ -103,6 +103,7 @@ pub fn handler(ctx: Context<MonsterAct>, monster: u8, action: u8, target: u8) ->
     require!(!session.core.pending_vrf, SessionError::RollPending);
     // Patch 6: a player down in the last callback is finalized first (`start_turn`).
     require!(session.pending_deaths == 0, SessionError::DeathsPending);
+    session.require_no_reveals()?;
     require!(
         action as usize <= MONSTER_SLOTS,
         SessionError::InvalidAction

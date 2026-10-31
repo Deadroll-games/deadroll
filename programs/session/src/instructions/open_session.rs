@@ -15,9 +15,9 @@ use crate::{
     rules::{BALANCE, EMPTY_UNIT, MIN_PRICE_LAMPORTS},
     state::{
         external::{
-            read_bestiary, read_map_full, read_monster_skill, read_reward_table, read_tile_costs,
-            with_table_body, MapLayoutView, ASPECTS_TABLE, BESTIARY_TABLE, MONSTER_SKILLS_TABLE,
-            RESONANCES_TABLE, REWARDS_TABLE, TILESET_TABLE, TRAITS_TABLE, TRIPLES_TABLE,
+            read_map_full, read_monster_skill, read_reward_table, read_tile_costs, with_table_body,
+            MapLayoutView, ASPECTS_TABLE, BESTIARY_TABLE, MONSTER_SKILLS_TABLE, RESONANCES_TABLE,
+            REWARDS_TABLE, TILESET_TABLE, TRAITS_TABLE, TRIPLES_TABLE,
         },
         ArenaMode, Escrow, GameSession, Monsters, ACCOUNT_VERSION, NO_CHEST, NO_PACK,
         RES_ASPECTS_LEN, RES_PAIRS_LEN, RES_TRAITS_LEN, RES_TRIPLES_LEN,
@@ -162,6 +162,7 @@ pub fn handler(ctx: Context<OpenSession>, price_lamports: u64, dm_actor: Pubkey)
     session.chest_radius = full.chest_radius;
     session.settle_timeout_secs = full.settle_timeout_secs;
     (session.chests, session.chest_count) = layout.chests()?;
+    session.visible_chests = session.chest_count;
     session.boss_table = layout.boss_table();
     session.pending_chest = NO_CHEST;
     // Arena update: the packs on the map (their monsters come into `MonsterState` at
@@ -192,16 +193,14 @@ pub fn handler(ctx: Context<OpenSession>, price_lamports: u64, dm_actor: Pubkey)
         &monsters,
     )?;
     monsters.clear_loot_tables()?;
-    // Arena update: one record per template and the chosen skills, each once; the monsters
-    // themselves are loaded pack by pack (`enter_arena`).
-    for i in 0..spawn_count {
-        let spawn = layout.spawn(i as usize)?;
-        let (record, template) = read_bestiary(&accounts.bestiary, spawn.bestiary_id)?;
-        monsters.add_template(spawn.bestiary_id, &record)?;
-        copy_skills(&monsters, &spawn, &template, &accounts.monster_skills)?;
-        copy_loot_table(&monsters, &accounts.rewards, template.loot_table)?;
-    }
+    // Patch C: the packs' monsters are under the map's secrets root: their templates, skills and
+    // body tables are copied when the DM reveals each pack (`reveal_pack`); the monsters are
+    // loaded pack by pack (`enter_arena`).
     monsters.set_count(0)?;
+    session.secrets_root = map.secrets_root;
+    session.leaf_count = session.leaves().count;
+    session.declared = layout.declared();
+    session.threat = layout.threat();
     for id in session
         .chest_list()
         .iter()
@@ -243,7 +242,7 @@ pub fn handler(ctx: Context<OpenSession>, price_lamports: u64, dm_actor: Pubkey)
 /// (`NO_TABLE`: nothing). `finalize_map` checked the chests' and the boss's; a body table must
 /// decode too, or the kill could not be paid.
 #[inline(never)]
-fn copy_loot_table(monsters: &Monsters, rewards: &AccountInfo, id: u8) -> Result<()> {
+pub(crate) fn copy_loot_table(monsters: &Monsters, rewards: &AccountInfo, id: u8) -> Result<()> {
     if id == NO_TABLE || monsters.loot_table(id)?.is_some() {
         return Ok(());
     }
@@ -305,7 +304,7 @@ fn copy_tables(
 /// once into the session table with its registry index. Arena update: `enter_arena` gives the
 /// spawn its slots and its passive aura from them (`crate::arena::load_monster`).
 #[inline(never)]
-fn copy_skills(
+pub(crate) fn copy_skills(
     monsters: &Monsters,
     spawn: &Spawn,
     template: &MonsterTemplate,

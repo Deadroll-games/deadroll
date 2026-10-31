@@ -4,7 +4,7 @@ import type { GameSessionAcc, Party, PartyPlayer } from "./game";
 import { errorName } from "./send";
 import { StateKind } from "./types";
 import { SessionStatus } from "@deadroll/sdk/session";
-import { cooldownLabel, exitVoteView, skillCooldowns, skillUsedText, skipText, arenaStepFor, startTurnFor, tickText, turnActed, turnStarted } from "./turns";
+import { auditLeft, cooldownLabel, exitVoteView, revealStepFor, skillCooldowns, skillUsedText, skipText, arenaStepFor, startTurnFor, tickText, turnActed, turnStarted } from "./turns";
 
 const A = (n: number) => getAddressDecoder().decode(new Uint8Array(32).fill(n)) as Address;
 const DM = A(1);
@@ -19,11 +19,14 @@ function party(turn: number, over: Partial<GameSessionAcc> = {}, core: Partial<G
     startedSeq: 6,
     actedSeq: 6,
     dmActor: A(9),
+    // Patch C: no reveal owed, every pack revealed.
+    obligationCount: 0,
+    packsRevealed: 0xff,
     ...over,
   } as unknown as GameSessionAcc;
   const player = (slot: number, owner: Address) =>
     ({ slot, character: A(20 + slot), participation: A(30 + slot), part: { player: owner, core: { actor: A(40 + slot) } } }) as unknown as PartyPlayer;
-  return { address: A(5), session, monsters: [], players: [player(0, ALICE), player(1, BOB)], monsterCooldowns: [], monsterRecords: [], monsterSkills: [], monsterAuras: [], monsterMods: [], monsterDefense: [], resonanceTables: null, burningCells: [], escrow: null, map: null, tiles: null, points: [], spawns: [], arenas: null, ground: null };
+  return { address: A(5), session, monsters: [], players: [player(0, ALICE), player(1, BOB)], monsterCooldowns: [], monsterRecords: [], monsterSkills: [], monsterAuras: [], monsterMods: [], monsterDefense: [], resonanceTables: null, burningCells: [], escrow: null, map: null, tiles: null, points: [], spawns: [], arenas: null, ground: null, secretsBlob: null };
 }
 
 describe("turn state", () => {
@@ -157,5 +160,28 @@ describe("exitVoteView (patch B)", () => {
   });
   it("the vote passed: the monsters take their last moves; no retreat below zero", () => {
     expect(view({ exitKind: 1, fleeMask: 0b11, lastMoves: 0b1, retreats: 5 })).toMatchObject({ leaving: true, retreatsLeft: 0 });
+  });
+});
+
+describe("patch C: the DM's reveals", () => {
+  it("a cell first, then the engaged pack; only the DM's tab, never during a roll", () => {
+    const p = party(0, { obligationCount: 2, obligations: [70, 71], obligedBy: 1, packsRevealed: 0, mode: 1, arenaPack: 2 } as never);
+    expect(revealStepFor(p, DM)).toEqual({ kind: "cell", leaf: 70, by: 1 });
+    expect(revealStepFor(p, ALICE)).toBeNull();
+    expect(arenaStepFor(p, ALICE)).toBeNull();
+    p.session.obligationCount = 0;
+    expect(revealStepFor(p, DM)).toEqual({ kind: "pack", pack: 2 });
+    expect(arenaStepFor(p, ALICE)).toBeNull();
+    p.session.packsRevealed = 0b100;
+    expect(revealStepFor(p, DM)).toBeNull();
+    expect(arenaStepFor(p, ALICE)).toBe("enter");
+    p.session.obligationCount = 1;
+    p.session.core.pendingVrf = true;
+    expect(revealStepFor(p, DM)).toBeNull();
+  });
+
+  it("the audit lists what is still hidden", () => {
+    const s = party(0, { revealed: Object.assign(new Array(273).fill(0), { 8: 0b10 }), packsRevealed: 0b10 } as never).session;
+    expect(auditLeft(s, [65, 66, 300], [1, 3])).toEqual({ cells: [66, 300], packs: [3] });
   });
 });

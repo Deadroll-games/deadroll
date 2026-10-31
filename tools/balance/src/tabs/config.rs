@@ -901,5 +901,74 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                             );
                         });
                 });
+
+            egui::CollapsingHeader::new("Secrets (SecretTuning)")
+                .default_open(false)
+                .show(ui, |ui| {
+                    let (s, ds) = (&mut c.secrets, &d.secrets);
+                    egui::Grid::new("secrets")
+                        .num_columns(2)
+                        .striped(true)
+                        .show(ui, |ui| {
+                            for t in 0..deadroll_rules::MAP_TIERS {
+                                let tier = t + 1;
+                                int_row(
+                                    ui,
+                                    &format!("Map tier {tier}: traps min (ambush included)"),
+                                    &mut s.traps_min[t],
+                                    ds.traps_min[t],
+                                    0..=16,
+                                );
+                                int_row(
+                                    ui,
+                                    &format!("Map tier {tier}: traps max (ambush included)"),
+                                    &mut s.traps_max[t],
+                                    ds.traps_max[t],
+                                    0..=16,
+                                );
+                                for (k, kind) in
+                                    ["traps", "ambushes", "hidden stashes", "secret doors"]
+                                        .iter()
+                                        .enumerate()
+                                {
+                                    int_row(
+                                        ui,
+                                        &format!("Map tier {tier}: most {kind}"),
+                                        &mut s.declared_max[t][k],
+                                        ds.declared_max[t][k],
+                                        0..=16,
+                                    );
+                                }
+                                int_row(
+                                    ui,
+                                    &format!("Map tier {tier}: trap damage max"),
+                                    &mut s.trap_damage_max[t],
+                                    ds.trap_damage_max[t],
+                                    1..=255,
+                                );
+                            }
+                            int_row(
+                                ui,
+                                "Examine a cell, AP",
+                                &mut s.examine_ap,
+                                ds.examine_ap,
+                                0..=10,
+                            );
+                            int_row(
+                                ui,
+                                "Threat: an elite counts its level times",
+                                &mut s.threat_elite,
+                                ds.threat_elite,
+                                1..=10,
+                            );
+                            int_row(
+                                ui,
+                                "Threat: a boss counts its level times",
+                                &mut s.threat_boss,
+                                ds.threat_boss,
+                                1..=10,
+                            );
+                        });
+                });
         });
 }

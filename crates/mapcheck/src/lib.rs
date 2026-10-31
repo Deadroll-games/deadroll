@@ -5,24 +5,27 @@
 #![no_std]
 
 pub mod arena;
+pub mod design;
 pub mod footprint;
 pub mod limits;
 pub mod loot;
 pub mod path;
 pub mod roster;
+pub mod secrets;
 pub mod tiles;
 pub mod walk;
 
 use deadroll_skillcheck::{check_monster_selection, monster::RECORDS_MAX, SkillError};
 use deadroll_types::{
-    Cell, MapArenasData, MapLayoutDataV2, PointKind, POINTS_MAX, SESSION_SKILLS_MAX,
-    SESSION_TEMPLATES_MAX, SPAWNS_MAX, SPAWN_ELITE,
+    Cell, MapArenasData, MapLayoutDataV2, MapSecretsData, PointKind, Spawn, PACKS_MAX, POINTS_MAX,
+    SESSION_SKILLS_MAX, SESSION_TEMPLATES_MAX, SPAWNS_MAX, SPAWN_ELITE,
 };
 
 use arena::ArenaLimits;
-use limits::{tier_limits, BOSSES, BOSS_HELPERS, SIDE_MAX, SIDE_MIN};
+use limits::{tier_limits, TierLimits, BOSSES, BOSS_HELPERS, SIDE_MAX, SIDE_MIN};
 use loot::{MapLoot, TableRules};
 use roster::{Role, SpawnRules};
+use secrets::SecretLimits;
 use tiles::{cell_index, in_bounds, TileRules};
 
 /// The first broken builder rule. One variant per rule; `code()` is stable.
@@ -150,6 +153,43 @@ pub enum MapCheckError {
     ArenaUnreachable,
     /// More distinct bestiary templates than a session copies (`SESSION_TEMPLATES_MAX`).
     TooManyTemplates,
+    // Patch C: secrets and hidden packs (docs/MAP_DESCRIPTION.md 8, 17.2, 17.4; `secrets`).
+    /// A cell's contents with a bad kind for its place or nonzero unused bytes.
+    SecretInvalid,
+    /// A trap or an ambush on a cell that cannot be entered.
+    SecretNotPassable,
+    /// A trap or an ambush on the entrance, the exit, a chest or a pack's map cell.
+    SecretOnPoint,
+    /// Trap damage 0 or above the tier's `trap_damage_max`.
+    TrapDamageOutOfRange,
+    /// An ambush linked to a pack number that is not an ambush pack.
+    AmbushPackInvalid,
+    /// An ambush trap in an arena (it starts a fight from the map).
+    AmbushInArena,
+    /// A hidden stash in an arena.
+    StashInArena,
+    /// A secret door on a cell that can be entered.
+    DoorNotWall,
+    /// More declared secrets than the tier allows, or more secrets of a type than declared.
+    TooManySecrets,
+    /// Fewer declared traps than the tier needs.
+    TooFewTraps,
+    /// Not exactly one ambush trap per ambush pack.
+    AmbushUnlinked,
+    /// A used pack declared with threat 0, or an unused one with a threat.
+    ThreatOutOfRange,
+    /// A pack's composition does not give its declared threat.
+    ThreatMismatch,
+    /// A composition with no monster, too many, or one of another pack.
+    RosterInvalid,
+    /// A composition whose first monster is not the pack's public one.
+    VisibleMismatch,
+    /// A public spawn that is not the visible monster of its pack.
+    SpawnNotVisible,
+    /// Fewer secrets of a type than declared.
+    TooFewSecrets,
+    /// Two secrets on one leaf.
+    DuplicateSecret,
 }
 
 impl MapCheckError {
@@ -185,7 +225,6 @@ pub fn check_map<R: Fn(u8) -> Option<TableRules>>(
 
     check_tiles(width, height, layout, tiles)?;
     let ends = check_points(width, height, layout, tiles)?;
-    let [entrance, exit] = ends;
 
     let count = layout.spawn_count as usize;
     if count > SPAWNS_MAX {
@@ -205,23 +244,8 @@ pub fn check_map<R: Fn(u8) -> Option<TableRules>>(
         let id = spawn.bestiary_id as usize;
         templates[id / 64] |= 1 << (id % 64);
         let role = t.role;
-        if !(limits.level_min..=limits.level_max).contains(&spawn.level) {
-            return Err(E::LevelOutOfTier);
-        }
-        if tier < t.min_tier {
-            return Err(E::TierBelowTemplate);
-        }
-        let elite = spawn.flags & SPAWN_ELITE != 0;
-        if elite && role == Role::Boss {
-            return Err(E::EliteBoss);
-        }
+        let elite = check_spawn(tier, &limits, spawn, &t)?;
         elites += elite as u8;
-        check_monster_selection(t.pool(), spawn.skills, t.slots_for(elite)).map_err(
-            |e| match e {
-                SkillError::MonsterSkillUnknown => E::MonsterSkillUnknown,
-                _ => E::MonsterSkillCount,
-            },
-        )?;
         for bit in 0..t.pool_len.min(16) {
             if spawn.skills & (1 << bit) != 0 {
                 let at = t.pool_start as usize + bit as usize;
@@ -288,7 +312,136 @@ pub fn check_map<R: Fn(u8) -> Option<TableRules>>(
         }
     }
 
-    loot::check_chests(width, height, limits.level_max, layout, tiles, ends, loot)?;
+    check_ground(
+        width,
+        height,
+        limits.level_max,
+        layout,
+        arenas,
+        arena_limits,
+        tiles,
+        ends,
+        &template_of,
+        loot,
+    )
+}
+
+/// Patch C: the public part of a map, what `finalize_map` checks (docs/MAP_DESCRIPTION.md 8.3,
+/// 17.2, 17.5). `layout.spawns` holds only the monster each pack shows on the map; the packs'
+/// compositions and the secrets are under the Merkle root, checked when revealed
+/// ([`arena::check_roster`], [`secrets::check_secret`]). `secrets` gives the declared threats
+/// and counts; `secret_limits` the tier's limits.
+#[allow(clippy::too_many_arguments)]
+pub fn check_public<R: Fn(u8) -> Option<TableRules>>(
+    width: u8,
+    height: u8,
+    tier: u8,
+    layout: &MapLayoutDataV2,
+    arenas: &MapArenasData,
+    secrets: &MapSecretsData,
+    arena_limits: ArenaLimits,
+    secret_limits: &SecretLimits,
+    tiles: &TileRules,
+    template_of: impl Fn(u8) -> Option<SpawnRules>,
+    loot: &MapLoot<R>,
+) -> Result<(), MapCheckError> {
+    use MapCheckError as E;
+
+    let side_ok = |side: u8| (SIDE_MIN..=SIDE_MAX).contains(&side);
+    if !side_ok(width) || !side_ok(height) {
+        return Err(E::SizeOutOfRange);
+    }
+    let limits = tier_limits(tier).ok_or(E::TierOutOfRange)?;
+    check_tiles(width, height, layout, tiles)?;
+    let ends = check_points(width, height, layout, tiles)?;
+
+    let count = layout.spawn_count as usize;
+    if count > PACKS_MAX {
+        return Err(E::TooManySpawns);
+    }
+    for (i, spawn) in layout.spawns[..count].iter().enumerate() {
+        let t = template_of(spawn.bestiary_id).ok_or(E::UnknownMonster)?;
+        check_spawn(tier, &limits, spawn, &t)?;
+        let p = arenas
+            .packs
+            .get(spawn.pack as usize)
+            .ok_or(E::PackOutOfRange)?;
+        if !p.is_used() {
+            return Err(E::PackWithoutArena);
+        }
+        if p.visible as usize != i {
+            return Err(E::SpawnNotVisible);
+        }
+    }
+    let used = arenas.packs.iter().filter(|p| p.is_used()).count();
+    if used > (limits.packs + BOSSES) as usize {
+        return Err(E::TooManyPacks);
+    }
+    for (p, threat) in arenas.packs.iter().zip(secrets.threat) {
+        if p.is_used() != (threat > 0) {
+            return Err(E::ThreatOutOfRange);
+        }
+    }
+    let ambush = secrets::ambush_mask(&arenas.packs);
+    secrets::check_declared(&secrets.declared, secret_limits, ambush.count_ones() as u8)?;
+    check_ground(
+        width,
+        height,
+        limits.level_max,
+        layout,
+        arenas,
+        arena_limits,
+        tiles,
+        ends,
+        &template_of,
+        loot,
+    )
+}
+
+/// The rules of one spawn by itself: level within the tier, the template's minimum tier, a boss
+/// never elite, the chosen skills. Returns whether it is elite.
+pub fn check_spawn(
+    tier: u8,
+    limits: &TierLimits,
+    spawn: &Spawn,
+    t: &SpawnRules,
+) -> Result<bool, MapCheckError> {
+    use MapCheckError as E;
+    if !(limits.level_min..=limits.level_max).contains(&spawn.level) {
+        return Err(E::LevelOutOfTier);
+    }
+    if tier < t.min_tier {
+        return Err(E::TierBelowTemplate);
+    }
+    let elite = spawn.flags & SPAWN_ELITE != 0;
+    if elite && t.role == Role::Boss {
+        return Err(E::EliteBoss);
+    }
+    check_monster_selection(t.pool(), spawn.skills, t.slots_for(elite)).map_err(|e| match e {
+        SkillError::MonsterSkillUnknown => E::MonsterSkillUnknown,
+        _ => E::MonsterSkillCount,
+    })?;
+    Ok(elite)
+}
+
+/// The chests, the path to the exit and the arenas, the same for the whole design and its public
+/// part.
+#[allow(clippy::too_many_arguments)]
+fn check_ground<R: Fn(u8) -> Option<TableRules>>(
+    width: u8,
+    height: u8,
+    level_cap: u8,
+    layout: &MapLayoutDataV2,
+    arenas: &MapArenasData,
+    arena_limits: ArenaLimits,
+    tiles: &TileRules,
+    ends: [Cell; 2],
+    template_of: &impl Fn(u8) -> Option<SpawnRules>,
+    loot: &MapLoot<R>,
+) -> Result<(), MapCheckError> {
+    use MapCheckError as E;
+    let [entrance, exit] = ends;
+    loot::check_chests(width, height, level_cap, layout, tiles, ends, loot)?;
 
     // Closed chests occupy their cell: the paths go around them.
     let (chests, chest_count) = loot::chest_cells(layout);
@@ -1257,6 +1410,8 @@ mod tests {
         assert_eq!(MapCheckError::PointOverlap.code(), 44);
         assert_eq!(MapCheckError::PackOutOfRange.code(), 45);
         assert_eq!(MapCheckError::TooManyTemplates.code(), 58);
+        assert_eq!(MapCheckError::SecretInvalid.code(), 59);
+        assert_eq!(MapCheckError::DuplicateSecret.code(), 76);
     }
 
     #[test]
@@ -1562,5 +1717,294 @@ mod tests {
             check_t(16, 16, 1, &layout, &tiles(), two, &test_loot()),
             Ok(())
         );
+    }
+
+    // Patch C: the public part, a pack's composition when revealed, the whole design.
+    mod fog {
+        use super::*;
+        use crate::{
+            arena::check_roster,
+            design::{check_design, split, Split},
+            roster::{RosterCount, RosterTotals},
+            secrets::{Board, Leaves, SecretLimits, ThreatWeights},
+        };
+        use deadroll_types::{
+            CellSecret, FoundSecret, MapSecretsData, PackRoster, NO_SPAWN, SECRET_TYPES,
+        };
+
+        const SECRETS: SecretLimits = SecretLimits {
+            traps_min: 1,
+            traps_max: 2,
+            declared_max: [2, 1, 1, 2],
+            trap_damage_max: 8,
+        };
+        const WEIGHTS: ThreatWeights = ThreatWeights { elite: 2, boss: 3 };
+
+        fn leaf(arenas: &MapArenasData, board: Board) -> u16 {
+            Leaves::new(16, 16, &arenas.packs).of(board).unwrap()
+        }
+
+        /// A trap on the floor and a secret door in the west wall.
+        fn secrets(arenas: &MapArenasData) -> [FoundSecret; 2] {
+            [
+                FoundSecret {
+                    leaf: leaf(arenas, Board::Map(Cell { x: 3, y: 3 })),
+                    secret: CellSecret::trap(5, 10),
+                },
+                FoundSecret {
+                    leaf: leaf(arenas, Board::Map(Cell { x: 0, y: 5 })),
+                    secret: CellSecret::door(),
+                },
+            ]
+        }
+
+        fn design(
+            layout: &MapLayoutDataV2,
+            arenas: &MapArenasData,
+            declared: [u8; SECRET_TYPES],
+            cells: &[FoundSecret],
+            loot: &TestLoot,
+        ) -> Result<Split, MapCheckError> {
+            check_design(
+                16,
+                16,
+                1,
+                layout,
+                arenas,
+                &declared,
+                cells,
+                LIMITS,
+                &SECRETS,
+                WEIGHTS,
+                &tiles(),
+                p0_role,
+                loot,
+            )
+        }
+
+        fn public(
+            s: &Split,
+            threat: [u8; PACKS_MAX],
+            declared: [u8; SECRET_TYPES],
+        ) -> Result<(), MapCheckError> {
+            let mut arenas = arenas();
+            arenas.packs = s.packs;
+            let mut secrets = MapSecretsData::EMPTY;
+            secrets.threat = threat;
+            secrets.declared = declared;
+            check_public(
+                16,
+                16,
+                1,
+                &s.public,
+                &arenas,
+                &secrets,
+                LIMITS,
+                &SECRETS,
+                &tiles(),
+                p0_role,
+                &test_loot(),
+            )
+        }
+
+        fn roster(
+            s: &Split,
+            n: u8,
+            r: &PackRoster,
+            threat: u8,
+        ) -> Result<RosterCount, MapCheckError> {
+            let mut arenas = arenas();
+            arenas.packs = s.packs;
+            let p = arenas.packs[n as usize];
+            let visible = (p.visible != NO_SPAWN).then(|| &s.public.spawns[p.visible as usize]);
+            check_roster(
+                1,
+                n,
+                r,
+                visible,
+                &arenas,
+                &tiles(),
+                p0_role,
+                WEIGHTS,
+                threat,
+            )
+        }
+
+        fn demo_split() -> Split {
+            let a = arenas();
+            design(&demo(), &a, [1, 0, 0, 1], &secrets(&a), &test_loot()).unwrap()
+        }
+
+        #[test]
+        fn the_demo_splits_into_visible_monsters_and_rosters() {
+            let s = demo_split();
+            assert_eq!(s.public.spawn_count, 3);
+            assert_eq!(s.packs[1].visible, 0);
+            assert_eq!(s.packs[3].visible, 2);
+            assert_eq!(s.public.spawns[2].bestiary_id, ids::GOBLIN_CHIEFTAIN);
+            let counts = [s.rosters[1].count, s.rosters[2].count, s.rosters[3].count];
+            assert_eq!(counts, [2, 2, 3]);
+            assert_eq!(s.rosters[0].count, 0);
+            // Levels 1: two of a kind = 2; the boss counts 3 times plus two helpers = 5.
+            assert_eq!(s.threat, [0, 2, 2, 5, 0, 0, 0, 0]);
+            assert_eq!(public(&s, s.threat, [1, 0, 0, 1]), Ok(()));
+            // The split puts the visible monster first.
+            let layout = demo();
+            let mut a = arenas();
+            a.packs[1].visible = 1;
+            let s2 = split(&layout, &a.packs, p0_role, WEIGHTS).unwrap();
+            assert_eq!(s2.rosters[1].spawns[0], layout.spawns[1]);
+            assert_eq!(s2.rosters[1].spawns[1], layout.spawns[0]);
+        }
+
+        #[test]
+        fn the_public_part_rejects() {
+            use MapCheckError as E;
+            let s = demo_split();
+            let mut threat = s.threat;
+            threat[0] = 1;
+            assert_eq!(public(&s, threat, [1, 0, 0, 1]), Err(E::ThreatOutOfRange));
+            threat = s.threat;
+            threat[1] = 0;
+            assert_eq!(public(&s, threat, [1, 0, 0, 1]), Err(E::ThreatOutOfRange));
+            assert_eq!(public(&s, s.threat, [0, 0, 0, 0]), Err(E::TooFewTraps));
+            assert_eq!(public(&s, s.threat, [3, 0, 0, 0]), Err(E::TooManySecrets));
+            assert_eq!(public(&s, s.threat, [1, 1, 0, 0]), Err(E::AmbushUnlinked));
+            // A hidden monster left in the public list.
+            let mut leak = s.clone();
+            leak.public.spawns[3] = demo().spawns[1];
+            leak.public.spawn_count = 4;
+            assert_eq!(
+                public(&leak, s.threat, [1, 0, 0, 0]),
+                Err(E::SpawnNotVisible)
+            );
+        }
+
+        #[test]
+        fn a_revealed_roster_must_match() {
+            use MapCheckError as E;
+            let s = demo_split();
+            let wolves = s.rosters[1];
+            assert_eq!(roster(&s, 1, &wolves, 2).map(|c| c.regular), Ok(2));
+            assert_eq!(roster(&s, 1, &wolves, 3), Err(E::ThreatMismatch));
+            assert_eq!(
+                roster(&s, 1, &PackRoster::default(), 0),
+                Err(E::RosterInvalid)
+            );
+            let mut other = wolves;
+            other.spawns[1].pack = 2;
+            assert_eq!(roster(&s, 1, &other, 2), Err(E::RosterInvalid));
+            let mut swapped = wolves;
+            swapped.spawns.swap(0, 1);
+            assert_eq!(roster(&s, 1, &swapped, 2), Err(E::VisibleMismatch));
+            let mut mixed = wolves;
+            mixed.spawns[1].bestiary_id = ids::GOBLIN_WARRIOR;
+            assert_eq!(roster(&s, 1, &mixed, 2), Err(E::HelperOutsideBossPack));
+            let mut boss = s.rosters[3];
+            boss.spawns[1].bestiary_id = ids::GOBLIN;
+            assert_eq!(roster(&s, 3, &boss, 5), Err(E::BossPackMixed));
+            let mut wall = wolves;
+            wall.spawns[1].x = 12;
+            assert_eq!(roster(&s, 1, &wall, 2), Err(E::SpawnOutOfBounds));
+            let mut high = wolves;
+            high.spawns[1].level = 3;
+            assert_eq!(roster(&s, 1, &high, 4), Err(E::LevelOutOfTier));
+
+            // The totals over the packs.
+            let limits = tier_limits(1).unwrap();
+            let mut totals = RosterTotals::default();
+            for n in 1..=3u8 {
+                let c = roster(&s, n, &s.rosters[n as usize], s.threat[n as usize]).unwrap();
+                totals.add(&c, &limits).unwrap();
+            }
+            assert_eq!(totals.finish(), Ok(()));
+            assert_eq!(RosterTotals::default().finish(), Err(E::BossCount));
+            let five = RosterCount {
+                regular: 5,
+                ..Default::default()
+            };
+            assert_eq!(
+                RosterTotals::default().add(&five, &limits),
+                Err(E::TooManyMonsters)
+            );
+        }
+
+        #[test]
+        fn the_secrets_of_a_design() {
+            use MapCheckError as E;
+            let a = arenas();
+            let cells = secrets(&a);
+            let loot = test_loot();
+            let err = |declared, cells: &[FoundSecret], loot: &TestLoot| {
+                design(&demo(), &a, declared, cells, loot).err()
+            };
+            assert_eq!(err([1, 0, 0, 0], &cells, &loot), Some(E::TooManySecrets));
+            assert_eq!(err([1, 0, 0, 2], &cells, &loot), Some(E::TooFewSecrets));
+            assert_eq!(
+                err([2, 0, 0, 0], &[cells[0], cells[0]], &loot),
+                Some(E::DuplicateSecret)
+            );
+            let past = FoundSecret {
+                leaf: Leaves::new(16, 16, &a.packs).count,
+                secret: CellSecret::trap(1, 1),
+            };
+            assert_eq!(err([1, 0, 0, 0], &[past], &loot), Some(E::SecretInvalid));
+            let on_pack = FoundSecret {
+                leaf: 2,
+                secret: CellSecret::trap(1, 1),
+            };
+            assert_eq!(err([1, 0, 0, 0], &[on_pack], &loot), Some(E::SecretInvalid));
+            let on_chest = FoundSecret {
+                leaf: leaf(&a, Board::Map(Cell { x: 5, y: 5 })),
+                secret: CellSecret::trap(1, 1),
+            };
+            assert_eq!(
+                err([1, 0, 0, 0], &[on_chest], &loot),
+                Some(E::SecretOnPoint)
+            );
+            // A trap in an arena is fine.
+            let arena_trap = FoundSecret {
+                leaf: leaf(&a, Board::Arena(2, Cell { x: 0, y: 0 })),
+                secret: CellSecret::trap(2, 0),
+            };
+            assert_eq!(err([1, 0, 0, 0], &[arena_trap], &loot), None);
+
+            // A hidden stash costs budget: chest 2 + stash 2 + boss 4 > 6 for one player.
+            let stash = [
+                cells[0],
+                FoundSecret {
+                    leaf: leaf(&a, Board::Map(Cell { x: 7, y: 7 })),
+                    secret: CellSecret::stash(tables::SMALL),
+                },
+            ];
+            assert_eq!(err([1, 0, 1, 0], &stash, &loot), Some(E::OverBudget));
+            assert_eq!(err([1, 0, 1, 0], &stash, &loot_for(2)), None);
+        }
+
+        #[test]
+        fn an_ambush_pack_has_no_map_cell_and_one_trap() {
+            use MapCheckError as E;
+            let mut a = arenas();
+            a.packs[2].visible = NO_SPAWN;
+            let ambush = FoundSecret {
+                leaf: leaf(&a, Board::Map(Cell { x: 8, y: 8 })),
+                secret: CellSecret::ambush(2),
+            };
+            let s = design(&demo(), &a, [0, 1, 0, 0], &[ambush], &test_loot()).unwrap();
+            assert_eq!(s.packs[2].visible, NO_SPAWN);
+            assert_eq!(s.public.spawn_count, 2);
+            assert_eq!(s.rosters[2].count, 2);
+            assert_eq!(roster(&s, 2, &s.rosters[2], 2).map(|c| c.regular), Ok(2));
+            // Without its trap, or a trap on a pack that shows a monster.
+            let trap = &secrets(&a)[..1];
+            let err = design(&demo(), &a, [1, 0, 0, 0], trap, &test_loot()).err();
+            assert_eq!(err, Some(E::AmbushUnlinked));
+            let wrong = FoundSecret {
+                secret: CellSecret::ambush(1),
+                ..ambush
+            };
+            let err = design(&demo(), &a, [0, 1, 0, 0], &[wrong], &test_loot()).err();
+            assert_eq!(err, Some(E::AmbushPackInvalid));
+        }
     }
 }

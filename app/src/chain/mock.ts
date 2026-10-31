@@ -1,5 +1,6 @@
 // Mock data for VITE_DATA=mock and the /dev pages. Shapes match chain/types.ts exactly.
-import { PACKS_MAX, type PackDraft } from "./mapcheckWasm";
+import { PACKS_MAX, type DraftSecret, type PackDraft } from "./mapcheckWasm";
+import { Secret, declaredOfDraft, secretLeaves, type BoardSecret } from "./secrets";
 import demoMap from "../../../assets/registry/maps/demo_16x16.json";
 import cavesTemplate from "../../../assets/registry/maps/caves_ruins_16x16.json";
 import forestTemplate from "../../../assets/registry/maps/forest_16x16.json";
@@ -77,7 +78,25 @@ export type MapPresetData = {
   /** Arena update: each pack's visible spawn, map cell, facing (by name) and arena rows. A spawn's
    * `x`, `y` are its cell in its pack's arena. */
   packs?: { pack: number; visible: number; x: number; y: number; facing: string; rows: string[] }[];
+  /** Patch C: the cells that hide something (crates/rules/tests/demo_preset.rs); `pack` set: in
+   * that pack's arena. */
+  secrets?: { kind: string; x: number; y: number; pack?: number; damage?: number; difficulty?: number; target?: number; table?: number }[];
 };
+
+/** Patch C: a preset's secrets by cell. */
+export function presetBoardSecrets(p: MapPresetData): BoardSecret[] {
+  return (p.secrets ?? []).map((x) => {
+    const kind = { trap: Secret.Trap, ambush: Secret.Ambush, stash: Secret.Stash, door: Secret.Door }[x.kind] ?? Secret.None;
+    const a = kind === Secret.Trap ? (x.damage ?? 1) : kind === Secret.Ambush ? (x.target ?? 0) : kind === Secret.Stash ? (x.table ?? 0) : 0;
+    return { pack: x.pack ?? null, x: x.x, y: x.y, kind, a, b: kind === Secret.Trap ? (x.difficulty ?? 0) : 0 };
+  });
+}
+
+/** Patch C: a preset's declared counts and secrets by leaf, as the builder checks them. */
+export function presetSecretsOf(p: MapPresetData): { declared: number[]; secrets: DraftSecret[] } {
+  const list = presetBoardSecrets(p);
+  return { declared: declaredOfDraft(list), secrets: secretLeaves(p.width, p.height, presetPacks(p), list) };
+}
 
 /** Arena update: `Facing` by name, clockwise from the north (crates/types). */
 export const FACING_NAMES = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"] as const;
@@ -111,6 +130,7 @@ export function presetToLayout(p: MapPresetData): {
   settleTimeoutSecs: number;
   biome: number;
   packs: (PackDraft | null)[];
+  secrets: BoardSecret[];
 } {
   const tiles = new Uint8Array(MAP_CELLS).fill(cellByte(Tile.Wall));
   let entrance: Cell | null = null;
@@ -146,6 +166,7 @@ export function presetToLayout(p: MapPresetData): {
     chestRadius: p.chest_radius ?? 3,
     settleTimeoutSecs: p.settle_timeout_secs ?? 3600,
     packs: presetPacks(p),
+    secrets: presetBoardSecrets(p),
   };
 }
 

@@ -934,5 +934,36 @@
     "retreat_empower_bp": 2000,
     "retreat_protect_bp": 2000,
     "retreat_buff_turns": 10
+  },
+  "secrets": {
+    "traps_min": [
+      1,
+      0
+    ],
+    "traps_max": [
+      2,
+      4
+    ],
+    "declared_max": [
+      [
+        2,
+        1,
+        1,
+        2
+      ],
+      [
+        4,
+        2,
+        2,
+        4
+      ]
+    ],
+    "trap_damage_max": [
+      8,
+      14
+    ],
+    "examine_ap": 1,
+    "threat_elite": 2,
+    "threat_boss": 3
   }
 }

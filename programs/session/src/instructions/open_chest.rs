@@ -101,6 +101,7 @@ pub fn handler(ctx: Context<OpenChest>, chest: u8) -> Result<()> {
     );
     require!(!session.core.pending_vrf, SessionError::RollPending);
     require!(session.pending_deaths == 0, SessionError::DeathsPending);
+    session.require_no_reveals()?;
     let slot = participation.core.slot;
     require!(
         session.current_unit() == Some(Unit::Player(slot)),

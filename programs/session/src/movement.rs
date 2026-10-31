@@ -8,7 +8,9 @@ use deadroll_mapcheck::{
     walk::{Blocker, Field, WalkError},
 };
 use deadroll_rules::spread::{step_into, BurningCell, BURNING_CELLS_MAX};
-use deadroll_types::{ActiveState, Cell, ARENA_MONSTERS_MAX, STATES_MAX};
+use deadroll_types::{
+    cell_byte, cell_variant, ActiveState, Cell, TileKind, ARENA_MONSTERS_MAX, STATES_MAX,
+};
 
 use crate::{
     errors::SessionError,
@@ -57,7 +59,11 @@ impl Field for MapField<'_, '_> {
     }
 
     fn step_cost(&self, cell: Cell) -> Option<u8> {
-        let byte = self.layout.tile(cell.x, cell.y).ok()?;
+        let mut byte = self.layout.tile(cell.x, cell.y).ok()?;
+        // Patch C: a secret door found here is a door (docs/MAP_DESCRIPTION.md 8.1).
+        if self.session.door_found_at(cell) {
+            byte = cell_byte(TileKind::Door as u8, cell_variant(byte));
+        }
         step_cost(byte, &self.session.tile_cost)
     }
 

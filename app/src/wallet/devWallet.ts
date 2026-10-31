@@ -77,3 +77,31 @@ export async function ensureDevFunds(rpc: AirdropRpc, who: Address, force = fals
   }
   return (await rpc.getBalance(who, { commitment: "confirmed" }).send()).value;
 }
+
+/**
+ * Patch C: the same dev wallet in another tab or browser profile (the DM opening its map secrets
+ * on another device, without any local file): the tab's seed as hex, and a seed pasted from
+ * another tab. Dev mode only (localnet), a throwaway key.
+ */
+export function exportDevSeed(): string | null {
+  try {
+    const raw = storage()?.getItem(SEED_KEY);
+    const arr = raw ? (JSON.parse(raw) as number[]) : null;
+    return Array.isArray(arr) && arr.length === 32 ? arr.map((b) => b.toString(16).padStart(2, "0")).join("") : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Replaces the tab's dev keypair with `hex` (32 bytes); false when it is not a seed. */
+export function importDevSeed(hex: string): boolean {
+  const clean = hex.trim().toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(clean)) return false;
+  const seed = Array.from({ length: 32 }, (_, i) => parseInt(clean.slice(i * 2, i * 2 + 2), 16));
+  try {
+    storage()?.setItem(SEED_KEY, JSON.stringify(seed));
+    return true;
+  } catch {
+    return false;
+  }
+}

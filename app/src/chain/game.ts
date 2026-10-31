@@ -49,6 +49,7 @@ import {
   getWritePointsInstruction,
   getWriteLayoutInstruction,
   getWriteSpawnsInstruction,
+  getWriteSecretsInstruction,
   MapStatus,
   PointKind,
   type Facing,
@@ -101,6 +102,10 @@ import {
   type ReactiveData,
   type ResistModData,
   type TimedModData,
+  type CellSecretArgs,
+  getRevealCellInstruction,
+  getRevealPackInstruction,
+  getExamineInstruction,
 } from "@deadroll/sdk/session";
 import {
   BUILDING_DISCRIMINATOR,
@@ -113,6 +118,11 @@ import {
   getTavernBoardDecoder,
 } from "@deadroll/sdk/city";
 import { COMPUTE_BUDGET_PROGRAM } from "@deadroll/sdk";
+import { commit as commitSecrets, sealSecrets, splitDesign, threat as secretThreat, type SecretKeys } from "@deadroll/sdk/secrets";
+import { declaredOfDraft, packShapes, secretLeaves, type BoardSecret } from "./secrets";
+import { Leaves, openSecrets, type Commitment, type Roster } from "@deadroll/sdk/secrets";
+import { mapKeys, type MessageSigner } from "./secrets";
+import type { GridSecret } from "../components/grid/types";
 import { MPL_CORE_PROGRAM, PROGRAMS, SYSTEM_PROGRAM, VRF } from "../config";
 import { client } from "../wallet/client";
 import { characterAppearance } from "./appearance";
@@ -468,7 +478,19 @@ export type MapDraft = {
   bossTable: number;
   /** Arena update: the packs by number (`null`: not used), `write_arena` each. */
   packs: (PackDraft | null)[];
+  /** Patch C: the cells that hide something; only the DM's encrypted copy holds them. */
+  secrets?: BoardSecret[];
 };
+
+/** Patch C: what a design publishes: the public spawns and pack records, each pack's roster and
+ * threat, the secrets by leaf and the declared counts. */
+export function mapDesign(d: MapDraft, isBoss: (bestiaryId: number) => boolean) {
+  const split = splitDesign(d.spawns, d.packs.map((p) => (p ? { visible: p.visible, x: p.x, y: p.y, facing: p.facing, width: p.width, height: p.height } : null)));
+  const threat = split.rosters.map((r) => secretThreat(r.spawns.slice(0, r.count), isBoss));
+  const list = d.secrets ?? [];
+  const cells = secretLeaves(d.width, d.height, d.packs, list).map((x) => ({ leaf: x.leaf, secret: { kind: x.kind, a: x.a, b: x.b, c: x.c } as CellSecretArgs }));
+  return { spawns: split.spawns, packs: split.packs, rosters: split.rosters, threat, cells, declared: declaredOfDraft(list) };
+}
 
 /** Cells exactly as the chain stores them: stride 32, cells outside the map Void (0). */
 export function chainTiles(d: MapDraft): Uint8Array {
@@ -493,23 +515,37 @@ export function draftPoints(d: Pick<MapDraft, "entrance" | "exit">): GridPoint[]
   ];
 }
 
-/** create_map, write_layout, write_spawns, write_points, write_arena for each pack, finalize_map (one
- * transaction each, as the test). */
-export async function buildMapIxs(dm: TransactionSigner, d: MapDraft): Promise<{ map: Address; layout: Address; index: number; ixs: Instruction[] }> {
+/** create_map, write_layout, write_spawns, write_points, write_arena for each pack, write_secrets,
+ * finalize_map (one transaction each, as the test). Patch C: only each pack's visible monster is
+ * public; the rosters and the secrets go under the root, encrypted with `keys` (the DM's wallet's
+ * unlock signature, `mapKeys`). */
+export async function buildMapIxs(
+  dm: TransactionSigner,
+  d: MapDraft,
+  keysFor: (map: Address) => Promise<SecretKeys>,
+  isBoss: (bestiaryId: number) => boolean,
+): Promise<{ map: Address; layout: Address; index: number; ixs: Instruction[] }> {
   const index = crypto.getRandomValues(new Uint32Array(1))[0]!;
   const map = await mapPda(dm.address, index);
   const layout = await layoutPda(map);
   const edit = { dm, map, layout };
   const tiles = chainTiles(d);
   const points = mapPoints(d);
+  const design = mapDesign(d, isBoss);
+  const mapBytes = new Uint8Array(getAddressEncoder().encode(map));
+  const keys = await keysFor(map);
+  const secrets = { rosters: design.rosters, cells: design.cells };
+  const tree = await commitSecrets(mapBytes, keys, d.width, d.height, packShapes(d.packs), secrets);
+  const blob = await sealSecrets(keys, mapBytes, secrets);
   const ixs = [
     getCreateMapInstruction({ ...edit, systemProgram: SYSTEM_PROGRAM, index, width: d.width, height: d.height, tier: d.tier, minPlayers: d.minPlayers, chestRadius: d.chestRadius, settleTimeoutSecs: d.settleTimeoutSecs, biome: d.biome }),
     getWriteLayoutInstruction({ ...edit, offset: 0, cells: tiles.slice(0, (d.height - 1) * MAP_MAX + d.width) }),
-    getWriteSpawnsInstruction({ ...edit, spawns: d.spawns }),
+    getWriteSpawnsInstruction({ ...edit, spawns: design.spawns }),
     getWritePointsInstruction({ ...edit, points, bossTable: d.bossTable }),
-    ...d.packs.flatMap((pk, pack) =>
-      pk ? [getWriteArenaInstruction({ ...edit, pack, record: { visible: pk.visible, x: pk.x, y: pk.y, facing: pk.facing as Facing, width: pk.width, height: pk.height }, cells: pk.cells })] : [],
+    ...design.packs.flatMap((pk, pack) =>
+      pk ? [getWriteArenaInstruction({ ...edit, pack, record: { visible: pk.visible, x: pk.x, y: pk.y, facing: pk.facing as Facing, width: pk.width, height: pk.height }, cells: d.packs[pack]!.cells })] : [],
     ),
+    ...secretChunks(blob).map((c) => getWriteSecretsInstruction({ ...edit, ...c, threat: Uint8Array.from(design.threat), declared: Uint8Array.from(design.declared) })),
     // The builder rules read the registry bestiary, monster skills (roles, pools, slots), reward
     // tables and the tileset (patch 13).
     getFinalizeMapInstruction({
@@ -518,10 +554,17 @@ export async function buildMapIxs(dm: TransactionSigner, d: MapDraft): Promise<{
       monsterSkills: await monsterSkillsPda(),
       rewards: await rewardsPda(),
       tileset: await tilesetPda(),
-      secretsRoot: new Uint8Array(32),
+      secretsRoot: tree.root,
     }),
   ];
   return { map, layout, index, ixs };
+}
+
+/** Patch C: `write_secrets` chunks of the encrypted copy. */
+export function secretChunks(blob: Uint8Array, size = 600) {
+  const out: { offset: number; bytes: Uint8Array; len: number }[] = [];
+  for (let at = 0; at < blob.length; at += size) out.push({ offset: at, bytes: blob.slice(at, at + size), len: blob.length });
+  return out;
 }
 
 /** Patch 11: rent of what `join_session` creates: the participation, and the character's reward
@@ -1104,12 +1147,14 @@ export type Party = {
    * read with the cells, once. */
   spawns: Spawn[];
   arenas: { cells: Uint8Array[] } | null;
+  /** Patch C: the DM's encrypted copy of the map's secrets (only the DM's wallet opens it). */
+  secretsBlob: Uint8Array | null;
   /** Arena update: the cells the units stand on (`groundTiles`): the map's or the arena's. */
   ground: Uint8Array | null;
 };
 
 /** What a layout read gives besides its cells: a caller passes the cells back, the rest comes along. */
-type LayoutExtras = { points: GridPoint[]; spawns: Spawn[]; arenas: { cells: Uint8Array[] } | null };
+type LayoutExtras = { points: GridPoint[]; spawns: Spawn[]; arenas: { cells: Uint8Array[] } | null; secretsBlob: Uint8Array | null };
 const LAYOUT_EXTRAS = new WeakMap<Uint8Array, LayoutExtras>();
 
 /** Arena update: where the party is (`GameSession.mode`). */
@@ -1138,11 +1183,114 @@ export function groundTiles(p: Pick<Party, "session" | "tiles" | "arenas">): Uin
 }
 
 /** On the map: each living pack's visible monster, its template and its cell (it stands still). */
-export function visiblePacks(p: Pick<Party, "session" | "spawns">): { pack: number; bestiaryId: number; x: number; y: number; facing: number }[] {
+/** Patch C: an ambush pack shows no monster; each visible one carries its pack's declared threat. */
+export function visiblePacks(p: Pick<Party, "session" | "spawns">): { pack: number; bestiaryId: number; x: number; y: number; facing: number; threat: number }[] {
   if (inArena(p.session)) return [];
   return p.session.packs.flatMap((pk, pack) =>
-    pk.width && p.session.packsAlive & (1 << pack) ? [{ pack, bestiaryId: p.spawns[pk.visible]?.bestiaryId ?? 0, x: pk.x, y: pk.y, facing: pk.facing as number }] : [],
+    pk.width && pk.visible !== NO_SPAWN && p.session.packsAlive & (1 << pack)
+      ? [{ pack, bestiaryId: p.spawns[pk.visible]?.bestiaryId ?? 0, x: pk.x, y: pk.y, facing: pk.facing as number, threat: p.session.threat[pack] ?? 0 }]
+      : [],
   );
+}
+
+/** Patch C: `PackLayout.visible` of an ambush pack. */
+export const NO_SPAWN = 0xff;
+
+/** Patch C: the map's leaf numbering as the session counts it. */
+export function sessionLeaves(s: GameSessionAcc): Leaves {
+  const onMap = !inArena(s) ;
+  const w = onMap ? s.width : s.mapWidth;
+  const h = onMap ? s.height : s.mapHeight;
+  return new Leaves(w, h, s.packs.map((pk) => (pk.width ? { width: pk.width, height: pk.height } : null)));
+}
+
+const SECRET_KINDS = ["trap", "trap", "ambush", "stash", "door"] as const;
+
+/** Patch C: the secrets found so far on the ground the party stands on, highlighted on the grid
+ * (an unfound secret looks like its floor or wall: it is not drawn at all). */
+export function foundSecrets(s: GameSessionAcc): GridSecret[] {
+  const leaves = sessionLeaves(s);
+  const ground = inArena(s) ? s.arenaPack : null;
+  return s.found.slice(0, s.foundCount).flatMap((f) => {
+    const b = leaves.board(f.leaf);
+    if (!b || b.kind === "pack" || (b.kind === "map" ? ground !== null : b.pack !== ground)) return [];
+    const kind = SECRET_KINDS[f.secret.kind as number] ?? "trap";
+    const label = kind === "trap" ? `Trap (${f.secret.a} damage)` : kind === "ambush" ? "Ambush trap" : kind === "stash" ? "Hidden stash" : "Secret door";
+    return [{ x: b.x, y: b.y, kind, found: true, label }];
+  });
+}
+
+/** Patch C: `reveal_cell` by the DM (main wallet or session key): leaf `leaf` with its contents,
+ * salt and proof; `by`: the participation of the player who uncovered it (a trap hits them). */
+export async function revealCellIx(
+  dm: Actor,
+  session: Address,
+  s: GameSessionAcc,
+  leaf: number,
+  reveal: { secret: CellSecretArgs; salt: Uint8Array; proof: Uint8Array[] },
+  by: Address | null,
+): Promise<Instruction> {
+  return getRevealCellInstruction({
+    signer: dm.signer,
+    session,
+    layout: s.layout,
+    participation: opt(by),
+    monsters: await monstersPda(session),
+    rewards: await rewardsPda(),
+    sessionToken: opt(dm.token),
+    leaf,
+    secret: reveal.secret,
+    salt: reveal.salt,
+    proof: reveal.proof,
+  });
+}
+
+/** Patch C: `reveal_pack` by the DM: pack `pack`'s roster with its salt and proof. */
+export const REVEAL_PACK_CU = 400_000;
+export async function revealPackIx(dm: Actor, session: Address, s: GameSessionAcc, pack: number, reveal: { roster: Roster; salt: Uint8Array; proof: Uint8Array[] }): Promise<Instruction[]> {
+  const ix = getRevealPackInstruction({
+    signer: dm.signer,
+    session,
+    layout: s.layout,
+    monsters: await monstersPda(session),
+    bestiary: await bestiaryPda(),
+    monsterSkills: await monsterSkillsPda(),
+    rewards: await rewardsPda(),
+    sessionToken: opt(dm.token),
+    pack,
+    count: reveal.roster.count,
+    spawns: reveal.roster.spawns,
+    salt: reveal.salt,
+    proof: reveal.proof,
+  });
+  return [computeLimitIx(REVEAL_PACK_CU), ix];
+}
+
+/** Patch C: the DM's secrets of a party, opened with the DM's wallet: the commitment the reveals
+ * take their contents, salts and proofs from, every secret leaf and the used packs (the audit). */
+export type DmSecrets = { commitment: Commitment; leaves: number[]; packs: number[] };
+export async function openDmSecrets(p: Party, signer: MessageSigner): Promise<DmSecrets> {
+  if (!p.secretsBlob || !p.map) throw new Error("the map's secrets are not loaded yet");
+  const mapBytes = new Uint8Array(getAddressEncoder().encode(p.session.core.map));
+  const keys = await mapKeys(signer, mapBytes);
+  const secrets = await openSecrets(keys, mapBytes, p.secretsBlob);
+  const shapes = p.session.packs.map((pk) => (pk.width ? { width: pk.width, height: pk.height } : null));
+  const commitment = await commitSecrets(mapBytes, keys, p.map.core.width, p.map.core.height, shapes, secrets);
+  if (commitment.root.some((b, i) => b !== p.map!.core.secretsRoot[i])) throw new Error("these secrets do not match the map's root");
+  return { commitment, leaves: secrets.cells.map((c) => c.leaf), packs: shapes.flatMap((x, n) => (x ? [n] : [])) };
+}
+
+/** Patch C: a player examines the cell `(x, y)` next to them (an interaction, AP). */
+export async function examineIx(actor: Actor, session: Address, character: Address, x: number, y: number): Promise<Instruction> {
+  return getExamineInstruction({
+    signer: actor.signer,
+    session,
+    participation: await participationPda(session, character),
+    monsters: await monstersPda(session),
+    sessionToken: opt(actor.token),
+    x,
+    y,
+  });
 }
 
 /** Arena update: `enter_arena` and `leave_arena`, any participant's signer pays; each living
@@ -1168,7 +1316,7 @@ export async function leaveArenaIx(session: Address, s: GameSessionAcc, payer: T
 }
 
 export async function readParty(address: Address, tiles: Uint8Array | null = null, prev: Party | null = null): Promise<Party | null> {
-  let extras: LayoutExtras = (tiles && LAYOUT_EXTRAS.get(tiles)) ?? { points: [], spawns: [], arenas: null };
+  let extras: LayoutExtras = (tiles && LAYOUT_EXTRAS.get(tiles)) ?? { points: [], spawns: [], arenas: null, secretsBlob: null };
   // With the previous read of the same party, the player, participation, character, map and layout
   // addresses are already known, so everything comes in ONE getMultipleAccounts call. If the roster
   // or the map changed (a join), the guess is wrong and the second call fetches the right accounts.
@@ -1208,6 +1356,7 @@ export async function readParty(address: Address, tiles: Uint8Array | null = nul
       points: layout ? layoutPoints(layout) : [],
       spawns: layout ? layout.spawns.slice(0, layout.spawnCount).map((x) => ({ ...x })) : [],
       arenas: decodedLayout ? { cells: decodedLayout.arenas.cells.map((c) => Uint8Array.from(c)) } : null,
+      secretsBlob: decodedLayout ? Uint8Array.from(decodedLayout.secrets.blob).slice(0, decodedLayout.secrets.blobLen) : null,
     };
     if (tiles) LAYOUT_EXTRAS.set(tiles, extras);
   }
@@ -1251,6 +1400,7 @@ export async function readParty(address: Address, tiles: Uint8Array | null = nul
     tiles,
     points: extras.points,
     spawns: extras.spawns,
+    secretsBlob: extras.secretsBlob,
     arenas: extras.arenas,
   };
 }

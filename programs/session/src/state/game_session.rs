@@ -1,11 +1,13 @@
 use anchor_lang::prelude::*;
+use deadroll_mapcheck::secrets::{Board, Leaves};
 use deadroll_rules::{
     aura::{Aura, AuraField, MonsterAuraField, PartyAuras, PlayerAuras, AURAS_PER_PLAYER},
     exit::Vote,
 };
 use deadroll_types::{
-    Aspect, Cell, GameSessionData, MapPoint, PackLayout, ARENA_MONSTERS_MAX, CHESTS_MAX,
-    MONSTERS_MAX, PACKS_MAX, PARTY_MAX, TILE_KINDS_MAX,
+    Aspect, Cell, FoundSecret, GameSessionData, MapPoint, PackLayout, SecretKind, Spawn,
+    ARENA_MONSTERS_MAX, CHESTS_MAX, MONSTERS_MAX, NO_SPAWN, OBLIGATIONS_MAX, PACKS_MAX, PARTY_MAX,
+    SECRETS_MAX, SECRET_LEAVES_MAX, SECRET_TYPES, SPAWNS_MAX, TILE_KINDS_MAX,
 };
 
 use super::{
@@ -198,8 +200,42 @@ pub struct GameSession {
     /// Bit per pack number whose next fight starts with the retreat buff (cleared when it starts).
     pub packs_buffed: u8,
     /// Bit per layout spawn killed in an arena the party retreated from: it stays dead.
+    /// Patch C: per revealed spawn (`spawns`).
     pub dead_spawns: u32,
+    // Patch C: secrets under the Merkle root (docs/MAP_DESCRIPTION.md 8, 11, 17.5).
+    /// The map's `secrets_root`, its leaf count (`deadroll_mapcheck::secrets::Leaves`) and the
+    /// public part: each pack's threat, the declared counts (copied at `open_session`).
+    pub secrets_root: [u8; 32],
+    pub leaf_count: u16,
+    pub declared: [u8; SECRET_TYPES],
+    pub threat: [u8; PACKS_MAX],
+    /// Bit per leaf the DM revealed.
+    pub revealed: [u8; REVEALED_BYTES],
+    /// Secrets of each type revealed (`SecretKind::counted`), never above `declared`.
+    pub found_counts: [u8; SECRET_TYPES],
+    /// The secrets revealed, in order (`found_count` used): what the party sees.
+    pub found: [FoundSecret; SECRETS_MAX],
+    pub found_count: u8,
+    /// Bit per pack number whose composition the DM revealed.
+    pub packs_revealed: u8,
+    /// The DM's obligations (MAP 8.5): leaves to reveal before any other action
+    /// (`obligation_count` used), and the player whose step or look made them.
+    pub obligations: [u16; OBLIGATIONS_MAX],
+    pub obligation_count: u8,
+    pub obliged_by: u8,
+    /// The revealed packs' monsters, pack by pack in reveal order (`spawn_count` used): the
+    /// spawns `enter_arena` loads and `dead_spawns` counts.
+    pub spawns: [Spawn; SPAWNS_MAX],
+    pub spawn_count: u8,
+    /// The map's totals over the revealed packs (`deadroll_mapcheck::roster::RosterTotals`):
+    /// monsters, elites, bosses, packs.
+    pub roster_totals: [u8; 4],
+    /// The chests of the map; the hidden stashes found follow them in `chests`.
+    pub visible_chests: u8,
 }
+
+/// Patch C: bytes of `GameSession.revealed`, a bit per leaf.
+pub const REVEALED_BYTES: usize = SECRET_LEAVES_MAX.div_ceil(8);
 
 /// Arena update: where the party is.
 #[derive(
@@ -328,20 +364,136 @@ impl GameSession {
     }
 
     /// On the map: the cells of the visible monsters of the living packs (they occupy them).
-    /// Nothing in an arena.
+    /// Nothing in an arena. Patch C: an ambush pack shows none.
     pub fn visible_monsters(&self) -> impl Iterator<Item = Cell> + '_ {
         let on_map = self.ground().is_none();
         self.living_packs()
-            .filter(move |_| on_map)
+            .filter(move |(_, p)| on_map && p.visible != NO_SPAWN)
             .map(|(_, p)| p.cell())
     }
 
     /// The living pack whose visible monster stands next to `c` (Chebyshev distance 1), lowest
-    /// number first: stepping onto `c` engages it (docs/PARTY_AND_TURNS.md 4.1.3).
+    /// number first: stepping onto `c` engages it (docs/PARTY_AND_TURNS.md 4.1.3). Patch C: an
+    /// ambush pack only by its trap.
     pub fn pack_next_to(&self, c: Cell) -> Option<u8> {
         self.living_packs()
-            .find(|(_, p)| deadroll_mapcheck::walk::adjacent(p.cell(), c))
+            .find(|(_, p)| p.visible != NO_SPAWN && deadroll_mapcheck::walk::adjacent(p.cell(), c))
             .map(|(n, _)| n)
+    }
+
+    /// Patch C: the map's size, also while the party is in an arena.
+    pub fn map_dims(&self) -> (u8, u8) {
+        match self.ground() {
+            None => (self.width, self.height),
+            Some(_) => (self.map_width, self.map_height),
+        }
+    }
+
+    /// Patch C: the map's leaf numbering.
+    pub fn leaves(&self) -> Leaves {
+        let (w, h) = self.map_dims();
+        Leaves::new(w, h, &self.packs)
+    }
+
+    /// Patch C: the leaf of cell `c` of the ground the units stand on.
+    pub fn leaf_here(&self, c: Cell) -> Option<u16> {
+        let board = match self.ground() {
+            None => Board::Map(c),
+            Some(pack) => Board::Arena(pack, c),
+        };
+        self.leaves().of(board)
+    }
+
+    pub fn is_revealed(&self, leaf: u16) -> bool {
+        self.revealed
+            .get(leaf as usize / 8)
+            .is_some_and(|b| b & (1 << (leaf % 8)) != 0)
+    }
+
+    pub fn set_revealed(&mut self, leaf: u16) {
+        if let Some(b) = self.revealed.get_mut(leaf as usize / 8) {
+            *b |= 1 << (leaf % 8);
+        }
+    }
+
+    /// Patch C: the obligations in use.
+    pub fn obligation_list(&self) -> &[u16] {
+        &self.obligations[..(self.obligation_count as usize).min(OBLIGATIONS_MAX)]
+    }
+
+    /// Patch C: the DM owes no reveal (docs/MAP_DESCRIPTION.md 8.5: until the obligations are
+    /// fulfilled, the party's next turn does not go through).
+    pub fn require_no_reveals(&self) -> Result<()> {
+        require!(
+            self.obligation_count == 0,
+            crate::errors::SessionError::RevealsPending
+        );
+        Ok(())
+    }
+
+    /// Patch C: the DM must reveal `leaf` (once; a revealed leaf needs nothing). `false` when
+    /// the list is full.
+    pub fn oblige(&mut self, leaf: u16) -> bool {
+        if self.is_revealed(leaf) || self.obligation_list().contains(&leaf) {
+            return true;
+        }
+        let n = self.obligation_count as usize;
+        if n >= OBLIGATIONS_MAX {
+            return false;
+        }
+        self.obligations[n] = leaf;
+        self.obligation_count += 1;
+        true
+    }
+
+    /// Patch C: takes `leaf` off the obligations; `false` if it was not on them.
+    pub fn fulfil(&mut self, leaf: u16) -> bool {
+        let list = self.obligation_list();
+        let Some(i) = list.iter().position(|&l| l == leaf) else {
+            return false;
+        };
+        let n = list.len();
+        self.obligations.copy_within(i + 1..n, i);
+        self.obligations[n - 1] = 0;
+        self.obligation_count -= 1;
+        true
+    }
+
+    /// Patch C: the secrets found so far.
+    pub fn found_list(&self) -> &[FoundSecret] {
+        &self.found[..(self.found_count as usize).min(SECRETS_MAX)]
+    }
+
+    /// Patch C: a secret door found on cell `c` of the ground the units stand on: a door now.
+    pub fn door_found_at(&self, c: Cell) -> bool {
+        self.found_count != 0
+            && self.leaf_here(c).is_some_and(|leaf| {
+                self.found_list()
+                    .iter()
+                    .any(|f| f.leaf == leaf && f.secret.kind == SecretKind::Door)
+            })
+    }
+
+    /// Patch C: the revealed spawns in use.
+    pub fn spawn_list(&self) -> &[Spawn] {
+        &self.spawns[..(self.spawn_count as usize).min(SPAWNS_MAX)]
+    }
+
+    /// Patch C: the used packs, bit per pack number.
+    pub fn used_packs(&self) -> u8 {
+        self.packs
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.is_used())
+            .fold(0, |m, (n, _)| m | 1 << n)
+    }
+
+    /// Patch C: the DM's final audit is done (docs/PARTY_AND_TURNS.md 3.2): every declared secret
+    /// and every pack revealed, the map's one boss among them.
+    pub fn audit_done(&self) -> bool {
+        self.found_counts == self.declared
+            && self.packs_revealed == self.used_packs()
+            && self.roster_totals[2] == deadroll_mapcheck::limits::BOSSES
     }
 
     /// The used chests.
@@ -537,5 +689,72 @@ mod tests {
         s.chests_opened = 1;
         assert!(!s.closed_chest_at(Cell { x: 2, y: 2 }));
         assert_eq!(s.closed_chests().count(), 0);
+    }
+
+    /// Patch C: an ambush pack shows no monster and engages only by its trap.
+    #[test]
+    fn an_ambush_pack_is_not_on_the_map() {
+        let mut s = with_packs();
+        s.packs[3].visible = deadroll_types::NO_SPAWN;
+        assert_eq!(
+            s.visible_monsters().collect::<Vec<_>>(),
+            [Cell { x: 4, y: 4 }]
+        );
+        assert_eq!(s.pack_next_to(Cell { x: 6, y: 6 }), None);
+        assert_eq!(s.used_packs(), 0b1010);
+    }
+
+    /// Patch C: the obligations, the revealed leaves, a found door, the audit.
+    #[test]
+    fn obligations_block_until_revealed() {
+        use deadroll_types::{CellSecret, FoundSecret, OBLIGATIONS_MAX};
+        let mut s = with_packs();
+        assert!(s.require_no_reveals().is_ok());
+        let (w, h) = s.map_dims();
+        assert_eq!((w, h), (s.width, s.height));
+        let leaf = s.leaf_here(Cell { x: 1, y: 1 }).unwrap();
+        assert_eq!(leaf as usize, deadroll_types::PACK_LEAVES + w as usize + 1);
+        assert!(s.oblige(leaf));
+        assert!(s.oblige(leaf), "once");
+        assert_eq!(s.obligation_list(), &[leaf]);
+        assert!(s.require_no_reveals().is_err());
+        assert!(s.fulfil(leaf));
+        assert!(!s.fulfil(leaf));
+        assert!(s.require_no_reveals().is_ok());
+        // A revealed leaf needs nothing; the list holds `OBLIGATIONS_MAX`.
+        s.set_revealed(leaf);
+        assert!(s.is_revealed(leaf) && !s.is_revealed(leaf + 1));
+        assert!(s.oblige(leaf));
+        assert_eq!(s.obligation_count, 0);
+        for l in 0..OBLIGATIONS_MAX as u16 {
+            assert!(s.oblige(100 + l));
+        }
+        assert!(!s.oblige(500));
+        // The middle one goes, the order stays.
+        assert!(s.fulfil(101));
+        assert_eq!(s.obligation_list()[..2], [100, 102]);
+
+        // A secret door found on the ground the party stands on.
+        let door = Cell { x: 2, y: 3 };
+        assert!(!s.door_found_at(door));
+        s.found[0] = FoundSecret {
+            leaf: s.leaf_here(door).unwrap(),
+            secret: CellSecret::door(),
+        };
+        s.found_count = 1;
+        assert!(s.door_found_at(door));
+        assert!(!s.door_found_at(Cell { x: 3, y: 3 }));
+
+        // The audit: every declared secret, every pack, one boss.
+        s.declared = [0, 0, 0, 1];
+        s.found_counts = [0, 0, 0, 1];
+        s.packs_revealed = 0b0010;
+        assert!(!s.audit_done());
+        s.packs_revealed = 0b1010;
+        assert!(!s.audit_done(), "no boss among them");
+        s.roster_totals[2] = 1;
+        assert!(s.audit_done());
+        s.declared[0] = 1;
+        assert!(!s.audit_done());
     }
 }

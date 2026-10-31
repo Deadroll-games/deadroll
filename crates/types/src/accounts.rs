@@ -17,10 +17,11 @@
 
 use crate::{
     Aspect, BuildingKind, BuildingStatus, Class, EquipSlot, EquipSource, Facing, ItemBase,
-    LayerRef, MapStatus, PointKind, Pubkey, Race, Requirement, RewardKind, SessionStatus,
-    StateKind, ARENA_CELLS, ARENA_SIDE_MAX, BAG_CONSUMABLE_SLOTS, BAG_RESOURCE_SLOTS, CACHE_BYTES,
-    CACHE_SLOTS, CHESTS_MAX, CITY_CELLS, CITY_OBJECTS_MAX, EMPTY_ITEM, EQUIP_SLOTS, LAYERS_MAX,
-    MAP_CELLS, MONSTERS_MAX, PACKS_MAX, PARTY_MAX, POINTS_MAX, PROGRAMS_COUNT, SOULBOUND_MAX,
+    LayerRef, MapStatus, PointKind, Pubkey, Race, Requirement, RewardKind, SecretKind,
+    SessionStatus, StateKind, ARENA_CELLS, ARENA_MONSTERS_MAX, ARENA_SIDE_MAX,
+    BAG_CONSUMABLE_SLOTS, BAG_RESOURCE_SLOTS, CACHE_BYTES, CACHE_SLOTS, CHESTS_MAX, CITY_CELLS,
+    CITY_OBJECTS_MAX, EMPTY_ITEM, EQUIP_SLOTS, LAYERS_MAX, MAP_CELLS, MONSTERS_MAX, PACKS_MAX,
+    PARTY_MAX, POINTS_MAX, PROGRAMS_COUNT, SECRETS_BLOB_MAX, SECRET_TYPES, SOULBOUND_MAX,
     SPAWNS_MAX, STATES_MAX, STATS_COUNT, TURN_ORDER_MAX, URI_BASE_LEN,
 };
 
@@ -774,4 +775,143 @@ impl TavernBoardData {
 
 impl QuestData {
     pub const SIZE: usize = 1 + PUBKEY * 4 + 1 + 1 + 1 + 8 + 8 + 1;
+}
+
+// Patch C: secrets under the Merkle root (docs/MAP_DESCRIPTION.md 8, 17.4, 17.5).
+shared! {
+    /// What one cell hides: the contents of its leaf. `a`, `b`, `c` by kind: a trap's damage and
+    /// detection difficulty; an ambush's pack number; a hidden stash's reward table id; nothing
+    /// for a secret door. `kind == None`: the cell hides nothing (every byte 0).
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct CellSecret {
+        pub kind: SecretKind,
+        pub a: u8,
+        pub b: u8,
+        pub c: u8,
+    }
+
+    /// A pack's composition, the contents of its leaf: `spawns[..count]`, the monster shown on the
+    /// map first (equal to its public spawn). The unused entries are all zero.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct PackRoster {
+        pub count: u8,
+        pub spawns: [Spawn; ARENA_MONSTERS_MAX],
+    }
+
+    /// A secret the party found (or the audit revealed): its leaf and contents.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct FoundSecret {
+        pub leaf: u16,
+        pub secret: CellSecret,
+    }
+
+    /// The public part of a map's secrets and the DM's encrypted copy, in the map program's
+    /// `MapLayout` after the arenas.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct MapSecretsData {
+        /// Each pack's threat level, declared openly (0 for an unused pack number).
+        pub threat: [u8; PACKS_MAX],
+        /// How many secrets of each type the map holds (`SecretKind::counted`).
+        pub declared: [u8; SECRET_TYPES],
+        /// Bytes of `blob` in use.
+        pub blob_len: u16,
+        /// The DM's secrets, encrypted on the website (opaque to the programs).
+        pub blob: [u8; SECRETS_BLOB_MAX],
+    }
+}
+
+impl CellSecret {
+    pub const SIZE: usize = SecretKind::SIZE + 3;
+    pub const NONE: CellSecret = CellSecret {
+        kind: SecretKind::None,
+        a: 0,
+        b: 0,
+        c: 0,
+    };
+
+    pub const fn trap(damage: u8, difficulty: u8) -> CellSecret {
+        CellSecret {
+            kind: SecretKind::Trap,
+            a: damage,
+            b: difficulty,
+            c: 0,
+        }
+    }
+
+    pub const fn ambush(pack: u8) -> CellSecret {
+        CellSecret {
+            kind: SecretKind::Ambush,
+            a: pack,
+            b: 0,
+            c: 0,
+        }
+    }
+
+    pub const fn stash(table: u8) -> CellSecret {
+        CellSecret {
+            kind: SecretKind::Stash,
+            a: table,
+            b: 0,
+            c: 0,
+        }
+    }
+
+    pub const fn door() -> CellSecret {
+        CellSecret {
+            kind: SecretKind::Door,
+            a: 0,
+            b: 0,
+            c: 0,
+        }
+    }
+
+    /// The leaf bytes.
+    pub const fn bytes(&self) -> [u8; CellSecret::SIZE] {
+        [self.kind as u8, self.a, self.b, self.c]
+    }
+}
+
+impl PackRoster {
+    pub const SIZE: usize = 1 + ARENA_MONSTERS_MAX * Spawn::SIZE;
+
+    /// The monsters in use.
+    pub fn list(&self) -> &[Spawn] {
+        &self.spawns[..(self.count as usize).min(ARENA_MONSTERS_MAX)]
+    }
+
+    /// The leaf bytes: the count, then every entry in `Spawn` borsh order.
+    pub fn bytes(&self) -> [u8; PackRoster::SIZE] {
+        let mut out = [0u8; PackRoster::SIZE];
+        out[0] = self.count;
+        for (i, s) in self.spawns.iter().enumerate() {
+            let at = 1 + i * Spawn::SIZE;
+            let skills = s.skills.to_le_bytes();
+            out[at..at + Spawn::SIZE].copy_from_slice(&[
+                s.bestiary_id,
+                s.x,
+                s.y,
+                s.level,
+                skills[0],
+                skills[1],
+                s.flags,
+                s.aspects,
+                s.pack,
+            ]);
+        }
+        out
+    }
+}
+
+impl FoundSecret {
+    pub const SIZE: usize = 2 + CellSecret::SIZE;
+}
+
+impl MapSecretsData {
+    pub const SIZE: usize = PACKS_MAX + SECRET_TYPES + 2 + SECRETS_BLOB_MAX;
+    pub const EMPTY: MapSecretsData = MapSecretsData {
+        threat: [0; PACKS_MAX],
+        declared: [0; SECRET_TYPES],
+        blob_len: 0,
+        blob: [0; SECRETS_BLOB_MAX],
+    };
 }

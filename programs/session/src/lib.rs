@@ -19,6 +19,7 @@ pub mod outcomes;
 pub mod party;
 pub mod reactions;
 pub mod rules;
+pub mod secrets;
 pub mod settlement;
 pub mod state;
 pub mod turns;
@@ -173,5 +174,36 @@ pub mod deadroll_session {
     /// its participation, the DM's without one); the old key stops passing.
     pub fn set_session_key(ctx: Context<SetSessionKey>, session_key: Pubkey) -> Result<()> {
         set_session_key::handler(ctx, session_key)
+    }
+
+    /// Patch C: the DM (main wallet or session key) reveals a leaf of the map's secrets with its
+    /// Merkle proof: an obligation during the party (its trap, ambush, stash or door takes
+    /// effect), any leaf in the final audit.
+    pub fn reveal_cell(
+        ctx: Context<RevealCell>,
+        leaf: u16,
+        secret: deadroll_types::CellSecret,
+        salt: [u8; 16],
+        proof: Vec<[u8; 32]>,
+    ) -> Result<()> {
+        reveal_cell::handler(ctx, leaf, secret, salt, proof)
+    }
+
+    /// Patch C: the DM (main wallet or session key) reveals a pack's composition with its Merkle
+    /// proof: the engaged pack during the party, any pack left in the final audit; its threat is
+    /// checked.
+    pub fn reveal_pack(
+        ctx: Context<RevealPack>,
+        pack: u8,
+        roster: deadroll_types::PackRoster,
+        salt: [u8; 16],
+        proof: Vec<[u8; 32]>,
+    ) -> Result<()> {
+        reveal_pack::handler(ctx, pack, roster, salt, proof)
+    }
+
+    /// Patch C: a player examines the cell next to them on their turn (AP); the DM must reveal it.
+    pub fn examine(ctx: Context<Examine>, x: u8, y: u8) -> Result<()> {
+        examine::handler(ctx, x, y)
     }
 }

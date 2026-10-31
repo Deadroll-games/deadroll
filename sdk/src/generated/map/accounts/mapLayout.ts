@@ -37,10 +37,14 @@ import {
   getMapArenasDataEncoder,
   getMapLayoutDataV2Decoder,
   getMapLayoutDataV2Encoder,
+  getMapSecretsDataDecoder,
+  getMapSecretsDataEncoder,
   type MapArenasData,
   type MapArenasDataArgs,
   type MapLayoutDataV2,
   type MapLayoutDataV2Args,
+  type MapSecretsData,
+  type MapSecretsDataArgs,
 } from "../types/index.js";
 
 export const MAP_LAYOUT_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Array([
@@ -55,11 +59,13 @@ export type MapLayout = {
   discriminator: ReadonlyUint8Array;
   core: MapLayoutDataV2;
   arenas: MapArenasData;
+  secrets: MapSecretsData;
 };
 
 export type MapLayoutArgs = {
   core: MapLayoutDataV2Args;
   arenas: MapArenasDataArgs;
+  secrets: MapSecretsDataArgs;
 };
 
 /** Gets the encoder for {@link MapLayoutArgs} account data. */
@@ -69,6 +75,7 @@ export function getMapLayoutEncoder(): FixedSizeEncoder<MapLayoutArgs> {
       ["discriminator", fixEncoderSize(getBytesEncoder(), 8)],
       ["core", getMapLayoutDataV2Encoder()],
       ["arenas", getMapArenasDataEncoder()],
+      ["secrets", getMapSecretsDataEncoder()],
     ]),
     (value) => ({ ...value, discriminator: MAP_LAYOUT_DISCRIMINATOR }),
   );
@@ -80,6 +87,7 @@ export function getMapLayoutDecoder(): FixedSizeDecoder<MapLayout> {
     ["discriminator", fixDecoderSize(getBytesDecoder(), 8)],
     ["core", getMapLayoutDataV2Decoder()],
     ["arenas", getMapArenasDataDecoder()],
+    ["secrets", getMapSecretsDataDecoder()],
   ]);
 }
 
@@ -142,5 +150,5 @@ export async function fetchAllMaybeMapLayout(
 }
 
 export function getMapLayoutSize(): number {
-  return 2509;
+  return 3323;
 }

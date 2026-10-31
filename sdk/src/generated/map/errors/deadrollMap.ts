@@ -156,8 +156,51 @@ export const DEADROLL_MAP_ERROR__TOO_MANY_TEMPLATES = 0x17b4; // 6068
 export const DEADROLL_MAP_ERROR__ARENA_CELLS_MISMATCH = 0x17b5; // 6069
 /** InvalidLayout: Not a map layout of this program in the current format */
 export const DEADROLL_MAP_ERROR__INVALID_LAYOUT = 0x17b6; // 6070
+/** SecretInvalid: A secret has a bad kind for its place or unused bytes set */
+export const DEADROLL_MAP_ERROR__SECRET_INVALID = 0x17b7; // 6071
+/** SecretNotPassable: A trap or an ambush is on a cell that cannot be entered */
+export const DEADROLL_MAP_ERROR__SECRET_NOT_PASSABLE = 0x17b8; // 6072
+/** SecretOnPoint: A trap or an ambush is on the entrance, the exit, a chest or a pack */
+export const DEADROLL_MAP_ERROR__SECRET_ON_POINT = 0x17b9; // 6073
+/** TrapDamageOutOfRange: Trap damage is 0 or above the tier's limit */
+export const DEADROLL_MAP_ERROR__TRAP_DAMAGE_OUT_OF_RANGE = 0x17ba; // 6074
+/** AmbushPackInvalid: An ambush is linked to a pack that is not an ambush pack */
+export const DEADROLL_MAP_ERROR__AMBUSH_PACK_INVALID = 0x17bb; // 6075
+/** AmbushInArena: An ambush trap is in an arena */
+export const DEADROLL_MAP_ERROR__AMBUSH_IN_ARENA = 0x17bc; // 6076
+/** StashInArena: A hidden stash is in an arena */
+export const DEADROLL_MAP_ERROR__STASH_IN_ARENA = 0x17bd; // 6077
+/** DoorNotWall: A secret door is on a cell that can be entered */
+export const DEADROLL_MAP_ERROR__DOOR_NOT_WALL = 0x17be; // 6078
+/** TooManySecrets: More secrets than the tier allows or than declared */
+export const DEADROLL_MAP_ERROR__TOO_MANY_SECRETS = 0x17bf; // 6079
+/** TooFewTraps: Fewer declared traps than the tier needs */
+export const DEADROLL_MAP_ERROR__TOO_FEW_TRAPS = 0x17c0; // 6080
+/** AmbushUnlinked: Not exactly one ambush trap per ambush pack */
+export const DEADROLL_MAP_ERROR__AMBUSH_UNLINKED = 0x17c1; // 6081
+/** ThreatOutOfRange: A used pack has threat 0, or an unused one a threat */
+export const DEADROLL_MAP_ERROR__THREAT_OUT_OF_RANGE = 0x17c2; // 6082
+/** ThreatMismatch: The pack's composition does not give its declared threat */
+export const DEADROLL_MAP_ERROR__THREAT_MISMATCH = 0x17c3; // 6083
+/** RosterInvalid: A pack composition is empty, too big or has a monster of another pack */
+export const DEADROLL_MAP_ERROR__ROSTER_INVALID = 0x17c4; // 6084
+/** VisibleMismatch: A pack composition does not start with the pack's public monster */
+export const DEADROLL_MAP_ERROR__VISIBLE_MISMATCH = 0x17c5; // 6085
+/** SpawnNotVisible: A public spawn is not the visible monster of its pack */
+export const DEADROLL_MAP_ERROR__SPAWN_NOT_VISIBLE = 0x17c6; // 6086
+/** TooFewSecrets: Fewer secrets of a type than declared */
+export const DEADROLL_MAP_ERROR__TOO_FEW_SECRETS = 0x17c7; // 6087
+/** DuplicateSecret: Two secrets on one cell */
+export const DEADROLL_MAP_ERROR__DUPLICATE_SECRET = 0x17c8; // 6088
+/** SecretsOutOfRange: Encrypted secrets chunk goes past the end of the blob */
+export const DEADROLL_MAP_ERROR__SECRETS_OUT_OF_RANGE = 0x17c9; // 6089
+/** SecretsMissing: The map has no secrets root or no encrypted secrets */
+export const DEADROLL_MAP_ERROR__SECRETS_MISSING = 0x17ca; // 6090
 
 export type DeadrollMapError =
+  | typeof DEADROLL_MAP_ERROR__AMBUSH_IN_ARENA
+  | typeof DEADROLL_MAP_ERROR__AMBUSH_PACK_INVALID
+  | typeof DEADROLL_MAP_ERROR__AMBUSH_UNLINKED
   | typeof DEADROLL_MAP_ERROR__ARENA_CELLS_MISMATCH
   | typeof DEADROLL_MAP_ERROR__ARENA_INVALID_TILE
   | typeof DEADROLL_MAP_ERROR__ARENA_NO_ROOM
@@ -173,6 +216,8 @@ export type DeadrollMapError =
   | typeof DEADROLL_MAP_ERROR__CHEST_RADIUS_OUT_OF_RANGE
   | typeof DEADROLL_MAP_ERROR__CHEST_UNREACHABLE
   | typeof DEADROLL_MAP_ERROR__CHUNK_OUT_OF_RANGE
+  | typeof DEADROLL_MAP_ERROR__DOOR_NOT_WALL
+  | typeof DEADROLL_MAP_ERROR__DUPLICATE_SECRET
   | typeof DEADROLL_MAP_ERROR__ELITE_BOSS
   | typeof DEADROLL_MAP_ERROR__ENTRANCE_COUNT
   | typeof DEADROLL_MAP_ERROR__ENTRANCE_MISMATCH
@@ -206,33 +251,51 @@ export type DeadrollMapError =
   | typeof DEADROLL_MAP_ERROR__POINT_NOT_PASSABLE
   | typeof DEADROLL_MAP_ERROR__POINT_OUT_OF_BOUNDS
   | typeof DEADROLL_MAP_ERROR__POINT_OVERLAP
+  | typeof DEADROLL_MAP_ERROR__ROSTER_INVALID
+  | typeof DEADROLL_MAP_ERROR__SECRET_INVALID
+  | typeof DEADROLL_MAP_ERROR__SECRET_NOT_PASSABLE
+  | typeof DEADROLL_MAP_ERROR__SECRET_ON_POINT
+  | typeof DEADROLL_MAP_ERROR__SECRETS_MISSING
+  | typeof DEADROLL_MAP_ERROR__SECRETS_OUT_OF_RANGE
   | typeof DEADROLL_MAP_ERROR__SETTLE_TIMEOUT_OUT_OF_RANGE
   | typeof DEADROLL_MAP_ERROR__SIZE_OUT_OF_RANGE
   | typeof DEADROLL_MAP_ERROR__SPAWN_NOT_PASSABLE
+  | typeof DEADROLL_MAP_ERROR__SPAWN_NOT_VISIBLE
   | typeof DEADROLL_MAP_ERROR__SPAWN_OUT_OF_BOUNDS
   | typeof DEADROLL_MAP_ERROR__SPAWN_OVERLAP
   | typeof DEADROLL_MAP_ERROR__SPAWN_UNREACHABLE
+  | typeof DEADROLL_MAP_ERROR__STASH_IN_ARENA
   | typeof DEADROLL_MAP_ERROR__TABLE_NOT_ALLOWED
+  | typeof DEADROLL_MAP_ERROR__THREAT_MISMATCH
+  | typeof DEADROLL_MAP_ERROR__THREAT_OUT_OF_RANGE
   | typeof DEADROLL_MAP_ERROR__TIER_BELOW_TEMPLATE
   | typeof DEADROLL_MAP_ERROR__TIER_OUT_OF_RANGE
+  | typeof DEADROLL_MAP_ERROR__TOO_FEW_SECRETS
+  | typeof DEADROLL_MAP_ERROR__TOO_FEW_TRAPS
   | typeof DEADROLL_MAP_ERROR__TOO_MANY_CHESTS
   | typeof DEADROLL_MAP_ERROR__TOO_MANY_ELITES
   | typeof DEADROLL_MAP_ERROR__TOO_MANY_HELPERS
   | typeof DEADROLL_MAP_ERROR__TOO_MANY_MONSTERS
   | typeof DEADROLL_MAP_ERROR__TOO_MANY_PACKS
   | typeof DEADROLL_MAP_ERROR__TOO_MANY_POINTS
+  | typeof DEADROLL_MAP_ERROR__TOO_MANY_SECRETS
   | typeof DEADROLL_MAP_ERROR__TOO_MANY_SESSION_SKILLS
   | typeof DEADROLL_MAP_ERROR__TOO_MANY_SPAWNS
   | typeof DEADROLL_MAP_ERROR__TOO_MANY_TEMPLATES
+  | typeof DEADROLL_MAP_ERROR__TRAP_DAMAGE_OUT_OF_RANGE
   | typeof DEADROLL_MAP_ERROR__TWO_LONERS
   | typeof DEADROLL_MAP_ERROR__UNKNOWN_MONSTER
   | typeof DEADROLL_MAP_ERROR__UNKNOWN_TABLE
   | typeof DEADROLL_MAP_ERROR__UNTRUSTED_CALLER
+  | typeof DEADROLL_MAP_ERROR__VISIBLE_MISMATCH
   | typeof DEADROLL_MAP_ERROR__VISIBLE_NOT_IN_PACK;
 
 let deadrollMapErrorMessages: Record<DeadrollMapError, string> | undefined;
 if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !== "production") {
   deadrollMapErrorMessages = {
+    [DEADROLL_MAP_ERROR__AMBUSH_IN_ARENA]: `An ambush trap is in an arena`,
+    [DEADROLL_MAP_ERROR__AMBUSH_PACK_INVALID]: `An ambush is linked to a pack that is not an ambush pack`,
+    [DEADROLL_MAP_ERROR__AMBUSH_UNLINKED]: `Not exactly one ambush trap per ambush pack`,
     [DEADROLL_MAP_ERROR__ARENA_CELLS_MISMATCH]: `Arena cells do not match its size (at most ARENA_SIDE_MAX a side)`,
     [DEADROLL_MAP_ERROR__ARENA_INVALID_TILE]: `An arena cell has a tile type the Tileset does not have`,
     [DEADROLL_MAP_ERROR__ARENA_NO_ROOM]: `From some side an arena has no room for a full party`,
@@ -248,6 +311,8 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_MAP_ERROR__CHEST_RADIUS_OUT_OF_RANGE]: `The chest radius is outside the limits (LootTuning.chest_radius_min..=max)`,
     [DEADROLL_MAP_ERROR__CHEST_UNREACHABLE]: `No cell next to a chest can be reached from the entrance`,
     [DEADROLL_MAP_ERROR__CHUNK_OUT_OF_RANGE]: `Chunk goes past the end of the tile grid`,
+    [DEADROLL_MAP_ERROR__DOOR_NOT_WALL]: `A secret door is on a cell that can be entered`,
+    [DEADROLL_MAP_ERROR__DUPLICATE_SECRET]: `Two secrets on one cell`,
     [DEADROLL_MAP_ERROR__ELITE_BOSS]: `A boss cannot be elite`,
     [DEADROLL_MAP_ERROR__ENTRANCE_COUNT]: `Map needs exactly one entrance point`,
     [DEADROLL_MAP_ERROR__ENTRANCE_MISMATCH]: `Unused since patch 13`,
@@ -281,28 +346,43 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_MAP_ERROR__POINT_NOT_PASSABLE]: `The entrance or the exit is on a cell that cannot be entered`,
     [DEADROLL_MAP_ERROR__POINT_OUT_OF_BOUNDS]: `The entrance or the exit is outside the map`,
     [DEADROLL_MAP_ERROR__POINT_OVERLAP]: `The entrance and the exit share a cell`,
+    [DEADROLL_MAP_ERROR__ROSTER_INVALID]: `A pack composition is empty, too big or has a monster of another pack`,
+    [DEADROLL_MAP_ERROR__SECRET_INVALID]: `A secret has a bad kind for its place or unused bytes set`,
+    [DEADROLL_MAP_ERROR__SECRET_NOT_PASSABLE]: `A trap or an ambush is on a cell that cannot be entered`,
+    [DEADROLL_MAP_ERROR__SECRET_ON_POINT]: `A trap or an ambush is on the entrance, the exit, a chest or a pack`,
+    [DEADROLL_MAP_ERROR__SECRETS_MISSING]: `The map has no secrets root or no encrypted secrets`,
+    [DEADROLL_MAP_ERROR__SECRETS_OUT_OF_RANGE]: `Encrypted secrets chunk goes past the end of the blob`,
     [DEADROLL_MAP_ERROR__SETTLE_TIMEOUT_OUT_OF_RANGE]: `The time to settle is outside the limits (at most LootTuning.settle_timeout_max_secs)`,
     [DEADROLL_MAP_ERROR__SIZE_OUT_OF_RANGE]: `Map side is outside 8..=32`,
     [DEADROLL_MAP_ERROR__SPAWN_NOT_PASSABLE]: `Spawn is on an impassable tile`,
+    [DEADROLL_MAP_ERROR__SPAWN_NOT_VISIBLE]: `A public spawn is not the visible monster of its pack`,
     [DEADROLL_MAP_ERROR__SPAWN_OUT_OF_BOUNDS]: `Spawn is outside the map`,
     [DEADROLL_MAP_ERROR__SPAWN_OVERLAP]: `Spawn shares a cell with another spawn, the entrance or the exit`,
     [DEADROLL_MAP_ERROR__SPAWN_UNREACHABLE]: `A spawn cannot be reached from the entrance`,
+    [DEADROLL_MAP_ERROR__STASH_IN_ARENA]: `A hidden stash is in an arena`,
     [DEADROLL_MAP_ERROR__TABLE_NOT_ALLOWED]: `Reward table is not allowed on this map tier`,
+    [DEADROLL_MAP_ERROR__THREAT_MISMATCH]: `The pack's composition does not give its declared threat`,
+    [DEADROLL_MAP_ERROR__THREAT_OUT_OF_RANGE]: `A used pack has threat 0, or an unused one a threat`,
     [DEADROLL_MAP_ERROR__TIER_BELOW_TEMPLATE]: `Map tier is below the monster's minimum tier`,
     [DEADROLL_MAP_ERROR__TIER_OUT_OF_RANGE]: `Map tier has no limits`,
+    [DEADROLL_MAP_ERROR__TOO_FEW_SECRETS]: `Fewer secrets of a type than declared`,
+    [DEADROLL_MAP_ERROR__TOO_FEW_TRAPS]: `Fewer declared traps than the tier needs`,
     [DEADROLL_MAP_ERROR__TOO_MANY_CHESTS]: `Too many visible chests for the map tier`,
     [DEADROLL_MAP_ERROR__TOO_MANY_ELITES]: `Too many elite monsters for the map tier`,
     [DEADROLL_MAP_ERROR__TOO_MANY_HELPERS]: `Too many boss helpers`,
     [DEADROLL_MAP_ERROR__TOO_MANY_MONSTERS]: `Too many monsters for the map tier`,
     [DEADROLL_MAP_ERROR__TOO_MANY_PACKS]: `Too many packs for the map tier`,
     [DEADROLL_MAP_ERROR__TOO_MANY_POINTS]: `Too many points (entrance, exit and chests)`,
+    [DEADROLL_MAP_ERROR__TOO_MANY_SECRETS]: `More secrets than the tier allows or than declared`,
     [DEADROLL_MAP_ERROR__TOO_MANY_SESSION_SKILLS]: `Too many different monster skills for one party`,
     [DEADROLL_MAP_ERROR__TOO_MANY_SPAWNS]: `Too many spawns`,
     [DEADROLL_MAP_ERROR__TOO_MANY_TEMPLATES]: `More distinct monster templates than a party copies`,
+    [DEADROLL_MAP_ERROR__TRAP_DAMAGE_OUT_OF_RANGE]: `Trap damage is 0 or above the tier's limit`,
     [DEADROLL_MAP_ERROR__TWO_LONERS]: `Two loners in one pack`,
     [DEADROLL_MAP_ERROR__UNKNOWN_MONSTER]: `Unknown bestiary id`,
     [DEADROLL_MAP_ERROR__UNKNOWN_TABLE]: `Unknown reward table`,
     [DEADROLL_MAP_ERROR__UNTRUSTED_CALLER]: `Caller is not the trusted game program's authority PDA`,
+    [DEADROLL_MAP_ERROR__VISIBLE_MISMATCH]: `A pack composition does not start with the pack's public monster`,
     [DEADROLL_MAP_ERROR__VISIBLE_NOT_IN_PACK]: `The monster shown on the map is not a spawn of its pack`,
   };
 }

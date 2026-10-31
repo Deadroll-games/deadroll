@@ -76,3 +76,23 @@ pub const ARENA_MONSTERS_MAX: usize = 8;
 /// Arena update: distinct bestiary templates one party copies at `open_session` (the session
 /// `MonsterState` keeps one record per template, not per monster).
 pub const SESSION_TEMPLATES_MAX: usize = 12;
+// Patch C: secrets under the Merkle root (docs/MAP_DESCRIPTION.md 8, 17.5).
+/// Secret types counted by the declared counts (`SecretKind` without `None`), indexed by
+/// `SecretKind as usize - 1`.
+pub const SECRET_TYPES: usize = 4;
+/// Secrets one map holds (the encrypted list, the session's found list).
+pub const SECRETS_MAX: usize = 16;
+/// Cells a trigger may oblige the DM to reveal before the next action (`MAX_PATH` steps).
+pub const OBLIGATIONS_MAX: usize = 16;
+/// Bytes of the encrypted secrets the map stores for its DM (`MapSecretsData.blob`).
+pub const SECRETS_BLOB_MAX: usize = 800;
+/// Bytes of a leaf's salt.
+pub const SECRET_SALT_LEN: usize = 16;
+/// Leaves before the map cells: one per pack number (its composition).
+pub const PACK_LEAVES: usize = PACKS_MAX;
+/// The most leaves a map has: the packs, a full map and every arena at full size.
+pub const SECRET_LEAVES_MAX: usize = PACK_LEAVES + MAP_CELLS + PACKS_MAX * ARENA_CELLS;
+/// Hashes in the longest proof (`SECRET_LEAVES_MAX` padded to a power of two).
+pub const SECRET_DEPTH_MAX: usize = 12;
+/// `PackLayout.visible` of an ambush pack: no monster on the map.
+pub const NO_SPAWN: u8 = 0xFF;

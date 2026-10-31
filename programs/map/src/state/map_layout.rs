@@ -6,8 +6,9 @@ use anchor_lang::{
     Discriminator,
 };
 use deadroll_types::{
-    seeds, MapArenasData, MapLayoutDataV2, MapPoint, PackLayout, Spawn, ARENA_CELLS,
-    ARENA_SIDE_MAX, MAP_CELLS, NO_TABLE, PACKS_MAX, POINTS_MAX, SPAWNS_MAX,
+    seeds, MapArenasData, MapLayoutDataV2, MapPoint, MapSecretsData, PackLayout, Spawn,
+    ARENA_CELLS, ARENA_SIDE_MAX, MAP_CELLS, NO_TABLE, PACKS_MAX, POINTS_MAX, SECRETS_BLOB_MAX,
+    SECRET_TYPES, SPAWNS_MAX,
 };
 
 use crate::{errors::MapError, state::LAYOUT_VERSION};
@@ -17,6 +18,9 @@ use crate::{errors::MapError, state::LAYOUT_VERSION};
 /// Patch 13: the core is `MapLayoutDataV2` (cells with variants, points), version 2.
 /// Arena update: version 3, the packs and their arenas after the core (`write_arena`). A layout
 /// from before it is smaller: it can neither be written nor open a party.
+/// Patch C: version 4, the public part of the secrets (each pack's threat, the declared counts)
+/// and the DM's encrypted copy after the arenas (`write_secrets`, `finalize_map`). The spawns
+/// are only the monsters the packs show on the map; the rest is under `Map.secrets_root`.
 ///
 /// The account (~2.5 KB) is never Borsh-decoded whole on-chain: `Account<MapLayout>` would put two
 /// copies of it on the 4 KB SBF stack frame. The instructions go through [`LayoutBytes`] (in place,
@@ -28,6 +32,7 @@ use crate::{errors::MapError, state::LAYOUT_VERSION};
 pub struct MapLayout {
     pub core: MapLayoutDataV2,
     pub arenas: MapArenasData,
+    pub secrets: MapSecretsData,
 }
 
 /// Account size, discriminator included.
@@ -49,7 +54,12 @@ pub mod off {
     pub const BUMP: usize = BOSS_TABLE + 1;
     pub const PACKS: usize = BUMP + 1;
     pub const ARENAS: usize = PACKS + PACKS_MAX * PackLayout::SIZE;
-    pub const END: usize = ARENAS + PACKS_MAX * ARENA_CELLS;
+    /// Patch C: the secrets after the arenas.
+    pub const THREAT: usize = ARENAS + PACKS_MAX * ARENA_CELLS;
+    pub const DECLARED: usize = THREAT + PACKS_MAX;
+    pub const BLOB_LEN: usize = DECLARED + SECRET_TYPES;
+    pub const BLOB: usize = BLOB_LEN + 2;
+    pub const END: usize = BLOB + SECRETS_BLOB_MAX;
 }
 
 const _: () = assert!(off::END == LAYOUT_SPACE);
@@ -209,6 +219,32 @@ impl<'a, 'info> LayoutBytes<'a, 'info> {
         Ok(())
     }
 
+    /// Patch C: writes `bytes` into the encrypted secrets from `offset` (`len`: the whole blob's
+    /// length, the website sends it in chunks) and the public part: each pack's threat and the
+    /// declared counts.
+    pub fn write_secrets(
+        &self,
+        offset: usize,
+        bytes: &[u8],
+        len: usize,
+        threat: &[u8; PACKS_MAX],
+        declared: &[u8; SECRET_TYPES],
+    ) -> Result<()> {
+        let end = offset
+            .checked_add(bytes.len())
+            .ok_or(MapError::SecretsOutOfRange)?;
+        require!(
+            end <= len && len <= SECRETS_BLOB_MAX,
+            MapError::SecretsOutOfRange
+        );
+        let mut data = self.info.try_borrow_mut_data()?;
+        data[off::THREAT..off::DECLARED].copy_from_slice(threat);
+        data[off::DECLARED..off::BLOB_LEN].copy_from_slice(declared);
+        data[off::BLOB_LEN..off::BLOB].copy_from_slice(&(len as u16).to_le_bytes());
+        data[off::BLOB + offset..off::BLOB + end].copy_from_slice(bytes);
+        Ok(())
+    }
+
     pub fn spawn_count(&self) -> Result<u8> {
         Ok(self.info.try_borrow_data()?[off::SPAWN_COUNT])
     }
@@ -229,11 +265,22 @@ pub fn decode_core(data: &[u8]) -> Result<Box<MapLayoutDataV2>> {
     ))
 }
 
+/// Patch C: the secrets after the arenas, decoded into a box (`finalize_map`). Not inlined.
+#[inline(never)]
+pub fn decode_declared(data: &[u8]) -> Result<Box<MapSecretsData>> {
+    let mut body = data
+        .get(off::THREAT..off::END)
+        .ok_or(error!(MapError::InvalidLayout))?;
+    Ok(Box::new(
+        MapSecretsData::deserialize(&mut body).map_err(|_| error!(MapError::InvalidLayout))?,
+    ))
+}
+
 /// Arena update: the packs and arenas, decoded into a box (`finalize_map`). Not inlined.
 #[inline(never)]
 pub fn decode_arenas(data: &[u8]) -> Result<Box<MapArenasData>> {
     let mut body = data
-        .get(off::PACKS..off::END)
+        .get(off::PACKS..off::THREAT)
         .ok_or(error!(MapError::InvalidLayout))?;
     Ok(Box::new(
         MapArenasData::deserialize(&mut body).map_err(|_| error!(MapError::InvalidLayout))?,
@@ -379,6 +426,37 @@ mod tests {
         // The boxed decoders read the same.
         assert_eq!(*decode_core(&buf.data).unwrap(), back.core);
         assert_eq!(*decode_arenas(&buf.data).unwrap(), back.arenas);
+    }
+
+    /// Patch C: the encrypted secrets in chunks, with the public part each time.
+    #[test]
+    fn writes_secrets_in_place_like_borsh() {
+        let mut buf = Buf::new();
+        let threat = [0, 2, 2, 5, 0, 0, 0, 9];
+        let declared = [1, 0, 0, 1];
+        {
+            let info = buf.info();
+            let l = LayoutBytes::load(&info).unwrap();
+            l.write_secrets(0, &[1, 2, 3], 5, &threat, &declared)
+                .unwrap();
+            l.write_secrets(3, &[4, 5], 5, &threat, &declared).unwrap();
+            let past = l.write_secrets(4, &[6, 7], 5, &threat, &declared);
+            assert_eq!(
+                code(past.unwrap_err()),
+                u32::from(MapError::SecretsOutOfRange)
+            );
+            let big = l.write_secrets(0, &[], SECRETS_BLOB_MAX + 1, &threat, &declared);
+            assert_eq!(
+                code(big.unwrap_err()),
+                u32::from(MapError::SecretsOutOfRange)
+            );
+        }
+        let back = MapLayout::try_deserialize(&mut &buf.data[..]).unwrap();
+        assert_eq!(back.secrets.threat, threat);
+        assert_eq!(back.secrets.declared, declared);
+        assert_eq!(back.secrets.blob_len, 5);
+        assert_eq!(&back.secrets.blob[..6], &[1, 2, 3, 4, 5, 0]);
+        assert_eq!(*decode_declared(&buf.data).unwrap(), back.secrets);
     }
 
     #[test]

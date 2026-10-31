@@ -161,8 +161,8 @@
         {
           "name": "layout",
           "docs": [
-            "Owner and discriminator checked, never decoded whole (`state::LayoutBytes`): the core and",
-            "the arenas are decoded into boxes one at a time."
+            "Owner and discriminator checked, never decoded whole (`state::LayoutBytes`): the core, the",
+            "arenas and the public secrets are decoded into boxes one at a time."
           ],
           "pda": {
             "seeds": [
@@ -583,6 +583,112 @@
       ]
     },
     {
+      "name": "write_secrets",
+      "docs": [
+        "Patch C: DM writes a chunk of the map's encrypted secrets (`len`: the whole blob) and the",
+        "public part of the secrets: each pack's threat and the declared counts."
+      ],
+      "discriminator": [
+        115,
+        130,
+        53,
+        1,
+        99,
+        125,
+        11,
+        66
+      ],
+      "accounts": [
+        {
+          "name": "dm",
+          "signer": true
+        },
+        {
+          "name": "map",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  112
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "map.core.dm",
+                "account": "Map"
+              },
+              {
+                "kind": "account",
+                "path": "map.core.index",
+                "account": "Map"
+              }
+            ]
+          }
+        },
+        {
+          "name": "layout",
+          "docs": [
+            "`LayoutBytes::load`; written in place."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  97,
+                  121,
+                  111,
+                  117,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "map"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "offset",
+          "type": "u16"
+        },
+        {
+          "name": "bytes",
+          "type": "bytes"
+        },
+        {
+          "name": "len",
+          "type": "u16"
+        },
+        {
+          "name": "threat",
+          "type": {
+            "array": [
+              "u8",
+              8
+            ]
+          }
+        },
+        {
+          "name": "declared",
+          "type": {
+            "array": [
+              "u8",
+              4
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "write_spawns",
       "docs": [
         "DM replaces the spawn list of a draft layout."
@@ -773,6 +879,19 @@
         229,
         183,
         110
+      ]
+    },
+    {
+      "name": "SecretsWritten",
+      "discriminator": [
+        203,
+        145,
+        40,
+        152,
+        105,
+        221,
+        161,
+        155
       ]
     },
     {
@@ -1144,6 +1263,106 @@
       "code": 6070,
       "name": "InvalidLayout",
       "msg": "Not a map layout of this program in the current format"
+    },
+    {
+      "code": 6071,
+      "name": "SecretInvalid",
+      "msg": "A secret has a bad kind for its place or unused bytes set"
+    },
+    {
+      "code": 6072,
+      "name": "SecretNotPassable",
+      "msg": "A trap or an ambush is on a cell that cannot be entered"
+    },
+    {
+      "code": 6073,
+      "name": "SecretOnPoint",
+      "msg": "A trap or an ambush is on the entrance, the exit, a chest or a pack"
+    },
+    {
+      "code": 6074,
+      "name": "TrapDamageOutOfRange",
+      "msg": "Trap damage is 0 or above the tier's limit"
+    },
+    {
+      "code": 6075,
+      "name": "AmbushPackInvalid",
+      "msg": "An ambush is linked to a pack that is not an ambush pack"
+    },
+    {
+      "code": 6076,
+      "name": "AmbushInArena",
+      "msg": "An ambush trap is in an arena"
+    },
+    {
+      "code": 6077,
+      "name": "StashInArena",
+      "msg": "A hidden stash is in an arena"
+    },
+    {
+      "code": 6078,
+      "name": "DoorNotWall",
+      "msg": "A secret door is on a cell that can be entered"
+    },
+    {
+      "code": 6079,
+      "name": "TooManySecrets",
+      "msg": "More secrets than the tier allows or than declared"
+    },
+    {
+      "code": 6080,
+      "name": "TooFewTraps",
+      "msg": "Fewer declared traps than the tier needs"
+    },
+    {
+      "code": 6081,
+      "name": "AmbushUnlinked",
+      "msg": "Not exactly one ambush trap per ambush pack"
+    },
+    {
+      "code": 6082,
+      "name": "ThreatOutOfRange",
+      "msg": "A used pack has threat 0, or an unused one a threat"
+    },
+    {
+      "code": 6083,
+      "name": "ThreatMismatch",
+      "msg": "The pack's composition does not give its declared threat"
+    },
+    {
+      "code": 6084,
+      "name": "RosterInvalid",
+      "msg": "A pack composition is empty, too big or has a monster of another pack"
+    },
+    {
+      "code": 6085,
+      "name": "VisibleMismatch",
+      "msg": "A pack composition does not start with the pack's public monster"
+    },
+    {
+      "code": 6086,
+      "name": "SpawnNotVisible",
+      "msg": "A public spawn is not the visible monster of its pack"
+    },
+    {
+      "code": 6087,
+      "name": "TooFewSecrets",
+      "msg": "Fewer secrets of a type than declared"
+    },
+    {
+      "code": 6088,
+      "name": "DuplicateSecret",
+      "msg": "Two secrets on one cell"
+    },
+    {
+      "code": 6089,
+      "name": "SecretsOutOfRange",
+      "msg": "Encrypted secrets chunk goes past the end of the blob"
+    },
+    {
+      "code": 6090,
+      "name": "SecretsMissing",
+      "msg": "The map has no secrets root or no encrypted secrets"
     }
   ],
   "types": [
@@ -1490,6 +1709,9 @@
         "Patch 13: the core is `MapLayoutDataV2` (cells with variants, points), version 2.",
         "Arena update: version 3, the packs and their arenas after the core (`write_arena`). A layout",
         "from before it is smaller: it can neither be written nor open a party.",
+        "Patch C: version 4, the public part of the secrets (each pack's threat, the declared counts)",
+        "and the DM's encrypted copy after the arenas (`write_secrets`, `finalize_map`). The spawns",
+        "are only the monsters the packs show on the map; the rest is under `Map.secrets_root`.",
         "",
         "The account (~2.5 KB) is never Borsh-decoded whole on-chain: `Account<MapLayout>` would put two",
         "copies of it on the 4 KB SBF stack frame. The instructions go through [`LayoutBytes`] (in place,",
@@ -1513,6 +1735,14 @@
             "type": {
               "defined": {
                 "name": "MapArenasData"
+              }
+            }
+          },
+          {
+            "name": "secrets",
+            "type": {
+              "defined": {
+                "name": "MapSecretsData"
               }
             }
           }
@@ -1628,6 +1858,61 @@
               "A visible chest: its reward table id."
             ],
             "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MapSecretsData",
+      "docs": [
+        "The public part of a map's secrets and the DM's encrypted copy, in the map program's",
+        "`MapLayout` after the arenas."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "threat",
+            "docs": [
+              "Each pack's threat level, declared openly (0 for an unused pack number)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                8
+              ]
+            }
+          },
+          {
+            "name": "declared",
+            "docs": [
+              "How many secrets of each type the map holds (`SecretKind::counted`)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                4
+              ]
+            }
+          },
+          {
+            "name": "blob_len",
+            "docs": [
+              "Bytes of `blob` in use."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "blob",
+            "docs": [
+              "The DM's secrets, encrypted on the website (opaque to the programs)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                800
+              ]
+            }
           }
         ]
       }
@@ -1816,6 +2101,57 @@
           {
             "name": "boss_table",
             "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SecretsWritten",
+      "docs": [
+        "Patch C: a chunk of the DM's encrypted secrets was written (`write_secrets`)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "map",
+            "type": "pubkey"
+          },
+          {
+            "name": "offset",
+            "type": "u16"
+          },
+          {
+            "name": "len",
+            "type": "u16"
+          },
+          {
+            "name": "total",
+            "docs": [
+              "The whole blob's length."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "threat",
+            "docs": [
+              "Each pack's threat and the declared counts (the public part)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                8
+              ]
+            }
+          },
+          {
+            "name": "declared",
+            "type": {
+              "array": [
+                "u8",
+                4
+              ]
+            }
           }
         ]
       }

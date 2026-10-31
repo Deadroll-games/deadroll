@@ -69,6 +69,19 @@ pub mod deadroll_map {
         finalize_map::handler(ctx, secrets_root)
     }
 
+    /// Patch C: DM writes a chunk of the map's encrypted secrets (`len`: the whole blob) and the
+    /// public part of the secrets: each pack's threat and the declared counts.
+    pub fn write_secrets(
+        ctx: Context<WriteLayout>,
+        offset: u16,
+        bytes: Vec<u8>,
+        len: u16,
+        threat: [u8; 8],
+        declared: [u8; 4],
+    ) -> Result<()> {
+        write_secrets::handler(ctx, offset, bytes, len, threat, declared)
+    }
+
     /// Session program only: map enters or leaves a party.
     pub fn set_status(ctx: Context<SetStatus>, status: MapStatus) -> Result<()> {
         set_status::handler(ctx, status)

@@ -6,13 +6,18 @@
 //! mapcheck.wasm (bash crates/mapcheck/wasm/build.sh).
 use std::path::PathBuf;
 
+use deadroll_mapcheck::secrets::{Board, Leaves};
 use deadroll_mapcheck::MapCheckError;
-use deadroll_mapcheck_wasm::{check, check_bytes, MapCheckRequest, Tables, ABI_VERSION};
+use deadroll_mapcheck_wasm::{
+    check, check_bytes, check_design, check_design_bytes, DesignRequest, MapCheckRequest, Tables,
+    ABI_VERSION,
+};
 use deadroll_rules::registry::Registry;
 use deadroll_types::{
     cell_byte, Cell, Facing, MapArenasData, MapLayoutDataV2, MapPoint, PackLayout, PointKind,
     Pubkey, Spawn, TileKind, ARENA_SIDE_MAX, MAP_CELLS, MAP_MAX, POINTS_MAX, SPAWNS_MAX,
 };
+use deadroll_types::{CellSecret, FoundSecret};
 use serde_json::{json, Value};
 
 fn hex(bytes: &[u8]) -> String {
@@ -345,8 +350,71 @@ fn cases() -> Vec<(&'static str, MapCheckRequest, Result<(), MapCheckError>)> {
     ]
 }
 
+/// Patch C: the demo preset's design (its trap and secret door) and a few broken ones.
+fn design_cases() -> Vec<(&'static str, DesignRequest, Result<(), MapCheckError>)> {
+    let map = demo();
+    let leaves = Leaves::new(map.width, map.height, &map.arenas.packs);
+    let at = |x, y| leaves.of(Board::Map(Cell { x, y })).unwrap();
+    let trap = FoundSecret {
+        leaf: at(9, 9),
+        secret: CellSecret::trap(4, 10),
+    };
+    let door = FoundSecret {
+        leaf: at(4, 11),
+        secret: CellSecret::door(),
+    };
+    let req = |declared: [u8; 4], secrets: Vec<FoundSecret>| DesignRequest {
+        map: map.clone(),
+        declared,
+        secrets,
+    };
+    use MapCheckError as E;
+    vec![
+        (
+            "design: the demo's trap and door",
+            req([1, 0, 0, 1], vec![trap, door]),
+            Ok(()),
+        ),
+        (
+            "design: one secret more than declared",
+            req([1, 0, 0, 0], vec![trap, door]),
+            Err(E::TooManySecrets),
+        ),
+        (
+            "design: no trap on tier 1",
+            req([0, 0, 0, 0], vec![]),
+            Err(E::TooFewTraps),
+        ),
+        (
+            "design: a door on the floor",
+            req(
+                [1, 0, 0, 1],
+                vec![
+                    trap,
+                    FoundSecret {
+                        leaf: at(9, 10),
+                        ..door
+                    },
+                ],
+            ),
+            Err(E::DoorNotWall),
+        ),
+    ]
+}
+
 fn build() -> Value {
     let t = tables();
+    let design: Vec<Value> = design_cases()
+        .into_iter()
+        .map(|(name, request, expected)| {
+            let got = check_design(&request, &t);
+            assert_eq!(got, expected, "case {name}");
+            let input = borsh::to_vec(&request).unwrap();
+            let verdict = check_design_bytes(&input, &t);
+            assert_eq!(verdict, got.map_or_else(|e| 1 + e.code() as i32, |_| 0));
+            json!({ "name": name, "input": hex(&input), "verdict": verdict })
+        })
+        .collect();
     let cases: Vec<Value> = cases()
         .into_iter()
         .map(|(name, request, expected)| {
@@ -368,6 +436,7 @@ fn build() -> Value {
             "tileset": hex(&t.tileset),
         },
         "cases": cases,
+        "designCases": design,
     })
 }
 

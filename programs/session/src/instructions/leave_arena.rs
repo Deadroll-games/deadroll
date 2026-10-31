@@ -49,6 +49,7 @@ pub fn handler<'info>(ctx: Context<'info, LeaveArena<'info>>) -> Result<()> {
     );
     require!(!session.core.pending_vrf, SessionError::RollPending);
     require!(session.pending_deaths == 0, SessionError::DeathsPending);
+    session.require_no_reveals()?;
     let retreated = session.mode == ArenaMode::Retreated;
     require!(
         retreated || session.mode == ArenaMode::Won,

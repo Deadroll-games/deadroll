@@ -17,8 +17,8 @@ use deadroll_rules::{items::Equipment, MonsterTemplate};
 use deadroll_skillcheck::monster::MonsterSkill;
 use deadroll_types::{
     Cell, CharacterData, MapArenasData, MapData, MapPoint, PackLayout, PointKind, Spawn, TileKind,
-    ARENA_CELLS, ARENA_SIDE_MAX, CHESTS_MAX, MAP_CELLS, MAP_MAX, PACKS_MAX, POINTS_MAX, SPAWNS_MAX,
-    TILE_KINDS_MAX,
+    ARENA_CELLS, ARENA_SIDE_MAX, CHESTS_MAX, MAP_CELLS, MAP_MAX, PACKS_MAX, POINTS_MAX,
+    SECRETS_BLOB_MAX, SECRET_TYPES, SPAWNS_MAX, TILE_KINDS_MAX,
 };
 
 use crate::{errors::SessionError, state::LOOT_RECORD_LEN};
@@ -123,12 +123,19 @@ mod layout_off {
     /// Arena update: `MapArenasData` after the core.
     pub const PACKS: usize = CORE_END;
     pub const ARENAS: usize = PACKS + PACKS_MAX * PackLayout::SIZE;
-    pub const END: usize = ARENAS + PACKS_MAX * ARENA_CELLS;
+    /// Patch C: `MapSecretsData` after the arenas.
+    pub const THREAT: usize = ARENAS + PACKS_MAX * ARENA_CELLS;
+    pub const DECLARED: usize = THREAT + PACKS_MAX;
+    pub const BLOB_LEN: usize = DECLARED + SECRET_TYPES;
+    pub const END: usize = BLOB_LEN + 2 + SECRETS_BLOB_MAX;
 }
 
-/// `MapLayout.core.version` of the format (`deadroll_map::state::LAYOUT_VERSION`): arena update,
-/// `MapLayoutDataV2` and `MapArenasData`.
-pub const LAYOUT_VERSION: u8 = 3;
+/// `MapLayout.core.version` of the format (`deadroll_map::state::LAYOUT_VERSION`): patch C,
+/// `MapLayoutDataV2`, `MapArenasData` and `MapSecretsData`.
+pub const LAYOUT_VERSION: u8 = 4;
+/// Patch C: the layout version before the secrets (its packs are public: such a map cannot open
+/// a party).
+pub const LAYOUT_VERSION_NO_SECRETS: u8 = 3;
 /// The layout version before the arena update (no arenas: such a map cannot open a party).
 pub const LAYOUT_VERSION_NO_ARENAS: u8 = 2;
 
@@ -153,6 +160,11 @@ impl<'a> MapLayoutView<'a> {
         if data.len() > layout_off::VERSION && data[layout_off::VERSION] == LAYOUT_VERSION_NO_ARENAS
         {
             return err!(SessionError::MapWithoutArenas);
+        }
+        if data.len() > layout_off::VERSION
+            && data[layout_off::VERSION] == LAYOUT_VERSION_NO_SECRETS
+        {
+            return err!(SessionError::MapWithoutSecrets);
         }
         require!(
             data.len() >= layout_off::END && data[layout_off::VERSION] == LAYOUT_VERSION,
@@ -257,6 +269,55 @@ impl<'a> MapLayoutView<'a> {
     /// Patch 11: the boss's reward table.
     pub fn boss_table(&self) -> u8 {
         self.data[layout_off::BOSS_TABLE]
+    }
+
+    /// Patch C: each pack's declared threat.
+    pub fn threat(&self) -> [u8; PACKS_MAX] {
+        let mut out = [0; PACKS_MAX];
+        out.copy_from_slice(&self.data[layout_off::THREAT..layout_off::DECLARED]);
+        out
+    }
+
+    /// Patch C: the declared secret counts.
+    pub fn declared(&self) -> [u8; SECRET_TYPES] {
+        let mut out = [0; SECRET_TYPES];
+        out.copy_from_slice(&self.data[layout_off::DECLARED..layout_off::BLOB_LEN]);
+        out
+    }
+
+    /// Patch C: the exit point.
+    pub fn exit(&self) -> Result<Cell> {
+        for i in 0..self.point_count()? {
+            let p = self.point(i)?;
+            if p.kind == PointKind::Exit {
+                return Ok(p.cell());
+            }
+        }
+        err!(SessionError::InvalidLayout)
+    }
+
+    /// Patch C: the raw cell byte of the map (`None`) or of pack `arena`'s arena, whatever the
+    /// view's ground.
+    pub fn cell_of(&self, arena: Option<u8>, x: u8, y: u8) -> Result<u8> {
+        match arena {
+            None => {
+                let index = y as usize * MAP_MAX + x as usize;
+                require!(index < MAP_CELLS, SessionError::OutOfBounds);
+                Ok(self.data[layout_off::CELLS + index])
+            }
+            Some(pack) => {
+                require!(
+                    (pack as usize) < PACKS_MAX
+                        && (x as usize) < ARENA_SIDE_MAX
+                        && (y as usize) < ARENA_SIDE_MAX,
+                    SessionError::OutOfBounds
+                );
+                Ok(self.data[layout_off::ARENAS
+                    + pack as usize * ARENA_CELLS
+                    + y as usize * ARENA_SIDE_MAX
+                    + x as usize])
+            }
+        }
     }
 
     /// Patch 13: the entrance point.
@@ -804,5 +865,30 @@ mod tests {
         let mut short = layout_account(Pubkey::new_unique());
         short.data.truncate(layout_off::CORE_END + 16);
         assert!(MapLayoutView::load(&short.info(), None).is_err());
+    }
+
+    /// Patch C: the public part of the secrets; a map from before them cannot open a party.
+    #[test]
+    fn the_layout_view_reads_the_secrets_and_refuses_an_older_map() {
+        use crate::state::test_support::layout_account;
+        let mut account = layout_account(Pubkey::new_unique());
+        {
+            let info = account.info();
+            let view = MapLayoutView::load(&info, None).unwrap();
+            assert_eq!(view.threat()[0], 2);
+            assert_eq!(view.declared()[0], 1);
+            assert_eq!(view.exit().unwrap(), Cell { x: 7, y: 7 });
+            assert_eq!(view.cell_of(Some(0), 3, 3).unwrap(), view.tile(3, 3).unwrap());
+            assert!(view.cell_of(Some(PACKS_MAX as u8), 0, 0).is_err());
+        }
+        account.data[layout_off::VERSION] = LAYOUT_VERSION_NO_SECRETS;
+        let err = MapLayoutView::load(&account.info(), None).err().unwrap();
+        match err {
+            Error::AnchorError(e) => assert_eq!(
+                e.error_code_number,
+                u32::from(SessionError::MapWithoutSecrets)
+            ),
+            other => panic!("unexpected {other:?}"),
+        }
     }
 }

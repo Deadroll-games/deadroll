@@ -143,8 +143,8 @@ export type FinalizeMapAsyncInput<
   dm: TAccountDm;
   map: TAccountMap;
   /**
-   * Owner and discriminator checked, never decoded whole (`state::LayoutBytes`): the core and
-   * the arenas are decoded into boxes one at a time.
+   * Owner and discriminator checked, never decoded whole (`state::LayoutBytes`): the core, the
+   * arenas and the public secrets are decoded into boxes one at a time.
    */
   layout?: TAccountLayout;
   /** spawns, read in place by `deadroll_registry::state::view`. */
@@ -338,8 +338,8 @@ export type FinalizeMapInput<
   dm: TAccountDm;
   map: TAccountMap;
   /**
-   * Owner and discriminator checked, never decoded whole (`state::LayoutBytes`): the core and
-   * the arenas are decoded into boxes one at a time.
+   * Owner and discriminator checked, never decoded whole (`state::LayoutBytes`): the core, the
+   * arenas and the public secrets are decoded into boxes one at a time.
    */
   layout: TAccountLayout;
   /** spawns, read in place by `deadroll_registry::state::view`. */
@@ -516,8 +516,8 @@ export type ParsedFinalizeMapInstruction<
     dm: TAccountMetas[0];
     map: TAccountMetas[1];
     /**
-     * Owner and discriminator checked, never decoded whole (`state::LayoutBytes`): the core and
-     * the arenas are decoded into boxes one at a time.
+     * Owner and discriminator checked, never decoded whole (`state::LayoutBytes`): the core, the
+     * arenas and the public secrets are decoded into boxes one at a time.
      */
     layout: TAccountMetas[2];
     /** spawns, read in place by `deadroll_registry::state::view`. */
