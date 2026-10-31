@@ -43,6 +43,9 @@ pub fn monster_killed(
         // Arena update: the pack is dead, `leave_arena` pays it and brings the party back
         // (docs/PARTY_AND_TURNS.md 4.1.4).
         session.mode = ArenaMode::Won;
+        // Patch B: a pack that dies in its last turns is won, not left.
+        session.set_exit_vote(deadroll_rules::exit::Vote::NONE);
+        session.last_moves = 0;
         emit!(ArenaWon {
             session: session_key,
             pack: session.arena_pack,

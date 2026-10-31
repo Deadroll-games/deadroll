@@ -275,6 +275,12 @@ pub fn session(players: &[Cell]) -> GameSession {
         map_round: 1,
         unit_time: [0; super::ARENA_UNITS],
         player_dex: [0; PARTY_MAX],
+        exit_kind: 0,
+        last_moves: 0,
+        retreats: 0,
+        packs_guarded: 0,
+        packs_buffed: 0,
+        dead_spawns: 0,
     }
 }
 

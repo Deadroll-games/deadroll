@@ -238,8 +238,9 @@ pub fn handler(ctx: Context<Act>, skill_slot: u8, target: u8) -> Result<()> {
         .action_points
         .checked_sub(action_ap(skill.as_ref()))
         .ok_or(SessionError::NotEnoughActionPoints)?;
-    // Any action resets every escape intent (docs/PARTY_AND_TURNS.md, 7.3).
-    session.flee_mask = 0;
+    // Any other action cancels a Retreat or Escape proposal (docs/PARTY_AND_TURNS.md 7.5).
+    let key = session.key();
+    crate::exit_vote::cancel(session, key, slot);
 
     let attacker = Unit::Player(slot).id();
     let target_unit = target_unit.id();

@@ -20,6 +20,7 @@ export * from "./monsterAct.js";
 export * from "./movePath.js";
 export * from "./openChest.js";
 export * from "./openSession.js";
+export * from "./retreat.js";
 export * from "./setReady.js";
 export * from "./setSessionKey.js";
 export * from "./settleParty.js";

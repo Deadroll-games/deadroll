@@ -216,6 +216,12 @@ export const DEADROLL_SESSION_ERROR__IN_ARENA = 0x17d2; // 6098
 export const DEADROLL_SESSION_ERROR__INVALID_ARENA_ACCOUNTS = 0x17d3; // 6099
 /** TooManyTemplates: Too many distinct monster templates for one party */
 export const DEADROLL_SESSION_ERROR__TOO_MANY_TEMPLATES = 0x17d4; // 6100
+/** NotInArena: Retreat and Escape are decided in an arena */
+export const DEADROLL_SESSION_ERROR__NOT_IN_ARENA = 0x17d5; // 6101
+/** RetreatLimit: The party used all its retreats */
+export const DEADROLL_SESSION_ERROR__RETREAT_LIMIT = 0x17d6; // 6102
+/** InvalidExit: No Retreat or Escape vote has passed */
+export const DEADROLL_SESSION_ERROR__INVALID_EXIT = 0x17d7; // 6103
 
 export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__ACTOR_MISMATCH
@@ -246,6 +252,7 @@ export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__INVALID_CHEST
   | typeof DEADROLL_SESSION_ERROR__INVALID_DEATH_ACCOUNTS
   | typeof DEADROLL_SESSION_ERROR__INVALID_DIRECTION
+  | typeof DEADROLL_SESSION_ERROR__INVALID_EXIT
   | typeof DEADROLL_SESSION_ERROR__INVALID_LAYOUT
   | typeof DEADROLL_SESSION_ERROR__INVALID_LOADOUT
   | typeof DEADROLL_SESSION_ERROR__INVALID_MAP
@@ -281,6 +288,7 @@ export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__NOT_ENOUGH_ACTION_POINTS
   | typeof DEADROLL_SESSION_ERROR__NOT_ENOUGH_PLAYERS
   | typeof DEADROLL_SESSION_ERROR__NOT_FINISHED
+  | typeof DEADROLL_SESSION_ERROR__NOT_IN_ARENA
   | typeof DEADROLL_SESSION_ERROR__NOT_IN_LOBBY
   | typeof DEADROLL_SESSION_ERROR__NOT_LOCKED_HERE
   | typeof DEADROLL_SESSION_ERROR__NOT_PLAYER
@@ -298,6 +306,7 @@ export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__PRICE_TOO_LOW
   | typeof DEADROLL_SESSION_ERROR__REACTIVE_ACCOUNTS_MISSING
   | typeof DEADROLL_SESSION_ERROR__READY_UNCHANGED
+  | typeof DEADROLL_SESSION_ERROR__RETREAT_LIMIT
   | typeof DEADROLL_SESSION_ERROR__ROLL_PENDING
   | typeof DEADROLL_SESSION_ERROR__ROOTED
   | typeof DEADROLL_SESSION_ERROR__SESSION_KEY_AT_READY
@@ -352,6 +361,7 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__INVALID_CHEST]: `No such chest on this map`,
     [DEADROLL_SESSION_ERROR__INVALID_DEATH_ACCOUNTS]: `The remaining accounts are not the character, skill set and bag of each pending death, in slot order`,
     [DEADROLL_SESSION_ERROR__INVALID_DIRECTION]: `Unknown step direction`,
+    [DEADROLL_SESSION_ERROR__INVALID_EXIT]: `No Retreat or Escape vote has passed`,
     [DEADROLL_SESSION_ERROR__INVALID_LAYOUT]: `Account is not the layout of this map`,
     [DEADROLL_SESSION_ERROR__INVALID_LOADOUT]: `Not the character's items loadout`,
     [DEADROLL_SESSION_ERROR__INVALID_MAP]: `Account is not a Deadroll map`,
@@ -387,6 +397,7 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__NOT_ENOUGH_ACTION_POINTS]: `Not enough action points`,
     [DEADROLL_SESSION_ERROR__NOT_ENOUGH_PLAYERS]: `Fewer players than the map's minimum`,
     [DEADROLL_SESSION_ERROR__NOT_FINISHED]: `Party has not ended`,
+    [DEADROLL_SESSION_ERROR__NOT_IN_ARENA]: `Retreat and Escape are decided in an arena`,
     [DEADROLL_SESSION_ERROR__NOT_IN_LOBBY]: `Session is not in the lobby`,
     [DEADROLL_SESSION_ERROR__NOT_LOCKED_HERE]: `The character is not locked in this party`,
     [DEADROLL_SESSION_ERROR__NOT_PLAYER]: `Only the player who joined with this character can do this`,
@@ -404,6 +415,7 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__PRICE_TOO_LOW]: `Party price is below the minimum`,
     [DEADROLL_SESSION_ERROR__REACTIVE_ACCOUNTS_MISSING]: `A reactive skill triggers here: the VRF accounts and the payer are required`,
     [DEADROLL_SESSION_ERROR__READY_UNCHANGED]: `Already in that ready state`,
+    [DEADROLL_SESSION_ERROR__RETREAT_LIMIT]: `The party used all its retreats`,
     [DEADROLL_SESSION_ERROR__ROLL_PENDING]: `Waiting for a dice roll`,
     [DEADROLL_SESSION_ERROR__ROOTED]: `The unit is rooted and cannot move`,
     [DEADROLL_SESSION_ERROR__SESSION_KEY_AT_READY]: `Joining binds no session key: the key and its prepayment come with Ready`,

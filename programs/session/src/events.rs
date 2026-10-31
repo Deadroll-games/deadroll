@@ -1,5 +1,5 @@
 //! Events (CONTRACTS.md, section 7). `PlayerReady`, `InitiativeRolled`, `TurnTicked`,
-//! `TurnSkipped`, `ModsTicked`, `EffectResolved`, `SkillUsed`, `PlayerDied`, `FleeVoted`, `RewardsRolled`, `ChestOpenRequested`, `ChestOpened`, `CacheSettled`, `ContributionRefunded`, `CacheClosed`, `EscrowClaimed` and `SessionKeyChanged`
+//! `TurnSkipped`, `ModsTicked`, `EffectResolved`, `SkillUsed`, `PlayerDied`, `FleeVoted`, `RetreatVoted`, `ExitPassed`, `ExitCancelled`, `ArenaRetreated`, `RewardsRolled`, `ChestOpenRequested`, `ChestOpened`, `CacheSettled`, `ContributionRefunded`, `CacheClosed`, `EscrowClaimed` and `SessionKeyChanged`
 //! are session-local.
 use anchor_lang::prelude::*;
 use deadroll_character::state::{MAP_SKILLS, SKILLS_MAX};
@@ -534,4 +534,43 @@ pub struct ArenaLeft {
     pub session: Pubkey,
     pub pack: u8,
     pub xp: [u32; PARTY_MAX],
+}
+
+/// Patch B: a player voted to retreat from the arena (docs/PARTY_AND_TURNS.md 7.5); the first vote
+/// proposes it. `vote_mask`: bit per player slot that voted.
+#[event]
+pub struct RetreatVoted {
+    pub session: Pubkey,
+    pub slot: u8,
+    pub vote_mask: u8,
+    pub alive_mask: u8,
+    /// Retreats the party made before this one.
+    pub retreats: u8,
+}
+
+/// Patch B: every living player voted for `kind` (`deadroll_rules::exit::ExitKind`): the arena
+/// slots in `last_moves` take one more turn each, then the party leaves.
+#[event]
+pub struct ExitPassed {
+    pub session: Pubkey,
+    pub kind: u8,
+    pub last_moves: u8,
+}
+
+/// Patch B: player `slot` took another action on their turn: the proposal of `kind` is off.
+#[event]
+pub struct ExitCancelled {
+    pub session: Pubkey,
+    pub kind: u8,
+    pub slot: u8,
+}
+
+/// Patch B: the party is back on the map after a retreat; the pack stays, on guard and buffed for
+/// its next fight, without the monsters killed in this fight (`dead_spawns`).
+#[event]
+pub struct ArenaRetreated {
+    pub session: Pubkey,
+    pub pack: u8,
+    pub retreats: u8,
+    pub dead_spawns: u32,
 }

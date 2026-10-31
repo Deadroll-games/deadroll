@@ -28,7 +28,7 @@ All of them are created at `open_session` / `join_session` (the reward cache onc
 | `move_path(unit, path)` | player: owner or its session key; monster: DM or its session key | the cells in order (8 neighbors, diagonal = one step, never past an impassable corner), action points by tile type, no rolls; a reactive skill can stop the walk and roll (patch 13) |
 | `act`, `monster_act` | owner / DM | one action; requests a VRF value |
 | `consume_randomness` | VRF oracle | resolves the action from the VRF value |
-| `flee` | player | flee vote |
+| `flee`, `retreat` | owner / key | patch B: in an arena, proposes or confirms Escape (leave the dungeon, nothing kept) or Retreat (back to the map); the vote ends the turn, any other action cancels it; when every living player voted the monsters move once more |
 | `open_chest` | owner / key | patch 11: opens a visible chest next to the player (AP); requests a VRF value |
 | `settle_party` | DM main wallet | patch 11: every cache becomes its player's, XP and unlock (CPI character), the escrow for the DM, the map Finished |
 | `claim_after_timeout` | player main wallet | patch 11: after the DM's deadline, the same for one character and its contribution back |

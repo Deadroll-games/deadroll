@@ -8,6 +8,7 @@ pub mod combat_input;
 pub mod cpi_out;
 pub mod errors;
 pub mod events;
+pub mod exit_vote;
 pub mod hit_event;
 pub mod instructions;
 pub mod line;
@@ -125,9 +126,16 @@ pub mod deadroll_session {
         consume_randomness::handler(ctx, randomness)
     }
 
-    /// Player chooses "Escape" on their turn; the party flees when every living player did.
+    /// Player proposes or confirms "Escape" in an arena on their turn; when every living player
+    /// did, the monsters move once more and the party flees (docs/PARTY_AND_TURNS.md 7.5).
     pub fn flee(ctx: Context<Flee>) -> Result<()> {
         flee::handler(ctx)
+    }
+
+    /// Patch B: player proposes or confirms "Retreat" in an arena on their turn; when every living
+    /// player did, the monsters move once more and `leave_arena` brings the party back to the map.
+    pub fn retreat(ctx: Context<Retreat>) -> Result<()> {
+        retreat::handler(ctx)
     }
 
     /// Patch 11: a player opens a visible chest next to them on their turn (AP); the rewards are

@@ -1,15 +1,14 @@
 use anchor_lang::prelude::*;
-use deadroll_types::{seeds, SessionStatus};
+use deadroll_rules::exit::ExitKind;
+use deadroll_types::seeds;
 use session_keys::{session_auth_or, Session, SessionTokenV2};
 
 use crate::{
     auth,
     errors::SessionError,
     events::FleeVoted,
-    outcomes,
-    rules::Unit,
+    exit_vote,
     state::{GameSession, Monsters, Participation},
-    turns,
 };
 
 #[derive(Accounts, Session)]
@@ -39,8 +38,9 @@ pub struct Flee<'info> {
     pub session_token: Option<Account<'info, SessionTokenV2>>,
 }
 
-/// "Escape" (docs/PARTY_AND_TURNS.md, section 7.3): sets this player's intent and spends the
-/// whole turn. When every living player has the intent, the party flees: no XP, no rewards.
+/// "Escape" (docs/PARTY_AND_TURNS.md 7.3, 7.5): in an arena, this player proposes or confirms
+/// leaving the dungeon, and the turn ends. When every living player voted, the arena's monsters
+/// move once more, then the party flees: no experience, no rewards (`turns::advance`).
 #[session_auth_or(
     ctx.accounts.signer.key() == ctx.accounts.participation.player,
     SessionError::Unauthorized
@@ -54,36 +54,18 @@ pub fn handler(ctx: Context<Flee>) -> Result<()> {
         &participation.player,
         &participation.core.session_key,
     )?;
-    require!(
-        session.core.status == SessionStatus::Active,
-        SessionError::NotActive
-    );
-    require!(!session.core.pending_vrf, SessionError::RollPending);
-    // Patch 6: a player down in the last callback is finalized first (`start_turn`).
-    require!(session.pending_deaths == 0, SessionError::DeathsPending);
     let slot = participation.core.slot;
-    require!(
-        session.current_unit() == Some(Unit::Player(slot)),
-        SessionError::NotYourTurn
-    );
-    require!(session.turn_started(), SessionError::TurnNotStarted);
-    session.require_in_play()?;
-    require!(session.player_alive(slot), SessionError::UnitDead);
+    exit_vote::check_can_vote(session, slot)?;
 
     let session_key = session.key();
-    session.flee_mask |= 1 << slot;
+    let monsters = Monsters::load(&accounts.monsters, &session_key)?;
+    let alive_mask = session.alive_mask;
+    let v = exit_vote::cast(session, ExitKind::Escape, slot);
     emit!(FleeVoted {
         session: session_key,
         slot,
-        flee_mask: session.flee_mask,
-        alive_mask: session.alive_mask,
+        flee_mask: v.mask,
+        alive_mask,
     });
-
-    if turns::everyone_flees(session.flee_mask, session.alive_mask) {
-        session.core.status = SessionStatus::Fled;
-        outcomes::emit_if_ended(session, session_key)?;
-        return Ok(());
-    }
-    let monsters = Monsters::load(&accounts.monsters, &session_key)?;
-    turns::advance(session, session_key, &monsters)
+    exit_vote::end_vote_turn(session, session_key, &monsters)
 }
