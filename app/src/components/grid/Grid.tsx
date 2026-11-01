@@ -165,12 +165,17 @@ function paintOrder(units: readonly GridUnit[]): GridUnit[] {
   return monsters.concat(players);
 }
 
-/** Live unit on a cell. Corpses and tombstones do not occupy a cell, so a click on one is a cell click (a move). */
+/** Cells per side of a unit (patch B: a 2x2 monster stands on its whole square). */
+const sideOf = (unit: GridUnit) => unit.size ?? 1;
+
+/** Live unit on a cell (any cell of a 2x2 one). Corpses and tombstones do not occupy a cell, so a
+ * click on one is a cell click (a move). */
 function unitOnCell(units: readonly GridUnit[], cell: Cell): GridUnit | undefined {
   const ordered = paintOrder(units);
   for (let i = ordered.length - 1; i >= 0; i--) {
     const unit = ordered[i];
-    if (unit && unit.alive && unit.x === cell.x && unit.y === cell.y) return unit;
+    const n = unit ? sideOf(unit) : 1;
+    if (unit && unit.alive && cell.x >= unit.x && cell.x < unit.x + n && cell.y >= unit.y && cell.y < unit.y + n) return unit;
   }
   return undefined;
 }
@@ -217,9 +222,10 @@ function drawPoint(ctx: CanvasRenderingContext2D, scratch: HTMLCanvasElement, po
 }
 
 function drawMarker(ctx: CanvasRenderingContext2D, unit: GridUnit, cell: number) {
-  const cx = unit.x * cell + cell / 2;
-  const cy = unit.y * cell + cell / 2;
-  const radius = Math.max(6, Math.floor(cell * 0.26));
+  const block = cell * sideOf(unit);
+  const cx = unit.x * cell + block / 2;
+  const cy = unit.y * cell + block / 2;
+  const radius = Math.max(6, Math.floor(block * 0.26));
   ctx.beginPath();
   ctx.arc(cx, cy, radius, 0, Math.PI * 2);
   if (!unit.alive) ctx.fillStyle = DEAD;
@@ -254,11 +260,13 @@ function drawUnit(
   active: boolean,
   selected: boolean,
 ) {
+  // Patch B: a 2x2 monster's block is its whole square.
+  const block = cell * sideOf(unit);
   if (sprite) {
-    // Bottom-center on the cell; a canvas wider or taller than the cell overlaps its neighbors.
+    // Bottom-center on its block; a canvas wider or taller than the block overlaps its neighbors.
     const dest = unitDest(sprite, cell);
-    const dx = Math.round(unit.x * cell + cell / 2 - dest.w / 2);
-    const dy = Math.round((unit.y + 1) * cell - dest.h);
+    const dx = Math.round(unit.x * cell + block / 2 - dest.w / 2);
+    const dy = Math.round(unit.y * cell + block - dest.h);
     paintImage(ctx, scratch, sprite, dx, dy, dest.w, dest.h);
   } else {
     drawMarker(ctx, unit, cell);
@@ -267,9 +275,9 @@ function drawUnit(
   if (unit.alive && unit.hpMax > 0) {
     const ratio = Math.max(0, Math.min(1, unit.hp / unit.hpMax));
     const barH = Math.max(3, Math.floor(cell / 12));
-    const barW = cell - 8;
+    const barW = block - 8;
     const bx = unit.x * cell + 4;
-    const by = (unit.y + 1) * cell - 8 - barH;
+    const by = unit.y * cell + block - 8 - barH;
     ctx.fillStyle = INK;
     ctx.fillRect(bx, by, barW, barH);
     ctx.fillStyle = hpColor(ratio);
@@ -278,8 +286,8 @@ function drawUnit(
 
   const ox = unit.x * cell;
   const oy = unit.y * cell;
-  if (active) paintOutline(ctx, ox, oy, cell, 3, 2, ACTIVE_RING);
-  if (selected) paintOutline(ctx, ox, oy, cell, 6, 2, SELECT_RING);
+  if (active) paintOutline(ctx, ox, oy, block, 3, 2, ACTIVE_RING);
+  if (selected) paintOutline(ctx, ox, oy, block, 6, 2, SELECT_RING);
 }
 
 function drawGrid(ctx: CanvasRenderingContext2D, props: GridProps, cell: number) {

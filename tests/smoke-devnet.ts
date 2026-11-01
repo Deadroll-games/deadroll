@@ -53,8 +53,9 @@ const [WOLF, GOBLIN, CHIEFTAIN, GOBLIN_WARRIOR, SHAMAN] = [0, 1, 2, 3, 4];
  * warrior 1, shaman 2 (x, y are arena cells). */
 const CAMP = [
   { id: CHIEFTAIN, x: 1, y: 1, pack: 3, skills: 0b11111 },
-  { id: GOBLIN_WARRIOR, x: 2, y: 2, pack: 3, skills: 0b11 },
-  { id: SHAMAN, x: 3, y: 3, pack: 3, skills: 0b111 },
+  // Patch B: the chieftain is 2x2 on (1..3, 1..3); the line goes on to the warrior and the shaman.
+  { id: GOBLIN_WARRIOR, x: 3, y: 3, pack: 3, skills: 0b11 },
+  { id: SHAMAN, x: 4, y: 4, pack: 3, skills: 0b111 },
   { id: WOLF, x: 9, y: 2, pack: 1, skills: 0b0111 },
   { id: WOLF, x: 10, y: 2, pack: 1, skills: 0b1110 },
   { id: GOBLIN, x: 7, y: 7, pack: 2, skills: 0b11 },

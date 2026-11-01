@@ -10,7 +10,7 @@ use deadroll_rules::{
     loot::LootTable,
     monster::{record, NO_SKILL},
     spread::{BurningCell, BURNING_CELLS_MAX},
-    MonsterDefense, MonsterProfile, MonsterSkillStats, MonsterTemplate,
+    Footprint, MonsterDefense, MonsterProfile, MonsterSkillStats, MonsterTemplate,
 };
 use deadroll_skillcheck::monster::{MonsterSkill, SESSION_SIZE};
 use deadroll_types::{
@@ -585,6 +585,18 @@ impl<'a, 'info> Monsters<'a, 'info> {
         Ok(())
     }
 
+    /// Patch B: monster `index`'s cells per side (`record::CELLS`, 1 or 2), read in place.
+    pub fn size(&self, index: u8) -> Result<u8> {
+        let at = off::RECORDS + Self::monster(index)? * MONSTER_RECORD_LEN + record::CELLS;
+        Ok(self.info.try_borrow_data()?[at].max(1))
+    }
+
+    /// Patch B: the cells monster `index` stands on (its cell is the top-left one).
+    pub fn footprint(&self, index: u8) -> Result<Footprint> {
+        let m = self.get(index)?;
+        Ok(Footprint::new(Cell { x: m.x, y: m.y }, self.size(index)?))
+    }
+
     /// The bestiary template of monster `index` (docs/BESTIARY.md 12).
     pub fn template(&self, index: u8) -> Result<MonsterTemplate> {
         MonsterTemplate::from_record(&self.record(index)?)
@@ -781,6 +793,7 @@ impl<'a, 'info> Monsters<'a, 'info> {
                 cell: Cell { x: m.x, y: m.y },
                 kin: self.record(i)?[record::KIN],
                 auras: self.auras(i)?,
+                size: self.size(i)?,
             };
             out.len += 1;
         }

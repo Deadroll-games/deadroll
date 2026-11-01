@@ -370,7 +370,8 @@ pub struct ResonanceSpread {
     pub moved_to: Cell,
     /// Cells set on fire (`ignited[..ignited_count]`): Burning of `ignite_power` on whoever
     /// steps in, through round `until_round`.
-    pub ignited: [Cell; 8],
+    /// Patch B: 12, the ring around a 2x2 target (`deadroll_rules::spread::IGNITED_MAX`).
+    pub ignited: [Cell; 12],
     pub ignited_count: u8,
     pub ignite_power: u32,
     pub until_round: u16,

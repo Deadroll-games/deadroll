@@ -138,6 +138,7 @@ fn ai_unit_json(u: &AiUnitInput) -> Value {
         "states": states_json(&u.states),
         "mods": mods_json(&u.mods),
         "kin": u.kin,
+        "size": u.size,
     })
 }
 
@@ -201,6 +202,7 @@ fn party_json(p: &PartyInput) -> Value {
                 "cell": [b.cell.x, b.cell.y],
                 "kin": b.kin,
                 "auras": b.auras.iter().map(|(a, k)| json!({ "aura": aura_json(a), "kinOnly": k })).collect::<Vec<Value>>(),
+                "size": b.size,
             })
         })
         .collect();
@@ -227,6 +229,7 @@ fn with_bearer(
         cell: at,
         kin,
         auras: [(aura, kin_only), (AuraInput::default(), false)],
+        size: 1,
     };
     p.bearer_count += 1;
     p
@@ -333,7 +336,7 @@ fn unit_mods_cases() -> Vec<UnitModsRequest> {
         aura_in(ModKind::Slow, Aspect::Cold, 2_000, true, true),
         false,
     );
-    let req = |party, mods, monster, slot, at, basic_attack, kin| UnitModsRequest {
+    let sized = |party, mods, monster, slot, at, basic_attack, kin, size| UnitModsRequest {
         party,
         mods,
         monster,
@@ -341,7 +344,14 @@ fn unit_mods_cases() -> Vec<UnitModsRequest> {
         at,
         basic_attack,
         kin,
+        size,
     };
+    let req = |party, mods, monster, slot, at, basic_attack, kin| {
+        sized(party, mods, monster, slot, at, basic_attack, kin, 1)
+    };
+    // Patch B: a 2x2 bearer and a 2x2 monster under auras, reached through any of its cells.
+    let mut big_leader = leader;
+    big_leader.bearers[0].size = 2;
     vec![
         req(protect, NO_MODS, false, 0, at, false, 0),
         req(protect, own, false, 1, Cell { x: 5, y: 5 }, false, 0),
@@ -364,6 +374,29 @@ fn unit_mods_cases() -> Vec<UnitModsRequest> {
             Cell { x: 5, y: 4 },
             false,
             0,
+        ),
+        sized(slow, NO_MODS, true, 0, Cell { x: 6, y: 6 }, false, 0, 1),
+        sized(slow, NO_MODS, true, 0, Cell { x: 6, y: 6 }, false, 0, 2),
+        sized(slow, NO_MODS, true, 0, Cell { x: 1, y: 1 }, false, 0, 2),
+        sized(
+            big_leader,
+            NO_MODS,
+            true,
+            1,
+            Cell { x: 7, y: 4 },
+            false,
+            1,
+            1,
+        ),
+        sized(
+            big_leader,
+            NO_MODS,
+            true,
+            1,
+            Cell { x: 7, y: 7 },
+            false,
+            1,
+            2,
         ),
     ]
 }
@@ -830,6 +863,7 @@ fn build() -> Value {
                     "at": [r.at.x, r.at.y],
                     "basicAttack": r.basic_attack,
                     "kin": r.kin,
+                    "size": r.size,
                 },
                 "bytes": hex(&borsh::to_vec(r).unwrap()),
                 "mods": mods_json(&unit_mods(r)),

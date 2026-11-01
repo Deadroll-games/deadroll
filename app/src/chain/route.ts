@@ -28,6 +28,8 @@ export type Ground = {
   tileCost: ArrayLike<number>;
   /** Cells held by a living unit (not the mover) or a closed chest, as `y * 32 + x`. */
   taken: Set<number>;
+  /** Patch B: the mover's cells per side (a 2x2 monster walks its whole square), default 1. */
+  size?: number;
 };
 
 export const cheb = (a: Cell, b: Cell) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
@@ -46,11 +48,32 @@ export function costAt(g: Ground, x: number, y: number): number {
   return g.tileCost[cellKind(g.tiles[y * MAP_MAX + x] ?? WALL)] ?? 0;
 }
 
+/** Every cell of the mover's square on `(x, y)` can be entered by its tile. */
+function squareOpen(g: Ground, x: number, y: number): boolean {
+  const n = g.size ?? 1;
+  for (let dy = 0; dy < n; dy++) for (let dx = 0; dx < n; dx++) if (!tileOpen(g, x + dx, y + dy)) return false;
+  return true;
+}
+
 /** Action points of the step `from -> to` (neighbors), 0 = cannot: a diagonal past an impassable
- * corner cannot (`deadroll_mapcheck::walk`, CornerBlocked). */
+ * corner cannot (`deadroll_mapcheck::walk`, CornerBlocked). Patch B: a mover of `size` cells per
+ * side (`walk_sized`) needs its whole square free and pays the dearest cell it enters. */
 export function stepCost(g: Ground, from: Cell, to: Cell): number {
-  if (from.x !== to.x && from.y !== to.y && !(tileOpen(g, to.x, from.y) && tileOpen(g, from.x, to.y))) return 0;
-  return costAt(g, to.x, to.y);
+  const n = g.size ?? 1;
+  if (from.x !== to.x && from.y !== to.y && !(squareOpen(g, to.x, from.y) && squareOpen(g, from.x, to.y))) return 0;
+  if (n === 1) return costAt(g, to.x, to.y);
+  let cost = 0;
+  for (let dy = 0; dy < n; dy++) {
+    for (let dx = 0; dx < n; dx++) {
+      const x = to.x + dx;
+      const y = to.y + dy;
+      const c = costAt(g, x, y);
+      if (!c) return 0;
+      const own = x >= from.x && x < from.x + n && y >= from.y && y < from.y + n;
+      if (!own) cost = Math.max(cost, c);
+    }
+  }
+  return cost;
 }
 
 /** Cheapest steps from `from` to the first cell where `goal` holds. */

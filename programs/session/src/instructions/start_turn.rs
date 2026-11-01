@@ -6,7 +6,7 @@ use deadroll_rules::{
     monster::record,
     reactive::{nearby, Event},
 };
-use deadroll_types::{seeds, Cell, SessionStatus, MONSTER_SLOTS};
+use deadroll_types::{seeds, SessionStatus, MONSTER_SLOTS};
 
 use crate::{
     cpi_out::{character::DeathAccounts, SessionSigner},
@@ -138,6 +138,8 @@ pub fn handler<'info>(ctx: Context<'info, StartTurn<'info>>) -> Result<()> {
     let mut dot_drop = (0u32, 0u32, 0u32);
     // Patch 6: the same for a monster's HP: the monsters whose reactive answers it.
     let mut monster_bearers = 0u32;
+    // Patch B: the unit's buffs and debuffs with the auras over it, after the tick.
+    let delay_mods;
     let (start, states, mods, action_points): (TurnStart, _, _, u8) = match current {
         Unit::Player(slot) => {
             let participation: &mut Participation = accounts
@@ -189,6 +191,8 @@ pub fn handler<'info>(ctx: Context<'info, StartTurn<'info>>) -> Result<()> {
             // (a monster's debuff aura included).
             let field = Field::load(session, &monsters)?;
             participation.refresh_ap(turn_seq, &field.view());
+            // Patch B: the delay of this turn, under what covers it now (PARTY_AND_TURNS 6.2).
+            delay_mods = participation.mods_with_auras(&field.view(), false);
             if start.hp < hp_before && !start.died {
                 reactive_bearers = dot_bearers(
                     session,
@@ -267,21 +271,16 @@ pub fn handler<'info>(ctx: Context<'info, StartTurn<'info>>) -> Result<()> {
             monsters.set(index, &monster)?;
             let field = Field::load(session, &monsters)?;
             let kin = monsters.record(index)?[record::KIN];
-            let view = field.view().monster_mods(
-                &mods,
-                index,
-                Cell {
-                    x: monster.x,
-                    y: monster.y,
-                },
-                kin,
-                false,
-            );
+            let view =
+                field
+                    .view()
+                    .monster_mods(&mods, index, monsters.footprint(index)?, kin, false);
             monster.action_points = speed_ap(
                 monster_ap(session.monster_speed[index as usize]),
                 &view,
                 chill,
             );
+            delay_mods = view;
             if start.died {
                 // No VRF value of its own: the reward seed of a boss killed this way is the
                 // latest one, already public but out of anyone's hands by now.
@@ -316,6 +315,7 @@ pub fn handler<'info>(ctx: Context<'info, StartTurn<'info>>) -> Result<()> {
         }
     };
     session.started_seq = turn_seq;
+    turns::add_turn_delay(session, current, &delay_mods);
 
     let unit = current.id();
     emit!(TurnTicked {
@@ -436,7 +436,7 @@ fn dot_bearers(
     let source = match Unit::from_id(source) {
         Some(Unit::Monster(i)) => {
             let m = monsters.get(i)?;
-            m.alive.then_some((i, Cell { x: m.x, y: m.y }))
+            m.alive.then_some((i, monsters.footprint(i)?))
         }
         Some(Unit::Player(_)) | None => None,
     };
@@ -482,8 +482,7 @@ fn monster_dot_bearers(
         Some(Unit::Player(s)) => Some(s),
         Some(Unit::Monster(_)) | None => None,
     };
-    let m = monsters.get(victim)?;
-    let at = Cell { x: m.x, y: m.y };
+    let at = monsters.footprint(victim)?;
     let mut bearers = 0u32;
     for b in 0..monsters.count()? {
         let event = if b == victim {
@@ -494,7 +493,7 @@ fn monster_dot_bearers(
             }
         } else {
             let o = monsters.get(b)?;
-            if !o.alive || !nearby(BALANCE, Cell { x: o.x, y: o.y }, at) {
+            if !o.alive || !nearby(BALANCE, monsters.footprint(b)?, at) {
                 continue;
             }
             Event::AllyHpDrop {

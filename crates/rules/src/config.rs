@@ -554,6 +554,15 @@ pub struct ArenaTuning {
     pub initiative_base: u16,
     /// Time of one arena round (`GameSession.core.round`, what burning cells count in).
     pub round_time: u32,
+    /// Patch B: the share of a Slow's power that also divides the bearer's initiative as a
+    /// counterweight (docs/PARTY_AND_TURNS.md 6.2), bp of the Slow (`10_000` = all of it).
+    #[cfg_attr(feature = "serde", serde(default = "slow_initiative_default"))]
+    pub slow_initiative_bp: u32,
+}
+
+#[cfg(feature = "serde")]
+fn slow_initiative_default() -> u32 {
+    ArenaTuning::DEFAULT.slow_initiative_bp
 }
 
 impl ArenaTuning {
@@ -563,6 +572,7 @@ impl ArenaTuning {
         time_scale: 1_200,
         initiative_base: 6,
         round_time: 100,
+        slow_initiative_bp: 10_000,
     };
 }
 

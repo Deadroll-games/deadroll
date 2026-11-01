@@ -22,7 +22,8 @@ use crate::{
     config::BalanceConfig,
     input::{effect_action, EffectAction},
     monster::{kin_reaches, MonsterProfile, MonsterSkillStats},
-    units::{chebyshev, form_range, reach},
+    units::{form_range, reach},
+    Footprint,
 };
 
 /// A unit as the AI sees it.
@@ -37,6 +38,15 @@ pub struct AiUnit {
     pub mods: TimedMods,
     /// Monsters: `MonsterTemplate::kin`.
     pub kin: u8,
+    /// Patch B: cells per side (`MonsterTemplate::size`; players and 0 count as 1).
+    pub size: u8,
+}
+
+impl AiUnit {
+    /// The cells it stands on.
+    pub const fn footprint(&self) -> Footprint {
+        Footprint::new(self.cell, self.size)
+    }
 }
 
 /// The monster that acts.
@@ -80,18 +90,18 @@ fn ready<'a>(m: &AiMonster<'a>, slot: usize, silenced: bool) -> Option<&'a Monst
 fn reachable(
     cfg: &BalanceConfig,
     walk_ap: u8,
-    from: Cell,
-    to: Cell,
+    from: Footprint,
+    to: Footprint,
     range: RangeTag,
     cost: u8,
     ally: bool,
 ) -> bool {
-    let d = chebyshev(from, to);
+    let d = from.distance(&to);
     if !ally && d == 0 {
         return false;
     }
     let walk = walk_ap.saturating_sub(cost);
-    d <= reach(range, &cfg.players).saturating_add(walk)
+    d <= reach(range, &cfg.players).saturating_add(walk) as u16
 }
 
 /// Whether `target` already has what `effect` gives (a modifier of its kind, or the control).
@@ -114,7 +124,7 @@ pub fn plan(
 ) -> Option<AiChoice> {
     let me = m.index as usize;
     let my = monsters.get(me)?;
-    let from = my.cell;
+    let from = my.footprint();
     // A rooted monster acts from where it stands; a silenced one uses no skill.
     let walk_ap = if rooted(&my.mods) { 0 } else { m.ap };
     let silenced = silenced(&my.mods);
@@ -140,7 +150,7 @@ pub fn plan(
                     cfg,
                     walk_ap,
                     from,
-                    monsters[i].cell,
+                    monsters[i].footprint(),
                     s.stats.ext.range,
                     s.stats.ap_cost,
                     true,
@@ -175,7 +185,7 @@ pub fn plan(
                     cfg,
                     walk_ap,
                     from,
-                    monsters[i].cell,
+                    monsters[i].footprint(),
                     s.stats.ext.range,
                     s.stats.ap_cost,
                     true,
@@ -198,7 +208,7 @@ pub fn plan(
     let order = &mut order[..n];
     order.sort_by_key(|&i| {
         let h = &heroes[i as usize];
-        (chebyshev(from, h.cell), h.hp, i)
+        (from.distance(&h.footprint()), h.hp, i)
     });
     for &slot_of in order.iter() {
         let h = &heroes[slot_of as usize];
@@ -208,7 +218,7 @@ pub fn plan(
                 cfg,
                 walk_ap,
                 from,
-                h.cell,
+                h.footprint(),
                 s.stats.ext.range,
                 s.stats.ap_cost,
                 false,
@@ -252,7 +262,7 @@ pub fn plan(
         }
         let range = form_range(m.profile.form);
         let cost = cfg.players.basic_attack_ap;
-        if m.ap >= cost && reachable(cfg, walk_ap, from, h.cell, range, cost, false) {
+        if m.ap >= cost && reachable(cfg, walk_ap, from, h.footprint(), range, cost, false) {
             return Some(AiChoice {
                 slot: None,
                 target,

@@ -695,9 +695,10 @@ const DEMO_SPAWNS: SpawnDef[] = [
   { id: WOLF, x: 6, y: 2, pack: 1, skills: 0b1110 },
   { id: GOBLIN, x: 1, y: 9, pack: 2, skills: 0b11 },
   { id: GOBLIN, x: 2, y: 10, pack: 2, skills: 0b11 },
-  { id: CHIEFTAIN, x: 11, y: 11, pack: 3, skills: 0b11111 },
-  { id: GOBLIN_WARRIOR, x: 10, y: 11, pack: 3, skills: 0b11 },
-  { id: SHAMAN, x: 11, y: 10, pack: 3, skills: 0b111 },
+  // Patch B: the chieftain is 2x2 on (10..12, 10..12), inside the 12 x 12 arena.
+  { id: CHIEFTAIN, x: 10, y: 10, pack: 3, skills: 0b11111 },
+  { id: GOBLIN_WARRIOR, x: 9, y: 10, pack: 3, skills: 0b11 },
+  { id: SHAMAN, x: 10, y: 9, pack: 3, skills: 0b111 },
 ];
 /** Arena update: `Facing` and the packs' places on the map. The pack a party meets first stands at
  * `FRONT`, looking south-east: the first player steps from the entrance onto (2, 2), next to it and
@@ -2846,10 +2847,16 @@ describe("deadroll_session: support and control skills", { skip: SKIP_PARTY }, (
     assert.ok(hasState((await party.monsters()).core.monsters[target].states, "freeze"));
 
     await party.endTurn(party.players[MAGE].wallet, MAGE);
-    await party.untilStartOf(MONSTER_BASE + target);
+    const before = await party.untilStartOf(MONSTER_BASE + target);
     const skipped = await eventOf(await party.begin(), "turnSkipped");
     assert.equal(skipped.unit, MONSTER_BASE + target);
     assert.ok(skipped.state.freeze !== undefined);
+    // Patch B (docs/PARTY_AND_TURNS.md 6.2): the lost turn puts the next one on the timeline like
+    // a turn played, and the next unit is the lowest time (Freeze and Stun share the path).
+    const after = await party.state();
+    const id = MONSTER_BASE + target;
+    assert.equal(after.unitTime[id], before.unitTime[id] + delayOf(initiativeOf(after, id)));
+    assert.equal(after.core.turnOrder[after.core.turnIndex], await timelineNext(party, after));
   });
 
   it("a dead ally cannot be healed or buffed", async () => {
@@ -3349,12 +3356,13 @@ async function tableBody(address: PublicKey): Promise<Buffer> {
 
 /** The demo roster with the boss pack in front (listed first): in its arena the chieftain stands
  * next to the party's corner, on its diagonal, so a line from the party through the chieftain runs
- * through the goblin warrior and the shaman. One goblin is elite. Arena slots of the boss pack:
- * chieftain 0, warrior 1, shaman 2. */
+ * through the goblin warrior and the shaman. Patch B: the chieftain is 2x2 on (1..3, 1..3), the
+ * line crosses two of its cells and hits it once. One goblin is elite. Arena slots of the boss
+ * pack: chieftain 0, warrior 1, shaman 2. */
 const CAMP: SpawnDef[] = [
   { id: CHIEFTAIN, x: 1, y: 1, pack: 3, skills: 0b11111 },
-  { id: GOBLIN_WARRIOR, x: 2, y: 2, pack: 3, skills: 0b11 },
-  { id: SHAMAN, x: 3, y: 3, pack: 3, skills: 0b111 },
+  { id: GOBLIN_WARRIOR, x: 3, y: 3, pack: 3, skills: 0b11 },
+  { id: SHAMAN, x: 4, y: 4, pack: 3, skills: 0b111 },
   { id: WOLF, x: 9, y: 2, pack: 1, skills: 0b0111 },
   { id: WOLF, x: 10, y: 2, pack: 1, skills: 0b1110 },
   { id: GOBLIN, x: 7, y: 7, pack: 2, skills: 0b11, flags: 1 },
@@ -4044,5 +4052,154 @@ describe("deadroll_session: a diagonal never cuts a corner (patch 13)", { skip: 
     await move([{ x: 1, y: 2 }, { x: 1, y: 3 }, { x: 1, y: 4 }, { x: 2, y: 5 }]);
     const after = await party.part(0);
     assert.deepEqual([after.core.x, after.core.y, after.core.actionPoints], [2, 5, before.core.actionPoints - 4]);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Patch B: the initiative timeline under effects, the 2x2 chieftain (docs/PARTY_AND_TURNS.md 6,
+// docs/BESTIARY.md 2)
+
+/** `BalanceConfig::DEFAULT.arena` as the website exports it (app/src/chain/balance.json). */
+const ARENA_TUNING = JSON.parse(readFileSync(new URL("../../../app/src/chain/balance.json", import.meta.url), "utf8")).arena;
+
+/** `deadroll_rules::arena::turn_delay`: the delay of a turn under a Slow of `slowBp`. */
+function delayOf(initiative: number, slowBp = 0): number {
+  const slow = Math.floor((slowBp * ARENA_TUNING.slow_initiative_bp) / 10_000);
+  const effective = Math.floor((initiative * 10_000) / (10_000 + slow));
+  return Math.max(1, Math.floor(ARENA_TUNING.time_scale / Math.max(1, ARENA_TUNING.initiative_base + effective)));
+}
+
+function initiativeOf(s: any, unit: number): number {
+  return unit < MONSTER_BASE ? s.playerInitiative[unit] : s.monsterInitiative[unit - MONSTER_BASE];
+}
+
+/** `deadroll_rules::arena::next_unit` over the session's timeline: the living unit with the lowest
+ * time, a tie to the higher Dexterity (a monster: its initiative), then the lower id. */
+async function timelineNext(party: Party, s: any): Promise<number> {
+  const m = (await party.monsters()).core.monsters;
+  const ids: number[] = s.core.turnOrder.slice(0, s.turnOrderLen);
+  const alive = (u: number) => (u < MONSTER_BASE ? (s.aliveMask & (1 << u)) !== 0 : m[u - MONSTER_BASE].alive);
+  const tie = (u: number) => (u < MONSTER_BASE ? s.playerDex[u] : s.monsterInitiative[u - MONSTER_BASE]);
+  return ids.filter(alive).sort((a, b) => s.unitTime[a] - s.unitTime[b] || tie(b) - tie(a) || a - b)[0]!;
+}
+
+const slowOn = (mods: any[]) => mods.find((m: any) => m.turns > 0 && m.kind.slow !== undefined)?.powerBp ?? 0;
+
+describe("deadroll_session: the initiative timeline (patch B)", { skip: SKIP_PARTY }, () => {
+  it("the lowest time acts, its turn start adds its delay; a fast unit acts twice while a slow one acts once", async () => {
+    const party = await Party.create(["warrior", "mage"]);
+    await party.startAll();
+    // A started turn already put its unit's next turn on the timeline: end it first.
+    const first = await party.state();
+    if (first.startedSeq === first.turnSeq) {
+      const cur = first.core.turnOrder[first.core.turnIndex];
+      await party.endTurn(cur < MONSTER_BASE ? party.players[cur].wallet : party.dm, cur < MONSTER_BASE ? cur : null);
+    }
+    const order: number[] = [];
+    for (let i = 0; i < 14; i++) {
+      await party.settle();
+      const s = await party.state();
+      const cur = s.core.turnOrder[s.core.turnIndex];
+      assert.equal(cur, await timelineNext(party, s), `turn ${i}: the lowest time`);
+      const sig = await party.begin();
+      if (i === 0) console.log(`    CU, start_turn on the timeline: ${await unitsOf(sig)}`);
+      const after = await party.state();
+      // Nobody acts: no effect covers anyone, the bare delay.
+      assert.equal(after.unitTime[cur], s.unitTime[cur] + delayOf(initiativeOf(after, cur)), `turn ${i}: the delay`);
+      order.push(cur);
+      await party.endTurn(cur < MONSTER_BASE ? party.players[cur].wallet : party.dm, cur < MONSTER_BASE ? cur : null);
+    }
+    // A faster unit takes more turns than the slowest, and at times two in a row.
+    const s = await party.state();
+    const ids: number[] = s.core.turnOrder.slice(0, s.turnOrderLen);
+    const slowest = ids.reduce((a, b) => (initiativeOf(s, b) < initiativeOf(s, a) ? b : a));
+    const count = (u: number) => order.filter((x) => x === u).length;
+    assert.ok(
+      ids.some((u) => count(u) > count(slowest)),
+      `a faster unit acts more often than unit ${slowest}: ${order.join(",")}`,
+    );
+    assert.ok(
+      order.some((u, i) => i > 0 && order[i - 1] === u),
+      `a unit acts twice in a row: ${order.join(",")}`,
+    );
+  });
+
+  it("a Slow divides initiative from the bearer's next turn: its next turn start adds the slowed delay", async () => {
+    // The chieftain's Net Throw (Slow, its first active slot) on the warrior.
+    const party = await Party.create(["warrior", "mage"], { roster: CAMP });
+    await party.startAll();
+    const WARRIOR = 0;
+    const NET_THROW = 0;
+    let landed = 0;
+    for (let i = 0; i < 20 && !landed; i++) {
+      await party.skipTo(MONSTER_BASE + C_CHIEF);
+      if ((await party.monsters()).skillCooldowns[C_CHIEF][NET_THROW] === 0) {
+        await party.monsterAct(party.dm, C_CHIEF, WARRIOR, null, skillAction(NET_THROW));
+        const who = party.pendingWho(await party.state());
+        const done = await party
+          .consumeEventsWhere(who, (ev) => eventsNamed(ev, "effectResolved").some((fx: any) => fx.applied.none === undefined))
+          .catch(() => null);
+        if (!done) await party.consume(who, MISS);
+        landed = slowOn((await party.part(WARRIOR)).mods);
+      }
+      await party.endTurn(party.dm, null);
+    }
+    assert.ok(landed > 0, "the Net Throw landed a Slow on the warrior");
+    const before = await party.untilStartOf(WARRIOR);
+    await party.begin();
+    const after = await party.state();
+    // The delay of this turn under what covers it after the turn start's tick.
+    const covering = slowOn((await party.part(WARRIOR)).mods);
+    const initiative = initiativeOf(after, WARRIOR);
+    const delay = after.unitTime[WARRIOR] - before.unitTime[WARRIOR];
+    assert.equal(delay, delayOf(initiative, covering));
+    if (covering > 0 && initiative > 0) assert.ok(delay > delayOf(initiative), "slowed, the next turn comes later");
+  });
+});
+
+describe("deadroll_session: the 2x2 chieftain (patch B)", { skip: SKIP_PARTY }, () => {
+  const [WARRIOR, MAGE] = [0, 1];
+  let party: Party;
+
+  before(async () => {
+    // The boss pack's arena: the chieftain on (1..3, 1..3), the party at (0, 0) and (1, 0).
+    party = await Party.create(["warrior", "mage"], { roster: CAMP });
+    await party.startAll();
+  });
+
+  it("its whole square is taken: nobody steps onto any of its cells", async () => {
+    await party.skipTo(MAGE);
+    const p = party.players[MAGE];
+    // From (1, 0): (2, 1) is its top-right cell, (1, 1) its top-left one.
+    await rejects(party.movePath(p.wallet, MAGE, [{ x: 2, y: 1 }], p.participation), "CellOccupied");
+    await rejects(party.movePath(p.wallet, MAGE, [{ x: 1, y: 1 }], p.participation), "CellOccupied");
+    await party.endTurn(p.wallet, MAGE);
+  });
+
+  it("melee reaches it from next to any of its cells", async () => {
+    await party.skipTo(WARRIOR);
+    const p = party.players[WARRIOR];
+    // (0, 0) -> (0, 3): next to its bottom-left cell (1, 2), two cells from its top-left one.
+    await party.movePath(p.wallet, WARRIOR, [{ x: 0, y: 1 }, { x: 0, y: 2 }, { x: 0, y: 3 }], p.participation);
+    await party.endTurn(p.wallet, WARRIOR);
+    await party.skipTo(WARRIOR);
+    await party.act(WARRIOR, p.wallet, BASE_ATTACK, C_CHIEF);
+    assert.ok((await party.state()).core.pendingVrf, "the basic attack (melee) reaches the chieftain");
+    await party.consume(WARRIOR, MISS);
+    await party.endTurn(p.wallet, WARRIOR);
+  });
+
+  it("it walks its whole square: a step that would cover a unit is refused", async () => {
+    await party.skipTo(MONSTER_BASE + C_CHIEF);
+    // (1, 1) -> (0, 2): its square would be (0..2, 2..4), the warrior stands on (0, 3).
+    await rejects(party.movePath(party.dm, MONSTER_BASE + C_CHIEF, [{ x: 0, y: 2 }], null), "CellOccupied");
+    const before = (await party.monsters()).core.monsters[C_CHIEF];
+    // (1, 1) -> (2, 1): its square (2..4, 1..3), free.
+    const sig = await party.movePath(party.dm, MONSTER_BASE + C_CHIEF, [{ x: 2, y: 1 }], null);
+    console.log(`    CU, move_path of the 2x2 chieftain: ${await unitsOf(sig)}`);
+    const after = (await party.monsters()).core.monsters[C_CHIEF];
+    assert.deepEqual([after.x, after.y], [2, 1]);
+    assert.ok(after.actionPoints < before.actionPoints);
+    await party.endTurn(party.dm, null);
   });
 });

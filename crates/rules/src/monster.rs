@@ -343,6 +343,7 @@ impl MonsterTemplate {
     ) -> Option<SpawnRules> {
         let mut r = SpawnRules::plain(self.role);
         r.min_tier = self.min_tier;
+        r.size = self.size;
         r.pool_start = self.pool_start;
         r.pool_len = self.pool_len;
         for (i, c) in r.pool.iter_mut().enumerate().take(self.pool_len as usize) {

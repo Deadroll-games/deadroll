@@ -1,5 +1,6 @@
 //! Unit ids, the initiative roll, cooldowns and reach.
 use deadroll_combat::{d20, RollSource};
+use deadroll_mapcheck::footprint::Footprint;
 use deadroll_types::{Cell, Form, RangeTag, PARTY_MAX, TURN_ORDER_MAX};
 
 use crate::config::PlayerTuning;
@@ -96,16 +97,33 @@ pub fn tick_cooldowns(cooldowns: &mut [u8]) {
     }
 }
 
-/// Whether `range` reaches from `from` to `to` (Chebyshev distance, never the own cell).
-pub fn in_range(range: RangeTag, from: Cell, to: Cell, t: &PlayerTuning) -> bool {
-    let distance = chebyshev(from, to);
-    distance >= 1 && distance <= reach(range, t)
+/// Whether `range` reaches from `from` to `to` (Chebyshev distance, never the own cell). Patch B:
+/// a large monster is its whole footprint, the distance is between the nearest cells.
+pub fn in_range(
+    range: RangeTag,
+    from: impl Into<Footprint>,
+    to: impl Into<Footprint>,
+    t: &PlayerTuning,
+) -> bool {
+    let distance = distance(from, to);
+    distance >= 1 && distance <= reach(range, t) as u16
 }
 
 /// Whether a buff of `range` reaches an ally: the same, but allies may share a cell (the whole
 /// party stands on the entrance when it joins).
-pub fn in_ally_range(range: RangeTag, from: Cell, to: Cell, t: &PlayerTuning) -> bool {
-    chebyshev(from, to) <= reach(range, t)
+pub fn in_ally_range(
+    range: RangeTag,
+    from: impl Into<Footprint>,
+    to: impl Into<Footprint>,
+    t: &PlayerTuning,
+) -> bool {
+    distance(from, to) <= reach(range, t) as u16
+}
+
+/// Patch B: Chebyshev distance between the nearest cells of two units (`Footprint`; a `Cell` is a
+/// one-cell unit).
+pub fn distance(a: impl Into<Footprint>, b: impl Into<Footprint>) -> u16 {
+    a.into().distance(&b.into())
 }
 
 pub fn chebyshev(from: Cell, to: Cell) -> u8 {

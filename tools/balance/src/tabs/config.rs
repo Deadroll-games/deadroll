@@ -864,6 +864,13 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                                 da.round_time,
                                 1..=100_000,
                             );
+                            int_row(
+                                ui,
+                                "Timeline: share of a Slow that divides initiative, bp",
+                                &mut a.slow_initiative_bp,
+                                da.slow_initiative_bp,
+                                0..=10_000,
+                            );
                         });
                 });
         });

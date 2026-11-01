@@ -20,12 +20,13 @@
 //!   no resonance yet (docs/DAMAGE_TYPES_AND_MIXES.md 6.2).
 use deadroll_combat::{states::state_bit, HitResult, Outcome};
 use deadroll_skillcheck::{Category, Purpose, Trigger};
-use deadroll_types::{Cell, StateKind};
+use deadroll_types::StateKind;
 
 use crate::{
     config::BalanceConfig,
     input::SkillStats,
-    units::{chebyshev, in_ally_range, in_range},
+    units::{distance, in_ally_range, in_range},
+    Footprint,
 };
 
 /// What happened, as a reactive trigger sees it.
@@ -107,13 +108,23 @@ pub fn hit_events(result: &HitResult, before: u32, after: u32, hp_max: u32) -> [
 
 /// An enemy that moved from `from` to `to` entered the cell next to `bearer` (it was not next to
 /// it before).
-pub fn entered_next_to(from: Cell, to: Cell, bearer: Cell) -> bool {
-    chebyshev(to, bearer) == 1 && chebyshev(from, bearer) > 1
+/// it before). Patch B: a large unit counts with its whole footprint.
+pub fn entered_next_to(
+    from: impl Into<Footprint>,
+    to: impl Into<Footprint>,
+    bearer: impl Into<Footprint>,
+) -> bool {
+    let bearer = bearer.into();
+    distance(to, bearer) == 1 && distance(from, bearer) > 1
 }
 
 /// Whether `bearer` counts `ally` as nearby for `AllyHpBelow`.
-pub fn nearby(cfg: &BalanceConfig, bearer: Cell, ally: Cell) -> bool {
-    chebyshev(bearer, ally) <= cfg.players.nearby_ally_cells
+pub fn nearby(
+    cfg: &BalanceConfig,
+    bearer: impl Into<Footprint>,
+    ally: impl Into<Footprint>,
+) -> bool {
+    distance(bearer, ally) <= cfg.players.nearby_ally_cells as u16
 }
 
 /// What a triggered reactive does.
@@ -131,7 +142,7 @@ pub enum Reaction {
 
 /// The reaction of `skill` (borne by player `bearer` at `at`) to `event`, or `None` when it does
 /// not trigger: not its condition, still on cooldown (`cooldown_left > 0`), or the enemy or ally
-/// out of reach. `source`: the monster that caused the event and its cell; `ally_cell`: the cell
+/// out of reach. `source`: the unit that caused the event and its cells; `ally_cell`: the cells
 /// of the ally of an `AllyHpDrop`.
 #[allow(clippy::too_many_arguments)]
 pub fn reaction(
@@ -139,10 +150,10 @@ pub fn reaction(
     skill: &SkillStats,
     cooldown_left: u8,
     bearer: u8,
-    at: Cell,
+    at: impl Into<Footprint>,
     event: &Event,
-    source: Option<(u8, Cell)>,
-    ally_cell: Option<Cell>,
+    source: Option<(u8, Footprint)>,
+    ally_cell: Option<Footprint>,
 ) -> Option<Reaction> {
     if cooldown_left > 0 || !fires(skill, event) {
         return None;
@@ -151,6 +162,7 @@ pub fn reaction(
         return Some(Reaction::Aura);
     }
     let range = skill.ext.range;
+    let at: Footprint = at.into();
     let enemy = || {
         let (monster, cell) = source?;
         in_range(range, at, cell, &cfg.players).then_some(monster)

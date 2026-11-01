@@ -17,7 +17,7 @@ import type { ActiveStateAcc, AuraAcc, CharacterAcc, MonsterAcc, SkillRecordAcc 
 import { cellKind, type ActiveState, type Cell, type TimedMod } from "./types";
 
 /** `ABI_VERSION` of the module this wrapper speaks. */
-export const COMBAT_ABI = 10;
+export const COMBAT_ABI = 11;
 /** Bytes of the resonance tables: the registry `aspects`, `traits`, `resonances` and `triples` bodies. */
 export const COMBAT_TABLES_LEN = 48 + 192 + 576 + 1920;
 export const COMBAT_STATS = 4;
@@ -163,7 +163,14 @@ export const NO_AURA: AuraInput = { kind: 0, aspect: 0, powerBp: 0, radius: 0, t
 
 /** A living monster with an aura (ABI 6): its index, cell, kin and its two auras (each with its
  * kin-only flag). */
-export type BearerInput = { index: number; cell: WasmCell; kin: number; auras: readonly { aura: AuraInput; kinOnly: boolean }[] };
+export type BearerInput = {
+  index: number;
+  cell: WasmCell;
+  kin: number;
+  auras: readonly { aura: AuraInput; kinOnly: boolean }[];
+  /** ABI 11: cells per side (0 or left out counts as 1). */
+  size?: number;
+};
 
 /** The auras of a party with their bearers' cells; `alive` is a bit per player slot; `bearers`: the
  * monsters' (ABI 6). */
@@ -197,6 +204,8 @@ export type UnitModsRequest = {
   /** The view of a basic or natural attack, which no passive Empowerment strengthens. */
   basicAttack: boolean;
   kin: number;
+  /** ABI 11: a monster's cells per side (0 or left out counts as 1). */
+  size?: number;
 };
 
 /** A monster's natural attack (`skill` null) or damage skill (its session copy) on a player. */
@@ -213,7 +222,17 @@ export type MonsterAttackRequest = {
 };
 
 /** A unit as the monster AI sees it. */
-export type AiUnitInput = { cell: WasmCell; hp: number; hpMax: number; alive: boolean; states: readonly ActiveState[]; mods: readonly TimedMod[]; kin: number };
+export type AiUnitInput = {
+  cell: WasmCell;
+  hp: number;
+  hpMax: number;
+  alive: boolean;
+  states: readonly ActiveState[];
+  mods: readonly TimedMod[];
+  kin: number;
+  /** ABI 11: cells per side (0 or left out counts as 1). */
+  size?: number;
+};
 
 /** The auto mode's question: monster `index` with its record, level, skills by slot (session copies,
  * null = empty), cooldowns and AP, among the players and the monsters. */
@@ -372,7 +391,7 @@ export function encodeMonsterAttack(r: MonsterAttackRequest): Uint8Array {
 
 const NO_UNIT: AiUnitInput = { cell: [0, 0], hp: 0, hpMax: 0, alive: false, states: [], mods: [], kin: 0 };
 function encodeAiUnit(u: AiUnitInput): Uint8Array {
-  return concat(encodeCell(u.cell), u32le(u.hp), u32le(u.hpMax), u8(u.alive ? 1 : 0), encodeStates(u.states), encodeMods(u.mods), u8(u.kin));
+  return concat(encodeCell(u.cell), u32le(u.hp), u32le(u.hpMax), u8(u.alive ? 1 : 0), encodeStates(u.states), encodeMods(u.mods), u8(u.kin), u8(u.size ?? 0));
 }
 
 export function encodeMonsterPlan(r: MonsterPlanRequest): Uint8Array {
@@ -448,6 +467,7 @@ function encodeBearer(b: BearerInput): Uint8Array {
       const a = b.auras[j];
       return concat(encodeAura(a?.aura ?? NO_AURA), u8(a?.kinOnly ? 1 : 0));
     }),
+    u8(b.size ?? 0),
   );
 }
 
@@ -463,7 +483,7 @@ export function encodeParty(p: PartyInput): Uint8Array {
 }
 
 export function encodeUnitMods(r: UnitModsRequest): Uint8Array {
-  return concat(encodeParty(r.party), encodeMods(r.mods), u8(r.monster ? 1 : 0), u8(r.slot), encodeCell(r.at), u8(r.basicAttack ? 1 : 0), u8(r.kin));
+  return concat(encodeParty(r.party), encodeMods(r.mods), u8(r.monster ? 1 : 0), u8(r.slot), encodeCell(r.at), u8(r.basicAttack ? 1 : 0), u8(r.kin), u8(r.size ?? 0));
 }
 
 export function encodeLine(r: LineRequest): Uint8Array {

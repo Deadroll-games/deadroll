@@ -97,6 +97,9 @@ jobs:
       - name: registry tables
         run: cargo test -p deadroll-rules --features serde --test registry
 
+      - name: arena timeline and footprints
+        run: cargo test -p deadroll-rules --features serde --test arena_ts_fixtures
+
   # The website ships a built combat WASM (app/src/chain/wasm/combat.wasm): it must be exactly what
   # crates/combat/wasm builds from this commit.
   combat-wasm:

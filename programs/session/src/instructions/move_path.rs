@@ -1,8 +1,11 @@
 use anchor_lang::prelude::*;
 use deadroll_combat::rooted;
-use deadroll_mapcheck::walk::walk;
+use deadroll_mapcheck::{
+    footprint::Footprint,
+    walk::{walk, walk_sized},
+};
 use deadroll_rules::reactive::{entered_next_to, Event};
-use deadroll_types::{seeds, Cell, SessionStatus};
+use deadroll_types::{seeds, Cell, SessionStatus, ARENA_MONSTERS_MAX};
 use session_keys::{session_auth_or, Session, SessionTokenV2};
 
 use crate::{
@@ -153,6 +156,11 @@ pub fn handler(ctx: Context<MovePath>, unit: u8, path: Vec<Cell>) -> Result<()> 
             // update: on the map, the first step next to a pack's visible monster engages the pack
             // (docs/PARTY_AND_TURNS.md 4.1.3); there are no live monsters there to react.
             let count = monsters.count()?;
+            // Patch B: every monster's cells (a large one's whole square).
+            let mut squares = [Footprint::cell(Cell::default()); ARENA_MONSTERS_MAX];
+            for (i, f) in squares.iter_mut().enumerate().take(count as usize) {
+                *f = monsters.footprint(i as u8)?;
+            }
             let mut bearers = 0u32;
             let mut failed = None;
             let mut engaged = None;
@@ -174,7 +182,9 @@ pub fn handler(ctx: Context<MovePath>, unit: u8, path: Vec<Cell>) -> Result<()> 
                                 return true;
                             }
                         };
-                        if !m.alive || !entered_next_to(from, to, Cell { x: m.x, y: m.y }) {
+                        let square = squares.get(i as usize).copied();
+                        let near = square.is_some_and(|f| entered_next_to(from, to, f));
+                        if !m.alive || !near {
                             continue;
                         }
                         let e = MonsterEvent {
@@ -203,6 +213,7 @@ pub fn handler(ctx: Context<MovePath>, unit: u8, path: Vec<Cell>) -> Result<()> 
                 session_key,
                 &monsters.burning_cells()?,
                 mover,
+                1,
                 &path[..walked.steps],
                 &mut p.core.states,
                 0,
@@ -258,14 +269,18 @@ pub fn handler(ctx: Context<MovePath>, unit: u8, path: Vec<Cell>) -> Result<()> 
                 x: state.x,
                 y: state.y,
             };
-            // The first step that brings it next to a player whose reactive answers.
+            // The first step that brings it next to a player whose reactive answers. Patch B: a
+            // large monster walks with its whole square (its cell is the top-left one).
+            let size = monsters.size(index)?;
             let mut bearers = 0u8;
-            let walked = walk(
+            let walked = walk_sized(
                 &MapField::new(session, &layout, &monsters, mover)?,
                 start,
+                size,
                 &path,
                 state.action_points,
                 |from, to| {
+                    let (from, to) = (Footprint::new(from, size), Footprint::new(to, size));
                     for b in 0..session.core.player_count {
                         let bearer = session.player_pos[b as usize];
                         if entered_next_to(from, to, bearer)
@@ -284,6 +299,7 @@ pub fn handler(ctx: Context<MovePath>, unit: u8, path: Vec<Cell>) -> Result<()> 
                 session_key,
                 &monsters.burning_cells()?,
                 mover,
+                size,
                 &path[..walked.steps],
                 &mut state.states,
                 immune,

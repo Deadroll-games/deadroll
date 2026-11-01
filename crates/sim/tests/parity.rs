@@ -855,6 +855,7 @@ fn resonance_side(
         ATTACKER,
         0,
         &mut ms,
+        &[],
         &defense,
         &Open { units },
         &mut cells,
@@ -1196,7 +1197,7 @@ fn reactive_skills_resolve_the_same() {
             Trigger::EnemyAdjacent => Event::EnemyEntered,
             other => panic!("no demo reactive on {other:?}"),
         };
-        let source = Some((0, next_to));
+        let source = Some((0, next_to.into()));
         let r = reaction(program_rules::BALANCE, &pr, 0, 0, at, &event, source, None);
         assert_eq!(r, reaction(&cfg, &sr, 0, 0, at, &event, source, None));
         for i in 0..SEEDS {
@@ -1659,24 +1660,46 @@ fn monster_auras_and_ai_are_the_same() {
 /// initiative and Dexterity `set_ready` stores, the same side moving first for every approach.
 #[test]
 fn arena_timeline_matches_the_program() {
-    use deadroll_rules::arena::{delay, first_side, from_back, Approach};
+    use deadroll_combat::{support::ModKind, TimedMods};
+    use deadroll_rules::arena::{delay, first_side, from_back, turn_delay, Approach};
     use deadroll_sim::presets::Approach as Side;
     use deadroll_types::{Facing, Stat};
     let cfg = sim_config();
     assert_eq!(cfg.arena, program_rules::BALANCE.arena);
+    // Patch B: the delay under a Slow (and under a Haste, which leaves it alone).
+    let with = |kind: ModKind, power_bp: u32| {
+        let mut m = TimedMods::default();
+        m[0].kind = kind;
+        m[0].turns = 1;
+        m[0].power_bp = power_bp;
+        m
+    };
+    let views = [
+        TimedMods::default(),
+        with(ModKind::Slow, 5_000),
+        with(ModKind::Slow, 30_000),
+        with(ModKind::Haste, 10_000),
+    ];
     for (c, set) in demo() {
         for gear in GEARS {
             let f = sim_fighter(&c, set, &cfg, gear);
             let h = program_hero(&c, gear);
             let dex = Stat::Dexterity as usize;
             assert_eq!(f.hero.stats[dex], h.stats[dex]);
-            assert_eq!(
-                delay(input::hero::initiative(&cfg, &f.hero), &cfg.arena),
-                delay(
-                    program_rules::hero_initiative(&h),
-                    &program_rules::BALANCE.arena
-                )
+            let (si, pi) = (
+                input::hero::initiative(&cfg, &f.hero),
+                program_rules::hero_initiative(&h),
             );
+            assert_eq!(
+                delay(si, &cfg.arena),
+                delay(pi, &program_rules::BALANCE.arena)
+            );
+            for v in &views {
+                assert_eq!(
+                    turn_delay(si, v, &cfg.arena),
+                    turn_delay(pi, v, &program_rules::BALANCE.arena)
+                );
+            }
         }
     }
     for &facing in Facing::ALL {

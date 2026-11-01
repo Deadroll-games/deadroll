@@ -32,6 +32,7 @@ use crate::input::take_damage;
 
 use crate::config::BalanceConfig;
 use crate::monster::MonsterDefense;
+use crate::Footprint;
 
 /// Cells burning at once in one fight.
 pub const BURNING_CELLS_MAX: usize = 16;
@@ -39,6 +40,8 @@ pub const BURNING_CELLS_MAX: usize = 16;
 pub const SPREAD_HITS_MAX: usize = 8;
 /// Modifiers a spread hit lands on a monster: the jump modifiers and the nova's.
 pub const SPREAD_MODS_MAX: usize = JUMP_MODS_MAX + 1;
+/// Patch B: the most cells one hit sets on fire, the ring around a 2x2 target.
+pub const IGNITED_MAX: usize = 12;
 
 /// The map as the spread sees it.
 pub trait Field {
@@ -108,7 +111,7 @@ pub struct SpreadOutcome {
     /// The target was pushed from one cell to another.
     pub moved: Option<(Cell, Cell)>,
     /// Cells set on fire (or refreshed) by this hit.
-    pub ignited: [Cell; 8],
+    pub ignited: [Cell; IGNITED_MAX],
     pub ignited_count: u8,
     pub splashes: [SplashHit; SPREAD_HITS_MAX],
     pub splash_count: u8,
@@ -144,12 +147,21 @@ pub fn spreads(result: &HitResult) -> bool {
         || result.splash.damage > 0
 }
 
-fn chebyshev(a: Cell, b: Cell) -> u8 {
-    a.x.abs_diff(b.x).max(a.y.abs_diff(b.y))
-}
-
 fn cell_of(m: &Monster) -> Cell {
     Cell { x: m.x, y: m.y }
+}
+
+/// Patch B: monster `i`'s footprint, its size from `sizes` (1 when missing).
+fn footprint_of(monsters: &[Monster], sizes: &[u8], i: usize) -> Footprint {
+    Footprint::new(cell_of(&monsters[i]), sizes.get(i).copied().unwrap_or(1))
+}
+
+/// `next` is one of `f`'s cells moved one step in `(dx, dy)`: right behind it in that direction.
+fn right_behind(f: Footprint, next: Footprint, dx: i8, dy: i8) -> bool {
+    !next.overlaps(&f)
+        && next
+            .cells()
+            .any(|c| step(c, -dx, -dy).is_some_and(|back| f.covers(back)))
 }
 
 /// One step from `from` in direction `(dx, dy)`, `None` off the grid.
@@ -183,7 +195,8 @@ pub fn land_state(
 }
 
 /// Plays the jumps, the knockback and the burning cells of `result` (a hit by a unit at
-/// `attacker` on monster `target`). `defense[i]` is monster `i`'s; `round` the current one.
+/// `attacker` on monster `target`). `defense[i]` is monster `i`'s, `sizes[i]` its cells per side
+/// (patch B: distances run between the nearest cells of large monsters); `round` the current one.
 #[allow(clippy::too_many_arguments)]
 pub fn spread(
     cfg: &BalanceConfig,
@@ -191,6 +204,7 @@ pub fn spread(
     attacker: Cell,
     target: usize,
     monsters: &mut [Monster],
+    sizes: &[u8],
     defense: &[MonsterDefense],
     field: &impl Field,
     cells: &mut [BurningCell; BURNING_CELLS_MAX],
@@ -198,19 +212,23 @@ pub fn spread(
     source: u8,
 ) -> SpreadOutcome {
     let mut out = SpreadOutcome::default();
-    let Some(origin) = monsters.get(target).map(cell_of) else {
+    if target >= monsters.len() {
         return out;
-    };
+    }
+    let origin = footprint_of(monsters, sizes, target);
     let can = |monsters: &[Monster], i: usize, kind: StateKind| {
         monsters[i].alive
             && defense
                 .get(i)
                 .is_none_or(|d| d.immune_states & (1 << kind as u8) == 0)
     };
+    // From the attacker to the target's cell nearest it.
+    let near = origin.nearest(attacker);
     let dir = (
-        (origin.x as i16 - attacker.x as i16).signum() as i8,
-        (origin.y as i16 - attacker.y as i16).signum() as i8,
+        (near.x as i16 - attacker.x as i16).signum() as i8,
+        (near.y as i16 - attacker.y as i16).signum() as i8,
     );
+    let fp = |monsters: &[Monster], i: usize| footprint_of(monsters, sizes, i);
 
     for jump in result.jumps().iter().take(JUMPS_MAX) {
         let kind = jump.state.kind;
@@ -221,7 +239,7 @@ pub fn spread(
                 }
                 if i == target
                     || !can(monsters, i, kind)
-                    || chebyshev(cell_of(&monsters[i]), origin) > jump.limit
+                    || fp(monsters, i).distance(&origin) > jump.limit as u16
                     || !(jump.filter_any
                         || deadroll_combat::states::has(&monsters[i].states, jump.filter))
                 {
@@ -248,13 +266,15 @@ pub fn spread(
                 JumpMode::Adjacent | JumpMode::Chain => (0..monsters.len()).find(|&i| {
                     reached & (1 << i.min(31)) == 0
                         && can(monsters, i, kind)
-                        && chebyshev(cell_of(&monsters[i]), from) == 1
+                        && fp(monsters, i).distance(&from) == 1
                         && (jump.mode != JumpMode::Chain
                             || deadroll_combat::states::has(&monsters[i].states, jump.filter))
                 }),
-                JumpMode::Line => step(origin, dir.0, dir.1).and_then(|behind| {
+                JumpMode::Line => (dir != (0, 0)).then_some(()).and_then(|()| {
                     (0..monsters.len()).find(|&i| {
-                        i != target && can(monsters, i, kind) && cell_of(&monsters[i]) == behind
+                        i != target
+                            && can(monsters, i, kind)
+                            && right_behind(origin, fp(monsters, i), dir.0, dir.1)
                     })
                 }),
                 JumpMode::Radius => None,
@@ -274,7 +294,7 @@ pub fn spread(
                 out.hit_count += 1;
             }
             reached |= 1 << i.min(31);
-            from = cell_of(&monsters[i]);
+            from = fp(monsters, i);
             left -= 1;
             if jump.mode != JumpMode::Chain {
                 break;
@@ -291,7 +311,7 @@ pub fn spread(
             }
             if i == target
                 || !monsters[i].alive
-                || chebyshev(cell_of(&monsters[i]), origin) > nova.radius
+                || fp(monsters, i).distance(&origin) > nova.radius as u16
             {
                 continue;
             }
@@ -321,16 +341,16 @@ pub fn spread(
             let immune = defense
                 .get(i)
                 .is_some_and(|d| d.immune_aspects & (1 << splash.aspect as u8) != 0);
-            if i == target || immune || !m.alive || chebyshev(cell_of(m), origin) != 1 {
+            let here = Footprint::new(cell_of(m), sizes.get(i).copied().unwrap_or(1));
+            if i == target || immune || !m.alive || here.distance(&origin) != 1 {
                 continue;
             }
             // A lined splash: only the cells right behind and right in front of the target.
             if splash.line {
-                let cell = cell_of(m);
                 let on_line = dir != (0, 0)
                     && [dir, (-dir.0, -dir.1)]
                         .iter()
-                        .any(|&(dx, dy)| step(origin, dx, dy) == Some(cell));
+                        .any(|&(dx, dy)| right_behind(origin, here, dx, dy));
                 if !on_line {
                     continue;
                 }
@@ -350,29 +370,38 @@ pub fn spread(
         }
     }
 
-    // Knockback, away from the attacker.
+    // Knockback, away from the attacker: a large monster moves with its whole footprint, each step
+    // only onto cells it does not stand on already (its own cells count as occupied).
     let mut at = origin;
     if dir != (0, 0) && monsters[target].alive {
         for _ in 0..result.knockback {
-            match step(at, dir.0, dir.1) {
-                Some(next) if field.passable(next) && !field.occupied(next) => at = next,
-                _ => break,
+            let Some(next) = step(at.at, dir.0, dir.1).map(|c| Footprint::new(c, at.size)) else {
+                break;
+            };
+            let free = next.cells().count() == at.cells().count()
+                && next
+                    .cells()
+                    .filter(|c| !at.covers(*c))
+                    .all(|c| field.passable(c) && !field.occupied(c));
+            if !free {
+                break;
             }
+            at = next;
         }
         if at != origin {
-            monsters[target].x = at.x;
-            monsters[target].y = at.y;
-            out.moved = Some((origin, at));
+            monsters[target].x = at.at.x;
+            monsters[target].y = at.at.y;
+            out.moved = Some((origin.at, at.at));
         }
     }
 
-    // Burning cells around the target.
+    // Burning cells around the target (every cell next to its footprint).
     if result.ignite_power > 0 {
         let until_round = round.saturating_add(cfg.combat.burning_cell_rounds as u16);
-        for (dx, dy) in NEIGHBORS {
-            let Some(cell) = step(at, dx, dy).filter(|c| field.passable(*c)) else {
+        for cell in ring(at) {
+            if !field.passable(cell) || out.ignited_count as usize >= IGNITED_MAX {
                 continue;
-            };
+            }
             if ignite(cells, cell, until_round, result.ignite_power, source, round) {
                 out.ignited[out.ignited_count as usize] = cell;
                 out.ignited_count += 1;
@@ -382,17 +411,19 @@ pub fn spread(
     out
 }
 
-/// The eight cells around one, row by row.
-const NEIGHBORS: [(i8, i8); 8] = [
-    (-1, -1),
-    (0, -1),
-    (1, -1),
-    (-1, 0),
-    (1, 0),
-    (-1, 1),
-    (0, 1),
-    (1, 1),
-];
+/// Patch B: the cells next to a footprint, row by row (the 8 around one cell).
+fn ring(f: Footprint) -> impl Iterator<Item = Cell> {
+    let n = f.size.max(1) as i16;
+    let (x0, y0) = (f.at.x as i16 - 1, f.at.y as i16 - 1);
+    (0..(n + 2) * (n + 2)).filter_map(move |i| {
+        let (x, y) = (x0 + i % (n + 2), y0 + i / (n + 2));
+        let c = Cell {
+            x: u8::try_from(x).ok()?,
+            y: u8::try_from(y).ok()?,
+        };
+        (!f.covers(c)).then_some(c)
+    })
+}
 
 /// Sets `cell` on fire: a burning one keeps the stronger fire and the later end, a new one takes
 /// a free or burnt-out slot. False when every slot burns.
@@ -536,6 +567,7 @@ mod tests {
             c(0, 5),
             0,
             &mut ms,
+            &[],
             &defense,
             &OPEN,
             &mut cells,
@@ -569,6 +601,7 @@ mod tests {
             c(0, 5),
             0,
             &mut ms,
+            &[],
             &defense,
             &OPEN,
             &mut cells,
@@ -611,6 +644,7 @@ mod tests {
             c(0, 1),
             0,
             &mut ms,
+            &[],
             &defense,
             &OPEN,
             &mut cells,
@@ -642,6 +676,7 @@ mod tests {
             c(2, 2),
             0,
             &mut ms,
+            &[],
             &defense,
             &OPEN,
             &mut cells,
@@ -657,6 +692,7 @@ mod tests {
             c(2, 2),
             0,
             &mut ms,
+            &[],
             &defense,
             &OPEN,
             &mut cells,
@@ -681,6 +717,7 @@ mod tests {
             c(4, 5),
             0,
             &mut ms,
+            &[],
             &defense,
             &OPEN,
             &mut cells,
@@ -701,6 +738,7 @@ mod tests {
             c(4, 5),
             0,
             &mut ms,
+            &[],
             &defense,
             &walled,
             &mut cells,
@@ -720,6 +758,7 @@ mod tests {
             c(4, 5),
             0,
             &mut ms,
+            &[],
             &defense,
             &crowded,
             &mut cells,
@@ -735,6 +774,7 @@ mod tests {
             c(8, 8),
             0,
             &mut ms,
+            &[],
             &defense,
             &OPEN,
             &mut cells,
@@ -742,6 +782,61 @@ mod tests {
             0,
         );
         assert_eq!(out.moved, None);
+    }
+
+    #[test]
+    fn a_large_target_spreads_and_moves_with_its_whole_square() {
+        // Patch B: a 2x2 monster on (4..6, 4..6), hit from (3, 4).
+        let defense = [MonsterDefense::NONE; 3];
+        let sizes = [2, 1, 1];
+        let mut cells = [BurningCell::default(); BURNING_CELLS_MAX];
+        let run = |r: &HitResult, ms: &mut [Monster], map: &Map, cells: &mut _| {
+            spread(CFG, r, c(3, 4), 0, ms, &sizes, &defense, map, cells, 1, 0)
+        };
+        // A nova of radius 1 reaches the cells around its square, not one cell further.
+        let mut r = HitResult::default();
+        r.nova.radius = 1;
+        r.nova.state = burning(3);
+        let mut ms = [monster(4, 4), monster(6, 6), monster(7, 5)];
+        let out = run(&r, &mut ms, &OPEN, &mut cells);
+        assert_eq!(
+            out.hits().iter().map(|h| h.monster).collect::<Vec<_>>(),
+            [1]
+        );
+        // A lined splash hits the cell right behind any of its cells.
+        let mut r = HitResult::default();
+        r.splash.damage = 2;
+        r.splash.line = true;
+        let mut ms = [monster(4, 4), monster(6, 4), monster(6, 6)];
+        let out = run(&r, &mut ms, &OPEN, &mut cells);
+        assert_eq!(
+            out.splashes().iter().map(|h| h.monster).collect::<Vec<_>>(),
+            [1]
+        );
+        // A knockback moves the whole square: its own cells never stop it, a unit beside the
+        // cells it enters does.
+        let r = HitResult {
+            knockback: 2,
+            ignite_power: 4,
+            ..HitResult::default()
+        };
+        let mut ms = [monster(4, 4), monster(0, 0), monster(0, 1)];
+        let out = run(&r, &mut ms, &OPEN, &mut cells);
+        assert_eq!(out.moved, Some((c(4, 4), c(6, 4))));
+        // The ring around the moved square burns: 12 cells.
+        assert_eq!(out.ignited_count, 12);
+        assert!(out
+            .ignited()
+            .iter()
+            .all(|x| !Footprint::new(c(6, 4), 2).covers(*x)));
+        let crowded = Map {
+            walls: &[],
+            units: &[c(7, 5)],
+        };
+        let mut ms = [monster(4, 4), monster(0, 0), monster(0, 1)];
+        let mut cells = [BurningCell::default(); BURNING_CELLS_MAX];
+        let out = run(&r, &mut ms, &crowded, &mut cells);
+        assert_eq!(out.moved, Some((c(4, 4), c(5, 4))));
     }
 
     #[test]
@@ -764,6 +859,7 @@ mod tests {
             c(4, 5),
             0,
             &mut ms,
+            &[],
             &defense,
             &walled,
             &mut cells,
@@ -812,7 +908,19 @@ mod tests {
 
     fn run(r: &HitResult, ms: &mut [Monster], defense: &[MonsterDefense]) -> SpreadOutcome {
         let mut cells = [BurningCell::default(); BURNING_CELLS_MAX];
-        spread(CFG, r, c(0, 5), 0, ms, defense, &OPEN, &mut cells, 1, 0)
+        spread(
+            CFG,
+            r,
+            c(0, 5),
+            0,
+            ms,
+            &[],
+            defense,
+            &OPEN,
+            &mut cells,
+            1,
+            0,
+        )
     }
 
     #[test]

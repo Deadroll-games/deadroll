@@ -11,10 +11,10 @@ use deadroll_combat::{Applied, EffectRoll, States, TimedMods};
 use deadroll_rules::{
     aura::{AuraField, MonsterAuras, PartyAuras, REACTIVE_AURA},
     input::{effect_action, EffectAction},
-    line::{targets_on_line, LINE_TARGETS_MAX},
+    line::{line_ends, targets_on_line, LINE_TARGETS_MAX},
     monster::{kin_reaches, record, REACTIVE_SLOT},
     reactive::{hit_events, nearby, reaction, Event, Reaction},
-    resolve, MonsterSkillStats,
+    resolve, Footprint, MonsterSkillStats,
 };
 use deadroll_skillcheck::{Purpose, Target};
 use deadroll_types::{Cell, Monster, SessionStatus, MONSTERS_MAX, PARTY_MAX};
@@ -155,13 +155,13 @@ impl<'a, 'info> Cb<'a, 'info> {
             }
         }
         if m.hp < before {
-            let at = cell_of(&m);
+            let at = Footprint::new(cell_of(&m), self.monsters.size(index)?);
             for b in 0..self.monsters.count()? {
                 if b == index || reactive & (1 << b) == 0 {
                     continue;
                 }
                 let o = self.monsters.get(b)?;
-                if o.alive && nearby(BALANCE, cell_of(&o), at) {
+                if o.alive && nearby(BALANCE, self.monsters.footprint(b)?, at) {
                     self.monster_events.push(MonsterEvent {
                         bearer: b,
                         event: Event::AllyHpDrop {
@@ -240,11 +240,12 @@ impl<'a, 'info> Cb<'a, 'info> {
         if !monster.alive || !session.player_alive(target) {
             return Ok(events);
         }
-        let from = cell_of(&monster);
+        let from = Footprint::new(cell_of(&monster), self.monsters.size(index)?);
         let (targets, n) = match skill.filter(|k| k.stats.blocks.target == Target::Line) {
             Some(k) => {
                 let layout = MapLayoutView::load(self.layout, session.ground())?;
                 let to = session.player_pos[target as usize];
+                let (from, to) = line_ends(from, to);
                 let line = skill_line(session, &layout, from, to, k.stats.ext.range);
                 let mut units = [(0u8, Cell::default()); PARTY_MAX];
                 let mut m = 0;
@@ -315,7 +316,7 @@ impl<'a, 'info> Cb<'a, 'info> {
         let monster_mods = field.view().monster_mods(
             &self.monsters.mods(index)?,
             index,
-            cell_of(&monster),
+            self.monsters.footprint(index)?,
             profile.kin,
             skill.is_none(),
         );
@@ -507,7 +508,7 @@ impl<'a, 'info> Cb<'a, 'info> {
         let caster_monster = self.monsters.get(index)?;
         let profile = self.monsters.profile(index, caster_monster.level)?;
         let (targets, n) = if skill.stats.blocks.target == Target::Line && target != index {
-            let from = cell_of(&caster_monster);
+            let from = self.monsters.footprint(index)?;
             self.line_monsters(session, from, target, &skill.stats)?
         } else {
             let mut one = [0u8; LINE_TARGETS_MAX];
@@ -767,7 +768,7 @@ pub fn monster_reaction_from(
             if !kin_reaches(skill.kin_only, mine, theirs, false) {
                 return Ok(None);
             }
-            Some(cell_of(&a))
+            Some(Footprint::new(cell_of(&a), monsters.size(ally)?))
         }
         Event::Hit { .. } | Event::HpDrop { .. } | Event::Controlled | Event::EnemyEntered => None,
     };
@@ -777,9 +778,9 @@ pub fn monster_reaction_from(
         &skill.stats,
         cooldown,
         b,
-        cell_of(&m),
+        Footprint::new(cell_of(&m), monsters.size(b)?),
         &e.event,
-        source,
+        source.map(|(s, c)| (s, c.into())),
         ally_cell,
     )
     .map(|r| (skill, r)))
