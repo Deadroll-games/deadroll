@@ -6,16 +6,27 @@
 // HKDF-SHA256 of that signature with the map address gives an AES-256-GCM key for the encrypted copy
 // on chain and an HMAC-SHA256 key that derives each leaf's 16-byte salt. Nothing is stored: any
 // device with the wallet opens the secrets again. WebCrypto only (browsers, Node 20+).
-import { getCellSecretEncoder, getSpawnEncoder, type CellSecretArgs, type SpawnArgs } from "./generated/session/index.js";
+/** `CellSecret` (crates/types): the kind (`SecretKind`) and three bytes. */
+export type CellSecretArgs = { kind: number; a: number; b: number; c: number };
+/** `Spawn` (crates/types). */
+export type SpawnArgs = { bestiaryId: number; x: number; y: number; level: number; skills: number; flags: number; aspects: number; pack: number };
+const spawnBytes = (s: SpawnArgs) =>
+  new Uint8Array([s.bestiaryId, s.x, s.y, s.level, s.skills & 0xff, (s.skills >> 8) & 0xff, s.flags, s.aspects, s.pack]);
 
+import { CLASS_BLOB, CLASS_PACKS, CLASS_SECRETS } from "./map.js";
+
+/** A Small map's pack numbers (patch D: `CLASS_PACKS[sizeClass]` for any size). */
 export const PACKS_MAX = 8;
 export const PACK_LEAVES = 8;
 export const ARENA_MONSTERS_MAX = 8;
 export const SECRET_TYPES = 4;
+/** A Small map's secrets and encrypted-copy bytes (patch D: `CLASS_SECRETS`, `CLASS_BLOB`). */
 export const SECRETS_MAX = 16;
 export const SECRETS_BLOB_MAX = 800;
 export const SALT_LEN = 16;
-export const DEPTH_MAX = 12;
+/** Patch D: the longest proof of any map (`SECRET_DEPTH_CAP`). */
+export const DEPTH_MAX = 15;
+const packsOf = (sizeClass: number) => CLASS_PACKS[sizeClass] ?? PACKS_MAX;
 /** `PackLayout.visible` of an ambush pack. */
 export const NO_SPAWN = 0xff;
 export const SPAWN_ELITE = 1;
@@ -51,17 +62,23 @@ async function sha256(...parts: Uint8Array[]): Promise<Uint8Array> {
   return new Uint8Array(await subtle().digest("SHA-256", buf(concat(...parts))));
 }
 
-/** The leaf numbering (`deadroll_mapcheck::secrets::Leaves`): packs, the map row by row, each used arena. */
+/** The leaf numbering (`deadroll_mapcheck::secrets::Leaves`): packs, the map row by row, each used
+ * arena. Patch D: a map of size class `sizeClass` has `CLASS_PACKS[sizeClass]` pack leaves (a Small
+ * map's 8, as before). */
 export class Leaves {
-  readonly arenaAt: number[] = new Array(PACKS_MAX).fill(0);
+  readonly packLeaves: number;
+  readonly arenaAt: number[];
   readonly count: number;
   constructor(
     readonly width: number,
     readonly height: number,
     readonly packs: PackShape[],
+    readonly sizeClass = 0,
   ) {
-    let at = PACK_LEAVES + width * height;
-    for (let n = 0; n < PACKS_MAX; n++) {
+    this.packLeaves = packsOf(sizeClass);
+    this.arenaAt = new Array(this.packLeaves).fill(0);
+    let at = this.packLeaves + width * height;
+    for (let n = 0; n < this.packLeaves; n++) {
       const p = packs[n];
       if (!p) continue;
       this.arenaAt[n] = at;
@@ -70,17 +87,17 @@ export class Leaves {
     this.count = at;
   }
   of(b: Board): number | null {
-    if (b.kind === "pack") return b.pack < PACK_LEAVES ? b.pack : null;
-    if (b.kind === "map") return b.x < this.width && b.y < this.height ? PACK_LEAVES + b.y * this.width + b.x : null;
+    if (b.kind === "pack") return b.pack < this.packLeaves ? b.pack : null;
+    if (b.kind === "map") return b.x < this.width && b.y < this.height ? this.packLeaves + b.y * this.width + b.x : null;
     const p = this.packs[b.pack];
     return p && b.x < p.width && b.y < p.height ? this.arenaAt[b.pack] + b.y * p.width + b.x : null;
   }
   board(leaf: number): Board | null {
     if (leaf < 0 || leaf >= this.count) return null;
-    if (leaf < PACK_LEAVES) return { kind: "pack", pack: leaf };
-    const m = leaf - PACK_LEAVES;
+    if (leaf < this.packLeaves) return { kind: "pack", pack: leaf };
+    const m = leaf - this.packLeaves;
     if (m < this.width * this.height) return { kind: "map", x: m % this.width, y: Math.floor(m / this.width) };
-    for (let n = 0; n < PACKS_MAX; n++) {
+    for (let n = 0; n < this.packLeaves; n++) {
       const p = this.packs[n];
       if (!p) continue;
       const i = leaf - this.arenaAt[n];
@@ -97,13 +114,12 @@ export const depth = (count: number) => {
   return d;
 };
 
-export const secretBytes = (s: CellSecretArgs) => new Uint8Array(getCellSecretEncoder().encode(s));
+export const secretBytes = (s: CellSecretArgs) => new Uint8Array([s.kind, s.a, s.b, s.c]);
 export const emptyRoster = (): Roster => ({ count: 0, spawns: Array.from({ length: ARENA_MONSTERS_MAX }, () => ({ bestiaryId: 0, x: 0, y: 0, level: 0, skills: 0, flags: 0, aspects: 0, pack: 0 })) });
 /** `PackRoster::bytes`: the count, then all `ARENA_MONSTERS_MAX` spawns. */
 export function rosterBytes(r: Roster): Uint8Array {
-  const enc = getSpawnEncoder();
   const spawns = emptyRoster().spawns.map((z, i) => r.spawns[i] ?? z);
-  return concat(new Uint8Array([r.count]), ...spawns.map((s) => new Uint8Array(enc.encode(s))));
+  return concat(new Uint8Array([r.count]), ...spawns.map(spawnBytes));
 }
 
 export const cellLeaf = (map: Uint8Array, leaf: number, s: CellSecretArgs, salt: Uint8Array) => sha256(new Uint8Array([TAG_CELL]), map, u16(leaf), secretBytes(s), salt);
@@ -139,8 +155,8 @@ export type PackRecord = { visible: number; x: number; y: number; facing: number
 export function splitDesign(spawns: SpawnArgs[], packs: (PackRecord | null)[]): { spawns: SpawnArgs[]; packs: (PackRecord | null)[]; rosters: Roster[] } {
   const pub: SpawnArgs[] = [];
   const outPacks = packs.map((p) => (p ? { ...p } : null));
-  const rosters = Array.from({ length: PACKS_MAX }, emptyRoster);
-  for (let n = 0; n < PACKS_MAX; n++) {
+  const rosters = Array.from({ length: packs.length }, emptyRoster);
+  for (let n = 0; n < packs.length; n++) {
     const p = packs[n];
     if (!p) continue;
     const list: SpawnArgs[] = [];
@@ -190,19 +206,21 @@ export async function saltOf(keys: SecretKeys, leaf: number): Promise<Uint8Array
 export type Secrets = { rosters: Roster[]; cells: CellEntry[] };
 
 const BLOB_VERSION = 1;
-/** The plain bytes of the encrypted copy: version, 8 rosters, the cells (`leaf` u16 LE + 4 bytes). */
-export function encodeSecrets(s: Secrets): Uint8Array {
-  if (s.cells.length > SECRETS_MAX) throw new Error(`at most ${SECRETS_MAX} secrets`);
-  const rosters = Array.from({ length: PACKS_MAX }, (_, n) => rosterBytes(s.rosters[n] ?? emptyRoster()));
+/** The plain bytes of the encrypted copy: version, a roster per pack number of the size class (8 on
+ * a Small map), the cells (`leaf` u16 LE + 4 bytes). */
+export function encodeSecrets(s: Secrets, sizeClass = 0): Uint8Array {
+  const max = CLASS_SECRETS[sizeClass] ?? SECRETS_MAX;
+  if (s.cells.length > max) throw new Error(`at most ${max} secrets`);
+  const rosters = Array.from({ length: packsOf(sizeClass) }, (_, n) => rosterBytes(s.rosters[n] ?? emptyRoster()));
   return concat(new Uint8Array([BLOB_VERSION]), ...rosters, new Uint8Array([s.cells.length]), ...s.cells.map((c) => concat(u16(c.leaf), secretBytes(c.secret))));
 }
 
-export function decodeSecrets(bytes: Uint8Array): Secrets {
+export function decodeSecrets(bytes: Uint8Array, sizeClass = 0): Secrets {
   if (bytes[0] !== BLOB_VERSION) throw new Error(`unknown secrets version ${bytes[0]}`);
   const rosterLen = 1 + ARENA_MONSTERS_MAX * 9;
   const rosters: Roster[] = [];
   let at = 1;
-  for (let n = 0; n < PACKS_MAX; n++, at += rosterLen) {
+  for (let n = 0; n < packsOf(sizeClass); n++, at += rosterLen) {
     const r = bytes.subarray(at, at + rosterLen);
     const spawns = Array.from({ length: ARENA_MONSTERS_MAX }, (_, i) => {
       const s = r.subarray(1 + i * 9, 10 + i * 9);
@@ -219,18 +237,19 @@ export function decodeSecrets(bytes: Uint8Array): Secrets {
 }
 
 /** The encrypted copy: a random 12-byte nonce, then AES-GCM of `encodeSecrets` (the map address as AAD). */
-export async function sealSecrets(keys: SecretKeys, map: Uint8Array, s: Secrets): Promise<Uint8Array> {
+export async function sealSecrets(keys: SecretKeys, map: Uint8Array, s: Secrets, sizeClass = 0): Promise<Uint8Array> {
   const iv = globalThis.crypto.getRandomValues(new Uint8Array(12));
-  const ct = new Uint8Array(await subtle().encrypt({ name: "AES-GCM", iv, additionalData: buf(map) }, keys.enc, buf(encodeSecrets(s))));
+  const ct = new Uint8Array(await subtle().encrypt({ name: "AES-GCM", iv, additionalData: buf(map) }, keys.enc, buf(encodeSecrets(s, sizeClass))));
   const out = concat(iv, ct);
-  if (out.length > SECRETS_BLOB_MAX) throw new Error(`encrypted secrets take ${out.length} bytes, at most ${SECRETS_BLOB_MAX}`);
+  const cap = CLASS_BLOB[sizeClass] ?? SECRETS_BLOB_MAX;
+  if (out.length > cap) throw new Error(`encrypted secrets take ${out.length} bytes, at most ${cap}`);
   return out;
 }
 
 /** Opens the encrypted copy; throws if the key (the wallet's signature) does not fit. */
-export async function openSecrets(keys: SecretKeys, map: Uint8Array, blob: Uint8Array): Promise<Secrets> {
+export async function openSecrets(keys: SecretKeys, map: Uint8Array, blob: Uint8Array, sizeClass = 0): Promise<Secrets> {
   const plain = await subtle().decrypt({ name: "AES-GCM", iv: buf(blob.slice(0, 12)), additionalData: buf(map) }, keys.enc, buf(blob.slice(12)));
-  return decodeSecrets(new Uint8Array(plain));
+  return decodeSecrets(new Uint8Array(plain), sizeClass);
 }
 
 /** The whole commitment: every leaf hashed with its salt, the root, and what a reveal sends. */
@@ -245,12 +264,12 @@ export type Commitment = {
 
 const NONE: CellSecretArgs = { kind: Secret.None, a: 0, b: 0, c: 0 } as CellSecretArgs;
 
-export async function commit(map: Uint8Array, keys: SecretKeys, width: number, height: number, packs: PackShape[], s: Secrets): Promise<Commitment> {
-  const leaves = new Leaves(width, height, packs);
+export async function commit(map: Uint8Array, keys: SecretKeys, width: number, height: number, packs: PackShape[], s: Secrets, sizeClass = 0): Promise<Commitment> {
+  const leaves = new Leaves(width, height, packs, sizeClass);
   const byLeaf = new Map(s.cells.map((c) => [c.leaf, c.secret]));
   const salts = await Promise.all(Array.from({ length: leaves.count }, (_, i) => saltOf(keys, i)));
   const hashes = await Promise.all(
-    salts.map((salt, i) => (i < PACK_LEAVES ? packLeaf(map, i, s.rosters[i] ?? emptyRoster(), salt) : cellLeaf(map, i, byLeaf.get(i) ?? NONE, salt))),
+    salts.map((salt, i) => (i < leaves.packLeaves ? packLeaf(map, i, s.rosters[i] ?? emptyRoster(), salt) : cellLeaf(map, i, byLeaf.get(i) ?? NONE, salt))),
   );
   const tree = await buildTree(hashes);
   return {

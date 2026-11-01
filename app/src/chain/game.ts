@@ -38,13 +38,17 @@ import {
 } from "@deadroll/sdk/character";
 import {
   MAP_DISCRIMINATOR,
-  MAP_LAYOUT_DISCRIMINATOR,
+  getCheckStepInstruction,
   getCreateMapInstruction,
   getFinalizeMapInstruction,
+  getGrowLayoutInstruction,
   getMapDecoder,
-  getMapLayoutDecoder,
-  getMapLayoutSize,
   getMapSize,
+  classOf,
+  decodeMapLayout,
+  growsNeeded,
+  layoutGeom,
+  type MapLayoutV5,
   getWriteArenaInstruction,
   getWritePointsInstruction,
   getWriteLayoutInstruction,
@@ -102,7 +106,9 @@ import {
   type ReactiveData,
   type ResistModData,
   type TimedModData,
-  type CellSecretArgs,
+  decodeSessionBoard,
+  type SecretKind,
+  type SessionBoardV1,
   getRevealCellInstruction,
   getRevealPackInstruction,
   getExamineInstruction,
@@ -152,13 +158,15 @@ import {
   monsterSkillsPda,
   rewardsPda,
   triplesPda,
+  boardPda,
 } from "./pda";
 import type { GridPoint } from "../components/grid/types";
 import type { Chest } from "./loot";
 import type { PackDraft } from "./mapcheckWasm";
 import type { Step } from "./route";
 import { PRESETS, SKILL_DESCRIPTION_LEN, SKILL_NAME_LEN, type NamedSkill } from "./skillcheck";
-import { Aspect, Class, MAP_CELLS, MAP_MAX, Race, Tile, cellByte, type Cell, type Spawn } from "./types";
+import { Aspect, Class, Race, Tile, cellByte, hasBit, type Cell, type Spawn } from "./types";
+import type { CellSecretArgs } from "@deadroll/sdk/secrets";
 
 // ---------------------------------------------------------------------------------------------
 // decoded account shapes: the generated sdk types (numbers for enums, `Option` for Rust options)
@@ -256,7 +264,7 @@ const ACCOUNTS = {
   SkillSet: { program: "character", disc: SKILL_SET_DISCRIMINATOR, decoder: getSkillSetDecoder() },
   SkillExtras: { program: "character", disc: SKILL_EXTRAS_DISCRIMINATOR, decoder: getSkillExtrasDecoder() },
   Map: { program: "map", disc: MAP_DISCRIMINATOR, decoder: getMapDecoder() },
-  MapLayout: { program: "map", disc: MAP_LAYOUT_DISCRIMINATOR, decoder: getMapLayoutDecoder() },
+
   GameSession: { program: "session", disc: GAME_SESSION_DISCRIMINATOR, decoder: getGameSessionDecoder() },
   Participation: { program: "session", disc: PARTICIPATION_DISCRIMINATOR, decoder: getParticipationDecoder() },
   MonsterState: { program: "session", disc: MONSTER_STATE_DISCRIMINATOR, decoder: getMonsterStateDecoder() },
@@ -492,12 +500,15 @@ export function mapDesign(d: MapDraft, isBoss: (bestiaryId: number) => boolean) 
   return { spawns: split.spawns, packs: split.packs, rosters: split.rosters, threat, cells, declared: declaredOfDraft(list) };
 }
 
-/** Cells exactly as the chain stores them: stride 32, cells outside the map Void (0). */
+/** Cells exactly as the chain stores them: `width` per row (patch D). */
 export function chainTiles(d: MapDraft): Uint8Array {
-  const out = new Uint8Array(MAP_CELLS);
-  for (let y = 0; y < d.height; y++) for (let x = 0; x < d.width; x++) out[y * MAP_MAX + x] = d.tiles[y * MAP_MAX + x] ?? cellByte(Tile.Wall);
+  const out = new Uint8Array(d.width * d.height);
+  for (let i = 0; i < out.length; i++) out[i] = d.tiles[i] ?? cellByte(Tile.Wall);
   return out;
 }
+
+/** Patch D: `write_layout` chunks (each with its accounts, under the 1232-byte transaction). */
+export const LAYOUT_CHUNK = 900;
 
 /** `MapLayout.points`: the entrance, the exit, then the chests (a chest's index in a party is its place
  * among the chests). */
@@ -515,16 +526,30 @@ export function draftPoints(d: Pick<MapDraft, "entrance" | "exit">): GridPoint[]
   ];
 }
 
-/** create_map, write_layout, write_spawns, write_points, write_arena for each pack, write_secrets,
- * finalize_map (one transaction each, as the test). Patch C: only each pack's visible monster is
- * public; the rosters and the secrets go under the root, encrypted with `keys` (the DM's wallet's
- * unlock signature, `mapKeys`). */
+/** Patch D: a map's publish, in the order the chain needs it: `create` (create_map with its
+ * grow_layout calls, one transaction), `writes` (independent, sent side by side), `checks` (the
+ * reachability check's check_step calls, in order) and `finalize`. */
+export type MapPublish = { map: Address; layout: Address; index: number; create: Instruction[]; writes: Instruction[][]; checks: Instruction[][]; finalize: Instruction[]; ixs: Instruction[] };
+
+/** Compute limits: a reachability check step, finalize_map (the rest of the check and the rules). */
+export const CHECK_STEP_CU = 1_400_000;
+export const FINALIZE_MAP_CU = 1_400_000;
+
+/** create_map (with grow_layout for a big map), write_layout in chunks, write_spawns, write_points,
+ * write_arena for each pack, write_secrets, check_step `steps` times, finalize_map. Patch C: only
+ * each pack's visible monster is public; the rosters and the secrets go under the root, encrypted
+ * with `keys` (the DM's wallet's unlock signature, `mapKeys`). Patch D: `steps` from the mapcheck
+ * WASM (`MapcheckWasm.steps`). */
 export async function buildMapIxs(
   dm: TransactionSigner,
   d: MapDraft,
   keysFor: (map: Address) => Promise<SecretKeys>,
   isBoss: (bestiaryId: number) => boolean,
-): Promise<{ map: Address; layout: Address; index: number; ixs: Instruction[] }> {
+  steps = 0,
+): Promise<MapPublish> {
+  // A map no class holds (a side under 8, say) is built as Small: create_map refuses it.
+  const sizeClass = classOf(d.width, d.height) ?? 0;
+  const geom = layoutGeom(d.width, d.height, sizeClass);
   const index = crypto.getRandomValues(new Uint32Array(1))[0]!;
   const map = await mapPda(dm.address, index);
   const layout = await layoutPda(map);
@@ -535,29 +560,40 @@ export async function buildMapIxs(
   const mapBytes = new Uint8Array(getAddressEncoder().encode(map));
   const keys = await keysFor(map);
   const secrets = { rosters: design.rosters, cells: design.cells };
-  const tree = await commitSecrets(mapBytes, keys, d.width, d.height, packShapes(d.packs), secrets);
-  const blob = await sealSecrets(keys, mapBytes, secrets);
-  const ixs = [
+  const tree = await commitSecrets(mapBytes, keys, d.width, d.height, packShapes(d.packs), secrets, sizeClass);
+  const blob = await sealSecrets(keys, mapBytes, secrets, sizeClass);
+  // One threat per pack number of the class.
+  const threat = Uint8Array.from({ length: geom.packs }, (_, n) => design.threat[n] ?? 0);
+  const create = [
     getCreateMapInstruction({ ...edit, systemProgram: SYSTEM_PROGRAM, index, width: d.width, height: d.height, tier: d.tier, minPlayers: d.minPlayers, chestRadius: d.chestRadius, settleTimeoutSecs: d.settleTimeoutSecs, biome: d.biome }),
-    getWriteLayoutInstruction({ ...edit, offset: 0, cells: tiles.slice(0, (d.height - 1) * MAP_MAX + d.width) }),
-    getWriteSpawnsInstruction({ ...edit, spawns: design.spawns }),
-    getWritePointsInstruction({ ...edit, points, bossTable: d.bossTable }),
+    ...Array.from({ length: growsNeeded(geom) }, () => getGrowLayoutInstruction({ ...edit, systemProgram: SYSTEM_PROGRAM })),
+  ];
+  const writes: Instruction[][] = [
+    ...Array.from({ length: Math.ceil(tiles.length / LAYOUT_CHUNK) }, (_, i) => [
+      getWriteLayoutInstruction({ ...edit, offset: i * LAYOUT_CHUNK, cells: tiles.slice(i * LAYOUT_CHUNK, (i + 1) * LAYOUT_CHUNK) }),
+    ]),
+    [getWriteSpawnsInstruction({ ...edit, spawns: design.spawns }), getWritePointsInstruction({ ...edit, points, bossTable: d.bossTable })],
     ...design.packs.flatMap((pk, pack) =>
-      pk ? [getWriteArenaInstruction({ ...edit, pack, record: { visible: pk.visible, x: pk.x, y: pk.y, facing: pk.facing as Facing, width: pk.width, height: pk.height }, cells: d.packs[pack]!.cells })] : [],
+      pk ? [[getWriteArenaInstruction({ ...edit, pack, visible: pk.visible, x: pk.x, y: pk.y, facing: pk.facing as Facing, width: pk.width, height: pk.height, cells: d.packs[pack]!.cells })]] : [],
     ),
-    ...secretChunks(blob).map((c) => getWriteSecretsInstruction({ ...edit, ...c, threat: Uint8Array.from(design.threat), declared: Uint8Array.from(design.declared) })),
-    // The builder rules read the registry bestiary, monster skills (roles, pools, slots), reward
-    // tables and the tileset (patch 13).
+    ...secretChunks(blob).map((c) => [getWriteSecretsInstruction({ ...edit, ...c, threat, declared: Uint8Array.from(design.declared) })]),
+  ];
+  const tileset = await tilesetPda();
+  const checks = Array.from({ length: steps }, () => [computeLimitIx(CHECK_STEP_CU), getCheckStepInstruction({ ...edit, tileset })]);
+  // The builder rules read the registry bestiary, monster skills (roles, pools, slots), reward
+  // tables and the tileset (patch 13).
+  const finalize = [
+    computeLimitIx(FINALIZE_MAP_CU),
     getFinalizeMapInstruction({
       ...edit,
       bestiary: await bestiaryPda(),
       monsterSkills: await monsterSkillsPda(),
       rewards: await rewardsPda(),
-      tileset: await tilesetPda(),
+      tileset,
       secretsRoot: tree.root,
     }),
   ];
-  return { map, layout, index, ixs };
+  return { map, layout, index, create, writes, checks, finalize, ixs: [...create, ...writes.flat(), ...checks.flat(), ...finalize] };
 }
 
 /** Patch C: `write_secrets` chunks of the encrypted copy. */
@@ -576,10 +612,13 @@ export async function joinRent(character: Address): Promise<bigint> {
   return BigInt(p) + BigInt(c);
 }
 
-/** Rent of the two accounts `create_map` makes (Map and MapLayout), in lamports. */
-export async function mapRent(): Promise<bigint> {
+/** Rent of the two accounts `create_map` makes (Map and MapLayout), in lamports. Patch D: the
+ * layout is as big as the map's size class and sides need; both come back to the DM when the
+ * played map closes. */
+export async function mapRent(width = 16, height = 16): Promise<bigint> {
   const rent = (size: number) => client.rpc.getMinimumBalanceForRentExemption(BigInt(size)).send();
-  const [map, layout] = await Promise.all([rent(getMapSize()), rent(getMapLayoutSize())]);
+  const geom = layoutGeom(width, height, classOf(width, height) ?? 0);
+  const [map, layout] = await Promise.all([rent(getMapSize()), rent(geom.end)]);
   return BigInt(map) + BigInt(layout);
 }
 
@@ -589,13 +628,13 @@ export function mapsOf(dm: Address) {
 }
 
 export async function mapTiles(layout: Address): Promise<Uint8Array | null> {
-  const l = await getAccount("MapLayout", layout);
-  return l ? Uint8Array.from(l.core.cells) : null;
+  const [raw] = await getAccounts([layout]);
+  return raw ? decodeMapLayout(raw).cells : null;
 }
 
 /** Patch 13: the entrance and the exit of a layout, for the grid. */
-export function layoutPoints(core: { points: { kind: PointKind; x: number; y: number }[]; pointCount: number }): GridPoint[] {
-  return core.points.slice(0, core.pointCount).flatMap((p): GridPoint[] =>
+export function layoutPoints(core: { points: { kind: PointKind | number; x: number; y: number }[] }): GridPoint[] {
+  return core.points.flatMap((p): GridPoint[] =>
     p.kind === PointKind.Entrance ? [{ x: p.x, y: p.y, kind: "entrance" }] : p.kind === PointKind.Exit ? [{ x: p.x, y: p.y, kind: "exit" }] : [],
   );
 }
@@ -637,6 +676,7 @@ export async function openSessionIx(dm: TransactionSigner, map: Address, priceLa
     tileset: await tilesetPda(),
     mapProgram: PROGRAMS.map,
     systemProgram: SYSTEM_PROGRAM,
+    board: await boardPda(acc.session),
     aspects: await aspectsPda(),
     traits: await traitsPda(),
     resonances: await resonancesPda(),
@@ -763,6 +803,7 @@ export async function movePathIx(actor: Actor, session: Address, layout: Address
     session,
     participation: mover.kind === "player" ? await participationPda(session, mover.character) : undefined,
     monsters: await monstersPda(session),
+    board: await boardPda(session),
     layout,
     sessionToken: opt(actor.token),
     ...(await vrfAccounts()),
@@ -941,6 +982,8 @@ async function endAccounts(session: Address, map: Address) {
     config: await gameConfigPda(),
     mapProgram: PROGRAMS.map,
     characterProgram: PROGRAMS.character,
+    // Patch D: the played map closes with its layout.
+    layout: await layoutPda(map),
   };
 }
 
@@ -954,7 +997,7 @@ export async function settlePartyIx(dm: TransactionSigner, session: Address, s: 
 /** Patch 11, claim_after_timeout: after the DM's deadline, the player's main wallet settles its own
  * character and takes its contribution back. Remaining: its accounts, then the pending deaths. */
 export async function claimAfterTimeoutIx(player: TransactionSigner, session: Address, s: GameSessionAcc, character: Address): Promise<Instruction> {
-  const ix = getClaimAfterTimeoutInstruction({ player, ...(await endAccounts(session, s.core.map)) });
+  const ix = getClaimAfterTimeoutInstruction({ player, ...(await endAccounts(session, s.core.map)), dm: s.core.dm });
   return withRemaining(ix, [...(await playerSettleAccounts(session, character)), ...(await deathAccountsOf(s))]);
 }
 
@@ -1149,6 +1192,9 @@ export type Party = {
   arenas: { cells: Uint8Array[] } | null;
   /** Patch C: the DM's encrypted copy of the map's secrets (only the DM's wallet opens it). */
   secretsBlob: Uint8Array | null;
+  /** Patch D: what the party uncovered (`SessionBoard`): the revealed leaves, the found secrets,
+   * the revealed spawns. */
+  board: SessionBoardV1 | null;
   /** Arena update: the cells the units stand on (`groundTiles`): the map's or the arena's. */
   ground: Uint8Array | null;
 };
@@ -1177,8 +1223,9 @@ export function groundTiles(p: Pick<Party, "session" | "tiles" | "arenas">): Uin
   if (!inArena(p.session)) return p.tiles;
   const cells = p.arenas?.cells[p.session.arenaPack];
   if (!cells) return null;
-  const out = new Uint8Array(MAP_CELLS).fill(cellByte(Tile.Wall));
-  for (let y = 0; y < p.session.height; y++) for (let x = 0; x < p.session.width; x++) out[y * MAP_MAX + x] = cells[y * ARENA_STRIDE + x] ?? 0;
+  const w = p.session.width;
+  const out = new Uint8Array(w * p.session.height).fill(cellByte(Tile.Wall));
+  for (let y = 0; y < p.session.height; y++) for (let x = 0; x < w; x++) out[y * w + x] = cells[y * ARENA_STRIDE + x] ?? 0;
   return out;
 }
 
@@ -1187,7 +1234,7 @@ export function groundTiles(p: Pick<Party, "session" | "tiles" | "arenas">): Uin
 export function visiblePacks(p: Pick<Party, "session" | "spawns">): { pack: number; bestiaryId: number; x: number; y: number; facing: number; threat: number }[] {
   if (inArena(p.session)) return [];
   return p.session.packs.flatMap((pk, pack) =>
-    pk.width && pk.visible !== NO_SPAWN && p.session.packsAlive & (1 << pack)
+    pk.width && pk.visible !== NO_SPAWN && hasBit(p.session.packsAlive, pack)
       ? [{ pack, bestiaryId: p.spawns[pk.visible]?.bestiaryId ?? 0, x: pk.x, y: pk.y, facing: pk.facing as number, threat: p.session.threat[pack] ?? 0 }]
       : [],
   );
@@ -1201,17 +1248,17 @@ export function sessionLeaves(s: GameSessionAcc): Leaves {
   const onMap = !inArena(s) ;
   const w = onMap ? s.width : s.mapWidth;
   const h = onMap ? s.height : s.mapHeight;
-  return new Leaves(w, h, s.packs.map((pk) => (pk.width ? { width: pk.width, height: pk.height } : null)));
+  return new Leaves(w, h, s.packs.map((pk) => (pk.width ? { width: pk.width, height: pk.height } : null)), s.mapClass);
 }
 
 const SECRET_KINDS = ["trap", "trap", "ambush", "stash", "door"] as const;
 
 /** Patch C: the secrets found so far on the ground the party stands on, highlighted on the grid
  * (an unfound secret looks like its floor or wall: it is not drawn at all). */
-export function foundSecrets(s: GameSessionAcc): GridSecret[] {
+export function foundSecrets(s: GameSessionAcc, board: SessionBoardV1 | null): GridSecret[] {
   const leaves = sessionLeaves(s);
   const ground = inArena(s) ? s.arenaPack : null;
-  return s.found.slice(0, s.foundCount).flatMap((f) => {
+  return (board?.found ?? []).flatMap((f) => {
     const b = leaves.board(f.leaf);
     if (!b || b.kind === "pack" || (b.kind === "map" ? ground !== null : b.pack !== ground)) return [];
     const kind = SECRET_KINDS[f.secret.kind as number] ?? "trap";
@@ -1237,9 +1284,13 @@ export async function revealCellIx(
     participation: opt(by),
     monsters: await monstersPda(session),
     rewards: await rewardsPda(),
+    board: await boardPda(session),
     sessionToken: opt(dm.token),
     leaf,
-    secret: reveal.secret,
+    kind: reveal.secret.kind as SecretKind,
+    a: reveal.secret.a,
+    b: reveal.secret.b,
+    c: reveal.secret.c,
     salt: reveal.salt,
     proof: reveal.proof,
   });
@@ -1256,6 +1307,7 @@ export async function revealPackIx(dm: Actor, session: Address, s: GameSessionAc
     bestiary: await bestiaryPda(),
     monsterSkills: await monsterSkillsPda(),
     rewards: await rewardsPda(),
+    board: await boardPda(session),
     sessionToken: opt(dm.token),
     pack,
     count: reveal.roster.count,
@@ -1273,9 +1325,9 @@ export async function openDmSecrets(p: Party, signer: MessageSigner): Promise<Dm
   if (!p.secretsBlob || !p.map) throw new Error("the map's secrets are not loaded yet");
   const mapBytes = new Uint8Array(getAddressEncoder().encode(p.session.core.map));
   const keys = await mapKeys(signer, mapBytes);
-  const secrets = await openSecrets(keys, mapBytes, p.secretsBlob);
+  const secrets = await openSecrets(keys, mapBytes, p.secretsBlob, p.session.mapClass);
   const shapes = p.session.packs.map((pk) => (pk.width ? { width: pk.width, height: pk.height } : null));
-  const commitment = await commitSecrets(mapBytes, keys, p.map.core.width, p.map.core.height, shapes, secrets);
+  const commitment = await commitSecrets(mapBytes, keys, p.map.core.width, p.map.core.height, shapes, secrets, p.session.mapClass);
   if (commitment.root.some((b, i) => b !== p.map!.core.secretsRoot[i])) throw new Error("these secrets do not match the map's root");
   return { commitment, leaves: secrets.cells.map((c) => c.leaf), packs: shapes.flatMap((x, n) => (x ? [n] : [])) };
 }
@@ -1287,6 +1339,7 @@ export async function examineIx(actor: Actor, session: Address, character: Addre
     session,
     participation: await participationPda(session, character),
     monsters: await monstersPda(session),
+    board: await boardPda(session),
     sessionToken: opt(actor.token),
     x,
     y,
@@ -1307,7 +1360,7 @@ async function livingParticipations(session: Address, s: GameSessionAcc): Promis
 export const ENTER_ARENA_CU = 600_000;
 export const LEAVE_ARENA_CU = 1_400_000;
 export async function enterArenaIx(session: Address, s: GameSessionAcc, payer: TransactionSigner): Promise<Instruction[]> {
-  const ix = getEnterArenaInstruction({ payer, session, monsters: await monstersPda(session), layout: s.layout });
+  const ix = getEnterArenaInstruction({ payer, session, monsters: await monstersPda(session), layout: s.layout, board: await boardPda(session) });
   return [computeLimitIx(ENTER_ARENA_CU), withRemaining(ix, await livingParticipations(session, s))];
 }
 export async function leaveArenaIx(session: Address, s: GameSessionAcc, payer: TransactionSigner): Promise<Instruction[]> {
@@ -1325,8 +1378,9 @@ export async function readParty(address: Address, tiles: Uint8Array | null = nul
   const guess: Address[] = known
     ? [...(await Promise.all(knownChars.map((c) => participationPda(address, c)))), ...knownChars, known.core.map, ...(tiles ? [] : [known.layout])]
     : [];
-  const head = [address, await monstersPda(address), await escrowPda(address)];
-  const [rawSession, rawMonsters, rawEscrow, ...guessed] = await getAccounts([...head, ...guess]);
+  const head = [address, await monstersPda(address), await escrowPda(address), await boardPda(address)];
+  const [rawSession, rawMonsters, rawEscrow, rawBoard, ...guessed] = await getAccounts([...head, ...guess]);
+  const board = rawBoard ? decodeSessionBoard(rawBoard) : null;
   if (!rawSession) return null;
   const decoded = decodeAccount("GameSession", rawSession);
   // Patch 9: the aura weights travel with their auras.
@@ -1349,14 +1403,19 @@ export async function readParty(address: Address, tiles: Uint8Array | null = nul
   const map = rawMap ? decodeAccount("Map", rawMap) : null;
   if (!tiles) {
     const rawLayout = extra[chars.length * 2 + 1];
-    const decodedLayout = rawLayout ? decodeAccount("MapLayout", rawLayout) : null;
-    const layout = decodedLayout?.core ?? null;
-    tiles = layout ? Uint8Array.from(layout.cells) : null;
+    // Patch D: a played map closes after its rewards; a version 4 layout cannot be read.
+    let layout: MapLayoutV5 | null = null;
+    try {
+      layout = rawLayout ? decodeMapLayout(rawLayout) : null;
+    } catch {
+      layout = null;
+    }
+    tiles = layout ? layout.cells : null;
     extras = {
       points: layout ? layoutPoints(layout) : [],
-      spawns: layout ? layout.spawns.slice(0, layout.spawnCount).map((x) => ({ ...x })) : [],
-      arenas: decodedLayout ? { cells: decodedLayout.arenas.cells.map((c) => Uint8Array.from(c)) } : null,
-      secretsBlob: decodedLayout ? Uint8Array.from(decodedLayout.secrets.blob).slice(0, decodedLayout.secrets.blobLen) : null,
+      spawns: layout ? layout.spawns.map((x) => ({ ...x })) : [],
+      arenas: layout ? { cells: layout.arenas } : null,
+      secretsBlob: layout ? layout.blob : null,
     };
     if (tiles) LAYOUT_EXTRAS.set(tiles, extras);
   }
@@ -1402,6 +1461,7 @@ export async function readParty(address: Address, tiles: Uint8Array | null = nul
     spawns: extras.spawns,
     secretsBlob: extras.secretsBlob,
     arenas: extras.arenas,
+    board,
   };
 }
 

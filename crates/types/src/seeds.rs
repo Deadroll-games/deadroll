@@ -68,3 +68,6 @@ pub const BUILDING: &[u8] = b"building";
 pub const TAVERN_BOARD: &[u8] = b"tavern_board";
 /// `["quest", session]` in city: one order on a Tavern board, for one party.
 pub const QUEST: &[u8] = b"quest";
+/// `["board", session]` in session (patch D): the revealed leaves, the found secrets and the
+/// revealed packs' monsters of a party.
+pub const BOARD: &[u8] = b"board";

@@ -1,7 +1,7 @@
 // Patch 13: the Tileset as the builder and the mock read it, the same records deadroll_rules decodes.
 import { describe, expect, it } from "vitest";
 import { SHIPPED_TILESET, SHIPPED_TILE_COST, knownTiles, tileCosts, wallMask } from "./tiles";
-import { MAP_CELLS, TILE_COUNT, TILE_KINDS_MAX, Tile, cellByte, cellIndex, cellKind, cellVariant } from "./types";
+import { TILE_COUNT, TILE_KINDS_MAX, Tile, cellByte, cellIndex, cellKind, cellVariant } from "./types";
 
 describe("tileset", () => {
   it("the shipped tileset costs by tile type (programs/session TILE_COST)", () => {
@@ -29,9 +29,10 @@ describe("tileset", () => {
 describe("wallMask", () => {
   /** A map from rows: `#` wall, `D` door, `.` floor, ` ` void. */
   const grid = (rows: string[]) => {
-    const tiles = new Uint8Array(MAP_CELLS);
+    const w = rows[0]!.length;
+    const tiles = new Uint8Array(w * rows.length);
     const kind: Record<string, number> = { "#": Tile.Wall, D: Tile.Door, ".": Tile.StoneFloor, " ": Tile.Void };
-    rows.forEach((row, y) => [...row].forEach((ch, x) => (tiles[cellIndex(x, y)] = cellByte(kind[ch]!, 3))));
+    rows.forEach((row, y) => [...row].forEach((ch, x) => (tiles[cellIndex(x, y, w)] = cellByte(kind[ch]!, 3))));
     return (x: number, y: number) => wallMask(tiles, rows[0]!.length, rows.length, x, y);
   };
 

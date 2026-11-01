@@ -7,8 +7,8 @@ use deadroll_mapcheck::{
 use deadroll_registry::state::{view::table_body, TableKind};
 use deadroll_rules::{loot::map_rules, map_tables};
 use deadroll_types::{
-    seeds, CellSecret, FoundSecret, MapPoint, PointKind, SecretKind, CHESTS_MAX, NO_TABLE,
-    SECRETS_MAX, SECRET_SALT_LEN,
+    seeds, CellSecret, FoundSecret, MapPoint, PointKind, SecretKind, CHESTS_CAP, NO_TABLE,
+    SECRETS_CAP, SECRET_SALT_LEN,
 };
 use session_keys::{session_auth_or, Session, SessionTokenV2};
 
@@ -21,7 +21,7 @@ use crate::{
     secrets::{audit_mode, place_of, rejected, tiles, verify_cell},
     state::{
         external::{MapLayoutView, REWARDS_TABLE},
-        ArenaMode, GameSession, Monsters, Participation,
+        ArenaMode, BoardBytes, GameSession, Monsters, Participation, CHEST_SLOTS,
     },
 };
 
@@ -57,6 +57,10 @@ pub struct RevealCell<'info> {
     /// CHECK: registry `["rewards"]` table, read in place: a hidden stash's table and the budget.
     #[account(address = REWARDS_TABLE @ SessionError::InvalidRegistryTable)]
     pub rewards: UncheckedAccount<'info>,
+    /// CHECK: the session's `SessionBoard` (patch D), checked by `BoardBytes::load`: the revealed
+    /// leaves and the found secrets, written in place.
+    #[account(mut, seeds = [seeds::BOARD, session.key().as_ref()], bump)]
+    pub board: UncheckedAccount<'info>,
     #[session(signer = signer, authority = session.core.dm)]
     pub session_token: Option<Account<'info, SessionTokenV2>>,
 }
@@ -93,7 +97,8 @@ pub fn handler(
             SessionError::NotObligated
         );
     }
-    require!(!session.is_revealed(leaf), SessionError::AlreadyRevealed);
+    let uncovered = BoardBytes::load(&accounts.board, &session_key)?;
+    require!(!uncovered.is_revealed(leaf)?, SessionError::AlreadyRevealed);
     verify_cell(session, leaf, &secret, &salt, &proof)?;
 
     let board = session
@@ -102,10 +107,14 @@ pub fn handler(
         .ok_or(SessionError::SecretRejected)?;
     let layout = MapLayoutView::load(&accounts.layout, None)?;
     let place = place_of(session, &layout, board)?;
-    let limits = BALANCE
-        .secrets
-        .limits(session.tier)
-        .ok_or(SessionError::SecretRejected)?;
+    // Patch D: the tier's limits at the map's size.
+    let limits = BALANCE.map_size.secrets(
+        BALANCE
+            .secrets
+            .limits(session.tier)
+            .ok_or(SessionError::SecretRejected)?,
+        session.map_class,
+    );
     let level_cap = tier_limits(session.tier)
         .ok_or(SessionError::SecretRejected)?
         .level_max;
@@ -114,7 +123,9 @@ pub fn handler(
             .map_err(|_| error!(SessionError::InvalidRegistryTable))?;
         let loot = MapLoot {
             min_players: session.min_players,
-            rules: map_rules(&BALANCE.loot, session.tier),
+            rules: BALANCE
+                .map_size
+                .loot(map_rules(&BALANCE.loot, session.tier), session.map_class),
             table_of: |id: u8| map_tables::table_rules(&body, id),
         };
         check_secret(
@@ -128,15 +139,16 @@ pub fn handler(
         .map_err(rejected)?;
         if secret.kind == SecretKind::Stash {
             // The map's chests, the stashes found before and this one, with the boss table.
-            let mut chests = [NO_TABLE; CHESTS_MAX];
-            let visible = (session.visible_chests as usize).min(CHESTS_MAX);
+            let mut chests = [NO_TABLE; CHESTS_CAP];
+            let visible = (session.visible_chests as usize).min(CHESTS_CAP);
             for (t, c) in chests.iter_mut().zip(session.chest_list()) {
                 *t = c.data;
             }
-            let mut stashes = [NO_TABLE; SECRETS_MAX];
+            let mut stashes = [NO_TABLE; SECRETS_CAP];
             let mut stash_count = 0;
-            for f in session.found_list() {
-                if f.secret.kind == SecretKind::Stash && stash_count < SECRETS_MAX - 1 {
+            for i in 0..uncovered.found_count()? as usize {
+                let f = uncovered.found(i)?;
+                if f.secret.kind == SecretKind::Stash && stash_count < SECRETS_CAP - 1 {
                     stashes[stash_count] = f.secret.a;
                     stash_count += 1;
                 }
@@ -157,12 +169,12 @@ pub fn handler(
         let n = session.found_counts[k].saturating_add(1);
         require!(n <= session.declared[k], SessionError::TooManySecrets);
         session.found_counts[k] = n;
-        let at = session.found_count as usize;
-        require!(at < SECRETS_MAX, SessionError::TooManySecrets);
-        session.found[at] = FoundSecret { leaf, secret };
-        session.found_count += 1;
+        require!(
+            uncovered.push_found(&FoundSecret { leaf, secret })?,
+            SessionError::TooManySecrets
+        );
     }
-    session.set_revealed(leaf);
+    uncovered.set_revealed(leaf)?;
     if !audit {
         session.fulfil(leaf);
         let slot = session.obliged_by;
@@ -200,7 +212,7 @@ pub fn handler(
             (SecretKind::Stash, Board::Map(c)) => {
                 // It opens like a chest from now on (docs/PARTY_AND_TURNS.md 9.3).
                 let n = session.chest_count as usize;
-                require!(n < CHESTS_MAX, SessionError::TooManySecrets);
+                require!(n < CHEST_SLOTS, SessionError::TooManySecrets);
                 session.chests[n] = MapPoint {
                     kind: PointKind::Chest,
                     x: c.x,

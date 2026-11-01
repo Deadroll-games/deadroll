@@ -4,6 +4,7 @@
 // is crates/mapcheck inside map.finalize_map, which also checks where the chests stand.
 // Fixture: crates/rules/tests/loot_ts_fixtures.rs.
 import balance from "./balance.json";
+import { CLASS_CHESTS } from "./types";
 
 /** `CHESTS_MAX` and `NO_TABLE` (crates/types). */
 export const CHESTS_MAX = 4;
@@ -62,17 +63,22 @@ export function rewardTables(body: Uint8Array): RewardTable[] {
 }
 
 /** The limits of `tier`, null for a tier without numbers. */
-export function tierLoot(tier: number): TierLoot | null {
+export function tierLoot(tier: number, sizeClass = 0): TierLoot | null {
   const i = tier - 1;
   const t = balance.loot;
   const levelCap = TIER_LEVEL_CAP[tier];
   if (i < 0 || i >= t.chests.length || levelCap === undefined) return null;
-  return { chests: t.chests[i]!, budget: t.budget[i]!, allowed: BigInt(t.allowed_tables[i]!), levelCap };
+  // Patch D: the size class multiplies the chests (within what it stores) and the budget
+  // (`MapSizeTuning::loot`).
+  const c = Math.min(Math.max(sizeClass, 0), 3);
+  const size = balance.map_size;
+  const chests = Math.min(t.chests[i]! * size.chests[c]!, CLASS_CHESTS[c]!);
+  return { chests, budget: t.budget[i]!.map((b) => b * size.budget[c]!), allowed: BigInt(t.allowed_tables[i]!), levelCap };
 }
 
 /** The budget of a tier for the map's minimum players (0 when out of range). */
-export function budgetOf(tier: number, minPlayers: number): number {
-  return tierLoot(tier)?.budget[minPlayers - 1] ?? 0;
+export function budgetOf(tier: number, minPlayers: number, sizeClass = 0): number {
+  return tierLoot(tier, sizeClass)?.budget[minPlayers - 1] ?? 0;
 }
 
 /** A table may stand on `tier`: in the tier's mask and not above its top level. */
@@ -172,6 +178,6 @@ export function chestsOf(s: { chests: { x: number; y: number; data: number }[]; 
     x: c.x,
     y: c.y,
     table: c.data,
-    opened: (s.chestsOpened & (1 << index)) !== 0,
+    opened: index < 32 && ((s.chestsOpened >>> index) & 1) === 1,
   }));
 }

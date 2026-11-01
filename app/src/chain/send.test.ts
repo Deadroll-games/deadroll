@@ -173,3 +173,14 @@ describe("packBySize", () => {
     expect(packed).toEqual([[ix(1), ix(2), ix(3)]]);
   });
 });
+
+describe("patch D: waves", () => {
+  it("what is left of the runs after some steps", async () => {
+    const { wavesAfter } = await import("./send");
+    expect(wavesAfter(undefined, 3)).toBeUndefined();
+    expect(wavesAfter([1, 5, 1, 1], 0)).toEqual([1, 5, 1, 1]);
+    expect(wavesAfter([1, 5, 1, 1], 1)).toEqual([5, 1, 1]);
+    expect(wavesAfter([1, 5, 1, 1], 3)).toEqual([3, 1, 1]);
+    expect(wavesAfter([1, 5, 1, 1], 7)).toEqual([1]);
+  });
+});

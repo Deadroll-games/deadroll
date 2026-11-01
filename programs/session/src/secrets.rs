@@ -15,13 +15,13 @@ use deadroll_mapcheck::{
     MapCheckError,
 };
 use deadroll_types::{
-    Cell, CellSecret, PackRoster, SessionStatus, SECRET_DEPTH_MAX, SECRET_SALT_LEN,
+    Cell, CellSecret, PackRoster, SessionStatus, SECRET_DEPTH_CAP, SECRET_SALT_LEN,
 };
 
 use crate::{
     errors::SessionError,
     events::RevealsOwed,
-    state::{external::MapLayoutView, GameSession},
+    state::{external::MapLayoutView, BoardBytes, GameSession},
 };
 
 /// The DM reveals during the party (`false`) or in the final audit after it ended (`true`).
@@ -36,9 +36,10 @@ pub fn audit_mode(session: &GameSession) -> Result<bool> {
 
 /// Every cell of `cells` (on the ground the units stand on) not revealed yet becomes an
 /// obligation of the DM, uncovered by player `slot` (MAP 8.4: a character stepped on the cell, or
-/// examined it).
+/// examined it). Patch D: the revealed leaves are on the `board`.
 pub fn oblige_cells(
     session: &mut GameSession,
+    board: &BoardBytes,
     session_key: Pubkey,
     slot: u8,
     cells: &[Cell],
@@ -46,7 +47,10 @@ pub fn oblige_cells(
     let before = session.obligation_count;
     for &c in cells {
         let leaf = session.leaf_here(c).ok_or(SessionError::OutOfBounds)?;
-        require!(session.oblige(leaf), SessionError::TooManyObligations);
+        require!(
+            session.oblige(board, leaf)?,
+            SessionError::TooManyObligations
+        );
     }
     if session.obligation_count != before {
         session.obliged_by = slot;
@@ -67,7 +71,7 @@ pub fn verify_cell(
     salt: &[u8; SECRET_SALT_LEN],
     proof: &[[u8; 32]],
 ) -> Result<()> {
-    require!(proof.len() <= SECRET_DEPTH_MAX, SessionError::BadProof);
+    require!(proof.len() <= SECRET_DEPTH_CAP, SessionError::BadProof);
     let map = session.core.map.to_bytes();
     let hash = cell_leaf(&map, leaf, secret, salt);
     require!(
@@ -85,7 +89,7 @@ pub fn verify_pack(
     salt: &[u8; SECRET_SALT_LEN],
     proof: &[[u8; 32]],
 ) -> Result<()> {
-    require!(proof.len() <= SECRET_DEPTH_MAX, SessionError::BadProof);
+    require!(proof.len() <= SECRET_DEPTH_CAP, SessionError::BadProof);
     let map = session.core.map.to_bytes();
     let leaf = pack as u16;
     let hash = pack_leaf(&map, leaf, roster, salt);

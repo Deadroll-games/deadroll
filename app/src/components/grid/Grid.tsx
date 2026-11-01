@@ -1,6 +1,7 @@
 // Battle map canvas: tiles, units, move highlights, and cell clicks.
-import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type WheelEvent } from "react";
 import { TILE_COUNT, Tile, cellIndex, cellKind, cellVariant, type Cell } from "../../chain/types";
+import { ParchmentMinimap } from "./ParchmentMinimap";
 import { wallMask } from "../../chain/tiles";
 import { TILE_PX } from "../../raster/SpriteCanvas";
 import type { GridPoint, GridProps, GridSecret, GridUnit } from "./types";
@@ -335,20 +336,45 @@ function drawUnit(
   if (selected) paintOutline(ctx, ox, oy, block, 6, 2, SELECT_RING);
 }
 
-function drawGrid(ctx: CanvasRenderingContext2D, props: GridProps, cell: number) {
+/** Patch D: the cells a grid shows, its top-left cell and size. */
+export type View = { x: number; y: number; cols: number; rows: number };
+
+/** Past this side a map is drawn through a window (patch D: the Small class fits whole). */
+export const WHOLE_MAP_MAX = 32;
+export const DEFAULT_VIEW = { cols: 24, rows: 14 };
+
+/** The window size of a `width` x `height` map. */
+export function viewSize(width: number, height: number, viewport?: { cols: number; rows: number }): { cols: number; rows: number } {
+  if (!viewport && width <= WHOLE_MAP_MAX && height <= WHOLE_MAP_MAX) return { cols: width, rows: height };
+  const v = viewport ?? DEFAULT_VIEW;
+  return { cols: Math.min(width, Math.max(1, v.cols)), rows: Math.min(height, Math.max(1, v.rows)) };
+}
+
+/** A window of `cols` x `rows` cells moved to keep inside the map. */
+export function clampView(x: number, y: number, cols: number, rows: number, width: number, height: number): View {
+  return { x: Math.max(0, Math.min(width - cols, Math.round(x))), y: Math.max(0, Math.min(height - rows, Math.round(y))), cols, rows };
+}
+
+function drawGrid(ctx: CanvasRenderingContext2D, props: GridProps, cell: number, view: View) {
   const { width, height, tiles, units } = props;
   const reachable = props.reachable ?? [];
   const targets = props.targets ?? [];
   const path = props.path ?? [];
+  const { cols, rows } = view;
   ctx.imageSmoothingEnabled = false;
-  ctx.clearRect(0, 0, width * cell, height * cell);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, cols * cell, rows * cell);
   ctx.fillStyle = INK;
-  ctx.fillRect(0, 0, width * cell, height * cell);
+  ctx.fillRect(0, 0, cols * cell, rows * cell);
+  // Patch D: everything is drawn in map pixels; the window shifts it.
+  ctx.translate(-view.x * cell, -view.y * cell);
 
   const scratch = document.createElement("canvas");
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const byte = tiles[cellIndex(x, y)];
+  const x1 = Math.min(width, view.x + cols);
+  const y1 = Math.min(height, view.y + rows);
+  for (let y = view.y; y < y1; y++) {
+    for (let x = view.x; x < x1; x++) {
+      const byte = tiles[cellIndex(x, y, width)];
       const tile = knownTile(byte);
       const mask = tile === Tile.Wall ? wallMask(tiles, width, height, x, y) : 0;
       const sprite = tile != null ? (props.tileSprite?.({ tile, variant: cellVariant(byte ?? 0), mask }) ?? null) : null;
@@ -356,16 +382,18 @@ function drawGrid(ctx: CanvasRenderingContext2D, props: GridProps, cell: number)
     }
   }
 
-  const pixelW = width * cell;
-  const pixelH = height * cell;
+  const left = view.x * cell;
+  const top = view.y * cell;
+  const pixelW = x1 * cell;
+  const pixelH = y1 * cell;
   ctx.fillStyle = GRID_LINE;
-  for (let x = 0; x <= width; x++) {
-    const px = x === width ? pixelW - 1 : x * cell;
-    ctx.fillRect(px, 0, 1, pixelH);
+  for (let x = view.x; x <= x1; x++) {
+    const px = x === x1 ? pixelW - 1 : x * cell;
+    ctx.fillRect(px, top, 1, pixelH - top);
   }
-  for (let y = 0; y <= height; y++) {
-    const py = y === height ? pixelH - 1 : y * cell;
-    ctx.fillRect(0, py, pixelW, 1);
+  for (let y = view.y; y <= y1; y++) {
+    const py = y === y1 ? pixelH - 1 : y * cell;
+    ctx.fillRect(left, py, pixelW - left, 1);
   }
 
   ctx.fillStyle = BURNING;
@@ -451,6 +479,7 @@ function drawGrid(ctx: CanvasRenderingContext2D, props: GridProps, cell: number)
     if (!inMap(spot, width, height)) continue;
     paintOutline(ctx, spot.x * cell, spot.y * cell, cell, 0, 2, TARGET);
   }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
 
 function cellKey(cell: Cell | null): string | null {
@@ -470,16 +499,63 @@ export function Grid(props: GridProps) {
   const hoveredChest = hovered ? props.chests?.find((c) => c.x === hovered.x && c.y === hovered.y) : undefined;
   const hoveredSecret = hovered ? props.secrets?.find((c) => c.x === hovered.x && c.y === hovered.y) : undefined;
 
+  // Patch D: the window over a big map.
+  const { cols, rows } = viewSize(width, height, props.viewport);
+  const windowed = cols < width || rows < height;
+  const [origin, setOrigin] = useState({ x: 0, y: 0 });
+  const view = clampView(origin.x, origin.y, cols, rows, width, height);
+  const lookAt = (c: Cell) => setOrigin({ x: c.x - Math.floor(cols / 2), y: c.y - Math.floor(rows / 2) });
+  const followKey = props.follow ? `${props.follow.x},${props.follow.y}` : null;
+  useEffect(() => {
+    if (!props.follow || !windowed) return;
+    const f = props.follow;
+    // Only when the cell leaves the window's inner part.
+    const margin = 2;
+    if (f.x < view.x + margin || f.y < view.y + margin || f.x >= view.x + cols - margin || f.y >= view.y + rows - margin) lookAt(f);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [followKey, windowed]);
+  const drag = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = context2d(canvas);
     if (!ctx) return;
-    drawGrid(ctx, props, cell);
-  }, [props, cell]);
+    drawGrid(ctx, props, cell, view);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props, cell, view.x, view.y, view.cols, view.rows]);
+
+  const dots = useMemo(
+    () => (windowed ? props.units.filter((u) => u.alive).map((u) => ({ x: u.x, y: u.y, kind: u.kind })) : []),
+    [windowed, props.units],
+  );
+
+  /** The map cell under the pointer (the window's cell plus its corner). */
+  function cellAt(event: MouseEvent<HTMLCanvasElement>): Cell | null {
+    const c = cellFromPoint(event.clientX, event.clientY, event.currentTarget.getBoundingClientRect(), cols, rows);
+    return c && { x: c.x + view.x, y: c.y + view.y };
+  }
+
+  function handleWheel(event: WheelEvent<HTMLCanvasElement>) {
+    if (!windowed) return;
+    const step = Math.sign(event.deltaY) * 2;
+    if (event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) setOrigin({ x: view.x + (step || Math.sign(event.deltaX) * 2), y: view.y });
+    else setOrigin({ x: view.x, y: view.y + step });
+  }
+
+  function handleDown(event: MouseEvent<HTMLCanvasElement>) {
+    // The middle button drags the window.
+    if (!windowed || event.button !== 1) return;
+    event.preventDefault();
+    drag.current = { x: event.clientX, y: event.clientY, ox: view.x, oy: view.y };
+  }
+
+  function handleUp() {
+    drag.current = null;
+  }
 
   function handleClick(event: MouseEvent<HTMLCanvasElement>) {
-    const cell = cellFromPoint(event.clientX, event.clientY, event.currentTarget.getBoundingClientRect(), width, height);
+    const cell = cellAt(event);
     if (!cell) return;
     const unit = unitOnCell(props.units, cell);
     if (unit) onUnitClick?.(unit);
@@ -487,7 +563,13 @@ export function Grid(props: GridProps) {
   }
 
   function handleMove(event: MouseEvent<HTMLCanvasElement>) {
-    const cell = cellFromPoint(event.clientX, event.clientY, event.currentTarget.getBoundingClientRect(), width, height);
+    if (drag.current) {
+      const rect = event.currentTarget.getBoundingClientRect();
+      const per = rect.width / cols;
+      setOrigin({ x: drag.current.ox - (event.clientX - drag.current.x) / per, y: drag.current.oy - (event.clientY - drag.current.y) / per });
+      return;
+    }
+    const cell = cellAt(event);
     const key = cellKey(cell);
     if (key === hoverKey.current) return;
     hoverKey.current = key;
@@ -496,24 +578,35 @@ export function Grid(props: GridProps) {
   }
 
   function handleLeave() {
+    drag.current = null;
     hoverKey.current = null;
     setHovered(null);
     onCellHover?.(null);
   }
 
-  return (
+  const canvas = (
     <canvas
       ref={canvasRef}
       className="pixel grid-canvas"
-      width={width * cell}
-      height={height * cell}
-      style={{ width: width * shownCell, height: height * shownCell }}
+      width={cols * cell}
+      height={rows * cell}
+      style={{ width: cols * shownCell, height: rows * shownCell }}
       role="img"
-      aria-label={`Battle map, ${width} by ${height} cells`}
+      aria-label={windowed ? `Battle map, ${width} by ${height} cells, showing ${cols} by ${rows} from ${view.x}, ${view.y}` : `Battle map, ${width} by ${height} cells`}
       title={hoveredChest?.label ?? hoveredSecret?.label}
       onClick={handleClick}
       onMouseMove={handleMove}
       onMouseLeave={handleLeave}
+      onMouseDown={handleDown}
+      onMouseUp={handleUp}
+      onWheel={handleWheel}
     />
+  );
+  if (!windowed) return canvas;
+  return (
+    <div className="grid-view">
+      {canvas}
+      <ParchmentMinimap width={width} height={height} tiles={props.tiles} dots={dots} view={view} onJump={lookAt} />
+    </div>
   );
 }

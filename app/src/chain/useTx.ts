@@ -4,7 +4,7 @@ import type { Instruction, TransactionSigner } from "@solana/kit";
 import { DEV_TOOLS } from "../config";
 import { useToast } from "../components/toast/Toast";
 import { decodeEvents, type ChainEvent } from "./events";
-import { BatchError, hasLanded, sendBatch, sendTx, type Sent } from "./send";
+import { BatchError, hasLanded, sendBatch, sendTx, wavesAfter, type Sent } from "./send";
 
 export type TxResult = { signature: string; events: ChainEvent[] };
 
@@ -71,11 +71,12 @@ export function useTx() {
   );
 
   /**
-   * One user action of several transactions: one wallet popup for all of them, sent in order.
+   * One user action of several transactions: one wallet popup for all of them, sent in order
+   * (patch D: `waves`, runs sent side by side, `sendBatch`).
    * Returns every step's result, or null when a step failed (then `stalled` offers the retry).
    */
   const sendSteps = useCallback(
-    async (what: string, payer: TransactionSigner | null, steps: Instruction[][]): Promise<TxResult[] | null> => {
+    async (what: string, payer: TransactionSigner | null, steps: Instruction[][], waves?: number[]): Promise<TxResult[] | null> => {
       if (!payer) {
         toast.push({ kind: "error", text: `${what}: connect a wallet${DEV_TOOLS ? " (or open the app with ?dev=1 on localnet)" : ""}` });
         return null;
@@ -86,7 +87,7 @@ export function useTx() {
         setStalled(null);
         setBusy(progressText(what, "sign", offset, total));
         try {
-          const sent = await sendBatch(payer, left, (phase, i) => setBusy(progressText(what, phase, offset + i, total)));
+          const sent = await sendBatch(payer, left, (phase, i) => setBusy(progressText(what, phase, offset + i, total)), wavesAfter(waves, offset));
           const all = [...done, ...sent.map(resultOf)];
           toast.push({ kind: "ok", text: what, signature: all[all.length - 1]!.signature });
           return all;

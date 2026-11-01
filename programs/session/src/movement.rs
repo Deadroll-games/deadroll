@@ -16,23 +16,25 @@ use crate::{
     errors::SessionError,
     events::CellBurned,
     rules::{step_cost, Unit, BALANCE},
-    state::{external::MapLayoutView, GameSession, Monsters},
+    state::{external::MapLayoutView, BoardBytes, GameSession, Monsters},
 };
 
 /// The party's map for one mover: the layout's cells, the living units but the mover, the closed
-/// chests.
-pub struct MapField<'a, 'b> {
+/// chests, the secret doors found (patch D: on the `SessionBoard`).
+pub struct MapField<'a, 'b, 'c, 'd> {
     session: &'a GameSession,
     layout: &'a MapLayoutView<'b>,
+    board: &'a BoardBytes<'c, 'd>,
     mover: Unit,
     /// Cells of the living monsters other than the mover (patch B: a large one's whole square).
     monsters: [Option<Footprint>; ARENA_MONSTERS_MAX],
 }
 
-impl<'a, 'b> MapField<'a, 'b> {
+impl<'a, 'b, 'c, 'd> MapField<'a, 'b, 'c, 'd> {
     pub fn new(
         session: &'a GameSession,
         layout: &'a MapLayoutView<'b>,
+        board: &'a BoardBytes<'c, 'd>,
         monsters: &Monsters,
         mover: Unit,
     ) -> Result<Self> {
@@ -47,13 +49,14 @@ impl<'a, 'b> MapField<'a, 'b> {
         Ok(Self {
             session,
             layout,
+            board,
             mover,
             monsters: cells,
         })
     }
 }
 
-impl Field for MapField<'_, '_> {
+impl Field for MapField<'_, '_, '_, '_> {
     fn contains(&self, cell: Cell) -> bool {
         cell.x < self.session.width && cell.y < self.session.height
     }
@@ -61,7 +64,11 @@ impl Field for MapField<'_, '_> {
     fn step_cost(&self, cell: Cell) -> Option<u8> {
         let mut byte = self.layout.tile(cell.x, cell.y).ok()?;
         // Patch C: a secret door found here is a door (docs/MAP_DESCRIPTION.md 8.1).
-        if self.session.door_found_at(cell) {
+        if self
+            .session
+            .door_found_at(self.board, cell)
+            .unwrap_or(false)
+        {
             byte = cell_byte(TileKind::Door as u8, cell_variant(byte));
         }
         step_cost(byte, &self.session.tile_cost)
@@ -145,7 +152,8 @@ pub fn burn_on_path(
 mod tests {
     use super::*;
     use crate::state::test_support::{
-        layout_account, monster, monsters_account, session, HEIGHT, WALL, WATER, WIDTH,
+        board_account, layout_account, monster, monsters_account, session, BOARD_SESSION, HEIGHT,
+        WALL, WATER, WIDTH,
     };
     use deadroll_mapcheck::walk::{walk as walk_cells, Walk, MAX_PATH};
     use deadroll_types::Monster;
@@ -183,10 +191,13 @@ mod tests {
         let monsters_session = Pubkey::new_unique();
         let mut layout = layout_account(s.core.map);
         let mut monsters = monsters_account(monsters_session, ms);
-        let (layout_info, monsters_info) = (layout.info(), monsters.info());
+        let mut board = board_account();
+        let (layout_info, monsters_info, board_info) =
+            (layout.info(), monsters.info(), board.info());
         let layout_view = MapLayoutView::load(&layout_info, None)?;
         let monsters_view = Monsters::load(&monsters_info, &monsters_session)?;
-        let field = MapField::new(&s, &layout_view, &monsters_view, mover)?;
+        let board_view = BoardBytes::load(&board_info, &BOARD_SESSION)?;
+        let field = MapField::new(&s, &layout_view, &board_view, &monsters_view, mover)?;
         walk_cells(&field, start, path, ap, |_, _| false).map_err(walk_error)
     }
 
@@ -212,7 +223,7 @@ mod tests {
 
     #[test]
     fn on_the_map_a_living_packs_visible_monster_occupies_its_cell() {
-        let with_pack = |alive: u8, mode| {
+        let with_pack = |alive: u64, mode| {
             walk_with(&[ORIGIN], 0, &[], P0, ORIGIN, &[c(1, 1)], 5, |s| {
                 s.mode = mode;
                 s.packs[2] = deadroll_types::PackLayout {
@@ -238,7 +249,7 @@ mod tests {
 
     #[test]
     fn a_closed_chest_blocks_an_opened_one_does_not() {
-        let with_chest = |opened: u8| {
+        let with_chest = |opened: u32| {
             walk_with(&[ORIGIN], 0, &[], P0, ORIGIN, &[c(1, 1)], 5, |s| {
                 // Arena update: chests are on the map.
                 s.mode = crate::state::ArenaMode::Map;
@@ -387,12 +398,15 @@ mod tests {
         let s = session(&[ORIGIN]);
         let mut layout = layout_account(s.core.map);
         let mut monsters = monsters_account(session_key, &boss);
-        let (layout_info, monsters_info) = (layout.info(), monsters.info());
+        let mut board = board_account();
+        let (layout_info, monsters_info, board_info) =
+            (layout.info(), monsters.info(), board.info());
         let layout_view = MapLayoutView::load(&layout_info, None).unwrap();
         let view = Monsters::load(&monsters_info, &session_key).unwrap();
+        let board_view = BoardBytes::load(&board_info, &BOARD_SESSION).unwrap();
         assert_eq!(view.size(0).unwrap(), 2);
         assert_eq!(view.size(1).unwrap(), 1);
-        let field = MapField::new(&s, &layout_view, &view, Unit::Monster(0)).unwrap();
+        let field = MapField::new(&s, &layout_view, &board_view, &view, Unit::Monster(0)).unwrap();
         let go = |path: &[Cell]| {
             deadroll_mapcheck::walk::walk_sized(&field, c(3, 3), 2, path, 4, |_, _| false)
                 .map_err(walk_error)

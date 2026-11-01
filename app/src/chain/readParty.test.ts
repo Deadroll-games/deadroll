@@ -3,7 +3,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getAddressDecoder, getBase64Decoder, type Address, type ReadonlyUint8Array } from "@solana/kit";
 import { getCharacterDecoder, getCharacterEncoder } from "@deadroll/sdk/character";
-import { getMapDecoder, getMapEncoder, getMapLayoutDecoder, getMapLayoutEncoder } from "@deadroll/sdk/map";
+import { MAP_LAYOUT_DISCRIMINATOR, getMapDecoder, getMapEncoder, layoutGeom } from "@deadroll/sdk/map";
 import {
   getEscrowDecoder,
   getEscrowEncoder,
@@ -59,7 +59,13 @@ async function roster(players: Address[]): Promise<void> {
   accounts.set(await monstersPda(SESSION), account(getMonsterStateEncoder(), getMonsterStateDecoder()));
   accounts.set(await escrowPda(SESSION), account(getEscrowEncoder(), getEscrowDecoder()));
   accounts.set(A(2), account(getMapEncoder(), getMapDecoder()));
-  accounts.set(A(3), account(getMapLayoutEncoder(), getMapLayoutDecoder()));
+  // Patch D: a version 5 layout of a 16x16 Small map.
+  const g = layoutGeom(16, 16, 0);
+  const layout = new Uint8Array(g.end);
+  layout.set(MAP_LAYOUT_DISCRIMINATOR, 0);
+  layout.set([5], 8);
+  layout.set([16, 16, 0], 41);
+  accounts.set(A(3), b64.decode(layout));
   for (const p of players) {
     accounts.set(await participationPda(SESSION, p), account(getParticipationEncoder(), getParticipationDecoder()));
     accounts.set(p, account(getCharacterEncoder(), getCharacterDecoder() as Zero));

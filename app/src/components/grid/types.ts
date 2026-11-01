@@ -48,11 +48,20 @@ export type GridPoint = { x: number; y: number; kind: GridPointKind };
 export type GridAura = { center: Cell; radius: number; hostile: boolean; label: string };
 
 export type GridProps = {
-  /** Map size in cells, 1..=32 each. */
+  /** Map size in cells, 1..=143 each (patch D). */
   width: number;
   height: number;
-  /** MapLayout.cells: 1024 cell bytes (tile type in bits 7-3, `cellKind`), index y * 32 + x (always stride 32). */
+  /** MapLayout.cells: `width * height` cell bytes (tile type in bits 7-3, `cellKind`), index
+   * y * width + x (patch D: `width` per row, as the chain stores them). */
   tiles: Uint8Array;
+  /**
+   * Patch D: the most cells shown at once; a bigger map is drawn through this window, panned with
+   * the wheel (shift: sideways), a middle-button drag or the parchment minimap. Default: the whole
+   * map up to 32x32, a 24x14 window past that.
+   */
+  viewport?: { cols: number; rows: number };
+  /** Patch D: the window follows this cell when it changes (the active unit). */
+  follow?: Cell | null;
   units: GridUnit[];
   /** Unit whose turn it is; gets a highlight ring. */
   activeUnitId?: number | null;

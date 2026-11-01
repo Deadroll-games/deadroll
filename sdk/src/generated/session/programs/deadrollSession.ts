@@ -40,6 +40,7 @@ import {
   getMonsterStateCodec,
   getParticipationCodec,
   getRewardCacheCodec,
+  getSessionBoardCodec,
   type Escrow,
   type EscrowArgs,
   type GameSession,
@@ -50,6 +51,8 @@ import {
   type ParticipationArgs,
   type RewardCache,
   type RewardCacheArgs,
+  type SessionBoard,
+  type SessionBoardArgs,
 } from "../accounts/index.js";
 import {
   getActInstructionAsync,
@@ -57,8 +60,8 @@ import {
   getCloseCacheInstructionAsync,
   getConsumeRandomnessInstruction,
   getEndTurnInstruction,
-  getEnterArenaInstruction,
-  getExamineInstruction,
+  getEnterArenaInstructionAsync,
+  getExamineInstructionAsync,
   getFleeInstruction,
   getJoinSessionInstructionAsync,
   getLeaveArenaInstruction,
@@ -68,8 +71,8 @@ import {
   getOpenChestInstructionAsync,
   getOpenSessionInstructionAsync,
   getRetreatInstruction,
-  getRevealCellInstruction,
-  getRevealPackInstruction,
+  getRevealCellInstructionAsync,
+  getRevealPackInstructionAsync,
   getSetReadyInstructionAsync,
   getSetSessionKeyInstruction,
   getSettlePartyInstructionAsync,
@@ -103,8 +106,8 @@ import {
   type CloseCacheAsyncInput,
   type ConsumeRandomnessInput,
   type EndTurnInput,
-  type EnterArenaInput,
-  type ExamineInput,
+  type EnterArenaAsyncInput,
+  type ExamineAsyncInput,
   type FleeInput,
   type JoinSessionAsyncInput,
   type LeaveArenaInput,
@@ -137,8 +140,8 @@ import {
   type ParsedStartSessionInstruction,
   type ParsedStartTurnInstruction,
   type RetreatInput,
-  type RevealCellInput,
-  type RevealPackInput,
+  type RevealCellAsyncInput,
+  type RevealPackAsyncInput,
   type SetReadyAsyncInput,
   type SetSessionKeyInput,
   type SettlePartyAsyncInput,
@@ -146,6 +149,7 @@ import {
   type StartTurnAsyncInput,
 } from "../instructions/index.js";
 import {
+  findBoardPda,
   findEscrowPda,
   findMonstersPda,
   findParticipationPda,
@@ -164,11 +168,13 @@ export const DeadrollSessionAccount = {
   2: "MonsterState",
   3: "Participation",
   4: "RewardCache",
+  5: "SessionBoard",
   Escrow: 0,
   GameSession: 1,
   MonsterState: 2,
   Participation: 3,
   RewardCache: 4,
+  SessionBoard: 5,
 } as const;
 
 export type DeadrollSessionAccount = (typeof DeadrollSessionAccount)[Exclude<
@@ -234,6 +240,17 @@ export function identifyDeadrollSessionAccount(
     )
   ) {
     return DeadrollSessionAccount.RewardCache;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([236, 104, 1, 55, 35, 193, 80, 96]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionAccount.SessionBoard;
   }
   throw new SolanaError(
     SOLANA_ERROR__PROGRAM_CLIENTS__FAILED_TO_IDENTIFY_ACCOUNT,
@@ -1457,6 +1474,8 @@ export type DeadrollSessionPluginAccounts = {
     SelfFetchFunctions<ParticipationArgs, Participation>;
   rewardCache: ReturnType<typeof getRewardCacheCodec> &
     SelfFetchFunctions<RewardCacheArgs, RewardCache>;
+  sessionBoard: ReturnType<typeof getSessionBoardCodec> &
+    SelfFetchFunctions<SessionBoardArgs, SessionBoard>;
 };
 
 export type DeadrollSessionPluginInstructions = {
@@ -1479,11 +1498,12 @@ export type DeadrollSessionPluginInstructions = {
     input: EndTurnInput,
   ) => ReturnType<typeof getEndTurnInstruction> & SelfPlanAndSendFunctions;
   enterArena: (
-    input: MakeOptional<EnterArenaInput, "payer">,
-  ) => ReturnType<typeof getEnterArenaInstruction> & SelfPlanAndSendFunctions;
+    input: MakeOptional<EnterArenaAsyncInput, "payer">,
+  ) => ReturnType<typeof getEnterArenaInstructionAsync> &
+    SelfPlanAndSendFunctions;
   examine: (
-    input: ExamineInput,
-  ) => ReturnType<typeof getExamineInstruction> & SelfPlanAndSendFunctions;
+    input: ExamineAsyncInput,
+  ) => ReturnType<typeof getExamineInstructionAsync> & SelfPlanAndSendFunctions;
   flee: (
     input: FleeInput,
   ) => ReturnType<typeof getFleeInstruction> & SelfPlanAndSendFunctions;
@@ -1518,11 +1538,13 @@ export type DeadrollSessionPluginInstructions = {
     input: RetreatInput,
   ) => ReturnType<typeof getRetreatInstruction> & SelfPlanAndSendFunctions;
   revealCell: (
-    input: RevealCellInput,
-  ) => ReturnType<typeof getRevealCellInstruction> & SelfPlanAndSendFunctions;
+    input: RevealCellAsyncInput,
+  ) => ReturnType<typeof getRevealCellInstructionAsync> &
+    SelfPlanAndSendFunctions;
   revealPack: (
-    input: RevealPackInput,
-  ) => ReturnType<typeof getRevealPackInstruction> & SelfPlanAndSendFunctions;
+    input: RevealPackAsyncInput,
+  ) => ReturnType<typeof getRevealPackInstructionAsync> &
+    SelfPlanAndSendFunctions;
   setReady: (
     input: SetReadyAsyncInput,
   ) => ReturnType<typeof getSetReadyInstructionAsync> &
@@ -1549,6 +1571,7 @@ export type DeadrollSessionPluginPdas = {
   programIdentity: typeof findProgramIdentityPda;
   escrow: typeof findEscrowPda;
   sessionAuthority: typeof findSessionAuthorityPda;
+  board: typeof findBoardPda;
   participation: typeof findParticipationPda;
   rewardCache: typeof findRewardCachePda;
   session: typeof findSessionPda;
@@ -1574,6 +1597,7 @@ export function deadrollSessionProgram() {
           monsterState: addSelfFetchFunctions(client, getMonsterStateCodec()),
           participation: addSelfFetchFunctions(client, getParticipationCodec()),
           rewardCache: addSelfFetchFunctions(client, getRewardCacheCodec()),
+          sessionBoard: addSelfFetchFunctions(client, getSessionBoardCodec()),
         },
         instructions: {
           act: (input) =>
@@ -1598,13 +1622,16 @@ export function deadrollSessionProgram() {
           enterArena: (input) =>
             addSelfPlanAndSendFunctions(
               client,
-              getEnterArenaInstruction({
+              getEnterArenaInstructionAsync({
                 ...input,
                 payer: input.payer ?? client.payer,
               }),
             ),
           examine: (input) =>
-            addSelfPlanAndSendFunctions(client, getExamineInstruction(input)),
+            addSelfPlanAndSendFunctions(
+              client,
+              getExamineInstructionAsync(input),
+            ),
           flee: (input) =>
             addSelfPlanAndSendFunctions(client, getFleeInstruction(input)),
           joinSession: (input) =>
@@ -1650,12 +1677,12 @@ export function deadrollSessionProgram() {
           revealCell: (input) =>
             addSelfPlanAndSendFunctions(
               client,
-              getRevealCellInstruction(input),
+              getRevealCellInstructionAsync(input),
             ),
           revealPack: (input) =>
             addSelfPlanAndSendFunctions(
               client,
-              getRevealPackInstruction(input),
+              getRevealPackInstructionAsync(input),
             ),
           setReady: (input) =>
             addSelfPlanAndSendFunctions(
@@ -1690,6 +1717,7 @@ export function deadrollSessionProgram() {
           programIdentity: findProgramIdentityPda,
           escrow: findEscrowPda,
           sessionAuthority: findSessionAuthorityPda,
+          board: findBoardPda,
           participation: findParticipationPda,
           rewardCache: findRewardCachePda,
           session: findSessionPda,

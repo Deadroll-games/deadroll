@@ -33,35 +33,40 @@ import {
   type SelfFetchFunctions,
   type SelfPlanAndSendFunctions,
 } from "@solana/program-client-core";
+import { getMapCodec, type Map, type MapArgs } from "../accounts/index.js";
 import {
-  getMapCodec,
-  getMapLayoutCodec,
-  type Map,
-  type MapArgs,
-  type MapLayout,
-  type MapLayoutArgs,
-} from "../accounts/index.js";
-import {
+  getCheckStepInstructionAsync,
+  getCloseMapInstructionAsync,
   getCreateMapInstructionAsync,
   getFinalizeMapInstructionAsync,
+  getGrowLayoutInstructionAsync,
   getSetStatusInstructionAsync,
   getWriteArenaInstructionAsync,
   getWriteLayoutInstructionAsync,
   getWritePointsInstructionAsync,
   getWriteSecretsInstructionAsync,
   getWriteSpawnsInstructionAsync,
+  parseCheckStepInstruction,
+  parseCloseMapInstruction,
   parseCreateMapInstruction,
   parseFinalizeMapInstruction,
+  parseGrowLayoutInstruction,
   parseSetStatusInstruction,
   parseWriteArenaInstruction,
   parseWriteLayoutInstruction,
   parseWritePointsInstruction,
   parseWriteSecretsInstruction,
   parseWriteSpawnsInstruction,
+  type CheckStepAsyncInput,
+  type CloseMapAsyncInput,
   type CreateMapAsyncInput,
   type FinalizeMapAsyncInput,
+  type GrowLayoutAsyncInput,
+  type ParsedCheckStepInstruction,
+  type ParsedCloseMapInstruction,
   type ParsedCreateMapInstruction,
   type ParsedFinalizeMapInstruction,
+  type ParsedGrowLayoutInstruction,
   type ParsedSetStatusInstruction,
   type ParsedWriteArenaInstruction,
   type ParsedWriteLayoutInstruction,
@@ -80,12 +85,7 @@ import { findLayoutPda, findMapPda } from "../pdas/index.js";
 export const DEADROLL_MAP_PROGRAM_ADDRESS =
   "2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH" as Address<"2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH">;
 
-export const DeadrollMapAccount = {
-  0: "Map",
-  1: "MapLayout",
-  Map: 0,
-  MapLayout: 1,
-} as const;
+export const DeadrollMapAccount = { 0: "Map", Map: 0 } as const;
 
 export type DeadrollMapAccount = (typeof DeadrollMapAccount)[Exclude<
   keyof typeof DeadrollMapAccount,
@@ -107,17 +107,6 @@ export function identifyDeadrollMapAccount(
   ) {
     return DeadrollMapAccount.Map;
   }
-  if (
-    containsBytes(
-      data,
-      fixEncoderSize(getBytesEncoder(), 8).encode(
-        new Uint8Array([142, 87, 223, 244, 59, 123, 62, 202]),
-      ),
-      0,
-    )
-  ) {
-    return DeadrollMapAccount.MapLayout;
-  }
   throw new SolanaError(
     SOLANA_ERROR__PROGRAM_CLIENTS__FAILED_TO_IDENTIFY_ACCOUNT,
     { accountData: data, programName: "deadrollMap" },
@@ -126,21 +115,27 @@ export function identifyDeadrollMapAccount(
 
 export const DeadrollMapEvent = {
   0: "ArenaWritten",
-  1: "LayoutWritten",
-  2: "MapCreated",
-  3: "MapFinalized",
-  4: "MapStatusChanged",
-  5: "PointsWritten",
-  6: "SecretsWritten",
-  7: "SpawnsWritten",
+  1: "LayoutGrown",
+  2: "LayoutWritten",
+  3: "MapChecked",
+  4: "MapClosed",
+  5: "MapCreated",
+  6: "MapFinalized",
+  7: "MapStatusChanged",
+  8: "PointsWritten",
+  9: "SecretsWritten",
+  10: "SpawnsWritten",
   ArenaWritten: 0,
-  LayoutWritten: 1,
-  MapCreated: 2,
-  MapFinalized: 3,
-  MapStatusChanged: 4,
-  PointsWritten: 5,
-  SecretsWritten: 6,
-  SpawnsWritten: 7,
+  LayoutGrown: 1,
+  LayoutWritten: 2,
+  MapChecked: 3,
+  MapClosed: 4,
+  MapCreated: 5,
+  MapFinalized: 6,
+  MapStatusChanged: 7,
+  PointsWritten: 8,
+  SecretsWritten: 9,
+  SpawnsWritten: 10,
 } as const;
 
 export type DeadrollMapEvent = (typeof DeadrollMapEvent)[Exclude<
@@ -167,12 +162,45 @@ export function identifyDeadrollMapEvent(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([183, 26, 73, 17, 40, 187, 79, 166]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollMapEvent.LayoutGrown;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([20, 29, 255, 123, 35, 114, 153, 232]),
       ),
       0,
     )
   ) {
     return DeadrollMapEvent.LayoutWritten;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([86, 234, 91, 73, 172, 18, 146, 135]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollMapEvent.MapChecked;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([123, 67, 249, 20, 118, 131, 86, 151]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollMapEvent.MapClosed;
   }
   if (
     containsBytes(
@@ -246,22 +274,28 @@ export function identifyDeadrollMapEvent(
 }
 
 export const DeadrollMapInstruction = {
-  0: "CreateMap",
-  1: "FinalizeMap",
-  2: "SetStatus",
-  3: "WriteArena",
-  4: "WriteLayout",
-  5: "WritePoints",
-  6: "WriteSecrets",
-  7: "WriteSpawns",
-  CreateMap: 0,
-  FinalizeMap: 1,
-  SetStatus: 2,
-  WriteArena: 3,
-  WriteLayout: 4,
-  WritePoints: 5,
-  WriteSecrets: 6,
-  WriteSpawns: 7,
+  0: "CheckStep",
+  1: "CloseMap",
+  2: "CreateMap",
+  3: "FinalizeMap",
+  4: "GrowLayout",
+  5: "SetStatus",
+  6: "WriteArena",
+  7: "WriteLayout",
+  8: "WritePoints",
+  9: "WriteSecrets",
+  10: "WriteSpawns",
+  CheckStep: 0,
+  CloseMap: 1,
+  CreateMap: 2,
+  FinalizeMap: 3,
+  GrowLayout: 4,
+  SetStatus: 5,
+  WriteArena: 6,
+  WriteLayout: 7,
+  WritePoints: 8,
+  WriteSecrets: 9,
+  WriteSpawns: 10,
 } as const;
 
 export type DeadrollMapInstruction = (typeof DeadrollMapInstruction)[Exclude<
@@ -273,6 +307,28 @@ export function identifyDeadrollMapInstruction(
   instruction: { data: ReadonlyUint8Array } | ReadonlyUint8Array,
 ): DeadrollMapInstruction {
   const data = "data" in instruction ? instruction.data : instruction;
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([75, 94, 230, 211, 25, 159, 56, 243]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollMapInstruction.CheckStep;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([49, 81, 101, 245, 210, 242, 155, 232]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollMapInstruction.CloseMap;
+  }
   if (
     containsBytes(
       data,
@@ -294,6 +350,17 @@ export function identifyDeadrollMapInstruction(
     )
   ) {
     return DeadrollMapInstruction.FinalizeMap;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([35, 102, 241, 111, 24, 88, 107, 236]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollMapInstruction.GrowLayout;
   }
   if (
     containsBytes(
@@ -371,11 +438,20 @@ export type ParsedDeadrollMapInstruction<
   TProgram extends string = "2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH",
 > =
   | ({
+      instructionType: typeof DeadrollMapInstruction.CheckStep;
+    } & ParsedCheckStepInstruction<TProgram>)
+  | ({
+      instructionType: typeof DeadrollMapInstruction.CloseMap;
+    } & ParsedCloseMapInstruction<TProgram>)
+  | ({
       instructionType: typeof DeadrollMapInstruction.CreateMap;
     } & ParsedCreateMapInstruction<TProgram>)
   | ({
       instructionType: typeof DeadrollMapInstruction.FinalizeMap;
     } & ParsedFinalizeMapInstruction<TProgram>)
+  | ({
+      instructionType: typeof DeadrollMapInstruction.GrowLayout;
+    } & ParsedGrowLayoutInstruction<TProgram>)
   | ({
       instructionType: typeof DeadrollMapInstruction.SetStatus;
     } & ParsedSetStatusInstruction<TProgram>)
@@ -400,6 +476,20 @@ export function parseDeadrollMapInstruction<TProgram extends string>(
 ): ParsedDeadrollMapInstruction<TProgram> {
   const instructionType = identifyDeadrollMapInstruction(instruction);
   switch (instructionType) {
+    case DeadrollMapInstruction.CheckStep: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: DeadrollMapInstruction.CheckStep,
+        ...parseCheckStepInstruction(instruction),
+      };
+    }
+    case DeadrollMapInstruction.CloseMap: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: DeadrollMapInstruction.CloseMap,
+        ...parseCloseMapInstruction(instruction),
+      };
+    }
     case DeadrollMapInstruction.CreateMap: {
       assertIsInstructionWithAccounts(instruction);
       return {
@@ -412,6 +502,13 @@ export function parseDeadrollMapInstruction<TProgram extends string>(
       return {
         instructionType: DeadrollMapInstruction.FinalizeMap,
         ...parseFinalizeMapInstruction(instruction),
+      };
+    }
+    case DeadrollMapInstruction.GrowLayout: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: DeadrollMapInstruction.GrowLayout,
+        ...parseGrowLayoutInstruction(instruction),
       };
     }
     case DeadrollMapInstruction.SetStatus: {
@@ -478,11 +575,17 @@ export type DeadrollMapPlugin = {
 
 export type DeadrollMapPluginAccounts = {
   map: ReturnType<typeof getMapCodec> & SelfFetchFunctions<MapArgs, Map>;
-  mapLayout: ReturnType<typeof getMapLayoutCodec> &
-    SelfFetchFunctions<MapLayoutArgs, MapLayout>;
 };
 
 export type DeadrollMapPluginInstructions = {
+  checkStep: (
+    input: CheckStepAsyncInput,
+  ) => ReturnType<typeof getCheckStepInstructionAsync> &
+    SelfPlanAndSendFunctions;
+  closeMap: (
+    input: CloseMapAsyncInput,
+  ) => ReturnType<typeof getCloseMapInstructionAsync> &
+    SelfPlanAndSendFunctions;
   createMap: (
     input: CreateMapAsyncInput,
   ) => ReturnType<typeof getCreateMapInstructionAsync> &
@@ -490,6 +593,10 @@ export type DeadrollMapPluginInstructions = {
   finalizeMap: (
     input: FinalizeMapAsyncInput,
   ) => ReturnType<typeof getFinalizeMapInstructionAsync> &
+    SelfPlanAndSendFunctions;
+  growLayout: (
+    input: GrowLayoutAsyncInput,
+  ) => ReturnType<typeof getGrowLayoutInstructionAsync> &
     SelfPlanAndSendFunctions;
   setStatus: (
     input: SetStatusAsyncInput,
@@ -518,8 +625,8 @@ export type DeadrollMapPluginInstructions = {
 };
 
 export type DeadrollMapPluginPdas = {
-  map: typeof findMapPda;
   layout: typeof findLayoutPda;
+  map: typeof findMapPda;
 };
 
 export type DeadrollMapPluginRequirements = ClientWithRpc<
@@ -534,11 +641,18 @@ export function deadrollMapProgram() {
   ): ExtendedClient<T, { deadrollMap: DeadrollMapPlugin }> => {
     return extendClient(client, {
       deadrollMap: {
-        accounts: {
-          map: addSelfFetchFunctions(client, getMapCodec()),
-          mapLayout: addSelfFetchFunctions(client, getMapLayoutCodec()),
-        },
+        accounts: { map: addSelfFetchFunctions(client, getMapCodec()) },
         instructions: {
+          checkStep: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getCheckStepInstructionAsync(input),
+            ),
+          closeMap: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getCloseMapInstructionAsync(input),
+            ),
           createMap: (input) =>
             addSelfPlanAndSendFunctions(
               client,
@@ -548,6 +662,11 @@ export function deadrollMapProgram() {
             addSelfPlanAndSendFunctions(
               client,
               getFinalizeMapInstructionAsync(input),
+            ),
+          growLayout: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getGrowLayoutInstructionAsync(input),
             ),
           setStatus: (input) =>
             addSelfPlanAndSendFunctions(
@@ -580,7 +699,7 @@ export function deadrollMapProgram() {
               getWriteSpawnsInstructionAsync(input),
             ),
         },
-        pdas: { map: findMapPda, layout: findLayoutPda },
+        pdas: { layout: findLayoutPda, map: findMapPda },
         identifyAccount: identifyDeadrollMapAccount,
         identifyInstruction: identifyDeadrollMapInstruction,
         parseInstruction: parseDeadrollMapInstruction,

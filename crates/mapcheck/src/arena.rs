@@ -7,8 +7,8 @@
 //! from ([`entry_cells`]); the monsters stand where the DM put them.
 
 use deadroll_types::{
-    Cell, Facing, MapArenasData, MapLayoutDataV2, PackLayout, PackRoster, Spawn,
-    ARENA_MONSTERS_MAX, ARENA_SIDE_MAX, NO_SPAWN, PACKS_MAX, PARTY_MAX,
+    Board, Cell, Facing, LayoutArenas, PackLayout, PackRoster, Spawn, ARENA_MONSTERS_MAX,
+    ARENA_SIDE_MAX, NO_SPAWN, PACKS_CAP, PARTY_MAX,
 };
 
 use crate::{
@@ -19,7 +19,7 @@ use crate::{
     roster::{Role, RosterCount, SpawnRules},
     secrets::{threat, ThreatWeights},
     tiles::{in_bounds, TileRules},
-    MapCheckError,
+    MapCheckError, Reached,
 };
 
 /// The arena sizes a DM may draw (`deadroll_rules::BalanceConfig.arena`), inclusive, never above
@@ -141,7 +141,7 @@ pub const fn anchor(approach: Approach, width: u8, height: u8) -> Cell {
 }
 
 /// The cell byte at `(x, y)` of `pack`'s arena (0, the void, outside the storage).
-pub fn arena_byte(arenas: &MapArenasData, pack: u8, x: usize, y: usize) -> u8 {
+pub fn arena_byte(arenas: &LayoutArenas, pack: u8, x: usize, y: usize) -> u8 {
     match arenas.cells.get(pack as usize) {
         Some(cells) if x < ARENA_SIDE_MAX && y < ARENA_SIDE_MAX => cells[y * ARENA_SIDE_MAX + x],
         _ => 0,
@@ -157,7 +157,7 @@ fn chebyshev(a: Cell, b: Cell) -> u8 {
 /// nearest to the [`anchor`] by Chebyshev distance, then by row, then by column. Returns how many
 /// it found: fewer than `out.len()` only on a map that failed [`check_arenas`].
 pub fn entry_cells(
-    arenas: &MapArenasData,
+    arenas: &LayoutArenas,
     pack: u8,
     tiles: &TileRules,
     approach: Approach,
@@ -232,7 +232,7 @@ pub fn footprint_cells(units: impl Iterator<Item = Footprint>, out: &mut [Cell])
 
 /// The cells reachable inside `pack`'s arena from `start`, around `blocked`.
 pub fn arena_reach(
-    arenas: &MapArenasData,
+    arenas: &LayoutArenas,
     pack: u8,
     tiles: &TileRules,
     start: Cell,
@@ -266,29 +266,33 @@ fn neighbors(c: Cell, width: u8, height: u8) -> impl Iterator<Item = Cell> {
 
 /// The arena rules of a map (docs/MAP_DESCRIPTION.md 17.2, 17.3). `map_reach`: the map cells the
 /// party reaches from the entrance (around the closed chests); `ends`: the entrance and the exit;
-/// `chests`: the visible chests' cells.
+/// `chests`: the visible chests' cells; `class_packs`: the pack numbers the map's size class
+/// stores (patch D).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn check_arenas(
-    width: u8,
-    height: u8,
-    layout: &MapLayoutDataV2,
-    arenas: &MapArenasData,
+    board: &Board,
+    class_packs: usize,
+    spawns: &[Spawn],
+    arenas: &LayoutArenas,
     limits: ArenaLimits,
     tiles: &TileRules,
     ends: [Cell; 2],
     chests: &[Cell],
-    map_reach: &Reach,
+    map_reach: &dyn Reached,
     size_of: &dyn Fn(u8) -> u8,
 ) -> Result<(), MapCheckError> {
     use MapCheckError as E;
-    let spawns = &layout.spawns[..(layout.spawn_count as usize).min(layout.spawns.len())];
-    check_spawn_cells(arenas, tiles, spawns, size_of)?;
+    let (width, height) = (board.width, board.height);
+    check_spawn_cells(arenas, class_packs, tiles, spawns, size_of)?;
 
     let side_max = limits.side_max.min(ARENA_SIDE_MAX as u8);
     let entrance = ends[0];
     for (n, p) in arenas.packs.iter().enumerate() {
         if !p.is_used() {
             continue;
+        }
+        if n >= class_packs {
+            return Err(E::PackOutOfRange);
         }
         let pack = n as u8;
         let side_ok = |side: u8| (limits.side_min..=side_max).contains(&side);
@@ -308,7 +312,7 @@ pub(crate) fn check_arenas(
                 Some(s) if s.pack == pack => {}
                 _ => return Err(E::VisibleNotInPack),
             }
-            check_pack_cell(width, height, layout, arenas, p, n, tiles, ends, chests)?;
+            check_pack_cell(board, arenas, p, n, tiles, ends, chests)?;
             if chebyshev(entrance, p.cell()) <= 1 {
                 return Err(E::PackAtEntrance);
             }
@@ -324,16 +328,21 @@ pub(crate) fn check_arenas(
 /// Every monster stands in its pack's arena, with every cell of its footprint (patch B), apart
 /// from the others of its pack, at most `ARENA_MONSTERS_MAX` in a pack.
 fn check_spawn_cells(
-    arenas: &MapArenasData,
+    arenas: &LayoutArenas,
+    class_packs: usize,
     tiles: &TileRules,
     spawns: &[Spawn],
     size_of: &dyn Fn(u8) -> u8,
 ) -> Result<(), MapCheckError> {
     use MapCheckError as E;
     let footprint = |s: &Spawn| Footprint::new(Cell { x: s.x, y: s.y }, size_of(s.bestiary_id));
-    let mut in_pack = [0u8; PACKS_MAX];
+    let mut in_pack = [0u8; PACKS_CAP];
     for (i, s) in spawns.iter().enumerate() {
-        let p = arenas.packs.get(s.pack as usize).ok_or(E::PackOutOfRange)?;
+        let p = arenas
+            .packs
+            .get(s.pack as usize)
+            .filter(|_| (s.pack as usize) < class_packs)
+            .ok_or(E::PackOutOfRange)?;
         if !p.is_used() {
             return Err(E::PackWithoutArena);
         }
@@ -372,7 +381,7 @@ pub fn check_roster(
     pack: u8,
     roster: &PackRoster,
     visible: Option<&Spawn>,
-    arenas: &MapArenasData,
+    arenas: &LayoutArenas,
     tiles: &TileRules,
     template_of: impl Fn(u8) -> Option<SpawnRules>,
     weights: ThreatWeights,
@@ -429,7 +438,7 @@ pub fn check_roster(
         return Err(E::TwoLoners);
     }
     let size_of = |id: u8| template_of(id).map_or(1, |t| t.size);
-    check_spawn_cells(arenas, tiles, spawns, &size_of)?;
+    check_spawn_cells(arenas, PACKS_CAP, tiles, spawns, &size_of)?;
     check_entries(arenas, pack, tiles, spawns, &size_of)?;
     let role_of = |id: u8| template_of(id).map(|t| t.role);
     if threat(spawns, role_of, weights) != declared_threat as u16 {
@@ -442,10 +451,8 @@ pub fn check_roster(
 /// pack's cell.
 #[allow(clippy::too_many_arguments)]
 fn check_pack_cell(
-    width: u8,
-    height: u8,
-    layout: &MapLayoutDataV2,
-    arenas: &MapArenasData,
+    board: &Board,
+    arenas: &LayoutArenas,
     p: &PackLayout,
     n: usize,
     tiles: &TileRules,
@@ -454,11 +461,10 @@ fn check_pack_cell(
 ) -> Result<(), MapCheckError> {
     use MapCheckError as E;
     let cell = p.cell();
-    if !in_bounds(cell, width, height) {
-        return Err(E::PackOutOfBounds);
-    }
-    if !tiles.is_passable(layout.cells[crate::tiles::cell_index(cell.x, cell.y)]) {
-        return Err(E::PackNotPassable);
+    match board.get(cell) {
+        None => return Err(E::PackOutOfBounds),
+        Some(b) if !tiles.is_passable(b) => return Err(E::PackNotPassable),
+        Some(_) => {}
     }
     let taken = ends.contains(&cell)
         || chests.contains(&cell)
@@ -474,7 +480,7 @@ fn check_pack_cell(
 /// From every side the party may come from, the arena has room for a full party and every monster
 /// can be reached from where it stands.
 fn check_entries(
-    arenas: &MapArenasData,
+    arenas: &LayoutArenas,
     pack: u8,
     tiles: &TileRules,
     spawns: &[Spawn],
@@ -588,8 +594,8 @@ mod tests {
         assert_eq!(anchor(approach(Facing::NW), 8, 6), c(0, 0));
     }
 
-    fn arena(rows: &[&str]) -> MapArenasData {
-        let mut a = MapArenasData::EMPTY;
+    fn arena(rows: &[&str]) -> LayoutArenas {
+        let mut a = LayoutArenas::EMPTY;
         a.packs[1] = PackLayout {
             width: rows[0].len() as u8,
             height: rows.len() as u8,

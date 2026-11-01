@@ -1336,3 +1336,37 @@ The DM's copy: the website signs `UNLOCK_MESSAGE` with the DM's wallet (`solana:
 HKDF-SHA256 (salt `deadroll/secrets/v1`, info the map address) gives an AES-256-GCM key (nonce 12,
 AAD the map address) and an HMAC-SHA256 key whose `HMAC(leaf u16 LE)[..16]` is each leaf's salt.
 The plain bytes: version 1, the 8 rosters, the count and `(leaf u16 LE, CellSecret)` per secret.
+
+## 32. Patch D: map sizes, the reachability check in steps, one-use maps
+
+Docs: `docs/MAP_DESCRIPTION.md` 2.3, 10.3, 13, 17.6, 17.7.
+
+`crates/types`, added:
+
+| Item | Value / meaning |
+| --- | --- |
+| `MAP_CLASSES` | 4 size classes: Small, Medium, Big, Dungeon |
+| `MAP_SIDE_CAP`, `MAP_CELLS_CAP` | 143, 143 × 143 |
+| `CLASS_PACKS`, `CLASS_CHESTS`, `CLASS_SECRETS`, `CLASS_BLOB` | `[8, 16, 24, 40]`, `[4, 8, 12, 16]`, `[16, 48, 80, 96]`, `[800, 1600, 2400, 3600]` |
+| `PACKS_CAP`, `CHESTS_CAP`, `POINTS_CAP`, `SECRETS_CAP`, `MONSTERS_CAP`, `STASHES_CAP` | 40, 16, 18, 96, 80, 16 |
+| `SECRET_LEAVES_CAP`, `SECRET_DEPTH_CAP`, `MAP_ROW_WORDS` | 26249, 15, 3 |
+| `map_size` module | `LayoutGeom` (offsets of a version 5 `MapLayout`), `Board` (cells with a stride), `LayoutCore`, `LayoutArenas`, `LayoutSecrets`, `LAYOUT_V5`, `hdr` offsets; manual `read`/`write` of `Spawn`, `MapPoint`, `PackLayout` |
+| `seeds::BOARD` | `["board", session]` in session |
+
+Nothing renamed or removed; `MAP_MAX`, `MAP_CELLS`, `PACKS_MAX`, `SPAWNS_MAX`, `CHESTS_MAX`, `MapLayoutDataV2`, `MapArenasData`, `MapSecretsData` keep their values and stay for the Small shapes.
+
+`MapLayout` version 5: the account is as big as its class and sides need (`LayoutGeom::new(width, height, class)`); the cells are `width` per row. `layout_hash` = SHA-256 of `[8 .. blob_len)`. The `#[account] MapLayout` struct is the header only.
+
+Map program, new instructions:
+
+| Instruction | Signer | What |
+| --- | --- | --- |
+| `grow_layout` | DM | adds up to 10 KB to a draft's layout (after `create_map`, same transaction) |
+| `check_step` | DM | one transaction's share of the reachability check (state in the layout, any write resets it) |
+| `close_map` | session PDA (CPI) | `[map (mut), layout (mut), dm (mut), session_authority (signer), config]`: closes a map in a party and its layout, the lamports to `map.dm` |
+
+`write_secrets.threat` is a `Vec<u8>`, one per pack number of the class. `finalize_map` takes `layout` writable and fails `CheckNotDone` until the check is finished.
+
+CPI surface (section 5) gains: session → `map::close_map` from `settle_party` and the last `claim_after_timeout`, in place of `set_status(Finished)`.
+
+Session: new account `SessionBoard` `["board", session]` (revealed leaves, found secrets, revealed spawns), created at `open_session`. `GameSession` fields widened in place (packs 40, chest slots 32, threats 40, pack masks `u64`, `dead_spawns` `u128`, `chests_opened` `u32`), `revealed`, `found`, `found_count`, `spawns`, `spawn_count` moved to the board, `map_class` appended. `open_session`, `move_path`, `examine`, `enter_arena`, `reveal_cell`, `reveal_pack` take `board`; `settle_party` takes `layout`; `claim_after_timeout` takes `layout` and `dm`. Sessions opened before the upgrade cannot be read after it.

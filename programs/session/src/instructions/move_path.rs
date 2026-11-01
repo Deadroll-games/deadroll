@@ -17,8 +17,8 @@ use crate::{
     reactions::{fires_for, request_reactive_roll},
     rules::{Unit, MAX_PATH},
     state::{
-        external::MapLayoutView, pending_kind, ArenaMode, GameSession, Monsters, Participation,
-        PendingMonsterReactiveData, PendingReactiveData,
+        external::MapLayoutView, pending_kind, ArenaMode, BoardBytes, GameSession, Monsters,
+        Participation, PendingMonsterReactiveData, PendingReactiveData,
     },
     vrf::{self, RequestAccounts},
 };
@@ -45,6 +45,10 @@ pub struct MovePath<'info> {
     /// CHECK: the session's `MapLayout`, address pinned at `open_session`.
     #[account(address = session.layout @ SessionError::InvalidLayout)]
     pub layout: UncheckedAccount<'info>,
+    /// CHECK: the session's `SessionBoard` (patch D), checked by `BoardBytes::load`: the found
+    /// doors and the revealed leaves.
+    #[account(seeds = [seeds::BOARD, session.key().as_ref()], bump)]
+    pub board: UncheckedAccount<'info>,
     /// MagicBlock `SessionTokenV2` of the actor's session key; none when the main wallet signs.
     #[session(signer = signer, authority = actor_authority())]
     pub session_token: Option<Account<'info, SessionTokenV2>>,
@@ -125,6 +129,7 @@ pub fn handler(ctx: Context<MovePath>, unit: u8, path: Vec<Cell>) -> Result<()> 
     require!(session.turn_started(), SessionError::TurnNotStarted);
     session.require_in_play()?;
     let layout = MapLayoutView::load(&accounts.layout, session.ground())?;
+    let board = BoardBytes::load(&accounts.board, &session_key)?;
     let request = RequestAccounts {
         payer: &accounts.signer,
         program_identity: &accounts.program_identity,
@@ -166,7 +171,7 @@ pub fn handler(ctx: Context<MovePath>, unit: u8, path: Vec<Cell>) -> Result<()> 
             let mut failed = None;
             let mut engaged = None;
             let walked = walk(
-                &MapField::new(session, &layout, &monsters, mover)?,
+                &MapField::new(session, &layout, &board, &monsters, mover)?,
                 start,
                 &path,
                 p.core.action_points,
@@ -225,7 +230,13 @@ pub fn handler(ctx: Context<MovePath>, unit: u8, path: Vec<Cell>) -> Result<()> 
             session.player_pos[slot as usize] = walked.end;
             // Patch C: every cell the character stepped on that the DM has not revealed yet
             // (docs/MAP_DESCRIPTION.md 8.4).
-            crate::secrets::oblige_cells(session, session_key, slot, &path[..walked.steps])?;
+            crate::secrets::oblige_cells(
+                session,
+                &board,
+                session_key,
+                slot,
+                &path[..walked.steps],
+            )?;
             // Moving is another action: it cancels a Retreat or Escape proposal
             // (docs/PARTY_AND_TURNS.md 7.5).
             crate::exit_vote::cancel(session, session_key, slot);
@@ -279,7 +290,7 @@ pub fn handler(ctx: Context<MovePath>, unit: u8, path: Vec<Cell>) -> Result<()> 
             let size = monsters.size(index)?;
             let mut bearers = 0u8;
             let walked = walk_sized(
-                &MapField::new(session, &layout, &monsters, mover)?,
+                &MapField::new(session, &layout, &board, &monsters, mover)?,
                 start,
                 size,
                 &path,

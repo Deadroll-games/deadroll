@@ -46,6 +46,7 @@ import {
   type ResolvedInstructionAccountMeta,
 } from "@solana/program-client-core";
 import {
+  findBoardPda,
   findEscrowPda,
   findMonstersPda,
   findSessionAuthorityPda,
@@ -93,6 +94,7 @@ export type OpenSessionInstruction<
     "FxXF2viQZ2zBSS4tEBFoMEVZWharoUA4PtQgimZCnytK",
   TAccountTriples extends string | AccountMeta<string> =
     "sWao9CeLDqT7z3R1oVxED2SGwH9EUSySM1ftyS44b6e",
+  TAccountBoard extends string | AccountMeta<string> = string,
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
 > = Instruction<TProgram> &
   InstructionWithData<ReadonlyUint8Array> &
@@ -150,6 +152,9 @@ export type OpenSessionInstruction<
       TAccountTriples extends string
         ? ReadonlyAccount<TAccountTriples>
         : TAccountTriples,
+      TAccountBoard extends string
+        ? WritableAccount<TAccountBoard>
+        : TAccountBoard,
       ...TRemainingAccounts,
     ]
   >;
@@ -216,6 +221,7 @@ export type OpenSessionAsyncInput<
     InstructionAccountInput,
   TAccountRewards extends InstructionAccountInput = InstructionAccountInput,
   TAccountTriples extends InstructionAccountInput = InstructionAccountInput,
+  TAccountBoard extends InstructionAccountInput = InstructionAccountInput,
 > = {
   dm: TAccountDm;
   map: TAccountMap;
@@ -238,6 +244,11 @@ export type OpenSessionAsyncInput<
   /** tables, copied into `MonsterState`. */
   rewards?: TAccountRewards;
   triples?: TAccountTriples;
+  /**
+   * Patch D: what the party uncovers (`SessionBoard`), sized for the largest map; only its
+   * header is written here, the rest starts zeroed.
+   */
+  board?: TAccountBoard;
   priceLamports: OpenSessionInstructionDataArgs["priceLamports"];
   dmActor: OpenSessionInstructionDataArgs["dmActor"];
 };
@@ -261,6 +272,7 @@ export async function getOpenSessionInstructionAsync<
   TAccountMonsterSkills extends InstructionAccountInput,
   TAccountRewards extends InstructionAccountInput,
   TAccountTriples extends InstructionAccountInput,
+  TAccountBoard extends InstructionAccountInput,
   TProgramAddress extends Address = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
 >(
   input: OpenSessionAsyncInput<
@@ -281,7 +293,8 @@ export async function getOpenSessionInstructionAsync<
     TAccountResonances,
     TAccountMonsterSkills,
     TAccountRewards,
-    TAccountTriples
+    TAccountTriples,
+    TAccountBoard
   >,
   config?: { programAddress?: TProgramAddress },
 ): Promise<
@@ -358,6 +371,10 @@ export async function getOpenSessionInstructionAsync<
     ResolvedInstructionAccountMeta<
       TAccountTriples,
       InstructionAccountInputAddress<TAccountTriples>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountBoard,
+      InstructionAccountInputAddress<TAccountBoard>
     >
   >
 > {
@@ -436,6 +453,7 @@ export async function getOpenSessionInstructionAsync<
       isSigner: false,
       isWritable: false,
     },
+    board: { value: input.board ?? null, isSigner: false, isWritable: true },
   };
   const accounts = originalAccounts as Record<
     keyof typeof originalAccounts,
@@ -533,6 +551,17 @@ export async function getOpenSessionInstructionAsync<
     accounts.triples.value =
       "sWao9CeLDqT7z3R1oVxED2SGwH9EUSySM1ftyS44b6e" as Address<"sWao9CeLDqT7z3R1oVxED2SGwH9EUSySM1ftyS44b6e">;
   }
+  if (!accounts.board.value) {
+    accounts.board.value = await findBoardPda(
+      {
+        session: getAddressFromResolvedInstructionAccount(
+          "session",
+          accounts.session.value,
+        ),
+      },
+      { programAddress },
+    );
+  }
 
   return Object.freeze({
     accounts: [
@@ -554,6 +583,7 @@ export async function getOpenSessionInstructionAsync<
       getAccountMeta("monsterSkills", accounts.monsterSkills),
       getAccountMeta("rewards", accounts.rewards),
       getAccountMeta("triples", accounts.triples),
+      getAccountMeta("board", accounts.board),
     ],
     data: getOpenSessionInstructionDataEncoder().encode(
       args as OpenSessionInstructionDataArgs,
@@ -632,6 +662,10 @@ export async function getOpenSessionInstructionAsync<
     ResolvedInstructionAccountMeta<
       TAccountTriples,
       InstructionAccountInputAddress<TAccountTriples>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountBoard,
+      InstructionAccountInputAddress<TAccountBoard>
     >
   >);
 }
@@ -658,6 +692,7 @@ export type OpenSessionInput<
     InstructionAccountInput,
   TAccountRewards extends InstructionAccountInput = InstructionAccountInput,
   TAccountTriples extends InstructionAccountInput = InstructionAccountInput,
+  TAccountBoard extends InstructionAccountInput = InstructionAccountInput,
 > = {
   dm: TAccountDm;
   map: TAccountMap;
@@ -680,6 +715,11 @@ export type OpenSessionInput<
   /** tables, copied into `MonsterState`. */
   rewards?: TAccountRewards;
   triples?: TAccountTriples;
+  /**
+   * Patch D: what the party uncovers (`SessionBoard`), sized for the largest map; only its
+   * header is written here, the rest starts zeroed.
+   */
+  board: TAccountBoard;
   priceLamports: OpenSessionInstructionDataArgs["priceLamports"];
   dmActor: OpenSessionInstructionDataArgs["dmActor"];
 };
@@ -703,6 +743,7 @@ export function getOpenSessionInstruction<
   TAccountMonsterSkills extends InstructionAccountInput,
   TAccountRewards extends InstructionAccountInput,
   TAccountTriples extends InstructionAccountInput,
+  TAccountBoard extends InstructionAccountInput,
   TProgramAddress extends Address = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
 >(
   input: OpenSessionInput<
@@ -723,7 +764,8 @@ export function getOpenSessionInstruction<
     TAccountResonances,
     TAccountMonsterSkills,
     TAccountRewards,
-    TAccountTriples
+    TAccountTriples,
+    TAccountBoard
   >,
   config?: { programAddress?: TProgramAddress },
 ): OpenSessionInstruction<
@@ -799,6 +841,10 @@ export function getOpenSessionInstruction<
   ResolvedInstructionAccountMeta<
     TAccountTriples,
     InstructionAccountInputAddress<TAccountTriples>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountBoard,
+    InstructionAccountInputAddress<TAccountBoard>
   >
 > {
   // Program address.
@@ -876,6 +922,7 @@ export function getOpenSessionInstruction<
       isSigner: false,
       isWritable: false,
     },
+    board: { value: input.board ?? null, isSigner: false, isWritable: true },
   };
   const accounts = originalAccounts as Record<
     keyof typeof originalAccounts,
@@ -947,6 +994,7 @@ export function getOpenSessionInstruction<
       getAccountMeta("monsterSkills", accounts.monsterSkills),
       getAccountMeta("rewards", accounts.rewards),
       getAccountMeta("triples", accounts.triples),
+      getAccountMeta("board", accounts.board),
     ],
     data: getOpenSessionInstructionDataEncoder().encode(
       args as OpenSessionInstructionDataArgs,
@@ -1025,6 +1073,10 @@ export function getOpenSessionInstruction<
     ResolvedInstructionAccountMeta<
       TAccountTriples,
       InstructionAccountInputAddress<TAccountTriples>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountBoard,
+      InstructionAccountInputAddress<TAccountBoard>
     >
   >);
 }
@@ -1056,6 +1108,11 @@ export type ParsedOpenSessionInstruction<
     /** tables, copied into `MonsterState`. */
     rewards: TAccountMetas[16];
     triples: TAccountMetas[17];
+    /**
+     * Patch D: what the party uncovers (`SessionBoard`), sized for the largest map; only its
+     * header is written here, the rest starts zeroed.
+     */
+    board: TAccountMetas[18];
   };
   data: OpenSessionInstructionData;
 };
@@ -1068,12 +1125,12 @@ export function parseOpenSessionInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
 ): ParsedOpenSessionInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 18) {
+  if (instruction.accounts.length < 19) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 18,
+        expectedAccountMetas: 19,
       },
     );
   }
@@ -1104,6 +1161,7 @@ export function parseOpenSessionInstruction<
       monsterSkills: getNextAccount(),
       rewards: getNextAccount(),
       triples: getNextAccount(),
+      board: getNextAccount(),
     },
     data: getOpenSessionInstructionDataDecoder().decode(instruction.data),
   };

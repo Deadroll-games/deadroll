@@ -76,7 +76,7 @@ export type FinalizeMapInstruction<
         : TAccountDm,
       TAccountMap extends string ? WritableAccount<TAccountMap> : TAccountMap,
       TAccountLayout extends string
-        ? ReadonlyAccount<TAccountLayout>
+        ? WritableAccount<TAccountLayout>
         : TAccountLayout,
       TAccountBestiary extends string
         ? ReadonlyAccount<TAccountBestiary>
@@ -143,8 +143,8 @@ export type FinalizeMapAsyncInput<
   dm: TAccountDm;
   map: TAccountMap;
   /**
-   * Owner and discriminator checked, never decoded whole (`state::LayoutBytes`): the core, the
-   * arenas and the public secrets are decoded into boxes one at a time.
+   * the cells are read in place, the core and the arenas decoded into boxes. Patch D: the
+   * reachability check's last share is written in place.
    */
   layout?: TAccountLayout;
   /** spawns, read in place by `deadroll_registry::state::view`. */
@@ -219,7 +219,7 @@ export async function getFinalizeMapInstructionAsync<
   const originalAccounts = {
     dm: { value: input.dm ?? null, isSigner: true, isWritable: false },
     map: { value: input.map ?? null, isSigner: false, isWritable: true },
-    layout: { value: input.layout ?? null, isSigner: false, isWritable: false },
+    layout: { value: input.layout ?? null, isSigner: false, isWritable: true },
     bestiary: {
       value: input.bestiary ?? null,
       isSigner: false,
@@ -338,8 +338,8 @@ export type FinalizeMapInput<
   dm: TAccountDm;
   map: TAccountMap;
   /**
-   * Owner and discriminator checked, never decoded whole (`state::LayoutBytes`): the core, the
-   * arenas and the public secrets are decoded into boxes one at a time.
+   * the cells are read in place, the core and the arenas decoded into boxes. Patch D: the
+   * reachability check's last share is written in place.
    */
   layout: TAccountLayout;
   /** spawns, read in place by `deadroll_registry::state::view`. */
@@ -412,7 +412,7 @@ export function getFinalizeMapInstruction<
   const originalAccounts = {
     dm: { value: input.dm ?? null, isSigner: true, isWritable: false },
     map: { value: input.map ?? null, isSigner: false, isWritable: true },
-    layout: { value: input.layout ?? null, isSigner: false, isWritable: false },
+    layout: { value: input.layout ?? null, isSigner: false, isWritable: true },
     bestiary: {
       value: input.bestiary ?? null,
       isSigner: false,
@@ -516,8 +516,8 @@ export type ParsedFinalizeMapInstruction<
     dm: TAccountMetas[0];
     map: TAccountMetas[1];
     /**
-     * Owner and discriminator checked, never decoded whole (`state::LayoutBytes`): the core, the
-     * arenas and the public secrets are decoded into boxes one at a time.
+     * the cells are read in place, the core and the arenas decoded into boxes. Patch D: the
+     * reachability check's last share is written in place.
      */
     layout: TAccountMetas[2];
     /** spawns, read in place by `deadroll_registry::state::view`. */

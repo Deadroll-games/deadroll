@@ -7,6 +7,7 @@ pub mod mods;
 pub mod monster_state;
 pub mod participation;
 pub mod reward_cache;
+pub mod session_board;
 pub mod skills;
 #[cfg(test)]
 pub(crate) mod test_support;
@@ -17,6 +18,7 @@ pub use mods::{ModKindData, ModsData, ResistModData, TimedModData, STORED_MODS};
 pub use monster_state::*;
 pub use participation::*;
 pub use reward_cache::*;
+pub use session_board::*;
 pub use skills::*;
 
 /// Layout version written into every session account.

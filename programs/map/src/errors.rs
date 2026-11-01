@@ -194,6 +194,15 @@ pub enum MapError {
     SecretsOutOfRange,
     #[msg("The map has no secrets root or no encrypted secrets")]
     SecretsMissing,
+    // Patch D: map sizes.
+    #[msg("The layout is not grown to its full size yet: send grow_layout first")]
+    LayoutNotGrown,
+    #[msg("The layout already has its full size")]
+    LayoutGrown,
+    #[msg("The reachability check is not done: send check_step first")]
+    CheckNotDone,
+    #[msg("The map is not in a party")]
+    MapNotInSession,
 }
 
 impl From<MapCheckError> for MapError {

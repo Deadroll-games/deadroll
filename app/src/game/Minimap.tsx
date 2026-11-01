@@ -3,7 +3,6 @@
 // a blank parchment.
 import { useEffect, useRef } from "react";
 import { MONSTER_BASE, arenaMode } from "../chain/game";
-import { MAP_MAX } from "../chain/types";
 import { artUrl } from "./art";
 import { useLiveParty } from "../routes/PartyChain";
 
@@ -33,7 +32,7 @@ export function Minimap({ onOpen }: { onOpen?: () => void }) {
     const oy = Math.floor((AREA.h - cell * height) / 2);
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
-        const kind = (party.tiles[y * MAP_MAX + x] ?? 0) >> 3;
+        const kind = (party.tiles[y * width + x] ?? 0) >> 3;
         const color = KIND_COLORS[kind] ?? FLOOR;
         if (color === "transparent") continue;
         ctx.fillStyle = color;

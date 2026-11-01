@@ -252,4 +252,9 @@ pub enum SessionError {
     TooManyObligations,
     #[msg("Only a cell next to the character can be examined")]
     NotAdjacent,
+    // Patch D: map sizes (docs/MAP_DESCRIPTION.md 17.6).
+    #[msg("The map was finalized before the map sizes update")]
+    MapWithoutSizes,
+    #[msg("Not the party board account")]
+    InvalidBoard,
 }

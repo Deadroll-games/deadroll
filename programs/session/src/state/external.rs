@@ -16,9 +16,8 @@ use deadroll_registry::state::{
 use deadroll_rules::{items::Equipment, MonsterTemplate};
 use deadroll_skillcheck::monster::MonsterSkill;
 use deadroll_types::{
-    Cell, CharacterData, MapArenasData, MapData, MapPoint, PackLayout, PointKind, Spawn, TileKind,
-    ARENA_CELLS, ARENA_SIDE_MAX, CHESTS_MAX, MAP_CELLS, MAP_MAX, PACKS_MAX, POINTS_MAX,
-    SECRETS_BLOB_MAX, SECRET_TYPES, SPAWNS_MAX, TILE_KINDS_MAX,
+    map_size::hdr, Cell, CharacterData, LayoutArenas, LayoutGeom, MapData, MapPoint, PackLayout,
+    PointKind, Spawn, TileKind, CHESTS_CAP, LAYOUT_V5, PACKS_CAP, SECRET_TYPES, TILE_KINDS_MAX,
 };
 
 use crate::{errors::SessionError, state::LOOT_RECORD_LEN};
@@ -106,47 +105,27 @@ pub fn read_map_full(info: &AccountInfo) -> Result<deadroll_map::state::Map> {
     deadroll_map::state::Map::decode_padded(&data).ok_or(error!(SessionError::InvalidMap))
 }
 
-/// Byte offsets inside a `MapLayout` account (discriminator included), patch 13:
-/// `MapLayoutDataV2`.
-mod layout_off {
-    use super::*;
-    pub const VERSION: usize = 8;
-    pub const MAP: usize = VERSION + 1;
-    pub const CELLS: usize = MAP + 32;
-    pub const SPAWNS: usize = CELLS + MAP_CELLS;
-    pub const SPAWN_COUNT: usize = SPAWNS + SPAWNS_MAX * Spawn::SIZE;
-    pub const POINTS: usize = SPAWN_COUNT + 1;
-    pub const POINT_COUNT: usize = POINTS + POINTS_MAX * MapPoint::SIZE;
-    pub const BOSS_TABLE: usize = POINT_COUNT + 1;
-    /// After the bump: the end of the core.
-    pub const CORE_END: usize = BOSS_TABLE + 2;
-    /// Arena update: `MapArenasData` after the core.
-    pub const PACKS: usize = CORE_END;
-    pub const ARENAS: usize = PACKS + PACKS_MAX * PackLayout::SIZE;
-    /// Patch C: `MapSecretsData` after the arenas.
-    pub const THREAT: usize = ARENAS + PACKS_MAX * ARENA_CELLS;
-    pub const DECLARED: usize = THREAT + PACKS_MAX;
-    pub const BLOB_LEN: usize = DECLARED + SECRET_TYPES;
-    pub const END: usize = BLOB_LEN + 2 + SECRETS_BLOB_MAX;
-}
-
-/// `MapLayout.core.version` of the format (`deadroll_map::state::LAYOUT_VERSION`): patch C,
-/// `MapLayoutDataV2`, `MapArenasData` and `MapSecretsData`.
-pub const LAYOUT_VERSION: u8 = 4;
+/// `MapLayout.version` of the format (`deadroll_map::state::LAYOUT_VERSION`): patch D, sized by
+/// the map's class (`deadroll_types::map_size`).
+pub const LAYOUT_VERSION: u8 = LAYOUT_V5;
+/// Patch D: the version before the map sizes (its cells are 32 per row: such a map cannot open a
+/// party).
+pub const LAYOUT_VERSION_NO_SIZES: u8 = 4;
 /// Patch C: the layout version before the secrets (its packs are public: such a map cannot open
 /// a party).
 pub const LAYOUT_VERSION_NO_SECRETS: u8 = 3;
 /// The layout version before the arena update (no arenas: such a map cannot open a party).
 pub const LAYOUT_VERSION_NO_ARENAS: u8 = 2;
 
-/// A `deadroll_map` `MapLayout` account, read in place (the account is ~2.5 KB, too big to copy
-/// onto the stack on every move).
+/// A `deadroll_map` `MapLayout` account, read in place (a Dungeon layout is ~37 KB).
 ///
 /// Arena update: the view reads the ground the units stand on, the map or pack `arena`'s arena
-/// (`GameSession::ground`): [`Self::tile`] gives that ground's cells.
+/// (`GameSession::ground`): [`Self::tile`] gives that ground's cells. Patch D: every offset comes
+/// from the layout's `LayoutGeom` (its sides and size class).
 pub struct MapLayoutView<'a> {
     data: core::cell::Ref<'a, &'a mut [u8]>,
     arena: Option<u8>,
+    geom: LayoutGeom,
 }
 
 impl<'a> MapLayoutView<'a> {
@@ -157,104 +136,86 @@ impl<'a> MapLayoutView<'a> {
             SessionError::InvalidLayout
         );
         let data = info.try_borrow_data()?;
-        if data.len() > layout_off::VERSION && data[layout_off::VERSION] == LAYOUT_VERSION_NO_ARENAS
-        {
+        let version = data.get(hdr::VERSION).copied();
+        if version == Some(LAYOUT_VERSION_NO_ARENAS) {
             return err!(SessionError::MapWithoutArenas);
         }
-        if data.len() > layout_off::VERSION
-            && data[layout_off::VERSION] == LAYOUT_VERSION_NO_SECRETS
-        {
+        if version == Some(LAYOUT_VERSION_NO_SECRETS) {
             return err!(SessionError::MapWithoutSecrets);
         }
+        if version == Some(LAYOUT_VERSION_NO_SIZES) {
+            return err!(SessionError::MapWithoutSizes);
+        }
+        let geom = LayoutGeom::read(&data).ok_or(SessionError::InvalidLayout)?;
         require!(
-            data.len() >= layout_off::END && data[layout_off::VERSION] == LAYOUT_VERSION,
+            arena.is_none_or(|p| (p as usize) < geom.packs),
             SessionError::InvalidLayout
         );
-        require!(
-            arena.is_none_or(|p| (p as usize) < PACKS_MAX),
-            SessionError::InvalidLayout
-        );
-        Ok(Self { data, arena })
+        Ok(Self { data, arena, geom })
     }
 
-    /// Arena update: pack `pack`'s record.
+    /// Patch D: where everything lies in this layout (its sides and size class).
+    pub fn geom(&self) -> LayoutGeom {
+        self.geom
+    }
+
+    /// Arena update: pack `pack`'s record (patch D: a pack number past the class is unused).
     pub fn pack(&self, pack: u8) -> Result<PackLayout> {
-        require!((pack as usize) < PACKS_MAX, SessionError::InvalidLayout);
-        let at = layout_off::PACKS + pack as usize * PackLayout::SIZE;
-        PackLayout::deserialize(&mut &self.data[at..at + PackLayout::SIZE])
-            .map_err(|_| error!(SessionError::InvalidLayout))
+        if pack as usize >= self.geom.packs {
+            return Ok(PackLayout::EMPTY);
+        }
+        self.geom
+            .pack(&self.data, pack as usize)
+            .ok_or(error!(SessionError::InvalidLayout))
     }
 
-    /// Arena update: every pack record and arena (1.2 KB, kept in a `Box`).
-    pub fn arenas(&self) -> Result<Box<MapArenasData>> {
-        let mut out = Box::new(MapArenasData::EMPTY);
-        for (n, p) in out.packs.iter_mut().enumerate() {
-            *p = self.pack(n as u8)?;
-        }
-        for (n, cells) in out.cells.iter_mut().enumerate() {
-            let at = layout_off::ARENAS + n * ARENA_CELLS;
-            cells.copy_from_slice(&self.data[at..at + ARENA_CELLS]);
-        }
+    /// Arena update: every pack record and arena (~5.9 KB, kept in a `Box`).
+    pub fn arenas(&self) -> Result<Box<LayoutArenas>> {
+        let mut out = Box::new(LayoutArenas::EMPTY);
+        self.geom.arenas_into(&self.data, &mut out);
         Ok(out)
     }
 
     pub fn map(&self) -> Pubkey {
         let mut key = [0u8; 32];
-        key.copy_from_slice(&self.data[layout_off::MAP..layout_off::MAP + 32]);
+        key.copy_from_slice(&self.data[hdr::MAP..hdr::MAP + 32]);
         Pubkey::new_from_array(key)
     }
 
     /// Raw cell byte (tile type and variant, `deadroll_types::cell_kind`) of the view's ground;
     /// callers check bounds against its size first (`GameSession.width`, `height`).
     pub fn tile(&self, x: u8, y: u8) -> Result<u8> {
-        match self.arena {
-            None => {
-                let index = y as usize * MAP_MAX + x as usize;
-                require!(index < MAP_CELLS, SessionError::OutOfBounds);
-                Ok(self.data[layout_off::CELLS + index])
-            }
-            Some(pack) => {
-                require!(
-                    (x as usize) < ARENA_SIDE_MAX && (y as usize) < ARENA_SIDE_MAX,
-                    SessionError::OutOfBounds
-                );
-                let at = layout_off::ARENAS
-                    + pack as usize * ARENA_CELLS
-                    + y as usize * ARENA_SIDE_MAX
-                    + x as usize;
-                Ok(self.data[at])
-            }
-        }
+        self.cell_of(self.arena, x, y)
     }
 
     /// Patch 13: the points in use (`finalize_map` checked them).
     fn point(&self, index: usize) -> Result<MapPoint> {
-        let at = layout_off::POINTS + index * MapPoint::SIZE;
-        MapPoint::deserialize(&mut &self.data[at..at + MapPoint::SIZE])
-            .map_err(|_| error!(SessionError::InvalidLayout))
+        self.geom
+            .point(&self.data, index)
+            .ok_or(error!(SessionError::InvalidLayout))
     }
 
     fn point_count(&self) -> Result<usize> {
-        let count = self.data[layout_off::POINT_COUNT] as usize;
-        require!(count <= POINTS_MAX, SessionError::InvalidLayout);
+        let count = self.data[hdr::POINT_COUNT] as usize;
+        require!(count <= self.geom.points, SessionError::InvalidLayout);
         Ok(count)
     }
 
     pub fn spawn_count(&self) -> u8 {
-        self.data[layout_off::SPAWN_COUNT]
+        self.data[hdr::SPAWN_COUNT]
     }
 
     pub fn spawn(&self, index: usize) -> Result<Spawn> {
-        require!(index < SPAWNS_MAX, SessionError::InvalidLayout);
-        let start = layout_off::SPAWNS + index * Spawn::SIZE;
-        Spawn::deserialize(&mut &self.data[start..start + Spawn::SIZE])
-            .map_err(|_| error!(SessionError::InvalidLayout))
+        self.geom
+            .spawn(&self.data, index)
+            .ok_or(error!(SessionError::InvalidLayout))
     }
 
     /// Patch 11: the visible chests in point order (`chest_count` used; `finalize_map`
-    /// checked them). Patch 13: the chest points of the layout.
-    pub fn chests(&self) -> Result<([MapPoint; CHESTS_MAX], u8)> {
-        let mut out = [MapPoint::default(); CHESTS_MAX];
+    /// checked them). Patch 13: the chest points of the layout. Patch D: up to the largest
+    /// class's chests, in the session's first slots.
+    pub fn chests(&self) -> Result<([MapPoint; CHESTS_CAP], u8)> {
+        let mut out = [MapPoint::default(); CHESTS_CAP];
         let mut count = 0;
         for i in 0..self.point_count()? {
             let p = self.point(i)?;
@@ -268,21 +229,17 @@ impl<'a> MapLayoutView<'a> {
 
     /// Patch 11: the boss's reward table.
     pub fn boss_table(&self) -> u8 {
-        self.data[layout_off::BOSS_TABLE]
+        self.data[hdr::BOSS_TABLE]
     }
 
-    /// Patch C: each pack's declared threat.
-    pub fn threat(&self) -> [u8; PACKS_MAX] {
-        let mut out = [0; PACKS_MAX];
-        out.copy_from_slice(&self.data[layout_off::THREAT..layout_off::DECLARED]);
-        out
+    /// Patch C: each pack's declared threat (patch D: 0 past the class's pack numbers).
+    pub fn threat(&self) -> [u8; PACKS_CAP] {
+        self.geom.secrets(&self.data).threat
     }
 
     /// Patch C: the declared secret counts.
     pub fn declared(&self) -> [u8; SECRET_TYPES] {
-        let mut out = [0; SECRET_TYPES];
-        out.copy_from_slice(&self.data[layout_off::DECLARED..layout_off::BLOB_LEN]);
-        out
+        self.geom.secrets(&self.data).declared
     }
 
     /// Patch C: the exit point.
@@ -297,26 +254,20 @@ impl<'a> MapLayoutView<'a> {
     }
 
     /// Patch C: the raw cell byte of the map (`None`) or of pack `arena`'s arena, whatever the
-    /// view's ground.
+    /// view's ground. Patch D: the map's cells are `width` per row.
     pub fn cell_of(&self, arena: Option<u8>, x: u8, y: u8) -> Result<u8> {
         match arena {
             None => {
-                let index = y as usize * MAP_MAX + x as usize;
-                require!(index < MAP_CELLS, SessionError::OutOfBounds);
-                Ok(self.data[layout_off::CELLS + index])
-            }
-            Some(pack) => {
                 require!(
-                    (pack as usize) < PACKS_MAX
-                        && (x as usize) < ARENA_SIDE_MAX
-                        && (y as usize) < ARENA_SIDE_MAX,
+                    x < self.geom.width && y < self.geom.height,
                     SessionError::OutOfBounds
                 );
-                Ok(self.data[layout_off::ARENAS
-                    + pack as usize * ARENA_CELLS
-                    + y as usize * ARENA_SIDE_MAX
-                    + x as usize])
+                Ok(self.geom.board(&self.data).byte(x as usize, y as usize))
             }
+            Some(pack) => self
+                .geom
+                .arena_byte(&self.data, pack as usize, x as usize, y as usize)
+                .ok_or(error!(SessionError::OutOfBounds)),
         }
     }
 
@@ -825,13 +776,14 @@ mod tests {
     #[test]
     fn the_layout_view_reads_the_map_or_an_arena() {
         use crate::state::test_support::layout_account;
-        use deadroll_types::{cell_byte, ARENA_SIDE_MAX};
+        use deadroll_types::{cell_byte, ARENA_CELLS, ARENA_SIDE_MAX, PACKS_MAX};
         let mut account = layout_account(Pubkey::new_unique());
+        let g = LayoutGeom::read(&account.data).unwrap();
         // Pack 2's arena: one wall at (3, 1).
         let wall = cell_byte(TileKind::Wall as u8, 0);
-        let at = layout_off::ARENAS + 2 * ARENA_CELLS + ARENA_SIDE_MAX + 3;
+        let at = g.arenas_at + 2 * ARENA_CELLS + ARENA_SIDE_MAX + 3;
         account.data[at] = wall;
-        let p = layout_off::PACKS + 2 * PackLayout::SIZE;
+        let p = g.packs_at + 2 * PackLayout::SIZE;
         account.data[p..p + PackLayout::SIZE].copy_from_slice(&[1, 9, 9, 2, 6, 6]);
         let info = account.info();
         let map = MapLayoutView::load(&info, None).unwrap();
@@ -839,7 +791,9 @@ mod tests {
         assert_eq!(map.pack(2).unwrap().cell(), Cell { x: 9, y: 9 });
         assert_eq!(map.pack(2).unwrap().facing, deadroll_types::Facing::E);
         assert_eq!(map.arenas().unwrap().cell(2, 3, 1), Some(wall));
-        assert!(map.pack(PACKS_MAX as u8).is_err());
+        // Patch D: a pack number past the Small class's is unused.
+        assert_eq!(map.pack(PACKS_MAX as u8).unwrap(), PackLayout::EMPTY);
+        assert_eq!(map.geom().class, 0);
         drop(map);
         let arena = MapLayoutView::load(&info, Some(2)).unwrap();
         assert_eq!(arena.tile(3, 1).unwrap(), wall);
@@ -852,7 +806,7 @@ mod tests {
     fn a_layout_without_arenas_cannot_open_a_party() {
         use crate::state::test_support::layout_account;
         let mut account = layout_account(Pubkey::new_unique());
-        account.data[layout_off::VERSION] = LAYOUT_VERSION_NO_ARENAS;
+        account.data[hdr::VERSION] = LAYOUT_VERSION_NO_ARENAS;
         let err = MapLayoutView::load(&account.info(), None).err().unwrap();
         match err {
             Error::AnchorError(e) => assert_eq!(
@@ -861,11 +815,15 @@ mod tests {
             ),
             other => panic!("unexpected {other:?}"),
         }
-        // Too short for the arenas: refused.
+        // Too short for its size: refused.
         let mut short = layout_account(Pubkey::new_unique());
-        short.data.truncate(layout_off::CORE_END + 16);
+        let end = short.data.len();
+        short.data.truncate(end - 1);
         assert!(MapLayoutView::load(&short.info(), None).is_err());
     }
+
+    /// Past the 8x8 test map.
+    const WIDTH_OUT: u8 = crate::state::test_support::WIDTH;
 
     /// Patch C: the public part of the secrets; a map from before them cannot open a party.
     #[test]
@@ -878,10 +836,26 @@ mod tests {
             assert_eq!(view.threat()[0], 2);
             assert_eq!(view.declared()[0], 1);
             assert_eq!(view.exit().unwrap(), Cell { x: 7, y: 7 });
-            assert_eq!(view.cell_of(Some(0), 3, 3).unwrap(), view.tile(3, 3).unwrap());
-            assert!(view.cell_of(Some(PACKS_MAX as u8), 0, 0).is_err());
+            assert_eq!(
+                view.cell_of(Some(0), 3, 3).unwrap(),
+                view.tile(3, 3).unwrap()
+            );
+            assert!(view
+                .cell_of(Some(deadroll_types::PACKS_MAX as u8), 0, 0)
+                .is_err());
+            assert!(view.cell_of(None, WIDTH_OUT, 0).is_err());
         }
-        account.data[layout_off::VERSION] = LAYOUT_VERSION_NO_SECRETS;
+        let mut v4 = layout_account(Pubkey::new_unique());
+        v4.data[hdr::VERSION] = LAYOUT_VERSION_NO_SIZES;
+        let err = MapLayoutView::load(&v4.info(), None).err().unwrap();
+        match err {
+            Error::AnchorError(e) => assert_eq!(
+                e.error_code_number,
+                u32::from(SessionError::MapWithoutSizes)
+            ),
+            other => panic!("unexpected {other:?}"),
+        }
+        account.data[hdr::VERSION] = LAYOUT_VERSION_NO_SECRETS;
         let err = MapLayoutView::load(&account.info(), None).err().unwrap();
         match err {
             Error::AnchorError(e) => assert_eq!(

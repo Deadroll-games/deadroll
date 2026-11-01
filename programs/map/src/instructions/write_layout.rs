@@ -24,8 +24,8 @@ pub struct WriteLayout<'info> {
     pub layout: UncheckedAccount<'info>,
 }
 
-/// Writes cell bytes (`cell_byte`: tile type and variant) into the row-major grid (`MAP_MAX`
-/// cells per row) starting at `offset`. Any byte is a cell: whether its tile type exists is up
+/// Writes cell bytes (`cell_byte`: tile type and variant) into the row-major grid (patch D:
+/// `width` cells per row) starting at `offset`. Any byte is a cell: whether its tile type exists is up
 /// to the `Tileset`, checked at `finalize_map` (patch 13).
 pub fn handler(ctx: Context<WriteLayout>, offset: u16, cells: Vec<u8>) -> Result<()> {
     LayoutBytes::load(&ctx.accounts.layout)?.write_cells(offset as usize, &cells)?;

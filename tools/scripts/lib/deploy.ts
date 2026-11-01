@@ -39,7 +39,7 @@ import {
   getSetUriBaseInstruction,
 } from "@deadroll/sdk/registry";
 import { GAME_CONFIG, blobFits, connect, pda as blobPda, parseHeader } from "./render-program.ts";
-import { MAP_STRIDE, layoutBytes, loadMapPreset, presetPoints, presetSecrets, secretChunks, type MapPreset } from "./demo-map.ts";
+import { layoutBytes, loadMapPreset, presetPoints, presetSecrets, secretChunks, type MapPreset } from "./demo-map.ts";
 import { GATED_SYSCALLS, featureActive, syscallProblems, type GatedSyscall } from "./syscalls.ts";
 
 export const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
@@ -634,7 +634,6 @@ async function ensureDemoMap(conn: Rpc, opts: DeployOptions, wallet: KeyPairSign
     else console.log(`${map}: status ${name}; a session used it. For a fresh demo map pass --map-index ${opts.mapIndex + 1}`);
     return { map, layout, status: name, preset };
   }
-  if (MAP_STRIDE !== 32) throw new Error("unexpected stride");
   await send(conn, wallet, [getWriteLayoutInstruction({ ...edit, offset: 0, cells: layoutBytes(preset) })]);
   // Patch C: only the visible monsters in the open; the rosters and the secrets under the root,
   // their encrypted copy under the deploy wallet's key (docs/MAP_DESCRIPTION.md 17.5).
@@ -643,8 +642,7 @@ async function ensureDemoMap(conn: Rpc, opts: DeployOptions, wallet: KeyPairSign
   await send(conn, wallet, [getWritePointsInstruction({ ...edit, points: presetPoints(preset), bossTable: preset.bossTable })]);
   // Arena update: every pack's record and arena.
   for (const p of design.packs) {
-    const record = { visible: p.visible, x: p.x, y: p.y, facing: p.facing, width: p.width, height: p.height };
-    await send(conn, wallet, [getWriteArenaInstruction({ ...edit, pack: p.pack, record, cells: p.cells })]);
+    await send(conn, wallet, [getWriteArenaInstruction({ ...edit, pack: p.pack, visible: p.visible, x: p.x, y: p.y, facing: p.facing, width: p.width, height: p.height, cells: p.cells })]);
   }
   for (const c of secretChunks(blob, design)) await send(conn, wallet, [getWriteSecretsInstruction({ ...edit, ...c })]);
   // The builder rules read the registry bestiary, monster skills (roles, pools, slots), reward

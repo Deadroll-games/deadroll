@@ -7,19 +7,15 @@
 // fails when it is stale). __fixtures__/mapcheck-wasm.json pins the request bytes and the verdicts.
 import { useEffect, useState } from "react";
 import wasmUrl from "./wasm/mapcheck.wasm?url";
-import { MAP_CELLS, PointKind, SPAWNS_MAX, type Cell, type Spawn } from "./types";
+import { classPacks, PointKind, type Cell, type Spawn } from "./types";
 
 /** `ABI_VERSION` of the module this wrapper speaks (2: the arenas, arena update; 3: patch C, the
- * whole design with its secrets, `check_design`). */
-export const MAPCHECK_ABI = 3;
-/** `POINTS_MAX`: the entrance, the exit and up to 4 chests. */
-export const POINTS_MAX = 6;
-/** Arena update: `PACKS_MAX`, `ARENA_SIDE_MAX` (crates/types). */
-export const PACKS_MAX = 8;
+ * whole design with its secrets, `check_design`; 4: patch D, maps of every size class,
+ * `check_steps`). */
+export const MAPCHECK_ABI = 4;
+/** Arena update: `ARENA_SIDE_MAX` (crates/types). */
 export const ARENA_SIDE_MAX = 12;
-/** Bytes of a request: 4 map numbers, the 1301-byte layout core, then the 1200-byte arenas (8 packs
- * of 6 bytes, 8 arenas of 144 cells, `ARENA_SIDE_MAX` per row). */
-export const MAPCHECK_REQUEST_LEN = 4 + 1301 + PACKS_MAX * 6 + PACKS_MAX * ARENA_SIDE_MAX * ARENA_SIDE_MAX;
+const ARENA_CELLS = ARENA_SIDE_MAX * ARENA_SIDE_MAX;
 
 /** `deadroll_mapcheck::MapCheckError` by code (append only, as the crate). */
 export const MAPCHECK_ERRORS = [
@@ -107,14 +103,14 @@ export type MapCheckError = (typeof MAPCHECK_ERRORS)[number];
 
 /** What the builder shows for each rule (the program's `MapError` messages, a little longer). */
 export const MAPCHECK_MESSAGES: Record<MapCheckError, string> = {
-  SizeOutOfRange: "Each side must be from 8 to 32",
+  SizeOutOfRange: "Each side must be from 8 to 143, and the area within the largest size",
   TierOutOfRange: "This map tier has no limits",
   InvalidTile: "A cell has a tile type the Tileset does not have",
   EntranceCount: "Place exactly one entrance",
   ExitCount: "Place exactly one exit",
   EntranceMismatch: "Entrance mismatch",
   ExitMismatch: "Exit mismatch",
-  TooManySpawns: `At most ${SPAWNS_MAX} spawns`,
+  TooManySpawns: "Too many monsters for this map size",
   SpawnOutOfBounds: "A monster stands outside its pack's arena",
   SpawnNotPassable: "A monster stands on an arena cell that cannot be entered",
   SpawnOverlap: "Two monsters of one pack share an arena cell",
@@ -152,7 +148,7 @@ export const MAPCHECK_MESSAGES: Record<MapCheckError, string> = {
   PointOutOfBounds: "The entrance or the exit is outside the map",
   PointNotPassable: "The entrance or the exit stands on a cell that cannot be entered",
   PointOverlap: "The entrance and the exit share a cell",
-  PackOutOfRange: `A pack number must be below ${PACKS_MAX}`,
+  PackOutOfRange: "A pack number past what this map size stores",
   PackWithoutArena: "A pack has no arena: draw it",
   PackTooBig: "A pack has more monsters than an arena holds",
   ArenaSizeOutOfRange: "An arena side is outside the allowed sizes",
@@ -189,7 +185,7 @@ export const MAPCHECK_MESSAGES: Record<MapCheckError, string> = {
 /** The registry tables finalize_map reads, as written on chain (`set_table` kinds 0-3). */
 export type MapcheckTables = { bestiary: Uint8Array; monsterSkills: Uint8Array; rewards: Uint8Array; tileset: Uint8Array };
 
-/** A draft as finalize_map sees it. `tiles`: cell bytes, stride 32. */
+/** A draft as finalize_map sees it. `tiles`: cell bytes, `width` per row (patch D). */
 export type MapCheckDraft = {
   width: number;
   height: number;
@@ -202,8 +198,11 @@ export type MapCheckDraft = {
   spawns: Spawn[];
   chests: { x: number; y: number; table: number }[];
   bossTable: number;
-  /** Arena update: the packs by number (`null`: not used). */
+  /** Arena update: the packs by number (`null`: not used); patch D: up to the size class's
+   * pack numbers (`classPacks`). */
   packs: (PackDraft | null)[];
+  /** Patch D: the size class (`classOf`). */
+  sizeClass: number;
 };
 
 /** Arena update: one pack as the builder edits it: the spawn shown on the map, its map cell, the
@@ -219,42 +218,40 @@ export function draftPointList(d: Pick<MapCheckDraft, "entrance" | "exit" | "che
   ];
 }
 
-/** The borsh `MapCheckRequest`: width, height, tier, min players, then `MapLayoutDataV2` (version,
- * map key and bump zero: finalize_map does not check them). */
+/** Patch D: the borsh `MapCheckRequest`: width, height, tier, min players, the cells (`width` per
+ * row), every spawn, the points, the boss table, the class's packs and their arenas (12 per row). */
 export function encodeMapCheck(d: MapCheckDraft): Uint8Array {
-  const out = new Uint8Array(MAPCHECK_REQUEST_LEN);
+  const n = classPacks(d.sizeClass);
+  const points = draftPointList(d);
+  const cells = d.width * d.height;
+  const out = new Uint8Array(4 + 4 + cells + 4 + d.spawns.length * 9 + 4 + points.length * 4 + 1 + 4 + n * 6 + 4 + n * ARENA_CELLS);
+  const view = new DataView(out.buffer);
   let at = 0;
   const u8 = (v: number) => (out[at++] = v & 0xff);
+  const len = (v: number) => {
+    view.setUint32(at, v, true);
+    at += 4;
+  };
   [d.width, d.height, d.tier, d.minPlayers].forEach(u8);
-  u8(0); // version
-  at += 32; // map
-  out.set(d.tiles.subarray(0, MAP_CELLS), at);
-  at += MAP_CELLS;
-  for (let i = 0; i < SPAWNS_MAX; i++) {
-    const s = d.spawns[i];
-    if (s) [s.bestiaryId, s.x, s.y, s.level, s.skills & 0xff, (s.skills >> 8) & 0xff, s.flags, s.aspects, s.pack].forEach(u8);
-    else at += 9;
-  }
-  u8(Math.min(d.spawns.length, 0xff));
-  const points = draftPointList(d);
-  for (let i = 0; i < POINTS_MAX; i++) {
-    const p = points[i];
-    if (p) [p.kind, p.x, p.y, p.data].forEach(u8);
-    else at += 4;
-  }
-  u8(Math.min(points.length, 0xff));
+  len(cells);
+  out.set(d.tiles.subarray(0, cells), at);
+  at += cells;
+  len(d.spawns.length);
+  for (const s of d.spawns) [s.bestiaryId, s.x, s.y, s.level, s.skills & 0xff, (s.skills >> 8) & 0xff, s.flags, s.aspects, s.pack].forEach(u8);
+  len(points.length);
+  for (const p of points) [p.kind, p.x, p.y, p.data].forEach(u8);
   u8(d.bossTable);
-  u8(0); // bump
-  // Arena update: `MapArenasData`.
-  for (let n = 0; n < PACKS_MAX; n++) {
-    const pk = d.packs[n];
+  len(n);
+  for (let k = 0; k < n; k++) {
+    const pk = d.packs[k];
     if (pk) [pk.visible, pk.x, pk.y, pk.facing, pk.width, pk.height].forEach(u8);
     else at += 6;
   }
-  for (let n = 0; n < PACKS_MAX; n++) {
-    const pk = d.packs[n];
+  len(n * ARENA_CELLS);
+  for (let k = 0; k < n; k++) {
+    const pk = d.packs[k];
     if (pk) for (let y = 0; y < pk.height; y++) out.set(pk.cells.subarray(y * pk.width, (y + 1) * pk.width), at + y * ARENA_SIDE_MAX);
-    at += ARENA_SIDE_MAX * ARENA_SIDE_MAX;
+    at += ARENA_CELLS;
   }
   return out;
 }
@@ -286,6 +283,7 @@ type Exports = {
   set_table(kind: number, len: number): number;
   check_map(len: number): number;
   check_design(len: number): number;
+  check_steps(len: number): number;
 };
 
 const TABLE_KINDS: (keyof MapcheckTables)[] = ["bestiary", "monsterSkills", "rewards", "tileset"];
@@ -341,6 +339,18 @@ export class MapcheckWasm {
   designVerdict(input: Uint8Array): number {
     this.write(input);
     return this.x.check_design(input.length);
+  }
+
+  /** Patch D: the `check_step` transactions the map needs before `finalize_map` (the program's
+   * own budget split), or a negative error. */
+  steps(d: MapCheckDraft): number {
+    return this.stepsOf(encodeMapCheck(d));
+  }
+
+  /** Patch D: the raw step count of a request. */
+  stepsOf(input: Uint8Array): number {
+    this.write(input);
+    return this.x.check_steps(input.length);
   }
 
   /** The raw verdict: 0 valid, `1 + code` (tests compare it with the fixture). */

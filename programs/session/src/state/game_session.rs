@@ -5,13 +5,14 @@ use deadroll_rules::{
     exit::Vote,
 };
 use deadroll_types::{
-    Aspect, Cell, FoundSecret, GameSessionData, MapPoint, PackLayout, SecretKind, Spawn,
-    ARENA_MONSTERS_MAX, CHESTS_MAX, MONSTERS_MAX, NO_SPAWN, OBLIGATIONS_MAX, PACKS_MAX, PARTY_MAX,
-    SECRETS_MAX, SECRET_LEAVES_MAX, SECRET_TYPES, SPAWNS_MAX, TILE_KINDS_MAX,
+    Aspect, Cell, GameSessionData, MapPoint, PackLayout, ARENA_MONSTERS_MAX, CHESTS_CAP,
+    MONSTERS_MAX, NO_SPAWN, OBLIGATIONS_MAX, PACKS_CAP, PARTY_MAX, SECRET_TYPES, STASHES_CAP,
+    TILE_KINDS_MAX,
 };
 
 use super::{
-    auras_to_rules, AuraData, PendingMonsterReactiveData, PendingReactiveData, ReactiveData,
+    auras_to_rules, AuraData, BoardBytes, PendingMonsterReactiveData, PendingReactiveData,
+    ReactiveData,
 };
 use crate::rules::{Unit, EMPTY_UNIT};
 
@@ -129,13 +130,14 @@ pub struct GameSession {
     /// The map's tier and minimum players (`start_session` needs that many).
     pub tier: u8,
     pub min_players: u8,
-    /// The visible chests: cell and reward table id; `0..chest_count` used.
-    pub chests: [MapPoint; CHESTS_MAX],
+    /// The visible chests: cell and reward table id; `0..chest_count` used. Patch D: the largest
+    /// class's chests, then its hidden stashes.
+    pub chests: [MapPoint; CHEST_SLOTS],
     pub chest_count: u8,
     /// The reward table of the boss event (registry id).
     pub boss_table: u8,
     /// Bit per chest: opened (then it no longer occupies its cell).
-    pub chests_opened: u8,
+    pub chests_opened: u32,
     /// The chest whose roll is pending (`open_chest`), `NO_CHEST` for every other roll.
     pub pending_chest: u8,
     /// Each player's share of the rewards (`deadroll_rules::loot::reward_share`), set at
@@ -167,10 +169,10 @@ pub struct GameSession {
     /// The player who stepped next to the pack: their side is where the party enters.
     pub engaged_by: u8,
     /// The map's packs, copied at `open_session`: the visible monster's map cell, the facing,
-    /// the arena size.
-    pub packs: [PackLayout; PACKS_MAX],
+    /// the arena size. Patch D: the largest class's pack numbers.
+    pub packs: [PackLayout; PACKS_CAP],
     /// Bit per pack number still on the map.
-    pub packs_alive: u8,
+    pub packs_alive: u64,
     /// Kept while the party is in an arena (`width`, `height`, `player_pos`, the turn order
     /// and the round are the arena's then): the map's size, each player's map cell before the
     /// fight, the map circle, its index and round.
@@ -196,46 +198,54 @@ pub struct GameSession {
     /// Retreats this party made (`ArenaTuning::retreats_max`).
     pub retreats: u8,
     /// Bit per pack number the party retreated from: on guard, it moves first from any side.
-    pub packs_guarded: u8,
+    pub packs_guarded: u64,
     /// Bit per pack number whose next fight starts with the retreat buff (cleared when it starts).
-    pub packs_buffed: u8,
+    pub packs_buffed: u64,
     /// Bit per layout spawn killed in an arena the party retreated from: it stays dead.
-    /// Patch C: per revealed spawn (`spawns`).
-    pub dead_spawns: u32,
+    /// Patch C: per revealed spawn (`SessionBoard` spawns).
+    pub dead_spawns: u128,
     // Patch C: secrets under the Merkle root (docs/MAP_DESCRIPTION.md 8, 11, 17.5).
     /// The map's `secrets_root`, its leaf count (`deadroll_mapcheck::secrets::Leaves`) and the
     /// public part: each pack's threat, the declared counts (copied at `open_session`).
     pub secrets_root: [u8; 32],
     pub leaf_count: u16,
     pub declared: [u8; SECRET_TYPES],
-    pub threat: [u8; PACKS_MAX],
-    /// Bit per leaf the DM revealed.
-    pub revealed: [u8; REVEALED_BYTES],
-    /// Secrets of each type revealed (`SecretKind::counted`), never above `declared`.
+    pub threat: [u8; PACKS_CAP],
+    /// Secrets of each type revealed (`SecretKind::counted`), never above `declared`. Patch D:
+    /// the revealed leaves and the secrets themselves are in the `SessionBoard`.
     pub found_counts: [u8; SECRET_TYPES],
-    /// The secrets revealed, in order (`found_count` used): what the party sees.
-    pub found: [FoundSecret; SECRETS_MAX],
-    pub found_count: u8,
     /// Bit per pack number whose composition the DM revealed.
-    pub packs_revealed: u8,
+    pub packs_revealed: u64,
     /// The DM's obligations (MAP 8.5): leaves to reveal before any other action
     /// (`obligation_count` used), and the player whose step or look made them.
     pub obligations: [u16; OBLIGATIONS_MAX],
     pub obligation_count: u8,
     pub obliged_by: u8,
-    /// The revealed packs' monsters, pack by pack in reveal order (`spawn_count` used): the
-    /// spawns `enter_arena` loads and `dead_spawns` counts.
-    pub spawns: [Spawn; SPAWNS_MAX],
-    pub spawn_count: u8,
     /// The map's totals over the revealed packs (`deadroll_mapcheck::roster::RosterTotals`):
     /// monsters, elites, bosses, packs.
     pub roster_totals: [u8; 4],
     /// The chests of the map; the hidden stashes found follow them in `chests`.
     pub visible_chests: u8,
+    // Patch D: map sizes (docs/MAP_DESCRIPTION.md 17.6). The pack, chest and mask fields above
+    // grew to the largest class in place; the revealed leaves, the found secrets and the revealed
+    // spawns moved to the `SessionBoard`, so the account stays small enough for the stack.
+    /// The map's size class (`deadroll_rules::BalanceConfig.map_size`, the layout's `class`).
+    pub map_class: u8,
 }
 
-/// Patch C: bytes of `GameSession.revealed`, a bit per leaf.
-pub const REVEALED_BYTES: usize = SECRET_LEAVES_MAX.div_ceil(8);
+/// `found_counts` index of the secret doors (`SecretKind::counted`).
+const DOOR: usize = 3;
+const _: () = assert!(matches!(
+    deadroll_types::SecretKind::Door.counted(),
+    Some(DOOR)
+));
+
+/// Patch D: the chest slots of a session: the largest class's visible chests, then its stashes.
+pub const CHEST_SLOTS: usize = CHESTS_CAP + STASHES_CAP;
+const _: () = assert!(CHEST_SLOTS <= 32, "chests_opened is a u32");
+// Patch D: no bigger than before the map sizes (1884 bytes): `Account<GameSession>` decodes on
+// the 4 KB stack frame before it is boxed.
+const _: () = assert!(<GameSession as anchor_lang::Space>::INIT_SPACE <= 1884);
 
 /// Arena update: where the party is.
 #[derive(
@@ -260,15 +270,16 @@ pub enum ArenaMode {
 /// multiplies an array length expression without parentheses.
 pub const ARENA_UNITS: usize = PARTY_MAX + ARENA_MONSTERS_MAX;
 
-/// Patch B: the bit of layout spawn `spawn` in `GameSession.dead_spawns`.
-pub const fn spawn_bit(spawn: u8) -> u32 {
-    match 1u32.checked_shl(spawn as u32) {
+/// Patch B: the bit of revealed spawn `spawn` in `GameSession.dead_spawns`.
+pub const fn spawn_bit(spawn: u8) -> u128 {
+    match 1u128.checked_shl(spawn as u32) {
         Some(b) => b,
         None => 0,
     }
 }
 
-const _: () = assert!(deadroll_types::SPAWNS_MAX <= 32);
+const _: () = assert!(deadroll_types::MONSTERS_CAP <= 128);
+const _: () = assert!(PACKS_CAP <= 64, "the pack masks are u64");
 
 /// `GameSession.arena_pack` on the map.
 pub const NO_PACK: u8 = 0xFF;
@@ -389,10 +400,10 @@ impl GameSession {
         }
     }
 
-    /// Patch C: the map's leaf numbering.
+    /// Patch C: the map's leaf numbering (patch D: by its size class).
     pub fn leaves(&self) -> Leaves {
         let (w, h) = self.map_dims();
-        Leaves::new(w, h, &self.packs)
+        Leaves::new(w, h, self.map_class, &self.packs)
     }
 
     /// Patch C: the leaf of cell `c` of the ground the units stand on.
@@ -402,18 +413,6 @@ impl GameSession {
             Some(pack) => Board::Arena(pack, c),
         };
         self.leaves().of(board)
-    }
-
-    pub fn is_revealed(&self, leaf: u16) -> bool {
-        self.revealed
-            .get(leaf as usize / 8)
-            .is_some_and(|b| b & (1 << (leaf % 8)) != 0)
-    }
-
-    pub fn set_revealed(&mut self, leaf: u16) {
-        if let Some(b) = self.revealed.get_mut(leaf as usize / 8) {
-            *b |= 1 << (leaf % 8);
-        }
     }
 
     /// Patch C: the obligations in use.
@@ -431,10 +430,15 @@ impl GameSession {
         Ok(())
     }
 
-    /// Patch C: the DM must reveal `leaf` (once; a revealed leaf needs nothing). `false` when
-    /// the list is full.
-    pub fn oblige(&mut self, leaf: u16) -> bool {
-        if self.is_revealed(leaf) || self.obligation_list().contains(&leaf) {
+    /// Patch C: the DM must reveal `leaf` (once; a leaf revealed on the `board` needs nothing).
+    /// `false` when the list is full.
+    pub fn oblige(&mut self, board: &BoardBytes, leaf: u16) -> Result<bool> {
+        Ok(self.oblige_unless(board.is_revealed(leaf)?, leaf))
+    }
+
+    /// [`Self::oblige`] with the board's answer given.
+    pub fn oblige_unless(&mut self, revealed: bool, leaf: u16) -> bool {
+        if revealed || self.obligation_list().contains(&leaf) {
             return true;
         }
         let n = self.obligation_count as usize;
@@ -459,28 +463,16 @@ impl GameSession {
         true
     }
 
-    /// Patch C: the secrets found so far.
-    pub fn found_list(&self) -> &[FoundSecret] {
-        &self.found[..(self.found_count as usize).min(SECRETS_MAX)]
-    }
-
     /// Patch C: a secret door found on cell `c` of the ground the units stand on: a door now.
-    pub fn door_found_at(&self, c: Cell) -> bool {
-        self.found_count != 0
-            && self.leaf_here(c).is_some_and(|leaf| {
-                self.found_list()
-                    .iter()
-                    .any(|f| f.leaf == leaf && f.secret.kind == SecretKind::Door)
-            })
-    }
-
-    /// Patch C: the revealed spawns in use.
-    pub fn spawn_list(&self) -> &[Spawn] {
-        &self.spawns[..(self.spawn_count as usize).min(SPAWNS_MAX)]
+    pub fn door_found_at(&self, board: &BoardBytes, c: Cell) -> Result<bool> {
+        match self.leaf_here(c) {
+            Some(leaf) if self.found_counts[DOOR] != 0 => board.door_at(leaf),
+            _ => Ok(false),
+        }
     }
 
     /// Patch C: the used packs, bit per pack number.
-    pub fn used_packs(&self) -> u8 {
+    pub fn used_packs(&self) -> u64 {
         self.packs
             .iter()
             .enumerate()
@@ -498,7 +490,7 @@ impl GameSession {
 
     /// The used chests.
     pub fn chest_list(&self) -> &[MapPoint] {
-        &self.chests[..(self.chest_count as usize).min(CHESTS_MAX)]
+        &self.chests[..(self.chest_count as usize).min(CHEST_SLOTS)]
     }
 
     /// Living players whose rewards are rolled, bit per slot.
@@ -707,46 +699,58 @@ mod tests {
     /// Patch C: the obligations, the revealed leaves, a found door, the audit.
     #[test]
     fn obligations_block_until_revealed() {
+        use crate::state::{
+            test_support::{board_account, BOARD_SESSION},
+            BoardBytes,
+        };
         use deadroll_types::{CellSecret, FoundSecret, OBLIGATIONS_MAX};
         let mut s = with_packs();
+        let mut board_acc = board_account();
+        let info = board_acc.info();
+        let board = BoardBytes::load(&info, &BOARD_SESSION).unwrap();
         assert!(s.require_no_reveals().is_ok());
         let (w, h) = s.map_dims();
         assert_eq!((w, h), (s.width, s.height));
         let leaf = s.leaf_here(Cell { x: 1, y: 1 }).unwrap();
         assert_eq!(leaf as usize, deadroll_types::PACK_LEAVES + w as usize + 1);
-        assert!(s.oblige(leaf));
-        assert!(s.oblige(leaf), "once");
+        assert!(s.oblige(&board, leaf).unwrap());
+        assert!(s.oblige(&board, leaf).unwrap(), "once");
         assert_eq!(s.obligation_list(), &[leaf]);
         assert!(s.require_no_reveals().is_err());
         assert!(s.fulfil(leaf));
         assert!(!s.fulfil(leaf));
         assert!(s.require_no_reveals().is_ok());
         // A revealed leaf needs nothing; the list holds `OBLIGATIONS_MAX`.
-        s.set_revealed(leaf);
-        assert!(s.is_revealed(leaf) && !s.is_revealed(leaf + 1));
-        assert!(s.oblige(leaf));
+        board.set_revealed(leaf).unwrap();
+        assert!(board.is_revealed(leaf).unwrap() && !board.is_revealed(leaf + 1).unwrap());
+        assert!(s.oblige(&board, leaf).unwrap());
         assert_eq!(s.obligation_count, 0);
         for l in 0..OBLIGATIONS_MAX as u16 {
-            assert!(s.oblige(100 + l));
+            assert!(s.oblige(&board, 100 + l).unwrap());
         }
-        assert!(!s.oblige(500));
+        assert!(!s.oblige(&board, 500).unwrap());
         // The middle one goes, the order stays.
         assert!(s.fulfil(101));
         assert_eq!(s.obligation_list()[..2], [100, 102]);
 
         // A secret door found on the ground the party stands on.
         let door = Cell { x: 2, y: 3 };
-        assert!(!s.door_found_at(door));
-        s.found[0] = FoundSecret {
-            leaf: s.leaf_here(door).unwrap(),
-            secret: CellSecret::door(),
-        };
-        s.found_count = 1;
-        assert!(s.door_found_at(door));
-        assert!(!s.door_found_at(Cell { x: 3, y: 3 }));
+        assert!(!s.door_found_at(&board, door).unwrap());
+        board
+            .push_found(&FoundSecret {
+                leaf: s.leaf_here(door).unwrap(),
+                secret: CellSecret::door(),
+            })
+            .unwrap();
+        assert!(!s.door_found_at(&board, door).unwrap(), "not counted yet");
+        s.found_counts[3] = 1;
+        assert!(s.door_found_at(&board, door).unwrap());
+        assert!(!s.door_found_at(&board, Cell { x: 3, y: 3 }).unwrap());
+        s.found_counts[3] = 0;
 
         // The audit: every declared secret, every pack, one boss.
         s.declared = [0, 0, 0, 1];
+        s.found_counts = [0; 4];
         s.found_counts = [0, 0, 0, 1];
         s.packs_revealed = 0b0010;
         assert!(!s.audit_done());

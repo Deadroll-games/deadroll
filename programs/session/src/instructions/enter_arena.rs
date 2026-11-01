@@ -12,7 +12,7 @@ use crate::{
     errors::SessionError,
     events::ArenaEntered,
     rules::{Unit, BALANCE},
-    state::{external::MapLayoutView, spawn_bit, ArenaMode, GameSession, Monsters},
+    state::{external::MapLayoutView, spawn_bit, ArenaMode, BoardBytes, GameSession, Monsters},
     turns,
 };
 
@@ -33,6 +33,10 @@ pub struct EnterArena<'info> {
     /// its arena.
     #[account(address = session.layout @ SessionError::InvalidLayout)]
     pub layout: UncheckedAccount<'info>,
+    /// CHECK: the session's `SessionBoard` (patch D): the revealed packs' monsters, checked by
+    /// `BoardBytes::load`.
+    #[account(seeds = [seeds::BOARD, session.key().as_ref()], bump)]
+    pub board: UncheckedAccount<'info>,
 }
 
 /// Arena update (docs/PARTY_AND_TURNS.md 4.1.3): the party goes into the arena of the pack a
@@ -76,8 +80,9 @@ pub fn handler<'info>(ctx: Context<'info, EnterArena<'info>>) -> Result<()> {
     let mut taken_count = 0usize;
     let mut spawns = [u8::MAX; ARENA_MONSTERS_MAX];
     let mut count = 0usize;
-    for i in 0..session.spawn_count {
-        let spawn = session.spawns[i as usize];
+    let board = BoardBytes::load(&accounts.board, &session_key)?;
+    for i in 0..board.spawn_count()? {
+        let spawn = board.spawn(i as usize)?;
         // Patch B: a monster killed before a retreat stays dead.
         if spawn.pack != pack || session.dead_spawns & spawn_bit(i) != 0 {
             continue;
@@ -94,7 +99,7 @@ pub fn handler<'info>(ctx: Context<'info, EnterArena<'info>>) -> Result<()> {
     monsters.set_burning_cells(&[BurningCell::default(); BURNING_CELLS_MAX])?;
 
     let from = session.player_pos[session.engaged_by as usize];
-    let pack_bit = 1u8 << pack;
+    let pack_bit = 1u64 << pack;
     // Patch C: an ambush pack has no map cell; the party comes in from the side its facing
     // names and the monsters move first (docs/MAP_DESCRIPTION.md 17.4).
     let (approach, first) = if record.visible == NO_SPAWN {

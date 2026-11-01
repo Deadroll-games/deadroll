@@ -6,6 +6,7 @@
  * @see https://github.com/codama-idl/codama
  */
 
+export * from "./board.js";
 export * from "./escrow.js";
 export * from "./monsters.js";
 export * from "./participation.js";

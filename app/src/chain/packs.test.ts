@@ -35,7 +35,7 @@ describe("pack edits (arena update)", () => {
     expect(removeSpawns(r, (s) => s.pack === 2).packs[2]).toBeNull();
   });
 
-  it("arena cells: painted, resized within the limits (kept cells stay), shown at the map stride", () => {
+  it("arena cells: painted, resized within the limits (kept cells stay), shown at their own width", () => {
     let d = addPack(empty(), { x: 6, y: 2 }, 0, 7)!.next;
     const wall = cellByte(Tile.Wall);
     d = paintArena(d, 1, { x: 1, y: 2 }, wall);
@@ -44,8 +44,9 @@ describe("pack edits (arena update)", () => {
     expect([d.packs[1]!.width, d.packs[1]!.height]).toEqual([ARENA_SIDE_MAX, ARENA_SIDE_MIN]);
     expect(d.packs[1]!.cells[2 * ARENA_SIDE_MAX + 1]).toBe(wall);
     const grid = arenaGrid(d.packs[1]!);
-    expect(grid[2 * 32 + 1]).toBe(wall);
-    expect(grid[ARENA_SIDE_MAX]).toBe(wall);
+    // Patch D: the grid is the arena itself, `width` per row.
+    expect(grid[2 * ARENA_SIDE_MAX + 1]).toBe(wall);
+    expect(grid.length).toBe(ARENA_SIDE_MAX * ARENA_SIDE_MIN);
     d = setPack(d, 1, { facing: 7, x: 9, y: 9 });
     expect([d.packs[1]!.facing, d.packs[1]!.x]).toEqual([7, 9]);
   });

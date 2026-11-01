@@ -684,9 +684,18 @@ fn secrets_layout() {
     let trap = CellSecret::trap(9, 14);
     assert_eq!(check(&trap, CellSecret::SIZE), trap.bytes());
     assert_eq!(CellSecret::NONE.bytes(), [0; 4]);
-    assert_eq!(CellSecret::ambush(3).bytes(), [SecretKind::Ambush as u8, 3, 0, 0]);
-    assert_eq!(CellSecret::stash(7).bytes(), [SecretKind::Stash as u8, 7, 0, 0]);
-    assert_eq!(CellSecret::door().bytes(), [SecretKind::Door as u8, 0, 0, 0]);
+    assert_eq!(
+        CellSecret::ambush(3).bytes(),
+        [SecretKind::Ambush as u8, 3, 0, 0]
+    );
+    assert_eq!(
+        CellSecret::stash(7).bytes(),
+        [SecretKind::Stash as u8, 7, 0, 0]
+    );
+    assert_eq!(
+        CellSecret::door().bytes(),
+        [SecretKind::Door as u8, 0, 0, 0]
+    );
     assert!(SecretKind::try_from(SecretKind::COUNT as u8).is_err());
     assert_eq!(SecretKind::None.counted(), None);
     let counted: Vec<_> = SecretKind::ALL.iter().filter_map(|k| k.counted()).collect();
@@ -727,6 +736,8 @@ fn secrets_layout() {
     assert_eq!(bytes[PACKS_MAX + SECRET_TYPES..][..2], [4, 3]);
     assert_eq!(bytes[MapSecretsData::SIZE - 1], 0xEE);
     const _: () = assert!(SECRET_LEAVES_MAX <= 1 << SECRET_DEPTH_MAX);
+    const _: () = assert!(SECRET_LEAVES_CAP <= 1 << SECRET_DEPTH_CAP);
+    const _: () = assert!(SECRET_LEAVES_CAP <= u16::MAX as usize);
 }
 
 #[cfg(feature = "anchor")]

@@ -33,6 +33,7 @@ const FACING_KIND = ["n", "ne", "e", "se", "s", "sw", "w", "nw"].map((k) => ({ [
 const modeOf = (s: any) => Object.keys(s.mode)[0];
 import { newSkill, partyAccounts } from "./skill_ext.ts";
 import { MPL_CORE_PROGRAM, PROGRAMS, SESSION_KEYS_PROGRAM, VRF } from "@deadroll/sdk";
+import { decodeSessionBoard } from "@deadroll/sdk/session";
 
 const { AnchorProvider, BN, EventParser, Program } = anchor;
 type BN = InstanceType<typeof BN>;
@@ -50,6 +51,14 @@ const REGISTRY = new PublicKey(PROGRAMS.registry);
 const CHARACTER = new PublicKey(PROGRAMS.character);
 const MAP = new PublicKey(PROGRAMS.map);
 const SESSION = new PublicKey(PROGRAMS.session);
+/** Patch D: what the party uncovered (`SessionBoard`, `["board", session]`). */
+const boardOf = (session: PublicKey) => PublicKey.findProgramAddressSync([Buffer.from("board"), session.toBuffer()], SESSION)[0];
+async function readBoard(session: PublicKey) {
+  const info = await provider.connection.getAccountInfo(boardOf(session), "confirmed");
+  return decodeSessionBoard(Uint8Array.from(info!.data));
+}
+/** Patch D: a `u64` mask (a BN) has bit `n`. */
+const bit = (mask: any, n: number) => new BN(mask.toString()).testn(n);
 const ITEMS = new PublicKey(PROGRAMS.items);
 const SESSION_KEYS = new PublicKey(SESSION_KEYS_PROGRAM);
 const MPL_CORE = new PublicKey(MPL_CORE_PROGRAM);
@@ -414,7 +423,7 @@ class Demo {
       await mapProgram.methods.writeArena(pk.pack, record, Buffer.from(pk.cells)).accountsStrict(edit).signers([this.dm]).rpc().then(track("write_arena"));
     }
     for (const c of secretChunks(blob, design)) {
-      await mapProgram.methods.writeSecrets(c.offset, Buffer.from(c.bytes), c.len, c.threat, c.declared).accountsStrict(edit).signers([this.dm]).rpc().then(track("write_secrets"));
+      await mapProgram.methods.writeSecrets(c.offset, Buffer.from(c.bytes), c.len, Buffer.from(c.threat), c.declared).accountsStrict(edit).signers([this.dm]).rpc().then(track("write_secrets"));
     }
     await mapProgram.methods
       .finalizeMap(Array.from(commitment.root))
@@ -467,6 +476,7 @@ class Demo {
         participation: pl.participation,
         monsters: this.acc.monsters,
         layout: this.layout,
+        board: boardOf(this.acc.session),
         sessionToken: pl.token,
         // Patch 6: stepping next to a monster can trigger its reactive skill (a VRF roll).
         ...vrfAccounts,
@@ -488,7 +498,7 @@ class Demo {
         await this.revealCell(s.obligations[0], this.players[s.obligedBy]?.participation ?? null, true);
         continue;
       }
-      if (modeOf(s) === "engaged" && !(s.packsRevealed & (1 << s.arenaPack))) {
+      if (modeOf(s) === "engaged" && !bit(s.packsRevealed, s.arenaPack)) {
         await this.revealPack(s.arenaPack, true);
         continue;
       }
@@ -502,7 +512,7 @@ class Demo {
     const signer = key ? this.dmActor : this.dm;
     return session.methods
       .revealCell(leaf, { kind: { [names[r.secret.kind as number]]: {} }, a: r.secret.a, b: r.secret.b, c: r.secret.c } as any, Array.from(r.salt), r.proof.map((h) => Array.from(h)))
-      .accountsStrict({ signer: signer.publicKey, session: this.acc.session, layout: this.layout, participation, monsters: this.acc.monsters, rewards, sessionToken: key ? this.dmToken : null })
+      .accountsStrict({ signer: signer.publicKey, session: this.acc.session, layout: this.layout, participation, monsters: this.acc.monsters, rewards, board: boardOf(this.acc.session), sessionToken: key ? this.dmToken : null })
       .signers([signer])
       .rpc({ commitment: "confirmed" })
       .then(track("reveal_cell"));
@@ -512,7 +522,7 @@ class Demo {
     const signer = key ? this.dmActor : this.dm;
     return session.methods
       .revealPack(pack, r.roster as any, Array.from(r.salt), r.proof.map((h) => Array.from(h)))
-      .accountsStrict({ signer: signer.publicKey, session: this.acc.session, layout: this.layout, monsters: this.acc.monsters, bestiary, monsterSkills, rewards, sessionToken: key ? this.dmToken : null })
+      .accountsStrict({ signer: signer.publicKey, session: this.acc.session, layout: this.layout, monsters: this.acc.monsters, bestiary, monsterSkills, rewards, board: boardOf(this.acc.session), sessionToken: key ? this.dmToken : null })
       .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 600_000 })])
       .signers([signer])
       .rpc({ commitment: "confirmed" })
@@ -521,8 +531,10 @@ class Demo {
   /** Patch C: the DM's final audit: every declared secret and pack not revealed yet (main wallet). */
   async audit() {
     const s = await this.state();
-    for (const c of this.cells) if (!(s.revealed[c.leaf >> 3] & (1 << (c.leaf & 7)))) await this.revealCell(c.leaf, null, false);
-    for (let n = 0; n < 8; n++) if (this.rosters[n].count && !(s.packsRevealed & (1 << n))) await this.revealPack(n, false);
+    // Patch D: the revealed leaves are on the board.
+    const board = await readBoard(this.acc.session);
+    for (const c of this.cells) if (!board.revealed(c.leaf)) await this.revealCell(c.leaf, null, false);
+    for (let n = 0; n < 8; n++) if (this.rosters[n].count && !bit(s.packsRevealed, n)) await this.revealPack(n, false);
   }
   act(who: number, slot: number, monster: number) {
     const pl = this.players[who];
@@ -623,6 +635,7 @@ class Demo {
         participation: null,
         monsters: this.acc.monsters,
         layout: this.layout,
+        board: boardOf(this.acc.session),
         sessionToken: this.dmToken,
         ...vrfAccounts,
       })
@@ -700,7 +713,7 @@ class Demo {
     await this.revealOwed();
     return session.methods
       .enterArena()
-      .accountsStrict({ payer: provider.wallet.publicKey, session: this.acc.session, monsters: this.acc.monsters, layout: this.layout })
+      .accountsStrict({ payer: provider.wallet.publicKey, session: this.acc.session, monsters: this.acc.monsters, layout: this.layout, board: boardOf(this.acc.session) })
       .remainingAccounts(await this.livingParts())
       .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 600_000 })])
       .rpc({ commitment: "confirmed" })
@@ -780,7 +793,7 @@ class Demo {
       // Patch 11: a closed chest occupies its cell.
       for (let i = 0; i < s.chestCount; i++) if (!(s.chestsOpened & (1 << i))) taken.add(s.chests[i].y * MAP_STRIDE + s.chests[i].x);
       for (let n = 0; n < 8; n++) {
-        if (!s.packs[n].width || !(s.packsAlive & (1 << n))) continue;
+        if (!s.packs[n].width || !bit(s.packsAlive, n)) continue;
         const { x: px, y: py } = s.packs[n];
         taken.add(py * MAP_STRIDE + px);
         // Next to another pack's monster the walk would engage it.
@@ -931,6 +944,7 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
         monsterSkills,
         rewards,
         triples,
+        board: boardOf(demo.acc.session),
       })
       .signers([demo.dm])
       .rpc({ commitment: "confirmed" })
@@ -1231,6 +1245,8 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
         config,
         mapProgram: MAP,
         characterProgram: CHARACTER,
+        // Patch D: the played map closes with its layout.
+        layout: demo.layout,
       })
       .remainingAccounts([...deathAccounts(await demo.state()), ...players])
       .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 1_000_000 })])
@@ -1250,7 +1266,9 @@ describe("demo script end to end (CLAUDE.md section 8)", { skip: SKIP }, () => {
     assert.equal(escrow.amount.toString(), PRICE.toString());
     const gained = (await connection.getBalance(demo.dm.publicKey)) - dmBefore;
     assert.ok(gained > PRICE.toNumber() - 20_000, `DM got ${gained}`);
-    assert.ok((await mapProgram.account.map.fetch(demo.map)).core.status.finished);
+    // Patch D: the map is played once: closed with its layout, the deposits back to the DM.
+    assert.equal(await connection.getAccountInfo(demo.map, "confirmed"), null);
+    assert.equal(await connection.getAccountInfo(demo.layout, "confirmed"), null);
   });
 
   it("every roll is public: each VRF callback is a confirmed transaction with its event", async () => {
