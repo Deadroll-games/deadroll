@@ -58,12 +58,15 @@ Pack rules:
 - The size of a pack and the number of packs on a map are limited by the map tier (`MAP_DESCRIPTION.md`, section 10.2).
 - How a pack enters combat is described in `PARTY_AND_TURNS.md`, section 4.
 
-**Planned (arena update, `PARTY_AND_TURNS.md`, section 4.1):**
+Packs and arenas (`PARTY_AND_TURNS.md`, section 4.1):
 
 - On the map only one monster of a pack is visible, picked by the DM; the rest of the pack is hidden until the fight.
 - The site shows the pack's threat level, declared openly by the DM and checked by the program when the pack is revealed: the sum of the monster levels, an elite counted 2 times, a boss 3 times.
-- A pack has a facing set by the DM: coming from its back, the party moves first; from the front, the monsters do.
+- A pack has a facing set by the DM: coming from its back (the 3 cells behind the visible monster), the party moves first; from the front or a side, the monsters do.
 - Outside combat monsters stand still. A fight is one pack in its own arena.
+- A map holds at most 12 different monster templates.
+- A pack's experience is the sum of the experience of its monsters, paid when the arena is won.
+- Large monsters (2×2, section 2) are measured from their nearest cell; a line hits one once, and knockback moves the whole square (`PARTY_AND_TURNS.md`, section 4.1.3).
 - After a retreat the pack heals fully, stays on guard and gets stronger (`PARTY_AND_TURNS.md`, section 7.5).
 
 ---
@@ -236,7 +239,7 @@ Consequences of Freeze immunity: Cold damage to a Treant goes through, but reson
 
 ### 9.1 Rules
 
-- **Experience** goes into the temporary cache (`PARTY_AND_TURNS.md`, section 8): now for each killed monster, planned for each won arena.
+- **Experience** goes into the temporary cache (`PARTY_AND_TURNS.md`, section 8): for each won arena, the sum over the pack's monsters (`PARTY_AND_TURNS.md`, section 4.1.4).
 - **Body resources** from each killed monster are rolled **separately for each** living participant, like the other rewards, and go into the temporary cache.
 - The **level of body resources** always equals the **monster's level**.
 - Resources correspond to the monster's **biome** or to the **monster itself**. For now body resources follow the table of section 9.2.

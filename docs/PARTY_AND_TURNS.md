@@ -1,6 +1,6 @@
 # PARTY_AND_TURNS: party, turns and rewards in Deadroll
 
-Version 0.1, draft. This document covers the party lifecycle, the exploration and combat modes, action points, the initiative timeline, party outcomes and reward distribution. **There are no numbers in this document**, they will appear at balancing.
+Version 0.1, draft. This document covers the party lifecycle, the map and arena modes, action points, the initiative timeline, party outcomes and reward distribution. **There are no numbers in this document**, they will appear at balancing.
 
 Related documents:
 
@@ -14,7 +14,7 @@ Related documents:
 
 ## 1. Principles
 
-1. **The game is always turn-based.** In both exploration and combat, characters act strictly in turn. There is no "mess" where everyone moves at once.
+1. **The game is always turn-based.** On the map and in an arena, characters act strictly in turn. There is no "mess" where everyone moves at once.
 2. **The fast move farther, the high-initiative take turns more often.** Speed gives action points per turn, initiative determines how often a turn comes.
 3. **One active skill per turn.** No matter how many action points there are, there are no double spells. Speed gives mobility, not extra damage.
 4. **Loot is not issued until the end.** Experience and rewards accumulate in the temporary cache and become yours only on victory or peaceful exit.
@@ -33,7 +33,7 @@ Related documents:
 5. The DM and players agree on a time (for example, in Discord);
    the DM records the start time in the party (**later**: there is no start time yet)
 6. Launch (section 2.1): players mark themselves ready in the lobby
-7. Party: exploration ↔ combat (planned: map ↔ arena, section 4.1)
+7. Party: map ↔ arena (section 4)
 8. End: victory, peaceful exit, escape, defeat
 9. The DM's final audit: reveal of all declared secrets
 10. Issuing rewards from temporary caches, paying the DM,
@@ -91,25 +91,15 @@ What happens to the contribution of a player who left the party early or lost co
 
 ## 4. Modes
 
-| Mode            | When                                | Turn order                                                                                      |
-| --------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------- |
-| **Exploration** | no monster pack is in combat        | in a circle: each living character acts once, the order is fixed on entry by initiative         |
-| **Combat**      | at least one pack has entered combat | initiative timeline (section 6)                                                                 |
+The game has two modes, **map** and **arena**. Map side: `MAP_DESCRIPTION.md`, section 17. Experience is awarded for each defeated pack (section 4.1.4; `CHARACTER.md`, section 5).
 
-- **Entering combat:** as soon as any monster of a pack comes into the vision of any character, or an ambush trap triggers, the **whole pack** enters combat (`BESTIARY.md`, section 2.1). All characters and the pack's monsters get a time until turn set by initiative.
-- **Other packs** join a combat already in progress the same way: when any of their monsters comes into the party's vision. An incautious party can draw two packs at once.
-- **Leaving combat:** all monsters in combat are dead. The mode returns to exploration, and cooldowns keep counting in turns.
-- Experience is awarded for each defeated pack (`CHARACTER.md`, section 5). Currently it is given for **each killed monster**: the full amount goes at once into the temporary cache of every living character, it is not divided. Awarding it per pack comes later.
-
-### 4.1 Planned: map and arena (big update)
-
-**Planned, not implemented.** The text above (section 4) describes how the game works now and stays valid until this update. Map side: `MAP_DESCRIPTION.md`, section 17.
+### 4.1 Map and arena
 
 #### 4.1.1 Two modes
 
 | Mode      | When                        | Turn order                                                                 | Monsters                          |
 | --------- | --------------------------- | -------------------------------------------------------------------------- | --------------------------------- |
-| **Map**   | outside combat              | in a circle, as in exploration now                                         | stand still, the DM does not move them |
+| **Map**   | outside combat              | in a circle: each living character acts once                               | stand still, the DM does not move them |
 | **Arena** | a fight with one pack       | initiative timeline (section 6), a tie goes to the higher Dexterity        | the DM moves them                 |
 
 `move_path` is the same instruction on the map and in the arena: the player marks several cells in a row and walks along them.
@@ -119,27 +109,40 @@ What happens to the contribution of a player who left the party early or lost co
 - Only **one monster of each pack** is visible on the map; the DM picks which one. The rest of the pack is hidden (`MAP_DESCRIPTION.md`, section 17.5).
 - The site shows the pack's **threat level**. The DM declares it openly; the program checks it when the pack is revealed, and a mismatch rejects the reveal. The threat is the sum of the monster levels, an elite counted 2 times, a boss 3 times.
 - A pack has a **facing** set by the DM.
+- A map holds at most **12 different monster templates** in all its packs; the party copies them once when the session opens.
 
 #### 4.1.3 Start of combat
 
 Combat starts when:
 
-- a character comes **within 1 cell** of a visible monster; or
+- a character steps onto a cell **next to** a visible monster (within 1 cell, diagonals included); or
 - an **ambush trap** triggers: the DM links a hidden pack with its arena to it, and the monsters move first.
 
 Then:
 
-- The **whole party** goes into the pack's arena, on the side of the character who came close.
-- From the pack's **back** the party moves first; from the **front** the monsters move first.
-- The arena is drawn by the DM for each pack in the builder; the DM picks its size within the limits of `BalanceConfig`. An arena may hold traps and secrets.
+- The **whole living party** goes into the pack's arena. Any signer may send the entering instruction.
+- **Where the party stands:** at the edge of the arena the character came from. The approach direction, seen from the visible monster, picks the edge on each axis (a character to the west of the monster comes in from the west edge); on an axis where the character stood level with the monster the party comes in at the middle, and a diagonal approach gives a corner. After an ambush trap the party comes in from the edge the pack's facing names.
+- **Who moves first:** the side of the approach decides.
+  - The **back** is the 3 cells behind the visible monster (against its facing): the party moves first.
+  - The **front** and the **sides** are the other 5 cells: the monsters move first. A side counts as the front.
+  - After an ambush trap the monsters move first.
+  - A pack that is **on guard** after a retreat moves first from any side (section 7.5).
+- The arena is drawn by the DM for each pack in the builder; the DM picks its size within the limits of `BalanceConfig` (6 to 12 cells a side). An arena may hold traps and secrets.
 - **One fight is one pack.** The map waits while the arena is played; other packs do not join.
-- A boss may occupy 2×2 cells.
 - Everything carries over between the map and the arena, both ways: HP, states, buffs, cooldowns.
+
+**Large monsters.** A monster of size 2×2 (`BESTIARY.md`, section 2) stands on its whole square in its arena; on the map the visible monster stays one cell.
+
+- Distance, reach, adjacency, auras and reactive triggers are measured from the **nearest cell** of the square to the other unit.
+- A line hits a large monster **once**, however many of its cells the line crosses.
+- Knockback moves the **whole square**.
+- Movement: a step costs the most expensive cell the square enters, and a diagonal step needs both side squares open (no corner cutting, section 5.1.1).
 
 #### 4.1.4 End of combat
 
-- **Victory** (the pack is dead): the pack disappears from the map, and the characters return to the cells they stood on before the fight.
-- **Experience** for a won arena goes to every living character in full, instead of the current "for each killed monster".
+- **Victory** (the pack is dead): the arena is won. The kills not yet paid get their body rewards, then the pack's experience is paid, and the pack disappears from the map; the characters return to the cells they stood on before the fight. Any signer may send the leaving instruction.
+- **Experience** for a won arena is the **sum of the experience of the pack's monsters**. It goes to every living character in full (it is not divided) into their temporary cache.
+- A **boss pack** ends the party with Victory (section 7.1) and also pays its pack experience.
 - **Retreat** and **Escape**: section 7.5.
 
 #### 4.1.5 Later
@@ -171,7 +174,7 @@ A character may step to any of the 8 neighbouring cells, and a diagonal step cos
 
 Haste changes the AP of a turn, not the order of turns.
 
-### 5.2 In exploration
+### 5.2 On the map
 
 The same AP apply, but without damage skills: steps, interactions, searching, buffs.
 
@@ -185,21 +188,24 @@ The same AP apply, but without damage skills: steps, interactions, searching, bu
 
 ## 6. Initiative timeline (combat)
 
-Planned: the timeline runs in the arena (section 4.1); the side that moves first is set by the approach (section 4.1.3).
+The timeline runs in the arena (section 4.1). The side that moves first is set by the approach (section 4.1.3).
 
 ### 6.1 How it works
 
-- Every combat participant (characters and monsters) has a **time until turn**.
+- Every arena participant (characters and monsters) has a **time until turn**.
 - The one with the **lowest** time acts.
-- After its turn, a **delay** is added to its time, inversely dependent on its initiative: the higher the initiative, the smaller the delay.
+- After its turn, a **delay** is added to its time, inversely dependent on its initiative: the higher the initiative, the smaller the delay. The delay is `1200 / (6 + initiative)`, at least 1 (`BalanceConfig.arena`: `time_scale`, `initiative_base`).
+- At the start of the arena the side that moves first has time 0; every unit of the other side starts with its own delay, so the first side acts before any unit of the other.
 - This is why a character with high initiative sometimes acts **twice** while a slow one acts once.
 
 ### 6.2 Rules
 
 - All values are integers (`COMBAT_MATH.md`).
-- Tie: higher Dexterity wins, then the order of joining the party.
-- Effects on initiative (Cold Mind, Slow) change the delay starting from the **next** turn.
-- Stun: the participant loses their turn, and the delay is added to their time as after a turn.
+- Tie: the higher Dexterity wins (a monster has no Dexterity, its initiative counts instead), then the order of joining the party.
+- Effects on initiative change the delay starting from the **next** turn. The delay is taken at the **start** of the unit's turn, under its effects and auras at that moment; an effect that lands later in the same turn changes only the delay after its next turn.
+- **Slow** divides the bearer's initiative as a counterweight (`COMBAT_MATH.md`, section 3), so its turns come less often. The share of the Slow that counts is `slow_initiative_bp` in `BalanceConfig.arena`. Haste does not change the order of turns (section 5.1). Chill acts through speed only.
+- Stun and Freeze: the participant loses their turn, and the delay is added to their time as after a played turn.
+- A turn skipped by the timeout (section 5.3) adds the bare delay, without the unit's effects, because its turn never started.
 - Skill cooldowns and state durations are counted in the participant's **own turns**.
 
 ### 6.3 Speed and initiative together
@@ -285,7 +291,7 @@ After a **retreat**:
 ## 8. Temporary cache
 
 - Each character in the party has their own **temporary cache** in `Participation`.
-- What accumulates there: experience for each **killed monster** (planned: for each won arena, section 4.1.4), and rewards from chests, hidden stashes and monsters.
+- What accumulates there: experience for each **won arena** (section 4.1.4), and rewards from chests, hidden stashes and monsters.
 - The contents become the character's property only on **victory** or **peaceful exit**, after the DM's final audit.
 
 ### 8.1 After the party ends
@@ -365,7 +371,7 @@ If the **base level** of the table dropped on the boss reward for the party, eve
 
 ### 9.5 Experience
 
-- Experience is awarded for each **killed monster**, in full to every living participant (it is not divided), accumulates in the cache, and is added to the character at the end. **Planned:** for each won arena, in full to every living character (section 4.1.4). Nothing after a retreat, not even for the monsters killed in that fight (section 7.5).
+- Experience is awarded for each **won arena**: the sum of the experience of the pack's monsters, in full to every living character (it is not divided), accumulates in the cache, and is added to the character at the end (section 4.1.4). Nothing after a retreat, not even for the monsters killed in that fight (section 7.5).
 - A character whose level is noticeably higher than the map tier gets less experience or none, and no rewards are rolled for them.
 - The counterweight to the peaceful exit penalty applies here.
 
@@ -378,8 +384,9 @@ If the **base level** of the table dropped on the boss reward for the party, eve
 | Group        | Fields                                                                              |
 | ------------ | ----------------------------------------------------------------------------------- |
 | References   | map, DM, contribution escrow                                                        |
-| Mode         | exploration / combat (planned: map / arena, the current arena and pack)             |
-| Queue        | exploration order; in combat, each participant's time until turn                    |
+| Mode         | map / arena, the current arena and pack, the cells the party left on the map        |
+| Queue        | map order; in an arena, each participant's time until turn                          |
+| Exits        | the open Retreat or Escape proposal and who voted, retreats used, packs on guard and buffed, killed spawns |
 | Participants | characters and their positions, monsters (template, HP, position, skills)           |
 | Map          | `explored`, `revealed`, revealed secrets, opened doors, DM obligations              |
 | Time         | turn number, timestamp of the current turn's start (for the timeout)                |
