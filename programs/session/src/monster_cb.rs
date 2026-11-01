@@ -243,7 +243,7 @@ impl<'a, 'info> Cb<'a, 'info> {
         let from = cell_of(&monster);
         let (targets, n) = match skill.filter(|k| k.stats.blocks.target == Target::Line) {
             Some(k) => {
-                let layout = MapLayoutView::load(self.layout)?;
+                let layout = MapLayoutView::load(self.layout, session.ground())?;
                 let to = session.player_pos[target as usize];
                 let line = skill_line(session, &layout, from, to, k.stats.ext.range);
                 let mut units = [(0u8, Cell::default()); PARTY_MAX];

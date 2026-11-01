@@ -62,7 +62,12 @@ import {
   type SkillRecordAcc,
   type Party,
   type SeedKind,
+  arenaMode,
+  enterArenaIx,
+  leaveArenaIx,
+  visiblePacks,
 } from "../chain/game";
+import { FACING_NAMES } from "../chain/mock";
 import { toHitResolved, toResonanceSpread } from "../chain/hit";
 import { aspectName, bestiaryName, carrierName, resonanceName, stateName } from "../chain/names";
 import {
@@ -82,7 +87,7 @@ import {
 import { ACTIVE_SLOTS, REACTIVE_SLOT, kinOf, monsterBearersOf, monsterSkillName, monsterSkillsOf, skillAction, useBuilderRegistry, useMonsterSkillTable, type MonsterSkill } from "../chain/monsters";
 import { errorName } from "../chain/send";
 import { statusLabel, type SubStatus } from "../chain/subscribe";
-import { cooldownLabel, skillCooldowns, skillUsedText, skipText, startTurnFor, takenOntoMap, tickText, turnActed, turnStarted } from "../chain/turns";
+import { cooldownLabel, skillCooldowns, skillUsedText, skipText, arenaStepFor, startTurnFor, takenOntoMap, tickText, turnActed, turnStarted } from "../chain/turns";
 import { skillSetPda } from "../chain/pda";
 import { affordable, cheb, extendPath, pathCost, reachable, route, type Step } from "../chain/route";
 import { useAutoFreezeTombstone } from "../chain/useAutoFreezeTombstone";
@@ -108,6 +113,24 @@ type LiveParty = ReturnType<typeof useParty> & { address: Address };
 const PartyContext = createContext<LiveParty | null>(null);
 
 /** One live read of a party for everything under it (the dungeon screen and the minimap). */
+
+/** Arena update: grid ids of the packs' visible monsters on the map (not targets). */
+const PACK_UNIT_BASE = 1000;
+
+/** The screen's title: the map, the step into or out of an arena, or the arena's fight. */
+function arenaTitle(p: Party): string {
+  switch (arenaMode(p.session)) {
+    case "engaged":
+      return `Map: entering the arena of pack ${p.session.arenaPack}`;
+    case "arena":
+      return `Arena: pack ${p.session.arenaPack}`;
+    case "won":
+      return `Arena won: back to the map`;
+    default:
+      return "Map";
+  }
+}
+
 export function PartyProvider({ address, children }: { address: Address; children: ReactNode }) {
   const live = useParty(address);
   const value = useMemo(() => ({ ...live, address }), [live, address]);
@@ -439,6 +462,31 @@ export function PartyView({ address }: { address: Address }) {
     if (party && startTurnFor(party, me ?? null)) void ensureStarted();
   }, [party, me, ensureStarted]);
 
+  // ---- Arena update: the step between the map and an arena holds no choice, so any tab of the
+  // party sends it with its own key: into the engaged pack's arena, out of a won one.
+  const arenaRun = useRef(false);
+  useEffect(() => {
+    if (!party || arenaRun.current || !payer) return;
+    const step = arenaStepFor(party, me ?? null);
+    if (!step) return;
+    arenaRun.current = true;
+    const signer = payer;
+    void (async () => {
+      try {
+        const build = step === "enter" ? enterArenaIx : leaveArenaIx;
+        const res = await send(step === "enter" ? "enter the arena" : "leave the arena", signer, async () => build(address, party.session, signer), {
+          quiet: true,
+          // Another tab sent it first.
+          onError: (m) => ["NotEngaged", "ArenaNotWon"].includes(errorName(m) ?? ""),
+        });
+        if (res) ingest(res.signature, res.events);
+        await refresh();
+      } finally {
+        arenaRun.current = false;
+      }
+    })();
+  }, [party, me, payer, send, ingest, refresh, address]);
+
   /** Sends one game action, then (localnet) answers its VRF request at once. */
   const act = async (what: string, signer: TransactionSigner | null, ixs: () => Promise<Parameters<typeof send>[2]>, needsRoll: boolean) => {
     if (lock.current) return;
@@ -471,8 +519,13 @@ export function PartyView({ address }: { address: Address }) {
       const t = new Set<number>();
       p.monsters.forEach((m, i) => m.alive && MONSTER_BASE + i !== mover && t.add(m.y * MAP_MAX + m.x));
       p.players.forEach((pl) => p.session.aliveMask & (1 << pl.slot) && pl.slot !== mover && t.add(pl.part.core.y * MAP_MAX + pl.part.core.x));
-      // Patch 11: a closed chest occupies its cell.
-      for (const c of chestsOf(p.session)) if (!c.opened) t.add(c.y * MAP_MAX + c.x);
+      // Patch 11: a closed chest occupies its cell; arena update: on the map only, with the packs'
+      // visible monsters.
+      const mode = arenaMode(p.session);
+      if (mode === "map" || mode === "engaged") {
+        for (const c of chestsOf(p.session)) if (!c.opened) t.add(c.y * MAP_MAX + c.x);
+        for (const v of visiblePacks(p)) t.add(v.y * MAP_MAX + v.x);
+      }
       return t;
     },
     [],
@@ -506,6 +559,17 @@ export function PartyView({ address }: { address: Address }) {
         label: `${bestiaryName(m.bestiaryId)} ${i}`,
         // Cells per side: the bestiary record (`record::CELLS`).
         size: ((party.monsterRecords[i]?.[3] ?? 1) === 2 ? 2 : 1) as 1 | 2,
+      })),
+      // Arena update: on the map each pack shows its one visible monster; it stands still.
+      ...visiblePacks(party).map((v) => ({
+        id: PACK_UNIT_BASE + v.pack,
+        kind: "monster" as const,
+        x: v.x,
+        y: v.y,
+        hp: 1,
+        hpMax: 1,
+        alive: true,
+        label: `${bestiaryName(v.bestiaryId)}: pack ${v.pack}, looking ${FACING_NAMES[v.facing] ?? "?"}`,
       })),
     ];
   }, [party]);
@@ -554,7 +618,7 @@ export function PartyView({ address }: { address: Address }) {
   const mAp = mChosen ? mChosen.sheet.apCost : BASIC_ATTACK_AP;
 
   const ground = useMemo(
-    () => (party?.tiles && s && unit !== null ? { tiles: party.tiles, width: s.width, height: s.height, tileCost, taken: taken(party, unit) } : null),
+    () => (party?.ground && s && unit !== null ? { tiles: party.ground, width: s.width, height: s.height, tileCost, taken: taken(party, unit) } : null),
     [party, s, unit, tileCost, taken],
   );
   // Patch 13: the path is marked cell by cell (a far cell adds the cheapest way to it) and walked in
@@ -666,7 +730,7 @@ export function PartyView({ address }: { address: Address }) {
     try {
       // start_turn first: a Freeze / Stun skip or a death from over-time damage ends the turn there.
       let p = await ensureStarted();
-      if (!p?.tiles || !turnStarted(p.session)) return;
+      if (!p?.ground || !turnStarted(p.session)) return;
       const u = currentUnit(p.session);
       if (u === null || u < MONSTER_BASE || p.session.core.pendingVrf) return;
       const seq = p.session.turnSeq;
@@ -715,7 +779,7 @@ export function PartyView({ address }: { address: Address }) {
         let ap = m.actionPoints;
         const keep = plan?.found ? plan.ap : BASIC_ATTACK_AP;
         if (!inRange(m)) {
-          const steps = route({ from: m, goal: (x, y) => inRange({ x, y }), tiles: p.tiles, width: p.session.width, height: p.session.height, tileCost: Array.from(p.session.tileCost), taken: taken(p, u) });
+          const steps = route({ from: m, goal: (x, y) => inRange({ x, y }), tiles: p.ground!, width: p.session.width, height: p.session.height, tileCost: Array.from(p.session.tileCost), taken: taken(p, u) });
           const take = steps ? affordable(steps, ap, keep) : [];
           if (take.length) {
             const r = await send(`move ${label(u)}`, actor.signer, async () => [await movePathIx(actor, address, p!.session.layout, { kind: "monster", index: mi }, take)], { quiet: true });
@@ -772,7 +836,9 @@ export function PartyView({ address }: { address: Address }) {
       aliveMask: party.session.aliveMask,
       width: party.session.width,
       height: party.session.height,
-      tiles: party.tiles ? Array.from(party.tiles) : [],
+      tiles: party.ground ? Array.from(party.ground) : [],
+      mode: arenaMode(party.session),
+      arenaPack: party.session.arenaPack,
       tileCost: Array.from(party.session.tileCost),
       unpaidKills: party.session.unpaidKills,
       players: party.players.map((p) => ({ slot: p.slot, x: p.part.core.x, y: p.part.core.y, hp: p.part.core.hp, ap: playerAp(p.part, party.session), name: bytesText(p.char.name), player: p.part.player, nftFrozen: p.char.nftFrozen, cooldowns: Array.from(p.part.cooldowns), hpMax: p.part.hpMax, mods: activeMods(p.part.mods) })),
@@ -784,13 +850,19 @@ export function PartyView({ address }: { address: Address }) {
   if (error && !party) return <p className="error">{error}</p>;
   if (!party || !s) return <p className="muted">Loading party {shortAddress(address)}...</p>;
 
-  const tiles = party.tiles ?? new Uint8Array(MAP_MAX * MAP_MAX);
+  const tiles = party.ground ?? new Uint8Array(MAP_MAX * MAP_MAX);
+  // Arena update: chests and points are on the map.
+  const onMap = arenaMode(s) === "map" || arenaMode(s) === "engaged";
   const unitSprite = (u: GridUnit) => {
     if (u.kind === "player") {
       const p = party.players.find((x) => x.slot === u.id);
       // A character from before the current graphics is not drawn: the grid shows its marker.
       if (!p || !isCurrentAppearance(p.char.core.appearance)) return null;
       return u.alive ? draw(`c:${p.character}`, characterRequest(p.char)) : draw("tomb", TOMBSTONE);
+    }
+    if (u.id >= PACK_UNIT_BASE) {
+      const v = visiblePacks(party).find((x) => PACK_UNIT_BASE + x.pack === u.id);
+      return v ? draw(`m:${v.bestiaryId}:true`, monsterRequest(v.bestiaryId, false)) : null;
     }
     const m = party.monsters[u.id - MONSTER_BASE];
     const img = m ? draw(`m:${m.bestiaryId}:${m.alive}`, monsterRequest(m.bestiaryId, !m.alive)) : null;
@@ -1057,7 +1129,7 @@ export function PartyView({ address }: { address: Address }) {
   return (
     <section>
       <h1>
-        {ended ? `Party ended: ${st}` : "Battle"} <LiveBadge status={live} />
+        {ended ? `Party ended: ${st}` : arenaTitle(party)} <LiveBadge status={live} />
       </h1>
       {header}
       <SessionKeyBox party={party} pk={pk} isDm={isDm} me={me} send={send} busy={busy} />
@@ -1073,8 +1145,8 @@ export function PartyView({ address }: { address: Address }) {
             targets={!ended ? monsterTargets : []}
             path={preview}
             auras={gridAuras}
-            chests={gridChests}
-            points={party.points}
+            chests={onMap ? gridChests : []}
+            points={onMap ? party.points : []}
             pointSprite={pointSprite}
             chestSprite={chestSprite}
             line={!ended ? lineCells : []}
@@ -1085,7 +1157,7 @@ export function PartyView({ address }: { address: Address }) {
             onCellHover={setHover}
             onCellClick={(c) => (canMove && (myTurn || (monsterTurn && isDm)) ? markCell(c) : undefined)}
             onUnitClick={(u) => {
-              if (!canAttack) return;
+              if (!canAttack || u.id >= PACK_UNIT_BASE) return;
               if (myTurn && chosenSide === "enemy" && u.kind === "monster" && u.alive) attack(u.id - MONSTER_BASE);
               else if (myTurn && chosenSide === "ally" && u.kind === "player" && u.alive) support(u.id);
               else if (monsterTurn && isDm && mSide === "enemy" && u.kind === "player" && u.alive) monsterAttack(u.id);

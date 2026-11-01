@@ -25,7 +25,7 @@ import {
   type KeyPairSigner,
 } from "@solana/kit";
 import { PROGRAM_CRATES, PROGRAMS as SDK_PROGRAMS, type ProgramName } from "@deadroll/sdk";
-import { MapStatus, findLayoutPda, findMapPda, getCreateMapInstruction, getFinalizeMapInstruction, getMapDecoder, getWriteLayoutInstruction, getWritePointsInstruction, getWriteSpawnsInstruction } from "@deadroll/sdk/map";
+import { MapStatus, findLayoutPda, findMapPda, getCreateMapInstruction, getFinalizeMapInstruction, getMapDecoder, getWriteLayoutInstruction, getWriteArenaInstruction, getWritePointsInstruction, getWriteSpawnsInstruction } from "@deadroll/sdk/map";
 import {
   findTablePda,
   getGameConfigDataDecoder,
@@ -638,6 +638,11 @@ async function ensureDemoMap(conn: Rpc, opts: DeployOptions, wallet: KeyPairSign
   await send(conn, wallet, [getWriteLayoutInstruction({ ...edit, offset: 0, cells: layoutBytes(preset) })]);
   await send(conn, wallet, [getWriteSpawnsInstruction({ ...edit, spawns: preset.spawns })]);
   await send(conn, wallet, [getWritePointsInstruction({ ...edit, points: presetPoints(preset), bossTable: preset.bossTable })]);
+  // Arena update: every pack's record and arena.
+  for (const p of preset.packs) {
+    const record = { visible: p.visible, x: p.x, y: p.y, facing: p.facing, width: p.width, height: p.height };
+    await send(conn, wallet, [getWriteArenaInstruction({ ...edit, pack: p.pack, record, cells: p.cells })]);
+  }
   // No secret cells in the demo preset; a fixed root keeps reruns identical. The builder rules
   // read the registry bestiary, monster skills (roles, pools, slots), reward tables and tileset.
   const table = async (seed: string) => (await findTablePda({ seed }))[0];
@@ -645,7 +650,7 @@ async function ensureDemoMap(conn: Rpc, opts: DeployOptions, wallet: KeyPairSign
   await send(conn, wallet, [
     getFinalizeMapInstruction({ ...edit, bestiary: await table("bestiary"), monsterSkills: await table("monster_skills"), rewards: await table("rewards"), tileset: await table("tileset"), secretsRoot }),
   ]);
-  console.log(`write_layout, write_spawns, write_points, finalize_map: ${map} Finalized`);
+  console.log(`write_layout, write_spawns, write_points, write_arena x${preset.packs.length}, finalize_map: ${map} Finalized`);
   return { map, layout, status: "Finalized", preset };
 }
 

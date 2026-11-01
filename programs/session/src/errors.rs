@@ -203,4 +203,19 @@ pub enum SessionError {
     // Triples.
     #[msg("The unit is silenced: it can only use its basic attack")]
     Silenced,
+    // Arena update (docs/PARTY_AND_TURNS.md 4.1).
+    #[msg("The party is between the map and an arena: enter_arena or leave_arena comes first")]
+    ArenaTransition,
+    #[msg("The map has no arenas (finalized before the arena update): it cannot open a party")]
+    MapWithoutArenas,
+    #[msg("No pack is engaged: step next to a pack's visible monster first")]
+    NotEngaged,
+    #[msg("The arena's pack is not dead yet")]
+    ArenaNotWon,
+    #[msg("Not in an arena: chests are on the map")]
+    InArena,
+    #[msg("The remaining accounts are not the Participation of each living player, in slot order")]
+    InvalidArenaAccounts,
+    #[msg("Too many distinct monster templates for one party")]
+    TooManyTemplates,
 }

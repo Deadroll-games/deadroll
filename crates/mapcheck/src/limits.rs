@@ -14,7 +14,7 @@ pub const TIER_MAX: u8 = 2;
 pub const BOSSES: u8 = 1;
 /// Helpers the boss starts combat with (docs/BESTIARY.md, section 6).
 pub const BOSS_HELPERS: u8 = 2;
-/// Max Chebyshev distance between two monsters of one pack.
+/// Unused since the arena update: a pack stands in its own arena, anywhere in it.
 pub const PACK_RADIUS: u8 = 4;
 
 /// Limits for one map tier.

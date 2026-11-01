@@ -8,13 +8,13 @@ use session_keys::{session_auth_or, Session, SessionTokenV2};
 use crate::{
     auth,
     errors::SessionError,
-    events::Moved,
+    events::{Moved, PackEngaged},
     monster_cb::{monster_reaction_from, request_monster_reactive_roll, Field, MonsterEvent},
     movement::{burn_on_path, walk_error, MapField},
     reactions::{fires_for, request_reactive_roll},
     rules::{Unit, MAX_PATH},
     state::{
-        external::MapLayoutView, pending_kind, GameSession, Monsters, Participation,
+        external::MapLayoutView, pending_kind, ArenaMode, GameSession, Monsters, Participation,
         PendingMonsterReactiveData, PendingReactiveData,
     },
     vrf::{self, RequestAccounts},
@@ -119,7 +119,8 @@ pub fn handler(ctx: Context<MovePath>, unit: u8, path: Vec<Cell>) -> Result<()> 
         SessionError::NotYourTurn
     );
     require!(session.turn_started(), SessionError::TurnNotStarted);
-    let layout = MapLayoutView::load(&accounts.layout)?;
+    session.require_in_play()?;
+    let layout = MapLayoutView::load(&accounts.layout, session.ground())?;
     let request = RequestAccounts {
         payer: &accounts.signer,
         program_identity: &accounts.program_identity,
@@ -148,16 +149,23 @@ pub fn handler(ctx: Context<MovePath>, unit: u8, path: Vec<Cell>) -> Result<()> 
                 x: p.core.x,
                 y: p.core.y,
             };
-            // The first step that brings it next to a monster whose reactive answers.
+            // The first step that brings it next to a monster whose reactive answers. Arena
+            // update: on the map, the first step next to a pack's visible monster engages the pack
+            // (docs/PARTY_AND_TURNS.md 4.1.3); there are no live monsters there to react.
             let count = monsters.count()?;
             let mut bearers = 0u32;
             let mut failed = None;
+            let mut engaged = None;
             let walked = walk(
                 &MapField::new(session, &layout, &monsters, mover)?,
                 start,
                 &path,
                 p.core.action_points,
                 |from, to| {
+                    if session.ground().is_none() {
+                        engaged = session.pack_next_to(to);
+                        return engaged.is_some();
+                    }
                     for i in 0..count {
                         let m = match monsters.get(i) {
                             Ok(m) => m,
@@ -212,6 +220,19 @@ pub fn handler(ctx: Context<MovePath>, unit: u8, path: Vec<Cell>) -> Result<()> 
                 y: walked.end.y,
                 action_points: walked.ap_left,
             });
+            if let Some(pack) = engaged {
+                // The map waits: `enter_arena` takes the party into the pack's arena.
+                session.mode = ArenaMode::Engaged;
+                session.arena_pack = pack;
+                session.engaged_by = slot;
+                emit!(PackEngaged {
+                    session: session_key,
+                    pack,
+                    slot,
+                    x: walked.end.x,
+                    y: walked.end.y,
+                });
+            }
             if bearers != 0 {
                 request_monster_reactive_roll(
                     session,

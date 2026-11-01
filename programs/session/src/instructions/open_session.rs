@@ -1,16 +1,11 @@
 use anchor_lang::prelude::*;
 use deadroll_combat::ResonanceTables;
 use deadroll_registry::state::TableKind;
-use deadroll_rules::{
-    aura::{monster_passive_aura, Aura, AURAS_PER_PLAYER, PASSIVE_AURA},
-    loot::settle_timeout_ok,
-    monster::{select_skills, NO_SKILL, PASSIVE_SLOT},
-    MonsterTemplate,
-};
-use deadroll_skillcheck::{monster::POOL_MAX, Category};
+use deadroll_rules::{loot::settle_timeout_ok, MonsterTemplate};
+use deadroll_skillcheck::monster::POOL_MAX;
 use deadroll_types::{
-    seeds, ActiveState, GameSessionData, MapStatus, Monster, SessionStatus, Spawn, MAP_MAX,
-    MONSTERS_MAX, MONSTER_SLOTS, NO_TABLE, PARTY_MAX, STATES_MAX, TURN_ORDER_MAX,
+    seeds, GameSessionData, MapStatus, SessionStatus, Spawn, MAP_MAX, MONSTERS_MAX, NO_TABLE,
+    PACKS_MAX, PARTY_MAX, TURN_ORDER_MAX,
 };
 
 use crate::{
@@ -24,8 +19,8 @@ use crate::{
             with_table_body, MapLayoutView, ASPECTS_TABLE, BESTIARY_TABLE, MONSTER_SKILLS_TABLE,
             RESONANCES_TABLE, REWARDS_TABLE, TILESET_TABLE, TRAITS_TABLE, TRIPLES_TABLE,
         },
-        Escrow, GameSession, Monsters, ACCOUNT_VERSION, NO_CHEST, RES_ASPECTS_LEN, RES_PAIRS_LEN,
-        RES_TRAITS_LEN, RES_TRIPLES_LEN,
+        ArenaMode, Escrow, GameSession, Monsters, ACCOUNT_VERSION, NO_CHEST, NO_PACK,
+        RES_ASPECTS_LEN, RES_PAIRS_LEN, RES_TRAITS_LEN, RES_TRIPLES_LEN,
     },
 };
 
@@ -124,7 +119,8 @@ pub fn handler(ctx: Context<OpenSession>, price_lamports: u64, dm_actor: Pubkey)
         SessionError::PriceTooLow
     );
 
-    let layout = MapLayoutView::load(&accounts.layout)?;
+    // Arena update: a map finalized before it has no arenas (`MapWithoutArenas`).
+    let layout = MapLayoutView::load(&accounts.layout, None)?;
     require_keys_eq!(
         layout.map(),
         accounts.map.key(),
@@ -168,6 +164,18 @@ pub fn handler(ctx: Context<OpenSession>, price_lamports: u64, dm_actor: Pubkey)
     (session.chests, session.chest_count) = layout.chests()?;
     session.boss_table = layout.boss_table();
     session.pending_chest = NO_CHEST;
+    // Arena update: the packs on the map (their monsters come into `MonsterState` at
+    // `enter_arena`).
+    session.mode = ArenaMode::Map;
+    session.arena_pack = NO_PACK;
+    session.packs_alive = 0;
+    for n in 0..PACKS_MAX as u8 {
+        let p = layout.pack(n)?;
+        session.packs[n as usize] = p;
+        if p.is_used() {
+            session.packs_alive |= 1 << n;
+        }
+    }
 
     let monsters = Monsters::create(
         &accounts.monsters,
@@ -184,34 +192,16 @@ pub fn handler(ctx: Context<OpenSession>, price_lamports: u64, dm_actor: Pubkey)
         &monsters,
     )?;
     monsters.clear_loot_tables()?;
+    // Arena update: one record per template and the chosen skills, each once; the monsters
+    // themselves are loaded pack by pack (`enter_arena`).
     for i in 0..spawn_count {
         let spawn = layout.spawn(i as usize)?;
         let (record, template) = read_bestiary(&accounts.bestiary, spawn.bestiary_id)?;
-        let hp = template.hp_at(spawn.level, spawn.flags, &BALANCE.monsters);
-        session.monster_speed[i as usize] = template.speed;
-        session.monster_initiative[i as usize] = template.initiative;
-        monsters.set_record(i, &record)?;
-        monsters.set_defense(i, &template.defense)?;
-        copy_skills(&monsters, i, &spawn, &template, &accounts.monster_skills)?;
+        monsters.add_template(spawn.bestiary_id, &record)?;
+        copy_skills(&monsters, &spawn, &template, &accounts.monster_skills)?;
         copy_loot_table(&monsters, &accounts.rewards, template.loot_table)?;
-        monsters.set(
-            i,
-            &Monster {
-                bestiary_id: spawn.bestiary_id,
-                level: spawn.level,
-                x: spawn.x,
-                y: spawn.y,
-                hp,
-                hp_max: hp,
-                action_points: 0,
-                alive: true,
-                pack: spawn.pack,
-                flags: spawn.flags,
-                states: [ActiveState::default(); STATES_MAX],
-            },
-        )?;
     }
-    monsters.set_count(spawn_count)?;
+    monsters.set_count(0)?;
     for id in session
         .chest_list()
         .iter()
@@ -310,54 +300,26 @@ fn copy_tables(
     )
 }
 
-/// The skills spawn `index` took from its template's pool (docs/BESTIARY.md 3.2, MAP_DESCRIPTION.md
-/// 7.2): the mask's pool bits, at most the rank's slots (`finalize_map` checked the count; a map
-/// finalized before patch 6 has none), copied once into the session table. The passive skill
-/// starts its permanent aura here (docs/SKILL_BUILDER.md 3.3).
+/// The skills spawn `spawn` took from its template's pool (docs/BESTIARY.md 3.2,
+/// MAP_DESCRIPTION.md 7.2: the mask's pool bits, `finalize_map` checked the count), each copied
+/// once into the session table with its registry index. Arena update: `enter_arena` gives the
+/// spawn its slots and its passive aura from them (`crate::arena::load_monster`).
 #[inline(never)]
 fn copy_skills(
     monsters: &Monsters,
-    index: u8,
     spawn: &Spawn,
     template: &MonsterTemplate,
     table: &AccountInfo,
 ) -> Result<()> {
     let len = (template.pool_len as usize).min(POOL_MAX);
-    let mut pool = [None; POOL_MAX];
-    let mut categories = [Category::Active; POOL_MAX];
-    for (i, (slot, category)) in pool
-        .iter_mut()
-        .zip(categories.iter_mut())
-        .take(len)
-        .enumerate()
-    {
+    for i in 0..len {
         // Only the chosen bits are read: an unchosen pool skill costs nothing.
         if spawn.skills & (1 << i) == 0 {
             continue;
         }
-        let skill = read_monster_skill(table, template.pool_start as usize + i)?;
-        *category = skill.blocks.category;
-        *slot = Some(skill);
+        let id = template.pool_start as usize + i;
+        let skill = read_monster_skill(table, id)?;
+        monsters.add_skill(&skill, id as u16)?;
     }
-    // Unchosen pool entries keep a category that never takes a slot: their mask bit is clear.
-    let chosen = select_skills(
-        &categories[..len],
-        spawn.skills,
-        template.slots(spawn.flags, &BALANCE.monsters),
-    );
-    let mut slots = [NO_SKILL; MONSTER_SLOTS];
-    for (slot, &p) in slots.iter_mut().zip(chosen.iter()) {
-        if let Some(skill) = (p != NO_SKILL).then(|| pool[p as usize]).flatten() {
-            *slot = monsters.add_skill(&skill)?;
-        }
-    }
-    monsters.set_skill_slots(index, &slots)?;
-    let mut auras = [Aura::default(); AURAS_PER_PLAYER];
-    if let Some(skill) = monsters.skill(index, PASSIVE_SLOT as u8)? {
-        let profile = template.profile(spawn.level, &BALANCE.monsters);
-        if let Some(a) = monster_passive_aura(BALANCE, &profile, &skill) {
-            auras[PASSIVE_AURA] = a;
-        }
-    }
-    monsters.set_auras(index, &auras)
+    Ok(())
 }

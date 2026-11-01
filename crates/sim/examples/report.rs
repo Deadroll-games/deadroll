@@ -10,7 +10,14 @@ use deadroll_types::StateKind;
 
 const FIGHTS: u32 = 4_000;
 const SEED: u64 = 7;
-const ENCOUNTERS: [&str; 4] = ["wolves", "goblins", "chieftain", "demo_map"];
+const ENCOUNTERS: [&str; 6] = [
+    "wolves",
+    "wolves_back",
+    "goblins",
+    "chieftain",
+    "demo_map",
+    "demo_arenas",
+];
 
 fn main() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tools/balance/presets");
@@ -23,9 +30,9 @@ fn main() {
     ];
     println!("{FIGHTS} fights per row, seed {SEED}.\n");
     println!(
-        "| party | encounter | win % | rounds p50 | hits to kill p50 | party dpt mean | crit share | dot share | control | states / fight | resonances / fight | reactives / fight | line extra / fight | aura reach / fight | monster skills / fight | monster heal / fight | monster reactives / fight |"
+        "| party | encounter | win % | rounds p50 | hits to kill p50 | party dpt mean | crit share | dot share | control | states / fight | resonances / fight | reactives / fight | line extra / fight | aura reach / fight | monster skills / fight | monster heal / fight | monster reactives / fight | packs won | xp | hp left |"
     );
-    println!("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
+    println!("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
     for party in parties {
         let ids: Vec<String> = party.iter().map(|s| s.to_string()).collect();
         let (team, issues) = resolve_party(&presets, &ids, &cfg);
@@ -59,7 +66,7 @@ fn main() {
                 r.cell_burns_per_fight
             );
             println!(
-                "| {} | {enc} | {:.1} | {:.0} | {:.0} | {:.2} | {:.3} | {:.3} | {:.3} | {} | {res} | {:.2} | {:.2} | {:.2} | {:.2} | {:.2} | {:.2} |",
+                "| {} | {enc} | {:.1} | {:.0} | {:.0} | {:.2} | {:.3} | {:.3} | {:.3} | {} | {res} | {:.2} | {:.2} | {:.2} | {:.2} | {:.2} | {:.2} | {:.2} | {:.0} | {:.2} |",
                 party.join(" + "),
                 r.win_rate * 100.0,
                 r.rounds_to_win.p50,
@@ -75,6 +82,9 @@ fn main() {
                 r.monster_skills_per_fight,
                 r.monster_healed_per_fight,
                 r.monster_reactions_per_fight,
+                r.packs_won_per_fight,
+                r.xp_per_fight,
+                r.hp_left_share,
             );
         }
     }

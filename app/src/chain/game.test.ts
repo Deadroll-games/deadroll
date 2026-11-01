@@ -425,10 +425,15 @@ describe("map builders", () => {
       { x: 1, y: 2, table: 0 },
       { x: 3, y: 1, table: 5 },
     ];
-    const draft = { width: 4, height: 3, tier: 1, minPlayers: 3, chestRadius: 4, settleTimeoutSecs: 7200, biome: Biome.Crypt, tiles, entrance: { x: 0, y: 0 }, exit: { x: 3, y: 0 }, spawns: [], chests, bossTable: 1 };
+    // Arena update: pack 2, a 2x2 arena; the other numbers unused.
+    const packs = new Array(8).fill(null);
+    packs[2] = { visible: 0, x: 3, y: 2, facing: 5, width: 2, height: 2, cells: Uint8Array.of(8, 9, 10, 11) };
+    const draft = { width: 4, height: 3, tier: 1, minPlayers: 3, chestRadius: 4, settleTimeoutSecs: 7200, biome: Biome.Crypt, tiles, entrance: { x: 0, y: 0 }, exit: { x: 3, y: 0 }, spawns: [], chests, bossTable: 1, packs };
     const b = await buildMapIxs(dm, draft);
-    expect(b.ixs.length).toBe(5);
-    const [create, layout, spawns, writePoints, finalize] = b.ixs as [Instruction, Instruction, Instruction, Instruction, Instruction];
+    expect(b.ixs.length).toBe(6);
+    const [create, layout, spawns, writePoints, arena, finalize] = b.ixs as [Instruction, Instruction, Instruction, Instruction, Instruction, Instruction];
+    // write_arena: pack u8, PackLayout (visible, x, y, facing, width, height), Vec<u8> of the rows.
+    expect(toHex(arena.data as Uint8Array)).toBe(toHex(concat(ixDisc("write_arena"), Uint8Array.of(2, 0, 3, 2, 5, 2, 2, 4, 0, 0, 0, 8, 9, 10, 11))));
     const index = new Uint8Array(4);
     new DataView(index.buffer).setUint32(0, b.index, true);
     // MapSettings: min_players, chest_radius, settle_timeout_secs (u32 LE, 7200 = 0x1c20), biome (Crypt = 2).
@@ -529,7 +534,25 @@ describe("decoders", () => {
       v.chestRadius = 4;
       v.settleTimeoutSecs = 600;
       v.tileCost = Uint8Array.from({ length: 32 }, (_, i) => (i === 10 ? 7 : 0));
+      v.mode = 2;
+      v.arenaPack = 3;
+      v.packs[3] = { visible: 4, x: 12, y: 13, facing: 5, width: 8, height: 9 };
+      v.packsAlive = 0b1110;
+      v.unitTime[11] = 0x0201;
+      v.playerDex[3] = 0x0403;
     });
+    // Arena update appends mode, arena_pack, engaged_by, packs (8 x 6), packs_alive, map_width,
+    // map_height, map_pos (4 x 2), map_order (4), map_order_len, map_turn_index, map_round (u16),
+    // unit_time (12 x u32), player_dex (4 x u16): 126 bytes.
+    const arena = 3 + 48 + 1 + 2 + 8 + 4 + 2 + 2 + 48 + 8;
+    expect(arena).toBe(126);
+    expect(Array.from(s.bytes.subarray(-arena, -arena + 2))).toEqual([2, 3]);
+    expect(Array.from(s.bytes.subarray(-arena + 3 + 18, -arena + 3 + 24))).toEqual([4, 12, 13, 5, 8, 9]);
+    expect(s.bytes[s.bytes.length - arena + 51]).toBe(0b1110);
+    expect(Array.from(s.bytes.subarray(-12, -8))).toEqual([1, 2, 0, 0]);
+    expect(Array.from(s.bytes.subarray(-2))).toEqual([3, 4]);
+    expect([s.back.mode, s.back.arenaPack, s.back.packs[3].y, s.back.unitTime[11], s.back.playerDex[3]]).toEqual([2, 3, 13, 0x0201, 0x0403]);
+    s.bytes = s.bytes.subarray(0, -arena);
     // Patch 13 appends tile_cost by tile type (32 bytes) and drops the patch 1 `[u8; 7]`.
     expect(s.bytes[s.bytes.length - 32 + 10]).toBe(7);
     expect(s.back.tileCost[10]).toBe(7);
@@ -605,8 +628,8 @@ describe("decoders", () => {
     expect(p.back.hpMax).toBe(30);
     expect(Array.from(p.back.equipment)).toEqual([0, 0xff, 0xff, 3, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
     expect(p.back.mods[ModKind.Weakening]).toEqual(mod);
+    // Arena update (version 2): the live slots are the arena's pack (8), the copies per template.
     const m = roundTrip("MonsterState", (v) => {
-      v.cooldowns[2] = Uint8Array.of(1, 0, 3, 0);
       v.mods[2][ModKind.Slow] = { kind: ModKind.Slow, aspect: Aspect.Cold, turns: 2, powerBp: 2_500, source: 1 };
       v.defense[1] = { resist: 2, immuneAspects: 0, immuneStates: 4 };
       v.burningCells[0] = { x: 3, y: 4, untilRound: 7, power: 5, source: 1 };
@@ -622,40 +645,49 @@ describe("decoders", () => {
       v.lootIds = Uint8Array.from({ length: 12 }, (_, i) => (i === 0 ? 4 : 0xff));
       v.lootTables[0] = Uint8Array.from({ length: 108 }, (_, i) => (i === 0 ? 1 : 0));
       v.resTriples = Uint8Array.from({ length: 1920 }, (_, i) => (i === 0 ? 7 : i === 1919 ? 9 : 0));
+      v.spawnOf = Uint8Array.of(6, 5, 4, 0, 0, 0, 0, 0);
+      v.templateIds = Uint8Array.from({ length: 12 }, (_, i) => (i === 0 ? 2 : 0xff));
+      v.templates[0] = Uint8Array.from({ length: 48 }, (_, i) => 200 - i);
+      v.skillIds = Uint16Array.from({ length: 32 }, (_, i) => (i === 0 ? 0x0102 : 0));
     });
-    // The triples pass appends res_triples (120 x 16), last in the account.
+    expect(m.bytes.length).toBe(8_100);
+    // The arena update appends spawn_of (8), template_ids (12), templates (12 x 48), skill_ids
+    // (32 x u16), last in the account.
+    const arenaM = 8 + 12 + 12 * 48 + 32 * 2;
+    expect(Array.from(m.bytes.subarray(-arenaM, -arenaM + 3))).toEqual([6, 5, 4]);
+    expect(m.bytes[m.bytes.length - arenaM + 8]).toBe(2);
+    expect(m.bytes[m.bytes.length - arenaM + 20]).toBe(200);
+    expect(Array.from(m.bytes.subarray(-64, -62))).toEqual([2, 1]);
+    expect([m.back.spawnOf[1], m.back.templateIds[0], m.back.skillIds[0]]).toEqual([5, 2, 0x0102]);
+    m.bytes = m.bytes.subarray(0, -arenaM);
+    // The triples pass: res_triples (120 x 16).
     expect(m.bytes[m.bytes.length - 1920]).toBe(7);
     expect(m.bytes[m.bytes.length - 1]).toBe(9);
-    expect([m.back.resTriples[0], m.back.resTriples[1919]]).toEqual([7, 9]);
     m.bytes = m.bytes.subarray(0, -1920);
-    // Patch 11 appends loot_ids (12) and loot_tables (12 x 108).
+    // Patch 11: loot_ids (12) and loot_tables (12 x 108).
     const p11m = 12 + 12 * 108;
     expect(Array.from(m.bytes.subarray(-p11m, -p11m + 2))).toEqual([4, 0xff]);
     expect(m.bytes[m.bytes.length - 12 * 108]).toBe(1);
-    expect(m.back.lootIds[0]).toBe(4);
     m.bytes = m.bytes.subarray(0, -p11m);
-    // Patch 9 appends resist_mods (24 x 14) and aura_weights (24 x 2 x 6).
-    const p9m = 24 * 14 + 24 * 2 * 6;
+    // Patch 9: resist_mods (8 x 14) and aura_weights (8 x 2 x 6).
+    const p9m = 8 * 14 + 8 * 2 * 6;
     expect(m.bytes[m.bytes.length - p9m + 3 * 14]).toBe(ModKind.Resistance);
-    expect(m.bytes[m.bytes.length - 24 * 2 * 6 + 12]).toBe(100);
-    expect(Array.from(m.back.resistMods[3].weightsPct)).toEqual([0, 100, 0, 0, 0, 0]);
-    expect(Array.from(m.back.auraWeights[1][0])).toEqual([100, 0, 0, 0, 0, 0]);
+    expect(m.bytes[m.bytes.length - 8 * 2 * 6 + 12]).toBe(100);
     m.bytes = m.bytes.subarray(0, -p9m);
-    // Patch 6 appends records (24 x 48), skill_table (32 x 16), skill_count, skills and
-    // skill_cooldowns (24 x 7 each), auras (24 x 2).
-    const p6m = 24 * 48 + 32 * 16 + 1 + 2 * 24 * 7 + 48 * getMonsterAuraDataEncoder().fixedSize;
+    // Patch 6: records (8 x 48), skill_table (32 x 16), skill_count, skills and skill_cooldowns
+    // (8 x 7 each), auras (8 x 2).
+    const p6m = 8 * 48 + 32 * 16 + 1 + 2 * 8 * 7 + 16 * getMonsterAuraDataEncoder().fixedSize;
     expect(Array.from(m.bytes.subarray(-p6m + 48, -p6m + 52))).toEqual([0, 1, 2, 3]);
-    expect(m.bytes[m.bytes.length - p6m + 24 * 48]).toBe(100);
-    expect(m.bytes[m.bytes.length - p6m + 24 * 48 + 32 * 16]).toBe(1);
+    expect(m.bytes[m.bytes.length - p6m + 8 * 48]).toBe(100);
+    expect(m.bytes[m.bytes.length - p6m + 8 * 48 + 32 * 16]).toBe(1);
     expect([m.back.skillCount, Array.from(m.back.skills[1]), Array.from(m.back.skillCooldowns[1]).slice(0, 1)]).toEqual([1, [0, 0xff, 0xff, 0xff, 0xff, 0xff, 0], [2]]);
     expect([m.back.auras[1][0].aura.turns, m.back.auras[1][0].kinOnly]).toEqual([255, true]);
     m.bytes = m.bytes.subarray(0, -p6m);
-    expect(m.back.cooldowns).toHaveLength(24);
-    expect(Array.from(m.back.cooldowns[2])).toEqual([1, 0, 3, 0]);
-    // After the mods (24 x 6 x 8): defense (24 x 3), the tables (48 + 192 + 576), burning cells (16 x 9).
-    const tail = 24 * 3 + 48 + 192 + 576 + 16 * 9;
-    expect(m.back.mods).toHaveLength(24);
-    expect(Array.from(m.bytes.subarray(-tail - 1152 + 2 * 48 + 8, -tail - 1152 + 2 * 48 + 11))).toEqual([ModKind.Slow, Aspect.Cold, 2]);
+    // After the core: the mods (8 x 6 x 8), defense (8 x 3), the tables (48 + 192 + 576), burning
+    // cells (16 x 9).
+    const tail = 8 * 3 + 48 + 192 + 576 + 16 * 9;
+    expect(m.back.mods).toHaveLength(8);
+    expect(Array.from(m.bytes.subarray(-tail - 384 + 2 * 48 + 8, -tail - 384 + 2 * 48 + 11))).toEqual([ModKind.Slow, Aspect.Cold, 2]);
     expect(Array.from(m.bytes.subarray(-tail + 3, -tail + 6))).toEqual([2, 0, 4]);
     expect(Array.from(m.bytes.subarray(-16 * 9, -16 * 9 + 9))).toEqual([3, 4, 7, 0, 5, 0, 0, 0, 1]);
     expect(m.back.burningCells[0]).toEqual({ x: 3, y: 4, untilRound: 7, power: 5, source: 1 });

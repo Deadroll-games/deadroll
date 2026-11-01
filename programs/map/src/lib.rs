@@ -9,7 +9,7 @@ pub mod instructions;
 pub mod state;
 pub mod trust;
 
-use deadroll_types::{MapPoint, MapStatus, Spawn};
+use deadroll_types::{MapPoint, MapStatus, PackLayout, Spawn};
 use instructions::*;
 use state::MapSettings;
 
@@ -51,6 +51,17 @@ pub mod deadroll_map {
         boss_table: u8,
     ) -> Result<()> {
         write_points::handler(ctx, points, boss_table)
+    }
+
+    /// Arena update: DM replaces one pack's record (visible monster, map cell, facing, arena size)
+    /// and its arena cells in a draft layout.
+    pub fn write_arena(
+        ctx: Context<WriteLayout>,
+        pack: u8,
+        record: PackLayout,
+        cells: Vec<u8>,
+    ) -> Result<()> {
+        write_arena::handler(ctx, pack, record, cells)
     }
 
     /// DM finalizes a draft: builder rules, layout hash, secrets root. The map is immutable after.

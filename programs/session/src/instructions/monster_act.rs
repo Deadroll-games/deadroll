@@ -113,6 +113,7 @@ pub fn handler(ctx: Context<MonsterAct>, monster: u8, action: u8, target: u8) ->
         SessionError::NotYourTurn
     );
     require!(session.turn_started(), SessionError::TurnNotStarted);
+    session.require_in_play()?;
     let mut state = monsters.get(monster)?;
     require!(state.alive, SessionError::UnitDead);
     // One attack per turn, like players (PARTY_AND_TURNS 5.1).
@@ -281,7 +282,7 @@ fn check_line(
     to: Cell,
 ) -> Result<()> {
     if let Some(k) = skill.filter(|k| k.stats.blocks.target == Target::Line) {
-        let layout = MapLayoutView::load(layout)?;
+        let layout = MapLayoutView::load(layout, session.ground())?;
         let line = skill_line(session, &layout, from, to, k.stats.ext.range);
         require!(line.index_of(to).is_some(), SessionError::LineBlocked);
     }

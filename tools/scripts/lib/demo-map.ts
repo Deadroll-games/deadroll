@@ -63,6 +63,22 @@ export type Spawn = {
   aspects: number;
   pack: number;
 };
+/** Arena update: `Facing` discriminants (crates/types), clockwise from the north. */
+export const FACINGS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"] as const;
+/** `PACKS_MAX`, `ARENA_SIDE_MAX` (crates/types). */
+export const PACKS_MAX = 8;
+export const ARENA_SIDE_MAX = 12;
+/** One pack (`PackLayout`) and its arena cells, `width` cells per row (`write_arena`). */
+export type Pack = {
+  pack: number;
+  visible: number;
+  x: number;
+  y: number;
+  facing: number;
+  width: number;
+  height: number;
+  cells: Uint8Array;
+};
 /** A visible chest (`MapPoint` with `PointKind::Chest`): the cell and its reward table id. */
 export type Chest = { x: number; y: number; table: number };
 export type MapPreset = {
@@ -85,7 +101,9 @@ export type MapPreset = {
   tiles: Uint8Array;
   entrance: Cell;
   exit: Cell;
+  /** Arena update: a spawn's `x`, `y` are its cell in its pack's arena. */
   spawns: Spawn[];
+  packs: Pack[];
 };
 
 export const DEMO_MAP_PATH = new URL("../../../assets/registry/maps/demo_16x16.json", import.meta.url);
@@ -152,12 +170,33 @@ export function parseMapPreset(json: any): MapPreset {
     y: u8(c.y, `chest ${i} y`),
     table: u8(c.table, `chest ${i} table`),
   }));
+  const packList: unknown = json.packs ?? [];
+  if (!Array.isArray(packList) || packList.length > PACKS_MAX) throw new Error(`packs must be a list of at most ${PACKS_MAX}`);
+  const packs = packList.map((p: any, i: number): Pack => {
+    const arenaRows: unknown = p.rows;
+    if (!Array.isArray(arenaRows) || arenaRows.length === 0 || arenaRows.length > ARENA_SIDE_MAX) throw new Error(`pack ${i}: 1 to ${ARENA_SIDE_MAX} arena rows`);
+    const w = [...String(arenaRows[0])].length;
+    if (w > ARENA_SIDE_MAX) throw new Error(`pack ${i}: arena wider than ${ARENA_SIDE_MAX}`);
+    const cells = new Uint8Array(w * arenaRows.length);
+    arenaRows.forEach((row: unknown, y: number) => {
+      const chars = [...String(row)];
+      if (chars.length !== w) throw new Error(`pack ${i}: arena row ${y} length`);
+      chars.forEach((ch, x) => {
+        const tile = LEGEND[ch];
+        if (tile === undefined || ch === "E" || ch === "X") throw new Error(`pack ${i}: arena tile ${JSON.stringify(ch)}`);
+        cells[y * w + x] = cellByte(tile);
+      });
+    });
+    const facing = FACINGS.indexOf(p.facing);
+    if (facing < 0) throw new Error(`pack ${i}: facing must be one of ${FACINGS.join(", ")}`);
+    return { pack: u8(p.pack, `pack ${i} pack`), visible: u8(p.visible, `pack ${i} visible`), x: u8(p.x, `pack ${i} x`), y: u8(p.y, `pack ${i} y`), facing, width: w, height: arenaRows.length, cells };
+  });
   const minPlayers = u8(json.min_players ?? 1, "min_players");
   const bossTable = u8(json.boss_table ?? NO_TABLE, "boss_table");
   const chestRadius = u8(json.chest_radius ?? 3, "chest_radius");
   const settleTimeoutSecs = Number(json.settle_timeout_secs ?? 3600);
   if (!Number.isInteger(settleTimeoutSecs) || settleTimeoutSecs < 1) throw new Error("settle_timeout_secs must be a positive integer");
-  return { name: String(json.name ?? ""), width, height, tier, biome, minPlayers, chestRadius, settleTimeoutSecs, bossTable, chests, tiles, entrance, exit, spawns };
+  return { name: String(json.name ?? ""), width, height, tier, biome, minPlayers, chestRadius, settleTimeoutSecs, bossTable, chests, tiles, entrance, exit, spawns, packs };
 }
 
 export function loadMapPreset(path: string | URL = DEMO_MAP_PATH): MapPreset {

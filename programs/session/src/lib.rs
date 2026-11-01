@@ -1,6 +1,7 @@
 //! Deadroll session: party, turns, combat, VRF callback, escrow.
 use anchor_lang::prelude::*;
 
+pub mod arena;
 pub mod auth;
 pub mod combat_input;
 // Outgoing CPI wrappers. Not named `cpi`: `#[program]` generates a crate-level `cpi` module.
@@ -73,6 +74,18 @@ pub mod deadroll_session {
     /// durations and cooldowns count down. A skip or a death ends the turn on its own.
     pub fn start_turn<'info>(ctx: Context<'info, StartTurn<'info>>) -> Result<()> {
         start_turn::handler(ctx)
+    }
+
+    /// Arena update: the party goes into the arena of the pack a player stepped next to
+    /// (permissionless). `remaining_accounts`: each living player's `Participation`, by slot.
+    pub fn enter_arena<'info>(ctx: Context<'info, EnterArena<'info>>) -> Result<()> {
+        enter_arena::handler(ctx)
+    }
+
+    /// Arena update: the arena's pack is dead; pays it and brings the party back to the map
+    /// (permissionless). `remaining_accounts`: each living player's `Participation`, by slot.
+    pub fn leave_arena<'info>(ctx: Context<'info, LeaveArena<'info>>) -> Result<()> {
+        leave_arena::handler(ctx)
     }
 
     /// Patch 13: the actor moves `unit` (a player slot, or a monster of the DM) along `path`, the

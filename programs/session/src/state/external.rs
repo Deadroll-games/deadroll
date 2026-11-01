@@ -16,8 +16,9 @@ use deadroll_registry::state::{
 use deadroll_rules::{items::Equipment, MonsterTemplate};
 use deadroll_skillcheck::monster::MonsterSkill;
 use deadroll_types::{
-    Cell, CharacterData, MapData, MapPoint, PointKind, Spawn, TileKind, CHESTS_MAX, MAP_CELLS,
-    MAP_MAX, POINTS_MAX, SPAWNS_MAX, TILE_KINDS_MAX,
+    Cell, CharacterData, MapArenasData, MapData, MapPoint, PackLayout, PointKind, Spawn, TileKind,
+    ARENA_CELLS, ARENA_SIDE_MAX, CHESTS_MAX, MAP_CELLS, MAP_MAX, PACKS_MAX, POINTS_MAX, SPAWNS_MAX,
+    TILE_KINDS_MAX,
 };
 
 use crate::{errors::SessionError, state::LOOT_RECORD_LEN};
@@ -117,31 +118,72 @@ mod layout_off {
     pub const POINTS: usize = SPAWN_COUNT + 1;
     pub const POINT_COUNT: usize = POINTS + POINTS_MAX * MapPoint::SIZE;
     pub const BOSS_TABLE: usize = POINT_COUNT + 1;
-    /// After the bump.
-    pub const END: usize = BOSS_TABLE + 2;
+    /// After the bump: the end of the core.
+    pub const CORE_END: usize = BOSS_TABLE + 2;
+    /// Arena update: `MapArenasData` after the core.
+    pub const PACKS: usize = CORE_END;
+    pub const ARENAS: usize = PACKS + PACKS_MAX * PackLayout::SIZE;
+    pub const END: usize = ARENAS + PACKS_MAX * ARENA_CELLS;
 }
 
-/// `MapLayout.core.version` of the `MapLayoutDataV2` format (`deadroll_map::state::LAYOUT_VERSION`).
-pub const LAYOUT_VERSION: u8 = 2;
+/// `MapLayout.core.version` of the format (`deadroll_map::state::LAYOUT_VERSION`): arena update,
+/// `MapLayoutDataV2` and `MapArenasData`.
+pub const LAYOUT_VERSION: u8 = 3;
+/// The layout version before the arena update (no arenas: such a map cannot open a party).
+pub const LAYOUT_VERSION_NO_ARENAS: u8 = 2;
 
-/// A `deadroll_map` `MapLayout` account, read in place (the account is ~1.3 KB, too big to copy
+/// A `deadroll_map` `MapLayout` account, read in place (the account is ~2.5 KB, too big to copy
 /// onto the stack on every move).
+///
+/// Arena update: the view reads the ground the units stand on, the map or pack `arena`'s arena
+/// (`GameSession::ground`): [`Self::tile`] gives that ground's cells.
 pub struct MapLayoutView<'a> {
     data: core::cell::Ref<'a, &'a mut [u8]>,
+    arena: Option<u8>,
 }
 
 impl<'a> MapLayoutView<'a> {
-    pub fn load<'info>(info: &'a AccountInfo<'info>) -> Result<Self> {
+    /// The layout with the cells of `arena`'s arena, or of the map for `None`.
+    pub fn load<'info>(info: &'a AccountInfo<'info>, arena: Option<u8>) -> Result<Self> {
         require!(
             check_header(info, &deadroll_map::ID, &MAP_LAYOUT_DISCRIMINATOR),
             SessionError::InvalidLayout
         );
         let data = info.try_borrow_data()?;
+        if data.len() > layout_off::VERSION && data[layout_off::VERSION] == LAYOUT_VERSION_NO_ARENAS
+        {
+            return err!(SessionError::MapWithoutArenas);
+        }
         require!(
             data.len() >= layout_off::END && data[layout_off::VERSION] == LAYOUT_VERSION,
             SessionError::InvalidLayout
         );
-        Ok(Self { data })
+        require!(
+            arena.is_none_or(|p| (p as usize) < PACKS_MAX),
+            SessionError::InvalidLayout
+        );
+        Ok(Self { data, arena })
+    }
+
+    /// Arena update: pack `pack`'s record.
+    pub fn pack(&self, pack: u8) -> Result<PackLayout> {
+        require!((pack as usize) < PACKS_MAX, SessionError::InvalidLayout);
+        let at = layout_off::PACKS + pack as usize * PackLayout::SIZE;
+        PackLayout::deserialize(&mut &self.data[at..at + PackLayout::SIZE])
+            .map_err(|_| error!(SessionError::InvalidLayout))
+    }
+
+    /// Arena update: every pack record and arena (1.2 KB, kept in a `Box`).
+    pub fn arenas(&self) -> Result<Box<MapArenasData>> {
+        let mut out = Box::new(MapArenasData::EMPTY);
+        for (n, p) in out.packs.iter_mut().enumerate() {
+            *p = self.pack(n as u8)?;
+        }
+        for (n, cells) in out.cells.iter_mut().enumerate() {
+            let at = layout_off::ARENAS + n * ARENA_CELLS;
+            cells.copy_from_slice(&self.data[at..at + ARENA_CELLS]);
+        }
+        Ok(out)
     }
 
     pub fn map(&self) -> Pubkey {
@@ -150,12 +192,27 @@ impl<'a> MapLayoutView<'a> {
         Pubkey::new_from_array(key)
     }
 
-    /// Raw cell byte (tile type and variant, `deadroll_types::cell_kind`); callers check bounds
-    /// against the map size first.
+    /// Raw cell byte (tile type and variant, `deadroll_types::cell_kind`) of the view's ground;
+    /// callers check bounds against its size first (`GameSession.width`, `height`).
     pub fn tile(&self, x: u8, y: u8) -> Result<u8> {
-        let index = y as usize * MAP_MAX + x as usize;
-        require!(index < MAP_CELLS, SessionError::OutOfBounds);
-        Ok(self.data[layout_off::CELLS + index])
+        match self.arena {
+            None => {
+                let index = y as usize * MAP_MAX + x as usize;
+                require!(index < MAP_CELLS, SessionError::OutOfBounds);
+                Ok(self.data[layout_off::CELLS + index])
+            }
+            Some(pack) => {
+                require!(
+                    (x as usize) < ARENA_SIDE_MAX && (y as usize) < ARENA_SIDE_MAX,
+                    SessionError::OutOfBounds
+                );
+                let at = layout_off::ARENAS
+                    + pack as usize * ARENA_CELLS
+                    + y as usize * ARENA_SIDE_MAX
+                    + x as usize;
+                Ok(self.data[at])
+            }
+        }
     }
 
     /// Patch 13: the points in use (`finalize_map` checked them).
@@ -702,5 +759,50 @@ mod tests {
             code(read_skill(&short.info(), &character, 0).unwrap_err()),
             invalid
         );
+    }
+
+    #[test]
+    fn the_layout_view_reads_the_map_or_an_arena() {
+        use crate::state::test_support::layout_account;
+        use deadroll_types::{cell_byte, ARENA_SIDE_MAX};
+        let mut account = layout_account(Pubkey::new_unique());
+        // Pack 2's arena: one wall at (3, 1).
+        let wall = cell_byte(TileKind::Wall as u8, 0);
+        let at = layout_off::ARENAS + 2 * ARENA_CELLS + ARENA_SIDE_MAX + 3;
+        account.data[at] = wall;
+        let p = layout_off::PACKS + 2 * PackLayout::SIZE;
+        account.data[p..p + PackLayout::SIZE].copy_from_slice(&[1, 9, 9, 2, 6, 6]);
+        let info = account.info();
+        let map = MapLayoutView::load(&info, None).unwrap();
+        assert_ne!(map.tile(3, 1).unwrap(), wall);
+        assert_eq!(map.pack(2).unwrap().cell(), Cell { x: 9, y: 9 });
+        assert_eq!(map.pack(2).unwrap().facing, deadroll_types::Facing::E);
+        assert_eq!(map.arenas().unwrap().cell(2, 3, 1), Some(wall));
+        assert!(map.pack(PACKS_MAX as u8).is_err());
+        drop(map);
+        let arena = MapLayoutView::load(&info, Some(2)).unwrap();
+        assert_eq!(arena.tile(3, 1).unwrap(), wall);
+        assert!(arena.tile(ARENA_SIDE_MAX as u8, 0).is_err());
+        drop(arena);
+        assert!(MapLayoutView::load(&info, Some(PACKS_MAX as u8)).is_err());
+    }
+
+    #[test]
+    fn a_layout_without_arenas_cannot_open_a_party() {
+        use crate::state::test_support::layout_account;
+        let mut account = layout_account(Pubkey::new_unique());
+        account.data[layout_off::VERSION] = LAYOUT_VERSION_NO_ARENAS;
+        let err = MapLayoutView::load(&account.info(), None).err().unwrap();
+        match err {
+            Error::AnchorError(e) => assert_eq!(
+                e.error_code_number,
+                u32::from(SessionError::MapWithoutArenas)
+            ),
+            other => panic!("unexpected {other:?}"),
+        }
+        // Too short for the arenas: refused.
+        let mut short = layout_account(Pubkey::new_unique());
+        short.data.truncate(layout_off::CORE_END + 16);
+        assert!(MapLayoutView::load(&short.info(), None).is_err());
     }
 }

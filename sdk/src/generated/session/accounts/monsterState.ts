@@ -21,6 +21,8 @@ import {
   getBytesEncoder,
   getStructDecoder,
   getStructEncoder,
+  getU16Decoder,
+  getU16Encoder,
   getU8Decoder,
   getU8Encoder,
   transformEncoder,
@@ -75,16 +77,18 @@ export function getMonsterStateDiscriminatorBytes(): ReadonlyUint8Array {
 
 export type MonsterState = {
   discriminator: ReadonlyUint8Array;
-  /** Frozen contract, first after the discriminator. */
-  core: MonsterStateData;
-  /** Not used since patch 6 (`skill_cooldowns` holds every monster slot). Kept for the layout. */
-  cooldowns: Array<ReadonlyUint8Array>;
   /**
-   * Per monster: buffs and debuffs (`deadroll_combat::support`), like `Participation.mods`
+   * Frozen contract, first after the discriminator. Arena update: `monsters[..count]` are the
+   * arena's pack (`count <= ARENA_MONSTERS_MAX`); the entries past `ARENA_MONSTERS_MAX` are not
+   * used.
+   */
+  core: MonsterStateData;
+  /**
+   * Per arena slot: buffs and debuffs (`deadroll_combat::support`), like `Participation.mods`
    * (the Resistance is in `resist_mods`).
    */
   mods: Array<Array<TimedModData>>;
-  /** Per monster: the defenses of its bestiary record. */
+  /** Per arena slot: the defenses of its bestiary record. */
   defense: Array<MonsterDefenseData>;
   /**
    * The registry `aspects`, `traits` and `resonances` table bodies
@@ -95,7 +99,7 @@ export type MonsterState = {
   resPairs: ReadonlyUint8Array;
   /** Cells set on fire by a resonance (`deadroll_rules::spread`); `power == 0` is free. */
   burningCells: Array<BurningCellData>;
-  /** Per monster: its bestiary record (`deadroll_rules::monster::record`). */
+  /** Per arena slot: its bestiary record (`deadroll_rules::monster::record`), from `templates`. */
   records: Array<ReadonlyUint8Array>;
   /**
    * Every skill the spawns took, each once (the session copy of
@@ -104,39 +108,54 @@ export type MonsterState = {
   skillTable: Array<ReadonlyUint8Array>;
   skillCount: number;
   /**
-   * Per monster, per slot (`0..5` active, `5` reactive, `6` passive): an index into
+   * Per arena slot, per skill slot (`0..5` active, `5` reactive, `6` passive): an index into
    * `skill_table`, `NO_SKILL` (0xFF) = empty.
    */
   skills: Array<ReadonlyUint8Array>;
   /**
-   * Per monster, per slot: own turn starts until usable (the reactive's too), counted down by
-   * `start_turn`.
+   * Per arena slot, per skill slot: own turn starts until usable (the reactive's too), counted
+   * down by `start_turn`.
    */
   skillCooldowns: Array<ReadonlyUint8Array>;
-  /** Per monster: its passive skill's aura (from `open_session`), then its reactive skill's. */
+  /** Per arena slot: its passive skill's aura (from `enter_arena`), then its reactive skill's. */
   auras: Array<Array<MonsterAuraData>>;
-  /** Per monster: its Resistance with the aspect weights, like `Participation.resist_mod`. */
+  /** Per arena slot: its Resistance with the aspect weights, like `Participation.resist_mod`. */
   resistMods: Array<ResistModData>;
-  /** Per monster, per aura slot: a Resistance aura's aspect weights. */
+  /** Per arena slot, per aura slot: a Resistance aura's aspect weights. */
   auraWeights: Array<Array<ReadonlyUint8Array>>;
   /** Registry id of each copied table, `NO_TABLE` = free. */
   lootIds: ReadonlyUint8Array;
   /** The copied records (`deadroll_rules::loot::record`), by `loot_ids` position. */
   lootTables: Array<ReadonlyUint8Array>;
   resTriples: ReadonlyUint8Array;
+  /** Per arena slot: the spawn of the map layout it was loaded from. */
+  spawnOf: ReadonlyUint8Array;
+  /**
+   * The bestiary records of the party's templates, each once, copied at `open_session`;
+   * `template_ids` gives their bestiary ids, `NO_TEMPLATE` = free.
+   */
+  templateIds: ReadonlyUint8Array;
+  templates: Array<ReadonlyUint8Array>;
+  /**
+   * The registry `monster_skills` index of each `skill_table` entry: `enter_arena` finds a
+   * spawn's chosen skills there.
+   */
+  skillIds: Array<number>;
 };
 
 export type MonsterStateArgs = {
-  /** Frozen contract, first after the discriminator. */
-  core: MonsterStateDataArgs;
-  /** Not used since patch 6 (`skill_cooldowns` holds every monster slot). Kept for the layout. */
-  cooldowns: Array<ReadonlyUint8Array>;
   /**
-   * Per monster: buffs and debuffs (`deadroll_combat::support`), like `Participation.mods`
+   * Frozen contract, first after the discriminator. Arena update: `monsters[..count]` are the
+   * arena's pack (`count <= ARENA_MONSTERS_MAX`); the entries past `ARENA_MONSTERS_MAX` are not
+   * used.
+   */
+  core: MonsterStateDataArgs;
+  /**
+   * Per arena slot: buffs and debuffs (`deadroll_combat::support`), like `Participation.mods`
    * (the Resistance is in `resist_mods`).
    */
   mods: Array<Array<TimedModDataArgs>>;
-  /** Per monster: the defenses of its bestiary record. */
+  /** Per arena slot: the defenses of its bestiary record. */
   defense: Array<MonsterDefenseDataArgs>;
   /**
    * The registry `aspects`, `traits` and `resonances` table bodies
@@ -147,7 +166,7 @@ export type MonsterStateArgs = {
   resPairs: ReadonlyUint8Array;
   /** Cells set on fire by a resonance (`deadroll_rules::spread`); `power == 0` is free. */
   burningCells: Array<BurningCellDataArgs>;
-  /** Per monster: its bestiary record (`deadroll_rules::monster::record`). */
+  /** Per arena slot: its bestiary record (`deadroll_rules::monster::record`), from `templates`. */
   records: Array<ReadonlyUint8Array>;
   /**
    * Every skill the spawns took, each once (the session copy of
@@ -156,26 +175,39 @@ export type MonsterStateArgs = {
   skillTable: Array<ReadonlyUint8Array>;
   skillCount: number;
   /**
-   * Per monster, per slot (`0..5` active, `5` reactive, `6` passive): an index into
+   * Per arena slot, per skill slot (`0..5` active, `5` reactive, `6` passive): an index into
    * `skill_table`, `NO_SKILL` (0xFF) = empty.
    */
   skills: Array<ReadonlyUint8Array>;
   /**
-   * Per monster, per slot: own turn starts until usable (the reactive's too), counted down by
-   * `start_turn`.
+   * Per arena slot, per skill slot: own turn starts until usable (the reactive's too), counted
+   * down by `start_turn`.
    */
   skillCooldowns: Array<ReadonlyUint8Array>;
-  /** Per monster: its passive skill's aura (from `open_session`), then its reactive skill's. */
+  /** Per arena slot: its passive skill's aura (from `enter_arena`), then its reactive skill's. */
   auras: Array<Array<MonsterAuraDataArgs>>;
-  /** Per monster: its Resistance with the aspect weights, like `Participation.resist_mod`. */
+  /** Per arena slot: its Resistance with the aspect weights, like `Participation.resist_mod`. */
   resistMods: Array<ResistModDataArgs>;
-  /** Per monster, per aura slot: a Resistance aura's aspect weights. */
+  /** Per arena slot, per aura slot: a Resistance aura's aspect weights. */
   auraWeights: Array<Array<ReadonlyUint8Array>>;
   /** Registry id of each copied table, `NO_TABLE` = free. */
   lootIds: ReadonlyUint8Array;
   /** The copied records (`deadroll_rules::loot::record`), by `loot_ids` position. */
   lootTables: Array<ReadonlyUint8Array>;
   resTriples: ReadonlyUint8Array;
+  /** Per arena slot: the spawn of the map layout it was loaded from. */
+  spawnOf: ReadonlyUint8Array;
+  /**
+   * The bestiary records of the party's templates, each once, copied at `open_session`;
+   * `template_ids` gives their bestiary ids, `NO_TEMPLATE` = free.
+   */
+  templateIds: ReadonlyUint8Array;
+  templates: Array<ReadonlyUint8Array>;
+  /**
+   * The registry `monster_skills` index of each `skill_table` entry: `enter_arena` finds a
+   * spawn's chosen skills there.
+   */
+  skillIds: Array<number>;
 };
 
 /** Gets the encoder for {@link MonsterStateArgs} account data. */
@@ -185,20 +217,13 @@ export function getMonsterStateEncoder(): FixedSizeEncoder<MonsterStateArgs> {
       ["discriminator", fixEncoderSize(getBytesEncoder(), 8)],
       ["core", getMonsterStateDataEncoder()],
       [
-        "cooldowns",
-        getArrayEncoder(fixEncoderSize(getBytesEncoder(), 4), { size: 24 }),
-      ],
-      [
         "mods",
         getArrayEncoder(
           getArrayEncoder(getTimedModDataEncoder(), { size: 6 }),
-          { size: 24 },
+          { size: 8 },
         ),
       ],
-      [
-        "defense",
-        getArrayEncoder(getMonsterDefenseDataEncoder(), { size: 24 }),
-      ],
+      ["defense", getArrayEncoder(getMonsterDefenseDataEncoder(), { size: 8 })],
       ["resAspects", fixEncoderSize(getBytesEncoder(), 48)],
       ["resTraits", fixEncoderSize(getBytesEncoder(), 192)],
       ["resPairs", fixEncoderSize(getBytesEncoder(), 576)],
@@ -208,7 +233,7 @@ export function getMonsterStateEncoder(): FixedSizeEncoder<MonsterStateArgs> {
       ],
       [
         "records",
-        getArrayEncoder(fixEncoderSize(getBytesEncoder(), 48), { size: 24 }),
+        getArrayEncoder(fixEncoderSize(getBytesEncoder(), 48), { size: 8 }),
       ],
       [
         "skillTable",
@@ -217,25 +242,25 @@ export function getMonsterStateEncoder(): FixedSizeEncoder<MonsterStateArgs> {
       ["skillCount", getU8Encoder()],
       [
         "skills",
-        getArrayEncoder(fixEncoderSize(getBytesEncoder(), 7), { size: 24 }),
+        getArrayEncoder(fixEncoderSize(getBytesEncoder(), 7), { size: 8 }),
       ],
       [
         "skillCooldowns",
-        getArrayEncoder(fixEncoderSize(getBytesEncoder(), 7), { size: 24 }),
+        getArrayEncoder(fixEncoderSize(getBytesEncoder(), 7), { size: 8 }),
       ],
       [
         "auras",
         getArrayEncoder(
           getArrayEncoder(getMonsterAuraDataEncoder(), { size: 2 }),
-          { size: 24 },
+          { size: 8 },
         ),
       ],
-      ["resistMods", getArrayEncoder(getResistModDataEncoder(), { size: 24 })],
+      ["resistMods", getArrayEncoder(getResistModDataEncoder(), { size: 8 })],
       [
         "auraWeights",
         getArrayEncoder(
           getArrayEncoder(fixEncoderSize(getBytesEncoder(), 6), { size: 2 }),
-          { size: 24 },
+          { size: 8 },
         ),
       ],
       ["lootIds", fixEncoderSize(getBytesEncoder(), 12)],
@@ -244,6 +269,13 @@ export function getMonsterStateEncoder(): FixedSizeEncoder<MonsterStateArgs> {
         getArrayEncoder(fixEncoderSize(getBytesEncoder(), 108), { size: 12 }),
       ],
       ["resTriples", fixEncoderSize(getBytesEncoder(), 1920)],
+      ["spawnOf", fixEncoderSize(getBytesEncoder(), 8)],
+      ["templateIds", fixEncoderSize(getBytesEncoder(), 12)],
+      [
+        "templates",
+        getArrayEncoder(fixEncoderSize(getBytesEncoder(), 48), { size: 12 }),
+      ],
+      ["skillIds", getArrayEncoder(getU16Encoder(), { size: 32 })],
     ]),
     (value) => ({ ...value, discriminator: MONSTER_STATE_DISCRIMINATOR }),
   );
@@ -255,16 +287,12 @@ export function getMonsterStateDecoder(): FixedSizeDecoder<MonsterState> {
     ["discriminator", fixDecoderSize(getBytesDecoder(), 8)],
     ["core", getMonsterStateDataDecoder()],
     [
-      "cooldowns",
-      getArrayDecoder(fixDecoderSize(getBytesDecoder(), 4), { size: 24 }),
-    ],
-    [
       "mods",
       getArrayDecoder(getArrayDecoder(getTimedModDataDecoder(), { size: 6 }), {
-        size: 24,
+        size: 8,
       }),
     ],
-    ["defense", getArrayDecoder(getMonsterDefenseDataDecoder(), { size: 24 })],
+    ["defense", getArrayDecoder(getMonsterDefenseDataDecoder(), { size: 8 })],
     ["resAspects", fixDecoderSize(getBytesDecoder(), 48)],
     ["resTraits", fixDecoderSize(getBytesDecoder(), 192)],
     ["resPairs", fixDecoderSize(getBytesDecoder(), 576)],
@@ -274,7 +302,7 @@ export function getMonsterStateDecoder(): FixedSizeDecoder<MonsterState> {
     ],
     [
       "records",
-      getArrayDecoder(fixDecoderSize(getBytesDecoder(), 48), { size: 24 }),
+      getArrayDecoder(fixDecoderSize(getBytesDecoder(), 48), { size: 8 }),
     ],
     [
       "skillTable",
@@ -283,25 +311,25 @@ export function getMonsterStateDecoder(): FixedSizeDecoder<MonsterState> {
     ["skillCount", getU8Decoder()],
     [
       "skills",
-      getArrayDecoder(fixDecoderSize(getBytesDecoder(), 7), { size: 24 }),
+      getArrayDecoder(fixDecoderSize(getBytesDecoder(), 7), { size: 8 }),
     ],
     [
       "skillCooldowns",
-      getArrayDecoder(fixDecoderSize(getBytesDecoder(), 7), { size: 24 }),
+      getArrayDecoder(fixDecoderSize(getBytesDecoder(), 7), { size: 8 }),
     ],
     [
       "auras",
       getArrayDecoder(
         getArrayDecoder(getMonsterAuraDataDecoder(), { size: 2 }),
-        { size: 24 },
+        { size: 8 },
       ),
     ],
-    ["resistMods", getArrayDecoder(getResistModDataDecoder(), { size: 24 })],
+    ["resistMods", getArrayDecoder(getResistModDataDecoder(), { size: 8 })],
     [
       "auraWeights",
       getArrayDecoder(
         getArrayDecoder(fixDecoderSize(getBytesDecoder(), 6), { size: 2 }),
-        { size: 24 },
+        { size: 8 },
       ),
     ],
     ["lootIds", fixDecoderSize(getBytesDecoder(), 12)],
@@ -310,6 +338,13 @@ export function getMonsterStateDecoder(): FixedSizeDecoder<MonsterState> {
       getArrayDecoder(fixDecoderSize(getBytesDecoder(), 108), { size: 12 }),
     ],
     ["resTriples", fixDecoderSize(getBytesDecoder(), 1920)],
+    ["spawnOf", fixDecoderSize(getBytesDecoder(), 8)],
+    ["templateIds", fixDecoderSize(getBytesDecoder(), 12)],
+    [
+      "templates",
+      getArrayDecoder(fixDecoderSize(getBytesDecoder(), 48), { size: 12 }),
+    ],
+    ["skillIds", getArrayDecoder(getU16Decoder(), { size: 32 })],
   ]);
 }
 
@@ -375,5 +410,5 @@ export async function fetchAllMaybeMonsterState(
 }
 
 export function getMonsterStateSize(): number {
-  return 10144;
+  return 8100;
 }

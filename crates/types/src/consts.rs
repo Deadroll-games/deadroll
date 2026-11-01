@@ -64,3 +64,15 @@ pub const CITY_H_MAX: usize = 32;
 pub const CITY_CELLS: usize = CITY_W_MAX * CITY_H_MAX;
 /// Decor objects of the city (`CityData.objects`).
 pub const CITY_OBJECTS_MAX: usize = 32;
+/// Arena update: packs of one map (`MapArenasData.packs`); a spawn's `pack` is its index here.
+pub const PACKS_MAX: usize = 8;
+/// Arena update: storage cap of an arena side; `deadroll_rules::BalanceConfig.arena` sets the
+/// allowed range within it.
+pub const ARENA_SIDE_MAX: usize = 12;
+/// Cells of one stored arena, row-major, `ARENA_SIDE_MAX` per row.
+pub const ARENA_CELLS: usize = ARENA_SIDE_MAX * ARENA_SIDE_MAX;
+/// Arena update: monsters of one pack in its arena, the live slots of the session `MonsterState`.
+pub const ARENA_MONSTERS_MAX: usize = 8;
+/// Arena update: distinct bestiary templates one party copies at `open_session` (the session
+/// `MonsterState` keeps one record per template, not per monster).
+pub const SESSION_TEMPLATES_MAX: usize = 12;

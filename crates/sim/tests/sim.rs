@@ -254,6 +254,11 @@ fn presets_save_and_load_by_file() {
                 skills: Some(0b1110),
             }],
             arena: Arena::default(),
+            approach: deadroll_sim::presets::Approach::Back,
+            then: vec![deadroll_sim::presets::PackStep {
+                encounter: "goblins".into(),
+                approach: deadroll_sim::presets::Approach::Front,
+            }],
         },
     );
     p.save(&dir).unwrap();
@@ -449,4 +454,44 @@ fn shipped_item_preset_and_app_table_match_the_defaults() {
         kits.starter_kits[Class::Mage as usize],
         [Some(deadroll_types::ItemBase::Wand), None, None, None]
     );
+}
+
+/// Arena update: an encounter's `then` packs are fought one arena after the other, the party
+/// carried over; the approach picks who moves first.
+#[test]
+fn packs_are_fought_one_arena_after_the_other() {
+    use deadroll_rules::arena::FirstSide;
+    let p = shipped();
+    let cfg = BalanceConfig::DEFAULT;
+    let (f, issues) = resolve_fight(&p, "demo_arenas", &cfg);
+    assert!(issues.errors.is_empty(), "{:?}", issues.errors);
+    let f = f.unwrap();
+    assert_eq!(f.first, FirstSide::Monsters);
+    assert_eq!(f.then.len(), 2);
+    assert_eq!(f.then[0].first, FirstSide::Party);
+    assert_eq!(f.then[1].first, FirstSide::Monsters);
+    let (back, _) = resolve_fight(&p, "wolves_back", &cfg);
+    assert_eq!(back.unwrap().first, FirstSide::Party);
+
+    let ids: Vec<String> = ["human_warrior", "elf_mage", "human_support"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let (team, _) = resolve_party(&p, &ids, &cfg);
+    let mut won = 0;
+    for seed in 0..40 {
+        let s = fight(&cfg, &team, &f, Settings::default(), seed);
+        assert!((1..=3).contains(&s.packs));
+        assert!(s.hp_left <= s.hp_max && s.hp_max > 0);
+        match s.outcome {
+            // Every pack won, each paid its experience.
+            Outcome::Victory => {
+                won += 1;
+                assert_eq!((s.packs, s.packs_won), (3, 3));
+                assert!(s.xp > 0);
+            }
+            _ => assert_eq!(s.packs_won, s.packs - 1),
+        }
+    }
+    assert!(won > 0);
 }

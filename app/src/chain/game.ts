@@ -45,11 +45,13 @@ import {
   getMapLayoutDecoder,
   getMapLayoutSize,
   getMapSize,
+  getWriteArenaInstruction,
   getWritePointsInstruction,
   getWriteLayoutInstruction,
   getWriteSpawnsInstruction,
   MapStatus,
   PointKind,
+  type Facing,
   type Map as MapAccount,
 } from "@deadroll/sdk/map";
 import {
@@ -81,6 +83,8 @@ import {
   getSetSessionKeyInstruction,
   getSettlePartyInstruction,
   getStartSessionInstruction,
+  getEnterArenaInstruction,
+  getLeaveArenaInstruction,
   getStartTurnInstruction,
   type ActiveState,
   type AuraData,
@@ -139,6 +143,7 @@ import {
 } from "./pda";
 import type { GridPoint } from "../components/grid/types";
 import type { Chest } from "./loot";
+import type { PackDraft } from "./mapcheckWasm";
 import type { Step } from "./route";
 import { PRESETS, SKILL_DESCRIPTION_LEN, SKILL_NAME_LEN, type NamedSkill } from "./skillcheck";
 import { Aspect, Class, MAP_CELLS, MAP_MAX, Race, Tile, cellByte, type Cell, type Spawn } from "./types";
@@ -455,9 +460,12 @@ export type MapDraft = {
   tiles: Uint8Array;
   entrance: Cell | null;
   exit: Cell | null;
+  /** Arena update: a spawn's `x`, `y` are its cell in its pack's arena. */
   spawns: Spawn[];
   chests: Chest[];
   bossTable: number;
+  /** Arena update: the packs by number (`null`: not used), `write_arena` each. */
+  packs: (PackDraft | null)[];
 };
 
 /** Cells exactly as the chain stores them: stride 32, cells outside the map Void (0). */
@@ -483,7 +491,8 @@ export function draftPoints(d: Pick<MapDraft, "entrance" | "exit">): GridPoint[]
   ];
 }
 
-/** create_map, write_layout, write_spawns, write_points, finalize_map (one transaction each, as the test). */
+/** create_map, write_layout, write_spawns, write_points, write_arena for each pack, finalize_map (one
+ * transaction each, as the test). */
 export async function buildMapIxs(dm: TransactionSigner, d: MapDraft): Promise<{ map: Address; layout: Address; index: number; ixs: Instruction[] }> {
   const index = crypto.getRandomValues(new Uint32Array(1))[0]!;
   const map = await mapPda(dm.address, index);
@@ -496,6 +505,9 @@ export async function buildMapIxs(dm: TransactionSigner, d: MapDraft): Promise<{
     getWriteLayoutInstruction({ ...edit, offset: 0, cells: tiles.slice(0, (d.height - 1) * MAP_MAX + d.width) }),
     getWriteSpawnsInstruction({ ...edit, spawns: d.spawns }),
     getWritePointsInstruction({ ...edit, points, bossTable: d.bossTable }),
+    ...d.packs.flatMap((pk, pack) =>
+      pk ? [getWriteArenaInstruction({ ...edit, pack, record: { visible: pk.visible, x: pk.x, y: pk.y, facing: pk.facing as Facing, width: pk.width, height: pk.height }, cells: pk.cells })] : [],
+    ),
     // The builder rules read the registry bestiary, monster skills (roles, pools, slots), reward
     // tables and the tileset (patch 13).
     getFinalizeMapInstruction({
@@ -1073,13 +1085,71 @@ export type Party = {
   tiles: Uint8Array | null;
   /** Patch 13: the entrance and the exit (read with the cells, once). */
   points: GridPoint[];
+  /** Arena update: the layout's spawns (a pack's visible monster names its template) and arenas,
+   * read with the cells, once. */
+  spawns: Spawn[];
+  arenas: { cells: Uint8Array[] } | null;
+  /** Arena update: the cells the units stand on (`groundTiles`): the map's or the arena's. */
+  ground: Uint8Array | null;
 };
 
-/** The points read with a layout's cells: a caller passes the cells back, the points come along. */
-const LAYOUT_POINTS = new WeakMap<Uint8Array, GridPoint[]>();
+/** What a layout read gives besides its cells: a caller passes the cells back, the rest comes along. */
+type LayoutExtras = { points: GridPoint[]; spawns: Spawn[]; arenas: { cells: Uint8Array[] } | null };
+const LAYOUT_EXTRAS = new WeakMap<Uint8Array, LayoutExtras>();
+
+/** Arena update: where the party is (`GameSession.mode`). */
+export type ArenaModeName = "map" | "engaged" | "arena" | "won";
+const ARENA_MODES: ArenaModeName[] = ["map", "engaged", "arena", "won"];
+export function arenaMode(s: GameSessionAcc): ArenaModeName {
+  return ARENA_MODES[s.mode as number] ?? "map";
+}
+/** `ARENA_SIDE_MAX`: the arenas are stored with this many cells per row. */
+const ARENA_STRIDE = 12;
+
+/** The cells the units stand on, at the map's stride (32): the map's, or in an arena its pack's
+ * (`GameSession::ground`). */
+export function groundTiles(p: Pick<Party, "session" | "tiles" | "arenas">): Uint8Array | null {
+  const mode = arenaMode(p.session);
+  if (mode !== "arena" && mode !== "won") return p.tiles;
+  const cells = p.arenas?.cells[p.session.arenaPack];
+  if (!cells) return null;
+  const out = new Uint8Array(MAP_CELLS).fill(cellByte(Tile.Wall));
+  for (let y = 0; y < p.session.height; y++) for (let x = 0; x < p.session.width; x++) out[y * MAP_MAX + x] = cells[y * ARENA_STRIDE + x] ?? 0;
+  return out;
+}
+
+/** On the map: each living pack's visible monster, its template and its cell (it stands still). */
+export function visiblePacks(p: Pick<Party, "session" | "spawns">): { pack: number; bestiaryId: number; x: number; y: number; facing: number }[] {
+  if (arenaMode(p.session) === "arena" || arenaMode(p.session) === "won") return [];
+  return p.session.packs.flatMap((pk, pack) =>
+    pk.width && p.session.packsAlive & (1 << pack) ? [{ pack, bestiaryId: p.spawns[pk.visible]?.bestiaryId ?? 0, x: pk.x, y: pk.y, facing: pk.facing as number }] : [],
+  );
+}
+
+/** Arena update: `enter_arena` and `leave_arena`, any participant's signer pays; each living
+ * player's participation, in slot order, follows. */
+async function livingParticipations(session: Address, s: GameSessionAcc): Promise<RemainingAccount[]> {
+  const out: RemainingAccount[] = [];
+  for (let slot = 0; slot < s.core.playerCount; slot++) {
+    if (!(s.aliveMask & (1 << slot))) continue;
+    out.push({ address: await participationPda(session, s.core.players[slot]!), writable: true });
+  }
+  return out;
+}
+/** Compute limits: loading a pack (up to 8 monsters and 4 participations), paying the kills left. */
+export const ENTER_ARENA_CU = 600_000;
+export const LEAVE_ARENA_CU = 1_400_000;
+export async function enterArenaIx(session: Address, s: GameSessionAcc, payer: TransactionSigner): Promise<Instruction[]> {
+  const ix = getEnterArenaInstruction({ payer, session, monsters: await monstersPda(session), layout: s.layout });
+  return [computeLimitIx(ENTER_ARENA_CU), withRemaining(ix, await livingParticipations(session, s))];
+}
+export async function leaveArenaIx(session: Address, s: GameSessionAcc, payer: TransactionSigner): Promise<Instruction[]> {
+  const ix = getLeaveArenaInstruction({ payer, session, monsters: await monstersPda(session) });
+  return [computeLimitIx(LEAVE_ARENA_CU), withRemaining(ix, await livingParticipations(session, s))];
+}
 
 export async function readParty(address: Address, tiles: Uint8Array | null = null, prev: Party | null = null): Promise<Party | null> {
-  let points = (tiles && LAYOUT_POINTS.get(tiles)) ?? [];
+  let extras: LayoutExtras = (tiles && LAYOUT_EXTRAS.get(tiles)) ?? { points: [], spawns: [], arenas: null };
   // With the previous read of the same party, the player, participation, character, map and layout
   // addresses are already known, so everything comes in ONE getMultipleAccounts call. If the roster
   // or the map changed (a join), the guess is wrong and the second call fetches the right accounts.
@@ -1112,10 +1182,15 @@ export async function readParty(address: Address, tiles: Uint8Array | null = nul
   const map = rawMap ? decodeAccount("Map", rawMap) : null;
   if (!tiles) {
     const rawLayout = extra[chars.length * 2 + 1];
-    const layout = rawLayout ? decodeAccount("MapLayout", rawLayout).core : null;
+    const decodedLayout = rawLayout ? decodeAccount("MapLayout", rawLayout) : null;
+    const layout = decodedLayout?.core ?? null;
     tiles = layout ? Uint8Array.from(layout.cells) : null;
-    points = layout ? layoutPoints(layout) : [];
-    if (tiles) LAYOUT_POINTS.set(tiles, points);
+    extras = {
+      points: layout ? layoutPoints(layout) : [],
+      spawns: layout ? layout.spawns.slice(0, layout.spawnCount).map((x) => ({ ...x })) : [],
+      arenas: decodedLayout ? { cells: decodedLayout.arenas.cells.map((c) => Uint8Array.from(c)) } : null,
+    };
+    if (tiles) LAYOUT_EXTRAS.set(tiles, extras);
   }
   const monsterCooldowns = (monsterState?.skillCooldowns ?? []).slice(0, count).map((c) => Uint8Array.from(c));
   const monsterRecords = (monsterState?.records ?? []).slice(0, count).map((r) => Uint8Array.from(r));
@@ -1137,9 +1212,11 @@ export async function readParty(address: Address, tiles: Uint8Array | null = nul
       )
     : null;
   const burningCells = (monsterState?.burningCells ?? []).filter((c) => c.power > 0);
+  const ground = groundTiles({ session, tiles, arenas: extras.arenas });
   return {
     address,
     session,
+    ground,
     monsters: (monsterState?.core.monsters ?? []).slice(0, count),
     players,
     monsterCooldowns,
@@ -1153,7 +1230,9 @@ export async function readParty(address: Address, tiles: Uint8Array | null = nul
     escrow: escrow && { collected: escrow.collected, claimed: escrow.claimed },
     map,
     tiles,
-    points,
+    points: extras.points,
+    spawns: extras.spawns,
+    arenas: extras.arenas,
   };
 }
 

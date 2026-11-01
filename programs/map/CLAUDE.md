@@ -3,7 +3,7 @@
 Owner lane: L6. Read the root CLAUDE.md first.
 
 ## What lives here
-Maps, their validation and finalization, the secrets root and the `layout` PDA (docs/ARCHITECTURE.md, 3.1). The DM builds a draft (`create_map`, `write_layout`, `write_spawns`), `finalize_map` runs `deadroll-mapcheck` and freezes it, and the session program moves it in and out of a party with `set_status`.
+Maps, their validation and finalization, the secrets root and the `layout` PDA (docs/ARCHITECTURE.md, 3.1). The DM builds a draft (`create_map`, `write_layout`, `write_spawns`, `write_points`, `write_arena`), `finalize_map` runs `deadroll-mapcheck` and freezes it, and the session program moves it in and out of a party with `set_status`.
 
 ## Rules for this zone
 - Docs: docs/MAP_DESCRIPTION.md (sections 2-4, 7, 10, 13), docs/BESTIARY.md (2.1, 6).

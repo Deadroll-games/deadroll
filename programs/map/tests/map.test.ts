@@ -32,6 +32,7 @@ import {
   getMapLayoutDecoder,
   getSetStatusInstruction,
   getSpawnEncoder,
+  getWriteArenaInstruction,
   getWriteLayoutInstruction,
   getWritePointsInstruction,
   getWriteSpawnsInstruction,
@@ -74,6 +75,11 @@ const MAP_SIZE = 8 + 105 + 1 + 1 + 1 + 4 + 1;
 const WOLF = 0, GOBLIN = 1, CHIEFTAIN = 2, WARRIOR = 3, SHAMAN = 4;
 /** `MapLayoutDataV2::SIZE`: the bytes `layout_hash` covers, after the discriminator. */
 const LAYOUT_CORE_SIZE = 1 + 32 + MAP_CELLS + SPAWNS_MAX * 9 + 1 + POINTS_MAX * 4 + 1 + 1 + 1;
+/** Arena update: `MapArenasData` after the core (8 packs of 6 bytes, 8 arenas of 12 x 12). */
+const PACKS_MAX = 8;
+const ARENA_SIDE_MAX = 12;
+const ARENAS_SIZE = PACKS_MAX * 6 + PACKS_MAX * ARENA_SIDE_MAX * ARENA_SIDE_MAX;
+const FACING = { N: 0, NE: 1, E: 2, SE: 3, S: 4, SW: 5, W: 6, NW: 7 };
 /** Offset of `points` in the layout account. */
 const POINTS_AT = 8 + 1 + 32 + MAP_CELLS + SPAWNS_MAX * 9 + 1;
 /** Anchor `ConstraintSeeds`. */
@@ -289,16 +295,36 @@ function demoTiles(): number[] {
   return tiles;
 }
 
-/** The skill choices of assets/registry/maps/demo_16x16.json: exactly the slots of each kind. */
+/** The skill choices of assets/registry/maps/demo_16x16.json: exactly the slots of each kind.
+ * Arena update: the cells are in each pack's arena (`DEMO_PACKS`). */
 const demoSpawns = (): Spawn[] => [
-  { id: WOLF, x: 6, y: 2, pack: 1, skills: 0b0111 },
-  { id: WOLF, x: 7, y: 3, pack: 1, skills: 0b1110 },
-  { id: GOBLIN, x: 2, y: 10, pack: 2, skills: 0b11 },
-  { id: GOBLIN, x: 3, y: 11, pack: 2, skills: 0b11 },
-  { id: CHIEFTAIN, x: 12, y: 12, pack: 3, skills: 0b11111 },
-  { id: WARRIOR, x: 11, y: 12, pack: 3, skills: 0b11 },
-  { id: SHAMAN, x: 12, y: 11, pack: 3, skills: 0b111 },
+  { id: WOLF, x: 4, y: 4, pack: 1, skills: 0b0111 },
+  { id: WOLF, x: 5, y: 4, pack: 1, skills: 0b1110 },
+  { id: GOBLIN, x: 4, y: 4, pack: 2, skills: 0b11 },
+  { id: GOBLIN, x: 4, y: 5, pack: 2, skills: 0b11 },
+  { id: CHIEFTAIN, x: 4, y: 4, pack: 3, skills: 0b11111 },
+  { id: WARRIOR, x: 3, y: 4, pack: 3, skills: 0b11 },
+  { id: SHAMAN, x: 4, y: 3, pack: 3, skills: 0b111 },
 ];
+
+/** Arena update: a pack's record (`PackLayout`) and its arena, row by row. */
+type Pack = { pack: number; visible: number; x: number; y: number; facing: number; width: number; height: number; cells: number[] };
+const openArena = (w = 8, h = 8) => new Array(w * h).fill(FLOOR);
+/** The demo packs: the visible monster's map cell and facing, an open 8x8 arena each. */
+const DEMO_PACKS = (): Pack[] => [
+  { pack: 1, visible: 0, x: 6, y: 2, facing: FACING.S, width: 8, height: 8, cells: openArena() },
+  { pack: 2, visible: 2, x: 2, y: 10, facing: FACING.E, width: 8, height: 8, cells: openArena() },
+  { pack: 3, visible: 4, x: 12, y: 12, facing: FACING.N, width: 8, height: 8, cells: openArena() },
+];
+
+async function writeArenaIx(dm: Signer, map: string, p: Pack) {
+  const record = { visible: p.visible, x: p.x, y: p.y, facing: p.facing, width: p.width, height: p.height };
+  return getWriteArenaInstruction({ ...(await editAccounts(dm, map)), pack: p.pack, record, cells: Uint8Array.from(p.cells) });
+}
+
+async function writeDemoArenas(dm: Signer, map: string) {
+  for (const p of DEMO_PACKS()) await send(dm, [await writeArenaIx(dm, map, p)]);
+}
 
 /** One tier 1 chest in the room, the tier 1 boss table: 2 + 4 points, the tier 1 budget for one player. */
 const DEMO_CHESTS: Chest[] = [{ x: 5, y: 5, table: T1_CHEST }];
@@ -314,6 +340,7 @@ async function demoDraft(dm: Signer, index = 0) {
   await send(dm, [await writeLayoutIx(dm, accounts.map, 0, demoTiles())]);
   await send(dm, [await writeSpawnsIx(dm, accounts.map, demoSpawns())]);
   await send(dm, [await writeChestsIx(dm, accounts.map, DEMO_CHESTS, T1_BOSS)]);
+  await writeDemoArenas(dm, accounts.map);
   return accounts;
 }
 
@@ -339,8 +366,8 @@ describe("map: create_map", () => {
     assert.equal(m.status, STATUS.Draft);
     assert.equal(m.tier, 2);
     const l = await readLayout(layout);
-    // Patch 13: layout version 2, every cell Void (0), no points.
-    assert.equal(l.version, 2);
+    // Patch 13: every cell Void (0), no points. Arena update: layout version 3.
+    assert.equal(l.version, 3);
     assert.deepEqual(l.map, Uint8Array.from(enc.encode(address(map))));
     assert.equal(l.spawnCount, 0);
     assert.equal(l.points.length, 0);
@@ -514,7 +541,8 @@ describe("map: finalize_map", () => {
     assert.deepEqual(m.secretsRoot, new Array(32).fill(9));
     // Anyone can check the hash against the layout account bytes.
     const raw = (await readLayout(layout)).raw;
-    const expected = createHash("sha256").update(raw.slice(8, 8 + LAYOUT_CORE_SIZE)).digest();
+    // Arena update: the hash covers the arenas too.
+    const expected = createHash("sha256").update(raw.slice(8, 8 + LAYOUT_CORE_SIZE + ARENAS_SIZE)).digest();
     assert.deepEqual(m.layoutHash, Array.from(expected));
   });
 
@@ -528,6 +556,7 @@ describe("map: finalize_map", () => {
     await send(dm, [await writeLayoutIx(dm, map, 512, grid.slice(512))]);
     await send(dm, [await writeSpawnsIx(dm, map, demoSpawns())]);
     await send(dm, [await writePointsIx(dm, map, points({ x: 0, y: 0 }, { x: 31, y: 31 }, DEMO_CHESTS), T1_BOSS)]);
+    await writeDemoArenas(dm, map);
     const cu = await send(dm, [await finalizeIx(dm, map, new Array(32).fill(0))]);
     console.log(`finalize 32x32: ${cu} CU`);
     assert.ok(cu < 200_000, `${cu} CU`);
@@ -641,8 +670,8 @@ describe("map: finalize_map", () => {
     await expectErr(finalizeWith(points({ x: 16, y: 1 }, EXIT, DEMO_CHESTS)), err("PointOutOfBounds"));
     await expectErr(finalizeWith(points({ x: 0, y: 1 }, EXIT, DEMO_CHESTS)), err("PointNotPassable"));
     await expectErr(finalizeWith(points(ENTRANCE, ENTRANCE, DEMO_CHESTS)), err("PointOverlap"));
-    // A spawn on the exit.
-    await expectErr(finalizeWith(points(ENTRANCE, { x: 6, y: 2 }, DEMO_CHESTS)), err("SpawnOverlap"));
+    // Arena update: the exit on a pack's map cell.
+    await expectErr(finalizeWith(points(ENTRANCE, { x: 6, y: 2 }, DEMO_CHESTS)), err("PackOverlap"));
     // The exit on a chasm, then on stairs; any order of the points.
     await send(dm, [await writeLayoutIx(dm, map, EXIT.y * MAP_MAX + EXIT.x, [cell(KIND.Chasm)])]);
     await expectErr(finalizeWith(points(ENTRANCE, EXIT, DEMO_CHESTS)), err("PointNotPassable"));
@@ -759,7 +788,8 @@ describe("map: finalize_map chests and rewards (patch 11)", () => {
     await send(dm, [await writeLayoutIx(dm, map, 5 * MAP_MAX + 9, [FLOOR])]);
     await expectErr(finalizeWith([{ x: 20, y: 5, table: T1_CHEST }], T1_BOSS), err("ChestOutOfBounds"));
     await expectErr(finalizeWith([{ ...ENTRANCE, table: T1_CHEST }], T1_BOSS), err("ChestOverlap"));
-    await expectErr(finalizeWith([{ x: 6, y: 2, table: T1_CHEST }], T1_BOSS), err("ChestOverlap"));
+    // Arena update: a chest on a pack's map cell is the pack's overlap.
+    await expectErr(finalizeWith([{ x: 6, y: 2, table: T1_CHEST }], T1_BOSS), err("PackOverlap"));
     await expectErr(finalizeWith([{ x: 5, y: 5, table: 31 }], T1_BOSS), err("UnknownTable"));
     // A tier 2 table on a tier 1 map.
     await expectErr(finalizeWith([{ x: 5, y: 5, table: T2_CHEST }], T1_BOSS), err("TableNotAllowed"));
@@ -806,6 +836,7 @@ describe("map: finalize_map chests and rewards (patch 11)", () => {
       await send(dm, [await writeLayoutIx(dm, map, 0, demoTiles())]);
       await send(dm, [await writeSpawnsIx(dm, map, spawns)]);
       await send(dm, [await writeChestsIx(dm, map, chests, T2_BOSS)]);
+      await writeDemoArenas(dm, map);
       const run = send(dm, [await finalizeIx(dm, map, root)]);
       if (ok) {
         await run;
@@ -814,5 +845,76 @@ describe("map: finalize_map chests and rewards (patch 11)", () => {
         await expectErr(run, err("OverBudget"));
       }
     }
+  });
+});
+
+describe("map: write_arena (arena update)", () => {
+  const root = new Array(32).fill(0);
+
+  it("writes a pack's record and arena rows, then replaces and clears them", async () => {
+    const dm = await funded();
+    const { map, layout } = await demoDraft(dm);
+    const cells = Array.from({ length: 6 * 7 }, (_, i) => cell(KIND.StoneFloor, i % 8));
+    const cu = await send(dm, [await writeArenaIx(dm, map, { pack: 7, visible: 1, x: 9, y: 3, facing: FACING.NW, width: 6, height: 7, cells })]);
+    console.log(`write_arena 6x7: ${cu} CU`);
+    const { arenas } = getMapLayoutDecoder().decode(await data(layout));
+    assert.deepEqual(arenas.packs[7], { visible: 1, x: 9, y: 3, facing: FACING.NW, width: 6, height: 7 });
+    // Rows are stored with ARENA_SIDE_MAX cells, the rest zero.
+    for (let y = 0; y < 7; y++) {
+      assert.deepEqual(Array.from(arenas.cells[7].slice(y * ARENA_SIDE_MAX, y * ARENA_SIDE_MAX + 6)), cells.slice(y * 6, y * 6 + 6));
+      assert.equal(arenas.cells[7][y * ARENA_SIDE_MAX + 6], 0);
+    }
+    // A width of 0 clears the pack.
+    await send(dm, [await writeArenaIx(dm, map, { pack: 7, visible: 0, x: 0, y: 0, facing: 0, width: 0, height: 0, cells: [] })]);
+    const after = getMapLayoutDecoder().decode(await data(layout)).arenas;
+    assert.equal(after.packs[7].width, 0);
+    assert.ok(after.cells[7].every((b) => b === 0));
+    // The largest arena fits one transaction.
+    const side = ARENA_SIDE_MAX;
+    await send(dm, [await writeArenaIx(dm, map, { pack: 6, visible: 0, x: 1, y: 1, facing: 0, width: side, height: side, cells: openArena(side, side) })]);
+  });
+
+  it("rejects a pack number past PACKS_MAX and cells that do not match the size", async () => {
+    const dm = await funded();
+    const { map } = await demoDraft(dm);
+    const p = DEMO_PACKS()[0];
+    await expectErr(send(dm, [await writeArenaIx(dm, map, { ...p, pack: PACKS_MAX })]), err("PackOutOfRange"));
+    await expectErr(send(dm, [await writeArenaIx(dm, map, { ...p, cells: openArena(8, 7) })]), err("ArenaCellsMismatch"));
+    await expectErr(send(dm, [await writeArenaIx(dm, map, { ...p, width: 13, height: 1, cells: openArena(13, 1) })]), err("ArenaCellsMismatch"));
+  });
+
+  it("rejects a signer that is not the DM, and writes after finalize", async () => {
+    const dm = await funded();
+    const stranger = await funded();
+    const { map } = await demoDraft(dm);
+    const ix = await writeArenaIx(stranger, map, DEMO_PACKS()[0]);
+    await expectErr(send(stranger, [ix]), err("NotDm"));
+    await send(dm, [await finalizeIx(dm, map, root)]);
+    await expectErr(send(dm, [await writeArenaIx(dm, map, DEMO_PACKS()[0])]), err("NotDraft"));
+  });
+
+  it("finalize_map checks the packs and their arenas", async () => {
+    const dm = await funded();
+    const { map } = await demoDraft(dm);
+    const finalizeWith = async (p: Pack) => {
+      await writeDemoArenas(dm, map);
+      await send(dm, [await writeArenaIx(dm, map, p)]);
+      return send(dm, [await finalizeIx(dm, map, root)]);
+    };
+    const [wolves] = DEMO_PACKS();
+    await expectErr(finalizeWith({ ...wolves, width: 0, height: 0, cells: [] }), err("PackWithoutArena"));
+    await expectErr(finalizeWith({ ...wolves, width: 5, height: 8, cells: openArena(5, 8) }), err("SpawnOutOfBounds"));
+    await expectErr(finalizeWith({ ...wolves, width: 8, height: 5, cells: openArena(8, 5) }), err("ArenaSizeOutOfRange"));
+    await expectErr(finalizeWith({ ...wolves, visible: 2 }), err("VisibleNotInPack"));
+    await expectErr(finalizeWith({ ...wolves, x: 2, y: 2 }), err("PackAtEntrance"));
+    await expectErr(finalizeWith({ ...wolves, x: 2, y: 10 }), err("PackOverlap"));
+    await expectErr(finalizeWith({ ...wolves, x: 0, y: 5 }), err("PackNotPassable"));
+    const walled = openArena();
+    // A wall ring around the wolves at (4, 4) and (5, 4).
+    for (const [x, y] of [[3, 3], [4, 3], [5, 3], [6, 3], [3, 4], [6, 4], [3, 5], [4, 5], [5, 5], [6, 5]]) walled[y * 8 + x] = WALL;
+    await expectErr(finalizeWith({ ...wolves, cells: walled }), err("ArenaUnreachable"));
+    const cu = await finalizeWith(wolves);
+    console.log(`finalize 16x16 with 3 arenas: ${cu} CU`);
+    assert.equal((await readMap(map)).status, STATUS.Finalized);
   });
 });

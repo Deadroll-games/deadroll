@@ -831,5 +831,40 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                             );
                         });
                 });
+
+            egui::CollapsingHeader::new("Arena (ArenaTuning)")
+                .default_open(true)
+                .show(ui, |ui| {
+                    let (a, da) = (&mut c.arena, &d.arena);
+                    egui::Grid::new("arena")
+                        .num_columns(2)
+                        .striped(true)
+                        .show(ui, |ui| {
+                            let cap = deadroll_types::ARENA_SIDE_MAX as u8;
+                            int_row(ui, "Arena side min", &mut a.side_min, da.side_min, 1..=cap);
+                            int_row(ui, "Arena side max", &mut a.side_max, da.side_max, 1..=cap);
+                            int_row(
+                                ui,
+                                "Timeline: time scale (delay = scale / (base + initiative))",
+                                &mut a.time_scale,
+                                da.time_scale,
+                                1..=100_000,
+                            );
+                            int_row(
+                                ui,
+                                "Timeline: initiative base",
+                                &mut a.initiative_base,
+                                da.initiative_base,
+                                0..=1_000,
+                            );
+                            int_row(
+                                ui,
+                                "Timeline: time of one round",
+                                &mut a.round_time,
+                                da.round_time,
+                                1..=100_000,
+                            );
+                        });
+                });
         });
 }

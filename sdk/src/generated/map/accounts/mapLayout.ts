@@ -33,8 +33,12 @@ import {
   type ReadonlyUint8Array,
 } from "@solana/kit";
 import {
+  getMapArenasDataDecoder,
+  getMapArenasDataEncoder,
   getMapLayoutDataV2Decoder,
   getMapLayoutDataV2Encoder,
+  type MapArenasData,
+  type MapArenasDataArgs,
   type MapLayoutDataV2,
   type MapLayoutDataV2Args,
 } from "../types/index.js";
@@ -50,9 +54,13 @@ export function getMapLayoutDiscriminatorBytes(): ReadonlyUint8Array {
 export type MapLayout = {
   discriminator: ReadonlyUint8Array;
   core: MapLayoutDataV2;
+  arenas: MapArenasData;
 };
 
-export type MapLayoutArgs = { core: MapLayoutDataV2Args };
+export type MapLayoutArgs = {
+  core: MapLayoutDataV2Args;
+  arenas: MapArenasDataArgs;
+};
 
 /** Gets the encoder for {@link MapLayoutArgs} account data. */
 export function getMapLayoutEncoder(): FixedSizeEncoder<MapLayoutArgs> {
@@ -60,6 +68,7 @@ export function getMapLayoutEncoder(): FixedSizeEncoder<MapLayoutArgs> {
     getStructEncoder([
       ["discriminator", fixEncoderSize(getBytesEncoder(), 8)],
       ["core", getMapLayoutDataV2Encoder()],
+      ["arenas", getMapArenasDataEncoder()],
     ]),
     (value) => ({ ...value, discriminator: MAP_LAYOUT_DISCRIMINATOR }),
   );
@@ -70,6 +79,7 @@ export function getMapLayoutDecoder(): FixedSizeDecoder<MapLayout> {
   return getStructDecoder([
     ["discriminator", fixDecoderSize(getBytesDecoder(), 8)],
     ["core", getMapLayoutDataV2Decoder()],
+    ["arenas", getMapArenasDataDecoder()],
   ]);
 }
 
@@ -132,5 +142,5 @@ export async function fetchAllMaybeMapLayout(
 }
 
 export function getMapLayoutSize(): number {
-  return 1309;
+  return 2509;
 }

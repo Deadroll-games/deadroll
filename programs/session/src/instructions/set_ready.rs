@@ -125,6 +125,8 @@ pub fn handler(ctx: Context<SetReady>, ready: bool, selection: [u8; MAP_SKILLS])
         participation.class_tier = class_tier;
         participation.skills = selection;
         session.player_initiative[slot as usize] = hero_initiative(&hero);
+        // Arena update: the timeline's tie (docs/PARTY_AND_TURNS.md 6.2).
+        session.player_dex[slot as usize] = hero.stats[deadroll_types::Stat::Dexterity as usize];
         session.ready_mask |= 1 << slot;
         // Patch 11: a character well above the map tier gets less experience and no rewards
         // (docs/PARTY_AND_TURNS.md 9.5); its level is locked with it.

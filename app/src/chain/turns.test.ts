@@ -4,7 +4,7 @@ import type { GameSessionAcc, Party, PartyPlayer } from "./game";
 import { errorName } from "./send";
 import { StateKind } from "./types";
 import { SessionStatus } from "@deadroll/sdk/session";
-import { cooldownLabel, skillCooldowns, skillUsedText, skipText, startTurnFor, tickText, turnActed, turnStarted } from "./turns";
+import { cooldownLabel, skillCooldowns, skillUsedText, skipText, arenaStepFor, startTurnFor, tickText, turnActed, turnStarted } from "./turns";
 
 const A = (n: number) => getAddressDecoder().decode(new Uint8Array(32).fill(n)) as Address;
 const DM = A(1);
@@ -23,7 +23,7 @@ function party(turn: number, over: Partial<GameSessionAcc> = {}, core: Partial<G
   } as unknown as GameSessionAcc;
   const player = (slot: number, owner: Address) =>
     ({ slot, character: A(20 + slot), participation: A(30 + slot), part: { player: owner, core: { actor: A(40 + slot) } } }) as unknown as PartyPlayer;
-  return { address: A(5), session, monsters: [], players: [player(0, ALICE), player(1, BOB)], monsterCooldowns: [], monsterRecords: [], monsterSkills: [], monsterAuras: [], monsterMods: [], monsterDefense: [], resonanceTables: null, burningCells: [], escrow: null, map: null, tiles: null, points: [] };
+  return { address: A(5), session, monsters: [], players: [player(0, ALICE), player(1, BOB)], monsterCooldowns: [], monsterRecords: [], monsterSkills: [], monsterAuras: [], monsterMods: [], monsterDefense: [], resonanceTables: null, burningCells: [], escrow: null, map: null, tiles: null, points: [], spawns: [], arenas: null, ground: null };
 }
 
 describe("turn state", () => {
@@ -124,5 +124,21 @@ describe("log texts", () => {
     expect(skillUsedText({ cooldown: 2 }, "Ilyra", "Frost Burn")).toBe("Ilyra used Frost Burn: cooldown 2 turns");
     expect(skillUsedText({ cooldown: 1 }, "Ilyra", "Frost Bolt")).toBe("Ilyra used Frost Bolt: cooldown 1 turn");
     expect(skillUsedText({ cooldown: 0 }, "Bran", "Jab")).toBe("Bran used Jab");
+  });
+});
+
+describe("arenaStepFor (arena update)", () => {
+  it("any party member enters an engaged pack's arena and leaves a won one; nothing on the map or in play", () => {
+    for (const [mode, step] of [[0, null], [1, "enter"], [2, null], [3, "leave"]] as const) {
+      expect(arenaStepFor(party(0, { mode }), BOB)).toBe(step);
+    }
+    // Not a member, a pending roll, deaths waiting: nothing.
+    expect(arenaStepFor(party(0, { mode: 1 }), A(77))).toBeNull();
+    expect(arenaStepFor(party(0, { mode: 3, pendingDeaths: 1 }), ALICE)).toBeNull();
+  });
+
+  it("between the map and an arena no turn starts, but the deaths are finalized", () => {
+    expect(startTurnFor(party(0, { mode: 1, startedSeq: 6 }), ALICE)).toBeNull();
+    expect(startTurnFor(party(0, { mode: 3, pendingDeaths: 1 }), ALICE)?.finalize).toBe(true);
   });
 });

@@ -3,7 +3,8 @@ use deadroll_rules::aura::{
     Aura, AuraField, MonsterAuraField, PartyAuras, PlayerAuras, AURAS_PER_PLAYER,
 };
 use deadroll_types::{
-    Aspect, Cell, GameSessionData, MapPoint, CHESTS_MAX, MONSTERS_MAX, PARTY_MAX, TILE_KINDS_MAX,
+    Aspect, Cell, GameSessionData, MapPoint, PackLayout, ARENA_MONSTERS_MAX, CHESTS_MAX,
+    MONSTERS_MAX, PACKS_MAX, PARTY_MAX, TILE_KINDS_MAX,
 };
 
 use super::{
@@ -153,7 +154,59 @@ pub struct GameSession {
     /// Step cost in action points per tile type id (`TileKind`, a cell byte's bits 7-3), 0 = cannot
     /// be entered (registry `Tileset`, copied at `open_session`).
     pub tile_cost: [u8; TILE_KINDS_MAX],
+    // Arena update (docs/PARTY_AND_TURNS.md 4.1, MAP_DESCRIPTION.md 17): the party walks the map
+    // in a circle and fights one pack at a time in the pack's arena.
+    /// The map or an arena, and the two steps between them.
+    pub mode: ArenaMode,
+    /// The pack the party is engaged with or fighting, `NO_PACK` on the map. Its monsters are the
+    /// live slots of `MonsterState`.
+    pub arena_pack: u8,
+    /// The player who stepped next to the pack: their side is where the party enters.
+    pub engaged_by: u8,
+    /// The map's packs, copied at `open_session`: the visible monster's map cell, the facing,
+    /// the arena size.
+    pub packs: [PackLayout; PACKS_MAX],
+    /// Bit per pack number still on the map.
+    pub packs_alive: u8,
+    /// Kept while the party is in an arena (`width`, `height`, `player_pos`, the turn order
+    /// and the round are the arena's then): the map's size, each player's map cell before the
+    /// fight, the map circle, its index and round.
+    pub map_width: u8,
+    pub map_height: u8,
+    pub map_pos: [Cell; PARTY_MAX],
+    pub map_order: [u8; PARTY_MAX],
+    pub map_order_len: u8,
+    pub map_turn_index: u8,
+    pub map_round: u16,
+    /// The arena's initiative timeline (docs/PARTY_AND_TURNS.md 6): each unit's time until its
+    /// turn, by turn-order id (players `0..PARTY_MAX`, then the arena's monsters).
+    pub unit_time: [u32; ARENA_UNITS],
+    /// Each player's Dexterity, set at `set_ready(true)`: it wins a tie on the timeline.
+    pub player_dex: [u16; PARTY_MAX],
 }
+
+/// Arena update: where the party is.
+#[derive(
+    AnchorSerialize, AnchorDeserialize, InitSpace, Clone, Copy, Debug, Default, PartialEq, Eq,
+)]
+pub enum ArenaMode {
+    /// On the map: the players move in a circle, the monsters stand still.
+    #[default]
+    Map,
+    /// A player stepped next to a pack's visible monster: `enter_arena` comes next.
+    Engaged,
+    /// Fighting `arena_pack` in its arena, on the timeline.
+    Arena,
+    /// The arena's pack is dead: `leave_arena` pays it and brings the party back.
+    Won,
+}
+
+/// Turn-order ids of an arena: every player slot, then every arena slot. A named length: `InitSpace`
+/// multiplies an array length expression without parentheses.
+pub const ARENA_UNITS: usize = PARTY_MAX + ARENA_MONSTERS_MAX;
+
+/// `GameSession.arena_pack` on the map.
+pub const NO_PACK: u8 = 0xFF;
 
 /// `GameSession.pending_chest` when no chest roll is pending.
 pub const NO_CHEST: u8 = 0xFF;
@@ -185,12 +238,63 @@ impl GameSession {
         self.acted_seq == self.turn_seq
     }
 
-    /// A closed chest stands on `c` (patch 11: it occupies its cell until opened).
+    /// A closed chest stands on `c` (patch 11: it occupies its cell until opened). Arena update:
+    /// chests are on the map only.
     pub fn closed_chest_at(&self, c: Cell) -> bool {
+        self.mode == ArenaMode::Map && self.closed_chests().any(|p| p == c)
+    }
+
+    /// The cells of the closed chests.
+    pub fn closed_chests(&self) -> impl Iterator<Item = Cell> + '_ {
         self.chest_list()
             .iter()
             .enumerate()
-            .any(|(i, p)| p.cell() == c && self.chests_opened & (1 << i) == 0)
+            .filter(|(i, _)| self.chests_opened & (1 << i) == 0)
+            .map(|(_, p)| p.cell())
+    }
+
+    /// Arena update: the turns go on (on the map or in an arena), not between the two.
+    pub fn in_play(&self) -> bool {
+        matches!(self.mode, ArenaMode::Map | ArenaMode::Arena)
+    }
+
+    pub fn require_in_play(&self) -> Result<()> {
+        require!(self.in_play(), crate::errors::SessionError::ArenaTransition);
+        Ok(())
+    }
+
+    /// The arena whose cells the units stand on, `None` on the map.
+    pub fn ground(&self) -> Option<u8> {
+        match self.mode {
+            ArenaMode::Arena | ArenaMode::Won => Some(self.arena_pack),
+            ArenaMode::Map | ArenaMode::Engaged => None,
+        }
+    }
+
+    /// The packs still on the map, with their record.
+    pub fn living_packs(&self) -> impl Iterator<Item = (u8, &PackLayout)> + '_ {
+        self.packs
+            .iter()
+            .enumerate()
+            .filter(move |(n, p)| p.is_used() && self.packs_alive & (1 << n) != 0)
+            .map(|(n, p)| (n as u8, p))
+    }
+
+    /// On the map: the cells of the visible monsters of the living packs (they occupy them).
+    /// Nothing in an arena.
+    pub fn visible_monsters(&self) -> impl Iterator<Item = Cell> + '_ {
+        let on_map = self.ground().is_none();
+        self.living_packs()
+            .filter(move |_| on_map)
+            .map(|(_, p)| p.cell())
+    }
+
+    /// The living pack whose visible monster stands next to `c` (Chebyshev distance 1), lowest
+    /// number first: stepping onto `c` engages it (docs/PARTY_AND_TURNS.md 4.1.3).
+    pub fn pack_next_to(&self, c: Cell) -> Option<u8> {
+        self.living_packs()
+            .find(|(_, p)| deadroll_mapcheck::walk::adjacent(p.cell(), c))
+            .map(|(n, _)| n)
     }
 
     /// The used chests.
@@ -258,6 +362,16 @@ mod tests {
     use deadroll_types::Cell;
 
     #[test]
+    fn the_account_size_is_its_borsh_size() {
+        use anchor_lang::Space;
+        let s = session(&[Cell { x: 0, y: 0 }]);
+        assert_eq!(
+            anchor_lang::prelude::borsh::to_vec(&s).unwrap().len(),
+            super::GameSession::INIT_SPACE
+        );
+    }
+
+    #[test]
     fn one_action_per_turn() {
         let mut s = session(&[Cell { x: 0, y: 0 }]);
         s.turn_seq = 3;
@@ -302,5 +416,79 @@ mod tests {
         assert!(s.turn_started());
         s.turn_seq = 2;
         assert!(!s.turn_started());
+    }
+
+    fn with_packs() -> super::GameSession {
+        use deadroll_types::{Facing, PackLayout};
+        let mut s = session(&[Cell { x: 0, y: 0 }]);
+        let pack = |x, y| PackLayout {
+            visible: 0,
+            x,
+            y,
+            facing: Facing::S,
+            width: 8,
+            height: 8,
+        };
+        s.packs[1] = pack(4, 4);
+        s.packs[3] = pack(5, 5);
+        s.packs_alive = 0b1010;
+        s.mode = super::ArenaMode::Map;
+        s
+    }
+
+    #[test]
+    fn packs_stand_on_the_map_only_and_the_lowest_engages_first() {
+        let mut s = with_packs();
+        assert_eq!(s.ground(), None);
+        assert_eq!(
+            s.visible_monsters().collect::<Vec<_>>(),
+            [Cell { x: 4, y: 4 }, Cell { x: 5, y: 5 }]
+        );
+        // (4, 5) is next to both: pack 1 first. (6, 6) only to pack 3. (4, 4) is pack 1's cell.
+        assert_eq!(s.pack_next_to(Cell { x: 4, y: 5 }), Some(1));
+        assert_eq!(s.pack_next_to(Cell { x: 6, y: 6 }), Some(3));
+        assert_eq!(s.pack_next_to(Cell { x: 0, y: 0 }), None);
+        // A dead pack is gone.
+        s.packs_alive = 0b1000;
+        assert_eq!(s.pack_next_to(Cell { x: 4, y: 5 }), Some(3));
+        assert_eq!(s.pack_next_to(Cell { x: 3, y: 3 }), None);
+        // In an arena the map's monsters are not there.
+        s.mode = super::ArenaMode::Arena;
+        s.arena_pack = 3;
+        assert_eq!(s.ground(), Some(3));
+        assert_eq!(s.visible_monsters().count(), 0);
+    }
+
+    #[test]
+    fn turns_wait_between_the_map_and_an_arena() {
+        use super::ArenaMode::*;
+        let mut s = with_packs();
+        for (mode, play) in [(Map, true), (Engaged, false), (Arena, true), (Won, false)] {
+            s.mode = mode;
+            assert_eq!(s.in_play(), play, "{mode:?}");
+            assert_eq!(s.require_in_play().is_ok(), play);
+        }
+        s.mode = Won;
+        s.arena_pack = 1;
+        assert_eq!(s.ground(), Some(1), "a won arena is still the ground");
+    }
+
+    #[test]
+    fn chests_stand_on_the_map_only() {
+        let mut s = with_packs();
+        s.chests[0] = deadroll_types::MapPoint {
+            kind: deadroll_types::PointKind::Chest,
+            x: 2,
+            y: 2,
+            data: 0,
+        };
+        s.chest_count = 1;
+        assert!(s.closed_chest_at(Cell { x: 2, y: 2 }));
+        s.mode = super::ArenaMode::Arena;
+        assert!(!s.closed_chest_at(Cell { x: 2, y: 2 }));
+        s.mode = super::ArenaMode::Map;
+        s.chests_opened = 1;
+        assert!(!s.closed_chest_at(Cell { x: 2, y: 2 }));
+        assert_eq!(s.closed_chests().count(), 0);
     }
 }

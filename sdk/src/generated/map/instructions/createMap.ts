@@ -175,6 +175,7 @@ export type CreateMapAsyncInput<
 > = {
   dm: TAccountDm;
   map?: TAccountMap;
+  /** written in place, never decoded whole). */
   layout?: TAccountLayout;
   systemProgram?: TAccountSystemProgram;
   index: CreateMapInstructionDataArgs["index"];
@@ -314,6 +315,7 @@ export type CreateMapInput<
 > = {
   dm: TAccountDm;
   map: TAccountMap;
+  /** written in place, never decoded whole). */
   layout: TAccountLayout;
   systemProgram?: TAccountSystemProgram;
   index: CreateMapInstructionDataArgs["index"];
@@ -430,6 +432,7 @@ export type ParsedCreateMapInstruction<
   accounts: {
     dm: TAccountMetas[0];
     map: TAccountMetas[1];
+    /** written in place, never decoded whole). */
     layout: TAccountMetas[2];
     systemProgram: TAccountMetas[3];
   };

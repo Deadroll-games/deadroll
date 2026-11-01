@@ -40,6 +40,10 @@ pub struct BalanceConfig {
     /// file saved before it: the defaults.
     #[cfg_attr(feature = "serde", serde(default))]
     pub loot: LootTuning,
+    /// Arena update: arena sizes and the initiative timeline (`crate::arena`). Missing in a bench
+    /// file saved before it: the defaults.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub arena: ArenaTuning,
 }
 
 impl BalanceConfig {
@@ -52,6 +56,7 @@ impl BalanceConfig {
         items: ItemTuning::DEFAULT,
         fees: FeeTuning::DEFAULT,
         loot: LootTuning::DEFAULT,
+        arena: ArenaTuning::DEFAULT,
     };
 }
 
@@ -533,6 +538,51 @@ impl Default for LootTuning {
         Self::DEFAULT
     }
 }
+
+/// Arena update (docs/MAP_DESCRIPTION.md 17.3, docs/PARTY_AND_TURNS.md 4.1 and 6): the arena a DM
+/// draws for each pack and the timeline the fight runs on.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ArenaTuning {
+    /// Arena sides a DM may draw, inclusive; never above `deadroll_types::ARENA_SIDE_MAX`.
+    pub side_min: u8,
+    pub side_max: u8,
+    /// The delay a unit's turn adds to its time until the next one:
+    /// `time_scale / (initiative_base + initiative)`, at least 1. Higher initiative, smaller
+    /// delay: a fast unit sometimes acts twice before a slow one acts once.
+    pub time_scale: u32,
+    pub initiative_base: u16,
+    /// Time of one arena round (`GameSession.core.round`, what burning cells count in).
+    pub round_time: u32,
+}
+
+impl ArenaTuning {
+    pub const DEFAULT: ArenaTuning = ArenaTuning {
+        side_min: 6,
+        side_max: 12,
+        time_scale: 1_200,
+        initiative_base: 6,
+        round_time: 100,
+    };
+}
+
+impl ArenaTuning {
+    /// The arena sizes as the map check takes them.
+    pub const fn limits(&self) -> deadroll_mapcheck::arena::ArenaLimits {
+        deadroll_mapcheck::arena::ArenaLimits {
+            side_min: self.side_min,
+            side_max: self.side_max,
+        }
+    }
+}
+
+impl Default for ArenaTuning {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
+const _: () = assert!(ArenaTuning::DEFAULT.side_max as usize <= deadroll_types::ARENA_SIDE_MAX);
 
 /// Enums by variant name in JSON (the name is the `Debug` text, the list is the enum's `ALL`).
 #[cfg(feature = "serde")]

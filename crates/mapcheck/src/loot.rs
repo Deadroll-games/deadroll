@@ -119,7 +119,6 @@ pub(crate) fn check_chests<R: Fn(u8) -> Option<TableRules>>(
         return Err(E::TooManyChests);
     }
 
-    let spawns = &layout.spawns[..(layout.spawn_count as usize).min(layout.spawns.len())];
     let (cells, _) = chest_cells(layout);
     let mut tables = [NO_TABLE; CHESTS_MAX];
     for (i, chest) in layout.chests().enumerate() {
@@ -130,9 +129,8 @@ pub(crate) fn check_chests<R: Fn(u8) -> Option<TableRules>>(
         if !tiles.is_passable(layout.cells[cell_index(cell.x, cell.y)]) {
             return Err(E::ChestNotPassable);
         }
-        let taken = ends.contains(&cell)
-            || spawns.iter().any(|s| s.x == cell.x && s.y == cell.y)
-            || cells[..i].contains(&cell);
+        // A chest on a pack's map cell is the pack's `PackOverlap` (arena update).
+        let taken = ends.contains(&cell) || cells[..i].contains(&cell);
         if taken {
             return Err(E::ChestOverlap);
         }

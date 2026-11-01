@@ -131,6 +131,7 @@ export type WritePointsAsyncInput<
 > = {
   dm: TAccountDm;
   map: TAccountMap;
+  /** `LayoutBytes::load`; written in place. */
   layout?: TAccountLayout;
   points: WritePointsInstructionDataArgs["points"];
   bossTable: WritePointsInstructionDataArgs["bossTable"];
@@ -228,6 +229,7 @@ export type WritePointsInput<
 > = {
   dm: TAccountDm;
   map: TAccountMap;
+  /** `LayoutBytes::load`; written in place. */
   layout: TAccountLayout;
   points: WritePointsInstructionDataArgs["points"];
   bossTable: WritePointsInstructionDataArgs["bossTable"];
@@ -311,6 +313,7 @@ export type ParsedWritePointsInstruction<
   accounts: {
     dm: TAccountMetas[0];
     map: TAccountMetas[1];
+    /** `LayoutBytes::load`; written in place. */
     layout: TAccountMetas[2];
   };
   data: WritePointsInstructionData;

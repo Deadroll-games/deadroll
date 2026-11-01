@@ -9,7 +9,9 @@ use deadroll_rules::{
 use deadroll_skillcheck::{check_loadout, Category, SkillBlocks, SkillExt, ACTIVE_MAX};
 use deadroll_types::{MONSTERS_MAX, MONSTER_SLOTS, PARTY_MAX, SPAWN_ELITE};
 
-use crate::presets::{Arena, HeroPreset, Presets, SkillPreset};
+use deadroll_rules::arena::FirstSide;
+
+use crate::presets::{Approach, Arena, HeroPreset, Presets, SkillPreset};
 
 /// Problems found while resolving a selection. Errors drop something from the fight; warnings
 /// do not.
@@ -136,6 +138,18 @@ pub struct Fight {
     pub arena: Arena,
     /// The registry resonance tables (`Presets::registry`).
     pub tables: deadroll_combat::ResonanceTables,
+    /// Arena update: the side that starts the timeline at 0.
+    pub first: FirstSide,
+    /// The packs fought after this one, the party carried over (`EncounterPreset::then`).
+    pub then: Vec<Fight>,
+}
+
+/// The side that moves first coming from `approach`.
+pub fn first_side(approach: Approach) -> FirstSide {
+    match approach {
+        Approach::Back => FirstSide::Party,
+        Approach::Front => FirstSide::Monsters,
+    }
 }
 
 /// One hero preset with its skills looked up in `presets`.
@@ -288,6 +302,34 @@ pub fn resolve_party(
 
 /// An encounter from its id (at most `MONSTERS_MAX` monsters).
 pub fn resolve_fight(presets: &Presets, id: &str, cfg: &BalanceConfig) -> (Option<Fight>, Issues) {
+    let (fight, mut issues) = resolve_pack(presets, id, cfg);
+    let Some(mut fight) = fight else {
+        return (None, issues);
+    };
+    let then = presets
+        .encounters
+        .get(id)
+        .map(|e| e.then.clone())
+        .unwrap_or_default();
+    for step in then {
+        let (next, more) = resolve_pack(presets, &step.encounter, cfg);
+        issues.extend(more);
+        match next {
+            Some(mut next) => {
+                next.first = first_side(step.approach);
+                fight.then.push(next);
+            }
+            None => issues.errors.push(format!(
+                "encounter `{id}`: pack `{}` left out",
+                step.encounter
+            )),
+        }
+    }
+    (Some(fight), issues)
+}
+
+/// One encounter as one pack, without its `then`.
+fn resolve_pack(presets: &Presets, id: &str, cfg: &BalanceConfig) -> (Option<Fight>, Issues) {
     let mut issues = Issues::default();
     let Some(e) = presets.encounters.get(id) else {
         issues
@@ -345,6 +387,8 @@ pub fn resolve_fight(presets: &Presets, id: &str, cfg: &BalanceConfig) -> (Optio
             spawns,
             arena,
             tables: presets.registry.tables,
+            first: first_side(e.approach),
+            then: Vec::new(),
         }),
         issues,
     )

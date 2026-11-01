@@ -1094,3 +1094,78 @@ A Dazed monster uses no reactive skill; a Silenced one only its natural attack; 
 on the bearer do nothing; Blinded, OffGuard, Sundered and Dulled divide the bearer's d20, defense,
 armor against Piercing and crit chance. Website combat WASM: ABI 10 (tables +1920 bytes, sixteen
 modifier slots).
+
+## 28. Arena update: packs with arenas, the map and the arena, the initiative timeline
+
+docs/PARTY_AND_TURNS.md 4.1, 6; docs/MAP_DESCRIPTION.md 17. A pack shows one monster on the map
+(its map cell and facing) and has an arena the DM draws; the party fights one pack at a time in its
+arena, on the initiative timeline. Needs a devnet upgrade (map and session programs); maps and
+sessions from before it cannot be read after it (`MapWithoutArenas`, `InvalidMonsterState`).
+
+`crates/types` (added only):
+
+```
+enum Facing { N, NE, E, SE, S, SW, W, NW }       clockwise, north is y - 1
+struct PackLayout { visible: u8, x: u8, y: u8, facing: Facing, width: u8, height: u8 }   6 bytes;
+                      visible = spawn index shown on the map, (x, y) its map cell, width 0 = unused
+struct MapArenasData { packs: [PackLayout; PACKS_MAX], cells: [[u8; ARENA_CELLS]; PACKS_MAX] }
+                      1_200 bytes, arena cells row-major with ARENA_SIDE_MAX per row
+consts PACKS_MAX = 8, ARENA_SIDE_MAX = 12, ARENA_CELLS = 144, ARENA_MONSTERS_MAX = 8,
+       SESSION_TEMPLATES_MAX = 12
+```
+
+A spawn's `x`, `y` are now its cell in its pack's arena; `Spawn.pack` is the index into
+`MapArenasData.packs`.
+
+Rules: `deadroll_rules::BalanceConfig.arena: ArenaTuning { side_min, side_max, time_scale,
+initiative_base, round_time }` (6, 12, 1200, 6, 100). `deadroll_rules::arena`: `first_side`,
+`delay`, `start_time`, `next_unit`, `round_at`, `pack_xp`, `on_pack_won`. `deadroll_mapcheck::arena`:
+`Approach`, `from_back` (the 3 cells behind the facing; the sides count as the front), `anchor`,
+`entry_cells`, `arena_reach`; `check_map(.., &MapLayoutDataV2, &MapArenasData, ArenaLimits, ..)`;
+`MapCheckError` appended `PackOutOfRange .. TooManyTemplates` (45..58). Mapcheck WASM ABI 2: the
+request appends `MapArenasData`.
+
+Map program:
+
+```
+MapLayout             { core: MapLayoutDataV2, arenas: MapArenasData }, core.version = 3, 2_509 bytes;
+                      read and written in place (LayoutBytes), never decoded whole on chain
+write_arena(pack, record: PackLayout, cells: Vec<u8>)   DM, Draft; cells = width * height, row by row
+finalize_map          the arenas checked too; layout_hash = sha256(account[8 .. 8 + 2_509])
+MapError              appended PackOutOfRange .. TooManyTemplates (the mapcheck codes), then
+                      ArenaCellsMismatch, InvalidLayout
+event ArenaWritten { map, pack, width, height }
+```
+
+Session program:
+
+```
+GameSession appended  mode: ArenaMode { Map, Engaged, Arena, Won }, arena_pack (0xFF = none),
+                      engaged_by, packs: [PackLayout; 8], packs_alive: u8, map_width, map_height,
+                      map_pos: [Cell; 4], map_order: [u8; 4], map_order_len, map_turn_index,
+                      map_round: u16, unit_time: [u32; 12], player_dex: [u16; 4]   (+126 bytes)
+MonsterState          version 2, rebuilt: core.monsters[..count] = the arena's pack (count <= 8,
+                      entries 8..24 unused); per arena slot mods, defense, records, skills,
+                      skill_cooldowns, auras, resist_mods, aura_weights ([_; 8], was [_; 24]); the
+                      unused patch 1 `cooldowns` gone; appended spawn_of: [u8; 8], template_ids:
+                      [u8; 12], templates: [[u8; 48]; 12], skill_ids: [u16; 32]. 8_100 bytes
+                      (was 10_144), no longer growing with the map's monsters
+open_session          copies the packs, one record per template and the chosen skills (by registry
+                      index); no monster is live
+start_session         the initiative roll orders the players only (the map circle)
+move_path             on the map: stops on the first cell next to a living pack's visible monster
+                      (which occupies its cell) and sets Engaged; nothing reacts on the map
+enter_arena()         permissionless; accounts payer (signer), session, monsters, layout; remaining:
+                      each living player's Participation, writable, slot order. Loads the pack, places
+                      the party (entry_cells), starts the timeline (first_side)
+leave_arena()         permissionless; accounts payer, session, monsters; remaining as enter_arena. Pays
+                      the kills left (bodies), the pack's experience, back to the map cells and circle
+experience            per pack, not per kill: leave_arena for a regular pack, the boss kill for its pack
+act, monster_act, end_turn, flee, start_turn   ArenaTransition between the map and an arena
+open_chest            InArena in an arena
+SessionError          appended ArenaTransition, MapWithoutArenas, NotEngaged, ArenaNotWon, InArena,
+                      InvalidArenaAccounts, TooManyTemplates
+events                PackEngaged { session, pack, slot, x, y }, ArenaEntered { session, pack,
+                      party_first, width, height, players: [Cell; 4], monsters, spawns: [u8; 8] },
+                      ArenaWon { session, pack }, ArenaLeft { session, pack, xp: [u32; 4] }
+```

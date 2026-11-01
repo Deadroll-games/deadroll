@@ -1,4 +1,5 @@
 // Mock data for VITE_DATA=mock and the /dev pages. Shapes match chain/types.ts exactly.
+import { PACKS_MAX, type PackDraft } from "./mapcheckWasm";
 import demoMap from "../../../assets/registry/maps/demo_16x16.json";
 import cavesTemplate from "../../../assets/registry/maps/caves_ruins_16x16.json";
 import forestTemplate from "../../../assets/registry/maps/forest_16x16.json";
@@ -73,7 +74,28 @@ export type MapPresetData = {
     aspects: number;
     pack: number;
   }[];
+  /** Arena update: each pack's visible spawn, map cell, facing (by name) and arena rows. A spawn's
+   * `x`, `y` are its cell in its pack's arena. */
+  packs?: { pack: number; visible: number; x: number; y: number; facing: string; rows: string[] }[];
 };
+
+/** Arena update: `Facing` by name, clockwise from the north (crates/types). */
+export const FACING_NAMES = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"] as const;
+
+/** A preset's packs by number (`null` for an unused number). */
+export function presetPacks(p: MapPresetData): (PackDraft | null)[] {
+  const out: (PackDraft | null)[] = new Array(PACKS_MAX).fill(null);
+  for (const k of p.packs ?? []) {
+    const width = k.rows[0]?.length ?? 0;
+    const cells = new Uint8Array(width * k.rows.length);
+    k.rows.forEach((row, y) => {
+      for (let x = 0; x < width; x++) cells[y * width + x] = cellByte(TILE_CHARS[row[x] ?? "#"] ?? Tile.Wall);
+    });
+    const facing = Math.max(0, FACING_NAMES.indexOf(k.facing as (typeof FACING_NAMES)[number]));
+    out[k.pack] = { visible: k.visible, x: k.x, y: k.y, facing, width, height: k.rows.length, cells };
+  }
+  return out;
+}
 
 /** Converts a preset from assets/registry/maps into MapLayout cells (stride 32), the entrance and the
  * exit, spawns and chests. */
@@ -88,6 +110,7 @@ export function presetToLayout(p: MapPresetData): {
   chestRadius: number;
   settleTimeoutSecs: number;
   biome: number;
+  packs: (PackDraft | null)[];
 } {
   const tiles = new Uint8Array(MAP_CELLS).fill(cellByte(Tile.Wall));
   let entrance: Cell | null = null;
@@ -122,6 +145,7 @@ export function presetToLayout(p: MapPresetData): {
     minPlayers: p.min_players ?? 1,
     chestRadius: p.chest_radius ?? 3,
     settleTimeoutSecs: p.settle_timeout_secs ?? 3600,
+    packs: presetPacks(p),
   };
 }
 

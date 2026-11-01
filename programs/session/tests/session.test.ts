@@ -66,6 +66,9 @@ const SLOT_HASHES = new PublicKey(VRF.slotHashes);
 const PRICE = new BN(LAMPORTS_PER_SOL / 10);
 const MIN_PRICE = new BN(10_000_000);
 const [N, E, S, W] = [0, 1, 2, 3];
+/** `DELTA` index of the south-east diagonal step. */
+const STEP_SE = 5;
+const STEP_SW = 6;
 const MAX_PATH = 16;
 const EMPTY_UNIT = 0xff;
 const BASE_ATTACK = 0xff;
@@ -678,20 +681,41 @@ const cellByte = (kind: number, variant = 0) => (kind << 3) | variant;
 const ENTRANCE = { x: 1, y: 1 };
 const EXIT = { x: 14, y: 14 };
 const [WOLF, GOBLIN, CHIEFTAIN, GOBLIN_WARRIOR, SHAMAN] = [0, 1, 2, 3, 4];
-/** Monster index of the chieftain in `DEMO_SPAWNS`. */
-const CHIEFTAIN_INDEX = 4;
+/** Arena update: the chieftain's slot in its arena (the first spawn of the boss pack), and the
+ * packs a play goes through to reach it after the front pack (the wolves on the demo roster). */
+const CHIEFTAIN_INDEX = 0;
+const TO_THE_BOSS = [3];
 /** `skills`: the chosen pool bits (assets/registry/maps/demo_16x16.json): exactly the slots of each
- * kind the template has (patch 6, finalize_map checks it). */
+ * kind the template has (patch 6, finalize_map checks it). Arena update: `x`, `y` are the cell in
+ * the pack's arena; the party comes into it at the corner (0, 0) (`createFinalizedMap`), so the
+ * cells keep the distances of the old map's entrance (1, 1). */
 type SpawnDef = { id: number; x: number; y: number; pack: number; skills: number; flags?: number };
 const DEMO_SPAWNS: SpawnDef[] = [
-  { id: WOLF, x: 6, y: 2, pack: 1, skills: 0b0111 },
-  { id: WOLF, x: 7, y: 3, pack: 1, skills: 0b1110 },
+  { id: WOLF, x: 5, y: 1, pack: 1, skills: 0b0111 },
+  { id: WOLF, x: 6, y: 2, pack: 1, skills: 0b1110 },
+  { id: GOBLIN, x: 1, y: 9, pack: 2, skills: 0b11 },
   { id: GOBLIN, x: 2, y: 10, pack: 2, skills: 0b11 },
-  { id: GOBLIN, x: 3, y: 11, pack: 2, skills: 0b11 },
-  { id: CHIEFTAIN, x: 12, y: 12, pack: 3, skills: 0b11111 },
-  { id: GOBLIN_WARRIOR, x: 11, y: 12, pack: 3, skills: 0b11 },
-  { id: SHAMAN, x: 12, y: 11, pack: 3, skills: 0b111 },
+  { id: CHIEFTAIN, x: 11, y: 11, pack: 3, skills: 0b11111 },
+  { id: GOBLIN_WARRIOR, x: 10, y: 11, pack: 3, skills: 0b11 },
+  { id: SHAMAN, x: 11, y: 10, pack: 3, skills: 0b111 },
 ];
+/** Arena update: `Facing` and the packs' places on the map. The pack a party meets first stands at
+ * `FRONT`, looking south-east: the first player steps from the entrance onto (2, 2), next to it and
+ * behind it, so the party moves first and enters the arena at its north-west corner. The others
+ * wait far away, looking south-east too (their north-west neighbor is behind them). */
+const FACING = { N: 0, NE: 1, E: 2, SE: 3, S: 4, SW: 5, W: 6, NW: 7 };
+const FRONT = { x: 3, y: 3 };
+const FAR = [
+  { x: 12, y: 12 },
+  { x: 12, y: 8 },
+  { x: 8, y: 12 },
+  { x: 12, y: 4 },
+];
+const ARENA_SIDE = 12;
+/** Offset of a bestiary record's `xp` (u32, `deadroll_rules::monster::record::XP`). */
+const WOLF_XP_AT = 34;
+const ArenaMode = { map: "map", engaged: "engaged", arena: "arena", won: "won" };
+const modeOf = (s: any) => Object.keys(s.mode)[0];
 
 interface MapFixture {
   map: PublicKey;
@@ -711,6 +735,12 @@ type MapLoot = {
   settleTimeoutSecs?: number;
   /** Patch 13: wall cells inside the room. */
   walls?: { x: number; y: number }[];
+  /** Arena update: the pack met first (default: the roster's first), its facing (default SE),
+   * other map cells for packs, and wall cells of the first pack's arena. */
+  front?: number;
+  facing?: number;
+  packCells?: Record<number, { x: number; y: number; facing?: number }>;
+  arenaWalls?: { x: number; y: number }[];
 };
 const T1_CHEST = 0;
 const T1_BOSS = 1;
@@ -751,6 +781,20 @@ async function createFinalizedMap(dm: Keypair, bossLevel = 1, roster: SpawnDef[]
     ...(loot.chests ?? []).map((c) => ({ kind: { chest: {} }, x: c.x, y: c.y, data: c.table })),
   ];
   await mapProgram.methods.writePoints(points, loot.bossTable ?? T1_BOSS).accountsStrict(edit).signers([dm]).rpc();
+  // Arena update: every pack, its visible monster (its first spawn), map cell, facing and arena.
+  const numbers = [...new Set(roster.map((r) => r.pack))];
+  const front = loot.front ?? numbers[0];
+  let far = 0;
+  for (const pack of numbers) {
+    const placed = loot.packCells?.[pack];
+    const cell = placed ?? (pack === front ? FRONT : FAR[far++]);
+    const facing = placed?.facing ?? (pack === front ? (loot.facing ?? FACING.SE) : FACING.SE);
+    const cells = new Array(ARENA_SIDE * ARENA_SIDE).fill(cellByte(TILE.StoneFloor));
+    if (pack === front) for (const w of loot.arenaWalls ?? []) cells[w.y * ARENA_SIDE + w.x] = cellByte(TILE.Wall);
+    const facingName = Object.keys(FACING).find((k) => (FACING as any)[k] === facing)!.toLowerCase();
+    const record = { visible: roster.findIndex((r) => r.pack === pack), x: cell.x, y: cell.y, facing: { [facingName]: {} }, width: ARENA_SIDE, height: ARENA_SIDE };
+    await mapProgram.methods.writeArena(pack, record, Buffer.from(cells)).accountsStrict(edit).signers([dm]).rpc();
+  }
   // Patch 6: the builder rules read the registry bestiary and monster skills; patch 11 the rewards,
   // patch 13 the tileset.
   await mapProgram.methods
@@ -913,6 +957,42 @@ function deathAccounts(st: any) {
 const FINALIZE_CU = 600_000;
 const finalizeBudget = (deaths: unknown[]) => (deaths.length ? [ComputeBudgetProgram.setComputeUnitLimit({ units: FINALIZE_CU })] : []);
 
+/** Arena update: the steps from `from` to `to` on the map (the fixture's open 14 x 14 room, 8
+ * neighbors, no corner cut), never on or next to a living pack's visible monster but `pack`'s, nor
+ * on a closed chest. */
+function mapPath(s: any, from: Cell, to: Cell, pack: number): Cell[] {
+  const blocked = (c: Cell) => {
+    if (c.x < 1 || c.y < 1 || c.x > 14 || c.y > 14) return true;
+    for (let n = 0; n < 8; n++) {
+      const p = s.packs[n];
+      if (!p.width || !(s.packsAlive & (1 << n))) continue;
+      const d = cheb(c, p);
+      if (d === 0 || (d === 1 && n !== pack)) return true;
+    }
+    return s.chests.slice(0, s.chestCount).some((ch: any, i: number) => !(s.chestsOpened & (1 << i)) && ch.x === c.x && ch.y === c.y);
+  };
+  const key = (c: Cell) => c.y * 32 + c.x;
+  const prev = new Map<number, Cell | null>([[key(from), null]]);
+  const queue: Cell[] = [from];
+  while (queue.length) {
+    const c = queue.shift()!;
+    if (c.x === to.x && c.y === to.y) {
+      const out: Cell[] = [];
+      for (let at: Cell | null = c; at && key(at) !== key(from); at = prev.get(key(at)) ?? null) out.unshift(at);
+      return out;
+    }
+    for (let dy = -1; dy <= 1; dy++)
+      for (let dx = -1; dx <= 1; dx++) {
+        const n = { x: c.x + dx, y: c.y + dy };
+        if ((dx || dy) && !prev.has(key(n)) && !blocked(n)) {
+          prev.set(key(n), c);
+          queue.push(n);
+        }
+      }
+  }
+  return [];
+}
+
 /** One party on a fresh demo map, with helpers for every session instruction. */
 class Party {
   dm!: Keypair;
@@ -1040,14 +1120,77 @@ class Party {
     const seed = playersFirstSeed(await this.initiativeUnits(), this.players.length);
     return { sig: await this.consume(0, seed), seed };
   }
-  /** open, everyone joins (player 0 pays the whole price), ready, start, initiative. */
-  async startAll() {
+  /** open, everyone joins (player 0 pays the whole price), ready, start, initiative; arena update:
+   * then player 0 steps next to the first pack and the party enters its arena (`onMap` stays on
+   * the map). */
+  async startAll(onMap = false) {
     await this.open().rpc();
     for (let i = 0; i < this.players.length; i++) await this.join(i, this.players[i].wallet, i === 0 ? PRICE : new BN(0));
     for (let i = 0; i < this.players.length; i++) await this.ready(i, this.players[i].wallet, true);
     await this.start(this.dm);
     await this.rollInitiative();
     await this.begin();
+    if (!onMap) await this.enterFront();
+  }
+  /** Arena update: player 0, on its first map turn at the entrance, steps onto (2, 2) next to the
+   * front pack; `enter_arena` takes the party in and the first turn starts. */
+  async enterFront() {
+    await this.move(0, this.players[0].wallet, [STEP_SE]);
+    await (await this.enterArena()).rpc({ commitment: "confirmed" });
+    await this.begin();
+  }
+  /** Arena update: each living player's participation, writable, in slot order. */
+  async livingParts(s?: any) {
+    const st = s ?? (await this.state());
+    return this.players
+      .map((pl, i) => ({ pl, i }))
+      .filter(({ i }) => st.aliveMask & (1 << i))
+      .map(({ pl }) => ({ pubkey: pl.participation, isSigner: false, isWritable: true }));
+  }
+  async enterArena(parts?: { pubkey: PublicKey; isSigner: boolean; isWritable: boolean }[]) {
+    return program.methods
+      .enterArena()
+      .accountsStrict({ payer: provider.wallet.publicKey, session: this.acc.session, monsters: this.acc.monsters, layout: this.fixture.layout })
+      .remainingAccounts(parts ?? (await this.livingParts()))
+      .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 600_000 })]);
+  }
+  async leaveArena(parts?: { pubkey: PublicKey; isSigner: boolean; isWritable: boolean }[]) {
+    return program.methods
+      .leaveArena()
+      .accountsStrict({ payer: provider.wallet.publicKey, session: this.acc.session, monsters: this.acc.monsters })
+      .remainingAccounts(parts ?? (await this.livingParts()))
+      .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })]);
+  }
+  /** Arena update: the first living player walks the map to the north-west neighbor of pack
+   * `pack`'s visible monster (around the other living packs), ending the other players' turns,
+   * and the party enters the arena. */
+  async engage(pack: number) {
+    for (let step = 0; step < 200; step++) {
+      await this.settle();
+      const s = await this.state();
+      if (modeOf(s) === ArenaMode.engaged) {
+        await (await this.enterArena()).rpc({ commitment: "confirmed" });
+        await this.begin();
+        return this.state();
+      }
+      if (s.startedSeq !== s.turnSeq) {
+        await this.begin();
+        continue;
+      }
+      const unit = s.core.turnOrder[s.core.turnIndex];
+      const walker = this.players.findIndex((_, i) => s.aliveMask & (1 << i));
+      if (unit !== walker) {
+        await this.endTurn(this.players[unit].wallet, unit);
+        continue;
+      }
+      const pl = await this.part(unit);
+      const ap = pl.apSeq === s.turnSeq ? pl.core.actionPoints : pl.maxAp;
+      const target = s.packs[pack];
+      const path = mapPath(s, { x: pl.core.x, y: pl.core.y }, { x: target.x - 1, y: target.y - 1 }, pack);
+      if (ap < 1 || path.length === 0) await this.endTurn(this.players[unit].wallet, unit);
+      else await this.movePath(this.players[unit].wallet, unit, path.slice(0, Math.min(ap, MAX_PATH)), pl.participation ?? this.players[unit].participation);
+    }
+    assert.fail(`pack ${pack} never engaged`);
   }
   /** `start_turn` with player `who`'s accounts (`null`: a monster's turn); sent by the provider
    * wallet, which is not in the party (anyone may start a turn). */
@@ -1456,7 +1599,12 @@ class Party {
     until?: (s: any, monsters: any[]) => boolean;
     /** Patch 11: records the compute units of every player callback that paid out kills. */
     killCu?: { units: number; kills: number; boss: boolean }[];
+    /** Arena update: the packs to fight after the arena's, in order. */
+    packs?: number[];
+    /** Arena update: stop on a won arena, before `leave_arena`. */
+    keepWon?: boolean;
   }) {
+    const next = [...(opts.packs ?? [])];
     const dirs = [
       [N, 0, -1],
       [E, 1, 0],
@@ -1465,7 +1613,16 @@ class Party {
     ];
     for (let step = 0; step < (opts.steps ?? 400); step++) {
       await this.settle();
-      const s = await this.state();
+      let s = await this.state();
+      // Arena update: a won arena pays and brings the party back; the next pack comes after.
+      if (s.core.status.active && modeOf(s) === ArenaMode.won && !s.pendingDeaths) {
+        if (opts.keepWon) return s;
+        await (await this.leaveArena()).rpc({ commitment: "confirmed" });
+        s = await this.state();
+        if (!next.length) return s;
+        await this.engage(next.shift()!);
+        continue;
+      }
       if (s.core.status.active && s.startedSeq !== s.turnSeq) {
         await this.begin();
         continue;
@@ -1550,7 +1707,7 @@ describe("deadroll_session: lobby, auth and movement on the demo map", { skip: S
     stranger = await funded(1);
   });
 
-  it("open_session: DM only, minimum price, then opens and spawns monsters", async () => {
+  it("open_session: DM only, minimum price, then opens with the packs on the map and no monster live", async () => {
     const { dm, dmActor, fixture } = party;
     await rejects(openSession(party.players[0].wallet, fixture.map, fixture.layout, PRICE, dmActor.publicKey).rpc(), "NotDm");
     await rejects(openSession(dm, fixture.map, fixture.layout, MIN_PRICE.subn(1), dmActor.publicKey).rpc(), "PriceTooLow");
@@ -1558,9 +1715,18 @@ describe("deadroll_session: lobby, auth and movement on the demo map", { skip: S
     const s = await party.state();
     assert.ok(s.core.status.lobby);
     assert.deepEqual([s.entrance.x, s.entrance.y], [ENTRANCE.x, ENTRANCE.y]);
+    // Arena update: the monsters come into MonsterState pack by pack; the map has the packs.
     const m = await party.monsters();
-    assert.equal(m.core.count, DEMO_SPAWNS.length);
-    assert.deepEqual([m.core.monsters[4].x, m.core.monsters[4].y, m.core.monsters[4].bestiaryId], [12, 12, CHIEFTAIN]);
+    assert.equal(m.core.count, 0);
+    assert.equal(modeOf(s), ArenaMode.map);
+    assert.equal(s.arenaPack, 0xff);
+    assert.equal(s.packsAlive, 0b1110);
+    assert.deepEqual([s.packs[1].x, s.packs[1].y, s.packs[1].visible, s.packs[1].width], [FRONT.x, FRONT.y, 0, ARENA_SIDE]);
+    assert.deepEqual([s.packs[3].x, s.packs[3].y, s.packs[3].visible], [FAR[1].x, FAR[1].y, 4]);
+    // One record per template (5 kinds), the chosen skills by their registry index.
+    const ids = Array.from(m.templateIds as number[]).filter((x) => x !== 0xff).sort();
+    assert.deepEqual(ids, [WOLF, GOBLIN, CHIEFTAIN, GOBLIN_WARRIOR, SHAMAN].sort());
+    assert.ok(m.skillCount >= 5);
     await rejects(party.open().rpc(), "already in use");
   });
 
@@ -1639,19 +1805,20 @@ describe("deadroll_session: lobby, auth and movement on the demo map", { skip: S
     assert.equal(s.turnOrderLen, 0);
     assert.deepEqual([s.pending.attacker, s.pending.target], [EMPTY_UNIT, EMPTY_UNIT]);
     assert.ok(s.pending.participation.equals(party.players[0].participation));
-    // Registry snapshot: speed and initiative per monster, tile costs by tile type (patch 13).
-    assert.ok(s.monsterSpeed.slice(0, DEMO_SPAWNS.length).every((v: number) => v >= 1));
+    // Registry snapshot: tile costs by tile type (patch 13). Arena update: a monster's speed and
+    // initiative come with its pack (enter_arena).
     assert.deepEqual(Array.from(s.tileCost), [0, 1, 1, 1, 0, 1, 2, 0, 1, 2, 0, ...new Array(21).fill(0)]);
     // Nobody acts before the initiative roll.
     await rejects(party.move(0, party.players[0].wallet, [S]), "RollPending");
     await rejects(party.start(party.dm), "NotInLobby");
   });
 
-  it("initiative: one VRF value orders every unit; InitiativeRolled shows the dice", async () => {
+  it("initiative: one VRF value orders the players' map circle; InitiativeRolled shows the dice", async () => {
     await rejects(party.consume(0, CRIT, await funded(1)), "ConstraintAddress");
     await rejects(party.consume(1, CRIT), "InvalidPendingAccounts");
+    // Arena update: on the map only the players take turns, the monsters stand still.
     const units = await party.initiativeUnits();
-    assert.equal(units.length, 2 + DEMO_SPAWNS.length);
+    assert.equal(units.length, 2);
     const { sig, seed } = await party.rollInitiative();
     const expected = initiativeOrder(seed, units);
     const ev = await eventOf(sig, "initiativeRolled");
@@ -1750,11 +1917,13 @@ describe("deadroll_session: lobby, auth and movement on the demo map", { skip: S
     await rejects(move([{ x: here.x, y: here.y + 1 }], p0.wallet, MONSTER_BASE, p0.participation, null), "ActorMismatch");
     // A player's wallet or key never moves a monster: the DM's authority.
     await rejects(move([{ x: 5, y: 5 }], p0.wallet, MONSTER_BASE, null, null), "Unauthorized");
-    // One diagonal step costs one action point.
-    await move([{ x: here.x + 1, y: here.y + 1 }]);
+    // Arena update: on the map no monster is live, the DM moves none.
+    await rejects(move([{ x: 5, y: 5 }], party.dm, MONSTER_BASE, null, null), "InvalidMonster");
+    // One diagonal step costs one action point (north-east: away from the pack at (3, 3)).
+    await move([{ x: here.x + 1, y: here.y - 1 }]);
     const p = await party.part(0);
-    assert.deepEqual([p.core.x, p.core.y, p.core.actionPoints], [here.x + 1, here.y + 1, at.core.actionPoints - 1]);
-    assert.deepEqual((await party.state()).playerPos[0], { x: here.x + 1, y: here.y + 1 });
+    assert.deepEqual([p.core.x, p.core.y, p.core.actionPoints], [here.x + 1, here.y - 1, at.core.actionPoints - 1]);
+    assert.deepEqual((await party.state()).playerPos[0], { x: here.x + 1, y: here.y - 1 });
     // Back, so the tests after this one find the player where they expect it.
     await move([here]);
   });
@@ -1985,7 +2154,7 @@ describe("deadroll_session: combat, death, victory and payouts", { skip: SKIP_PA
     await rejects(party.act(0, p0.wallet, 0, 0), "AlreadyActed");
     await party.move(0, p0.wallet, [S]);
     const p = await party.part(0);
-    assert.deepEqual([p.core.x, p.core.y, p.core.actionPoints], [1, 2, p.maxAp - 3]);
+    assert.deepEqual([p.core.x, p.core.y, p.core.actionPoints], [0, 1, p.maxAp - 3]);
     assert.equal((await party.state()).actedSeq, (await party.state()).turnSeq);
     await party.endTurn(p0.wallet, 0);
   });
@@ -2009,7 +2178,8 @@ describe("deadroll_session: combat, death, victory and payouts", { skip: SKIP_PA
     const [p0, p1] = party.players;
     await rejects(party.monsterAct(party.dm, 0, 0), "NotYourTurn");
     await party.endTurn(p1.wallet, 1);
-    const s = await party.state();
+    // Arena update: on the timeline the mage may come again first; the first wolf's turn is next.
+    const s = await party.untilStartOf(MONSTER_BASE);
     const wolfTurn = s.core.turnOrder[s.core.turnIndex] - MONSTER_BASE;
     // A monster's turn starts first too (no participation needed).
     await rejects(party.monsterMove(party.dm, wolfTurn, [S]), "TurnNotStarted");
@@ -2078,14 +2248,15 @@ describe("deadroll_session: combat, death, victory and payouts", { skip: SKIP_PA
   it("killing the goblin chieftain wins the party; the kills filled the living player's cache", async () => {
     await rejects(party.settleParty(), "NotFinished");
     const killCu: { units: number; kills: number; boss: boolean }[] = [];
-    const s = await party.play({ playerSeed: CRIT, monsterSeed: () => MISS, focus: CHIEFTAIN_INDEX, steps: 2000, killCu });
+    const s = await party.play({ playerSeed: CRIT, monsterSeed: () => MISS, focus: CHIEFTAIN_INDEX, packs: TO_THE_BOSS, steps: 2000, killCu });
     for (const k of killCu.filter((x) => x.kills > 0)) console.log(`    CU, a kill callback paying out (${k.kills} killed${k.boss ? ", the boss table too" : ""}, 2 players): ${k.units}`);
     assert.ok(s.core.status.victory, "boss killed");
     assert.ok(s.endedAt.toNumber() > 0, "the end is stamped");
     // Kills pay out in their callback while its compute budget lasts; any left pay at the settlement.
     assert.deepEqual(Buffer.from(s.victorySeed), Buffer.from(s.core.lastSeed));
     const m = await party.monsters();
-    assert.ok(!m.core.monsters[4].alive);
+    assert.ok(!m.core.monsters[CHIEFTAIN_INDEX].alive);
+    assert.equal(m.core.monsters[CHIEFTAIN_INDEX].bestiaryId, CHIEFTAIN);
     // Patch 11: experience went into the cache during the party, the boss table's rewards too.
     const p0 = await party.part(0);
     assert.ok(p0.cacheXp > 0);
@@ -2188,7 +2359,7 @@ describe("character.spend_stat_points after a level-up", { skip: SKIP_PARTY }, (
   });
 
   it("the victory levels the survivors up: points to spend and the level's HP", async () => {
-    const s = await party.play({ playerSeed: CRIT, monsterSeed: () => MISS, focus: CHIEFTAIN_INDEX, steps: 2000 });
+    const s = await party.play({ playerSeed: CRIT, monsterSeed: () => MISS, focus: CHIEFTAIN_INDEX, packs: TO_THE_BOSS, steps: 2000 });
     assert.ok(s.core.status.victory, "boss killed");
     // Patch 11: each kill's full experience went into each living player's cache.
     const xp = (await party.part(0)).cacheXp;
@@ -2240,14 +2411,14 @@ describe("deadroll_session: flee and wipe", { skip: SKIP_PARTY }, () => {
     await party.move(1, p1.wallet, [S]); // another action: intents reset
     assert.equal((await party.state()).fleeMask, 0);
     await party.endTurn(p1.wallet, 1);
-    for (let i = 0; i < DEMO_SPAWNS.length; i++) {
+    // Arena update: on the timeline each player votes on its next turn, the monsters pass.
+    for (let i = 0; i < 20 && !(await party.state()).core.status.fled; i++) {
       await party.begin();
-      await party.endTurn(party.dm, null);
+      const st = await party.state();
+      const unit = st.core.turnOrder[st.core.turnIndex];
+      if (unit < MONSTER_BASE) await party.flee(unit, party.players[unit].wallet);
+      else await party.endTurn(party.dm, null);
     }
-    await party.begin();
-    await party.flee(0, p0.wallet);
-    await party.begin();
-    await party.flee(1, p1.wallet);
     s = await party.state();
     assert.ok(s.core.status.fled);
     await rejects(party.flee(0, p0.wallet), "NotActive");
@@ -2828,6 +2999,19 @@ describe("deadroll_session: reactive and passive skills, auras", { skip: SKIP_PA
   before(async () => {
     party = await Party.create(["warrior", "mage", "support", "stormMage"]);
     await party.startAll();
+    // Arena update: the party enters at the corner, W (0, 0), M (1, 0), S (0, 1), ST (1, 1), and moves
+    // first (support, Dexterity 8, then by slot). On their first turns they stand around (2, 2): the
+    // mages west of it, the warrior and the support east, so a wolf coming from the east passes the
+    // warrior and the support and stops on (2, 2), next to everyone.
+    const formation: [number, Cell[]][] = [
+      [SUPPORT, [{ x: 1, y: 2 }, { x: 2, y: 3 }, { x: 3, y: 3 }]],
+      [WARRIOR, [{ x: 0, y: 1 }, { x: 1, y: 2 }, { x: 2, y: 1 }, { x: 3, y: 1 }]],
+      [MAGE, [{ x: 0, y: 1 }, { x: 0, y: 2 }, { x: 1, y: 3 }]],
+    ];
+    for (const [who, cells] of formation) {
+      await party.skipTo(who);
+      await party.movePath(party.players[who].wallet, who, cells, party.players[who].participation);
+    }
   });
 
   it("set_ready takes the passive skills as auras and the reactive skills into the session", async () => {
@@ -2864,11 +3048,11 @@ describe("deadroll_session: reactive and passive skills, auras", { skip: SKIP_PA
     await party.untilStartOf(MONSTER_BASE + WOLF0);
     await party.begin();
     const before = (await party.monsters()).core.monsters[WOLF0];
-    // From (6, 2) west: (2, 2) is the first cell next to the party on the entrance (1, 1).
-    const sig = await party.monsterMove(party.dm, WOLF0, [W, W, W, W, W]);
+    // From (5, 1) south-west, then west: (2, 2) is the first cell next to a mage.
+    const sig = await party.monsterMove(party.dm, WOLF0, [STEP_SW, W, W, W, W]);
     const moved = (await party.monsters()).core.monsters[WOLF0];
     assert.deepEqual([moved.x, moved.y], [2, 2], "the walk stops on the cell next to the mage");
-    assert.equal(moved.actionPoints, before.actionPoints - 4, "the steps not taken cost nothing");
+    assert.equal(moved.actionPoints, before.actionPoints - 3, "the steps not taken cost nothing");
     const s = await party.state();
     assert.ok(s.core.pendingVrf);
     assert.equal(s.pendingReactive.kind, 1, "an enemy entered");
@@ -2982,8 +3166,8 @@ describe("deadroll_session: the line target and AP costs", { skip: SKIP_PARTY },
     await party.move(MAGE, mage.wallet, [E, E]);
     assert.equal((await party.part(MAGE)).core.actionPoints, 2);
     await rejects(party.act(MAGE, mage.wallet, ICE_PRISON, WOLF0), "NotEnoughActionPoints");
-    // Two more steps: (5, 1), diagonal to both wolves; nothing left for this turn.
-    await party.move(MAGE, mage.wallet, [E, E]);
+    // One more step: (4, 0) in the arena, diagonal to both wolves; 1 AP is not enough.
+    await party.move(MAGE, mage.wallet, [E]);
     await rejects(party.act(MAGE, mage.wallet, FROST_BOLT, WOLF0), "NotEnoughActionPoints");
     await party.endTurn(mage.wallet, MAGE);
   });
@@ -2993,10 +3177,10 @@ describe("deadroll_session: the line target and AP costs", { skip: SKIP_PARTY },
     await party.begin();
     const mage = party.players[MAGE];
     const s = await party.state();
-    assert.deepEqual([s.playerPos[MAGE].x, s.playerPos[MAGE].y], [5, 1]);
+    assert.deepEqual([s.playerPos[MAGE].x, s.playerPos[MAGE].y], [4, 0]);
     const ms = (await party.monsters()).core.monsters;
-    // (5, 1) -> (6, 2) -> (7, 3): both wolves on the diagonal.
-    assert.deepEqual([ms[WOLF0].x, ms[WOLF0].y, ms[WOLF1].x, ms[WOLF1].y], [6, 2, 7, 3]);
+    // (4, 0) -> (5, 1) -> (6, 2): both wolves on the diagonal.
+    assert.deepEqual([ms[WOLF0].x, ms[WOLF0].y, ms[WOLF1].x, ms[WOLF1].y], [5, 1, 6, 2]);
     await party.act(MAGE, mage.wallet, ARC, WOLF0);
     assert.equal((await party.part(MAGE)).core.actionPoints, 1, "Arc costs 3 AP (a line)");
     const done = await party.consume(MAGE, CRIT);
@@ -3015,6 +3199,145 @@ describe("deadroll_session: the line target and AP costs", { skip: SKIP_PARTY },
 });
 
 // ---------------------------------------------------------------------------------------------
+// Arena update (docs/PARTY_AND_TURNS.md 4.1, docs/MAP_DESCRIPTION.md 17)
+
+describe("deadroll_session: the map and a pack's arena (arena update)", { skip: SKIP_PARTY }, () => {
+  let party: Party;
+  let mapHp: number[];
+
+  before(async () => {
+    party = await Party.create(["warrior", "mage"]);
+    await party.startAll(true);
+  });
+
+  it("on the map the players move in a circle and the packs stand on their cells", async () => {
+    const s = await party.state();
+    assert.equal(modeOf(s), ArenaMode.map);
+    assert.deepEqual(s.core.turnOrder.slice(0, s.turnOrderLen).sort(), [0, 1]);
+    assert.equal((await party.monsters()).core.count, 0);
+    await rejects((await party.enterArena()).rpc(), "NotEngaged");
+    await rejects((await party.leaveArena()).rpc(), "ArenaNotWon");
+  });
+
+  it("move_path stops on the first cell next to a pack's visible monster and engages it", async () => {
+    const p0 = party.players[0];
+    mapHp = [(await party.part(0)).core.hp, (await party.part(1)).core.hp];
+    // (1, 1) -> (2, 2) is next to the wolves at (3, 3): the walk ends there, (3, 2) is not walked.
+    const sig = await party.movePath(p0.wallet, 0, [{ x: 2, y: 2 }, { x: 3, y: 2 }], p0.participation);
+    const ev = await eventOf(sig, "packEngaged");
+    assert.deepEqual([ev.pack, ev.slot, ev.x, ev.y], [1, 0, 2, 2]);
+    const s = await party.state();
+    assert.equal(modeOf(s), ArenaMode.engaged);
+    assert.deepEqual([s.arenaPack, s.engagedBy], [1, 0]);
+    assert.deepEqual(s.playerPos[0], { x: 2, y: 2 });
+    // Nothing goes on until the party is in the arena.
+    await rejects(party.move(0, p0.wallet, [S]), "ArenaTransition");
+    await rejects(party.endTurn(p0.wallet, 0), "ArenaTransition");
+    await rejects(party.flee(0, p0.wallet), "ArenaTransition");
+    await rejects(party.startTurn(0), "ArenaTransition");
+    await rejects((await party.leaveArena()).rpc(), "ArenaNotWon");
+  });
+
+  it("enter_arena: every living player's participation in slot order", async () => {
+    const parts = await party.livingParts();
+    await rejects((await party.enterArena(parts.slice(0, 1))).rpc(), "InvalidArenaAccounts");
+    await rejects((await party.enterArena([parts[1], parts[0]])).rpc(), "InvalidArenaAccounts");
+    await rejects((await party.enterArena([parts[0], { ...parts[1], isWritable: false }])).rpc(), "InvalidArenaAccounts");
+  });
+
+  it("enter_arena: the pack where the DM put it, the party at the edge it came from, from the back it moves first", async () => {
+    const sig = await (await party.enterArena()).rpc({ commitment: "confirmed" });
+    console.log(`    CU, enter_arena with 2 wolves and 2 players: ${await unitsOf(sig)}`);
+    const ev = await eventOf(sig, "arenaEntered");
+    assert.deepEqual([ev.pack, ev.partyFirst, ev.width, ev.height, ev.monsters], [1, true, ARENA_SIDE, ARENA_SIDE, 2]);
+    // Approach from the north-west: the corner (0, 0), then the next free cell by row.
+    assert.deepEqual([ev.players[0], ev.players[1]], [{ x: 0, y: 0 }, { x: 1, y: 0 }]);
+    assert.deepEqual(Array.from(ev.spawns.slice(0, 2)), [0, 1]);
+    const s = await party.state();
+    assert.equal(modeOf(s), ArenaMode.arena);
+    assert.deepEqual([s.width, s.height, s.mapWidth, s.mapHeight], [ARENA_SIDE, ARENA_SIDE, 16, 16]);
+    assert.deepEqual([s.mapPos[0], s.mapPos[1]], [{ x: 2, y: 2 }, ENTRANCE]);
+    // The timeline: the players at 0 (ties by Dexterity, then slot), the wolves at their delay.
+    assert.deepEqual(s.core.turnOrder.slice(0, s.turnOrderLen), [0, 1, MONSTER_BASE, MONSTER_BASE + 1]);
+    assert.equal(s.core.turnOrder[s.core.turnIndex], 0);
+    assert.deepEqual([s.unitTime[0], s.unitTime[1]], [0, 0]);
+    assert.ok(s.unitTime[MONSTER_BASE] > 0 && s.unitTime[MONSTER_BASE + 1] > 0);
+    const m = await party.monsters();
+    assert.equal(m.core.count, 2);
+    assert.deepEqual([m.core.monsters[0].x, m.core.monsters[0].y, m.core.monsters[1].x, m.core.monsters[1].y], [5, 1, 6, 2]);
+    assert.ok(m.core.monsters.slice(0, 2).every((x: any) => x.alive && x.hp === x.hpMax));
+    assert.ok(s.monsterSpeed[0] >= 1 && s.monsterInitiative[0] >= 1);
+    // HP, states and cooldowns come along as they are.
+    const [a, b] = [await party.part(0), await party.part(1)];
+    assert.deepEqual([a.core.x, a.core.y, b.core.x, b.core.y], [0, 0, 1, 0]);
+    assert.deepEqual([a.core.hp, b.core.hp], mapHp);
+    await rejects((await party.enterArena()).rpc(), "NotEngaged");
+    await party.begin();
+  });
+
+  it("chests are on the map: open_chest is refused in an arena", async () => {
+    await rejects(party.openChestCall(0, 0).rpc(), "InArena");
+  });
+
+  it("the pack's last death wins the arena; nothing goes on until leave_arena", async () => {
+    const s = await party.play({ playerSeed: CRIT, monsterSeed: () => MISS, steps: 600, keepWon: true });
+    assert.equal(modeOf(s), ArenaMode.won);
+    const m = await party.monsters();
+    assert.ok(m.core.monsters.slice(0, 2).every((x: any) => !x.alive));
+    const cur = s.core.turnOrder[s.core.turnIndex];
+    if (cur < MONSTER_BASE) await rejects(party.endTurn(party.players[cur].wallet, cur), "ArenaTransition");
+    await rejects(party.startTurn(cur < MONSTER_BASE ? cur : null), "ArenaTransition");
+    await rejects((await party.enterArena()).rpc(), "NotEngaged");
+  });
+
+  it("leave_arena: the pack's experience to every living player, back on the map without the pack", async () => {
+    const before = [await party.part(0), await party.part(1)];
+    await rejects((await party.leaveArena((await party.livingParts()).slice(0, 1))).rpc(), "InvalidArenaAccounts");
+    const sig = await (await party.leaveArena()).rpc({ commitment: "confirmed" });
+    console.log(`    CU, leave_arena for 2 players: ${await unitsOf(sig)}`);
+    const ev = await eventOf(sig, "arenaLeft");
+    // Two level 1 wolves (docs/PARTY_AND_TURNS.md 4.1.4: per pack, not per kill).
+    const wolfXp = 2 * (await tableBody(bestiary)).readUInt32LE(WOLF * 48 + WOLF_XP_AT);
+    assert.equal(ev.pack, 1);
+    assert.deepEqual(ev.xp.slice(0, 2), [wolfXp, wolfXp]);
+    const s = await party.state();
+    assert.equal(modeOf(s), ArenaMode.map);
+    assert.deepEqual([s.arenaPack, s.packsAlive & 0b10, s.width], [0xff, 0, 16]);
+    assert.deepEqual([s.playerPos[0], s.playerPos[1]], [{ x: 2, y: 2 }, ENTRANCE]);
+    const after = [await party.part(0), await party.part(1)];
+    for (const i of [0, 1]) {
+      assert.equal(after[i].cacheXp, before[i].cacheXp + wolfXp, `the pack's experience in cache ${i}`);
+      assert.equal(after[i].core.hp, before[i].core.hp, "HP comes back as it was");
+      assert.deepEqual([after[i].core.x, after[i].core.y], [s.playerPos[i].x, s.playerPos[i].y]);
+    }
+    assert.equal((await party.monsters()).core.count, 0);
+    assert.deepEqual(s.core.turnOrder.slice(0, s.turnOrderLen).sort(), [0, 1]);
+    // The circle goes on with the player after the one who engaged.
+    assert.equal(s.core.turnOrder[s.core.turnIndex], 1);
+    await rejects((await party.leaveArena()).rpc(), "ArenaNotWon");
+    // The pack is gone: its cell is free and its neighbors engage nothing.
+    await party.begin();
+    await party.move(1, party.players[1].wallet, [E, STEP_SE, S]);
+    assert.deepEqual((await party.state()).playerPos[1], FRONT);
+    assert.equal(modeOf(await party.state()), ArenaMode.map);
+  });
+});
+
+describe("deadroll_session: from a pack's front the monsters move first (arena update)", { skip: SKIP_PARTY }, () => {
+  it("the wolves look north-west at the party: the timeline starts with them", async () => {
+    const party = await Party.create(["warrior"], { loot: { facing: FACING.NW } });
+    await party.startAll(true);
+    await party.move(0, party.players[0].wallet, [STEP_SE]);
+    const sig = await (await party.enterArena()).rpc({ commitment: "confirmed" });
+    assert.equal((await eventOf(sig, "arenaEntered")).partyFirst, false);
+    const s = await party.state();
+    assert.equal(s.unitTime[MONSTER_BASE], 0);
+    assert.ok(s.unitTime[0] > 0);
+    assert.ok(s.core.turnOrder[s.core.turnIndex] >= MONSTER_BASE, "a wolf's turn first");
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
 // Patch 6: monster skills from the registry (docs/BESTIARY.md 3, 5, 8.1, 12)
 
 /** The registry table body (8-byte discriminator, 8-byte header, then the records). */
@@ -3024,19 +3347,20 @@ async function tableBody(address: PublicKey): Promise<Buffer> {
   return info.data.subarray(16);
 }
 
-/** The demo roster with the boss pack next to the entrance (1, 1), on its diagonal: a line from
- * the party through the chieftain runs through the goblin warrior and the shaman. One goblin is
- * elite. Monster indices: wolves 0, 1; goblins 2 (elite), 3; chieftain 4; warrior 5; shaman 6. */
+/** The demo roster with the boss pack in front (listed first): in its arena the chieftain stands
+ * next to the party's corner, on its diagonal, so a line from the party through the chieftain runs
+ * through the goblin warrior and the shaman. One goblin is elite. Arena slots of the boss pack:
+ * chieftain 0, warrior 1, shaman 2. */
 const CAMP: SpawnDef[] = [
-  { id: WOLF, x: 10, y: 3, pack: 1, skills: 0b0111 },
-  { id: WOLF, x: 11, y: 3, pack: 1, skills: 0b1110 },
-  { id: GOBLIN, x: 8, y: 8, pack: 2, skills: 0b11, flags: 1 },
-  { id: GOBLIN, x: 9, y: 8, pack: 2, skills: 0b11 },
-  { id: CHIEFTAIN, x: 2, y: 2, pack: 3, skills: 0b11111 },
-  { id: GOBLIN_WARRIOR, x: 3, y: 3, pack: 3, skills: 0b11 },
-  { id: SHAMAN, x: 4, y: 4, pack: 3, skills: 0b111 },
+  { id: CHIEFTAIN, x: 1, y: 1, pack: 3, skills: 0b11111 },
+  { id: GOBLIN_WARRIOR, x: 2, y: 2, pack: 3, skills: 0b11 },
+  { id: SHAMAN, x: 3, y: 3, pack: 3, skills: 0b111 },
+  { id: WOLF, x: 9, y: 2, pack: 1, skills: 0b0111 },
+  { id: WOLF, x: 10, y: 2, pack: 1, skills: 0b1110 },
+  { id: GOBLIN, x: 7, y: 7, pack: 2, skills: 0b11, flags: 1 },
+  { id: GOBLIN, x: 8, y: 7, pack: 2, skills: 0b11 },
 ];
-const [C_WOLF0, C_ELITE, C_GOBLIN, C_CHIEF, C_WARRIOR, C_SHAMAN] = [0, 2, 3, 4, 5, 6];
+const [C_CHIEF, C_WARRIOR, C_SHAMAN] = [0, 1, 2];
 /** `monster_act` action of a monster skill slot (0 = the natural attack). */
 const skillAction = (slot: number) => 1 + slot;
 /** Monster slots (`deadroll_rules::monster`): 0..5 active, 5 reactive, 6 passive. */
@@ -3054,10 +3378,18 @@ describe("deadroll_session: monster skills, the shaman and the chieftain (patch 
     await party.startAll();
   });
 
-  it("open_session copies the records and the chosen skills; Leader is an aura from the start; elite has more HP", async () => {
+  it("open_session copies the records and the chosen skills; enter_arena loads the pack; Leader is an aura from the start", async () => {
     const m = await party.monsters();
     const bestiaryBody = await tableBody(bestiary);
-    CAMP.forEach((sp, i) => assert.deepEqual([...m.records[i]], [...bestiaryBody.subarray(sp.id * 48, sp.id * 48 + 48)], `record of monster ${i}`));
+    // Arena update: one record per template at open_session, each arena slot its own at entry.
+    assert.equal(m.core.count, 3);
+    CAMP.slice(0, 3).forEach((sp, i) => assert.deepEqual([...m.records[i]], [...bestiaryBody.subarray(sp.id * 48, sp.id * 48 + 48)], `record of monster ${i}`));
+    assert.deepEqual(Array.from(m.spawnOf.slice(0, 3)), [0, 1, 2]);
+    for (const sp of CAMP) {
+      const at = Array.from(m.templateIds as number[]).indexOf(sp.id);
+      assert.ok(at >= 0, `template ${sp.id} copied`);
+      assert.deepEqual([...m.templates[at]], [...bestiaryBody.subarray(sp.id * 48, sp.id * 48 + 48)]);
+    }
     // Wolves 0..4, goblins 4..6 (the warrior shares their pool), chieftain 6..11, shaman 11..14.
     assert.equal(m.skillCount, 14, "each chosen registry skill once");
     const skills = await tableBody(monsterSkills);
@@ -3071,10 +3403,6 @@ describe("deadroll_session: monster skills, the shaman and the chieftain (patch 
     const leader = m.auras[C_CHIEF][0];
     assert.ok(leader.kinOnly && leader.aura.kind.empowerment !== undefined && leader.aura.passive && leader.aura.turns === 255 && leader.aura.radius === 2);
     assert.equal(m.auras[C_CHIEF][1].aura.turns, 0, "Battle Cry waits for its trigger");
-    // Elite: +50% HP (BalanceConfig elite_hp_bp), one more active slot (the goblin pool has 2).
-    const [elite, plain] = [m.core.monsters[C_ELITE], m.core.monsters[C_GOBLIN]];
-    assert.equal(elite.flags & 1, 1);
-    assert.equal(elite.hpMax, plain.hpMax + plain.hpMax / 2);
   });
 
   it("Leader: the goblin warrior's Thrown Stone carries the chieftain's Empowerment", async () => {
@@ -3170,11 +3498,10 @@ describe("deadroll_session: monster skills, the shaman and the chieftain (patch 
     await party.skipTo(MONSTER_BASE + C_SHAMAN);
     const before = (await party.monsters()).core.monsters[C_WARRIOR];
     assert.ok(before.hp < before.hpMax, "the cleave wounded the goblin warrior");
-    // Same kin only: a wolf is another kin.
-    await rejects(party.monsterAct(party.dm, C_SHAMAN, C_WOLF0, null, skillAction(MENDING), WARRIOR), "NotSameKin");
+    // Same kin only (another kin is never in the boss pack's arena: crates/rules covers the filter).
     // The callback of a heal on a monster takes the lowest living player's accounts.
     await rejects(party.monsterAct(party.dm, C_SHAMAN, C_WARRIOR, null, skillAction(MENDING), MAGE), "InvalidPendingAccounts");
-    // A damage skill takes a player: monster index 5 is no player slot.
+    // A damage skill takes a player: arena slot 1 is no player slot.
     await rejects(party.monsterAct(party.dm, C_SHAMAN, C_WARRIOR, null, skillAction(SPARK), WARRIOR), "InvalidTarget");
     await rejects(party.monsterAct(party.dm, C_SHAMAN, 9, null, skillAction(MENDING), WARRIOR), "InvalidAllyTarget");
     await party.monsterAct(party.dm, C_SHAMAN, C_WARRIOR, null, skillAction(MENDING), WARRIOR);
@@ -3202,8 +3529,8 @@ describe("deadroll_session: monster skills, the shaman and the chieftain (patch 
 });
 
 describe("deadroll_session: a monster line puts several players down; start_turn finalizes them (patch 6)", { skip: SKIP_PARTY }, () => {
-  // Mages on the entrance cell: the chieftain's Spin Strike (a melee line, 1 cell) from the cell
-  // next to them hits them all.
+  // Arena update: the players stand on their own cells, so the chieftain's Spin Strike (a melee
+  // line, 1 cell) puts one down; the queue is the same for one death or several.
   const SPIN_STRIKE = 1;
 
   /**
@@ -3255,12 +3582,12 @@ describe("deadroll_session: a monster line puts several players down; start_turn
     return down;
   }
 
-  it("3 players, 2 down: nothing but start_turn goes until the deaths are final", async () => {
+  it("3 players, 1 down: nothing but start_turn goes until the death is final", async () => {
     const party = await Party.create(["mage", "mage", "mage"], { roster: CAMP });
     await party.startAll();
-    const sig = await lineDown(party, 2);
-    console.log(`CU consume_randomness, a monster line on 3 players, 2 down: ${await unitsOf(sig)}`);
-    const down = await assertPending(party, sig, 2);
+    const sig = await lineDown(party, 1);
+    console.log(`CU consume_randomness, a monster line, 1 down: ${await unitsOf(sig)}`);
+    const down = await assertPending(party, sig, 1);
     const living = [0, 1, 2].find((x) => !down.includes(x))!;
     const pl = party.players[living];
     // Every action waits for the queue.
@@ -3272,8 +3599,8 @@ describe("deadroll_session: a monster line puts several players down; start_turn
     await rejects(party.flee(living, pl.wallet), "DeathsPending");
     // Missing, swapped or foreign accounts are refused; the queue stays.
     const queue = deathAccounts(await party.state());
-    await rejects(party.startTurn(null, {}, queue.slice(0, 3)), "InvalidDeathAccounts");
-    const swapped = [...queue.slice(3), ...queue.slice(0, 3)];
+    await rejects(party.startTurn(null, {}, queue.slice(0, 2)), "InvalidDeathAccounts");
+    const swapped = [queue[1], queue[0], queue[2]];
     await rejects(party.startTurn(null, {}, swapped), "InvalidDeathAccounts");
     const foreign = [...queue];
     foreign[2] = { ...foreign[2], pubkey: pda([Buffer.from("bag"), pl.character.toBuffer()], CHARACTER) };
@@ -3281,7 +3608,7 @@ describe("deadroll_session: a monster line puts several players down; start_turn
     // Anyone sends start_turn: the turn already started (the chieftain acted), so it only
     // finalizes; the chieftain's turn goes on.
     const fin = await party.startTurn(null);
-    console.log(`CU start_turn finalizing 2 deaths: ${await unitsOf(fin)}`);
+    console.log(`CU start_turn finalizing 1 death: ${await unitsOf(fin)}`);
     const events = await eventsOf(fin);
     assert.deepEqual(eventsNamed(events, "deathFinalized").map((d) => d.slot), down);
     assert.equal(eventsNamed(events, "turnTicked").length, 0, "no new turn");
@@ -3310,20 +3637,18 @@ describe("deadroll_session: a monster line puts several players down; start_turn
     assert.ok(order.length > 0 && targeted);
   });
 
-  it("4 players, 3 down at once; start_turn finalizes all three; a wipe is finalized by claim_rewards", async () => {
-    const party = await Party.create(["mage", "mage", "mage", "mage"], { roster: CAMP });
+  it("2 players, one down and finalized, then the last: a wipe is finalized by settle_party", async () => {
+    const party = await Party.create(["mage", "mage"], { roster: CAMP });
     await party.startAll();
-    const sig = await lineDown(party, 3);
-    console.log(`CU consume_randomness, a monster line on 4 players, 3 down: ${await unitsOf(sig)}`);
-    const down = await assertPending(party, sig, 3);
+    const sig = await lineDown(party, 1);
+    const down = await assertPending(party, sig, 1);
     const fin = await party.startTurn(null);
-    console.log(`CU start_turn finalizing 3 deaths: ${await unitsOf(fin)}`);
-    assert.equal(eventsNamed(await eventsOf(fin), "deathFinalized").length, 3);
+    assert.equal(eventsNamed(await eventsOf(fin), "deathFinalized").length, 1);
     for (const slot of down) assert.ok(!(await party.character(slot)).core.alive);
     assert.equal((await party.state()).pendingDeaths, 0);
     await party.endTurn(party.dm, null);
-    // The last one: down in a callback, the party wiped; the claims finalize it first.
-    const last = [0, 1, 2, 3].find((x) => !down.includes(x))!;
+    // The last one: down in a callback, the party wiped; the settlement finalizes it first.
+    const last = [0, 1].find((x) => !down.includes(x))!;
     for (let i = 0; i < 60; i++) {
       await party.skipTo(MONSTER_BASE + C_CHIEF, 60);
       await party.monsterAct(party.dm, C_CHIEF, last);
@@ -3339,7 +3664,7 @@ describe("deadroll_session: a monster line puts several players down; start_turn
       assert.ok((await party.character(last)).core.alive, "not finalized yet");
       await rejects(party.startTurn(null), "NotActive");
       const settle = await party.settleParty();
-      console.log(`CU settle_party for 4 players, finalizing 1 death: ${await unitsOf(settle)}`);
+      console.log(`CU settle_party for 2 players, finalizing 1 death: ${await unitsOf(settle)}`);
       assert.equal(eventsNamed(await eventsOf(settle), "deathFinalized")[0].slot, last);
       assert.ok(!(await party.character(last)).core.alive);
       assert.equal((await party.state()).pendingDeaths, 0);
@@ -3382,8 +3707,9 @@ describe("deadroll_session: visible chests (patch 11)", { skip: SKIP_PARTY }, ()
   let party: Party;
 
   before(async () => {
-    party = await Party.create(["warrior", "mage"], { loot: { chests: [CHEST] } });
-    await party.startAll();
+    // Arena update: chests are on the map; the wolves wait far from the chest and the party.
+    party = await Party.create(["warrior", "mage"], { loot: { chests: [CHEST], packCells: { 1: { x: 8, y: 2 } } } });
+    await party.startAll(true);
   });
 
   it("open_session copied the chest, the boss table and the reward tables", async () => {
@@ -3451,10 +3777,10 @@ describe("deadroll_session: visible chests (patch 11)", { skip: SKIP_PARTY }, ()
 
 describe("deadroll_session: a monster near another player of the party (patch 11)", { skip: SKIP_PARTY }, () => {
   it("open_chest refuses while a living monster stands within the radius of any living player", async () => {
-    // The wolves far from the chest and the opener; the mage walks up to them.
-    const roster = DEMO_SPAWNS.map((x, i) => (i === 0 ? { ...x, x: 8, y: 1 } : i === 1 ? { ...x, x: 9, y: 2 } : x));
-    const party = await Party.create(["warrior", "mage"], { roster, loot: { chests: [CHEST] } });
-    await party.startAll();
+    // The wolves (their visible one on the map) far from the chest and the opener; the mage walks
+    // up to them.
+    const party = await Party.create(["warrior", "mage"], { loot: { chests: [CHEST], packCells: { 1: { x: 8, y: 1 } } } });
+    await party.startAll(true);
     const [p0, p1] = party.players;
     await party.move(0, p0.wallet, [S, S]); // (1, 3), next to the chest
     await party.endTurn(p0.wallet, 0);
@@ -3482,9 +3808,9 @@ describe("deadroll_session: what a kill's payout costs (patch 11)", { skip: SKIP
 
 describe("deadroll_session: a chest with a monster near it (patch 11)", { skip: SKIP_PARTY }, () => {
   it("open_chest refuses while a living monster stands within the radius", async () => {
-    const roster = DEMO_SPAWNS.map((x, i) => (i === 0 ? { ...x, x: 2, y: 6 } : i === 1 ? { ...x, x: 3, y: 6 } : x));
-    const party = await Party.create(["warrior"], { roster, loot: { chests: [CHEST] } });
-    await party.startAll();
+    // The wolves' visible one 2 cells from the chest.
+    const party = await Party.create(["warrior"], { loot: { chests: [CHEST], packCells: { 1: { x: 2, y: 6 } } } });
+    await party.startAll(true);
     await party.move(0, party.players[0].wallet, [S, S]);
     await rejects(party.openChestCall(0, 0).rpc(), "MonsterNearChest");
   });
@@ -3496,7 +3822,7 @@ describe("deadroll_session: the DM's deadline (patch 11)", { skip: SKIP_PARTY },
   before(async () => {
     party = await Party.create(["warrior", "mage"], { loot: { settleTimeoutSecs: SHORT_SETTLE_SECS } });
     await party.startAll();
-    const s = await party.play({ playerSeed: CRIT, monsterSeed: () => MISS, focus: CHIEFTAIN_INDEX, steps: 2000 });
+    const s = await party.play({ playerSeed: CRIT, monsterSeed: () => MISS, focus: CHIEFTAIN_INDEX, packs: TO_THE_BOSS, steps: 2000 });
     assert.ok(s.core.status.victory, "boss killed");
     assert.equal(s.settleTimeoutSecs, SHORT_SETTLE_SECS, "the map's time to settle");
   });
@@ -3550,7 +3876,7 @@ describe("deadroll_session: a character is free when its party ends (patch 11)",
   before(async () => {
     party = await Party.create(["warrior", "mage"], { loot: { settleTimeoutSecs: 300 } });
     await party.startAll();
-    const s = await party.play({ playerSeed: CRIT, monsterSeed: () => MISS, focus: CHIEFTAIN_INDEX, steps: 2000 });
+    const s = await party.play({ playerSeed: CRIT, monsterSeed: () => MISS, focus: CHIEFTAIN_INDEX, packs: TO_THE_BOSS, steps: 2000 });
     assert.ok(s.core.status.victory, "boss killed");
   });
 
@@ -3598,7 +3924,7 @@ describe("deadroll_session: a new party after the deadline burns the unclaimed r
   it("the old rewards burn at the join; the claim then refunds the contribution only", async () => {
     const party = await Party.create(["warrior"], { loot: { settleTimeoutSecs: SHORT_SETTLE_SECS } });
     await party.startAll();
-    const s = await party.play({ playerSeed: CRIT, monsterSeed: () => MISS, focus: CHIEFTAIN_INDEX, steps: 2000 });
+    const s = await party.play({ playerSeed: CRIT, monsterSeed: () => MISS, focus: CHIEFTAIN_INDEX, packs: TO_THE_BOSS, steps: 2000 });
     assert.ok(s.core.status.victory, "boss killed");
     const pl = party.players[0];
     await party.leave(0);
@@ -3670,7 +3996,7 @@ describe("deadroll_session: at most 3 parties wait for one character's rewards (
 describe("deadroll_session: what a move_path costs (patch 13)", { skip: SKIP_PARTY }, () => {
   it("measures the longest walks of a player and of a wolf, and one cell of each", async () => {
     // The wolves away from the rows the walks take, so no reactive skill cuts them short.
-    const roster = DEMO_SPAWNS.map((x, i) => (i === 0 ? { ...x, x: 9, y: 8 } : i === 1 ? { ...x, x: 10, y: 9 } : x));
+    const roster = DEMO_SPAWNS.map((x, i) => (i === 0 ? { ...x, x: 8, y: 7 } : i === 1 ? { ...x, x: 9, y: 8 } : x));
     const party = await Party.create(["warrior", "mage"], { roster });
     await party.startAll();
     const cu: string[] = [];
@@ -3679,8 +4005,8 @@ describe("deadroll_session: what a move_path costs (patch 13)", { skip: SKIP_PAR
       await party.skipTo(who);
       const p = await party.part(who);
       const ap = who === 0 ? p.maxAp : 1;
-      // Player 0 along row 1, player 1 one cell down.
-      const steps = who === 0 ? new Array(ap).fill(E) : [S];
+      // In the arena: player 0 down column 0 (player 1 stands east of it), player 1 one cell down.
+      const steps = who === 0 ? new Array(ap).fill(S) : [S];
       await walk(`player`, await party.move(who, party.players[who].wallet, steps), steps.length);
       const after = await party.part(who);
       assert.equal(after.core.actionPoints, p.core.actionPoints - steps.length);
@@ -3700,8 +4026,9 @@ describe("deadroll_session: a diagonal never cuts a corner (patch 13)", { skip: 
   it("move_path refuses a diagonal past one wall or between two, allows an open one", async () => {
     // A wall at (2, 1) beside the entrance (1, 1); walls at (3, 2) and (2, 3) touch at the corner
     // between (2, 2) and (3, 3).
-    const party = await Party.create(["warrior", "mage"], { loot: { walls: [{ x: 2, y: 1 }, { x: 3, y: 2 }, { x: 2, y: 3 }] } });
-    await party.startAll();
+    // On the map; the wolves wait far from these cells (no engagement).
+    const party = await Party.create(["warrior", "mage"], { loot: { walls: [{ x: 2, y: 1 }, { x: 3, y: 2 }, { x: 2, y: 3 }], packCells: { 1: { x: 8, y: 8 } } } });
+    await party.startAll(true);
     await party.skipTo(0);
     const p0 = party.players[0];
     const before = await party.part(0);

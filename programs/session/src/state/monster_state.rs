@@ -14,8 +14,8 @@ use deadroll_rules::{
 };
 use deadroll_skillcheck::monster::{MonsterSkill, SESSION_SIZE};
 use deadroll_types::{
-    seeds, Aspect, Cell, Monster, MonsterStateData, MONSTERS_MAX, MONSTER_SLOTS, NO_TABLE,
-    SESSION_SKILLS_MAX,
+    seeds, Aspect, Cell, Monster, MonsterStateData, ARENA_MONSTERS_MAX, MONSTERS_MAX,
+    MONSTER_SLOTS, NO_TABLE, SESSION_SKILLS_MAX, SESSION_TEMPLATES_MAX,
 };
 
 use crate::{
@@ -26,11 +26,16 @@ use crate::{
             self, ModsData, ResistModData, TimedModData, RESIST_MOD_SIZE, STORED_MODS,
             TIMED_MOD_SIZE,
         },
-        AuraData, ACCOUNT_VERSION,
+        AuraData,
     },
 };
 
-/// `["monsters", session]`: every monster of the party, spawned from the map layout.
+/// `["monsters", session]`: the monsters of the arena the party fights in, and the registry copies
+/// the party fixed at `open_session`. Arena update: the live slots `0..ARENA_MONSTERS_MAX` hold the
+/// current pack only, loaded by `enter_arena` (on the map there are none); the copies are one
+/// bestiary record per template, the chosen skills, the reward and resonance tables, so the size
+/// no longer grows with the monsters of the map. Version `MONSTER_STATE_VERSION`; an account from
+/// before the arena update (version 1, every monster of the map) is refused.
 ///
 /// On-chain it is never Borsh-decoded as a whole: `[Monster; 24]` (~1.3 KB) decoded by
 /// `Account<MonsterState>` overflows the 4 KB SBPF v3 stack frame. Contexts take it as
@@ -41,17 +46,17 @@ use crate::{
 #[account]
 #[derive(InitSpace)]
 pub struct MonsterState {
-    /// Frozen contract, first after the discriminator.
+    /// Frozen contract, first after the discriminator. Arena update: `monsters[..count]` are the
+    /// arena's pack (`count <= ARENA_MONSTERS_MAX`); the entries past `ARENA_MONSTERS_MAX` are not
+    /// used.
     pub core: MonsterStateData,
-    /// Not used since patch 6 (`skill_cooldowns` holds every monster slot). Kept for the layout.
-    pub cooldowns: [[u8; MONSTER_SKILLS_MAX]; MONSTERS_MAX],
-    /// Per monster: buffs and debuffs (`deadroll_combat::support`), like `Participation.mods`
+    /// Per arena slot: buffs and debuffs (`deadroll_combat::support`), like `Participation.mods`
     /// (the Resistance is in `resist_mods`).
-    pub mods: [[TimedModData; STORED_MODS]; MONSTERS_MAX],
+    pub mods: [[TimedModData; STORED_MODS]; ARENA_MONSTERS_MAX],
     // Patch 4. Registry rules copied at `open_session`, fixed for the party
     // (docs/DAMAGE_TYPES_AND_MIXES.md 9 and 10.1), then the map state resonances make.
-    /// Per monster: the defenses of its bestiary record.
-    pub defense: [MonsterDefenseData; MONSTERS_MAX],
+    /// Per arena slot: the defenses of its bestiary record.
+    pub defense: [MonsterDefenseData; ARENA_MONSTERS_MAX],
     /// The registry `aspects`, `traits` and `resonances` table bodies
     /// (`deadroll_combat::tables`).
     pub res_aspects: [u8; RES_ASPECTS_LEN],
@@ -61,25 +66,25 @@ pub struct MonsterState {
     pub burning_cells: [BurningCellData; BURNING_CELLS_MAX],
     // Patch 6. The registry bestiary records and monster skills of the spawns, copied at
     // `open_session` (docs/BESTIARY.md 3, 12), then what the skills do in the fight.
-    /// Per monster: its bestiary record (`deadroll_rules::monster::record`).
-    pub records: [[u8; MONSTER_RECORD_LEN]; MONSTERS_MAX],
+    /// Per arena slot: its bestiary record (`deadroll_rules::monster::record`), from `templates`.
+    pub records: [[u8; MONSTER_RECORD_LEN]; ARENA_MONSTERS_MAX],
     /// Every skill the spawns took, each once (the session copy of
     /// `deadroll_skillcheck::monster`); the first `skill_count` are used.
     pub skill_table: [[u8; SKILL_COPY_LEN]; SESSION_SKILLS_MAX],
     pub skill_count: u8,
-    /// Per monster, per slot (`0..5` active, `5` reactive, `6` passive): an index into
+    /// Per arena slot, per skill slot (`0..5` active, `5` reactive, `6` passive): an index into
     /// `skill_table`, `NO_SKILL` (0xFF) = empty.
-    pub skills: [[u8; MONSTER_SLOTS]; MONSTERS_MAX],
-    /// Per monster, per slot: own turn starts until usable (the reactive's too), counted down by
-    /// `start_turn`.
-    pub skill_cooldowns: [[u8; MONSTER_SLOTS]; MONSTERS_MAX],
-    /// Per monster: its passive skill's aura (from `open_session`), then its reactive skill's.
-    pub auras: [[MonsterAuraData; AURAS_PER_PLAYER]; MONSTERS_MAX],
+    pub skills: [[u8; MONSTER_SLOTS]; ARENA_MONSTERS_MAX],
+    /// Per arena slot, per skill slot: own turn starts until usable (the reactive's too), counted
+    /// down by `start_turn`.
+    pub skill_cooldowns: [[u8; MONSTER_SLOTS]; ARENA_MONSTERS_MAX],
+    /// Per arena slot: its passive skill's aura (from `enter_arena`), then its reactive skill's.
+    pub auras: [[MonsterAuraData; AURAS_PER_PLAYER]; ARENA_MONSTERS_MAX],
     // Patch 9: resistances (docs/DAMAGE_TYPES_AND_MIXES.md 9).
-    /// Per monster: its Resistance with the aspect weights, like `Participation.resist_mod`.
-    pub resist_mods: [ResistModData; MONSTERS_MAX],
-    /// Per monster, per aura slot: a Resistance aura's aspect weights.
-    pub aura_weights: [[[u8; Aspect::COUNT]; AURAS_PER_PLAYER]; MONSTERS_MAX],
+    /// Per arena slot: its Resistance with the aspect weights, like `Participation.resist_mod`.
+    pub resist_mods: [ResistModData; ARENA_MONSTERS_MAX],
+    /// Per arena slot, per aura slot: a Resistance aura's aspect weights.
+    pub aura_weights: [[[u8; Aspect::COUNT]; AURAS_PER_PLAYER]; ARENA_MONSTERS_MAX],
     // Patch 11: the registry reward tables of the party (the spawns' bodies, the chests, the
     // boss), copied at `open_session` and read in place by the reward events.
     /// Registry id of each copied table, `NO_TABLE` = free.
@@ -87,10 +92,24 @@ pub struct MonsterState {
     /// The copied records (`deadroll_rules::loot::record`), by `loot_ids` position.
     pub loot_tables: [[u8; LOOT_RECORD_LEN]; LOOT_TABLES_MAX],
     // Triples pass: the registry `triples` table body, copied at `open_session` like the other
-    // resonance tables (last in the account: new fields only at the end). 8_224 + 1_920 =
-    // 10_144 bytes, under the 10_240 a CPI can allocate (a test pins it).
+    // resonance tables.
     pub res_triples: [u8; RES_TRIPLES_LEN],
+    // Arena update.
+    /// Per arena slot: the spawn of the map layout it was loaded from.
+    pub spawn_of: [u8; ARENA_MONSTERS_MAX],
+    /// The bestiary records of the party's templates, each once, copied at `open_session`;
+    /// `template_ids` gives their bestiary ids, `NO_TEMPLATE` = free.
+    pub template_ids: [u8; SESSION_TEMPLATES_MAX],
+    pub templates: [[u8; MONSTER_RECORD_LEN]; SESSION_TEMPLATES_MAX],
+    /// The registry `monster_skills` index of each `skill_table` entry: `enter_arena` finds a
+    /// spawn's chosen skills there.
+    pub skill_ids: [u16; SESSION_SKILLS_MAX],
 }
+
+/// `MonsterState.core.version` since the arena update.
+pub const MONSTER_STATE_VERSION: u8 = 2;
+/// `MonsterState.template_ids` of a free slot.
+pub const NO_TEMPLATE: u8 = 0xFF;
 
 /// Distinct reward tables one party copies (bodies, chests and the boss together).
 pub const LOOT_TABLES_MAX: usize = 12;
@@ -212,16 +231,18 @@ impl From<BurningCell> for BurningCellData {
     }
 }
 
-/// Cooldown slots per monster.
-pub const MONSTER_SKILLS_MAX: usize = 4;
-
 /// `sha256("account:MonsterState")[..8]`, Anchor's discriminator for [`MonsterState`].
 pub const MONSTER_STATE_DISCRIMINATOR: [u8; 8] = [0xae, 0xda, 0x67, 0xcc, 0xde, 0x2e, 0xe8, 0x18];
 
 /// Account size, discriminator included.
 pub const MONSTER_STATE_SPACE: usize = 8 + MonsterState::INIT_SPACE;
-// A CPI allocates at most 10 KiB, and `open_session` creates the account in one call.
+// A CPI allocates at most 10 KiB, and `open_session` creates the account in one call. Since the
+// arena update the size does not depend on the map's monsters (a test pins it).
 const _: () = assert!(MONSTER_STATE_SPACE <= 10_240);
+
+/// What the arena update made of the account (10_144 bytes before it, for every map monster).
+#[cfg(test)]
+const MONSTER_STATE_SPACE_PINNED: usize = 8_100;
 
 /// Byte offsets inside a `MonsterState` account (discriminator included).
 mod off {
@@ -231,27 +252,31 @@ mod off {
     pub const MONSTERS: usize = SESSION + 32;
     pub const COUNT: usize = MONSTERS + MONSTERS_MAX * Monster::SIZE;
     pub const BUMP: usize = COUNT + 1;
-    pub const COOLDOWNS: usize = BUMP + 1;
-    pub const MODS: usize = COOLDOWNS + MONSTERS_MAX * MONSTER_SKILLS_MAX;
-    pub const DEFENSE: usize = MODS + MONSTERS_MAX * super::MODS_LEN;
-    pub const RES_ASPECTS: usize = DEFENSE + MONSTERS_MAX * super::DEFENSE_SIZE;
+    pub const MODS: usize = BUMP + 1;
+    pub const DEFENSE: usize = MODS + ARENA_MONSTERS_MAX * super::MODS_LEN;
+    pub const RES_ASPECTS: usize = DEFENSE + ARENA_MONSTERS_MAX * super::DEFENSE_SIZE;
     pub const RES_TRAITS: usize = RES_ASPECTS + super::RES_ASPECTS_LEN;
     pub const RES_PAIRS: usize = RES_TRAITS + super::RES_TRAITS_LEN;
     pub const BURNING: usize = RES_PAIRS + super::RES_PAIRS_LEN;
     pub const RECORDS: usize = BURNING + BURNING_CELLS_MAX * super::BURNING_CELL_SIZE;
-    pub const SKILL_TABLE: usize = RECORDS + MONSTERS_MAX * super::MONSTER_RECORD_LEN;
+    pub const SKILL_TABLE: usize = RECORDS + ARENA_MONSTERS_MAX * super::MONSTER_RECORD_LEN;
     pub const SKILL_COUNT: usize = SKILL_TABLE + SESSION_SKILLS_MAX * super::SKILL_COPY_LEN;
     pub const SKILLS: usize = SKILL_COUNT + 1;
-    pub const SKILL_COOLDOWNS: usize = SKILLS + MONSTERS_MAX * MONSTER_SLOTS;
-    pub const AURAS: usize = SKILL_COOLDOWNS + MONSTERS_MAX * MONSTER_SLOTS;
+    pub const SKILL_COOLDOWNS: usize = SKILLS + ARENA_MONSTERS_MAX * MONSTER_SLOTS;
+    pub const AURAS: usize = SKILL_COOLDOWNS + ARENA_MONSTERS_MAX * MONSTER_SLOTS;
     pub const RESIST_MODS: usize =
-        AURAS + MONSTERS_MAX * AURAS_PER_PLAYER * super::MONSTER_AURA_SIZE;
-    pub const AURA_WEIGHTS: usize = RESIST_MODS + MONSTERS_MAX * super::RESIST_MOD_SIZE;
-    pub const LOOT_IDS: usize = AURA_WEIGHTS + MONSTERS_MAX * AURAS_PER_PLAYER * Aspect::COUNT;
+        AURAS + ARENA_MONSTERS_MAX * AURAS_PER_PLAYER * super::MONSTER_AURA_SIZE;
+    pub const AURA_WEIGHTS: usize = RESIST_MODS + ARENA_MONSTERS_MAX * super::RESIST_MOD_SIZE;
+    pub const LOOT_IDS: usize =
+        AURA_WEIGHTS + ARENA_MONSTERS_MAX * AURAS_PER_PLAYER * Aspect::COUNT;
     pub const LOOT_TABLES: usize = LOOT_IDS + super::LOOT_TABLES_MAX;
     pub const RES_TRIPLES: usize = LOOT_TABLES + super::LOOT_TABLES_MAX * super::LOOT_RECORD_LEN;
+    pub const SPAWN_OF: usize = RES_TRIPLES + super::RES_TRIPLES_LEN;
+    pub const TEMPLATE_IDS: usize = SPAWN_OF + ARENA_MONSTERS_MAX;
+    pub const TEMPLATES: usize = TEMPLATE_IDS + SESSION_TEMPLATES_MAX;
+    pub const SKILL_IDS: usize = TEMPLATES + SESSION_TEMPLATES_MAX * super::MONSTER_RECORD_LEN;
     #[cfg(test)]
-    pub const END: usize = RES_TRIPLES + super::RES_TRIPLES_LEN;
+    pub const END: usize = SKILL_IDS + SESSION_SKILLS_MAX * 2;
 }
 
 /// Bytes of one monster's `mods`.
@@ -272,6 +297,7 @@ impl<'a, 'info> Monsters<'a, 'info> {
             require!(
                 data.len() >= MONSTER_STATE_SPACE
                     && data[..8] == MONSTER_STATE_DISCRIMINATOR
+                    && data[off::VERSION] == MONSTER_STATE_VERSION
                     && data[off::SESSION..off::SESSION + 32] == session.to_bytes(),
                 SessionError::InvalidMonsterState
             );
@@ -343,10 +369,11 @@ impl<'a, 'info> Monsters<'a, 'info> {
         {
             let mut data = info.try_borrow_mut_data()?;
             data[..8].copy_from_slice(&MONSTER_STATE_DISCRIMINATOR);
-            data[off::VERSION] = ACCOUNT_VERSION;
+            data[off::VERSION] = MONSTER_STATE_VERSION;
             data[off::SESSION..off::SESSION + 32].copy_from_slice(session.as_ref());
             data[off::COUNT] = 0;
             data[off::BUMP] = bump;
+            data[off::TEMPLATE_IDS..off::TEMPLATES].fill(NO_TEMPLATE);
         }
         Ok(Self { info })
     }
@@ -356,12 +383,16 @@ impl<'a, 'info> Monsters<'a, 'info> {
     }
 
     pub fn set_count(&self, count: u8) -> Result<()> {
-        require!(count as usize <= MONSTERS_MAX, SessionError::InvalidMonster);
+        require!(
+            count as usize <= ARENA_MONSTERS_MAX,
+            SessionError::InvalidMonster
+        );
         self.info.try_borrow_mut_data()?[off::COUNT] = count;
         Ok(())
     }
 
-    /// Monster `index` (any slot below `MONSTERS_MAX`; slots at or past `count` are empty).
+    /// Monster `index` (any arena slot below `ARENA_MONSTERS_MAX`; slots at or past `count` are
+    /// not in the arena).
     pub fn get(&self, index: u8) -> Result<Monster> {
         let start = Self::slot(index)?;
         let data = self.info.try_borrow_data()?;
@@ -427,10 +458,11 @@ impl<'a, 'info> Monsters<'a, 'info> {
         Ok(())
     }
 
-    /// The defenses of every monster slot, by index.
+    /// The defenses of every arena slot, by index (`MONSTERS_MAX` long for the rules; the slots
+    /// past `ARENA_MONSTERS_MAX` have none).
     pub fn defenses(&self) -> Result<[MonsterDefense; MONSTERS_MAX]> {
         let mut out = [MonsterDefense::NONE; MONSTERS_MAX];
-        for (i, d) in out.iter_mut().enumerate() {
+        for (i, d) in out.iter_mut().enumerate().take(ARENA_MONSTERS_MAX) {
             *d = self.defense(i as u8)?;
         }
         Ok(out)
@@ -564,25 +596,92 @@ impl<'a, 'info> Monsters<'a, 'info> {
         Ok(self.template(index)?.profile(level, &BALANCE.monsters))
     }
 
-    /// Copies `skill` into the session table (once) and returns its index there.
-    pub fn add_skill(&self, skill: &MonsterSkill) -> Result<u8> {
+    /// Copies `skill`, registry `monster_skills` record `id`, into the session table (once per
+    /// id) and returns its index there.
+    pub fn add_skill(&self, skill: &MonsterSkill, id: u16) -> Result<u8> {
+        if let Some(i) = self.skill_index_of(id)? {
+            return Ok(i);
+        }
         let copy = skill.encode_session();
         let mut data = self.info.try_borrow_mut_data()?;
         let count = data[off::SKILL_COUNT] as usize;
-        for i in 0..count {
-            let at = off::SKILL_TABLE + i * SKILL_COPY_LEN;
-            if data[at..at + SKILL_COPY_LEN] == copy {
-                return Ok(i as u8);
-            }
-        }
         require!(
             count < SESSION_SKILLS_MAX,
             SessionError::TooManyMonsterSkills
         );
         let at = off::SKILL_TABLE + count * SKILL_COPY_LEN;
         data[at..at + SKILL_COPY_LEN].copy_from_slice(&copy);
+        let at = off::SKILL_IDS + count * 2;
+        data[at..at + 2].copy_from_slice(&id.to_le_bytes());
         data[off::SKILL_COUNT] = count as u8 + 1;
         Ok(count as u8)
+    }
+
+    /// Arena update: the session table index of registry skill `id`, if the party copied it.
+    pub fn skill_index_of(&self, id: u16) -> Result<Option<u8>> {
+        let data = self.info.try_borrow_data()?;
+        let count = (data[off::SKILL_COUNT] as usize).min(SESSION_SKILLS_MAX);
+        Ok((0..count)
+            .find(|i| {
+                let at = off::SKILL_IDS + i * 2;
+                u16::from_le_bytes([data[at], data[at + 1]]) == id
+            })
+            .map(|i| i as u8))
+    }
+
+    /// The session copy of table entry `index`.
+    pub fn table_skill(&self, index: u8) -> Result<MonsterSkill> {
+        let data = self.info.try_borrow_data()?;
+        require!(
+            index < data[off::SKILL_COUNT],
+            SessionError::InvalidMonsterState
+        );
+        let at = off::SKILL_TABLE + index as usize * SKILL_COPY_LEN;
+        MonsterSkill::decode_session(&data[at..at + SESSION_SIZE])
+            .ok_or(error!(SessionError::InvalidMonsterState))
+    }
+
+    /// Arena update: copies the bestiary record of template `id` once (`open_session`).
+    /// `TooManyTemplates` when every slot is taken.
+    pub fn add_template(&self, id: u8, r: &[u8; MONSTER_RECORD_LEN]) -> Result<()> {
+        let mut data = self.info.try_borrow_mut_data()?;
+        let ids = &data[off::TEMPLATE_IDS..off::TEMPLATES];
+        if ids.contains(&id) {
+            return Ok(());
+        }
+        let free = ids
+            .iter()
+            .position(|i| *i == NO_TEMPLATE)
+            .ok_or(SessionError::TooManyTemplates)?;
+        data[off::TEMPLATE_IDS + free] = id;
+        let at = off::TEMPLATES + free * MONSTER_RECORD_LEN;
+        data[at..at + MONSTER_RECORD_LEN].copy_from_slice(r);
+        Ok(())
+    }
+
+    /// The copied bestiary record of template `id`.
+    pub fn template_record(&self, id: u8) -> Result<[u8; MONSTER_RECORD_LEN]> {
+        let data = self.info.try_borrow_data()?;
+        let i = data[off::TEMPLATE_IDS..off::TEMPLATES]
+            .iter()
+            .position(|x| *x == id && id != NO_TEMPLATE)
+            .ok_or(SessionError::InvalidMonster)?;
+        let at = off::TEMPLATES + i * MONSTER_RECORD_LEN;
+        let mut out = [0u8; MONSTER_RECORD_LEN];
+        out.copy_from_slice(&data[at..at + MONSTER_RECORD_LEN]);
+        Ok(out)
+    }
+
+    /// Arena update: the layout spawn arena slot `index` was loaded from.
+    pub fn spawn_of(&self, index: u8) -> Result<u8> {
+        let at = off::SPAWN_OF + Self::monster(index)?;
+        Ok(self.info.try_borrow_data()?[at])
+    }
+
+    pub fn set_spawn_of(&self, index: u8, spawn: u8) -> Result<()> {
+        let at = off::SPAWN_OF + Self::monster(index)?;
+        self.info.try_borrow_mut_data()?[at] = spawn;
+        Ok(())
     }
 
     /// Skill slots of monster `index`: indices into the session table, `NO_SKILL` = empty.
@@ -607,14 +706,7 @@ impl<'a, 'info> Monsters<'a, 'info> {
         if t == NO_SKILL {
             return Ok(None);
         }
-        let data = self.info.try_borrow_data()?;
-        require!(
-            t < data[off::SKILL_COUNT],
-            SessionError::InvalidMonsterState
-        );
-        let at = off::SKILL_TABLE + t as usize * SKILL_COPY_LEN;
-        let skill = MonsterSkill::decode_session(&data[at..at + SESSION_SIZE])
-            .ok_or(SessionError::InvalidMonsterState)?;
+        let skill = self.table_skill(t)?;
         Ok(Some(MonsterSkillStats::new(&skill, &BALANCE.skills)))
     }
 
@@ -697,7 +789,7 @@ impl<'a, 'info> Monsters<'a, 'info> {
 
     fn monster(index: u8) -> Result<usize> {
         require!(
-            (index as usize) < MONSTERS_MAX,
+            (index as usize) < ARENA_MONSTERS_MAX,
             SessionError::InvalidMonster
         );
         Ok(index as usize)
@@ -705,7 +797,7 @@ impl<'a, 'info> Monsters<'a, 'info> {
 
     fn defense_slot(index: u8) -> Result<usize> {
         require!(
-            (index as usize) < MONSTERS_MAX,
+            (index as usize) < ARENA_MONSTERS_MAX,
             SessionError::InvalidMonster
         );
         Ok(off::DEFENSE + index as usize * DEFENSE_SIZE)
@@ -713,7 +805,7 @@ impl<'a, 'info> Monsters<'a, 'info> {
 
     fn mods_slot(index: u8) -> Result<usize> {
         require!(
-            (index as usize) < MONSTERS_MAX,
+            (index as usize) < ARENA_MONSTERS_MAX,
             SessionError::InvalidMonster
         );
         Ok(off::MODS + index as usize * MODS_LEN)
@@ -721,7 +813,7 @@ impl<'a, 'info> Monsters<'a, 'info> {
 
     fn slot(index: u8) -> Result<usize> {
         require!(
-            (index as usize) < MONSTERS_MAX,
+            (index as usize) < ARENA_MONSTERS_MAX,
             SessionError::InvalidMonster
         );
         Ok(off::MONSTERS + index as usize * Monster::SIZE)
@@ -744,13 +836,14 @@ mod tests {
     #[test]
     fn discriminator_and_size_are_anchors() {
         assert_eq!(MONSTER_STATE_DISCRIMINATOR, *MonsterState::DISCRIMINATOR);
-        assert_eq!(off::COOLDOWNS, 8 + MonsterStateData::SIZE);
+        assert_eq!(off::MODS, 8 + MonsterStateData::SIZE);
         assert_eq!(off::END, MONSTER_STATE_SPACE);
         assert_eq!(RES_ASPECTS_LEN, deadroll_combat::tables::ASPECTS_LEN);
         assert_eq!(RES_TRAITS_LEN, deadroll_combat::tables::TRAITS_LEN);
         assert_eq!(RES_PAIRS_LEN, deadroll_combat::tables::PAIRS_LEN);
         assert_eq!(RES_TRIPLES_LEN, deadroll_combat::tables::TRIPLES_LEN);
-        assert_eq!(MONSTER_STATE_SPACE, 10_144);
+        // Arena update: the pack's slots only, no longer the whole map's monsters.
+        assert_eq!(MONSTER_STATE_SPACE, MONSTER_STATE_SPACE_PINNED);
         assert_eq!(MONSTER_RECORD_LEN, record::SIZE);
         assert_eq!(LOOT_RECORD_LEN, deadroll_rules::loot::record::SIZE);
         assert_eq!(SKILL_COPY_LEN, SESSION_SIZE);
@@ -804,11 +897,12 @@ mod tests {
             view.set_count(3).unwrap();
             assert_eq!(view.skill_cooldowns(2).unwrap(), [0; MONSTER_SLOTS]);
             view.set_skill_cooldowns(2, &[1, 0, 3, 0, 0, 2, 0]).unwrap();
-            view.set_skill_cooldowns(MONSTERS_MAX as u8 - 1, &[9; MONSTER_SLOTS])
+            view.set_skill_cooldowns(ARENA_MONSTERS_MAX as u8 - 1, &[9; MONSTER_SLOTS])
                 .unwrap();
             assert_eq!(view.mods(2).unwrap(), TimedMods::default());
             view.set_mods(2, &slowed).unwrap();
-            view.set_mods(MONSTERS_MAX as u8 - 1, &slowed).unwrap();
+            view.set_mods(ARENA_MONSTERS_MAX as u8 - 1, &slowed)
+                .unwrap();
             assert_eq!(view.mods(2).unwrap(), slowed);
         }
         let state = MonsterState::try_deserialize(&mut &account.data[..]).unwrap();
@@ -823,7 +917,10 @@ mod tests {
         assert_eq!(state.core.monsters[2], monster(7, 7));
         assert_eq!(state.core.bump, 254);
         assert_eq!(state.skill_cooldowns[2], [1, 0, 3, 0, 0, 2, 0]);
-        assert_eq!(state.skill_cooldowns[MONSTERS_MAX - 1], [9; MONSTER_SLOTS]);
+        assert_eq!(
+            state.skill_cooldowns[ARENA_MONSTERS_MAX - 1],
+            [9; MONSTER_SLOTS]
+        );
         assert_eq!(state.skill_cooldowns[0], [0; MONSTER_SLOTS]);
         assert_eq!(
             mods::to_combat(&state.mods[2], &state.resist_mods[2]),
@@ -831,8 +928,8 @@ mod tests {
         );
         assert_eq!(
             mods::to_combat(
-                &state.mods[MONSTERS_MAX - 1],
-                &state.resist_mods[MONSTERS_MAX - 1]
+                &state.mods[ARENA_MONSTERS_MAX - 1],
+                &state.resist_mods[ARENA_MONSTERS_MAX - 1]
             ),
             slowed
         );
@@ -840,7 +937,10 @@ mod tests {
         assert_eq!(state.resist_mods[2].weights_pct, [0, 0, 0, 65, 35, 65]);
         assert_eq!(state.resist_mods[1], ResistModData::default());
         // The cooldowns of the last monster were not touched by its mods.
-        assert_eq!(state.skill_cooldowns[MONSTERS_MAX - 1], [9; MONSTER_SLOTS]);
+        assert_eq!(
+            state.skill_cooldowns[ARENA_MONSTERS_MAX - 1],
+            [9; MONSTER_SLOTS]
+        );
     }
 
     #[test]
@@ -866,11 +966,14 @@ mod tests {
         {
             let info = account.info();
             let view = Monsters::load(&info, &session).unwrap();
-            view.set_defense(MONSTERS_MAX as u8 - 1, &defense).unwrap();
-            assert!(view.set_defense(MONSTERS_MAX as u8, &defense).is_err());
+            view.set_defense(ARENA_MONSTERS_MAX as u8 - 1, &defense)
+                .unwrap();
+            assert!(view
+                .set_defense(ARENA_MONSTERS_MAX as u8, &defense)
+                .is_err());
             view.set_burning_cells(&cells).unwrap();
             view.set_tables(&a, &t, &p, &x).unwrap();
-            assert_eq!(view.defense(MONSTERS_MAX as u8 - 1).unwrap(), defense);
+            assert_eq!(view.defense(ARENA_MONSTERS_MAX as u8 - 1).unwrap(), defense);
             assert_eq!(view.defense(0).unwrap(), MonsterDefense::NONE);
             assert_eq!(view.burning_cells().unwrap(), cells);
             let mut back = Box::<ResonanceTables>::default();
@@ -878,7 +981,7 @@ mod tests {
             assert_eq!(*back, tables);
         }
         let state = MonsterState::try_deserialize(&mut &account.data[..]).unwrap();
-        assert_eq!(state.defense[MONSTERS_MAX - 1].immune_states, 0b100);
+        assert_eq!(state.defense[ARENA_MONSTERS_MAX - 1].immune_states, 0b100);
         assert_eq!(state.burning_cells[3].power, 4);
         assert_eq!(state.res_pairs, p);
         assert_eq!(state.res_triples, x);
@@ -920,11 +1023,11 @@ mod tests {
         );
         // Skills: copied once each, by slot.
         let pool = reg.pool(&reg.template(ids::GOBLIN_CHIEFTAIN).unwrap());
-        let a = view.add_skill(&pool[0].unwrap()).unwrap();
-        let b = view.add_skill(&pool[1].unwrap()).unwrap();
+        let a = view.add_skill(&pool[0].unwrap(), 40).unwrap();
+        let b = view.add_skill(&pool[1].unwrap(), 41).unwrap();
         assert_eq!((a, b), (0, 1));
         assert_eq!(
-            view.add_skill(&pool[0].unwrap()).unwrap(),
+            view.add_skill(&pool[0].unwrap(), 40).unwrap(),
             0,
             "deduplicated"
         );
@@ -963,11 +1066,11 @@ mod tests {
         let mut other = pool[0].unwrap();
         for i in 2..SESSION_SKILLS_MAX as u8 {
             other.ext.hp_below_pct = i;
-            view.add_skill(&other).unwrap();
+            view.add_skill(&other, 40 + i as u16).unwrap();
         }
         other.ext.hp_below_pct = 200;
         assert_eq!(
-            code(view.add_skill(&other).unwrap_err()),
+            code(view.add_skill(&other, 200).unwrap_err()),
             u32::from(SessionError::TooManyMonsterSkills)
         );
         let _ = REACTIVE_SLOT;
@@ -1002,20 +1105,73 @@ mod tests {
         let mut account = monsters_account(session, &[]);
         let info = account.info();
         let view = Monsters::load(&info, &session).unwrap();
-        assert!(view.get(MONSTERS_MAX as u8).is_err());
-        assert!(view.set(MONSTERS_MAX as u8, &monster(0, 0)).is_err());
-        assert!(view.set_count(MONSTERS_MAX as u8 + 1).is_err());
-        assert!(view.skill_cooldowns(MONSTERS_MAX as u8).is_err());
+        assert!(view.get(ARENA_MONSTERS_MAX as u8).is_err());
+        assert!(view.set(ARENA_MONSTERS_MAX as u8, &monster(0, 0)).is_err());
+        assert!(view.set_count(ARENA_MONSTERS_MAX as u8 + 1).is_err());
+        assert!(view.skill_cooldowns(ARENA_MONSTERS_MAX as u8).is_err());
         assert!(view
-            .set_skill_cooldowns(MONSTERS_MAX as u8, &[0; MONSTER_SLOTS])
+            .set_skill_cooldowns(ARENA_MONSTERS_MAX as u8, &[0; MONSTER_SLOTS])
             .is_err());
-        assert!(view.record(MONSTERS_MAX as u8).is_err());
-        assert!(view.skill_slots(MONSTERS_MAX as u8).is_err());
-        assert!(view.auras(MONSTERS_MAX as u8).is_err());
+        assert!(view.record(ARENA_MONSTERS_MAX as u8).is_err());
+        assert!(view.skill_slots(ARENA_MONSTERS_MAX as u8).is_err());
+        assert!(view.auras(ARENA_MONSTERS_MAX as u8).is_err());
         assert!(view.skill(0, MONSTER_SLOTS as u8).is_err());
-        assert!(view.mods(MONSTERS_MAX as u8).is_err());
+        assert!(view.mods(ARENA_MONSTERS_MAX as u8).is_err());
         assert!(view
-            .set_mods(MONSTERS_MAX as u8, &TimedMods::default())
+            .set_mods(ARENA_MONSTERS_MAX as u8, &TimedMods::default())
             .is_err());
+    }
+
+    #[test]
+    fn templates_skill_ids_and_spawns_in_place() {
+        use crate::state::test_support::{ids, registry};
+        let reg = registry();
+        let session = Pubkey::new_unique();
+        let mut account = monsters_account(session, &[]);
+        // A fresh party copies its own templates: start from none.
+        account.data[off::TEMPLATE_IDS..off::TEMPLATES].fill(NO_TEMPLATE);
+        let info = account.info();
+        let view = Monsters::load(&info, &session).unwrap();
+        assert!(view.template_record(ids::WOLF).is_err());
+        let wolf = reg.record(ids::WOLF).unwrap();
+        view.add_template(ids::WOLF, &wolf).unwrap();
+        view.add_template(ids::WOLF, &[0; MONSTER_RECORD_LEN])
+            .unwrap();
+        assert_eq!(
+            view.template_record(ids::WOLF).unwrap(),
+            wolf,
+            "copied once"
+        );
+        for id in 1..SESSION_TEMPLATES_MAX as u8 {
+            view.add_template(100 + id, &wolf).unwrap();
+        }
+        assert_eq!(
+            code(view.add_template(200, &wolf).unwrap_err()),
+            u32::from(SessionError::TooManyTemplates)
+        );
+        assert!(view.template_record(NO_TEMPLATE).is_err());
+        // Skills by their registry index.
+        let pool = reg.pool(&reg.template(ids::GOBLIN_CHIEFTAIN).unwrap());
+        assert_eq!(view.skill_index_of(7).unwrap(), None);
+        assert_eq!(view.add_skill(&pool[0].unwrap(), 7).unwrap(), 0);
+        assert_eq!(view.add_skill(&pool[0].unwrap(), 9).unwrap(), 1, "by id");
+        assert_eq!(view.skill_index_of(9).unwrap(), Some(1));
+        assert_eq!(view.table_skill(1).unwrap(), pool[0].unwrap());
+        assert!(view.table_skill(2).is_err());
+        // The spawn of each arena slot.
+        view.set_spawn_of(ARENA_MONSTERS_MAX as u8 - 1, 17).unwrap();
+        assert_eq!(view.spawn_of(ARENA_MONSTERS_MAX as u8 - 1).unwrap(), 17);
+        assert!(view.set_spawn_of(ARENA_MONSTERS_MAX as u8, 1).is_err());
+    }
+
+    #[test]
+    fn an_account_from_before_the_arena_update_is_refused() {
+        let session = Pubkey::new_unique();
+        let mut old = monsters_account(session, &[]);
+        old.data[off::VERSION] = 1;
+        assert_eq!(
+            code(Monsters::load(&old.info(), &session).err().unwrap()),
+            u32::from(SessionError::InvalidMonsterState)
+        );
     }
 }

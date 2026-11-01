@@ -7,8 +7,8 @@ use deadroll_types::{seeds, Monster, SessionStatus, PARTY_MAX};
 use crate::{
     cpi_out::{self, character::DeathAccounts, SessionSigner},
     errors::SessionError,
-    events::{DeathFinalized, MonsterKilled, PlayerDied, SessionEnded},
-    state::{GameSession, Monsters},
+    events::{ArenaWon, DeathFinalized, MonsterKilled, PlayerDied, SessionEnded},
+    state::{ArenaMode, GameSession, Monsters},
 };
 
 /// Monster `index` reached 0 HP, killed by unit `by`: `MonsterKilled`, and the kill waits in
@@ -39,8 +39,26 @@ pub fn monster_killed(
     if boss {
         session.core.status = SessionStatus::Victory;
         session.victory_seed = seed;
+    } else if session.mode == ArenaMode::Arena && last_of_pack(monsters, index)? {
+        // Arena update: the pack is dead, `leave_arena` pays it and brings the party back
+        // (docs/PARTY_AND_TURNS.md 4.1.4).
+        session.mode = ArenaMode::Won;
+        emit!(ArenaWon {
+            session: session_key,
+            pack: session.arena_pack,
+        });
     }
     Ok(())
+}
+
+/// Every monster of the arena but `index` (dying now, written back by the caller) is dead.
+fn last_of_pack(monsters: &Monsters, index: u8) -> Result<bool> {
+    for i in 0..monsters.count()? {
+        if i != index && monsters.get(i)?.alive {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// Player `slot` reached 0 HP, put down by unit `by` in a VRF callback: out of the living at once
@@ -249,5 +267,38 @@ mod tests {
         assert_eq!(err(&foreign), invalid);
         // An empty queue takes no accounts.
         assert!(check_death_accounts(&[], &[]).is_ok());
+    }
+
+    #[test]
+    fn the_last_kill_of_the_pack_wins_the_arena() {
+        use crate::state::{
+            test_support::{ids, monster, monsters_account},
+            ArenaMode,
+        };
+        let key = Pubkey::new_unique();
+        let mut account = monsters_account(key, &[monster(1, 1), monster(2, 1)]);
+        let info = account.info();
+        let monsters = Monsters::load(&info, &key).unwrap();
+        let mut s = party(1);
+        let mut first = monsters.get(0).unwrap();
+        monster_killed(&mut s, key, &monsters, &mut first, 0, 0, [1; 32]).unwrap();
+        monsters.set(0, &first).unwrap();
+        assert_eq!(s.mode, ArenaMode::Arena);
+        let mut second = monsters.get(1).unwrap();
+        monster_killed(&mut s, key, &monsters, &mut second, 1, 0, [1; 32]).unwrap();
+        assert_eq!(s.mode, ArenaMode::Won);
+        assert_eq!(s.unpaid_kills, 0b11);
+        assert_eq!(s.core.status, SessionStatus::Active);
+        // The boss wins the party, the arena does not matter.
+        let mut boss = monster(1, 1);
+        boss.bestiary_id = ids::GOBLIN_CHIEFTAIN;
+        let mut account = monsters_account(key, &[boss, monster(2, 1)]);
+        let info = account.info();
+        let monsters = Monsters::load(&info, &key).unwrap();
+        let mut s = party(1);
+        let mut boss = monsters.get(0).unwrap();
+        monster_killed(&mut s, key, &monsters, &mut boss, 0, 0, [2; 32]).unwrap();
+        assert_eq!(s.core.status, SessionStatus::Victory);
+        assert_eq!(s.mode, ArenaMode::Arena);
     }
 }

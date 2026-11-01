@@ -213,13 +213,45 @@ impl HeroPreset {
     }
 }
 
-/// A fight: registry monsters (by their `bestiary.json` name) on an open arena.
+/// A fight: registry monsters (by their `bestiary.json` name) on an open arena. Arena update:
+/// one encounter is one pack in its arena; `then` lists the packs fought after it, one arena
+/// each, the party carrying its HP, states, buffs and cooldowns (docs/PARTY_AND_TURNS.md 4.1.3).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EncounterPreset {
     pub name: String,
     pub monsters: Vec<EncounterSlot>,
     #[serde(default)]
     pub arena: Arena,
+    /// The side the party came from: who moves first.
+    #[serde(default, skip_serializing_if = "Approach::is_front")]
+    pub approach: Approach,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub then: Vec<PackStep>,
+}
+
+/// Arena update: where the party came from, seen from the pack. From the back the party moves
+/// first; from the front (and the sides) the monsters do.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Approach {
+    #[default]
+    Front,
+    Back,
+}
+
+impl Approach {
+    pub fn is_front(&self) -> bool {
+        *self == Approach::Front
+    }
+}
+
+/// One more pack of an encounter: another encounter preset, entered from `approach` (its own
+/// `approach` and `then` are not used).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PackStep {
+    pub encounter: String,
+    #[serde(default, skip_serializing_if = "Approach::is_front")]
+    pub approach: Approach,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

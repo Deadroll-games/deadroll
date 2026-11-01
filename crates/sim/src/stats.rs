@@ -131,6 +131,11 @@ pub struct Report {
     pub monster_skills_per_fight: f64,
     pub monster_healed_per_fight: f64,
     pub monster_reactions_per_fight: f64,
+    /// Arena update: arenas won per run (an encounter and its `then` packs), the pack experience
+    /// a living hero got per run, and the party's HP left at the end of the run, share of max.
+    pub packs_won_per_fight: f64,
+    pub xp_per_fight: f64,
+    pub hp_left_share: f64,
 }
 
 fn ratio(a: u64, b: u64) -> f64 {
@@ -249,6 +254,12 @@ impl Report {
             monster_skills_per_fight: per_fight(|f| f.monster_skills),
             monster_healed_per_fight: per_fight(|f| f.monster_healed.min(u32::MAX as u64) as u32),
             monster_reactions_per_fight: per_fight(|f| f.monster_reactions),
+            packs_won_per_fight: per_fight(|f| f.packs_won),
+            xp_per_fight: per_fight(|f| f.xp),
+            hp_left_share: ratio(
+                fights.iter().map(|f| f.hp_left).sum(),
+                fights.iter().map(|f| f.hp_max).sum(),
+            ),
         }
     }
 }

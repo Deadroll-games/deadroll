@@ -1,6 +1,7 @@
 // Turn rules of the session program as the screens need them (PR #23, docs/PARTY_AND_TURNS.md 5.1):
 // every turn begins with the permissionless start_turn, one attack or active skill per turn,
 // skill cooldowns counted in own turn starts. Pure functions over decoded accounts and events.
+import { arenaMode } from "./game";
 import type { Address } from "@solana/kit";
 import { ACTIVE_MAX, NO_SKILL } from "./skillcheck";
 import { StateKind } from "@deadroll/sdk/session";
@@ -25,6 +26,9 @@ export type TurnStart = { unit: number; turnSeq: number; player: PartyPlayer | n
 export function startTurnFor(p: Party, me: Address | null): TurnStart | null {
   const s = p.session;
   if (!me || status(s) !== "active" || s.core.pendingVrf) return null;
+  // Arena update: between the map and an arena only the deaths are finalized.
+  const between = arenaMode(s) === "engaged" || arenaMode(s) === "won";
+  if (between && !s.pendingDeaths) return null;
   const unit = currentUnit(s);
   if (unit === null) return null;
   const current = unit < MONSTER_BASE ? (p.players.find((x) => x.slot === unit) ?? null) : null;
@@ -44,6 +48,17 @@ export function startTurnFor(p: Party, me: Address | null): TurnStart | null {
  * participation can trail the events by a refresh, so SkillUsed events of this unit after its
  * TurnTicked for `turnSeq` raise them at once (a use only ever raises a cooldown within a turn).
  */
+/** Arena update: the step between the map and an arena this tab sends (any party member's): enter
+ * the engaged pack's arena, or leave a won one once its deaths are final. */
+export function arenaStepFor(p: Party, me: Address | null): "enter" | "leave" | null {
+  const s = p.session;
+  if (!me || status(s) !== "active" || s.core.pendingVrf || s.pendingDeaths) return null;
+  const inParty = s.core.dm === me || p.players.some((x) => x.part.player === me);
+  if (!inParty) return null;
+  const mode = arenaMode(s);
+  return mode === "engaged" ? "enter" : mode === "won" ? "leave" : null;
+}
+
 export function skillCooldowns(part: ParticipationAcc, events: readonly { name: string; data: any }[], unit: number, turnSeq: number): number[] {
   const out = Array.from(part.cooldowns);
   let since = -1;

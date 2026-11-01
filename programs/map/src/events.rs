@@ -52,3 +52,12 @@ pub struct PointsWritten {
     pub point_count: u8,
     pub boss_table: u8,
 }
+
+/// Arena update: a pack's record and arena were written (`write_arena`).
+#[event]
+pub struct ArenaWritten {
+    pub map: Pubkey,
+    pub pack: u8,
+    pub width: u8,
+    pub height: u8,
+}

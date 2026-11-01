@@ -6,9 +6,12 @@
  * @see https://github.com/codama-idl/codama
  */
 
+export * from "./facing.js";
+export * from "./mapArenasData.js";
 export * from "./mapData.js";
 export * from "./mapLayoutDataV2.js";
 export * from "./mapPoint.js";
 export * from "./mapStatus.js";
+export * from "./packLayout.js";
 export * from "./pointKind.js";
 export * from "./spawn.js";

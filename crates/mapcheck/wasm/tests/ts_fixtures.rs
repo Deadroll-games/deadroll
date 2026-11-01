@@ -10,8 +10,8 @@ use deadroll_mapcheck::MapCheckError;
 use deadroll_mapcheck_wasm::{check, check_bytes, MapCheckRequest, Tables, ABI_VERSION};
 use deadroll_rules::registry::Registry;
 use deadroll_types::{
-    cell_byte, Cell, MapLayoutDataV2, MapPoint, PointKind, Pubkey, Spawn, TileKind, MAP_CELLS,
-    MAP_MAX, POINTS_MAX, SPAWNS_MAX,
+    cell_byte, Cell, Facing, MapArenasData, MapLayoutDataV2, MapPoint, PackLayout, PointKind,
+    Pubkey, Spawn, TileKind, ARENA_SIDE_MAX, MAP_CELLS, MAP_MAX, POINTS_MAX, SPAWNS_MAX,
 };
 use serde_json::{json, Value};
 
@@ -53,6 +53,33 @@ fn kind_of(ch: char) -> TileKind {
 
 fn u8_of(v: &Value, key: &str) -> u8 {
     v[key].as_u64().unwrap_or(0) as u8
+}
+
+/// The packs and arenas of a preset (arena update, `presetToArenas` on the website).
+fn arenas(json: &Value) -> MapArenasData {
+    let mut out = MapArenasData::EMPTY;
+    for p in json["packs"].as_array().unwrap() {
+        let n = u8_of(p, "pack") as usize;
+        let rows = p["rows"].as_array().unwrap();
+        let facing = p["facing"].as_str().unwrap();
+        out.packs[n] = PackLayout {
+            visible: u8_of(p, "visible"),
+            x: u8_of(p, "x"),
+            y: u8_of(p, "y"),
+            facing: *Facing::ALL
+                .iter()
+                .find(|f| format!("{f:?}") == facing)
+                .unwrap(),
+            width: rows[0].as_str().unwrap().chars().count() as u8,
+            height: rows.len() as u8,
+        };
+        for (y, row) in rows.iter().enumerate() {
+            for (x, ch) in row.as_str().unwrap().chars().enumerate() {
+                out.cells[n][y * ARENA_SIDE_MAX + x] = cell_byte(kind_of(ch) as u8, 0);
+            }
+        }
+    }
+    out
 }
 
 /// The demo preset as the website builder sends it (`presetToLayout`, `mapPoints`).
@@ -123,7 +150,12 @@ fn demo() -> MapCheckRequest {
             boss_table: u8_of(&json, "boss_table"),
             bump: 0,
         },
+        arenas: arenas(&json),
     }
+}
+
+fn arena_at(r: &mut MapCheckRequest, pack: usize, x: u8, y: u8, kind: TileKind) {
+    r.arenas.cells[pack][y as usize * ARENA_SIDE_MAX + x as usize] = cell_byte(kind as u8, 0);
 }
 
 fn at(r: &mut MapCheckRequest, x: u8, y: u8, kind: TileKind, variant: u8) {
@@ -181,10 +213,10 @@ fn cases() -> Vec<(&'static str, MapCheckRequest, Result<(), MapCheckError>)> {
             Err(E::PointOverlap),
         ),
         (
-            "a wall under a spawn",
+            "a wall under a spawn in its arena",
             edit(&|r| {
                 let s = r.layout.spawns[0];
-                at(r, s.x, s.y, TileKind::Wall, 0);
+                arena_at(r, s.pack as usize, s.x, s.y, TileKind::Wall);
             }),
             Err(E::SpawnNotPassable),
         ),
@@ -194,12 +226,69 @@ fn cases() -> Vec<(&'static str, MapCheckRequest, Result<(), MapCheckError>)> {
             Err(E::InvalidTile),
         ),
         (
-            "spawn on the exit",
+            "two wolves on one arena cell",
             edit(&|r| {
-                r.layout.spawns[0].x = exit.x;
-                r.layout.spawns[0].y = exit.y;
+                r.layout.spawns[1].x = r.layout.spawns[0].x;
+                r.layout.spawns[1].y = r.layout.spawns[0].y;
             }),
             Err(E::SpawnOverlap),
+        ),
+        (
+            "pack on the exit",
+            edit(&|r| {
+                r.arenas.packs[1].x = exit.x;
+                r.arenas.packs[1].y = exit.y;
+            }),
+            Err(E::PackOverlap),
+        ),
+        (
+            "pack next to the entrance",
+            edit(&|r| {
+                r.arenas.packs[1].x = 2;
+                r.arenas.packs[1].y = 1;
+            }),
+            Err(E::PackAtEntrance),
+        ),
+        (
+            "visible monster of another pack",
+            edit(&|r| r.arenas.packs[1].visible = 2),
+            Err(E::VisibleNotInPack),
+        ),
+        (
+            "spawn without an arena",
+            edit(&|r| r.arenas.packs[2] = PackLayout::EMPTY),
+            Err(E::PackWithoutArena),
+        ),
+        (
+            "arena height 5",
+            edit(&|r| r.arenas.packs[1].height = 5),
+            Err(E::ArenaSizeOutOfRange),
+        ),
+        (
+            "arena side 12",
+            edit(&|r| {
+                r.arenas.packs[1].width = 12;
+                for x in 8..12 {
+                    for y in 0..8 {
+                        arena_at(r, 1, x, y, TileKind::StoneFloor);
+                    }
+                }
+            }),
+            Ok(()),
+        ),
+        (
+            "wolves walled in",
+            edit(&|r| {
+                for y in 0..8 {
+                    arena_at(r, 1, 3, y, TileKind::Wall);
+                    arena_at(r, 1, 6, y, TileKind::Wall);
+                }
+                for x in 3..7 {
+                    arena_at(r, 1, x, 3, TileKind::Wall);
+                    arena_at(r, 1, x, 6, TileKind::Wall);
+                }
+            }),
+            Err(E::ArenaUnreachable),
         ),
         (
             "no boss",
