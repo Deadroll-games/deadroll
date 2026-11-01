@@ -97,6 +97,8 @@ pub fn handler<'info>(ctx: Context<'info, StartTurn<'info>>) -> Result<()> {
         SessionError::NotActive
     );
     require!(!session.core.pending_vrf, SessionError::RollPending);
+    // Patch C: the DM's reveals come before the next turn (docs/MAP_DESCRIPTION.md 8.5).
+    session.require_no_reveals()?;
     // Patch 6: the players a callback put down are finalized before anything else
     // (`character.mark_dead`, their accounts in `remaining_accounts`).
     if session.pending_deaths != 0 {

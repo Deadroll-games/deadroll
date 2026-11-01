@@ -23,6 +23,7 @@ pub fn check_can_vote(session: &GameSession, slot: u8) -> Result<()> {
     require!(!session.core.pending_vrf, SessionError::RollPending);
     // Patch 6: a player down in the last callback is finalized first (`start_turn`).
     require!(session.pending_deaths == 0, SessionError::DeathsPending);
+    session.require_no_reveals()?;
     require!(
         session.current_unit() == Some(Unit::Player(slot)),
         SessionError::NotYourTurn

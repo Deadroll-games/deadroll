@@ -49,10 +49,10 @@ import {
 import { findLayoutPda } from "../pdas/index.js";
 import { DEADROLL_MAP_PROGRAM_ADDRESS } from "../programs/index.js";
 import {
-  getPackLayoutDecoder,
-  getPackLayoutEncoder,
-  type PackLayout,
-  type PackLayoutArgs,
+  getFacingDecoder,
+  getFacingEncoder,
+  type Facing,
+  type FacingArgs,
 } from "../types/index.js";
 
 export const WRITE_ARENA_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Array([
@@ -87,13 +87,29 @@ export type WriteArenaInstruction<
 export type WriteArenaInstructionData = {
   discriminator: ReadonlyUint8Array;
   pack: number;
-  record: PackLayout;
+  /** Index into `MapLayoutDataV2.spawns` of the monster shown on the map (one of the pack). */
+  visible: number;
+  /** The visible monster's cell on the map. */
+  x: number;
+  y: number;
+  facing: Facing;
+  /** Arena size in cells, within `deadroll_rules::BalanceConfig.arena`. */
+  width: number;
+  height: number;
   cells: ReadonlyUint8Array;
 };
 
 export type WriteArenaInstructionDataArgs = {
   pack: number;
-  record: PackLayoutArgs;
+  /** Index into `MapLayoutDataV2.spawns` of the monster shown on the map (one of the pack). */
+  visible: number;
+  /** The visible monster's cell on the map. */
+  x: number;
+  y: number;
+  facing: FacingArgs;
+  /** Arena size in cells, within `deadroll_rules::BalanceConfig.arena`. */
+  width: number;
+  height: number;
   cells: ReadonlyUint8Array;
 };
 
@@ -102,7 +118,12 @@ export function getWriteArenaInstructionDataEncoder(): Encoder<WriteArenaInstruc
     getStructEncoder([
       ["discriminator", fixEncoderSize(getBytesEncoder(), 8)],
       ["pack", getU8Encoder()],
-      ["record", getPackLayoutEncoder()],
+      ["visible", getU8Encoder()],
+      ["x", getU8Encoder()],
+      ["y", getU8Encoder()],
+      ["facing", getFacingEncoder()],
+      ["width", getU8Encoder()],
+      ["height", getU8Encoder()],
       ["cells", addEncoderSizePrefix(getBytesEncoder(), getU32Encoder())],
     ]),
     (value) => ({ ...value, discriminator: WRITE_ARENA_DISCRIMINATOR }),
@@ -113,7 +134,12 @@ export function getWriteArenaInstructionDataDecoder(): Decoder<WriteArenaInstruc
   return getStructDecoder([
     ["discriminator", fixDecoderSize(getBytesDecoder(), 8)],
     ["pack", getU8Decoder()],
-    ["record", getPackLayoutDecoder()],
+    ["visible", getU8Decoder()],
+    ["x", getU8Decoder()],
+    ["y", getU8Decoder()],
+    ["facing", getFacingDecoder()],
+    ["width", getU8Decoder()],
+    ["height", getU8Decoder()],
     ["cells", addDecoderSizePrefix(getBytesDecoder(), getU32Decoder())],
   ]);
 }
@@ -138,7 +164,12 @@ export type WriteArenaAsyncInput<
   /** `LayoutBytes::load`; written in place. */
   layout?: TAccountLayout;
   pack: WriteArenaInstructionDataArgs["pack"];
-  record: WriteArenaInstructionDataArgs["record"];
+  visible: WriteArenaInstructionDataArgs["visible"];
+  x: WriteArenaInstructionDataArgs["x"];
+  y: WriteArenaInstructionDataArgs["y"];
+  facing: WriteArenaInstructionDataArgs["facing"];
+  width: WriteArenaInstructionDataArgs["width"];
+  height: WriteArenaInstructionDataArgs["height"];
   cells: WriteArenaInstructionDataArgs["cells"];
 };
 
@@ -237,7 +268,12 @@ export type WriteArenaInput<
   /** `LayoutBytes::load`; written in place. */
   layout: TAccountLayout;
   pack: WriteArenaInstructionDataArgs["pack"];
-  record: WriteArenaInstructionDataArgs["record"];
+  visible: WriteArenaInstructionDataArgs["visible"];
+  x: WriteArenaInstructionDataArgs["x"];
+  y: WriteArenaInstructionDataArgs["y"];
+  facing: WriteArenaInstructionDataArgs["facing"];
+  width: WriteArenaInstructionDataArgs["width"];
+  height: WriteArenaInstructionDataArgs["height"];
   cells: WriteArenaInstructionDataArgs["cells"];
 };
 

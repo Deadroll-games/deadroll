@@ -5,14 +5,14 @@ use deadroll_rules::{
     exit::{first_side_guarded, retreat_buff},
     spread::{BurningCell, BURNING_CELLS_MAX},
 };
-use deadroll_types::{seeds, Cell, SessionStatus, ARENA_MONSTERS_MAX, PARTY_MAX};
+use deadroll_types::{seeds, Cell, SessionStatus, ARENA_MONSTERS_MAX, NO_SPAWN, PARTY_MAX};
 
 use crate::{
     arena::{living_participations, load_monster, store_participations},
     errors::SessionError,
     events::ArenaEntered,
     rules::{Unit, BALANCE},
-    state::{external::MapLayoutView, spawn_bit, ArenaMode, GameSession, Monsters},
+    state::{external::MapLayoutView, spawn_bit, ArenaMode, BoardBytes, GameSession, Monsters},
     turns,
 };
 
@@ -33,6 +33,10 @@ pub struct EnterArena<'info> {
     /// its arena.
     #[account(address = session.layout @ SessionError::InvalidLayout)]
     pub layout: UncheckedAccount<'info>,
+    /// CHECK: the session's `SessionBoard` (patch D): the revealed packs' monsters, checked by
+    /// `BoardBytes::load`.
+    #[account(seeds = [seeds::BOARD, session.key().as_ref()], bump)]
+    pub board: UncheckedAccount<'info>,
 }
 
 /// Arena update (docs/PARTY_AND_TURNS.md 4.1.3): the party goes into the arena of the pack a
@@ -54,6 +58,7 @@ pub fn handler<'info>(ctx: Context<'info, EnterArena<'info>>) -> Result<()> {
     );
     require!(!session.core.pending_vrf, SessionError::RollPending);
     require!(session.pending_deaths == 0, SessionError::DeathsPending);
+    session.require_no_reveals()?;
     require!(session.mode == ArenaMode::Engaged, SessionError::NotEngaged);
     let mut players = living_participations(ctx.remaining_accounts, session)?;
     let monsters = Monsters::load(&accounts.monsters, &session_key)?;
@@ -63,6 +68,11 @@ pub fn handler<'info>(ctx: Context<'info, EnterArena<'info>>) -> Result<()> {
         .packs
         .get(pack as usize)
         .ok_or(SessionError::NotEngaged)?;
+    // Patch C: the DM reveals the pack's composition first (`reveal_pack`).
+    require!(
+        session.packs_revealed & (1 << pack) != 0,
+        SessionError::PackHidden
+    );
 
     // The pack's monsters, in spawn order; every cell they stand on (patch B: a large one's whole
     // square) is taken.
@@ -70,8 +80,9 @@ pub fn handler<'info>(ctx: Context<'info, EnterArena<'info>>) -> Result<()> {
     let mut taken_count = 0usize;
     let mut spawns = [u8::MAX; ARENA_MONSTERS_MAX];
     let mut count = 0usize;
-    for i in 0..layout.spawn_count() {
-        let spawn = layout.spawn(i as usize)?;
+    let board = BoardBytes::load(&accounts.board, &session_key)?;
+    for i in 0..board.spawn_count()? {
+        let spawn = board.spawn(i as usize)?;
         // Patch B: a monster killed before a retreat stays dead.
         if spawn.pack != pack || session.dead_spawns & spawn_bit(i) != 0 {
             continue;
@@ -88,15 +99,22 @@ pub fn handler<'info>(ctx: Context<'info, EnterArena<'info>>) -> Result<()> {
     monsters.set_burning_cells(&[BurningCell::default(); BURNING_CELLS_MAX])?;
 
     let from = session.player_pos[session.engaged_by as usize];
-    let approach = Approach::between(record.cell(), from).ok_or(SessionError::NotEngaged)?;
-    // Patch B: a pack the party retreated from is on guard and moves first from any side; its
-    // next fight starts with the retreat buff (docs/PARTY_AND_TURNS.md 7.5).
-    let pack_bit = 1u8 << pack;
-    let first = first_side_guarded(
-        record.facing,
-        approach,
-        session.packs_guarded & pack_bit != 0,
-    );
+    let pack_bit = 1u64 << pack;
+    // Patch C: an ambush pack has no map cell; the party comes in from the side its facing
+    // names and the monsters move first (docs/MAP_DESCRIPTION.md 17.4).
+    let (approach, first) = if record.visible == NO_SPAWN {
+        (Approach::of_facing(record.facing), FirstSide::Monsters)
+    } else {
+        let approach = Approach::between(record.cell(), from).ok_or(SessionError::NotEngaged)?;
+        // Patch B: a pack the party retreated from is on guard and moves first from any side;
+        // its next fight starts with the retreat buff (docs/PARTY_AND_TURNS.md 7.5).
+        let first = first_side_guarded(
+            record.facing,
+            approach,
+            session.packs_guarded & pack_bit != 0,
+        );
+        (approach, first)
+    };
     if session.packs_buffed & pack_bit != 0 {
         for slot in 0..count as u8 {
             let mut mods = monsters.mods(slot)?;

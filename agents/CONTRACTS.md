@@ -1240,3 +1240,133 @@ events                RetreatVoted { session, slot, vote_mask, alive_mask, retre
 
 Simulator presets: `EncounterPreset.guarded` and `PackStep.guarded` (a pack the party retreated
 from: monsters first, retreat buff).
+
+## 31. Patch C: secrets under the Merkle root, hidden packs, the DM's reveals and the audit
+
+docs/MAP_DESCRIPTION.md 8, 17.2, 17.4, 17.5; PARTY_AND_TURNS.md 3.2. Needs a devnet upgrade (map
+and session programs). `MapLayout` is version 4 (a version 3 map cannot open a party:
+`MapWithoutSecrets`); `GameSession` grew by 677 bytes: sessions opened before the upgrade cannot be
+read after it.
+
+`crates/types` (added only):
+
+```
+consts   SECRET_TYPES = 4, SECRETS_MAX = 16, OBLIGATIONS_MAX = 16, SECRETS_BLOB_MAX = 800,
+         SECRET_SALT_LEN = 16, PACK_LEAVES = PACKS_MAX, SECRET_LEAVES_MAX = 8 + 1024 + 8 * 144,
+         SECRET_DEPTH_MAX = 12, NO_SPAWN = 0xFF (PackLayout.visible of an ambush pack)
+enum     SecretKind { None, Trap, Ambush, Stash, Door }, counted() -> Some(kind - 1)
+struct   CellSecret { kind: SecretKind, a: u8, b: u8, c: u8 }  4 bytes; trap (damage, difficulty),
+         ambush (pack), stash (reward table), door
+struct   PackRoster { count: u8, spawns: [Spawn; ARENA_MONSTERS_MAX] }  73 bytes, visible first
+struct   FoundSecret { leaf: u16, secret: CellSecret }  6 bytes
+struct   MapSecretsData { threat: [u8; 8], declared: [u8; 4], blob_len: u16, blob: [u8; 800] }
+```
+
+The tree (`deadroll_mapcheck::secrets`, `@deadroll/sdk/secrets` mirrors it): leaves are the 8
+packs, the map's `width * height` cells row by row, then each used pack's arena cells row by row;
+padded with zero hashes to a power of two. Cell leaf
+`sha256(0x00 ‖ map ‖ leaf u16 LE ‖ CellSecret ‖ salt16)`, pack leaf
+`sha256(0x02 ‖ map ‖ leaf u16 LE ‖ PackRoster ‖ salt16)`, node `sha256(0x01 ‖ left ‖ right)`. The
+threat of a pack is the sum of its monsters' levels, an elite's 2 times, a boss's 3 times
+(`SecretTuning.threat_elite`, `threat_boss`).
+
+Rules: `BalanceConfig.secrets: SecretTuning { traps_min [1, 0], traps_max [2, 4], declared_max
+[[2,1,1,2],[4,2,2,4]], trap_damage_max [8, 14], examine_ap 1, threat_elite 2, threat_boss 3 }`.
+Mapcheck: `check_public` (finalize_map), `check_spawn`, `arena::check_roster`,
+`roster::{RosterCount, RosterTotals}`, `secrets::*`, `design::{split, check_design, place_of,
+occupied, occupied_cell}`, `loot::{allowed_table, check_stash_budget}`; `check_map` checks a whole
+design (every spawn, `visible` into them) and accepts `visible = NO_SPAWN`. `MapCheckError`
+appended SecretInvalid .. DuplicateSecret (codes 59-76); `MapError` mirrors them, then
+SecretsOutOfRange, SecretsMissing. Mapcheck WASM ABI 3: `check_design(len)` on a borsh
+`DesignRequest { map: MapCheckRequest, declared: [u8; 4], secrets: Vec<FoundSecret> }`.
+
+Map program:
+
+```
+MapLayout             { core, arenas, secrets: MapSecretsData }, core.version = 4; spawns hold only
+                      each pack's visible monster
+write_secrets(offset: u16, bytes: Vec<u8>, len: u16, threat: [u8; 8], declared: [u8; 4])
+                      DM, Draft: a chunk of the encrypted copy and the public part
+finalize_map          check_public; the root nonzero and the encrypted copy written (SecretsMissing);
+                      layout_hash covers [8 .. off::BLOB_LEN) (the copy is not hashed)
+events                SecretsWritten { map, offset, len, total, threat, declared }
+```
+
+Session program:
+
+```
+GameSession appended  secrets_root [32], leaf_count u16, declared [4], threat [8], revealed [273],
+                      found_counts [4], found [FoundSecret; 16], found_count, packs_revealed,
+                      obligations [u16; 16], obligation_count, obliged_by, spawns [Spawn; 24],
+                      spawn_count, roster_totals [4], visible_chests   (+677 bytes)
+open_session          copies the root, the declared counts and threats; no template copied
+move_path             a player's walked cells not revealed yet become obligations (RevealsOwed)
+examine(x, y)         player (session key), its started turn, a cell next to it, examine_ap: an
+                      obligation; accounts signer, session, participation, monsters, session_token
+reveal_cell(leaf, secret: CellSecret, salt: [u8; 16], proof: Vec<[u8; 32]>)
+                      DM main wallet or dm_actor; Active: an obligation (NotObligated), applies it:
+                      a trap off the obliged player's HP (player_down at 0), an ambush engages its
+                      pack (monsters first), a stash becomes chests[chest_count] (RewardSource::Stash),
+                      a door is a door for movement; Victory/Wiped/Fled: the audit, no effect.
+                      Checks BadProof, AlreadyRevealed, check_secret (SecretRejected), the declared
+                      counts (TooManySecrets), the stash budget. Accounts signer, session, layout,
+                      participation (opt), monsters, rewards, session_token
+reveal_pack(pack, roster: PackRoster, salt, proof)
+                      DM main wallet or dm_actor; Active: the engaged pack before enter_arena
+                      (PackNotToReveal); the audit after the end. check_roster (ThreatMismatch,
+                      SecretRejected), RosterTotals; Active: the roster joins session.spawns and its
+                      templates, skills and body tables are copied. Accounts signer, session, layout,
+                      monsters, bestiary, monster_skills, rewards, session_token
+enter_arena           PackHidden until revealed; monsters from session.spawns; an ambush pack:
+                      the party at the edge its facing names, the monsters first
+every action          start_turn, end_turn, move_path, act, monster_act, open_chest, examine, flee,
+                      retreat, enter_arena, leave_arena: RevealsPending while obligation_count > 0
+settle_party          AuditIncomplete until every declared secret and pack is revealed and the
+                      map's one boss was among them
+SessionError          appended MapWithoutSecrets, RevealsPending, BadProof, AlreadyRevealed,
+                      NotObligated, PackHidden, PackNotToReveal, ThreatMismatch, TooManySecrets,
+                      SecretRejected, AuditIncomplete, TooManyObligations, NotAdjacent
+events                RevealsOwed { session, slot, count }, CellRevealed { session, leaf, kind, a,
+                      b, c, audit }, TrapTriggered { session, slot, damage, hp }, PackRevealed
+                      { session, pack, count, threat, audit }, CellExamined { session, slot, x, y,
+                      action_points }, AmbushSprung { session, pack, slot }
+```
+
+The DM's copy: the website signs `UNLOCK_MESSAGE` with the DM's wallet (`solana:signMessage`),
+HKDF-SHA256 (salt `deadroll/secrets/v1`, info the map address) gives an AES-256-GCM key (nonce 12,
+AAD the map address) and an HMAC-SHA256 key whose `HMAC(leaf u16 LE)[..16]` is each leaf's salt.
+The plain bytes: version 1, the 8 rosters, the count and `(leaf u16 LE, CellSecret)` per secret.
+
+## 32. Patch D: map sizes, the reachability check in steps, one-use maps
+
+Docs: `docs/MAP_DESCRIPTION.md` 2.3, 10.3, 13, 17.6, 17.7.
+
+`crates/types`, added:
+
+| Item | Value / meaning |
+| --- | --- |
+| `MAP_CLASSES` | 4 size classes: Small, Medium, Big, Dungeon |
+| `MAP_SIDE_CAP`, `MAP_CELLS_CAP` | 143, 143 × 143 |
+| `CLASS_PACKS`, `CLASS_CHESTS`, `CLASS_SECRETS`, `CLASS_BLOB` | `[8, 16, 24, 40]`, `[4, 8, 12, 16]`, `[16, 48, 80, 96]`, `[800, 1600, 2400, 3600]` |
+| `PACKS_CAP`, `CHESTS_CAP`, `POINTS_CAP`, `SECRETS_CAP`, `MONSTERS_CAP`, `STASHES_CAP` | 40, 16, 18, 96, 80, 16 |
+| `SECRET_LEAVES_CAP`, `SECRET_DEPTH_CAP`, `MAP_ROW_WORDS` | 26249, 15, 3 |
+| `map_size` module | `LayoutGeom` (offsets of a version 5 `MapLayout`), `Board` (cells with a stride), `LayoutCore`, `LayoutArenas`, `LayoutSecrets`, `LAYOUT_V5`, `hdr` offsets; manual `read`/`write` of `Spawn`, `MapPoint`, `PackLayout` |
+| `seeds::BOARD` | `["board", session]` in session |
+
+Nothing renamed or removed; `MAP_MAX`, `MAP_CELLS`, `PACKS_MAX`, `SPAWNS_MAX`, `CHESTS_MAX`, `MapLayoutDataV2`, `MapArenasData`, `MapSecretsData` keep their values and stay for the Small shapes.
+
+`MapLayout` version 5: the account is as big as its class and sides need (`LayoutGeom::new(width, height, class)`); the cells are `width` per row. `layout_hash` = SHA-256 of `[8 .. blob_len)`. The `#[account] MapLayout` struct is the header only.
+
+Map program, new instructions:
+
+| Instruction | Signer | What |
+| --- | --- | --- |
+| `grow_layout` | DM | adds up to 10 KB to a draft's layout (after `create_map`, same transaction) |
+| `check_step` | DM | one transaction's share of the reachability check (state in the layout, any write resets it) |
+| `close_map` | session PDA (CPI) | `[map (mut), layout (mut), dm (mut), session_authority (signer), config]`: closes a map in a party and its layout, the lamports to `map.dm` |
+
+`write_secrets.threat` is a `Vec<u8>`, one per pack number of the class. `finalize_map` takes `layout` writable and fails `CheckNotDone` until the check is finished.
+
+CPI surface (section 5) gains: session → `map::close_map` from `settle_party` and the last `claim_after_timeout`, in place of `set_status(Finished)`.
+
+Session: new account `SessionBoard` `["board", session]` (revealed leaves, found secrets, revealed spawns), created at `open_session`. `GameSession` fields widened in place (packs 40, chest slots 32, threats 40, pack masks `u64`, `dead_spawns` `u128`, `chests_opened` `u32`), `revealed`, `found`, `found_count`, `spawns`, `spawn_count` moved to the board, `map_class` appended. `open_session`, `move_path`, `examine`, `enter_arena`, `reveal_cell`, `reveal_pack` take `board`; `settle_party` takes `layout`; `claim_after_timeout` takes `layout` and `dm`. Sessions opened before the upgrade cannot be read after it.

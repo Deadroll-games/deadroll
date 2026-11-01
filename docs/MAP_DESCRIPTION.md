@@ -15,7 +15,7 @@ Related documents:
 1. **A map stores the meaning of its cells, not a picture.** One tile type per cell, a list of objects, points, and the Merkle root of the secrets. The picture is assembled by the rasterizer.
 2. **Only ready-made parts.** The DM builds a map from a limited set of tiles and prefabs (mountains, rocks, trees, bushes...), drawn in advance and stored on chain. Custom images cannot be uploaded into a map.
 3. **The program checks the rules.** Limits, passability, and the path from entrance to exit are checked in the program when the map is created. The builder on the website uses the same code via WASM.
-4. **The public part is open, secrets are under a Merkle root.** Terrain, objects, and monsters are visible. Traps and hidden stashes are stored only as the tree root and are revealed cell by cell with a proof. **Planned (arena update, section 17):** only one monster of each pack is visible; the composition of packs is a secret too.
+4. **The public part is open, secrets are under a Merkle root.** Terrain, objects, and the one monster each pack shows are visible. Traps, hidden stashes, secret doors and the composition of packs are stored only as the tree root and are revealed one by one with a proof (sections 8, 17.5).
 5. **The map is a template, the party is state.** `Map` is created by the DM once and used in one party. Everything live (positions, explored and revealed cells, monster HP) lives in `GameSession`. **Planned (section 17.7):** the map is one-use and closes by itself after the rewards are issued; its deposit returns to the DM.
 
 ---
@@ -34,17 +34,18 @@ At 6 cells per turn, a path of 500 cells is 80+ turns of walking alone, without 
 
 ### 2.3 Deadroll sizes
 
-| Size        | Cells  | Used for                                  |
-| ----------- | ------ | ----------------------------------------- |
-| **S** 16×16 | 256    | one or two rooms, a short quest, **MVP**  |
-| **M** 24×24 | 576    | a small dungeon for one session           |
-| **L** 32×32 | 1024   | a large dungeon, a long session           |
+The DM picks a **size class**; the class follows from the map's area (section 17.6):
 
-Width and height may differ (for example, 32×16 for a corridor), but each side is from 8 to 32. The storage format allows up to 64 per side, in case larger maps are needed later.
+| Class       | Most cells | About square | Used for                               |
+| ----------- | ---------- | ------------ | -------------------------------------- |
+| **Small**   | 1024       | 32×32        | one or two rooms, a short quest        |
+| **Medium**  | 5184       | 72×72        | a dungeon for one session              |
+| **Big**     | 10201      | 101×101      | a large dungeon, a long session        |
+| **Dungeon** | 20449      | 143×143      | a whole dungeon                        |
 
-The brief mentions 10×10 for the MVP: that is one room, which a character crosses in 2 turns. 16×16 shows exploration better, and costs ~256 bytes in storage.
+Width and height may differ (for example, 128×8 is a Small corridor), but each side is from 8 to 143 and the area within the largest class. A map's class is the first one whose cells hold its area.
 
-**Planned (arena update):** the sizes of this section are replaced by Small, Medium, Big and Dungeon (section 17.6).
+The brief mentions 10×10 for the MVP: that is one room, which a character crosses in 2 turns. 16×16 shows exploration better.
 
 ---
 
@@ -224,16 +225,20 @@ When a party is opened, spawns are copied into `GameSession.monsters` with full 
 | ------------ | --------------------------------------------- |
 | no secret    |                                               |
 | trap         | trap type, detection difficulty, damage       |
+| ambush trap  | the hidden pack it starts a fight with (section 17.4) |
 | hidden stash | loot table id                                 |
 | secret door  | turns a wall into a door when revealed        |
 
+A trap deals a fixed damage the DM sets, within the map tier's limit (`BalanceConfig`); it comes off HP as it is, without dice and resistances. A trap and an ambush trap lie on a cell that can be entered and is not the entrance, the exit, a chest or a pack's cell. An ambush trap and a hidden stash lie on the map, not in an arena. A secret door lies in a wall. A found hidden stash opens like a chest; its table counts in the map's reward budget.
+
 ### 8.2 Merkle tree
 
-- **Every cell of the map has a leaf**, including empty ones. This way the DM can prove both "there is a trap here" and "there is nothing here", but cannot lie in either direction.
-- Leaf: `SHA-256(map address ‖ cell number u16 ‖ contents ‖ salt 16 bytes)`. Each cell has its own salt, otherwise empty cells could be guessed by brute force.
-- The number of leaves is padded with empty leaves to a power of two.
-- Depth: 8 for an S map, 10 for L. Proof: 8-10 hashes = 256-320 bytes.
-- `Map` stores only the root (32 bytes). The tree and salts are known only to the DM client. **The DM must save the map's secrets file**: without it, cells cannot be revealed. **Planned (section 17.5):** there is no secrets file; the secrets lie on chain, encrypted.
+- **Every cell of the map and of every arena has a leaf**, including empty ones. This way the DM can prove both "there is a trap here" and "there is nothing here", but cannot lie in either direction. Each pack's composition has a leaf too.
+- The leaves, in order: one per pack number (8), the map's cells row by row, then each used pack's arena cells row by row.
+- Cell leaf: `SHA-256(0x00 ‖ map address ‖ leaf number u16 ‖ contents 4 bytes ‖ salt 16 bytes)`. Pack leaf: `SHA-256(0x02 ‖ map address ‖ leaf number u16 ‖ composition ‖ salt 16 bytes)`. Node: `SHA-256(0x01 ‖ left ‖ right)`. Each leaf has its own salt, otherwise empty cells could be guessed by brute force.
+- The number of leaves is padded with empty hashes to a power of two; a padding index is never a leaf.
+- Depth: up to 15 (a 143×143 Dungeon with 40 arenas of 12×12). Proof: up to 15 hashes = 480 bytes. A map has one pack leaf per pack number its size class stores (8 on a Small map).
+- `Map` stores only the root (32 bytes). There is no secrets file: the secrets lie on chain, encrypted (section 17.5).
 
 ### 8.3 Declared counts
 
@@ -246,13 +251,14 @@ Players see: "the map has 3 traps and 1 hidden stash", but do not know where.
 | Trigger                                                          | What is revealed                                    |
 | ---------------------------------------------------------------- | --------------------------------------------------- |
 | a character stepped on the cell                                  | that cell; a trap triggers at the moment of reveal  |
-| a successful detection skill (`search`, a roll against difficulty) | all cells in the skill's area                     |
-| interaction with an object (search a barrel, examine a wall)     | that cell                                           |
+| a successful detection skill (`search`, a roll against difficulty) | all cells in the skill's area (**later**: there is no detection skill yet) |
+| interaction with an object (search a barrel, examine a wall)     | that cell: "Examine" a cell next to the character, for action points |
+| the party engages a pack                                         | the pack's composition (section 17.2)               |
 
 ### 8.5 DM obligations
 
 - The trigger records in `GameSession` an **obligation** to reveal a list of cells.
-- The DM client sends the reveals automatically: contents, salt, proof. About 3 cells fit in one transaction.
+- The DM client sends the reveals automatically with the DM's session key: contents, salt, proof. One or two cells fit in one transaction.
 - Until the obligations are fulfilled, **the party's next turn does not go through**. The DM cannot "forget" to reveal a trap.
 - What is revealed is recorded in `GameSession` (section 11) and becomes visible to the party.
 - Penalties for delaying a reveal: in phase 1, via the DM stake.
@@ -275,7 +281,7 @@ Checked by the program in the `finalize_map` instruction (not in `create_map`). 
 
 ### 10.1 Structure
 
-- [ ] Each side is from 8 to 32
+- [ ] Each side is from 8 to 143, the area within the map's size class (section 17.6)
 - [ ] Exactly one entrance and one exit, both on passable cells
 - [ ] **There is a path from the entrance to the exit** (reachability over the 8 neighbours of passable cells, without cutting corners, taking objects into account)
 - [ ] Every visible chest and every spawn is reachable from the entrance
@@ -286,7 +292,7 @@ Checked by the program in the `finalize_map` instruction (not in `create_map`). 
 
 ### 10.2 Limits by map tier
 
-The numbers are starter values, tuned at balancing. Object limits depend on map size. The reward budget is counted for the map's **minimum number of players**.
+The numbers are starter values, tuned at balancing. Object limits depend on map size. The reward budget is counted for the map's **minimum number of players**. The table gives a Small map's limits; a bigger size class multiplies them (section 17.6).
 
 | Parameter                  | Map tier 1 (levels 1-2)  | Map tier 2 (levels 3-4)  |
 | -------------------------- | ------------------------ | ------------------------ |
@@ -301,7 +307,9 @@ The numbers are starter values, tuned at balancing. Object limits depend on map 
 
 ### 10.3 Compute
 
-Reachability over 1024 cells fits within the compute limit of a single transaction, but a map is written in several steps: `create_map` (allocate the accounts), `write_layout` (the grid in chunks), `write_spawns`, `write_points`, and `finalize_map` (rule check; after it the map is immutable).
+A map is written in several steps: `create_map` (allocate the accounts; a layout past 10 KB grows with `grow_layout` in the same transaction), `write_layout` (the grid in chunks), `write_spawns`, `write_points`, `write_arena`, `write_secrets`, and `finalize_map` (rule check; after it the map is immutable).
+
+The reachability check of a big map does not fit one transaction: it runs in steps (`check_step`), each within the compute limit, and keeps where it stopped in the layout. `finalize_map` does the last part and the rules; a Small map needs no step. Any write to the layout starts the check over. The website counts the steps a map needs with the same code and sends them before `finalize_map`, in the same wallet confirmation.
 
 ---
 
@@ -309,18 +317,18 @@ Reachability over 1024 cells fits within the compute limit of a single transacti
 
 The part of `GameSession` that relates to the map:
 
-| Field                                         | Size for L (32×32)   |
+| Field                                         | Size                 |
 | --------------------------------------------- | -------------------- |
 | character positions                           | 2 bytes × up to 4    |
 | `monsters`: template, HP, position, skills    | ~8 bytes × up to 8   |
 | `explored`: bitmask                           | 128 bytes            |
-| `revealed`: bitmask of revealed cells         | 128 bytes            |
-| revealed secrets: (cell, type, data)          | ~4 bytes × up to 8   |
-| opened doors: bitmask over doors              | a few bytes          |
-| DM obligations: list of cells                 | up to 9 × 2 bytes    |
+| `revealed`: bitmask over every leaf           | ~3.3 KB (`SessionBoard`) |
+| revealed secrets: (leaf, contents)            | 6 bytes × up to 96 (`SessionBoard`) |
+| DM obligations: list of leaves                | up to 16 × 2 bytes   |
+| revealed packs' monsters                      | 9 bytes × up to 80 (`SessionBoard`) |
 | whose turn, turn number                       | a few bytes          |
 
-In total, on the order of 400-500 bytes for an L map. The account is created in full size when the party is opened, turns only update it.
+The accounts are created in full size, for the largest map, when the party is opened; turns only update them. The revealed leaves, the found secrets and the revealed monsters live in a separate account of the party, `SessionBoard`, so that `GameSession` stays small.
 
 ---
 
@@ -338,7 +346,7 @@ Rendering order:
 4. Effects (rune glow, particles).
 5. Darkening: cells outside the `viewer`'s vision darken, unexplored ones are almost black.
 
-Image size: 64 px per cell. An S map = 1024×1024, L = 2048×2048. Units reach up above their cell. For the NFT card of a map (phase 3), a reduced version or nearest-neighbor upscaling is used, by the same rules as for characters.
+Image size: 64 px per cell. A 16×16 map = 1024×1024, 32×32 = 2048×2048; past that the site draws only the part of the map on screen, with the whole map on a parchment minimap beside it. Units reach up above their cell. For the NFT card of a map (phase 3), a reduced version or nearest-neighbor upscaling is used, by the same rules as for characters.
 
 ---
 
@@ -365,6 +373,8 @@ Data:
 
 This is the target format. In the current build the cells, spawns and points live in a separate `MapLayout` account (`["layout", map]`), and the `Map` account holds the header, the tier, the map settings of section 7.1 (minimum players, chest radius, issue deadline), the layout hash and `secrets_root`.
 
+`MapLayout` is at **version 5**: as big as its size class and sides need. After the header (width, height, size class): each pack's visible monster, the points, the packs, their threats, the declared secret counts, the arenas, then the cells (`width` per row), the DM's encrypted copy of the secrets and the reachability check's scratch. A class stores 8, 16, 24 or 40 pack numbers and 4, 8, 12 or 16 visible chests. The layout hash covers everything before the encrypted copy. A version 4 map cannot open a party.
+
 `Map` is at **version 2** (121 bytes): `biome: u8` (section 4.4) is appended at the end. A version 1 map (120 bytes) reads with the missing byte as zero (Caves and Ruins), so a finalized old map still opens a party; a version 1 draft cannot be continued.
 
 ---
@@ -373,12 +383,15 @@ This is the target format. In the current build the cells, spawns and points liv
 
 | What                                     | Size      | Deposit (~6960 lamports per byte) |
 | ---------------------------------------- | --------- | --------------------------------- |
-| S map (16×16)                            | ~450 bytes | ~0.003 SOL                       |
-| M map (24×24)                            | ~800 bytes | ~0.006 SOL                       |
-| L map (32×32)                            | ~1.3 KB   | ~0.009 SOL                        |
+| Small map (32×32), with the `Map`        | ~3.8 KB   | ~0.028 SOL                        |
+| Medium map (72×72)                       | ~11.9 KB  | ~0.084 SOL                        |
+| Big map (101×101)                        | ~19.9 KB  | ~0.140 SOL                        |
+| Dungeon map (143×143)                    | ~37.6 KB  | ~0.263 SOL                        |
 | `Tileset` (32 tiles + 16 wall variants)  | ~3-4 KB   | ~0.03 SOL                         |
 | `PrefabBook` (30 prefabs)                | ~2-3 KB   | ~0.02 SOL                         |
-| The `GameSession` part for an L map      | ~500 bytes | ~0.004 SOL                       |
+| A party's `SessionBoard`                 | ~4.6 KB   | ~0.033 SOL                        |
+
+A map is played once: after the rewards its deposits go back to the DM (section 17.7).
 
 ---
 
@@ -400,14 +413,14 @@ This is the target format. In the current build the cells, spawns and points liv
 - [x] `PrefabBook` with the starter set of prefabs (a registry table)
 - [x] The `deadroll-mapcheck` crate: all checks of section 10, compiles into both the program and WASM
 - [x] Instructions `create_map`, `write_layout`, `write_spawns`, `write_points`, `finalize_map`
-- [ ] DM client: salt generation, Merkle tree, export and import of the secrets file (planned: replaced by encrypted secrets on chain, section 17.5)
-- [ ] Reveal instruction with proof verification and counting against the declared counts
-- [ ] DM obligations block the next turn
+- [x] DM client: salts, Merkle tree, the secrets encrypted on chain (section 17.5)
+- [x] Reveal instruction with proof verification and counting against the declared counts
+- [x] DM obligations block the next turn
 - [x] Biome (`Map.biome`), variant brush and biome templates in the builder
 - [x] Wall autotiling and drawing by biome and variant on the site
 - [ ] `render_map` with autotiling, y-sorting, and darkening in the rasterizer
-- [ ] Test: the DM cannot reveal a cell with contents different from the committed ones
-- [ ] Test: the DM cannot prove "empty" for a cell with a trap
+- [x] Test: the DM cannot reveal a cell with contents different from the committed ones
+- [x] Test: the DM cannot prove "empty" for a cell with a trap
 - [x] Test: a map without a path from the entrance to the exit fails `finalize_map`
 
 ---
@@ -425,6 +438,8 @@ This is the target format. In the current build the cells, spawns and points liv
 
 - On the map only **one monster of each pack** is visible. The DM picks which one.
 - The site shows the pack's **threat level**. The DM declares the threat openly when building the map; the program checks it when the pack is revealed, and a mismatch rejects the reveal.
+- The threat is the sum of the pack's monster levels: an elite's level counts 2 times, a boss's 3 times (`BalanceConfig`).
+- A pack with no monster on the map is an **ambush pack**: only its ambush trap starts its fight (section 17.4).
 - A pack has a **facing** (the direction it looks), set by the DM. It decides who moves first in the arena (`PARTY_AND_TURNS.md`, section 4.1).
 
 ### 17.3 Arenas
@@ -436,33 +451,34 @@ This is the target format. In the current build the cells, spawns and points liv
 
 ### 17.4 Ambush trap
 
-A trap to which the DM links a **hidden pack** with its arena. When it triggers, the whole party goes into that arena and the monsters move first.
+A trap to which the DM links a **hidden pack** with its arena. When it triggers, the whole party goes into that arena and the monsters move first. The party comes in at the edge the pack's facing names. Each ambush pack has exactly one ambush trap.
 
 ### 17.5 Fog of war and secrets
 
 - Hidden: the **composition of packs** and the **secrets** (traps, hidden stashes, secret doors), under the Merkle root (section 8). Terrain stays open.
 - Until found, a secret looks like an ordinary floor or wall. After it is found it is highlighted.
 - **There is no secrets file.** The secrets lie on chain, encrypted with a key derived from a signature of the DM's wallet. The DM's client decrypts them and sends the reveals by itself, with the DM's session key, without separate signatures (like the players' moves, `GAME_COMMISSIONS.md`, section 7).
+- The key: the wallet signs a fixed message (an Ed25519 signature is the same every time); HKDF-SHA256 of the signature with the map address gives the AES-256-GCM key of the encrypted copy and the key that derives each leaf's salt. Nothing is stored: any device with the wallet opens the secrets.
 - **The DM must be online** during the party.
 - The DM's final audit before payment stays (`PARTY_AND_TURNS.md`, section 3.2).
 - **Later:** fog of war through a MagicBlock Private Ephemeral Rollup (TEE).
 
 ### 17.6 Map sizes
 
-The DM picks the size; sizes are set by area.
+The DM picks the size; sizes are set by area (section 2.3).
 
-| Size        | Side, about     | Packs, chests, reward budget |
-| ----------- | --------------- | ---------------------------- |
-| **Small**   | up to 32×32     | ×1 (the base)                |
-| **Medium**  | ~72×72          | ×3                           |
-| **Big**     | ~101×101        | ×5                           |
-| **Dungeon** | ~143×143        | ×8                           |
+| Size        | Most cells | Side, about | Limits    |
+| ----------- | ---------- | ----------- | --------- |
+| **Small**   | 1024       | 32×32       | ×1 (base) |
+| **Medium**  | 5184       | 72×72       | ×3        |
+| **Big**     | 10201      | 101×101     | ×5        |
+| **Dungeon** | 20449      | 143×143     | ×8        |
 
-The limits of packs and chests and the reward budget of Small are the base; the multipliers are in `BalanceConfig`.
+The Small limits are the base (section 10.2). A bigger size multiplies the packs, the regular monsters, the elites, the visible chests, the reward budget, the traps with the ambush traps, and the declared ambush traps, hidden stashes and secret doors. Each of them has its own multiplier in `BalanceConfig` (Ivan's decision: any one can be switched off with ×1 at every size). The multipliers raise the maximums only: the minimum number of traps stays the Small one. The boss stays one per map. A limit never goes past what the size class stores.
 
 ### 17.7 One-use map
 
-A map is played once. After the rewards are issued it closes by itself, and its deposit returns to the DM.
+A map is played once. When the rewards are issued (the DM's settlement, or the last player's claim after the DM's deadline) it closes by itself with its layout, and both deposits return to the DM. A party that never started does not play the map.
 
 ### 17.8 Later
 

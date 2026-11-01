@@ -67,6 +67,7 @@ export type SettlePartyInstruction<
     "2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH",
   TAccountCharacterProgram extends string | AccountMeta<string> =
     "9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL",
+  TAccountLayout extends string | AccountMeta<string> = string,
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
 > = Instruction<TProgram> &
   InstructionWithData<ReadonlyUint8Array> &
@@ -97,6 +98,9 @@ export type SettlePartyInstruction<
       TAccountCharacterProgram extends string
         ? ReadonlyAccount<TAccountCharacterProgram>
         : TAccountCharacterProgram,
+      TAccountLayout extends string
+        ? WritableAccount<TAccountLayout>
+        : TAccountLayout,
       ...TRemainingAccounts,
     ]
   >;
@@ -140,6 +144,7 @@ export type SettlePartyAsyncInput<
   TAccountMapProgram extends InstructionAccountInput = InstructionAccountInput,
   TAccountCharacterProgram extends InstructionAccountInput =
     InstructionAccountInput,
+  TAccountLayout extends InstructionAccountInput = InstructionAccountInput,
 > = {
   /**
    * DM main wallet only: this moves lamports and the rewards (docs/GAME_COMMISSIONS.md 7);
@@ -155,6 +160,8 @@ export type SettlePartyAsyncInput<
   config?: TAccountConfig;
   mapProgram?: TAccountMapProgram;
   characterProgram?: TAccountCharacterProgram;
+  /** by the map CPI (patch D). */
+  layout: TAccountLayout;
 };
 
 export async function getSettlePartyInstructionAsync<
@@ -167,6 +174,7 @@ export async function getSettlePartyInstructionAsync<
   TAccountConfig extends InstructionAccountInput,
   TAccountMapProgram extends InstructionAccountInput,
   TAccountCharacterProgram extends InstructionAccountInput,
+  TAccountLayout extends InstructionAccountInput,
   TProgramAddress extends Address = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
 >(
   input: SettlePartyAsyncInput<
@@ -178,7 +186,8 @@ export async function getSettlePartyInstructionAsync<
     TAccountSessionAuthority,
     TAccountConfig,
     TAccountMapProgram,
-    TAccountCharacterProgram
+    TAccountCharacterProgram,
+    TAccountLayout
   >,
   config?: { programAddress?: TProgramAddress },
 ): Promise<
@@ -219,6 +228,10 @@ export async function getSettlePartyInstructionAsync<
     ResolvedInstructionAccountMeta<
       TAccountCharacterProgram,
       InstructionAccountInputAddress<TAccountCharacterProgram>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountLayout,
+      InstructionAccountInputAddress<TAccountLayout>
     >
   >
 > {
@@ -260,6 +273,7 @@ export async function getSettlePartyInstructionAsync<
       isSigner: false,
       isWritable: false,
     },
+    layout: { value: input.layout ?? null, isSigner: false, isWritable: true },
   };
   const accounts = originalAccounts as Record<
     keyof typeof originalAccounts,
@@ -312,6 +326,7 @@ export async function getSettlePartyInstructionAsync<
       getAccountMeta("config", accounts.config),
       getAccountMeta("mapProgram", accounts.mapProgram),
       getAccountMeta("characterProgram", accounts.characterProgram),
+      getAccountMeta("layout", accounts.layout),
     ],
     data: getSettlePartyInstructionDataEncoder().encode({}),
     programAddress,
@@ -352,6 +367,10 @@ export async function getSettlePartyInstructionAsync<
     ResolvedInstructionAccountMeta<
       TAccountCharacterProgram,
       InstructionAccountInputAddress<TAccountCharacterProgram>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountLayout,
+      InstructionAccountInputAddress<TAccountLayout>
     >
   >);
 }
@@ -368,6 +387,7 @@ export type SettlePartyInput<
   TAccountMapProgram extends InstructionAccountInput = InstructionAccountInput,
   TAccountCharacterProgram extends InstructionAccountInput =
     InstructionAccountInput,
+  TAccountLayout extends InstructionAccountInput = InstructionAccountInput,
 > = {
   /**
    * DM main wallet only: this moves lamports and the rewards (docs/GAME_COMMISSIONS.md 7);
@@ -383,6 +403,8 @@ export type SettlePartyInput<
   config: TAccountConfig;
   mapProgram?: TAccountMapProgram;
   characterProgram?: TAccountCharacterProgram;
+  /** by the map CPI (patch D). */
+  layout: TAccountLayout;
 };
 
 export function getSettlePartyInstruction<
@@ -395,6 +417,7 @@ export function getSettlePartyInstruction<
   TAccountConfig extends InstructionAccountInput,
   TAccountMapProgram extends InstructionAccountInput,
   TAccountCharacterProgram extends InstructionAccountInput,
+  TAccountLayout extends InstructionAccountInput,
   TProgramAddress extends Address = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
 >(
   input: SettlePartyInput<
@@ -406,7 +429,8 @@ export function getSettlePartyInstruction<
     TAccountSessionAuthority,
     TAccountConfig,
     TAccountMapProgram,
-    TAccountCharacterProgram
+    TAccountCharacterProgram,
+    TAccountLayout
   >,
   config?: { programAddress?: TProgramAddress },
 ): SettlePartyInstruction<
@@ -446,6 +470,10 @@ export function getSettlePartyInstruction<
   ResolvedInstructionAccountMeta<
     TAccountCharacterProgram,
     InstructionAccountInputAddress<TAccountCharacterProgram>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountLayout,
+    InstructionAccountInputAddress<TAccountLayout>
   >
 > {
   // Program address.
@@ -486,6 +514,7 @@ export function getSettlePartyInstruction<
       isSigner: false,
       isWritable: false,
     },
+    layout: { value: input.layout ?? null, isSigner: false, isWritable: true },
   };
   const accounts = originalAccounts as Record<
     keyof typeof originalAccounts,
@@ -513,6 +542,7 @@ export function getSettlePartyInstruction<
       getAccountMeta("config", accounts.config),
       getAccountMeta("mapProgram", accounts.mapProgram),
       getAccountMeta("characterProgram", accounts.characterProgram),
+      getAccountMeta("layout", accounts.layout),
     ],
     data: getSettlePartyInstructionDataEncoder().encode({}),
     programAddress,
@@ -553,6 +583,10 @@ export function getSettlePartyInstruction<
     ResolvedInstructionAccountMeta<
       TAccountCharacterProgram,
       InstructionAccountInputAddress<TAccountCharacterProgram>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountLayout,
+      InstructionAccountInputAddress<TAccountLayout>
     >
   >);
 }
@@ -577,6 +611,8 @@ export type ParsedSettlePartyInstruction<
     config: TAccountMetas[6];
     mapProgram: TAccountMetas[7];
     characterProgram: TAccountMetas[8];
+    /** by the map CPI (patch D). */
+    layout: TAccountMetas[9];
   };
   data: SettlePartyInstructionData;
 };
@@ -589,12 +625,12 @@ export function parseSettlePartyInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
 ): ParsedSettlePartyInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 9) {
+  if (instruction.accounts.length < 10) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 9,
+        expectedAccountMetas: 10,
       },
     );
   }
@@ -616,6 +652,7 @@ export function parseSettlePartyInstruction<
       config: getNextAccount(),
       mapProgram: getNextAccount(),
       characterProgram: getNextAccount(),
+      layout: getNextAccount(),
     },
     data: getSettlePartyInstructionDataDecoder().decode(instruction.data),
   };

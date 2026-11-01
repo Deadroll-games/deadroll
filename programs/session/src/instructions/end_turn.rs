@@ -68,6 +68,7 @@ pub fn handler(ctx: Context<EndTurn>) -> Result<()> {
     require!(!session.core.pending_vrf, SessionError::RollPending);
     // Patch 6: a player down in the last callback is finalized first (`start_turn`).
     require!(session.pending_deaths == 0, SessionError::DeathsPending);
+    session.require_no_reveals()?;
     let current = session.current_unit().ok_or(SessionError::NotActive)?;
     match current {
         Unit::Player(slot) => {

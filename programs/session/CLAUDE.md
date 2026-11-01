@@ -10,6 +10,7 @@ Party, `Participation`, turns, combat, the VRF callback and the party price escr
 - `lib/Cargo.toml` is this program as a dependency of other crates (same `src/`, rlib; `crates/sim` uses it): a dependency or feature added to `Cargo.toml` goes there too.
 - CPI out only through `deadroll-character` and `deadroll-map` from `[workspace.dependencies]` (their `lib/` packages), wrappers in `src/cpi_out/`.
 - `mock-vrf` is for localnet only (`pnpm deploy:local`); `deploy-devnet.ts` refuses a mock build. Never take a deploy `.so` from `anchor build`, the deploy scripts build their own.
+- Patch D: `GameSession` must stay small enough to decode on the 4 KB stack (`Account<T>` decodes before boxing; a const assert keeps it at most 1884 bytes). What a party uncovers (revealed leaves, found secrets, revealed spawns) is in the `SessionBoard` (`["board", session]`), read in place by `BoardBytes`. The map layout is read through `deadroll_types::LayoutGeom`.
 - Forbidden: editing other zones, crates/types, agents/CONTRACTS.md.
 
 ## Commands

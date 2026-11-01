@@ -1,24 +1,25 @@
 use anchor_lang::prelude::*;
 use deadroll_mapcheck::{
-    check_map,
+    check_public_map,
     loot::{MapLoot, TableRules},
     roster::SpawnRules,
+    wide::{ReachView, Row, FINALIZE_BUDGET},
+    MapParts,
 };
 use deadroll_registry::state::{
     records::{BESTIARY_MAX, REWARDS_MAX},
     view::table_body,
     TableKind,
 };
-use deadroll_rules::{config::BalanceConfig, loot::map_rules, map_tables, tiles::tile_rules};
-use deadroll_types::{seeds, MapLayoutDataV2, MapStatus};
-
-use crate::state::{decode_arenas, decode_core, LAYOUT_SPACE};
+use deadroll_rules::{config::BalanceConfig, loot::map_rules, map_tables};
+use deadroll_types::{seeds, LayoutArenas, LayoutCore, MapStatus, MAP_ROW_WORDS};
 use solana_sha256_hasher::hash;
 
 use crate::{
     errors::MapError,
-    events::MapFinalized,
-    state::{Map, MapLayout},
+    events::{MapChecked, MapFinalized},
+    instructions::check_step::{advance, tiles_of},
+    state::{LayoutBytes, Map},
 };
 
 /// Registry `["bestiary"]` and `["monster_skills"]` tables (checked against their derivation in
@@ -41,10 +42,11 @@ pub struct FinalizeMap<'info> {
         constraint = map.core.status == MapStatus::Draft @ MapError::NotDraft,
     )]
     pub map: Account<'info, Map>,
-    /// Owner and discriminator checked, never decoded whole (`state::LayoutBytes`): the core and
-    /// the arenas are decoded into boxes one at a time.
-    #[account(seeds = [seeds::LAYOUT, map.key().as_ref()], bump)]
-    pub layout: LazyAccount<'info, MapLayout>,
+    /// CHECK: the map's `MapLayout` (seeds), checked by `LayoutBytes::load`, never decoded whole:
+    /// the cells are read in place, the core and the arenas decoded into boxes. Patch D: the
+    /// reachability check's last share is written in place.
+    #[account(mut, seeds = [seeds::LAYOUT, map.key().as_ref()], bump)]
+    pub layout: UncheckedAccount<'info>,
     /// CHECK: registry `["bestiary"]` table (patch 6): roles, minimum tiers and skill pools of the
     /// spawns, read in place by `deadroll_registry::state::view`.
     #[account(address = BESTIARY_TABLE @ MapError::InvalidRegistryTable)]
@@ -67,7 +69,7 @@ pub struct FinalizeMap<'info> {
 fn templates(
     bestiary: &AccountInfo,
     skills: &AccountInfo,
-    layout: &MapLayoutDataV2,
+    layout: &LayoutCore,
 ) -> Result<Box<[Option<SpawnRules>; BESTIARY_MAX]>> {
     let beasts = table_body(bestiary, TableKind::Bestiary)
         .map_err(|_| error!(MapError::InvalidRegistryTable))?;
@@ -75,7 +77,7 @@ fn templates(
         .map_err(|_| error!(MapError::InvalidRegistryTable))?;
     let cfg = &BalanceConfig::DEFAULT;
     let mut out = Box::new([None; BESTIARY_MAX]);
-    for spawn in &layout.spawns[..(layout.spawn_count as usize).min(layout.spawns.len())] {
+    for spawn in layout.spawn_list() {
         let id = spawn.bestiary_id as usize;
         if id >= BESTIARY_MAX || out[id].is_some() {
             continue;
@@ -88,7 +90,7 @@ fn templates(
 /// The builder view of every reward table the layout names (`None`: no such table).
 fn reward_tables(
     rewards: &AccountInfo,
-    layout: &MapLayoutDataV2,
+    layout: &LayoutCore,
 ) -> Result<[Option<TableRules>; REWARDS_MAX]> {
     let body = table_body(rewards, TableKind::Rewards)
         .map_err(|_| error!(MapError::InvalidRegistryTable))?;
@@ -102,49 +104,91 @@ fn reward_tables(
     Ok(out)
 }
 
-/// Runs every builder rule, then freezes the map: `layout_hash` = SHA-256 of the layout bytes
-/// after the discriminator (arena update: the core and the arenas, `[8 .. 8 + MapLayout::INIT_SPACE]`).
+/// Runs every builder rule on the public part, then freezes the map: `layout_hash` = SHA-256 of
+/// the layout's public bytes (`LayoutGeom::hash_range`: the header, the spawns, points, packs,
+/// threats, declared counts, arenas and cells; not the encrypted secrets or the check's scratch).
+/// Patch C: the threats and the declared counts are public (docs/MAP_DESCRIPTION.md 8.3, 17.2,
+/// written with the encrypted secrets by `write_secrets`); the packs' compositions and the
+/// secrets are checked when a party reveals them. The map must have its encrypted secrets and a
+/// root. Patch D: the reachability check finishes here (a Small map's whole check fits); a bigger
+/// map needs its `check_step` calls first. The limits are the tier's times the size class's
+/// multipliers (`BalanceConfig.map_size`).
 pub fn handler(ctx: Context<FinalizeMap>, secrets_root: [u8; 32]) -> Result<()> {
     let accounts = ctx.accounts;
-    let (core, arenas) = {
-        let data = accounts.layout.as_ref().try_borrow_data()?;
-        require!(
-            data.len() >= LAYOUT_SPACE && data[8] == crate::state::LAYOUT_VERSION,
-            MapError::InvalidLayout
-        );
-        (decode_core(&data)?, decode_arenas(&data)?)
+    let tiles = tiles_of(&accounts.tileset)?;
+    let layout = LayoutBytes::load(&accounts.layout)?;
+    let g = layout.geom;
+    let state = advance(&layout, &tiles, FINALIZE_BUDGET)?;
+    emit!(MapChecked {
+        map: accounts.map.key(),
+        phase: state.phase,
+        row: state.row,
+    });
+    require!(state.done(), MapError::CheckNotDone);
+    let h = g.height as usize;
+    let mut pass: Vec<Row> = vec![[0; MAP_ROW_WORDS]; h];
+    let mut reach: Vec<Row> = vec![[0; MAP_ROW_WORDS]; h];
+    layout.load_rows(&mut pass, &mut reach)?;
+    drop(pass);
+    let (core, secrets) = {
+        let data = layout.data()?;
+        (Box::new(g.core(&data)), g.secrets(&data))
     };
+    let mut arenas = Box::new(LayoutArenas::EMPTY);
+    g.arenas_into(&layout.data()?, &mut arenas);
     let rules = templates(&accounts.bestiary, &accounts.monster_skills, &core)?;
     let tables = reward_tables(&accounts.rewards, &core)?;
-    let tiles = tile_rules(
-        &table_body(&accounts.tileset, TableKind::Tileset)
-            .map_err(|_| error!(MapError::InvalidRegistryTable))?,
-    );
     let map = &mut accounts.map;
+    let cfg = &BalanceConfig::DEFAULT;
+    let secret_limits = cfg.map_size.secrets(
+        cfg.secrets
+            .limits(map.tier)
+            .ok_or(MapError::TierOutOfRange)?,
+        g.class,
+    );
     let loot = MapLoot {
         min_players: map.min_players,
-        rules: map_rules(&BalanceConfig::DEFAULT.loot, map.tier),
+        rules: cfg.map_size.loot(map_rules(&cfg.loot, map.tier), g.class),
         table_of: |id: u8| tables.get(id as usize).copied().flatten(),
     };
-    check_map(
-        map.core.width,
-        map.core.height,
-        map.tier,
-        &core,
-        &arenas,
-        BalanceConfig::DEFAULT.arena.limits(),
-        &tiles,
-        |id| rules.get(id as usize).copied().flatten(),
-        &loot,
-    )
-    .map_err(MapError::from)?;
+    {
+        let data = layout.data()?;
+        let parts = MapParts {
+            board: g.board(&data),
+            core: &core,
+            spawns: core.spawn_list(),
+            arenas: &arenas,
+        };
+        let view = ReachView {
+            rows: &reach,
+            width: g.width,
+            height: g.height,
+        };
+        check_public_map(
+            &parts,
+            map.tier,
+            cfg.map_size.scale(g.class),
+            &secrets,
+            cfg.arena.limits(),
+            &secret_limits,
+            &tiles,
+            |id| rules.get(id as usize).copied().flatten(),
+            &loot,
+            &view,
+        )
+        .map_err(MapError::from)?;
+    }
+    require!(
+        secrets_root != [0; 32] && secrets.blob_len > 0,
+        MapError::SecretsMissing
+    );
+    require!(
+        (map.core.width, map.core.height) == (g.width, g.height),
+        MapError::InvalidLayout
+    );
 
-    let layout_hash: [u8; 32] = {
-        let data = accounts.layout.as_ref().try_borrow_data()?;
-        hash(&data[8..LAYOUT_SPACE]).to_bytes()
-    };
+    let layout_hash: [u8; 32] = hash(&layout.data()?[g.hash_range()]).to_bytes();
     map.core.layout_hash = layout_hash;
-    // TODO(post-demo): declared secret counts with the commit-reveal trap (L6.5).
     map.core.secrets_root = secrets_root;
     map.core.status = MapStatus::Finalized;
 

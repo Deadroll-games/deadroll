@@ -1,10 +1,10 @@
 use anchor_lang::prelude::*;
-use deadroll_mapcheck::limits::{tier_limits, SIDE_MAX, SIDE_MIN};
+use deadroll_mapcheck::limits::tier_limits;
 use deadroll_rules::{
     loot::{chest_radius_ok, settle_timeout_ok},
     BalanceConfig,
 };
-use deadroll_types::{seeds, Biome, MapStatus, PARTY_MAX};
+use deadroll_types::{seeds, Biome, LayoutGeom, MapStatus, PARTY_MAX};
 
 use crate::{
     errors::MapError,
@@ -46,8 +46,12 @@ pub fn handler(
         settle_timeout_secs,
         biome,
     } = settings;
-    let side_ok = |side: u8| (SIDE_MIN..=SIDE_MAX).contains(&side);
-    require!(side_ok(width) && side_ok(height), MapError::SizeOutOfRange);
+    // Patch D: the size class follows from the area (docs/MAP_DESCRIPTION.md 17.6).
+    let geom = BalanceConfig::DEFAULT
+        .map_size
+        .class_of(width, height)
+        .and_then(|class| LayoutGeom::new(width, height, class))
+        .ok_or(MapError::SizeOutOfRange)?;
     require!(tier_limits(tier).is_some(), MapError::TierOutOfRange);
     require!(
         (1..=PARTY_MAX as u8).contains(&min_players),
@@ -83,12 +87,14 @@ pub fn handler(
     map.biome = biome;
 
     // Cells start zeroed, which is `TileKind::Void`; the DM overwrites them with `write_layout`.
+    // Patch D: a layout past 10 KB grows to its full size with `grow_layout`.
     LayoutBytes::create(
         &ctx.accounts.layout,
         &ctx.accounts.dm,
         &ctx.accounts.system_program,
         &map_key,
         ctx.bumps.layout,
+        geom,
     )?;
 
     emit!(MapCreated {

@@ -68,9 +68,25 @@ export type HitOutcome = (typeof HitOutcome)[keyof typeof HitOutcome];
 export const Applied = { None: 0, Added: 1, Refreshed: 2, Froze: 3 } as const;
 export type Applied = (typeof Applied)[keyof typeof Applied];
 
-/** Constants from crates/types. */
-export const MAP_MAX = 32;
-export const MAP_CELLS = 1024;
+/** Constants from crates/types. Patch D: a map side is up to `MAP_SIDE_CAP`; tiles are stored
+ * `width` per row (`cellIndex`). */
+export const MAP_SIDE_CAP = 143;
+/** Patch D: size classes (crates/types `CLASS_PACKS`, `CLASS_CHESTS`, `CLASS_SECRETS`,
+ * `CLASS_BLOB`) and the cells of each (`BalanceConfig.map_size.cells`). */
+export const CLASS_PACKS = [8, 16, 24, 40] as const;
+export const CLASS_CHESTS = [4, 8, 12, 16] as const;
+export const CLASS_SECRETS = [16, 48, 80, 96] as const;
+export const CLASS_BLOB = [800, 1600, 2400, 3600] as const;
+export const CLASS_NAMES = ["Small", "Medium", "Big", "Dungeon"] as const;
+export const classPacks = (c: number) => CLASS_PACKS[Math.min(Math.max(c, 0), 3)]!;
+export const CLASS_CELLS = [1024, 5184, 10201, 20449] as const;
+export const MAP_SIDE_MIN = 8;
+/** The size class of a `width` x `height` map (`MapSizeTuning::class_of`), or null. */
+export function classOf(width: number, height: number): number | null {
+  if (width < MAP_SIDE_MIN || height < MAP_SIDE_MIN || width > MAP_SIDE_CAP || height > MAP_SIDE_CAP) return null;
+  const i = CLASS_CELLS.findIndex((c) => width * height <= c);
+  return i < 0 ? null : i;
+}
 export const PARTY_MAX = 4;
 export const MONSTERS_MAX = 24;
 export const SPAWNS_MAX = 24;
@@ -83,10 +99,20 @@ export const DAMAGE_SCALE = 10_000n;
 
 export type Cell = { x: number; y: number };
 
-/** Index of a cell in MapLayout.tiles (row stride is always MAP_MAX, crates/mapcheck). */
-export function cellIndex(x: number, y: number): number {
-  return y * MAP_MAX + x;
+/** Index of a cell in a tile array (patch D: `width` per row, as `MapLayout` stores the cells). */
+export function cellIndex(x: number, y: number, width: number): number {
+  return y * width + x;
 }
+
+/** Patch D: bit `n` of a mask the chain keeps as a `u64` (a bigint) or a `u8`/`u32` (a number). */
+export const hasBit = (mask: bigint | number, n: number): boolean =>
+  !Number.isInteger(n) || n < 0
+    ? false
+    : typeof mask === "bigint" ? ((mask >> BigInt(n)) & 1n) === 1n : n < 32 && ((mask >>> n) & 1) === 1;
+
+/** Patch D: the key of a cell in sets and maps, for any side (not an index into tiles). */
+export const cellKey = (x: number, y: number) => y * 256 + x;
+export const keyCell = (k: number): Cell => ({ x: k % 256, y: Math.floor(k / 256) });
 
 export type LayerRef = {
   spriteId: number;

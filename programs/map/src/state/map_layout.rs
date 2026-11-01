@@ -5,86 +5,95 @@ use anchor_lang::{
     },
     Discriminator,
 };
+use deadroll_mapcheck::wide::{rows_from_bytes, rows_to_bytes, CheckState, Row};
 use deadroll_types::{
-    seeds, MapArenasData, MapLayoutDataV2, MapPoint, PackLayout, Spawn, ARENA_CELLS,
-    ARENA_SIDE_MAX, MAP_CELLS, NO_TABLE, PACKS_MAX, POINTS_MAX, SPAWNS_MAX,
+    map_size::hdr, seeds, LayoutGeom, MapPoint, PackLayout, Spawn, LAYOUT_V5, NO_TABLE,
+    SECRET_TYPES,
 };
 
 use crate::{errors::MapError, state::LAYOUT_VERSION};
 
-/// `["layout", map]`. `finalize_map` hashes the account bytes after the discriminator into
-/// `Map.layout_hash`.
+/// `["layout", map]`. `finalize_map` hashes the public bytes into `Map.layout_hash`.
 /// Patch 13: the core is `MapLayoutDataV2` (cells with variants, points), version 2.
-/// Arena update: version 3, the packs and their arenas after the core (`write_arena`). A layout
-/// from before it is smaller: it can neither be written nor open a party.
+/// Arena update: version 3, the packs and their arenas after the core (`write_arena`).
+/// Patch C: version 4, the public part of the secrets (each pack's threat, the declared counts)
+/// and the DM's encrypted copy after the arenas (`write_secrets`, `finalize_map`).
+/// Patch D: version 5 (`deadroll_types::map_size`): as big as the map's size class and sides
+/// need, the cells `width` per row after the class's packs and arenas, then the encrypted copy and
+/// the reachability check's scratch (`check_step`). A Dungeon layout is ~37 KB: `create_map`
+/// creates the first 10 KB and `grow_layout` the rest, 10 KB per instruction. An older layout can
+/// neither be written nor open a party.
 ///
-/// The account (~2.5 KB) is never Borsh-decoded whole on-chain: `Account<MapLayout>` would put two
-/// copies of it on the 4 KB SBF stack frame. The instructions go through [`LayoutBytes`] (in place,
-/// like the session's `MapLayoutView`); `finalize_map` decodes the core and the arenas into boxes
-/// one at a time. Contexts take it as `UncheckedAccount` (seeds checked), `finalize_map` as
-/// `LazyAccount` (owner, discriminator, IDL entry).
+/// The account is never Borsh-decoded whole: the struct is its header (what the IDL shows); the
+/// instructions go through [`LayoutBytes`] and `LayoutGeom`. Contexts take it as
+/// `UncheckedAccount` (seeds checked).
 #[account]
 #[derive(InitSpace)]
 pub struct MapLayout {
-    pub core: MapLayoutDataV2,
-    pub arenas: MapArenasData,
+    pub version: u8,
+    pub map: Pubkey,
+    pub width: u8,
+    pub height: u8,
+    /// Patch D: the size class (`deadroll_rules::BalanceConfig.map_size`).
+    pub class: u8,
+    /// The reward table of the boss (registry `Rewards` id, `NO_TABLE` = none).
+    pub boss_table: u8,
+    pub bump: u8,
+    pub spawn_count: u8,
+    pub point_count: u8,
 }
 
-/// Account size, discriminator included.
-pub const LAYOUT_SPACE: usize = 8 + MapLayout::INIT_SPACE;
-// `create_map` creates it in one CPI.
-const _: () = assert!(LAYOUT_SPACE <= 10_240);
+const _: () = assert!(8 + MapLayout::INIT_SPACE == hdr::BODY);
 
-/// Byte offsets inside a `MapLayout` account (discriminator included).
-pub mod off {
-    use super::*;
-    pub const VERSION: usize = 8;
-    pub const MAP: usize = VERSION + 1;
-    pub const CELLS: usize = MAP + 32;
-    pub const SPAWNS: usize = CELLS + MAP_CELLS;
-    pub const SPAWN_COUNT: usize = SPAWNS + SPAWNS_MAX * Spawn::SIZE;
-    pub const POINTS: usize = SPAWN_COUNT + 1;
-    pub const POINT_COUNT: usize = POINTS + POINTS_MAX * MapPoint::SIZE;
-    pub const BOSS_TABLE: usize = POINT_COUNT + 1;
-    pub const BUMP: usize = BOSS_TABLE + 1;
-    pub const PACKS: usize = BUMP + 1;
-    pub const ARENAS: usize = PACKS + PACKS_MAX * PackLayout::SIZE;
-    pub const END: usize = ARENAS + PACKS_MAX * ARENA_CELLS;
-}
+/// Most bytes one instruction may add to an account (the runtime's
+/// `MAX_PERMITTED_DATA_INCREASE`).
+pub const GROW_STEP: usize = 10_240;
 
-const _: () = assert!(off::END == LAYOUT_SPACE);
-
-/// In-place access to a `MapLayout` account.
+/// In-place access to a version 5 `MapLayout` account.
 pub struct LayoutBytes<'a, 'info> {
     info: &'a AccountInfo<'info>,
+    pub geom: LayoutGeom,
 }
 
 impl<'a, 'info> LayoutBytes<'a, 'info> {
-    /// A `MapLayout` of this program in the current format (the seeds are the context's).
-    pub fn load(info: &'a AccountInfo<'info>) -> Result<Self> {
+    /// A `MapLayout` of this program in the current format, whole or still growing (the seeds
+    /// are the context's).
+    pub fn load_header(info: &'a AccountInfo<'info>) -> Result<Self> {
         require_keys_eq!(*info.owner, crate::ID, MapError::InvalidLayout);
         let data = info.try_borrow_data()?;
         require!(
-            data.len() >= LAYOUT_SPACE
+            data.len() >= hdr::BODY
                 && data[..8] == *MapLayout::DISCRIMINATOR
-                && data[off::VERSION] == LAYOUT_VERSION,
+                && data[hdr::VERSION] == LAYOUT_VERSION,
             MapError::InvalidLayout
         );
+        let geom = LayoutGeom::new(data[hdr::WIDTH], data[hdr::HEIGHT], data[hdr::CLASS])
+            .ok_or(MapError::InvalidLayout)?;
         drop(data);
-        Ok(Self { info })
+        Ok(Self { info, geom })
     }
 
-    /// Creates the PDA `["layout", map]` and writes its header: no cells, spawns, points or packs,
-    /// no boss table. Works like Anchor's `init`, including an address pre-funded by someone else.
+    /// [`Self::load_header`] of a layout grown to its full size.
+    pub fn load(info: &'a AccountInfo<'info>) -> Result<Self> {
+        let out = Self::load_header(info)?;
+        require!(info.data_len() >= out.geom.end, MapError::LayoutNotGrown);
+        Ok(out)
+    }
+
+    /// Creates the PDA `["layout", map]` with its first `GROW_STEP` bytes (all of a layout that
+    /// small) and writes its header: no cells, spawns, points or packs, no boss table. Works like
+    /// Anchor's `init`, including an address pre-funded by someone else.
     pub fn create(
         info: &'a AccountInfo<'info>,
         payer: &AccountInfo<'info>,
         system_program: &AccountInfo<'info>,
         map: &Pubkey,
         bump: u8,
+        geom: LayoutGeom,
     ) -> Result<Self> {
+        let space = geom.end.min(GROW_STEP);
         let signer: &[&[&[u8]]] = &[&[seeds::LAYOUT, map.as_ref(), &[bump]]];
-        let rent = Rent::get()?.minimum_balance(LAYOUT_SPACE);
+        let rent = Rent::get()?.minimum_balance(space);
         let program = system_program.key();
         if info.lamports() == 0 {
             create_account(
@@ -97,7 +106,7 @@ impl<'a, 'info> LayoutBytes<'a, 'info> {
                     signer,
                 ),
                 rent,
-                LAYOUT_SPACE as u64,
+                space as u64,
                 &crate::ID,
             )?;
         } else {
@@ -122,7 +131,7 @@ impl<'a, 'info> LayoutBytes<'a, 'info> {
                     },
                     signer,
                 ),
-                LAYOUT_SPACE as u64,
+                space as u64,
             )?;
             assign(
                 CpiContext::new_with_signer(
@@ -138,107 +147,156 @@ impl<'a, 'info> LayoutBytes<'a, 'info> {
         {
             let mut data = info.try_borrow_mut_data()?;
             data[..8].copy_from_slice(MapLayout::DISCRIMINATOR);
-            data[off::VERSION] = LAYOUT_VERSION;
-            data[off::MAP..off::MAP + 32].copy_from_slice(map.as_ref());
-            data[off::BOSS_TABLE] = NO_TABLE;
-            data[off::BUMP] = bump;
+            geom.write_header(&mut data, &map.to_bytes(), NO_TABLE, bump);
         }
-        Ok(Self { info })
+        Ok(Self { info, geom })
     }
 
-    /// Writes `cells` into the grid from cell `start` (row-major, `MAP_MAX` per row).
+    /// Patch D: adds up to `GROW_STEP` bytes towards the full size, the payer topping up the
+    /// rent. Returns the new size.
+    pub fn grow(
+        &self,
+        payer: &AccountInfo<'info>,
+        system_program: &AccountInfo<'info>,
+    ) -> Result<usize> {
+        let len = self.info.data_len();
+        require!(len < self.geom.end, MapError::LayoutGrown);
+        let new_len = (len + GROW_STEP).min(self.geom.end);
+        let missing = Rent::get()?
+            .minimum_balance(new_len)
+            .saturating_sub(self.info.lamports());
+        if missing > 0 {
+            transfer(
+                CpiContext::new(
+                    system_program.key(),
+                    Transfer {
+                        from: payer.clone(),
+                        to: self.info.clone(),
+                    },
+                ),
+                missing,
+            )?;
+        }
+        self.info.resize(new_len)?;
+        Ok(new_len)
+    }
+
+    /// Every write starts the reachability check over (`check_step`).
+    fn reset_check(&self, data: &mut [u8]) {
+        let at = self.geom.check_at;
+        data[at..at + LayoutGeom::CHECK_LEN].fill(0);
+    }
+
+    /// Writes `cells` into the map from cell `start` (row-major, `width` per row).
     pub fn write_cells(&self, start: usize, cells: &[u8]) -> Result<()> {
-        let end = start
-            .checked_add(cells.len())
-            .ok_or(MapError::ChunkOutOfRange)?;
-        require!(end <= MAP_CELLS, MapError::ChunkOutOfRange);
-        self.info.try_borrow_mut_data()?[off::CELLS + start..off::CELLS + end]
-            .copy_from_slice(cells);
+        let mut data = self.info.try_borrow_mut_data()?;
+        require!(
+            self.geom.write_cells(&mut data, start, cells),
+            MapError::ChunkOutOfRange
+        );
+        self.reset_check(&mut data);
         Ok(())
     }
 
     /// Replaces the spawn list (the slots past it are cleared).
     pub fn write_spawns(&self, spawns: &[Spawn]) -> Result<()> {
-        require!(spawns.len() <= SPAWNS_MAX, MapError::TooManySpawns);
         let mut data = self.info.try_borrow_mut_data()?;
-        data[off::SPAWNS..off::SPAWN_COUNT].fill(0);
-        for (i, s) in spawns.iter().enumerate() {
-            let at = off::SPAWNS + i * Spawn::SIZE;
-            s.serialize(&mut &mut data[at..at + Spawn::SIZE])
-                .map_err(|_| error!(MapError::InvalidLayout))?;
-        }
-        data[off::SPAWN_COUNT] = spawns.len() as u8;
+        require!(
+            self.geom.write_spawns(&mut data, spawns),
+            MapError::TooManySpawns
+        );
+        self.reset_check(&mut data);
         Ok(())
     }
 
     /// Replaces the points (the slots past them are cleared) and the boss table.
     pub fn write_points(&self, points: &[MapPoint], boss_table: u8) -> Result<()> {
-        require!(points.len() <= POINTS_MAX, MapError::TooManyPoints);
         let mut data = self.info.try_borrow_mut_data()?;
-        data[off::POINTS..off::POINT_COUNT].fill(0);
-        for (i, p) in points.iter().enumerate() {
-            let at = off::POINTS + i * MapPoint::SIZE;
-            p.serialize(&mut &mut data[at..at + MapPoint::SIZE])
-                .map_err(|_| error!(MapError::InvalidLayout))?;
-        }
-        data[off::POINT_COUNT] = points.len() as u8;
-        data[off::BOSS_TABLE] = boss_table;
+        require!(
+            self.geom.write_points(&mut data, points, boss_table),
+            MapError::TooManyPoints
+        );
+        self.reset_check(&mut data);
         Ok(())
     }
 
     /// Arena update: replaces pack `pack`'s record and its arena, `cells` row by row
-    /// (`record.width` per row; `ARENA_SIDE_MAX` per stored row, the rest cleared).
+    /// (`record.width` per row).
     pub fn write_arena(&self, pack: u8, record: &PackLayout, cells: &[u8]) -> Result<()> {
-        require!((pack as usize) < PACKS_MAX, MapError::PackOutOfRange);
-        let (w, h) = (record.width as usize, record.height as usize);
+        require!((pack as usize) < self.geom.packs, MapError::PackOutOfRange);
+        let mut data = self.info.try_borrow_mut_data()?;
         require!(
-            w <= ARENA_SIDE_MAX && h <= ARENA_SIDE_MAX && cells.len() == w * h,
+            self.geom
+                .write_arena(&mut data, pack as usize, record, cells),
             MapError::ArenaCellsMismatch
         );
-        let mut data = self.info.try_borrow_mut_data()?;
-        let at = off::PACKS + pack as usize * PackLayout::SIZE;
-        record
-            .serialize(&mut &mut data[at..at + PackLayout::SIZE])
-            .map_err(|_| error!(MapError::InvalidLayout))?;
-        let arena = off::ARENAS + pack as usize * ARENA_CELLS;
-        data[arena..arena + ARENA_CELLS].fill(0);
-        for (y, row) in cells.chunks(w.max(1)).take(h).enumerate() {
-            let at = arena + y * ARENA_SIDE_MAX;
-            data[at..at + row.len()].copy_from_slice(row);
-        }
+        self.reset_check(&mut data);
         Ok(())
     }
 
+    /// Patch C: writes `bytes` into the encrypted secrets from `offset` (`len`: the whole copy's
+    /// length, the website sends it in chunks) and the public part: each pack's threat (one per
+    /// pack number of the class) and the declared counts.
+    pub fn write_secrets(
+        &self,
+        offset: usize,
+        bytes: &[u8],
+        len: usize,
+        threat: &[u8],
+        declared: &[u8; SECRET_TYPES],
+    ) -> Result<()> {
+        let mut data = self.info.try_borrow_mut_data()?;
+        require!(
+            self.geom
+                .write_secrets(&mut data, offset, bytes, len, threat, declared),
+            MapError::SecretsOutOfRange
+        );
+        self.reset_check(&mut data);
+        Ok(())
+    }
+
+    /// The account bytes, to read.
+    pub fn data(&self) -> Result<std::cell::Ref<'a, &'a mut [u8]>> {
+        Ok(self.info.try_borrow_data()?)
+    }
+
     pub fn spawn_count(&self) -> Result<u8> {
-        Ok(self.info.try_borrow_data()?[off::SPAWN_COUNT])
+        Ok(self.info.try_borrow_data()?[hdr::SPAWN_COUNT])
     }
 
     pub fn point_count(&self) -> Result<u8> {
-        Ok(self.info.try_borrow_data()?[off::POINT_COUNT])
+        Ok(self.info.try_borrow_data()?[hdr::POINT_COUNT])
+    }
+
+    /// Patch D: the reachability check's state.
+    pub fn check_state(&self) -> Result<CheckState> {
+        let data = self.info.try_borrow_data()?;
+        let mut b = [0u8; 8];
+        b.copy_from_slice(&data[self.geom.check_at..self.geom.check_at + 8]);
+        Ok(CheckState::from_bytes(b))
+    }
+
+    /// The check's two bitsets into `pass` and `reach` (`height` rows each).
+    pub fn load_rows(&self, pass: &mut [Row], reach: &mut [Row]) -> Result<()> {
+        let data = self.info.try_borrow_data()?;
+        let (g, n) = (&self.geom, self.geom.bits_len());
+        rows_from_bytes(&data[g.pass_at..g.pass_at + n], g.row_words, pass);
+        rows_from_bytes(&data[g.reach_at..g.reach_at + n], g.row_words, reach);
+        Ok(())
+    }
+
+    /// Stores the check's state and bitsets.
+    pub fn store_check(&self, state: CheckState, pass: &[Row], reach: &[Row]) -> Result<()> {
+        let mut data = self.info.try_borrow_mut_data()?;
+        let (g, n) = (&self.geom, self.geom.bits_len());
+        data[g.check_at..g.check_at + 8].copy_from_slice(&state.to_bytes());
+        rows_to_bytes(pass, g.row_words, &mut data[g.pass_at..g.pass_at + n]);
+        rows_to_bytes(reach, g.row_words, &mut data[g.reach_at..g.reach_at + n]);
+        Ok(())
     }
 }
 
-/// The layout core, decoded into a box (`finalize_map`). Not inlined: its frame holds one copy.
-#[inline(never)]
-pub fn decode_core(data: &[u8]) -> Result<Box<MapLayoutDataV2>> {
-    let mut body = data
-        .get(off::VERSION..off::PACKS)
-        .ok_or(error!(MapError::InvalidLayout))?;
-    Ok(Box::new(
-        MapLayoutDataV2::deserialize(&mut body).map_err(|_| error!(MapError::InvalidLayout))?,
-    ))
-}
-
-/// Arena update: the packs and arenas, decoded into a box (`finalize_map`). Not inlined.
-#[inline(never)]
-pub fn decode_arenas(data: &[u8]) -> Result<Box<MapArenasData>> {
-    let mut body = data
-        .get(off::PACKS..off::END)
-        .ok_or(error!(MapError::InvalidLayout))?;
-    Ok(Box::new(
-        MapArenasData::deserialize(&mut body).map_err(|_| error!(MapError::InvalidLayout))?,
-    ))
-}
+const _: () = assert!(LAYOUT_VERSION == LAYOUT_V5);
 
 #[cfg(test)]
 mod tests {
@@ -261,11 +319,10 @@ mod tests {
     }
 
     impl Buf {
-        fn new() -> Self {
-            let mut data = vec![0u8; LAYOUT_SPACE];
+        fn new(geom: LayoutGeom) -> Self {
+            let mut data = vec![0u8; geom.end];
             data[..8].copy_from_slice(MapLayout::DISCRIMINATOR);
-            data[off::VERSION] = LAYOUT_VERSION;
-            data[off::BOSS_TABLE] = NO_TABLE;
+            geom.write_header(&mut data, &[9; 32], NO_TABLE, 255);
             Self {
                 key: Pubkey::new_unique(),
                 owner: crate::ID,
@@ -287,9 +344,13 @@ mod tests {
         }
     }
 
+    fn medium() -> LayoutGeom {
+        LayoutGeom::new(40, 30, 1).unwrap()
+    }
+
     #[test]
-    fn writes_in_place_like_borsh() {
-        let mut buf = Buf::new();
+    fn writes_in_place_and_resets_the_check() {
+        let mut buf = Buf::new(medium());
         let spawn = Spawn {
             bestiary_id: 2,
             x: 3,
@@ -298,12 +359,12 @@ mod tests {
             skills: 0x1f,
             flags: 0,
             aspects: 0,
-            pack: 3,
+            pack: 12,
         };
         let point = MapPoint {
             kind: PointKind::Exit,
-            x: 9,
-            y: 9,
+            x: 39,
+            y: 29,
             data: 0,
         };
         let record = PackLayout {
@@ -314,86 +375,113 @@ mod tests {
             width: 3,
             height: 2,
         };
+        let g = medium();
         {
             let info = buf.info();
             let l = LayoutBytes::load(&info).unwrap();
-            l.write_cells(40, &[8, 9]).unwrap();
+            l.store_check(
+                CheckState {
+                    phase: 3,
+                    row: 0,
+                    changed: false,
+                },
+                &[[1, 0, 0]; 30],
+                &[[1, 0, 0]; 30],
+            )
+            .unwrap();
+            assert!(l.check_state().unwrap().done());
+            l.write_cells(40 * 29, &[8; 40]).unwrap();
+            assert_eq!(l.check_state().unwrap(), CheckState::default());
             l.write_spawns(&[spawn, spawn]).unwrap();
             l.write_spawns(&[spawn]).unwrap();
             l.write_points(&[point], 1).unwrap();
-            l.write_arena(3, &record, &[1, 2, 3, 4, 5, 6]).unwrap();
+            l.write_arena(15, &record, &[1, 2, 3, 4, 5, 6]).unwrap();
+            let mut threat = [0u8; 16];
+            threat[15] = 3;
+            l.write_secrets(0, &[1, 2], 2, &threat, &[1, 0, 0, 0])
+                .unwrap();
             assert_eq!(
-                code(l.write_cells(MAP_CELLS - 1, &[1, 2]).unwrap_err()),
+                code(l.write_cells(40 * 30 - 1, &[1, 2]).unwrap_err()),
                 u32::from(MapError::ChunkOutOfRange)
             );
-            let many = [spawn; SPAWNS_MAX + 1];
             assert_eq!(
-                code(l.write_spawns(&many).unwrap_err()),
+                code(l.write_spawns(&[spawn; 17]).unwrap_err()),
                 u32::from(MapError::TooManySpawns)
             );
-            let points = [point; POINTS_MAX + 1];
             assert_eq!(
-                code(l.write_points(&points, 0).unwrap_err()),
+                code(l.write_points(&[point; 11], 0).unwrap_err()),
                 u32::from(MapError::TooManyPoints)
             );
             assert_eq!(
-                code(
-                    l.write_arena(PACKS_MAX as u8, &record, &[0; 6])
-                        .unwrap_err()
-                ),
+                code(l.write_arena(16, &record, &[0; 6]).unwrap_err()),
                 u32::from(MapError::PackOutOfRange)
             );
             assert_eq!(
                 code(l.write_arena(3, &record, &[0; 5]).unwrap_err()),
                 u32::from(MapError::ArenaCellsMismatch)
             );
-            let wide = PackLayout {
-                width: ARENA_SIDE_MAX as u8 + 1,
-                height: 1,
-                ..record
-            };
+            assert_eq!(
+                code(l.write_secrets(0, &[], 1601, &threat, &[0; 4]).unwrap_err()),
+                u32::from(MapError::SecretsOutOfRange)
+            );
             assert_eq!(
                 code(
-                    l.write_arena(3, &wide, &[0; ARENA_SIDE_MAX + 1])
+                    l.write_secrets(0, &[], 2, &threat[..8], &[0; 4])
                         .unwrap_err()
                 ),
-                u32::from(MapError::ArenaCellsMismatch)
+                u32::from(MapError::SecretsOutOfRange)
             );
         }
-        let back = MapLayout::try_deserialize(&mut &buf.data[..]).unwrap();
-        assert_eq!(&back.core.cells[40..42], &[8, 9]);
-        assert_eq!(back.core.spawn_count, 1);
-        assert_eq!(back.core.spawns[0], spawn);
-        assert_eq!(back.core.spawns[1], Spawn::default(), "cleared");
+        let header = MapLayout::try_deserialize(&mut &buf.data[..]).unwrap();
         assert_eq!(
-            (
-                back.core.point_count,
-                back.core.points[0],
-                back.core.boss_table
-            ),
-            (1, point, 1)
+            (header.width, header.height, header.class, header.boss_table),
+            (40, 30, 1, 1)
         );
-        assert_eq!(back.arenas.packs[3], record);
-        assert_eq!(back.arenas.cell(3, 2, 1), Some(6));
-        assert_eq!(back.arenas.cell(3, 3, 0), Some(0));
-        // The boxed decoders read the same.
-        assert_eq!(*decode_core(&buf.data).unwrap(), back.core);
-        assert_eq!(*decode_arenas(&buf.data).unwrap(), back.arenas);
+        assert_eq!((header.spawn_count, header.point_count), (1, 1));
+        let core = g.core(&buf.data);
+        assert_eq!(core.spawn_list(), &[spawn]);
+        assert_eq!(core.exit(), Some(deadroll_types::Cell { x: 39, y: 29 }));
+        assert_eq!(g.pack(&buf.data, 15), Some(record));
+        assert_eq!(g.board(&buf.data).row(29), &[8; 40]);
+        assert_eq!(g.secrets(&buf.data).threat[15], 3);
     }
 
     #[test]
-    fn refuses_another_owner_discriminator_or_version() {
-        let mut other = Buf::new();
+    fn the_check_survives_its_bytes() {
+        let mut buf = Buf::new(LayoutGeom::new(143, 20, 3).unwrap());
+        let info = buf.info();
+        let l = LayoutBytes::load(&info).unwrap();
+        let pass: Vec<Row> = (0..20u64).map(|i| [i, i << 3, 7]).collect();
+        let reach: Vec<Row> = (0..20u64).map(|i| [!i, 0, i]).collect();
+        let state = CheckState {
+            phase: 2,
+            row: 17,
+            changed: true,
+        };
+        l.store_check(state, &pass, &reach).unwrap();
+        let (mut p, mut r) = (vec![[0u64; 3]; 20], vec![[0u64; 3]; 20]);
+        l.load_rows(&mut p, &mut r).unwrap();
+        assert_eq!((p, r), (pass, reach));
+        assert_eq!(l.check_state().unwrap(), state);
+    }
+
+    #[test]
+    fn refuses_another_owner_version_or_a_short_account() {
+        let mut other = Buf::new(medium());
         other.owner = Pubkey::new_unique();
         assert!(LayoutBytes::load(&other.info()).is_err());
-        let mut old = Buf::new();
-        old.data[off::VERSION] = 2;
+        let mut old = Buf::new(medium());
+        old.data[hdr::VERSION] = 4;
         assert!(LayoutBytes::load(&old.info()).is_err());
-        let mut wrong = Buf::new();
+        let mut wrong = Buf::new(medium());
         wrong.data[0] ^= 1;
         assert!(LayoutBytes::load(&wrong.info()).is_err());
-        let mut short = Buf::new();
-        short.data.truncate(LAYOUT_SPACE - 1);
-        assert!(LayoutBytes::load(&short.info()).is_err());
+        let mut short = Buf::new(medium());
+        short.data.truncate(medium().end - 1);
+        assert_eq!(
+            code(LayoutBytes::load(&short.info()).err().unwrap()),
+            u32::from(MapError::LayoutNotGrown)
+        );
+        assert!(LayoutBytes::load_header(&short.info()).is_ok());
     }
 }

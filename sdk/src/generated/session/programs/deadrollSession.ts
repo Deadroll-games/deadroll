@@ -40,6 +40,7 @@ import {
   getMonsterStateCodec,
   getParticipationCodec,
   getRewardCacheCodec,
+  getSessionBoardCodec,
   type Escrow,
   type EscrowArgs,
   type GameSession,
@@ -50,6 +51,8 @@ import {
   type ParticipationArgs,
   type RewardCache,
   type RewardCacheArgs,
+  type SessionBoard,
+  type SessionBoardArgs,
 } from "../accounts/index.js";
 import {
   getActInstructionAsync,
@@ -57,7 +60,8 @@ import {
   getCloseCacheInstructionAsync,
   getConsumeRandomnessInstruction,
   getEndTurnInstruction,
-  getEnterArenaInstruction,
+  getEnterArenaInstructionAsync,
+  getExamineInstructionAsync,
   getFleeInstruction,
   getJoinSessionInstructionAsync,
   getLeaveArenaInstruction,
@@ -67,6 +71,8 @@ import {
   getOpenChestInstructionAsync,
   getOpenSessionInstructionAsync,
   getRetreatInstruction,
+  getRevealCellInstructionAsync,
+  getRevealPackInstructionAsync,
   getSetReadyInstructionAsync,
   getSetSessionKeyInstruction,
   getSettlePartyInstructionAsync,
@@ -78,6 +84,7 @@ import {
   parseConsumeRandomnessInstruction,
   parseEndTurnInstruction,
   parseEnterArenaInstruction,
+  parseExamineInstruction,
   parseFleeInstruction,
   parseJoinSessionInstruction,
   parseLeaveArenaInstruction,
@@ -87,6 +94,8 @@ import {
   parseOpenChestInstruction,
   parseOpenSessionInstruction,
   parseRetreatInstruction,
+  parseRevealCellInstruction,
+  parseRevealPackInstruction,
   parseSetReadyInstruction,
   parseSetSessionKeyInstruction,
   parseSettlePartyInstruction,
@@ -97,7 +106,8 @@ import {
   type CloseCacheAsyncInput,
   type ConsumeRandomnessInput,
   type EndTurnInput,
-  type EnterArenaInput,
+  type EnterArenaAsyncInput,
+  type ExamineAsyncInput,
   type FleeInput,
   type JoinSessionAsyncInput,
   type LeaveArenaInput,
@@ -112,6 +122,7 @@ import {
   type ParsedConsumeRandomnessInstruction,
   type ParsedEndTurnInstruction,
   type ParsedEnterArenaInstruction,
+  type ParsedExamineInstruction,
   type ParsedFleeInstruction,
   type ParsedJoinSessionInstruction,
   type ParsedLeaveArenaInstruction,
@@ -121,12 +132,16 @@ import {
   type ParsedOpenChestInstruction,
   type ParsedOpenSessionInstruction,
   type ParsedRetreatInstruction,
+  type ParsedRevealCellInstruction,
+  type ParsedRevealPackInstruction,
   type ParsedSetReadyInstruction,
   type ParsedSetSessionKeyInstruction,
   type ParsedSettlePartyInstruction,
   type ParsedStartSessionInstruction,
   type ParsedStartTurnInstruction,
   type RetreatInput,
+  type RevealCellAsyncInput,
+  type RevealPackAsyncInput,
   type SetReadyAsyncInput,
   type SetSessionKeyInput,
   type SettlePartyAsyncInput,
@@ -134,6 +149,7 @@ import {
   type StartTurnAsyncInput,
 } from "../instructions/index.js";
 import {
+  findBoardPda,
   findEscrowPda,
   findMonstersPda,
   findParticipationPda,
@@ -152,11 +168,13 @@ export const DeadrollSessionAccount = {
   2: "MonsterState",
   3: "Participation",
   4: "RewardCache",
+  5: "SessionBoard",
   Escrow: 0,
   GameSession: 1,
   MonsterState: 2,
   Participation: 3,
   RewardCache: 4,
+  SessionBoard: 5,
 } as const;
 
 export type DeadrollSessionAccount = (typeof DeadrollSessionAccount)[Exclude<
@@ -223,6 +241,17 @@ export function identifyDeadrollSessionAccount(
   ) {
     return DeadrollSessionAccount.RewardCache;
   }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([236, 104, 1, 55, 35, 193, 80, 96]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionAccount.SessionBoard;
+  }
   throw new SolanaError(
     SOLANA_ERROR__PROGRAM_CLIENTS__FAILED_TO_IDENTIFY_ACCOUNT,
     { accountData: data, programName: "deadrollSession" },
@@ -231,87 +260,99 @@ export function identifyDeadrollSessionAccount(
 
 export const DeadrollSessionEvent = {
   0: "ActionRequested",
-  1: "ArenaEntered",
-  2: "ArenaLeft",
-  3: "ArenaRetreated",
-  4: "ArenaWon",
-  5: "AuraChanged",
-  6: "CacheClosed",
-  7: "CacheSettled",
-  8: "CellBurned",
-  9: "ChestOpenRequested",
-  10: "ChestOpened",
-  11: "ContributionRefunded",
-  12: "DeathFinalized",
-  13: "EffectResolved",
-  14: "EscrowClaimed",
-  15: "ExitCancelled",
-  16: "ExitPassed",
-  17: "FleeVoted",
-  18: "HitResolved",
-  19: "InitiativeRolled",
-  20: "ModsTicked",
-  21: "MonsterAuraChanged",
-  22: "MonsterKilled",
-  23: "MonsterReactiveTriggered",
-  24: "Moved",
-  25: "PackEngaged",
-  26: "PartyLeft",
-  27: "PlayerDied",
-  28: "PlayerJoined",
-  29: "PlayerReady",
-  30: "ReactiveTriggered",
-  31: "ResonanceSpread",
-  32: "RetreatVoted",
-  33: "RewardsRolled",
-  34: "SessionEnded",
-  35: "SessionKeyChanged",
-  36: "SessionOpened",
-  37: "SkillUsed",
-  38: "TurnSkipped",
-  39: "TurnStarted",
-  40: "TurnTicked",
+  1: "AmbushSprung",
+  2: "ArenaEntered",
+  3: "ArenaLeft",
+  4: "ArenaRetreated",
+  5: "ArenaWon",
+  6: "AuraChanged",
+  7: "CacheClosed",
+  8: "CacheSettled",
+  9: "CellBurned",
+  10: "CellExamined",
+  11: "CellRevealed",
+  12: "ChestOpenRequested",
+  13: "ChestOpened",
+  14: "ContributionRefunded",
+  15: "DeathFinalized",
+  16: "EffectResolved",
+  17: "EscrowClaimed",
+  18: "ExitCancelled",
+  19: "ExitPassed",
+  20: "FleeVoted",
+  21: "HitResolved",
+  22: "InitiativeRolled",
+  23: "ModsTicked",
+  24: "MonsterAuraChanged",
+  25: "MonsterKilled",
+  26: "MonsterReactiveTriggered",
+  27: "Moved",
+  28: "PackEngaged",
+  29: "PackRevealed",
+  30: "PartyLeft",
+  31: "PlayerDied",
+  32: "PlayerJoined",
+  33: "PlayerReady",
+  34: "ReactiveTriggered",
+  35: "ResonanceSpread",
+  36: "RetreatVoted",
+  37: "RevealsOwed",
+  38: "RewardsRolled",
+  39: "SessionEnded",
+  40: "SessionKeyChanged",
+  41: "SessionOpened",
+  42: "SkillUsed",
+  43: "TrapTriggered",
+  44: "TurnSkipped",
+  45: "TurnStarted",
+  46: "TurnTicked",
   ActionRequested: 0,
-  ArenaEntered: 1,
-  ArenaLeft: 2,
-  ArenaRetreated: 3,
-  ArenaWon: 4,
-  AuraChanged: 5,
-  CacheClosed: 6,
-  CacheSettled: 7,
-  CellBurned: 8,
-  ChestOpenRequested: 9,
-  ChestOpened: 10,
-  ContributionRefunded: 11,
-  DeathFinalized: 12,
-  EffectResolved: 13,
-  EscrowClaimed: 14,
-  ExitCancelled: 15,
-  ExitPassed: 16,
-  FleeVoted: 17,
-  HitResolved: 18,
-  InitiativeRolled: 19,
-  ModsTicked: 20,
-  MonsterAuraChanged: 21,
-  MonsterKilled: 22,
-  MonsterReactiveTriggered: 23,
-  Moved: 24,
-  PackEngaged: 25,
-  PartyLeft: 26,
-  PlayerDied: 27,
-  PlayerJoined: 28,
-  PlayerReady: 29,
-  ReactiveTriggered: 30,
-  ResonanceSpread: 31,
-  RetreatVoted: 32,
-  RewardsRolled: 33,
-  SessionEnded: 34,
-  SessionKeyChanged: 35,
-  SessionOpened: 36,
-  SkillUsed: 37,
-  TurnSkipped: 38,
-  TurnStarted: 39,
-  TurnTicked: 40,
+  AmbushSprung: 1,
+  ArenaEntered: 2,
+  ArenaLeft: 3,
+  ArenaRetreated: 4,
+  ArenaWon: 5,
+  AuraChanged: 6,
+  CacheClosed: 7,
+  CacheSettled: 8,
+  CellBurned: 9,
+  CellExamined: 10,
+  CellRevealed: 11,
+  ChestOpenRequested: 12,
+  ChestOpened: 13,
+  ContributionRefunded: 14,
+  DeathFinalized: 15,
+  EffectResolved: 16,
+  EscrowClaimed: 17,
+  ExitCancelled: 18,
+  ExitPassed: 19,
+  FleeVoted: 20,
+  HitResolved: 21,
+  InitiativeRolled: 22,
+  ModsTicked: 23,
+  MonsterAuraChanged: 24,
+  MonsterKilled: 25,
+  MonsterReactiveTriggered: 26,
+  Moved: 27,
+  PackEngaged: 28,
+  PackRevealed: 29,
+  PartyLeft: 30,
+  PlayerDied: 31,
+  PlayerJoined: 32,
+  PlayerReady: 33,
+  ReactiveTriggered: 34,
+  ResonanceSpread: 35,
+  RetreatVoted: 36,
+  RevealsOwed: 37,
+  RewardsRolled: 38,
+  SessionEnded: 39,
+  SessionKeyChanged: 40,
+  SessionOpened: 41,
+  SkillUsed: 42,
+  TrapTriggered: 43,
+  TurnSkipped: 44,
+  TurnStarted: 45,
+  TurnTicked: 46,
 } as const;
 
 export type DeadrollSessionEvent = (typeof DeadrollSessionEvent)[Exclude<
@@ -333,6 +374,17 @@ export function identifyDeadrollSessionEvent(
     )
   ) {
     return DeadrollSessionEvent.ActionRequested;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([144, 85, 181, 83, 87, 230, 150, 5]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionEvent.AmbushSprung;
   }
   if (
     containsBytes(
@@ -421,6 +473,28 @@ export function identifyDeadrollSessionEvent(
     )
   ) {
     return DeadrollSessionEvent.CellBurned;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([157, 207, 252, 8, 71, 28, 148, 9]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionEvent.CellExamined;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([203, 206, 218, 96, 88, 70, 243, 232]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionEvent.CellRevealed;
   }
   if (
     containsBytes(
@@ -613,6 +687,17 @@ export function identifyDeadrollSessionEvent(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([152, 85, 14, 60, 105, 201, 31, 169]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionEvent.PackRevealed;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([34, 166, 133, 39, 139, 208, 84, 178]),
       ),
       0,
@@ -690,6 +775,17 @@ export function identifyDeadrollSessionEvent(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([78, 141, 220, 14, 203, 151, 114, 17]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionEvent.RevealsOwed;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([160, 209, 32, 22, 55, 150, 108, 241]),
       ),
       0,
@@ -745,6 +841,17 @@ export function identifyDeadrollSessionEvent(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([254, 10, 186, 118, 67, 114, 31, 191]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionEvent.TrapTriggered;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([150, 70, 164, 15, 49, 252, 194, 65]),
       ),
       0,
@@ -786,40 +893,46 @@ export const DeadrollSessionInstruction = {
   3: "ConsumeRandomness",
   4: "EndTurn",
   5: "EnterArena",
-  6: "Flee",
-  7: "JoinSession",
-  8: "LeaveArena",
-  9: "LeaveParty",
-  10: "MonsterAct",
-  11: "MovePath",
-  12: "OpenChest",
-  13: "OpenSession",
-  14: "Retreat",
-  15: "SetReady",
-  16: "SetSessionKey",
-  17: "SettleParty",
-  18: "StartSession",
-  19: "StartTurn",
+  6: "Examine",
+  7: "Flee",
+  8: "JoinSession",
+  9: "LeaveArena",
+  10: "LeaveParty",
+  11: "MonsterAct",
+  12: "MovePath",
+  13: "OpenChest",
+  14: "OpenSession",
+  15: "Retreat",
+  16: "RevealCell",
+  17: "RevealPack",
+  18: "SetReady",
+  19: "SetSessionKey",
+  20: "SettleParty",
+  21: "StartSession",
+  22: "StartTurn",
   Act: 0,
   ClaimAfterTimeout: 1,
   CloseCache: 2,
   ConsumeRandomness: 3,
   EndTurn: 4,
   EnterArena: 5,
-  Flee: 6,
-  JoinSession: 7,
-  LeaveArena: 8,
-  LeaveParty: 9,
-  MonsterAct: 10,
-  MovePath: 11,
-  OpenChest: 12,
-  OpenSession: 13,
-  Retreat: 14,
-  SetReady: 15,
-  SetSessionKey: 16,
-  SettleParty: 17,
-  StartSession: 18,
-  StartTurn: 19,
+  Examine: 6,
+  Flee: 7,
+  JoinSession: 8,
+  LeaveArena: 9,
+  LeaveParty: 10,
+  MonsterAct: 11,
+  MovePath: 12,
+  OpenChest: 13,
+  OpenSession: 14,
+  Retreat: 15,
+  RevealCell: 16,
+  RevealPack: 17,
+  SetReady: 18,
+  SetSessionKey: 19,
+  SettleParty: 20,
+  StartSession: 21,
+  StartTurn: 22,
 } as const;
 
 export type DeadrollSessionInstruction =
@@ -897,6 +1010,17 @@ export function identifyDeadrollSessionInstruction(
     )
   ) {
     return DeadrollSessionInstruction.EnterArena;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([47, 32, 144, 85, 130, 172, 176, 211]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionInstruction.Examine;
   }
   if (
     containsBytes(
@@ -1001,6 +1125,28 @@ export function identifyDeadrollSessionInstruction(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([170, 179, 0, 236, 214, 31, 40, 164]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionInstruction.RevealCell;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([224, 204, 1, 112, 66, 170, 24, 11]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionInstruction.RevealPack;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([105, 78, 7, 162, 181, 167, 186, 43]),
       ),
       0,
@@ -1080,6 +1226,9 @@ export type ParsedDeadrollSessionInstruction<
       instructionType: typeof DeadrollSessionInstruction.EnterArena;
     } & ParsedEnterArenaInstruction<TProgram>)
   | ({
+      instructionType: typeof DeadrollSessionInstruction.Examine;
+    } & ParsedExamineInstruction<TProgram>)
+  | ({
       instructionType: typeof DeadrollSessionInstruction.Flee;
     } & ParsedFleeInstruction<TProgram>)
   | ({
@@ -1106,6 +1255,12 @@ export type ParsedDeadrollSessionInstruction<
   | ({
       instructionType: typeof DeadrollSessionInstruction.Retreat;
     } & ParsedRetreatInstruction<TProgram>)
+  | ({
+      instructionType: typeof DeadrollSessionInstruction.RevealCell;
+    } & ParsedRevealCellInstruction<TProgram>)
+  | ({
+      instructionType: typeof DeadrollSessionInstruction.RevealPack;
+    } & ParsedRevealPackInstruction<TProgram>)
   | ({
       instructionType: typeof DeadrollSessionInstruction.SetReady;
     } & ParsedSetReadyInstruction<TProgram>)
@@ -1169,6 +1324,13 @@ export function parseDeadrollSessionInstruction<TProgram extends string>(
         ...parseEnterArenaInstruction(instruction),
       };
     }
+    case DeadrollSessionInstruction.Examine: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: DeadrollSessionInstruction.Examine,
+        ...parseExamineInstruction(instruction),
+      };
+    }
     case DeadrollSessionInstruction.Flee: {
       assertIsInstructionWithAccounts(instruction);
       return {
@@ -1230,6 +1392,20 @@ export function parseDeadrollSessionInstruction<TProgram extends string>(
       return {
         instructionType: DeadrollSessionInstruction.Retreat,
         ...parseRetreatInstruction(instruction),
+      };
+    }
+    case DeadrollSessionInstruction.RevealCell: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: DeadrollSessionInstruction.RevealCell,
+        ...parseRevealCellInstruction(instruction),
+      };
+    }
+    case DeadrollSessionInstruction.RevealPack: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: DeadrollSessionInstruction.RevealPack,
+        ...parseRevealPackInstruction(instruction),
       };
     }
     case DeadrollSessionInstruction.SetReady: {
@@ -1298,6 +1474,8 @@ export type DeadrollSessionPluginAccounts = {
     SelfFetchFunctions<ParticipationArgs, Participation>;
   rewardCache: ReturnType<typeof getRewardCacheCodec> &
     SelfFetchFunctions<RewardCacheArgs, RewardCache>;
+  sessionBoard: ReturnType<typeof getSessionBoardCodec> &
+    SelfFetchFunctions<SessionBoardArgs, SessionBoard>;
 };
 
 export type DeadrollSessionPluginInstructions = {
@@ -1320,8 +1498,12 @@ export type DeadrollSessionPluginInstructions = {
     input: EndTurnInput,
   ) => ReturnType<typeof getEndTurnInstruction> & SelfPlanAndSendFunctions;
   enterArena: (
-    input: MakeOptional<EnterArenaInput, "payer">,
-  ) => ReturnType<typeof getEnterArenaInstruction> & SelfPlanAndSendFunctions;
+    input: MakeOptional<EnterArenaAsyncInput, "payer">,
+  ) => ReturnType<typeof getEnterArenaInstructionAsync> &
+    SelfPlanAndSendFunctions;
+  examine: (
+    input: ExamineAsyncInput,
+  ) => ReturnType<typeof getExamineInstructionAsync> & SelfPlanAndSendFunctions;
   flee: (
     input: FleeInput,
   ) => ReturnType<typeof getFleeInstruction> & SelfPlanAndSendFunctions;
@@ -1355,6 +1537,14 @@ export type DeadrollSessionPluginInstructions = {
   retreat: (
     input: RetreatInput,
   ) => ReturnType<typeof getRetreatInstruction> & SelfPlanAndSendFunctions;
+  revealCell: (
+    input: RevealCellAsyncInput,
+  ) => ReturnType<typeof getRevealCellInstructionAsync> &
+    SelfPlanAndSendFunctions;
+  revealPack: (
+    input: RevealPackAsyncInput,
+  ) => ReturnType<typeof getRevealPackInstructionAsync> &
+    SelfPlanAndSendFunctions;
   setReady: (
     input: SetReadyAsyncInput,
   ) => ReturnType<typeof getSetReadyInstructionAsync> &
@@ -1381,6 +1571,7 @@ export type DeadrollSessionPluginPdas = {
   programIdentity: typeof findProgramIdentityPda;
   escrow: typeof findEscrowPda;
   sessionAuthority: typeof findSessionAuthorityPda;
+  board: typeof findBoardPda;
   participation: typeof findParticipationPda;
   rewardCache: typeof findRewardCachePda;
   session: typeof findSessionPda;
@@ -1406,6 +1597,7 @@ export function deadrollSessionProgram() {
           monsterState: addSelfFetchFunctions(client, getMonsterStateCodec()),
           participation: addSelfFetchFunctions(client, getParticipationCodec()),
           rewardCache: addSelfFetchFunctions(client, getRewardCacheCodec()),
+          sessionBoard: addSelfFetchFunctions(client, getSessionBoardCodec()),
         },
         instructions: {
           act: (input) =>
@@ -1430,10 +1622,15 @@ export function deadrollSessionProgram() {
           enterArena: (input) =>
             addSelfPlanAndSendFunctions(
               client,
-              getEnterArenaInstruction({
+              getEnterArenaInstructionAsync({
                 ...input,
                 payer: input.payer ?? client.payer,
               }),
+            ),
+          examine: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getExamineInstructionAsync(input),
             ),
           flee: (input) =>
             addSelfPlanAndSendFunctions(client, getFleeInstruction(input)),
@@ -1477,6 +1674,16 @@ export function deadrollSessionProgram() {
             ),
           retreat: (input) =>
             addSelfPlanAndSendFunctions(client, getRetreatInstruction(input)),
+          revealCell: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getRevealCellInstructionAsync(input),
+            ),
+          revealPack: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getRevealPackInstructionAsync(input),
+            ),
           setReady: (input) =>
             addSelfPlanAndSendFunctions(
               client,
@@ -1510,6 +1717,7 @@ export function deadrollSessionProgram() {
           programIdentity: findProgramIdentityPda,
           escrow: findEscrowPda,
           sessionAuthority: findSessionAuthorityPda,
+          board: findBoardPda,
           participation: findParticipationPda,
           rewardCache: findRewardCachePda,
           session: findSessionPda,

@@ -6,6 +6,7 @@ import type { Address } from "@solana/kit";
 import { ACTIVE_MAX, NO_SKILL } from "./skillcheck";
 import { StateKind } from "@deadroll/sdk/session";
 import balance from "./balance.json";
+import { hasBit } from "./types";
 import { MONSTER_BASE, currentUnit, status, variantKey, type GameSessionAcc, type Party, type ParticipationAcc, type PartyPlayer } from "./game";
 
 /** start_turn ran for the current turn (states ticked, cooldowns counted down, AP granted). */
@@ -58,7 +59,34 @@ export function arenaStepFor(p: Party, me: Address | null): "enter" | "leave" | 
   const inParty = s.core.dm === me || p.players.some((x) => x.part.player === me);
   if (!inParty) return null;
   const mode = arenaMode(s);
-  return mode === "engaged" ? "enter" : mode === "won" || mode === "retreated" ? "leave" : null;
+  // Patch C: into an arena once the DM revealed the pack and every cell the step uncovered.
+  if (mode === "engaged") return s.obligationCount === 0 && hasBit(s.packsRevealed, s.arenaPack) ? "enter" : null;
+  return mode === "won" || mode === "retreated" ? "leave" : null;
+}
+
+/** Patch C: the next reveal the DM's client sends by itself (docs/MAP_DESCRIPTION.md 8.5): a cell
+ * a step or a look uncovered (`by`: the player's slot, a trap hits them), then the engaged pack. */
+export type RevealStep = { kind: "cell"; leaf: number; by: number } | { kind: "pack"; pack: number };
+export function revealStepFor(p: Party, me: Address | null): RevealStep | null {
+  const s = p.session;
+  if (!me || s.core.dm !== me || status(s) !== "active" || s.core.pendingVrf) return null;
+  if (s.obligationCount > 0) return { kind: "cell", leaf: s.obligations[0]!, by: s.obligedBy };
+  if (arenaMode(s) === "engaged" && !hasBit(s.packsRevealed, s.arenaPack)) return { kind: "pack", pack: s.arenaPack };
+  return null;
+}
+
+/** Patch C: the DM's final audit (docs/PARTY_AND_TURNS.md 3.2): the secret leaves and the packs not
+ * revealed yet, after the party ended. `leaves`: every secret cell of the DM's copy; `packs`: the
+ * used pack numbers. */
+export function auditLeft(
+  s: GameSessionAcc,
+  board: { revealed: (leaf: number) => boolean } | null,
+  leaves: number[],
+  packs: number[],
+): { cells: number[]; packs: number[] } {
+  // Patch D: the revealed leaves are on the `SessionBoard`.
+  const revealed = (leaf: number) => board?.revealed(leaf) ?? false;
+  return { cells: leaves.filter((l) => !revealed(l)), packs: packs.filter((n) => !hasBit(s.packsRevealed, n)) };
 }
 
 /** Patch B: the Retreat or Escape proposal as the site shows it (docs/PARTY_AND_TURNS.md 7.5). */

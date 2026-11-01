@@ -6,10 +6,14 @@
  * @see https://github.com/codama-idl/codama
  */
 
+export * from "./checkStep.js";
+export * from "./closeMap.js";
 export * from "./createMap.js";
 export * from "./finalizeMap.js";
+export * from "./growLayout.js";
 export * from "./setStatus.js";
 export * from "./writeArena.js";
 export * from "./writeLayout.js";
 export * from "./writePoints.js";
+export * from "./writeSecrets.js";
 export * from "./writeSpawns.js";

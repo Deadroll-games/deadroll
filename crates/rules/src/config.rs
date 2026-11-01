@@ -5,9 +5,11 @@
 //! that enum's `COUNT` as their length, so a new variant does not compile until it has numbers.
 
 use deadroll_combat::{Balance, SupportBalance};
+use deadroll_mapcheck::{limits::SizeScale, loot::LootRules, secrets::SecretLimits};
 use deadroll_skillcheck::SkillTuning;
 use deadroll_types::{
-    Aspect, Class, EquipSlot, Form, ItemBase, Race, RangeTag, StateKind, PARTY_MAX, STATS_COUNT,
+    Aspect, Class, EquipSlot, Form, ItemBase, Race, RangeTag, StateKind, CLASS_CHESTS,
+    CLASS_SECRETS, MAP_CLASSES, MAP_SIDE_CAP, PARTY_MAX, SECRET_TYPES, STATS_COUNT,
 };
 
 use crate::items::KIT_MAX;
@@ -44,6 +46,14 @@ pub struct BalanceConfig {
     /// file saved before it: the defaults.
     #[cfg_attr(feature = "serde", serde(default))]
     pub arena: ArenaTuning,
+    /// Patch C: secrets and pack threat (`deadroll_mapcheck::secrets`). Missing in a bench file
+    /// saved before it: the defaults.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub secrets: SecretTuning,
+    /// Patch D: map size classes and what they multiply the Small limits by
+    /// (`MapSizeTuning`). Missing in a bench file saved before it: the defaults.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub map_size: MapSizeTuning,
 }
 
 impl BalanceConfig {
@@ -57,6 +67,8 @@ impl BalanceConfig {
         fees: FeeTuning::DEFAULT,
         loot: LootTuning::DEFAULT,
         arena: ArenaTuning::DEFAULT,
+        secrets: SecretTuning::DEFAULT,
+        map_size: MapSizeTuning::DEFAULT,
     };
 }
 
@@ -629,6 +641,207 @@ impl Default for ArenaTuning {
 }
 
 const _: () = assert!(ArenaTuning::DEFAULT.side_max as usize <= deadroll_types::ARENA_SIDE_MAX);
+
+/// Patch C: secrets and pack threat (docs/MAP_DESCRIPTION.md 8 and 10.2, 17.2 and 17.4).
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SecretTuning {
+    /// Traps a map declares, ambush traps included, by map tier, inclusive (MAP 10.2).
+    pub traps_min: [u8; MAP_TIERS],
+    pub traps_max: [u8; MAP_TIERS],
+    /// Most declared secrets of each type (`deadroll_types::SecretKind::counted`: trap, ambush,
+    /// hidden stash, secret door), by map tier.
+    pub declared_max: [[u8; SECRET_TYPES]; MAP_TIERS],
+    /// The most damage a DM gives a trap, by map tier (at least 1). It comes off HP as it is:
+    /// no dice, no resistances (Ivan's decision).
+    pub trap_damage_max: [u8; MAP_TIERS],
+    /// Action points to examine a cell next to the character (MAP 8.4).
+    pub examine_ap: u8,
+    /// A pack's threat is the sum of its monsters' levels, an elite's counted this many times,
+    /// a boss's this many times (Ivan's decision); a regular monster's once.
+    pub threat_elite: u8,
+    pub threat_boss: u8,
+}
+
+impl SecretTuning {
+    pub const DEFAULT: SecretTuning = SecretTuning {
+        traps_min: [1, 0],
+        traps_max: [2, 4],
+        declared_max: [[2, 1, 1, 2], [4, 2, 2, 4]],
+        trap_damage_max: [8, 14],
+        examine_ap: 1,
+        threat_elite: 2,
+        threat_boss: 3,
+    };
+
+    /// The limits of map tier `tier` as the map check takes them (`None`: no such tier).
+    pub const fn limits(&self, tier: u8) -> Option<deadroll_mapcheck::secrets::SecretLimits> {
+        if tier == 0 || tier as usize > MAP_TIERS {
+            return None;
+        }
+        let t = tier as usize - 1;
+        Some(deadroll_mapcheck::secrets::SecretLimits {
+            traps_min: self.traps_min[t],
+            traps_max: self.traps_max[t],
+            declared_max: self.declared_max[t],
+            trap_damage_max: self.trap_damage_max[t],
+        })
+    }
+
+    /// The threat weights as the map check takes them.
+    pub const fn threat(&self) -> deadroll_mapcheck::secrets::ThreatWeights {
+        deadroll_mapcheck::secrets::ThreatWeights {
+            elite: self.threat_elite,
+            boss: self.threat_boss,
+        }
+    }
+}
+
+impl Default for SecretTuning {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
+/// Patch D: map sizes (docs/MAP_DESCRIPTION.md 17.6). A map's size class is the first whose
+/// `cells` hold its area; each limit has its own multiplier by class (Ivan's decision: any one can
+/// be switched off with all ones). The multipliers raise the maximums only: the minimum traps stay
+/// the Small ones, and every limit stays within what the class stores
+/// (`deadroll_types::CLASS_PACKS` and the rest).
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MapSizeTuning {
+    /// Most cells of a map of each class: Small, Medium, Big, Dungeon (by side, about 32, 72,
+    /// 101 and 143). Each side is from 8 to `deadroll_types::MAP_SIDE_CAP`.
+    pub cells: [u16; MAP_CLASSES],
+    /// Regular packs (`deadroll_mapcheck::limits::TierLimits::packs`).
+    pub packs: [u8; MAP_CLASSES],
+    /// Regular monsters.
+    pub monsters: [u8; MAP_CLASSES],
+    /// Elite spawns.
+    pub elites: [u8; MAP_CLASSES],
+    /// Visible chests (`LootTuning::chests`).
+    pub chests: [u8; MAP_CLASSES],
+    /// The reward budget (`LootTuning::budget`).
+    pub budget: [u8; MAP_CLASSES],
+    /// Traps with the ambush traps (`SecretTuning::traps_max`) and the declared traps.
+    pub traps: [u8; MAP_CLASSES],
+    /// Declared ambush traps.
+    pub ambush: [u8; MAP_CLASSES],
+    /// Declared hidden stashes.
+    pub stash: [u8; MAP_CLASSES],
+    /// Declared secret doors.
+    pub door: [u8; MAP_CLASSES],
+}
+
+impl MapSizeTuning {
+    pub const DEFAULT: MapSizeTuning = MapSizeTuning {
+        cells: [1024, 5184, 10201, 20449],
+        packs: [1, 3, 5, 8],
+        monsters: [1, 3, 5, 8],
+        elites: [1, 3, 5, 8],
+        chests: [1, 3, 5, 8],
+        budget: [1, 3, 5, 8],
+        traps: [1, 3, 5, 8],
+        ambush: [1, 3, 5, 8],
+        stash: [1, 3, 5, 8],
+        door: [1, 3, 5, 8],
+    };
+
+    /// The size class of a `width` x `height` map (`None`: a side outside 8 to
+    /// `MAP_SIDE_CAP`, or more cells than the largest class).
+    pub const fn class_of(&self, width: u8, height: u8) -> Option<u8> {
+        let min = deadroll_mapcheck::limits::SIDE_MIN;
+        if width < min
+            || height < min
+            || width as usize > MAP_SIDE_CAP
+            || height as usize > MAP_SIDE_CAP
+        {
+            return None;
+        }
+        let area = width as u32 * height as u32;
+        let mut c = 0;
+        while c < MAP_CLASSES {
+            if area <= self.cells[c] as u32 {
+                return Some(c as u8);
+            }
+            c += 1;
+        }
+        None
+    }
+
+    const fn at(table: &[u8; MAP_CLASSES], class: u8) -> u8 {
+        let c = class as usize;
+        table[if c < MAP_CLASSES { c } else { MAP_CLASSES - 1 }]
+    }
+
+    /// What the map check takes for class `class`.
+    pub const fn scale(&self, class: u8) -> SizeScale {
+        let c = class as usize;
+        SizeScale {
+            class,
+            max_cells: self.cells[if c < MAP_CLASSES { c } else { MAP_CLASSES - 1 }],
+            monsters: Self::at(&self.monsters, class),
+            packs: Self::at(&self.packs, class),
+            elites: Self::at(&self.elites, class),
+        }
+    }
+
+    /// The loot limits of a map tier at class `class`: the chests within what the class stores,
+    /// the budget times its multiplier.
+    pub fn loot(&self, rules: LootRules, class: u8) -> LootRules {
+        let cap = CLASS_CHESTS[(class as usize).min(MAP_CLASSES - 1)];
+        let chests = (rules.chests as usize * Self::at(&self.chests, class) as usize).min(cap);
+        let by = Self::at(&self.budget, class) as u32;
+        LootRules {
+            chests: chests as u8,
+            budget: rules
+                .budget
+                .map(|b| (b as u32 * by).min(u16::MAX as u32) as u16),
+            allowed: rules.allowed,
+        }
+    }
+
+    /// The secret limits of a map tier at class `class`: the maximums times their multipliers,
+    /// each within what the class stores; the minimum traps as they are.
+    pub fn secrets(&self, limits: SecretLimits, class: u8) -> SecretLimits {
+        let cap = CLASS_SECRETS[(class as usize).min(MAP_CLASSES - 1)];
+        let times = |v: u8, table: &[u8; MAP_CLASSES]| {
+            (v as usize * Self::at(table, class) as usize)
+                .min(cap)
+                .min(u8::MAX as usize) as u8
+        };
+        let d = limits.declared_max;
+        SecretLimits {
+            traps_min: limits.traps_min,
+            traps_max: times(limits.traps_max, &self.traps),
+            declared_max: [
+                times(d[0], &self.traps),
+                times(d[1], &self.ambush),
+                times(d[2], &self.stash),
+                times(d[3], &self.door),
+            ],
+            trap_damage_max: limits.trap_damage_max,
+        }
+    }
+}
+
+impl Default for MapSizeTuning {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
+const _: () = {
+    let t = MapSizeTuning::DEFAULT;
+    let mut c = 0;
+    while c < MAP_CLASSES {
+        assert!(t.cells[c] as usize <= MAP_SIDE_CAP * MAP_SIDE_CAP);
+        assert!(c == 0 || t.cells[c] > t.cells[c - 1]);
+        c += 1;
+    }
+    assert!(t.cells[MAP_CLASSES - 1] as usize == deadroll_types::MAP_CELLS_CAP);
+};
 
 /// Enums by variant name in JSON (the name is the `Debug` text, the list is the enum's `ALL`).
 #[cfg(feature = "serde")]

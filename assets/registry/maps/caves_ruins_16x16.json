@@ -171,5 +171,8 @@
         ".........."
       ]
     }
+  ],
+  "secrets": [
+    { "kind": "trap", "x": 7, "y": 7, "damage": 4, "difficulty": 10 }
   ]
 }

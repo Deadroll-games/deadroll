@@ -2,6 +2,7 @@ import { useConnect, useConnectedWallet, useDisconnect, useWallets } from "@sola
 import { useState } from "react";
 import { client } from "./client";
 import { useAppWallet } from "./AppWallet";
+import { exportDevSeed, importDevSeed } from "./devWallet";
 
 export function shortAddress(a: string): string {
   return a.length > 10 ? `${a.slice(0, 4)}..${a.slice(-4)}` : a;
@@ -22,6 +23,26 @@ export function ConnectButton() {
         </span>{" "}
         <button className="btn" onClick={() => void w.airdrop()} title="Airdrop 5 SOL from the local validator">
           Airdrop
+        </button>{" "}
+        <button
+          className="btn"
+          title="Copy this tab's dev key, to be the same player in another tab or browser profile (localnet only)"
+          onClick={() => {
+            const seed = exportDevSeed();
+            if (seed) void navigator.clipboard?.writeText(seed);
+          }}
+        >
+          Copy key
+        </button>{" "}
+        <button
+          className="btn"
+          title="Use a dev key copied from another tab (localnet only); the page reloads"
+          onClick={() => {
+            const seed = window.prompt("Dev key (64 hex digits) copied from another tab");
+            if (seed && importDevSeed(seed)) location.reload();
+          }}
+        >
+          Use key
         </button>
         {w.error && <span className="error"> {w.error}</span>}
       </span>

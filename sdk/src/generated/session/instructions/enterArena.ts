@@ -33,12 +33,14 @@ import {
 } from "@solana/kit";
 import {
   getAccountMetaFactory,
+  getAddressFromResolvedInstructionAccount,
   type InstructionAccountInput,
   type InstructionAccountInputAddress,
   type InstructionSignerInput,
   type ResolvedInstructionAccount,
   type ResolvedInstructionAccountMeta,
 } from "@solana/program-client-core";
+import { findBoardPda } from "../pdas/index.js";
 import { DEADROLL_SESSION_PROGRAM_ADDRESS } from "../programs/index.js";
 
 export const ENTER_ARENA_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Array([
@@ -55,6 +57,7 @@ export type EnterArenaInstruction<
   TAccountSession extends string | AccountMeta<string> = string,
   TAccountMonsters extends string | AccountMeta<string> = string,
   TAccountLayout extends string | AccountMeta<string> = string,
+  TAccountBoard extends string | AccountMeta<string> = string,
   TRemainingAccounts extends readonly AccountMeta<string>[] = [],
 > = Instruction<TProgram> &
   InstructionWithData<ReadonlyUint8Array> &
@@ -73,6 +76,9 @@ export type EnterArenaInstruction<
       TAccountLayout extends string
         ? ReadonlyAccount<TAccountLayout>
         : TAccountLayout,
+      TAccountBoard extends string
+        ? ReadonlyAccount<TAccountBoard>
+        : TAccountBoard,
       ...TRemainingAccounts,
     ]
   >;
@@ -104,11 +110,12 @@ export function getEnterArenaInstructionDataCodec(): FixedSizeCodec<
   );
 }
 
-export type EnterArenaInput<
+export type EnterArenaAsyncInput<
   TAccountPayer extends InstructionSignerInput = InstructionSignerInput,
   TAccountSession extends InstructionAccountInput = InstructionAccountInput,
   TAccountMonsters extends InstructionAccountInput = InstructionAccountInput,
   TAccountLayout extends InstructionAccountInput = InstructionAccountInput,
+  TAccountBoard extends InstructionAccountInput = InstructionAccountInput,
 > = {
   /** Any participant: entering holds no choice (the engaging player's tab sends it with the move). */
   payer: TAccountPayer;
@@ -116,39 +123,49 @@ export type EnterArenaInput<
   monsters: TAccountMonsters;
   /** its arena. */
   layout: TAccountLayout;
+  /** `BoardBytes::load`. */
+  board?: TAccountBoard;
 };
 
-export function getEnterArenaInstruction<
+export async function getEnterArenaInstructionAsync<
   TAccountPayer extends InstructionSignerInput,
   TAccountSession extends InstructionAccountInput,
   TAccountMonsters extends InstructionAccountInput,
   TAccountLayout extends InstructionAccountInput,
+  TAccountBoard extends InstructionAccountInput,
   TProgramAddress extends Address = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
 >(
-  input: EnterArenaInput<
+  input: EnterArenaAsyncInput<
     TAccountPayer,
     TAccountSession,
     TAccountMonsters,
-    TAccountLayout
+    TAccountLayout,
+    TAccountBoard
   >,
   config?: { programAddress?: TProgramAddress },
-): EnterArenaInstruction<
-  TProgramAddress,
-  ResolvedInstructionAccountMeta<
-    TAccountPayer,
-    InstructionAccountInputAddress<TAccountPayer>
-  >,
-  ResolvedInstructionAccountMeta<
-    TAccountSession,
-    InstructionAccountInputAddress<TAccountSession>
-  >,
-  ResolvedInstructionAccountMeta<
-    TAccountMonsters,
-    InstructionAccountInputAddress<TAccountMonsters>
-  >,
-  ResolvedInstructionAccountMeta<
-    TAccountLayout,
-    InstructionAccountInputAddress<TAccountLayout>
+): Promise<
+  EnterArenaInstruction<
+    TProgramAddress,
+    ResolvedInstructionAccountMeta<
+      TAccountPayer,
+      InstructionAccountInputAddress<TAccountPayer>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountSession,
+      InstructionAccountInputAddress<TAccountSession>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountMonsters,
+      InstructionAccountInputAddress<TAccountMonsters>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountLayout,
+      InstructionAccountInputAddress<TAccountLayout>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountBoard,
+      InstructionAccountInputAddress<TAccountBoard>
+    >
   >
 > {
   // Program address.
@@ -172,11 +189,25 @@ export function getEnterArenaInstruction<
       isWritable: true,
     },
     layout: { value: input.layout ?? null, isSigner: false, isWritable: false },
+    board: { value: input.board ?? null, isSigner: false, isWritable: false },
   };
   const accounts = originalAccounts as Record<
     keyof typeof originalAccounts,
     ResolvedInstructionAccount
   >;
+
+  // Resolve default values.
+  if (!accounts.board.value) {
+    accounts.board.value = await findBoardPda(
+      {
+        session: getAddressFromResolvedInstructionAccount(
+          "session",
+          accounts.session.value,
+        ),
+      },
+      { programAddress },
+    );
+  }
 
   return Object.freeze({
     accounts: [
@@ -184,6 +215,7 @@ export function getEnterArenaInstruction<
       getAccountMeta("session", accounts.session),
       getAccountMeta("monsters", accounts.monsters),
       getAccountMeta("layout", accounts.layout),
+      getAccountMeta("board", accounts.board),
     ],
     data: getEnterArenaInstructionDataEncoder().encode({}),
     programAddress,
@@ -204,6 +236,129 @@ export function getEnterArenaInstruction<
     ResolvedInstructionAccountMeta<
       TAccountLayout,
       InstructionAccountInputAddress<TAccountLayout>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountBoard,
+      InstructionAccountInputAddress<TAccountBoard>
+    >
+  >);
+}
+
+export type EnterArenaInput<
+  TAccountPayer extends InstructionSignerInput = InstructionSignerInput,
+  TAccountSession extends InstructionAccountInput = InstructionAccountInput,
+  TAccountMonsters extends InstructionAccountInput = InstructionAccountInput,
+  TAccountLayout extends InstructionAccountInput = InstructionAccountInput,
+  TAccountBoard extends InstructionAccountInput = InstructionAccountInput,
+> = {
+  /** Any participant: entering holds no choice (the engaging player's tab sends it with the move). */
+  payer: TAccountPayer;
+  session: TAccountSession;
+  monsters: TAccountMonsters;
+  /** its arena. */
+  layout: TAccountLayout;
+  /** `BoardBytes::load`. */
+  board: TAccountBoard;
+};
+
+export function getEnterArenaInstruction<
+  TAccountPayer extends InstructionSignerInput,
+  TAccountSession extends InstructionAccountInput,
+  TAccountMonsters extends InstructionAccountInput,
+  TAccountLayout extends InstructionAccountInput,
+  TAccountBoard extends InstructionAccountInput,
+  TProgramAddress extends Address = typeof DEADROLL_SESSION_PROGRAM_ADDRESS,
+>(
+  input: EnterArenaInput<
+    TAccountPayer,
+    TAccountSession,
+    TAccountMonsters,
+    TAccountLayout,
+    TAccountBoard
+  >,
+  config?: { programAddress?: TProgramAddress },
+): EnterArenaInstruction<
+  TProgramAddress,
+  ResolvedInstructionAccountMeta<
+    TAccountPayer,
+    InstructionAccountInputAddress<TAccountPayer>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountSession,
+    InstructionAccountInputAddress<TAccountSession>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountMonsters,
+    InstructionAccountInputAddress<TAccountMonsters>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountLayout,
+    InstructionAccountInputAddress<TAccountLayout>
+  >,
+  ResolvedInstructionAccountMeta<
+    TAccountBoard,
+    InstructionAccountInputAddress<TAccountBoard>
+  >
+> {
+  // Program address.
+  const programAddress =
+    config?.programAddress ?? DEADROLL_SESSION_PROGRAM_ADDRESS;
+
+  // Account meta helper.
+  const getAccountMeta = getAccountMetaFactory(programAddress, "programId");
+
+  // Original accounts.
+  const originalAccounts = {
+    payer: { value: input.payer ?? null, isSigner: true, isWritable: false },
+    session: {
+      value: input.session ?? null,
+      isSigner: false,
+      isWritable: true,
+    },
+    monsters: {
+      value: input.monsters ?? null,
+      isSigner: false,
+      isWritable: true,
+    },
+    layout: { value: input.layout ?? null, isSigner: false, isWritable: false },
+    board: { value: input.board ?? null, isSigner: false, isWritable: false },
+  };
+  const accounts = originalAccounts as Record<
+    keyof typeof originalAccounts,
+    ResolvedInstructionAccount
+  >;
+
+  return Object.freeze({
+    accounts: [
+      getAccountMeta("payer", accounts.payer),
+      getAccountMeta("session", accounts.session),
+      getAccountMeta("monsters", accounts.monsters),
+      getAccountMeta("layout", accounts.layout),
+      getAccountMeta("board", accounts.board),
+    ],
+    data: getEnterArenaInstructionDataEncoder().encode({}),
+    programAddress,
+  } as EnterArenaInstruction<
+    TProgramAddress,
+    ResolvedInstructionAccountMeta<
+      TAccountPayer,
+      InstructionAccountInputAddress<TAccountPayer>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountSession,
+      InstructionAccountInputAddress<TAccountSession>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountMonsters,
+      InstructionAccountInputAddress<TAccountMonsters>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountLayout,
+      InstructionAccountInputAddress<TAccountLayout>
+    >,
+    ResolvedInstructionAccountMeta<
+      TAccountBoard,
+      InstructionAccountInputAddress<TAccountBoard>
     >
   >);
 }
@@ -220,6 +375,8 @@ export type ParsedEnterArenaInstruction<
     monsters: TAccountMetas[2];
     /** its arena. */
     layout: TAccountMetas[3];
+    /** `BoardBytes::load`. */
+    board: TAccountMetas[4];
   };
   data: EnterArenaInstructionData;
 };
@@ -232,12 +389,12 @@ export function parseEnterArenaInstruction<
     InstructionWithAccounts<TAccountMetas> &
     InstructionWithData<ReadonlyUint8Array>,
 ): ParsedEnterArenaInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 4) {
+  if (instruction.accounts.length < 5) {
     throw new SolanaError(
       SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
       {
         actualAccountMetas: instruction.accounts.length,
-        expectedAccountMetas: 4,
+        expectedAccountMetas: 5,
       },
     );
   }
@@ -254,6 +411,7 @@ export function parseEnterArenaInstruction<
       session: getNextAccount(),
       monsters: getNextAccount(),
       layout: getNextAccount(),
+      board: getNextAccount(),
     },
     data: getEnterArenaInstructionDataDecoder().decode(instruction.data),
   };

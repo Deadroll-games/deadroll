@@ -75,10 +75,31 @@ export async function sendTx(payer: TransactionSigner, instructions: Instruction
 }
 
 /**
- * Signs `steps` (one transaction each) with one wallet call and sends them in order. Throws a
- * BatchError naming the first step that did not land; the caller resumes with the rest.
+ * Patch D: `waves` cuts `steps` into runs (their lengths, in order) whose transactions do not depend
+ * on each other: a run is sent side by side, the next run after the whole of it landed. Without it
+ * every step is its own run. What is left of `waves` after `done` steps.
  */
-export async function sendBatch(payer: TransactionSigner, steps: Instruction[][], onProgress?: BatchProgress): Promise<Sent[]> {
+export function wavesAfter(waves: number[] | undefined, done: number): number[] | undefined {
+  if (!waves) return undefined;
+  const out: number[] = [];
+  let skip = done;
+  for (const w of waves) {
+    if (skip >= w) {
+      skip -= w;
+      continue;
+    }
+    out.push(w - skip);
+    skip = 0;
+  }
+  return out;
+}
+
+/**
+ * Signs `steps` (one transaction each) with one wallet call and sends them in order (patch D: run
+ * by run, `waves`). Throws a BatchError naming the first step that did not land; the caller
+ * resumes with the rest (a step of a run that landed after it is sent again: those are writes).
+ */
+export async function sendBatch(payer: TransactionSigner, steps: Instruction[][], onProgress?: BatchProgress, waves?: number[]): Promise<Sent[]> {
   const sent: Sent[] = [];
   const total = steps.length;
   const fail = (e: unknown, signature: Signature | null): never => {
@@ -112,16 +133,21 @@ export async function sendBatch(payer: TransactionSigner, steps: Instruction[][]
   }
   const { rpc, rpcSubscriptions } = client;
   const sendAndConfirm = sendAndConfirmTransactionFactory({ rpc, rpcSubscriptions });
-  for (const [i, tx] of signed.entries()) {
-    onProgress?.("send", i, total);
-    const signature = getSignatureFromTransaction(tx);
-    try {
-      // The factory wants a lifetime-narrowed type; every message here has a blockhash lifetime.
-      await sendAndConfirm(tx as Parameters<typeof sendAndConfirm>[0], { commitment: "confirmed" });
-    } catch (e) {
-      fail(e, signature);
+  const runs = waves && waves.reduce((a, b) => a + b, 0) === total ? waves : signed.map(() => 1);
+  let at = 0;
+  for (const run of runs) {
+    const txs = signed.slice(at, at + run);
+    onProgress?.("send", at, total);
+    // The factory wants a lifetime-narrowed type; every message here has a blockhash lifetime.
+    const results = await Promise.allSettled(
+      txs.map((tx) => sendAndConfirm(tx as Parameters<typeof sendAndConfirm>[0], { commitment: "confirmed" })),
+    );
+    for (const [i, r] of results.entries()) {
+      const signature = getSignatureFromTransaction(txs[i]!);
+      if (r.status === "rejected") fail(r.reason, signature);
+      sent.push(await landed(payer, signature));
     }
-    sent.push(await landed(payer, signature));
+    at += run;
   }
   return sent;
 }

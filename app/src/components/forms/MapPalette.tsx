@@ -5,6 +5,18 @@ import { SpriteCanvas } from "../../raster/SpriteCanvas";
 import type { BuilderTool, MapPaletteProps } from "./types";
 import "./forms.css";
 
+/** Patch C: `SecretKind` (crates/types) and the starting numbers of each secret tool. */
+const SECRET_TRAP = 1;
+const SECRET_AMBUSH = 2;
+const SECRET_DOOR = 4;
+const SECRET_TOOLS = [
+  { secret: SECRET_TRAP, label: "Trap", a: 4, b: 10 },
+  { secret: SECRET_AMBUSH, label: "Ambush", a: 0, b: 0 },
+  { secret: 3, label: "Hidden stash", a: 0, b: 0 },
+  { secret: SECRET_DOOR, label: "Secret door", a: 0, b: 0 },
+];
+type SecretTool = Extract<BuilderTool, { kind: "secret" }>;
+
 const TILE_COLORS: Record<TileId, string> = {
   [Tile.Void]: "#07050a",
   [Tile.StoneFloor]: "#3b3043",
@@ -143,6 +155,39 @@ export function MapPalette(p: MapPaletteProps) {
             Erase
           </button>
         </div>
+      </div>
+
+      <div className="panel">
+        <h3>Secrets</h3>
+        <p className="muted">Only you see them: the map stores them encrypted with your wallet's key. Players find them by stepping on a cell or examining it.</p>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {SECRET_TOOLS.map((t) => (
+            <button
+              key={t.secret}
+              type="button"
+              className="btn"
+              aria-pressed={p.tool.kind === "secret" && p.tool.secret === t.secret}
+              disabled={locked}
+              onClick={() => p.onToolChange({ kind: "secret", secret: t.secret, a: t.a, b: t.b })}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        {p.tool.kind === "secret" && p.tool.secret !== SECRET_DOOR && (
+          <div style={{ marginTop: 6 }}>
+            <label>
+              {p.tool.secret === SECRET_TRAP ? "Damage " : p.tool.secret === SECRET_AMBUSH ? "Pack " : "Reward table "}
+              <input type="number" min={0} max={255} value={p.tool.a} disabled={locked} onChange={(e) => p.onToolChange({ ...(p.tool as SecretTool), a: Number(e.target.value) })} />
+            </label>
+            {p.tool.secret === SECRET_TRAP && (
+              <label>
+                {" "}Detection difficulty{" "}
+                <input type="number" min={0} max={255} value={p.tool.b} disabled={locked} onChange={(e) => p.onToolChange({ ...(p.tool as SecretTool), b: Number(e.target.value) })} />
+              </label>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="forms-row">

@@ -2,7 +2,8 @@
 // dev keypair on localnet (`?dev=1`). Every screen reads `useAppWallet()` instead of the wallet
 // plugin directly, so both kinds sign the same instructions.
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import type { Address, KeyPairSigner, TransactionSigner } from "@solana/kit";
+import { signBytes, type Address, type KeyPairSigner, type TransactionSigner } from "@solana/kit";
+import type { MessageSigner } from "../chain/secrets";
 import { useConnectedWallet } from "@solana/kit-plugin-wallet/react";
 import { DATA_SOURCE } from "../config";
 import { client } from "./client";
@@ -13,6 +14,9 @@ export type AppWallet = {
   kind: "dev" | "wallet" | "none";
   address: Address | null;
   signer: TransactionSigner | null;
+  /** Patch C: signs a message (the DM's unlock of the map secrets): the wallet's
+   * `solana:signMessage`, or the dev key pair. */
+  messageSigner: MessageSigner | null;
   /** Lamports, refreshed after airdrops and on demand (dev mode). */
   balance: bigint | null;
   devMode: boolean;
@@ -51,6 +55,11 @@ export function AppWalletProvider({ children }: { children: ReactNode }) {
 
   const address = devMode ? (dev?.address ?? null) : ((connected?.account.address as Address | undefined) ?? null);
   const signer: TransactionSigner | null = devMode ? dev : (connected?.signer ?? null);
+  const messageSigner = useMemo<MessageSigner | null>(() => {
+    if (!address) return null;
+    if (devMode) return dev ? { address, signMessage: async (m) => new Uint8Array(await signBytes(dev.keyPair.privateKey, m)) } : null;
+    return connected ? { address, signMessage: async (m) => new Uint8Array(await client.wallet.signMessage(m)) } : null;
+  }, [address, devMode, dev, connected]);
 
   const refreshBalance = useCallback(async () => {
     if (!address) return;
@@ -93,13 +102,14 @@ export function AppWalletProvider({ children }: { children: ReactNode }) {
       kind: devMode ? "dev" : signer ? "wallet" : "none",
       address,
       signer,
+      messageSigner,
       balance,
       devMode,
       airdrop,
       refreshBalance,
       error,
     }),
-    [devMode, signer, address, balance, airdrop, refreshBalance, error],
+    [devMode, signer, messageSigner, address, balance, airdrop, refreshBalance, error],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

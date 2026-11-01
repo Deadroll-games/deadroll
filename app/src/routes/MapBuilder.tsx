@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Address } from "@solana/kit";
 import { Grid } from "../components/grid/Grid";
-import type { GridChest, GridPointKind, GridTile, GridUnit } from "../components/grid/types";
+import type { GridChest, GridPointKind, GridSecret, GridTile, GridUnit } from "../components/grid/types";
 import { MapPalette } from "../components/forms/MapPalette";
 import { PrepayConfirm } from "../components/forms/PrepayConfirm";
 import { StalledAction } from "../components/forms/StalledAction";
@@ -10,11 +10,12 @@ import { MAP_PRESETS, presetToLayout } from "../chain/mock";
 import { BESTIARY_NAMES, BIOME_NAMES, bestiaryName } from "../chain/names";
 import { chestRequest, lookRequest, pointLook, tileLook, tileVariants } from "../chain/appearance";
 import { useSprites } from "../raster/useSprites";
-import { SPAWNS_MAX, Tile, cellByte, cellIndex, type Cell, type Spawn } from "../chain/types";
+import { CLASS_CELLS, CLASS_NAMES, MAP_SIDE_CAP, MAP_SIDE_MIN, Tile, cellByte, cellIndex, classOf, type Cell, type Spawn } from "../chain/types";
 import { MAPCHECK_MESSAGES, useMapcheck, type MapCheckDraft, type MapcheckWasm, type PackDraft } from "../chain/mapcheckWasm";
-import { buildMapIxs, draftPoints, mapRent, mapStatus, mapsOf, type MapAcc } from "../chain/game";
+import { buildMapIxs, draftPoints, mapDesign, mapRent, mapStatus, mapsOf, type MapAcc } from "../chain/game";
+import { getAddressEncoder } from "@solana/kit";
+import { SECRET_LABELS, Secret, declaredOfDraft, isBoss, mapKeys, secretLeaves, type BoardSecret } from "../chain/secrets";
 import {
-  CHESTS_MAX,
   CHEST_RADIUS_MAX,
   CHEST_RADIUS_MIN,
   MIN_PLAYERS_MAX,
@@ -39,7 +40,7 @@ import { covers, footprint } from "../chain/footprint";
 import { SPAWN_ELITE, bestiarySize, spawnView, useBuilderRegistry, type SpawnView } from "../chain/monsters";
 import { SKILL_ERRORS, SKILL_ERROR_MESSAGES } from "../chain/skillcheck";
 import { FACING_NAMES } from "../chain/mock";
-import { ARENA_SIDE_MAX, ARENA_SIDE_MIN, addPack, addToPack, arenaGrid, packAt, paintArena, removeSpawns, resizeArena, setPack } from "../chain/packs";
+import { ARENA_SIDE_MAX, ARENA_SIDE_MIN, addPack, addToPack, arenaGrid, packAt, packsForClass, paintArena, removeSpawns, resizeArena, setPack } from "../chain/packs";
 
 const CATEGORY_NAMES = ["active", "reactive", "passive"];
 
@@ -51,21 +52,66 @@ export function spawnSkillError(view: SpawnView | null): string | null {
   return err ? SKILL_ERROR_MESSAGES[err] : `skill error ${code}`;
 }
 
+/** Patch D: monsters one map can hold (`MONSTERS_CAP`, crates/types). */
+const SPAWNS_MAX = 80;
+/** Patch D: the sides a size class picks by default (about square). */
+const CLASS_SIDES = [32, 72, 101, 143] as const;
+
+/** Patch D: a map resized: the cells it keeps stay in the top-left corner, new cells are walls; the
+ * points, chests, packs' map cells and map secrets past the new sides go; the packs are cut to the
+ * new class's pack numbers. */
+export function resizeLayout<L extends { tiles: Uint8Array; entrance: Cell | null; exit: Cell | null; chests: { x: number; y: number }[]; packs: (PackDraft | null)[]; spawns: Spawn[]; secrets: BoardSecret[] }>(
+  layout: L,
+  from: { width: number; height: number },
+  to: { width: number; height: number },
+): L {
+  const tiles = new Uint8Array(to.width * to.height).fill(cellByte(Tile.Wall));
+  for (let y = 0; y < Math.min(from.height, to.height); y++)
+    for (let x = 0; x < Math.min(from.width, to.width); x++) tiles[cellIndex(x, y, to.width)] = layout.tiles[cellIndex(x, y, from.width)] ?? cellByte(Tile.Wall);
+  const inside = (c: Cell | null) => (c && c.x < to.width && c.y < to.height ? c : null);
+  const packs = packsForClass(layout.packs, classOf(to.width, to.height) ?? 0).map((pk) => (pk && pk.visible !== 0xff && !inside(pk) ? null : pk));
+  // A pack dropped takes its monsters along.
+  const spawns = layout.spawns.filter((sp) => packs[sp.pack]);
+  const renumber = new Map(layout.spawns.map((sp, i) => [i, spawns.indexOf(sp)]));
+  return {
+    ...layout,
+    tiles,
+    entrance: inside(layout.entrance),
+    exit: inside(layout.exit),
+    chests: layout.chests.filter((c) => inside(c)),
+    spawns,
+    packs: packs.map((pk) => (pk && pk.visible !== 0xff ? { ...pk, visible: renumber.get(pk.visible) ?? 0 } : pk)),
+    secrets: layout.secrets.filter((s) => (s.pack === null ? inside(s) : packs[s.pack])),
+  };
+}
+
 const BESTIARY = Object.entries(BESTIARY_NAMES).map(([id, name]) => ({ id: Number(id), name }));
 const PRESETS = MAP_PRESETS.map((p) => ({ name: p.name, width: p.width, height: p.height }));
-/** One user action, one transaction per step: create_map, write_layout, write_spawns, write_points,
- * write_arena for each pack (arena update), finalize_map. */
+/** One user action, one wallet confirmation: create_map (patch D: with its grow_layout calls),
+ * write_layout in chunks, write_spawns and write_points, write_arena for each pack (arena update),
+ * write_secrets (patch C), the check_step calls (patch D), finalize_map. */
 const PUBLISH = "Publish the map";
 const same = (a: Cell | null, b: Cell) => a !== null && a.x === b.x && a.y === b.y;
+/** Patch C: `PackLayout.visible` of an ambush pack. */
+const NO_SPAWN = 0xff;
+/** Patch C: a secret's tooltip. */
+const secretLabel = (x: BoardSecret) =>
+  x.kind === Secret.Trap ? `Trap: ${x.a} damage, difficulty ${x.b}` : x.kind === Secret.Ambush ? `Ambush: pack ${x.a}` : x.kind === Secret.Stash ? `Hidden stash: table ${x.a}` : (SECRET_LABELS[x.kind] ?? "Secret");
 
 /**
  * The verdict finalize_map would give the draft: crates/mapcheck through WASM, on the registry
  * tables the program reads (docs/MAP_DESCRIPTION.md 1, 10). Empty = the map is valid. A spawn's skill
  * choice also gets its own line (the combat module's check, `spawnSkillError`).
  */
-export function mapVerdict(mapcheck: MapcheckWasm | null, draft: MapCheckDraft, skillError: (s: Spawn) => string | null = () => null): string[] {
+export function mapVerdict(
+  mapcheck: MapcheckWasm | null,
+  draft: Omit<MapCheckDraft, "sizeClass"> & { sizeClass?: number; secrets?: BoardSecret[] },
+  skillError: (s: Spawn) => string | null = () => null,
+): string[] {
   if (!mapcheck) return ["The map checker is still loading"];
-  const rule = mapcheck.check(draft);
+  // Patch C: the whole design, every pack and every secret as the session checks them when revealed.
+  const list = draft.secrets ?? [];
+  const rule = mapcheck.checkDesign({ ...draft, sizeClass: draft.sizeClass ?? classOf(draft.width, draft.height) ?? 0 }, declaredOfDraft(list), secretLeaves(draft.width, draft.height, draft.packs, list));
   if (!rule) return [];
   const spawns = rule.startsWith("MonsterSkill")
     ? draft.spawns.flatMap((sp, i) => {
@@ -80,6 +126,14 @@ export function mapVerdict(mapcheck: MapcheckWasm | null, draft: MapCheckDraft, 
 export function MapBuilder({ onPublish }: { onPublish?: (map: Address) => void }) {
   const first = MAP_PRESETS[0]!;
   const [size, setSize] = useState({ width: first.width, height: first.height });
+  // Patch D: the size class follows from the area.
+  const sizeClass = classOf(size.width, size.height) ?? 0;
+  const resize = (to: { width: number; height: number }) => {
+    if (classOf(to.width, to.height) === null) return;
+    edit(resizeLayout(layout, size, to));
+    setSize(to);
+    setView(null);
+  };
   const [layout, setLayout] = useState(() => presetToLayout(first));
   const [tool, setTool] = useState<BuilderTool>({ kind: "tile", tile: Tile.StoneFloor, variant: 0 });
   // Arena update: the grid shows the map or one pack's arena; `placing` moves a pack's monster on
@@ -126,11 +180,26 @@ export function MapBuilder({ onPublish }: { onPublish?: (map: Address) => void }
   const finalizeOnChain = async () => {
     setRent(null);
     const dm = wallet.signer;
-    if (!dm) return void (await sendSteps(PUBLISH, null, []));
-    const b = await buildMapIxs(dm, { width: size.width, height: size.height, tier, ...layout });
-    // Five transactions in order, one wallet confirmation (a retry resumes at the failed one).
+    const signer = wallet.messageSigner;
+    if (!dm || !signer) return void (await sendSteps(PUBLISH, null, []));
+    // Patch C: the wallet signs the unlock message (once per tab); the secrets go on chain encrypted.
+    // Patch D: the check_step calls the map needs, counted by the same code as the program.
+    const draft = { width: size.width, height: size.height, tier, ...layout };
+    const steps = mapcheck ? mapcheck.steps({ ...draft, sizeClass }) : 0;
+    if (steps < 0) return setErrors(["The map checker refused the map: validate it first"]);
+    let b;
+    try {
+      b = await buildMapIxs(dm, draft, (map) => mapKeys(signer, new Uint8Array(getAddressEncoder().encode(map))), isBoss, steps);
+    } catch (e) {
+      setRent(null);
+      return setErrors([`The wallet could not unlock the map secrets: ${e instanceof Error ? e.message : String(e)}`]);
+    }
+    // One wallet confirmation (a retry resumes at the failed one): the creation, then every write
+    // side by side, then the check steps and finalize_map in order.
     setPublishing(b.map);
-    if (await sendSteps(PUBLISH, dm, b.ixs.map((ix) => [ix]))) await published(b.map);
+    const groups = [b.create, ...b.writes, ...b.checks, b.finalize];
+    const waves = [1, b.writes.length, ...b.checks.map(() => 1), 1];
+    if (await sendSteps(PUBLISH, dm, groups, waves)) await published(b.map);
   };
   const published = async (map: Address) => {
     setPublishing(null);
@@ -143,7 +212,7 @@ export function MapBuilder({ onPublish }: { onPublish?: (map: Address) => void }
   // create_map pays rent for two accounts: show the amount before anything is signed.
   const askRent = async () => {
     try {
-      setRent(await mapRent());
+      setRent(await mapRent(size.width, size.height));
     } catch {
       setErrors(["Could not read the rent for the map accounts"]);
     }
@@ -157,7 +226,17 @@ export function MapBuilder({ onPublish }: { onPublish?: (map: Address) => void }
 
   const defaultSkills = (bestiaryId: number) => viewOf({ bestiaryId, flags: 0, skills: 0 })?.check?.defaultMask ?? 0;
   /** Arena update: a click in pack `view`'s arena paints it, adds a monster or erases one. */
+  /** Patch C: the secret tool toggles its secret on a cell; another secret there is replaced. */
+  const toggleSecret = (pack: number | null, cell: Cell) => {
+    if (tool.kind !== "secret") return;
+    const here = (x: BoardSecret) => x.pack === pack && x.x === cell.x && x.y === cell.y;
+    const old = layout.secrets.find(here);
+    const rest = layout.secrets.filter((x) => !here(x));
+    const same = old && old.kind === tool.secret && old.a === tool.a && old.b === tool.b;
+    edit({ ...layout, secrets: same ? rest : [...rest, { pack, x: cell.x, y: cell.y, kind: tool.secret, a: tool.a, b: tool.b }] });
+  };
   const onArenaCell = (pack: number, cell: Cell) => {
+    if (tool.kind === "secret") return toggleSecret(pack, cell);
     if (tool.kind === "tile") edit({ ...layout, ...paintArena(layout, pack, cell, cellByte(tool.tile, tool.variant)) });
     else if (tool.kind === "spawn") {
       if (layout.spawns.length >= SPAWNS_MAX) return;
@@ -166,7 +245,8 @@ export function MapBuilder({ onPublish }: { onPublish?: (map: Address) => void }
     } else if (tool.kind === "erase") {
       // Patch B: any cell of a 2x2 monster's square erases it.
       const next = removeSpawns(layout, (sp) => sp.pack === pack && covers(footprint(sp, bestiarySize(registry, sp.bestiaryId)), cell));
-      edit({ ...layout, ...next });
+      const secrets = layout.secrets.filter((x) => !(x.pack === pack && x.x === cell.x && x.y === cell.y));
+      edit({ ...layout, ...next, secrets });
       if (!next.packs[pack]) setView(null);
     }
   };
@@ -181,16 +261,17 @@ export function MapBuilder({ onPublish }: { onPublish?: (map: Address) => void }
       setPlacing(null);
       return;
     }
+    if (tool.kind === "secret") return toggleSecret(null, cell);
     if (tool.kind === "tile") {
       const tiles = layout.tiles.slice();
       // The brush overwrites the whole cell: its tile type and the variant the DM picked.
-      tiles[cellIndex(x, y)] = cellByte(tool.tile, tool.variant);
+      tiles[cellIndex(x, y, size.width)] = cellByte(tool.tile, tool.variant);
       edit({ ...layout, tiles });
     } else if (tool.kind === "entrance" || tool.kind === "exit") {
       const taken = layout.chests.some((c) => c.x === x && c.y === y) || onPack || onPoint;
       if (!taken) edit({ ...layout, [tool.kind]: cell });
     } else if (tool.kind === "chest") {
-      const limit = Math.min(CHESTS_MAX, tierLoot(tier)?.chests ?? 0);
+      const limit = tierLoot(tier, sizeClass)?.chests ?? 0;
       const taken = layout.chests.some((c) => c.x === x && c.y === y) || onPack;
       if (taken || onPoint || layout.chests.length >= limit) return;
       // The first table the tier allows; the DM picks another in the loot panel.
@@ -210,6 +291,7 @@ export function MapBuilder({ onPublish }: { onPublish?: (map: Address) => void }
         ...rest,
         packs: pack === null ? layout.packs : rest.packs.map((pk, n) => (n === pack ? null : pk)),
         chests: layout.chests.filter((c) => c.x !== x || c.y !== y),
+        secrets: layout.secrets.filter((c) => c.pack !== null || c.x !== x || c.y !== y),
         entrance: same(layout.entrance, cell) ? null : layout.entrance,
         exit: same(layout.exit, cell) ? null : layout.exit,
       });
@@ -240,16 +322,27 @@ export function MapBuilder({ onPublish }: { onPublish?: (map: Address) => void }
       return layout.spawns.flatMap((sp, i) =>
         sp.pack === view ? [unit(i, sp.x, sp.y, bestiaryName(sp.bestiaryId), bestiarySize(registry, sp.bestiaryId) as 1 | 2)] : [],
       );
+    // Patch C: the pack's threat (its monsters' levels, an elite twice, a boss 3 times) as a badge.
+    const threat = mapDesign({ width: size.width, height: size.height, tier, ...layout, secrets: [] }, isBoss).threat;
     return layout.packs.flatMap((pk, n) => {
       const sp = pk ? layout.spawns[pk.visible] : undefined;
-      return pk && sp ? [unit(pk.visible, pk.x, pk.y, `${bestiaryName(sp.bestiaryId)}: pack ${n}, looking ${FACING_NAMES[pk.facing]}`)] : [];
+      return pk && sp ? [{ ...unit(pk.visible, pk.x, pk.y, `${bestiaryName(sp.bestiaryId)}: pack ${n}, threat ${threat[n]}, looking ${FACING_NAMES[pk.facing]}`), badge: String(threat[n]) }] : [];
     });
-  }, [layout.spawns, layout.packs, view, registry]);
+  }, [layout, view, registry, size, tier, sizeClass]);
+  // Patch C: the DM sees every secret of the board shown.
+  const secretMarks: GridSecret[] = useMemo(
+    () =>
+      layout.secrets
+        .filter((x) => x.pack === view)
+        .map((x) => ({ x: x.x, y: x.y, kind: (["trap", "trap", "ambush", "stash", "door"] as const)[x.kind] ?? "trap", found: true, label: secretLabel(x) })),
+    [layout.secrets, view],
+  );
   const arena = view !== null ? layout.packs[view] : null;
 
   return (
     <section>
       <h1>Map builder</h1>
+      <SizePicker size={size} locked={busy !== null} onResize={resize} />
       <div style={{ display: "flex", gap: 20, alignItems: "flex-start", flexWrap: "wrap" }}>
         <div>
           <Grid
@@ -259,6 +352,7 @@ export function MapBuilder({ onPublish }: { onPublish?: (map: Address) => void }
             units={units}
             chests={arena ? [] : chests}
             points={arena ? [] : draftPoints(layout)}
+            secrets={secretMarks}
             cellPx={32}
             tileSprite={tileSprite}
             pointSprite={pointSprite}
@@ -299,7 +393,7 @@ export function MapBuilder({ onPublish }: { onPublish?: (map: Address) => void }
               setTier(p.tier ?? 1);
               edit(presetToLayout(p));
             }}
-            loot={<LootEditor tier={tier} tables={tables} locked={busy !== null} value={layout} onChange={(next) => edit({ ...layout, ...next })} />}
+            loot={<LootEditor tier={tier} sizeClass={sizeClass} tables={tables} locked={busy !== null} value={layout} onChange={(next) => edit({ ...layout, ...next })} />}
             spawns={layout.spawns}
             onRemoveSpawn={(i) => edit({ ...layout, spawns: layout.spawns.filter((_, j) => j !== i) })}
             renderSpawn={(spawn, i) => (
@@ -313,7 +407,7 @@ export function MapBuilder({ onPublish }: { onPublish?: (map: Address) => void }
             )}
             errors={errors}
             onValidate={() => {
-              const e = mapVerdict(mapcheck, { width: size.width, height: size.height, tier, ...layout }, (sp) => spawnSkillError(viewOf(sp)));
+              const e = mapVerdict(mapcheck, { width: size.width, height: size.height, tier, sizeClass, ...layout }, (sp) => spawnSkillError(viewOf(sp)));
               setErrors(e);
               setValidated(e.length === 0);
             }}
@@ -325,7 +419,7 @@ export function MapBuilder({ onPublish }: { onPublish?: (map: Address) => void }
             <PrepayConfirm
               action="Finalize"
               lamports={rent}
-              detail="as rent for the map's two accounts"
+              detail="as rent for the map's two accounts (it comes back when the played map closes)"
               busy={busy !== null}
               onConfirm={() => void finalizeOnChain()}
               onCancel={() => setRent(null)}
@@ -420,14 +514,29 @@ function PackPanel(p: {
   const pk = layout.packs[view];
   if (!pk) return null;
   const members = layout.spawns.map((sp, i) => ({ sp, i })).filter(({ sp }) => sp.pack === view);
+  // Patch C: an ambush pack shows no monster on the map; an ambush trap leads to it.
+  const ambush = pk.visible === NO_SPAWN;
+  const threat = members.reduce((t, { sp }) => t + sp.level * (isBoss(sp.bestiaryId) ? 3 : sp.flags & SPAWN_ELITE ? 2 : 1), 0);
   return (
     <div className="panel">
       <h3>Pack {view}: its arena</h3>
+      <p className="muted">
+        Threat {threat} (shown to the players). Only {ambush ? "an ambush trap reveals this pack" : "the monster picked below stands on the map; the rest is hidden until the fight"}.
+      </p>
+      <label>
+        <input
+          type="checkbox"
+          checked={ambush}
+          disabled={p.locked || members.length === 0}
+          onChange={(e) => p.onChange(setPack(layout, view, { visible: e.target.checked ? NO_SPAWN : (members[0]?.i ?? 0) }))}
+        />{" "}
+        Ambush pack (no monster on the map)
+      </label>
       <p className="muted">Paint the arena, place the pack's monsters with the spawn tool, Erase removes one.</p>
       <fieldset disabled={p.locked}>
         <label>
           Shown on the map{" "}
-          <select value={pk.visible} onChange={(e) => p.onChange(setPack(layout, view, { visible: Number(e.target.value) }))}>
+          <select value={pk.visible} disabled={ambush} onChange={(e) => p.onChange(setPack(layout, view, { visible: Number(e.target.value) }))}>
             {members.map(({ sp, i }) => (
               <option key={i} value={i}>
                 {bestiaryName(sp.bestiaryId)} ({sp.x}, {sp.y})
@@ -540,8 +649,54 @@ const SETTLE_CHOICES = [600, 1800, 3600, 7200, 14_400, 36_000].filter((x) => x >
 
 /** Patch 11: the map's minimum players, the boss table and each chest's table, with the budget
  * (docs/MAP_DESCRIPTION.md 7.1, docs/PARTY_AND_TURNS.md 9.2). Only tables the tier allows. */
+/** Patch D: the map's size class and sides (docs/MAP_DESCRIPTION.md 17.6): the class picks about
+ * square sides, the sides may be any within the class's area. */
+function SizePicker(p: { size: { width: number; height: number }; locked: boolean; onResize: (to: { width: number; height: number }) => void }) {
+  const { width, height } = p.size;
+  const sizeClass = classOf(width, height) ?? 0;
+  const [draft, setDraft] = useState(p.size);
+  useEffect(() => setDraft(p.size), [p.size]);
+  const ok = classOf(draft.width, draft.height) !== null;
+  const side = (v: string) => Math.max(0, Math.min(MAP_SIDE_CAP, Number(v) || 0));
+  return (
+    <fieldset className="forms-field" disabled={p.locked} style={{ marginBottom: 12 }}>
+      <legend>Map size</legend>
+      <div className="forms-row" style={{ gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        {CLASS_NAMES.map((name, c) => (
+          <button
+            key={name}
+            type="button"
+            className={`btn${c === sizeClass ? " primary" : ""}`}
+            aria-pressed={c === sizeClass}
+            title={`Up to ${CLASS_CELLS[c]} cells`}
+            onClick={() => p.onResize({ width: CLASS_SIDES[c]!, height: CLASS_SIDES[c]! })}
+          >
+            {name}
+          </button>
+        ))}
+        <label>
+          W{" "}
+          <input type="number" min={MAP_SIDE_MIN} max={MAP_SIDE_CAP} value={draft.width} style={{ width: 64 }} onChange={(e) => setDraft({ ...draft, width: side(e.target.value) })} />
+        </label>
+        <label>
+          H{" "}
+          <input type="number" min={MAP_SIDE_MIN} max={MAP_SIDE_CAP} value={draft.height} style={{ width: 64 }} onChange={(e) => setDraft({ ...draft, height: side(e.target.value) })} />
+        </label>
+        <button type="button" className="btn" disabled={!ok || (draft.width === width && draft.height === height)} onClick={() => p.onResize(draft)}>
+          Resize
+        </button>
+        <span className="muted">
+          {width}x{height}, {CLASS_NAMES[sizeClass]}
+          {!ok && ` · ${draft.width}x${draft.height} fits no size (sides ${MAP_SIDE_MIN}-${MAP_SIDE_CAP}, at most ${CLASS_CELLS[3]} cells)`}
+        </span>
+      </div>
+    </fieldset>
+  );
+}
+
 function LootEditor(p: {
   tier: number;
+  sizeClass: number;
   tables: RewardTable[];
   locked: boolean;
   value: LootValue;
@@ -557,8 +712,8 @@ function LootEditor(p: {
     bossTable,
     p.tables,
   );
-  const budget = budgetOf(p.tier, minPlayers);
-  const limit = Math.min(CHESTS_MAX, tierLoot(p.tier)?.chests ?? 0);
+  const budget = budgetOf(p.tier, minPlayers, p.sizeClass);
+  const limit = tierLoot(p.tier, p.sizeClass)?.chests ?? 0;
   const option = (t: RewardTable) => (
     <option key={t.id} value={t.id}>
       #{t.id} {levelsLabel(t)}, cost {t.cost}

@@ -6,6 +6,7 @@ import { findLayoutPda, findMapPda } from "@deadroll/sdk/map";
 import { findConfigPda, findTablePda } from "@deadroll/sdk/registry";
 import { findPalettePda, findRasterizerPda, findSpriteBookPda } from "@deadroll/sdk/render";
 import {
+  findBoardPda,
   findEscrowPda,
   findMonstersPda,
   findParticipationPda,
@@ -56,6 +57,8 @@ export const layoutPda = (map: Address) => at(findLayoutPda({ map }));
 export const sessionPda = (map: Address) => at(findSessionPda({ map }));
 export const monstersPda = (session: Address) => at(findMonstersPda({ session }));
 export const escrowPda = (session: Address) => at(findEscrowPda({ session }));
+/** Patch D: what the party uncovered (`SessionBoard`). */
+export const boardPda = (session: Address) => at(findBoardPda({ session }));
 export const participationPda = (session: Address, character: Address) => at(findParticipationPda({ session, character }));
 /** Patch 11: the character's reward cache after a party, until "Done" (`close_cache`). */
 export const rewardCachePda = (character: Address) => at(findRewardCachePda({ character }));

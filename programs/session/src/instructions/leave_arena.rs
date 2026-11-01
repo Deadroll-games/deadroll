@@ -49,6 +49,7 @@ pub fn handler<'info>(ctx: Context<'info, LeaveArena<'info>>) -> Result<()> {
     );
     require!(!session.core.pending_vrf, SessionError::RollPending);
     require!(session.pending_deaths == 0, SessionError::DeathsPending);
+    session.require_no_reveals()?;
     let retreated = session.mode == ArenaMode::Retreated;
     require!(
         retreated || session.mode == ArenaMode::Won,
@@ -97,8 +98,8 @@ pub fn handler<'info>(ctx: Context<'info, LeaveArena<'info>>) -> Result<()> {
                 session.dead_spawns |= spawn_bit(monsters.spawn_of(i)?);
             }
         }
-        session.packs_guarded |= 1u8 << pack;
-        session.packs_buffed |= 1u8 << pack;
+        session.packs_guarded |= 1u64 << pack;
+        session.packs_buffed |= 1u64 << pack;
         session.retreats = session.retreats.saturating_add(1);
         emit!(ArenaRetreated {
             session: session_key,
@@ -108,7 +109,7 @@ pub fn handler<'info>(ctx: Context<'info, LeaveArena<'info>>) -> Result<()> {
         });
     } else {
         // Back on the map, without the pack.
-        session.packs_alive &= !(1u8 << pack);
+        session.packs_alive &= !(1u64 << pack);
     }
     session.width = session.map_width;
     session.height = session.map_height;

@@ -9,6 +9,7 @@
 // start_turn finalizes the queued death (patch 6).
 // Prints the oracle's callback transactions and what each used of the compute budget the oracle
 // gave it.
+// Patch D: the layout, the packs and the secrets follow the map's size class.
 // Needs tools/scripts/deploy-devnet.ts. The session must be the real-VRF build: nothing here plays the oracle.
 //
 // cd tests && ANCHOR_PROVIDER_URL=<devnet rpc> ANCHOR_WALLET=<keypair.json> node --import tsx smoke-devnet.ts
@@ -18,9 +19,12 @@ import { readFileSync } from "node:fs";
 import anchor from "@anchor-lang/core";
 import { ComputeBudgetProgram, Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
 import { randomBytes } from "node:crypto";
-import { MAP_STRIDE, Tile, cellByte } from "../tools/scripts/lib/demo-map.ts";
+import { Tile, cellByte } from "../tools/scripts/lib/demo-map.ts";
 import { newSkill } from "./skill_ext.ts";
 import { MPL_CORE_PROGRAM, PROGRAMS, VRF } from "@deadroll/sdk";
+import { Secret, commit, declaredOf, deriveKeys, sealSecrets, splitDesign, threat as threatOf, Leaves } from "@deadroll/sdk/secrets";
+import { CLASS_PACKS, classOf, growsNeeded, layoutGeom } from "@deadroll/sdk/map";
+import { createHash } from "node:crypto";
 
 const { AnchorProvider, BN, EventParser, Program } = anchor;
 
@@ -46,6 +50,11 @@ const COMPUTE_BUDGET = new PublicKey("ComputeBudget11111111111111111111111111111
 /** Compute limit of a `start_turn` that may finalize queued deaths (`character.mark_dead` each). */
 const FINALIZE_CU = 600_000;
 const BLEEDING_CLEAVE = 3;
+/** Patch D: the 16 x 16 room's size class and its pack numbers. */
+const SIZE_CLASS = classOf(16, 16)!;
+const PACKS = CLASS_PACKS[SIZE_CLASS]!;
+/** `CellSecret.kind` variants by `Secret` number. */
+const SECRET_NAMES = ["none", "trap", "ambush", "stash", "door"];
 const ENTRANCE = { x: 1, y: 1 };
 const EXIT = { x: 14, y: 14 };
 const [WOLF, GOBLIN, CHIEFTAIN, GOBLIN_WARRIOR, SHAMAN] = [0, 1, 2, 3, 4];
@@ -155,7 +164,8 @@ async function waitVrf(sessionPda: PublicKey, what: string) {
 
 const dm = Keypair.generate();
 const dmActor = Keypair.generate();
-await fund(dm.publicKey, 0.12);
+// Patch D: open_session also pays the rent of the session board.
+await fund(dm.publicKey, 0.2);
 
 /** A warrior with its starter kit in one transaction (create_character gives it, worn). */
 async function newHero(name: string) {
@@ -215,8 +225,9 @@ idx.writeUInt32LE(index);
 const map = pda([Buffer.from("map"), dm.publicKey.toBuffer(), idx], MAP);
 const layout = pda([Buffer.from("layout"), map.toBuffer()], MAP);
 const edit = { dm: dm.publicKey, map, layout };
-const tiles = new Array(15 * MAP_STRIDE + 16).fill(cellByte(Tile.Wall));
-for (let y = 1; y < 15; y++) for (let x = 1; x < 15; x++) tiles[y * MAP_STRIDE + x] = cellByte(Tile.StoneFloor);
+// Patch D: the cells are `width` per row.
+const tiles = new Array(16 * 16).fill(cellByte(Tile.Wall));
+for (let y = 1; y < 15; y++) for (let x = 1; x < 15; x++) tiles[y * 16 + x] = cellByte(Tile.StoneFloor);
 // Patch 13: the entrance and the exit are points.
 const points = [
   { kind: { entrance: {} }, ...ENTRANCE, data: 0 },
@@ -225,22 +236,41 @@ const points = [
 const spawns = CAMP.map((s) => ({ bestiaryId: s.id, x: s.x, y: s.y, level: 1, skills: s.skills, flags: 0, aspects: 0, pack: s.pack }));
 // Patch 11: the DM's settings (devnet takes at least 10 minutes to settle).
 await mapProgram.methods.createMap(index, 16, 16, 1, { minPlayers: 1, chestRadius: 3, settleTimeoutSecs: 600, biome: 0 }).accountsStrict({ ...edit, systemProgram: SystemProgram.programId }).signers([dm]).rpc();
+for (let i = 0; i < growsNeeded(layoutGeom(16, 16, SIZE_CLASS)); i++) {
+  await mapProgram.methods.growLayout().accountsStrict({ ...edit, systemProgram: SystemProgram.programId }).signers([dm]).rpc();
+}
 await mapProgram.methods.writeLayout(0, Buffer.from(tiles)).accountsStrict(edit).signers([dm]).rpc();
-await mapProgram.methods.writeSpawns(spawns).accountsStrict(edit).signers([dm]).rpc();
+// Patch C: only the visible monster of each pack is public; the rest and one trap (tier 1 needs
+// one) go under the root, encrypted on chain with a key the DM's wallet derives.
+const records = Array.from({ length: PACKS }, (_, n) => (CAMP.some((x) => x.pack === n) ? { visible: CAMP.findIndex((x) => x.pack === n), x: 0, y: 0, facing: 0, width: ARENA_SIDE, height: ARENA_SIDE } : null));
+const split = splitDesign(spawns, records);
+const shapes = records.map((r) => (r ? { width: r.width, height: r.height } : null));
+const cells = [{ leaf: new Leaves(16, 16, shapes, SIZE_CLASS).of({ kind: "map", x: 14, y: 1 })!, secret: { kind: Secret.Trap, a: 4, b: 10, c: 0 } as any }];
+const keys = await deriveKeys(createHash("sha512").update(dm.secretKey).digest(), map.toBytes());
+const commitment = await commit(map.toBytes(), keys, 16, 16, shapes, { rosters: split.rosters, cells }, SIZE_CLASS);
+const blob = await sealSecrets(keys, map.toBytes(), { rosters: split.rosters, cells }, SIZE_CLASS);
+const isBoss = (id: number) => id === CHIEFTAIN;
+await mapProgram.methods.writeSpawns(split.spawns).accountsStrict(edit).signers([dm]).rpc();
 // Patch 11: no chests, the tier 1 boss table of assets/registry/reward_tables.json.
 await mapProgram.methods.writePoints(points, 1).accountsStrict(edit).signers([dm]).rpc();
 for (const pack of [3, 1, 2]) {
-  const record = { visible: CAMP.findIndex((x) => x.pack === pack), ...PACK_CELLS[pack]!, facing: { se: {} }, width: ARENA_SIDE, height: ARENA_SIDE };
+  const record = { visible: split.packs[pack]!.visible, ...PACK_CELLS[pack]!, facing: { se: {} }, width: ARENA_SIDE, height: ARENA_SIDE };
   const cells = Buffer.alloc(ARENA_SIDE * ARENA_SIDE, cellByte(Tile.StoneFloor));
   await mapProgram.methods.writeArena(pack, record, cells).accountsStrict(edit).signers([dm]).rpc();
 }
 const tileset = pda([Buffer.from("tileset")], REGISTRY);
-await mapProgram.methods.finalizeMap(new Array(32).fill(0)).accountsStrict({ ...edit, bestiary, monsterSkills, rewards, tileset }).signers([dm]).rpc();
+// Patch D: one threat byte per pack number of the size class.
+const threat = Buffer.from(split.rosters.map((r) => threatOf(r.spawns.slice(0, r.count), isBoss)));
+assert.equal(threat.length, PACKS);
+await mapProgram.methods.writeSecrets(0, Buffer.from(blob), blob.length, threat, declaredOf(cells)).accountsStrict(edit).signers([dm]).rpc();
+await mapProgram.methods.finalizeMap(Array.from(commitment.root)).accountsStrict({ ...edit, bestiary, monsterSkills, rewards, tileset }).signers([dm]).rpc();
 
 // session
 const sessionPda = pda([Buffer.from("session"), map.toBuffer()], SESSION);
 const monsters = pda([Buffer.from("monsters"), sessionPda.toBuffer()], SESSION);
 const escrow = pda([Buffer.from("escrow"), sessionPda.toBuffer()], SESSION);
+// Patch D: what the party found on the map (created by open_session).
+const board = pda([Buffer.from("board"), sessionPda.toBuffer()], SESSION);
 await session.methods
   .openSession(PRICE, dmActor.publicKey)
   .accountsStrict({
@@ -249,7 +279,7 @@ await session.methods
     mapProgram: MAP, systemProgram: SystemProgram.programId,
     aspects: pda([Buffer.from("aspects")], REGISTRY), traits: pda([Buffer.from("traits")], REGISTRY),
     resonances: pda([Buffer.from("resonances")], REGISTRY), monsterSkills, rewards,
-    triples: pda([Buffer.from("triples")], REGISTRY),
+    triples: pda([Buffer.from("triples")], REGISTRY), board,
   })
   .signers([dm])
   .rpc();
@@ -363,14 +393,38 @@ for (let guard = 0; guard < 6; guard++) {
   }
   await session.methods
     .movePath(0, [{ x: 2, y: 2 }])
-    .accountsStrict({ signer: h.wallet.publicKey, session: sessionPda, participation: h.participation, monsters, layout, sessionToken: null, ...vrfAccounts })
+    .accountsStrict({ signer: h.wallet.publicKey, session: sessionPda, participation: h.participation, monsters, layout, board, sessionToken: null, ...vrfAccounts })
     .signers([h.wallet])
     .rpc({ commitment: "confirmed" });
+  // Patch C: the DM reveals every cell the step obliged (tests/demo.test.ts `revealOwed`), then the
+  // engaged pack.
+  for (let o = await state(); o.obligationCount > 0 && !o.core.pendingVrf; o = await state()) {
+    const leaf = o.obligations[0];
+    const r = await commitment.cell(leaf);
+    const secret = { kind: { [SECRET_NAMES[r.secret.kind as number]!]: {} }, a: r.secret.a, b: r.secret.b, c: r.secret.c };
+    const cellSig = await session.methods
+      .revealCell(leaf, secret as any, Array.from(r.salt), r.proof.map((x) => Array.from(x)))
+      .accountsStrict({ signer: dm.publicKey, session: sessionPda, layout, participation: heroes[o.obligedBy]?.participation ?? null, monsters, rewards, board, sessionToken: null })
+      .signers([dm])
+      .rpc({ commitment: "confirmed" });
+    console.log(`reveal_cell ${leaf}:`, explorer(cellSig));
+  }
+}
+{
+  const pack = (await state()).arenaPack;
+  const r = await commitment.pack(pack);
+  const packSig = await session.methods
+    .revealPack(pack, r.roster as any, Array.from(r.salt), r.proof.map((x) => Array.from(x)))
+    .accountsStrict({ signer: dm.publicKey, session: sessionPda, layout, monsters, bestiary, monsterSkills, rewards, board, sessionToken: null })
+    .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 600_000 })])
+    .signers([dm])
+    .rpc({ commitment: "confirmed" });
+  console.log("reveal_pack:", explorer(packSig));
 }
 const living = heroes.map((h) => ({ pubkey: h.participation, isSigner: false, isWritable: true }));
 const enterSig = await session.methods
   .enterArena()
-  .accountsStrict({ payer: provider.wallet.publicKey, session: sessionPda, monsters, layout })
+  .accountsStrict({ payer: provider.wallet.publicKey, session: sessionPda, monsters, layout, board })
   .remainingAccounts(living)
   .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 600_000 })])
   .rpc({ commitment: "confirmed" });

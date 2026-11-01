@@ -7,9 +7,13 @@
  */
 
 export * from "./arenaWritten.js";
+export * from "./layoutGrown.js";
 export * from "./layoutWritten.js";
+export * from "./mapChecked.js";
+export * from "./mapClosed.js";
 export * from "./mapCreated.js";
 export * from "./mapFinalized.js";
 export * from "./mapStatusChanged.js";
 export * from "./pointsWritten.js";
+export * from "./secretsWritten.js";
 export * from "./spawnsWritten.js";

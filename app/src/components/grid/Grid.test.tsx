@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Grid, cellFromPoint } from "./Grid";
+import { Grid, cellFromPoint, clampView, viewSize } from "./Grid";
 import type { GridUnit } from "./types";
 
 afterEach(() => {
@@ -157,5 +157,28 @@ describe("unitDest", () => {
     expect(unitDest({ width: 96, height: 96 }, 128)).toEqual({ w: 192, h: 192 });
     expect(unitDest({ width: 128, height: 128 }, 96)).toEqual({ w: 192, h: 192 });
     expect(unitDest({ width: 64, height: 64 }, 64)).toEqual({ w: 64, h: 64 });
+  });
+});
+
+describe("patch D: the window over a big map", () => {
+  it("shows a Small map whole and a bigger one through a 24x14 window kept inside the map", () => {
+    expect(viewSize(32, 32)).toEqual({ cols: 32, rows: 32 });
+    expect(viewSize(143, 143)).toEqual({ cols: 24, rows: 14 });
+    expect(viewSize(40, 10)).toEqual({ cols: 24, rows: 10 });
+    expect(viewSize(16, 16, { cols: 8, rows: 8 })).toEqual({ cols: 8, rows: 8 });
+    expect(clampView(-5, 200, 24, 14, 143, 143)).toEqual({ x: 0, y: 129, cols: 24, rows: 14 });
+    expect(clampView(60.4, 30.6, 24, 14, 143, 143)).toEqual({ x: 60, y: 31, cols: 24, rows: 14 });
+  });
+
+  it("a click on the window maps to the map cell, the parchment minimap comes along", () => {
+    const tiles = new Uint8Array(100 * 100).fill(1 << 3);
+    const onCellClick = vi.fn();
+    const { container } = render(<Grid width={100} height={100} tiles={tiles} units={[]} cellPx={10} follow={{ x: 80, y: 90 }} onCellClick={onCellClick} />);
+    const canvas = container.querySelector("canvas.grid-canvas") as HTMLCanvasElement;
+    expect(container.querySelector(".parchment-minimap")).not.toBeNull();
+    // The window follows (80, 90): it shows columns 68..91 and rows 83..96.
+    canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 240, height: 140, right: 240, bottom: 140, x: 0, y: 0, toJSON: () => ({}) });
+    fireEvent.click(canvas, { clientX: 5, clientY: 5 });
+    expect(onCellClick).toHaveBeenCalledWith({ x: 68, y: 83 });
   });
 });

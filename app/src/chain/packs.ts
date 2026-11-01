@@ -3,8 +3,8 @@
 // spawns stand in the arena (a spawn's x, y are arena cells). Pure functions over the draft; the
 // rules are finalize_map's (crates/mapcheck through the WASM).
 import balance from "./balance.json";
-import { PACKS_MAX, type PackDraft } from "./mapcheckWasm";
-import { MAP_MAX, Tile, cellByte, type Cell, type Spawn } from "./types";
+import { type PackDraft } from "./mapcheckWasm";
+import { Tile, cellByte, classPacks, type Cell, type Spawn } from "./types";
 
 /** `BalanceConfig.arena`: the arena sides a DM may draw. */
 export const ARENA_SIDE_MIN: number = balance.arena.side_min;
@@ -20,7 +20,8 @@ const floor = (side: number) => new Uint8Array(side * side).fill(cellByte(Tile.S
 
 /** The pack whose visible monster stands on map cell `c`, or null. */
 export function packAt(d: Pick<PackEdit, "packs">, c: Cell): number | null {
-  const n = d.packs.findIndex((pk) => pk !== null && pk.x === c.x && pk.y === c.y);
+  // Patch C: an ambush pack has no map cell.
+  const n = d.packs.findIndex((pk) => pk !== null && pk.visible !== 0xff && pk.x === c.x && pk.y === c.y);
   return n < 0 ? null : n;
 }
 
@@ -88,12 +89,17 @@ export function setPack(d: PackEdit, pack: number, change: Partial<Pick<PackDraf
   return pk ? { ...d, packs: d.packs.map((x, n) => (n === pack ? { ...pk, ...change } : x)) } : d;
 }
 
-/** Pack `pack`'s arena cells at the map's stride (32) for the grid, the rest walls. */
+/** Pack `pack`'s arena cells for the grid (`width` per row, as every tile array). */
 export function arenaGrid(pk: PackDraft): Uint8Array {
-  const out = new Uint8Array(MAP_MAX * MAP_MAX).fill(cellByte(Tile.Wall));
-  for (let y = 0; y < pk.height; y++) for (let x = 0; x < pk.width; x++) out[y * MAP_MAX + x] = pk.cells[y * pk.width + x]!;
-  return out;
+  return pk.cells.slice(0, pk.width * pk.height);
 }
 
-/** No pack yet: `PACKS_MAX` empty numbers. */
-export const noPacks = (): (PackDraft | null)[] => new Array(PACKS_MAX).fill(null);
+/** No pack yet: the size class's pack numbers, empty (patch D: 8 on a Small map). */
+export const noPacks = (sizeClass = 0): (PackDraft | null)[] => new Array(classPacks(sizeClass)).fill(null);
+
+/** Patch D: the packs of a draft at another size class: the numbers past the class dropped, new
+ * ones empty. */
+export function packsForClass(packs: (PackDraft | null)[], sizeClass: number): (PackDraft | null)[] {
+  const n = classPacks(sizeClass);
+  return Array.from({ length: n }, (_, i) => packs[i] ?? null);
+}

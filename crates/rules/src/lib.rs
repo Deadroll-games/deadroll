@@ -39,8 +39,8 @@ pub mod turn;
 pub mod units;
 
 pub use config::{
-    ArenaTuning, BalanceConfig, FeeTuning, ItemBaseStats, ItemTuning, LootTuning, MonsterScaling,
-    PlayerTuning, LEVELS, MAP_TIERS, TIERS,
+    ArenaTuning, BalanceConfig, FeeTuning, ItemBaseStats, ItemTuning, LootTuning, MapSizeTuning,
+    MonsterScaling, PlayerTuning, SecretTuning, LEVELS, MAP_TIERS, TIERS,
 };
 pub use deadroll_mapcheck::footprint::Footprint;
 pub use input::{EffectAction, HeroStats, Side, SkillStats, SkillUse};

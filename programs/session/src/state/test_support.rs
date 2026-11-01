@@ -2,10 +2,9 @@
 use anchor_lang::prelude::*;
 use anchor_lang::AccountSerialize;
 use deadroll_types::{
-    cell_byte, Cell, GameSessionData, MapArenasData, MapLayoutDataV2, MapPoint, Monster,
-    MonsterStateData, PackLayout, PointKind, SessionStatus, Spawn, TileKind, ARENA_MONSTERS_MAX,
-    ARENA_SIDE_MAX, MAP_CELLS, MAP_MAX, MONSTERS_MAX, PARTY_MAX, POINTS_MAX, SESSION_TEMPLATES_MAX,
-    SPAWNS_MAX, TILE_KINDS_MAX, TURN_ORDER_MAX,
+    cell_byte, Cell, GameSessionData, LayoutGeom, MapPoint, Monster, MonsterStateData, PackLayout,
+    PointKind, SessionStatus, Spawn, TileKind, ARENA_MONSTERS_MAX, MONSTERS_MAX, PACKS_CAP,
+    PARTY_MAX, SESSION_TEMPLATES_MAX, TILE_KINDS_MAX, TURN_ORDER_MAX,
 };
 
 use super::{external::MAP_LAYOUT_DISCRIMINATOR, GameSession, MonsterState};
@@ -47,19 +46,14 @@ pub const HEIGHT: u8 = 8;
 pub const WATER: Cell = Cell { x: 1, y: 0 };
 pub const WALL: Cell = Cell { x: 0, y: 2 };
 
-/// 8x8 floor (rest of the 32x32 grid is wall), water at (1,0), wall at (0,2).
+/// An 8x8 Small map of the version 5 format: floor, water at (1,0), wall at (0,2).
 pub fn layout_account(map: Pubkey) -> TestAccount {
     let byte = |kind: TileKind| cell_byte(kind as u8, 0);
-    let mut cells = [byte(TileKind::Wall); MAP_CELLS];
-    for y in 0..HEIGHT as usize {
-        for x in 0..WIDTH as usize {
-            cells[y * MAP_MAX + x] = byte(TileKind::StoneFloor);
-        }
-    }
-    cells[WATER.y as usize * MAP_MAX + WATER.x as usize] = byte(TileKind::ShallowWater);
-    cells[WALL.y as usize * MAP_MAX + WALL.x as usize] = byte(TileKind::Wall);
-    let mut spawns = [Spawn::default(); SPAWNS_MAX];
-    spawns[0] = Spawn {
+    let (w, h) = (WIDTH as usize, HEIGHT as usize);
+    let mut cells = vec![byte(TileKind::StoneFloor); w * h];
+    cells[WATER.y as usize * w + WATER.x as usize] = byte(TileKind::ShallowWater);
+    cells[WALL.y as usize * w + WALL.x as usize] = byte(TileKind::Wall);
+    let spawn = Spawn {
         bestiary_id: 1,
         x: 5,
         y: 5,
@@ -72,24 +66,20 @@ pub fn layout_account(map: Pubkey) -> TestAccount {
         y,
         data: 0,
     };
-    let mut points = [MapPoint::default(); POINTS_MAX];
-    points[0] = point(PointKind::Entrance, 0, 0);
-    points[1] = point(PointKind::Exit, 7, 7);
-    let layout = MapLayoutDataV2 {
-        version: crate::state::external::LAYOUT_VERSION,
-        map,
-        cells,
-        spawns,
-        spawn_count: 1,
-        points,
-        point_count: 2,
-        boss_table: deadroll_types::NO_TABLE,
-        bump: 255,
-    };
-    // Arena update: pack 0's arena is the same 8x8 ground (the map's corner), so the views read
-    // the same cells on the map and in that arena.
-    let mut arenas = MapArenasData::EMPTY;
-    arenas.packs[0] = PackLayout {
+    let points = [
+        point(PointKind::Entrance, 0, 0),
+        point(PointKind::Exit, 7, 7),
+    ];
+    let geom = LayoutGeom::new(WIDTH, HEIGHT, 0).unwrap();
+    let mut data = vec![0u8; geom.end];
+    data[..8].copy_from_slice(&MAP_LAYOUT_DISCRIMINATOR);
+    geom.write_header(&mut data, &map.to_bytes(), deadroll_types::NO_TABLE, 255);
+    assert!(geom.write_cells(&mut data, 0, &cells));
+    assert!(geom.write_spawns(&mut data, &[spawn]));
+    assert!(geom.write_points(&mut data, &points, deadroll_types::NO_TABLE));
+    // Arena update: pack 0's arena is the same 8x8 ground, so the views read the same cells on
+    // the map and in that arena.
+    let record = PackLayout {
         visible: 0,
         x: 5,
         y: 5,
@@ -97,15 +87,11 @@ pub fn layout_account(map: Pubkey) -> TestAccount {
         width: WIDTH,
         height: HEIGHT,
     };
-    for y in 0..HEIGHT as usize {
-        for x in 0..WIDTH as usize {
-            arenas.cells[0][y * ARENA_SIDE_MAX + x] = cells[y * MAP_MAX + x];
-        }
-    }
-    let mut data = MAP_LAYOUT_DISCRIMINATOR.to_vec();
-    layout.serialize(&mut data).unwrap();
-    arenas.serialize(&mut data).unwrap();
-    data.extend_from_slice(&[0; 16]);
+    assert!(geom.write_arena(&mut data, 0, &record, &cells));
+    // Patch C: pack 0 declared at threat 2, one trap.
+    let mut threat = vec![0u8; geom.packs];
+    threat[0] = 2;
+    assert!(geom.write_secrets(&mut data, 0, &[0], 1, &threat, &[1, 0, 0, 0]));
     TestAccount::new(deadroll_map::ID, data)
 }
 
@@ -264,7 +250,7 @@ pub fn session(players: &[Cell]) -> GameSession {
         mode: super::ArenaMode::Arena,
         arena_pack: 0,
         engaged_by: 0,
-        packs: [deadroll_types::PackLayout::EMPTY; deadroll_types::PACKS_MAX],
+        packs: [deadroll_types::PackLayout::EMPTY; PACKS_CAP],
         packs_alive: 0,
         map_width: WIDTH,
         map_height: HEIGHT,
@@ -281,6 +267,18 @@ pub fn session(players: &[Cell]) -> GameSession {
         packs_guarded: 0,
         packs_buffed: 0,
         dead_spawns: 0,
+        secrets_root: [0; 32],
+        leaf_count: 0,
+        declared: [0; deadroll_types::SECRET_TYPES],
+        threat: [0; PACKS_CAP],
+        found_counts: [0; deadroll_types::SECRET_TYPES],
+        packs_revealed: 0,
+        obligations: [0; deadroll_types::OBLIGATIONS_MAX],
+        obligation_count: 0,
+        obliged_by: 0,
+        roster_totals: [0; 4],
+        visible_chests: 0,
+        map_class: 0,
     }
 }
 
@@ -326,4 +324,15 @@ pub fn profile(id: u8) -> deadroll_rules::MonsterProfile {
         .template(id)
         .expect("a shipped bestiary id")
         .profile(1, &crate::rules::BALANCE.monsters)
+}
+
+/// Patch D: the session the test boards belong to.
+pub const BOARD_SESSION: Pubkey = Pubkey::new_from_array([5; 32]);
+
+/// Patch D: an empty `SessionBoard` of `BOARD_SESSION`, as `open_session` leaves it.
+pub fn board_account() -> TestAccount {
+    TestAccount::new(
+        crate::ID,
+        super::session_board::tests::board_data(&BOARD_SESSION),
+    )
 }

@@ -233,8 +233,14 @@ pub fn open_chest(
     let t = monsters
         .loot_table(point.data)?
         .ok_or(SessionError::InvalidRewardTables)?;
+    // Patch C: a hidden stash found opens like a chest (it follows the map's chests).
+    let source = if chest < session.visible_chests {
+        RewardSource::Chest
+    } else {
+        RewardSource::Stash
+    };
     let roll = reward_event(
-        RewardSource::Chest,
+        source,
         &t,
         0,
         session.loot_eligible(),
@@ -245,7 +251,7 @@ pub fn open_chest(
     deliver(
         session,
         session_key,
-        RewardSource::Chest,
+        source,
         chest,
         point.data,
         &roll,

@@ -19,8 +19,8 @@ import {
   getHiddenPrefixEncoder,
   getStructDecoder,
   getStructEncoder,
-  getU32Decoder,
-  getU32Encoder,
+  getU128Decoder,
+  getU128Encoder,
   getU8Decoder,
   getU8Encoder,
   type Address,
@@ -43,10 +43,15 @@ export type ArenaRetreatedEvent = {
   session: Address;
   pack: number;
   retreats: number;
-  deadSpawns: number;
+  deadSpawns: bigint;
 };
 
-export type ArenaRetreatedEventArgs = ArenaRetreatedEvent;
+export type ArenaRetreatedEventArgs = {
+  session: Address;
+  pack: number;
+  retreats: number;
+  deadSpawns: number | bigint;
+};
 
 /** Gets the encoder for {@link ArenaRetreatedEventArgs} event data. */
 export function getArenaRetreatedEventEncoder(): FixedSizeEncoder<ArenaRetreatedEventArgs> {
@@ -55,7 +60,7 @@ export function getArenaRetreatedEventEncoder(): FixedSizeEncoder<ArenaRetreated
       ["session", getAddressEncoder()],
       ["pack", getU8Encoder()],
       ["retreats", getU8Encoder()],
-      ["deadSpawns", getU32Encoder()],
+      ["deadSpawns", getU128Encoder()],
     ]),
     [getConstantEncoder(ARENA_RETREATED_EVENT_DISCRIMINATOR)],
   );
@@ -68,7 +73,7 @@ export function getArenaRetreatedEventDecoder(): FixedSizeDecoder<ArenaRetreated
       ["session", getAddressDecoder()],
       ["pack", getU8Decoder()],
       ["retreats", getU8Decoder()],
-      ["deadSpawns", getU32Decoder()],
+      ["deadSpawns", getU128Decoder()],
     ]),
     [getConstantDecoder(ARENA_RETREATED_EVENT_DISCRIMINATOR)],
   );

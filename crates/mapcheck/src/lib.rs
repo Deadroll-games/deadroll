@@ -1,29 +1,37 @@
 //! Deadroll map checks and pathfinding (docs/MAP_DESCRIPTION.md, section 10).
 //!
-//! Pure, `no_std`, fixed-size buffers. `programs/map` runs [`check_map`] in `finalize_map`;
-//! the website builder runs the same function through WASM.
+//! Pure, `no_std`, fixed-size buffers. `programs/map` runs [`wide::step`] in `check_step` and
+//! `finalize_map`, then [`check_public_map`]; the website builder runs [`design::check_design`]
+//! through WASM. Patch D: a map of any size class is read as [`MapParts`]; [`check_map`] and
+//! [`check_public`] take a Small map in the version 4 shapes.
 #![no_std]
 
 pub mod arena;
+pub mod design;
 pub mod footprint;
 pub mod limits;
 pub mod loot;
 pub mod path;
 pub mod roster;
+pub mod secrets;
 pub mod tiles;
 pub mod walk;
+pub mod wide;
 
 use deadroll_skillcheck::{check_monster_selection, monster::RECORDS_MAX, SkillError};
 use deadroll_types::{
-    Cell, MapArenasData, MapLayoutDataV2, PointKind, POINTS_MAX, SESSION_SKILLS_MAX,
+    Board, Cell, LayoutArenas, LayoutCore, LayoutSecrets, MapArenasData, MapLayoutDataV2,
+    MapSecretsData, PointKind, Spawn, CLASS_CHESTS, CLASS_PACKS, MAP_CLASSES, MAP_MAX,
+    MAP_ROW_WORDS, MAP_SIDE_CAP, MONSTERS_CAP, PACKS_MAX, POINTS_MAX, SESSION_SKILLS_MAX,
     SESSION_TEMPLATES_MAX, SPAWNS_MAX, SPAWN_ELITE,
 };
 
 use arena::ArenaLimits;
-use limits::{tier_limits, BOSSES, BOSS_HELPERS, SIDE_MAX, SIDE_MIN};
+use limits::{tier_limits, SizeScale, TierLimits, BOSSES, BOSS_HELPERS};
 use loot::{MapLoot, TableRules};
 use roster::{Role, SpawnRules};
-use tiles::{cell_index, in_bounds, TileRules};
+use secrets::SecretLimits;
+use tiles::TileRules;
 
 /// The first broken builder rule. One variant per rule; `code()` is stable.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -150,6 +158,43 @@ pub enum MapCheckError {
     ArenaUnreachable,
     /// More distinct bestiary templates than a session copies (`SESSION_TEMPLATES_MAX`).
     TooManyTemplates,
+    // Patch C: secrets and hidden packs (docs/MAP_DESCRIPTION.md 8, 17.2, 17.4; `secrets`).
+    /// A cell's contents with a bad kind for its place or nonzero unused bytes.
+    SecretInvalid,
+    /// A trap or an ambush on a cell that cannot be entered.
+    SecretNotPassable,
+    /// A trap or an ambush on the entrance, the exit, a chest or a pack's map cell.
+    SecretOnPoint,
+    /// Trap damage 0 or above the tier's `trap_damage_max`.
+    TrapDamageOutOfRange,
+    /// An ambush linked to a pack number that is not an ambush pack.
+    AmbushPackInvalid,
+    /// An ambush trap in an arena (it starts a fight from the map).
+    AmbushInArena,
+    /// A hidden stash in an arena.
+    StashInArena,
+    /// A secret door on a cell that can be entered.
+    DoorNotWall,
+    /// More declared secrets than the tier allows, or more secrets of a type than declared.
+    TooManySecrets,
+    /// Fewer declared traps than the tier needs.
+    TooFewTraps,
+    /// Not exactly one ambush trap per ambush pack.
+    AmbushUnlinked,
+    /// A used pack declared with threat 0, or an unused one with a threat.
+    ThreatOutOfRange,
+    /// A pack's composition does not give its declared threat.
+    ThreatMismatch,
+    /// A composition with no monster, too many, or one of another pack.
+    RosterInvalid,
+    /// A composition whose first monster is not the pack's public one.
+    VisibleMismatch,
+    /// A public spawn that is not the visible monster of its pack.
+    SpawnNotVisible,
+    /// Fewer secrets of a type than declared.
+    TooFewSecrets,
+    /// Two secrets on one leaf.
+    DuplicateSecret,
 }
 
 impl MapCheckError {
@@ -158,10 +203,94 @@ impl MapCheckError {
     }
 }
 
-/// Runs every builder rule on a map. `tiles` are the registry `Tileset` (patch 13);
-/// `template_of` gives a bestiary id's rules from the registry (`None`: no such template);
-/// `loot` the chest and reward table rules (patch 11); `arenas` and `arena_limits` the packs'
-/// arenas (arena update, [`arena`]).
+/// The cells the party reaches from the entrance, as the rules ask about them.
+pub trait Reached {
+    fn contains(&self, cell: Cell) -> bool;
+}
+
+impl Reached for path::Reach {
+    fn contains(&self, cell: Cell) -> bool {
+        path::Reach::contains(self, cell)
+    }
+}
+
+/// Patch D: a map's layout as the rules read it, of any size class.
+#[derive(Clone, Copy, Debug)]
+pub struct MapParts<'a> {
+    pub board: Board<'a>,
+    /// The points and the boss table (its spawns are not read: see `spawns`).
+    pub core: &'a LayoutCore,
+    /// The spawns the rules check: every monster of a design ([`check_design_map`]), or each
+    /// pack's visible one ([`check_public_map`], `core.spawn_list()`).
+    pub spawns: &'a [Spawn],
+    pub arenas: &'a LayoutArenas,
+}
+
+/// The reachability check in one go on the caller's stack (~10 KB, off-chain only: the program
+/// runs [`wide::step`] over the layout's own scratch), from the entrance around the closed
+/// chests; then `f` with what it reached. `InvalidTile` for a tile the `Tileset` does not have.
+pub fn with_reach<T>(
+    board: &Board,
+    core: &LayoutCore,
+    tiles: &TileRules,
+    f: impl FnOnce(&wide::ReachView) -> T,
+) -> Result<T, MapCheckError> {
+    let mut pass = [[0u64; MAP_ROW_WORDS]; MAP_SIDE_CAP];
+    let mut open = pass;
+    let mut reach = pass;
+    let (chests, count) = loot::chest_cells(core);
+    let start = core.entrance().unwrap_or(Cell {
+        x: u8::MAX,
+        y: u8::MAX,
+    });
+    wide::run(
+        board,
+        tiles,
+        start,
+        &chests[..count],
+        &mut pass,
+        &mut open,
+        &mut reach,
+    )?;
+    Ok(f(&wide::ReachView {
+        rows: &reach,
+        width: board.width,
+        height: board.height,
+    }))
+}
+
+/// A side of the version 4 shapes: the Small class's area within `MAP_MAX` a side (its storage).
+fn small_fits(width: u8, height: u8) -> bool {
+    SizeScale::SMALL.fits(width, height) && width <= limits::SIDE_MAX && height <= limits::SIDE_MAX
+}
+
+/// A Small map in the version 4 shapes (`MAP_MAX` cells per row), as the rules read it.
+fn small_parts<'a>(
+    width: u8,
+    height: u8,
+    layout: &'a MapLayoutDataV2,
+    core: &'a LayoutCore,
+    spawns: &'a [Spawn],
+    arenas: &'a LayoutArenas,
+) -> MapParts<'a> {
+    MapParts {
+        board: Board {
+            width,
+            height,
+            stride: MAP_MAX,
+            cells: &layout.cells,
+        },
+        core,
+        spawns,
+        arenas,
+    }
+}
+
+/// Runs every builder rule on a whole Small design in the version 4 shapes (the tests, the
+/// presets): [`check_design_map`] with the reachability check done here. `tiles` are the
+/// registry `Tileset` (patch 13); `template_of` gives a bestiary id's rules from the registry
+/// (`None`: no such template); `loot` the chest and reward table rules (patch 11); `arenas` and
+/// `arena_limits` the packs' arenas (arena update, [`arena`]).
 #[allow(clippy::too_many_arguments)]
 pub fn check_map<R: Fn(u8) -> Option<TableRules>>(
     width: u8,
@@ -174,24 +303,62 @@ pub fn check_map<R: Fn(u8) -> Option<TableRules>>(
     template_of: impl Fn(u8) -> Option<SpawnRules>,
     loot: &MapLoot<R>,
 ) -> Result<(), MapCheckError> {
+    use MapCheckError as E;
+    if !small_fits(width, height) {
+        return Err(E::SizeOutOfRange);
+    }
+    tier_limits(tier).ok_or(E::TierOutOfRange)?;
+    let count = layout.spawn_count as usize;
+    let core = LayoutCore::from_v2(layout);
+    let arenas = LayoutArenas::from_v1(arenas);
+    let spawns = &layout.spawns[..count.min(SPAWNS_MAX)];
+    let parts = small_parts(width, height, layout, &core, spawns, &arenas);
+    with_reach(&parts.board, &core, tiles, |reach| {
+        check_points(&parts.board, &core, POINTS_MAX, tiles)?;
+        if count > SPAWNS_MAX {
+            return Err(E::TooManySpawns);
+        }
+        check_design_map(
+            &parts,
+            tier,
+            SizeScale::SMALL,
+            arena_limits,
+            tiles,
+            template_of,
+            loot,
+            reach,
+        )
+    })?
+}
+
+/// Every builder rule on a whole design of any size (every spawn in `parts.spawns`). `reach`:
+/// what the reachability check found ([`with_reach`], or the program's steps); the check also
+/// refused unknown tiles.
+#[allow(clippy::too_many_arguments)]
+pub fn check_design_map<R: Fn(u8) -> Option<TableRules>>(
+    parts: &MapParts,
+    tier: u8,
+    scale: SizeScale,
+    arena_limits: ArenaLimits,
+    tiles: &TileRules,
+    template_of: impl Fn(u8) -> Option<SpawnRules>,
+    loot: &MapLoot<R>,
+    reach: &dyn Reached,
+) -> Result<(), MapCheckError> {
     let role_of = |id: u8| template_of(id).map(|t| t.role);
     use MapCheckError as E;
 
-    let side_ok = |side: u8| (SIDE_MIN..=SIDE_MAX).contains(&side);
-    if !side_ok(width) || !side_ok(height) {
+    let (width, height) = (parts.board.width, parts.board.height);
+    if !scale.fits(width, height) {
         return Err(E::SizeOutOfRange);
     }
-    let limits = tier_limits(tier).ok_or(E::TierOutOfRange)?;
+    let limits = tier_limits(tier).ok_or(E::TierOutOfRange)?.scaled(scale);
+    let ends = check_points(&parts.board, parts.core, points_cap(scale), tiles)?;
 
-    check_tiles(width, height, layout, tiles)?;
-    let ends = check_points(width, height, layout, tiles)?;
-    let [entrance, exit] = ends;
-
-    let count = layout.spawn_count as usize;
-    if count > SPAWNS_MAX {
+    if parts.spawns.len() > MONSTERS_CAP {
         return Err(E::TooManySpawns);
     }
-    let spawns = &layout.spawns[..count];
+    let spawns = parts.spawns;
 
     let mut boss_pack = None;
     let mut bosses = 0u8;
@@ -205,23 +372,8 @@ pub fn check_map<R: Fn(u8) -> Option<TableRules>>(
         let id = spawn.bestiary_id as usize;
         templates[id / 64] |= 1 << (id % 64);
         let role = t.role;
-        if !(limits.level_min..=limits.level_max).contains(&spawn.level) {
-            return Err(E::LevelOutOfTier);
-        }
-        if tier < t.min_tier {
-            return Err(E::TierBelowTemplate);
-        }
-        let elite = spawn.flags & SPAWN_ELITE != 0;
-        if elite && role == Role::Boss {
-            return Err(E::EliteBoss);
-        }
-        elites += elite as u8;
-        check_monster_selection(t.pool(), spawn.skills, t.slots_for(elite)).map_err(
-            |e| match e {
-                SkillError::MonsterSkillUnknown => E::MonsterSkillUnknown,
-                _ => E::MonsterSkillCount,
-            },
-        )?;
+        let elite = check_spawn(tier, &limits, spawn, &t)?;
+        elites = elites.saturating_add(elite as u8);
         for bit in 0..t.pool_len.min(16) {
             if spawn.skills & (1 << bit) != 0 {
                 let at = t.pool_start as usize + bit as usize;
@@ -262,7 +414,7 @@ pub fn check_map<R: Fn(u8) -> Option<TableRules>>(
             Role::Helper => return Err(E::HelperOutsideBossPack),
             _ if in_boss_pack => return Err(E::BossPackMixed),
             _ => {
-                monsters += 1;
+                monsters = monsters.saturating_add(1);
                 packs[spawn.pack as usize / 32] |= 1 << (spawn.pack % 32);
             }
         }
@@ -288,70 +440,227 @@ pub fn check_map<R: Fn(u8) -> Option<TableRules>>(
         }
     }
 
-    loot::check_chests(width, height, limits.level_max, layout, tiles, ends, loot)?;
+    check_ground(
+        parts,
+        scale,
+        limits.level_max,
+        arena_limits,
+        tiles,
+        ends,
+        &template_of,
+        loot,
+        reach,
+    )
+}
+
+/// The public part of a Small map in the version 4 shapes (the tests): [`check_public_map`] with
+/// the reachability check done here.
+#[allow(clippy::too_many_arguments)]
+pub fn check_public<R: Fn(u8) -> Option<TableRules>>(
+    width: u8,
+    height: u8,
+    tier: u8,
+    layout: &MapLayoutDataV2,
+    arenas: &MapArenasData,
+    secrets: &MapSecretsData,
+    arena_limits: ArenaLimits,
+    secret_limits: &SecretLimits,
+    tiles: &TileRules,
+    template_of: impl Fn(u8) -> Option<SpawnRules>,
+    loot: &MapLoot<R>,
+) -> Result<(), MapCheckError> {
+    use MapCheckError as E;
+    if !small_fits(width, height) {
+        return Err(E::SizeOutOfRange);
+    }
+    tier_limits(tier).ok_or(E::TierOutOfRange)?;
+    let core = LayoutCore::from_v2(layout);
+    let arenas = LayoutArenas::from_v1(arenas);
+    let secrets = LayoutSecrets::from_v1(secrets);
+    let parts = small_parts(width, height, layout, &core, core.spawn_list(), &arenas);
+    if layout.spawn_count as usize > PACKS_MAX {
+        return Err(E::TooManySpawns);
+    }
+    with_reach(&parts.board, &core, tiles, |reach| {
+        check_public_map(
+            &parts,
+            tier,
+            SizeScale::SMALL,
+            &secrets,
+            arena_limits,
+            secret_limits,
+            tiles,
+            template_of,
+            loot,
+            reach,
+        )
+    })?
+}
+
+/// Patch C: the public part of a map, what `finalize_map` checks (docs/MAP_DESCRIPTION.md 8.3,
+/// 17.2, 17.5). `parts.spawns` holds only the monster each pack shows on the map; the packs'
+/// compositions and the secrets are under the Merkle root, checked when revealed
+/// ([`arena::check_roster`], [`secrets::check_secret`]). `secrets` gives the declared threats
+/// and counts; `secret_limits` the tier's limits at this size. `reach`: what the reachability
+/// check found (it also refused unknown tiles).
+#[allow(clippy::too_many_arguments)]
+pub fn check_public_map<R: Fn(u8) -> Option<TableRules>>(
+    parts: &MapParts,
+    tier: u8,
+    scale: SizeScale,
+    secrets: &LayoutSecrets,
+    arena_limits: ArenaLimits,
+    secret_limits: &SecretLimits,
+    tiles: &TileRules,
+    template_of: impl Fn(u8) -> Option<SpawnRules>,
+    loot: &MapLoot<R>,
+    reach: &dyn Reached,
+) -> Result<(), MapCheckError> {
+    use MapCheckError as E;
+
+    let (width, height) = (parts.board.width, parts.board.height);
+    if !scale.fits(width, height) {
+        return Err(E::SizeOutOfRange);
+    }
+    let limits = tier_limits(tier).ok_or(E::TierOutOfRange)?.scaled(scale);
+    let ends = check_points(&parts.board, parts.core, points_cap(scale), tiles)?;
+
+    let class_packs = class_packs(scale);
+    if parts.spawns.len() > class_packs {
+        return Err(E::TooManySpawns);
+    }
+    for (i, spawn) in parts.spawns.iter().enumerate() {
+        let t = template_of(spawn.bestiary_id).ok_or(E::UnknownMonster)?;
+        check_spawn(tier, &limits, spawn, &t)?;
+        let p = parts
+            .arenas
+            .packs
+            .get(spawn.pack as usize)
+            .filter(|_| (spawn.pack as usize) < class_packs)
+            .ok_or(E::PackOutOfRange)?;
+        if !p.is_used() {
+            return Err(E::PackWithoutArena);
+        }
+        if p.visible as usize != i {
+            return Err(E::SpawnNotVisible);
+        }
+    }
+    let used = parts.arenas.packs.iter().filter(|p| p.is_used()).count();
+    if used > (limits.packs + BOSSES) as usize {
+        return Err(E::TooManyPacks);
+    }
+    for (n, (p, threat)) in parts.arenas.packs.iter().zip(secrets.threat).enumerate() {
+        if p.is_used() && n >= class_packs {
+            return Err(E::PackOutOfRange);
+        }
+        if p.is_used() != (threat > 0) {
+            return Err(E::ThreatOutOfRange);
+        }
+    }
+    let ambush = secrets::ambush_mask(&parts.arenas.packs);
+    secrets::check_declared(&secrets.declared, secret_limits, ambush.count_ones() as u8)?;
+    check_ground(
+        parts,
+        scale,
+        limits.level_max,
+        arena_limits,
+        tiles,
+        ends,
+        &template_of,
+        loot,
+        reach,
+    )
+}
+
+/// Pack numbers a map of this size stores.
+fn class_packs(scale: SizeScale) -> usize {
+    CLASS_PACKS[(scale.class as usize).min(MAP_CLASSES - 1)]
+}
+
+/// Points a map of this size stores: the entrance, the exit and its class's chests.
+fn points_cap(scale: SizeScale) -> usize {
+    2 + CLASS_CHESTS[(scale.class as usize).min(MAP_CLASSES - 1)]
+}
+
+/// The rules of one spawn by itself: level within the tier, the template's minimum tier, a boss
+/// never elite, the chosen skills. Returns whether it is elite.
+pub fn check_spawn(
+    tier: u8,
+    limits: &TierLimits,
+    spawn: &Spawn,
+    t: &SpawnRules,
+) -> Result<bool, MapCheckError> {
+    use MapCheckError as E;
+    if !(limits.level_min..=limits.level_max).contains(&spawn.level) {
+        return Err(E::LevelOutOfTier);
+    }
+    if tier < t.min_tier {
+        return Err(E::TierBelowTemplate);
+    }
+    let elite = spawn.flags & SPAWN_ELITE != 0;
+    if elite && t.role == Role::Boss {
+        return Err(E::EliteBoss);
+    }
+    check_monster_selection(t.pool(), spawn.skills, t.slots_for(elite)).map_err(|e| match e {
+        SkillError::MonsterSkillUnknown => E::MonsterSkillUnknown,
+        _ => E::MonsterSkillCount,
+    })?;
+    Ok(elite)
+}
+
+/// The chests, the path to the exit and the arenas, the same for the whole design and its public
+/// part.
+#[allow(clippy::too_many_arguments)]
+fn check_ground<R: Fn(u8) -> Option<TableRules>>(
+    parts: &MapParts,
+    scale: SizeScale,
+    level_cap: u8,
+    arena_limits: ArenaLimits,
+    tiles: &TileRules,
+    ends: [Cell; 2],
+    template_of: &impl Fn(u8) -> Option<SpawnRules>,
+    loot: &MapLoot<R>,
+    reach: &dyn Reached,
+) -> Result<(), MapCheckError> {
+    use MapCheckError as E;
+    let exit = ends[1];
+    loot::check_chests(&parts.board, level_cap, parts.core, tiles, ends, loot)?;
 
     // Closed chests occupy their cell: the paths go around them.
-    let (chests, chest_count) = loot::chest_cells(layout);
-    let reach = path::reachable_avoiding(
-        &layout.cells,
-        tiles,
-        width,
-        height,
-        entrance,
-        &chests[..chest_count],
-    );
+    let (chests, chest_count) = loot::chest_cells(parts.core);
     if !reach.contains(exit) {
         return Err(E::ExitUnreachable);
     }
-    loot::check_chest_access(width, height, layout, &reach)?;
+    loot::check_chest_access(&parts.board, parts.core, reach)?;
     arena::check_arenas(
-        width,
-        height,
-        layout,
-        arenas,
+        &parts.board,
+        class_packs(scale),
+        parts.spawns,
+        parts.arenas,
         arena_limits,
         tiles,
         ends,
         &chests[..chest_count],
-        &reach,
+        reach,
         &|id| template_of(id).map_or(1, |t| t.size),
     )
 }
 
-/// Every cell inside the map has a tile type the `Tileset` has (any variant).
-fn check_tiles(
-    width: u8,
-    height: u8,
-    layout: &MapLayoutDataV2,
-    tiles: &TileRules,
-) -> Result<(), MapCheckError> {
-    for y in 0..height {
-        let row = cell_index(0, y);
-        if !layout.cells[row..row + width as usize]
-            .iter()
-            .all(|&b| tiles.knows(b))
-        {
-            return Err(MapCheckError::InvalidTile);
-        }
-    }
-    Ok(())
-}
-
 /// Exactly one entrance and one exit point, inside the map, on cells that can be entered and
-/// apart. Returns `[entrance, exit]`. Chests are `loot::check_chests`'s.
+/// apart, at most `cap` points. Returns `[entrance, exit]`. Chests are `loot::check_chests`'s.
 fn check_points(
-    width: u8,
-    height: u8,
-    layout: &MapLayoutDataV2,
+    board: &Board,
+    core: &LayoutCore,
+    cap: usize,
     tiles: &TileRules,
 ) -> Result<[Cell; 2], MapCheckError> {
     use MapCheckError as E;
 
-    if layout.point_count as usize > POINTS_MAX {
+    if core.point_count as usize > cap {
         return Err(E::TooManyPoints);
     }
     let mut ends = [None; 2];
-    for point in layout.point_list() {
+    for point in core.point_list() {
         let (end, twice) = match point.kind {
             PointKind::Entrance => (0, E::EntranceCount),
             PointKind::Exit => (1, E::ExitCount),
@@ -361,11 +670,10 @@ fn check_points(
             return Err(twice);
         }
         let cell = point.cell();
-        if !in_bounds(cell, width, height) {
-            return Err(E::PointOutOfBounds);
-        }
-        if !tiles.is_passable(layout.cells[cell_index(cell.x, cell.y)]) {
-            return Err(E::PointNotPassable);
+        match board.get(cell) {
+            None => return Err(E::PointOutOfBounds),
+            Some(b) if !tiles.is_passable(b) => return Err(E::PointNotPassable),
+            Some(_) => {}
         }
         ends[end] = Some(cell);
     }
@@ -380,6 +688,7 @@ fn check_points(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tiles::cell_index;
     use deadroll_skillcheck::Category;
     use deadroll_types::{
         cell_byte, Facing, MapPoint, PackLayout, Pubkey, Spawn, TileKind, ARENA_CELLS,
@@ -610,6 +919,16 @@ mod tests {
             p0_role,
             &test_loot(),
         )
+    }
+
+    /// A 16x16 test layout's cells as a board (`MAP_MAX` per row).
+    fn small_board(layout: &MapLayoutDataV2) -> Board<'_> {
+        Board {
+            width: 16,
+            height: 16,
+            stride: MAP_MAX,
+            cells: &layout.cells,
+        }
     }
 
     fn set(layout: &mut MapLayoutDataV2, x: u8, y: u8, kind: TileKind) {
@@ -1156,15 +1475,15 @@ mod tests {
             layout.spawns[7 + i as usize] = spawn(ids::WOLF, i, 7, 1);
         }
         layout.spawn_count = 15;
-        let (chests, count) = loot::chest_cells(&layout);
+        let (chests, count) = loot::chest_cells(&LayoutCore::from_v2(&layout));
         let reach =
             path::reachable_avoiding(&layout.cells, &tiles(), 16, 16, ENTRANCE, &chests[..count]);
         let run = |layout: &MapLayoutDataV2| {
             arena::check_arenas(
-                16,
-                16,
-                layout,
-                &arenas(),
+                &small_board(layout),
+                8,
+                &layout.spawns[..layout.spawn_count as usize],
+                &LayoutArenas::from_v1(&arenas()),
                 LIMITS,
                 &tiles(),
                 [ENTRANCE, EXIT],
@@ -1257,6 +1576,8 @@ mod tests {
         assert_eq!(MapCheckError::PointOverlap.code(), 44);
         assert_eq!(MapCheckError::PackOutOfRange.code(), 45);
         assert_eq!(MapCheckError::TooManyTemplates.code(), 58);
+        assert_eq!(MapCheckError::SecretInvalid.code(), 59);
+        assert_eq!(MapCheckError::DuplicateSecret.code(), 76);
     }
 
     #[test]
@@ -1562,5 +1883,318 @@ mod tests {
             check_t(16, 16, 1, &layout, &tiles(), two, &test_loot()),
             Ok(())
         );
+    }
+
+    // Patch C: the public part, a pack's composition when revealed, the whole design.
+    mod fog {
+        use super::*;
+        use crate::{
+            arena::check_roster,
+            design::{check_design, split, Split},
+            roster::{RosterCount, RosterTotals},
+            secrets::{Board, Leaves, SecretLimits, ThreatWeights},
+        };
+        use deadroll_types::{
+            CellSecret, FoundSecret, PackRoster, NO_SPAWN, PACKS_CAP, SECRET_TYPES,
+        };
+
+        const SECRETS: SecretLimits = SecretLimits {
+            traps_min: 1,
+            traps_max: 2,
+            declared_max: [2, 1, 1, 2],
+            trap_damage_max: 8,
+        };
+        const WEIGHTS: ThreatWeights = ThreatWeights { elite: 2, boss: 3 };
+
+        fn leaf(arenas: &MapArenasData, board: Board) -> u16 {
+            Leaves::new(16, 16, 0, &LayoutArenas::from_v1(arenas).packs)
+                .of(board)
+                .unwrap()
+        }
+
+        /// A trap on the floor and a secret door in the west wall.
+        fn secrets(arenas: &MapArenasData) -> [FoundSecret; 2] {
+            [
+                FoundSecret {
+                    leaf: leaf(arenas, Board::Map(Cell { x: 3, y: 3 })),
+                    secret: CellSecret::trap(5, 10),
+                },
+                FoundSecret {
+                    leaf: leaf(arenas, Board::Map(Cell { x: 0, y: 5 })),
+                    secret: CellSecret::door(),
+                },
+            ]
+        }
+
+        fn design(
+            layout: &MapLayoutDataV2,
+            arenas: &MapArenasData,
+            declared: [u8; SECRET_TYPES],
+            cells: &[FoundSecret],
+            loot: &TestLoot,
+        ) -> Result<Split, MapCheckError> {
+            let core = LayoutCore::from_v2(layout);
+            let arenas = LayoutArenas::from_v1(arenas);
+            let parts = MapParts {
+                board: small_board(layout),
+                core: &core,
+                spawns: &layout.spawns[..layout.spawn_count as usize],
+                arenas: &arenas,
+            };
+            check_design(
+                &parts,
+                1,
+                SizeScale::SMALL,
+                &declared,
+                cells,
+                LIMITS,
+                &SECRETS,
+                WEIGHTS,
+                &tiles(),
+                p0_role,
+                loot,
+            )
+        }
+
+        fn public(
+            s: &Split,
+            threat: [u8; PACKS_CAP],
+            declared: [u8; SECRET_TYPES],
+        ) -> Result<(), MapCheckError> {
+            let mut arenas = LayoutArenas::from_v1(&arenas());
+            arenas.packs = s.packs;
+            let mut secrets = LayoutSecrets::EMPTY;
+            secrets.threat = threat;
+            secrets.declared = declared;
+            let layout = demo();
+            let parts = MapParts {
+                board: small_board(&layout),
+                core: &s.public,
+                spawns: s.public.spawn_list(),
+                arenas: &arenas,
+            };
+            with_reach(&parts.board, &s.public, &tiles(), |reach| {
+                check_public_map(
+                    &parts,
+                    1,
+                    SizeScale::SMALL,
+                    &secrets,
+                    LIMITS,
+                    &SECRETS,
+                    &tiles(),
+                    p0_role,
+                    &test_loot(),
+                    reach,
+                )
+            })?
+        }
+
+        fn roster(
+            s: &Split,
+            n: u8,
+            r: &PackRoster,
+            threat: u8,
+        ) -> Result<RosterCount, MapCheckError> {
+            let mut arenas = LayoutArenas::from_v1(&arenas());
+            arenas.packs = s.packs;
+            let p = arenas.packs[n as usize];
+            let visible = (p.visible != NO_SPAWN).then(|| &s.public.spawns[p.visible as usize]);
+            check_roster(
+                1,
+                n,
+                r,
+                visible,
+                &arenas,
+                &tiles(),
+                p0_role,
+                WEIGHTS,
+                threat,
+            )
+        }
+
+        fn demo_split() -> Split {
+            let a = arenas();
+            design(&demo(), &a, [1, 0, 0, 1], &secrets(&a), &test_loot()).unwrap()
+        }
+
+        #[test]
+        fn the_demo_splits_into_visible_monsters_and_rosters() {
+            let s = demo_split();
+            assert_eq!(s.public.spawn_count, 3);
+            assert_eq!(s.packs[1].visible, 0);
+            assert_eq!(s.packs[3].visible, 2);
+            assert_eq!(s.public.spawns[2].bestiary_id, ids::GOBLIN_CHIEFTAIN);
+            let counts = [s.rosters[1].count, s.rosters[2].count, s.rosters[3].count];
+            assert_eq!(counts, [2, 2, 3]);
+            assert_eq!(s.rosters[0].count, 0);
+            // Levels 1: two of a kind = 2; the boss counts 3 times plus two helpers = 5.
+            assert_eq!(s.threat[..8], [0, 2, 2, 5, 0, 0, 0, 0]);
+            assert!(s.threat[8..].iter().all(|t| *t == 0));
+            assert_eq!(public(&s, s.threat, [1, 0, 0, 1]), Ok(()));
+            // The split puts the visible monster first.
+            let layout = demo();
+            let mut a = arenas();
+            a.packs[1].visible = 1;
+            let s2 = split(
+                &LayoutCore::from_v2(&layout),
+                &layout.spawns[..layout.spawn_count as usize],
+                &LayoutArenas::from_v1(&a).packs,
+                p0_role,
+                WEIGHTS,
+            )
+            .unwrap();
+            assert_eq!(s2.rosters[1].spawns[0], layout.spawns[1]);
+            assert_eq!(s2.rosters[1].spawns[1], layout.spawns[0]);
+        }
+
+        #[test]
+        fn the_public_part_rejects() {
+            use MapCheckError as E;
+            let s = demo_split();
+            let mut threat = s.threat;
+            threat[0] = 1;
+            assert_eq!(public(&s, threat, [1, 0, 0, 1]), Err(E::ThreatOutOfRange));
+            threat = s.threat;
+            threat[1] = 0;
+            assert_eq!(public(&s, threat, [1, 0, 0, 1]), Err(E::ThreatOutOfRange));
+            assert_eq!(public(&s, s.threat, [0, 0, 0, 0]), Err(E::TooFewTraps));
+            assert_eq!(public(&s, s.threat, [3, 0, 0, 0]), Err(E::TooManySecrets));
+            assert_eq!(public(&s, s.threat, [1, 1, 0, 0]), Err(E::AmbushUnlinked));
+            // A hidden monster left in the public list.
+            let mut leak = s.clone();
+            leak.public.spawns[3] = demo().spawns[1];
+            leak.public.spawn_count = 4;
+            assert_eq!(
+                public(&leak, s.threat, [1, 0, 0, 0]),
+                Err(E::SpawnNotVisible)
+            );
+        }
+
+        #[test]
+        fn a_revealed_roster_must_match() {
+            use MapCheckError as E;
+            let s = demo_split();
+            let wolves = s.rosters[1];
+            assert_eq!(roster(&s, 1, &wolves, 2).map(|c| c.regular), Ok(2));
+            assert_eq!(roster(&s, 1, &wolves, 3), Err(E::ThreatMismatch));
+            assert_eq!(
+                roster(&s, 1, &PackRoster::default(), 0),
+                Err(E::RosterInvalid)
+            );
+            let mut other = wolves;
+            other.spawns[1].pack = 2;
+            assert_eq!(roster(&s, 1, &other, 2), Err(E::RosterInvalid));
+            let mut swapped = wolves;
+            swapped.spawns.swap(0, 1);
+            assert_eq!(roster(&s, 1, &swapped, 2), Err(E::VisibleMismatch));
+            let mut mixed = wolves;
+            mixed.spawns[1].bestiary_id = ids::GOBLIN_WARRIOR;
+            assert_eq!(roster(&s, 1, &mixed, 2), Err(E::HelperOutsideBossPack));
+            let mut boss = s.rosters[3];
+            boss.spawns[1].bestiary_id = ids::GOBLIN;
+            assert_eq!(roster(&s, 3, &boss, 5), Err(E::BossPackMixed));
+            let mut wall = wolves;
+            wall.spawns[1].x = 12;
+            assert_eq!(roster(&s, 1, &wall, 2), Err(E::SpawnOutOfBounds));
+            let mut high = wolves;
+            high.spawns[1].level = 3;
+            assert_eq!(roster(&s, 1, &high, 4), Err(E::LevelOutOfTier));
+
+            // The totals over the packs.
+            let limits = tier_limits(1).unwrap();
+            let mut totals = RosterTotals::default();
+            for n in 1..=3u8 {
+                let c = roster(&s, n, &s.rosters[n as usize], s.threat[n as usize]).unwrap();
+                totals.add(&c, &limits).unwrap();
+            }
+            assert_eq!(totals.finish(), Ok(()));
+            assert_eq!(RosterTotals::default().finish(), Err(E::BossCount));
+            let five = RosterCount {
+                regular: 5,
+                ..Default::default()
+            };
+            assert_eq!(
+                RosterTotals::default().add(&five, &limits),
+                Err(E::TooManyMonsters)
+            );
+        }
+
+        #[test]
+        fn the_secrets_of_a_design() {
+            use MapCheckError as E;
+            let a = arenas();
+            let cells = secrets(&a);
+            let loot = test_loot();
+            let err = |declared, cells: &[FoundSecret], loot: &TestLoot| {
+                design(&demo(), &a, declared, cells, loot).err()
+            };
+            assert_eq!(err([1, 0, 0, 0], &cells, &loot), Some(E::TooManySecrets));
+            assert_eq!(err([1, 0, 0, 2], &cells, &loot), Some(E::TooFewSecrets));
+            assert_eq!(
+                err([2, 0, 0, 0], &[cells[0], cells[0]], &loot),
+                Some(E::DuplicateSecret)
+            );
+            let past = FoundSecret {
+                leaf: Leaves::new(16, 16, 0, &LayoutArenas::from_v1(&a).packs).count,
+                secret: CellSecret::trap(1, 1),
+            };
+            assert_eq!(err([1, 0, 0, 0], &[past], &loot), Some(E::SecretInvalid));
+            let on_pack = FoundSecret {
+                leaf: 2,
+                secret: CellSecret::trap(1, 1),
+            };
+            assert_eq!(err([1, 0, 0, 0], &[on_pack], &loot), Some(E::SecretInvalid));
+            let on_chest = FoundSecret {
+                leaf: leaf(&a, Board::Map(Cell { x: 5, y: 5 })),
+                secret: CellSecret::trap(1, 1),
+            };
+            assert_eq!(
+                err([1, 0, 0, 0], &[on_chest], &loot),
+                Some(E::SecretOnPoint)
+            );
+            // A trap in an arena is fine.
+            let arena_trap = FoundSecret {
+                leaf: leaf(&a, Board::Arena(2, Cell { x: 0, y: 0 })),
+                secret: CellSecret::trap(2, 0),
+            };
+            assert_eq!(err([1, 0, 0, 0], &[arena_trap], &loot), None);
+
+            // A hidden stash costs budget: chest 2 + stash 2 + boss 4 > 6 for one player.
+            let stash = [
+                cells[0],
+                FoundSecret {
+                    leaf: leaf(&a, Board::Map(Cell { x: 7, y: 7 })),
+                    secret: CellSecret::stash(tables::SMALL),
+                },
+            ];
+            assert_eq!(err([1, 0, 1, 0], &stash, &loot), Some(E::OverBudget));
+            assert_eq!(err([1, 0, 1, 0], &stash, &loot_for(2)), None);
+        }
+
+        #[test]
+        fn an_ambush_pack_has_no_map_cell_and_one_trap() {
+            use MapCheckError as E;
+            let mut a = arenas();
+            a.packs[2].visible = NO_SPAWN;
+            let ambush = FoundSecret {
+                leaf: leaf(&a, Board::Map(Cell { x: 8, y: 8 })),
+                secret: CellSecret::ambush(2),
+            };
+            let s = design(&demo(), &a, [0, 1, 0, 0], &[ambush], &test_loot()).unwrap();
+            assert_eq!(s.packs[2].visible, NO_SPAWN);
+            assert_eq!(s.public.spawn_count, 2);
+            assert_eq!(s.rosters[2].count, 2);
+            assert_eq!(roster(&s, 2, &s.rosters[2], 2).map(|c| c.regular), Ok(2));
+            // Without its trap, or a trap on a pack that shows a monster.
+            let trap = &secrets(&a)[..1];
+            let err = design(&demo(), &a, [1, 0, 0, 0], trap, &test_loot()).err();
+            assert_eq!(err, Some(E::AmbushUnlinked));
+            let wrong = FoundSecret {
+                secret: CellSecret::ambush(1),
+                ..ambush
+            };
+            let err = design(&demo(), &a, [0, 1, 0, 0], &[wrong], &test_loot()).err();
+            assert_eq!(err, Some(E::AmbushPackInvalid));
+        }
     }
 }

@@ -16,7 +16,16 @@ export type GridUnit = {
   label: string;
   /** Footprint in cells (1, or 2 for big monsters). The sprite is drawn bottom-center on its cell at the tile pixel scale. */
   size?: 1 | 2;
+  /** Patch C: a short tag drawn at the unit's top-right corner (a pack's threat level). */
+  badge?: string;
 };
+/**
+ * Patch C: a secret cell (docs/MAP_DESCRIPTION.md 8.1, 17.5). Until it is found it is not given at
+ * all (it looks like the floor or the wall it is); a found one is highlighted. The DM's own view
+ * passes the unfound ones too, `found: false`, drawn faint.
+ */
+export type GridSecretKind = "trap" | "ambush" | "stash" | "door";
+export type GridSecret = { x: number; y: number; kind: GridSecretKind; found: boolean; label: string };
 
 /**
  * Patch 11: a visible chest (docs/MAP_DESCRIPTION.md 7.1). A closed chest occupies its cell; an
@@ -39,11 +48,20 @@ export type GridPoint = { x: number; y: number; kind: GridPointKind };
 export type GridAura = { center: Cell; radius: number; hostile: boolean; label: string };
 
 export type GridProps = {
-  /** Map size in cells, 1..=32 each. */
+  /** Map size in cells, 1..=143 each (patch D). */
   width: number;
   height: number;
-  /** MapLayout.cells: 1024 cell bytes (tile type in bits 7-3, `cellKind`), index y * 32 + x (always stride 32). */
+  /** MapLayout.cells: `width * height` cell bytes (tile type in bits 7-3, `cellKind`), index
+   * y * width + x (patch D: `width` per row, as the chain stores them). */
   tiles: Uint8Array;
+  /**
+   * Patch D: the most cells shown at once; a bigger map is drawn through this window, panned with
+   * the wheel (shift: sideways), a middle-button drag or the parchment minimap. Default: the whole
+   * map up to 32x32, a 24x14 window past that.
+   */
+  viewport?: { cols: number; rows: number };
+  /** Patch D: the window follows this cell when it changes (the active unit). */
+  follow?: Cell | null;
   units: GridUnit[];
   /** Unit whose turn it is; gets a highlight ring. */
   activeUnitId?: number | null;
@@ -68,6 +86,8 @@ export type GridProps = {
   chests?: GridChest[];
   /** Patch 13: the entrance and the exit. */
   points?: GridPoint[];
+  /** Patch C: secret cells, drawn over the floor under the units; the canvas title shows the hovered one's label. */
+  secrets?: GridSecret[];
   /**
    * CSS pixel size of one cell on screen. Default 48. With sprites it is rounded down to a whole
    * multiple of the 64 px tile (minimum 64), so the canvas is never resized by CSS and sprites scale

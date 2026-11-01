@@ -1,5 +1,6 @@
 // Mock data for VITE_DATA=mock and the /dev pages. Shapes match chain/types.ts exactly.
-import { PACKS_MAX, type PackDraft } from "./mapcheckWasm";
+import { type DraftSecret, type PackDraft } from "./mapcheckWasm";
+import { Secret, declaredOfDraft, secretLeaves, type BoardSecret } from "./secrets";
 import demoMap from "../../../assets/registry/maps/demo_16x16.json";
 import cavesTemplate from "../../../assets/registry/maps/caves_ruins_16x16.json";
 import forestTemplate from "../../../assets/registry/maps/forest_16x16.json";
@@ -13,7 +14,6 @@ import {
   Carrier,
   Class,
   HitOutcome,
-  MAP_CELLS,
   OpKind,
   OpOrigin,
   Race,
@@ -21,6 +21,8 @@ import {
   Tile,
   cellByte,
   cellIndex,
+  classOf,
+  classPacks,
   type Cell,
   type HitResult,
   type PacketResult,
@@ -77,14 +79,33 @@ export type MapPresetData = {
   /** Arena update: each pack's visible spawn, map cell, facing (by name) and arena rows. A spawn's
    * `x`, `y` are its cell in its pack's arena. */
   packs?: { pack: number; visible: number; x: number; y: number; facing: string; rows: string[] }[];
+  /** Patch C: the cells that hide something (crates/rules/tests/demo_preset.rs); `pack` set: in
+   * that pack's arena. */
+  secrets?: { kind: string; x: number; y: number; pack?: number; damage?: number; difficulty?: number; target?: number; table?: number }[];
 };
+
+/** Patch C: a preset's secrets by cell. */
+export function presetBoardSecrets(p: MapPresetData): BoardSecret[] {
+  return (p.secrets ?? []).map((x) => {
+    const kind = { trap: Secret.Trap, ambush: Secret.Ambush, stash: Secret.Stash, door: Secret.Door }[x.kind] ?? Secret.None;
+    const a = kind === Secret.Trap ? (x.damage ?? 1) : kind === Secret.Ambush ? (x.target ?? 0) : kind === Secret.Stash ? (x.table ?? 0) : 0;
+    return { pack: x.pack ?? null, x: x.x, y: x.y, kind, a, b: kind === Secret.Trap ? (x.difficulty ?? 0) : 0 };
+  });
+}
+
+/** Patch C: a preset's declared counts and secrets by leaf, as the builder checks them. */
+export function presetSecretsOf(p: MapPresetData): { declared: number[]; secrets: DraftSecret[] } {
+  const list = presetBoardSecrets(p);
+  return { declared: declaredOfDraft(list), secrets: secretLeaves(p.width, p.height, presetPacks(p), list) };
+}
 
 /** Arena update: `Facing` by name, clockwise from the north (crates/types). */
 export const FACING_NAMES = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"] as const;
 
 /** A preset's packs by number (`null` for an unused number). */
 export function presetPacks(p: MapPresetData): (PackDraft | null)[] {
-  const out: (PackDraft | null)[] = new Array(PACKS_MAX).fill(null);
+  // Patch D: the pack numbers of the preset's size class.
+  const out: (PackDraft | null)[] = new Array(classPacks(classOf(p.width, p.height) ?? 0)).fill(null);
   for (const k of p.packs ?? []) {
     const width = k.rows[0]?.length ?? 0;
     const cells = new Uint8Array(width * k.rows.length);
@@ -97,7 +118,7 @@ export function presetPacks(p: MapPresetData): (PackDraft | null)[] {
   return out;
 }
 
-/** Converts a preset from assets/registry/maps into MapLayout cells (stride 32), the entrance and the
+/** Converts a preset from assets/registry/maps into MapLayout cells (`width` per row), the entrance and the
  * exit, spawns and chests. */
 export function presetToLayout(p: MapPresetData): {
   tiles: Uint8Array;
@@ -111,8 +132,9 @@ export function presetToLayout(p: MapPresetData): {
   settleTimeoutSecs: number;
   biome: number;
   packs: (PackDraft | null)[];
+  secrets: BoardSecret[];
 } {
-  const tiles = new Uint8Array(MAP_CELLS).fill(cellByte(Tile.Wall));
+  const tiles = new Uint8Array(p.width * p.height).fill(cellByte(Tile.Wall));
   let entrance: Cell | null = null;
   let exit: Cell | null = null;
   p.rows.forEach((row, y) => {
@@ -120,7 +142,7 @@ export function presetToLayout(p: MapPresetData): {
       const ch = row[x] ?? "#";
       if (ch === "E") entrance = { x, y };
       if (ch === "X") exit = { x, y };
-      tiles[cellIndex(x, y)] = cellByte(TILE_CHARS[ch] ?? Tile.Wall, Number(p.variants?.[y]?.[x] ?? 0));
+      if (x < p.width && y < p.height) tiles[cellIndex(x, y, p.width)] = cellByte(TILE_CHARS[ch] ?? Tile.Wall, Number(p.variants?.[y]?.[x] ?? 0));
     }
   });
   const spawns = p.spawns.map((s) => ({
@@ -146,6 +168,7 @@ export function presetToLayout(p: MapPresetData): {
     chestRadius: p.chest_radius ?? 3,
     settleTimeoutSecs: p.settle_timeout_secs ?? 3600,
     packs: presetPacks(p),
+    secrets: presetBoardSecrets(p),
   };
 }
 

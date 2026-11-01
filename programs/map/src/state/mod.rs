@@ -10,15 +10,17 @@ pub use map_layout::*;
 /// Layout version written into every map account. 2: `Map.biome` appended (a version 1 map has
 /// no biome byte and reads as `Biome::Caves`).
 pub const ACCOUNT_VERSION: u8 = 2;
-/// Patch 13: `MapLayout.core.version` of the `MapLayoutDataV2` format.
-pub const LAYOUT_VERSION: u8 = 3;
+/// Patch 13: `MapLayout.core.version` of the `MapLayoutDataV2` format. Arena update: 3.
+/// Patch C: 4, the secrets after the arenas. Patch D: 5, sized by the map's class
+/// (`deadroll_types::map_size`).
+pub const LAYOUT_VERSION: u8 = 5;
 
 #[cfg(test)]
 pub(crate) mod tests {
     use anchor_lang::{
         prelude::Pubkey, AccountDeserialize, AccountSerialize, Discriminator, Space,
     };
-    use deadroll_types::{Biome, MapData, MapLayoutDataV2, MapStatus};
+    use deadroll_types::{map_size::hdr, Biome, MapData, MapStatus};
     use solana_sha256_hasher::hash;
 
     use super::*;
@@ -31,10 +33,8 @@ pub(crate) mod tests {
             MapLayout::DISCRIMINATOR,
             &hash(b"account:MapLayout").to_bytes()[..8]
         );
-        assert_eq!(
-            MapLayout::INIT_SPACE,
-            MapLayoutDataV2::SIZE + deadroll_types::MapArenasData::SIZE
-        );
+        // Patch D: the struct is the header; the rest follows `LayoutGeom`.
+        assert_eq!(8 + MapLayout::INIT_SPACE, hdr::BODY);
         // tier, then patch 11: min_players, chest_radius, settle_timeout_secs (u32), then biome.
         assert_eq!(Map::INIT_SPACE, MapData::SIZE + 1 + 1 + 1 + 4 + 1);
     }
