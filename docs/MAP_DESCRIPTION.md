@@ -16,7 +16,7 @@ Related documents:
 2. **Only ready-made parts.** The DM builds a map from a limited set of tiles and prefabs (mountains, rocks, trees, bushes...), drawn in advance and stored on chain. Custom images cannot be uploaded into a map.
 3. **The program checks the rules.** Limits, passability, and the path from entrance to exit are checked in the program when the map is created. The builder on the website uses the same code via WASM.
 4. **The public part is open, secrets are under a Merkle root.** Terrain, objects, and the one monster each pack shows are visible. Traps, hidden stashes, secret doors and the composition of packs are stored only as the tree root and are revealed one by one with a proof (sections 8, 17.5).
-5. **The map is a template, the party is state.** `Map` is created by the DM once and used in one party. Everything live (positions, explored and revealed cells, monster HP) lives in `GameSession`. **Planned (section 17.7):** the map is one-use and closes by itself after the rewards are issued; its deposit returns to the DM.
+5. **The map is a template, the party is state.** `Map` is created by the DM once and used in one party. Everything live (positions, explored and revealed cells, monster HP) lives in `GameSession`. The map is one-use (section 17.7): it closes by itself after the rewards are issued, and its deposit returns to the DM.
 
 ---
 
@@ -56,7 +56,7 @@ The brief mentions 10×10 for the MVP: that is one room, which a character cross
 | Terrain  | floor, walls, water, doors, stairs                | public      | `Map.cells`, 1 byte per cell                         |
 | Objects  | trees, rocks, bushes, mountains, columns, barrels | public      | `Map.objects`, list of prefabs                       |
 | Points   | entrance, exit, visible chests                    | public      | `Map.points`                                         |
-| Monsters | placement from the Bestiary                       | public (planned: one per pack, section 17.2) | `Map.spawns`, live state in `GameSession` |
+| Monsters | placement from the Bestiary                       | public: one per pack, the rest under the Merkle root (section 17.2) | `Map.spawns`, live state in `GameSession` |
 | Secrets  | traps, hidden stashes, secret doors               | **hidden**  | only `Map.secrets_root` + declared counts            |
 
 ---
@@ -271,7 +271,7 @@ Players see: "the map has 3 traps and 1 hidden stash", but do not know where.
 - **Line of sight:** a cell is visible if the Bresenham line from the character to it does not pass through cells that block vision (walls, trees, boulders, closed doors).
 - **Explored:** cells that have ever been in the vision of anyone in the party are marked in `GameSession.explored` and are shown muted from then on.
 
-**Important:** terrain, objects, and monsters lie on chain in the open, anyone can read them. The vision radius for the public layers is an **interface** mechanic, not cryptography. Only the secrets under the Merkle root are truly hidden. Terrain stays open: the fog of war covers only secrets and, after the arena update, the composition of packs (section 17.5).
+**Important:** terrain, objects, and the one visible monster of each pack lie on chain in the open, anyone can read them. The vision radius for the public layers is an **interface** mechanic, not cryptography. Only the secrets under the Merkle root are truly hidden. Terrain stays open: the fog of war covers only secrets and the composition of packs (section 17.5).
 
 ---
 
@@ -425,13 +425,13 @@ A map is played once: after the rewards its deposits go back to the DM (section 
 
 ---
 
-## 17. Planned: map and arena
+## 17. Map and arena
 
-**Planned, not implemented.** This section is the design of the arena update. Until the patch, sections 1-16 describe how maps work now. Turns, combat and outcomes of the update are in `PARTY_AND_TURNS.md`, section 4.1.
+Turns, combat and outcomes of the two modes are in `PARTY_AND_TURNS.md`, section 4.1.
 
 ### 17.1 Two modes
 
-- **Map** (outside combat): the party walks the map in turns in a circle, as now. Monsters stand still; the DM moves monsters only in combat.
+- **Map** (outside combat): the party walks the map in turns in a circle. Monsters stand still; the DM moves monsters only in combat.
 - **Arena** (combat): each pack has its own small arena. One fight is one pack; the map waits while the arena is played.
 
 ### 17.2 Packs on the map
@@ -440,18 +440,20 @@ A map is played once: after the rewards its deposits go back to the DM (section 
 - The site shows the pack's **threat level**. The DM declares the threat openly when building the map; the program checks it when the pack is revealed, and a mismatch rejects the reveal.
 - The threat is the sum of the pack's monster levels: an elite's level counts 2 times, a boss's 3 times (`BalanceConfig`).
 - A pack with no monster on the map is an **ambush pack**: only its ambush trap starts its fight (section 17.4).
-- A pack has a **facing** (the direction it looks), set by the DM. It decides who moves first in the arena (`PARTY_AND_TURNS.md`, section 4.1).
+- A pack has a **facing** (the direction it looks), set by the DM. It decides who moves first in the arena: the 3 cells behind the visible monster are its back, the other 5 neighbouring cells (the sides included) are its front (`PARTY_AND_TURNS.md`, section 4.1.3).
+- One map holds at most **12 different monster templates** in all its packs; `finalize_map` rejects more (`TooManyTemplates`), because the party copies the templates once when the session opens.
 
 ### 17.3 Arenas
 
 - The DM draws an **arena for every pack** in the builder, with the same tiles, objects and biome rules as the map.
-- The DM picks the arena size within limits from `BalanceConfig`.
+- The DM picks the arena size within limits from `BalanceConfig`: a side from 6 to 12 cells.
 - An arena may hold its own traps and secrets (section 17.5).
-- A boss may occupy 2×2 cells in the arena.
+- A monster of size 2×2 (today the Goblin Chieftain; the size comes from the Bestiary) stands on its whole square in the arena. The square must lie inside the arena, on passable cells and free of other spawns. On the map the visible monster stays one cell. The party is placed around the squares, and a monster counts as reachable if any cell of its square has a reachable neighbour. How distance, lines and knockback treat a large monster: `PARTY_AND_TURNS.md`, section 4.1.3.
+- Every edge the party may come from needs room for a full party, and every monster must be reachable from every side.
 
 ### 17.4 Ambush trap
 
-A trap to which the DM links a **hidden pack** with its arena. When it triggers, the whole party goes into that arena and the monsters move first. The party comes in at the edge the pack's facing names. Each ambush pack has exactly one ambush trap.
+A trap to which the DM links a **hidden pack** with its arena. When it triggers, the whole party goes into that arena and the monsters move first. The party comes in at the edge the pack's facing names (a diagonal facing gives a corner). Each ambush pack has exactly one ambush trap.
 
 ### 17.5 Fog of war and secrets
 

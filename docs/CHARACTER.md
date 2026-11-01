@@ -78,7 +78,7 @@ Rules:
 | **State chance**       | raises the chance to apply states and debuffs (section 2.1)                              | Strength or Intelligence by the skill's source, Dexterity for tempo effects |
 | **Speed**              | how many action points the character gets per turn                                       | race, class, Dexterity, items, effects (section 3.1)                        |
 | **Action Points (AP)** | spent on steps, skills, the basic attack, interactions (`PARTY_AND_TURNS.md`, section 5) | computed from speed                                                         |
-| **Initiative**         | how often the character's turn comes in combat (`PARTY_AND_TURNS.md`, section 6)         | Intelligence, items, effects (for example, Cold Mind)                       |
+| **Initiative**         | how often the character's turn comes in combat (`PARTY_AND_TURNS.md`, section 6)         | Intelligence, items, effects (for example, Slow)                            |
 | **Crit chance**        | in addition to a natural 20 on the d20                                                   | items, traits, skills                                                       |
 
 Resistances exist for every aspect, physical ones included. Physical damage is cut by **armor** first and then by the resistance to its aspect (`COMBAT_MATH.md`, section 6.5). Race gives a resistance only through the passive Resistance skill, which adds its own predisposition (`SKILL_BUILDER.md`, section 6.2). Resistances to future families (mental, sacred) will be added together with them.
@@ -131,7 +131,7 @@ The simulator picks the specific curve.
 
 - A character starts at **level 1**.
 - In the first version there are levels 1-4: this is enough for two map tiers (1-2 and 3-4).
-- **Experience is given for every killed monster** (full to each living character). **Planned:** for every won arena, in full to each living character (`PARTY_AND_TURNS.md`, section 4.1). Nothing after a retreat, not even for the monsters killed in that fight (`PARTY_AND_TURNS.md`, section 7.5). It **accumulates in the temporary cache** and is added to the character only on victory over the boss or on a peaceful exit (`PARTY_AND_TURNS.md`, section 7).
+- **Experience is given for every won arena**: the sum of the experience of the pack's monsters, in full to each living character (`PARTY_AND_TURNS.md`, section 4.1.4). Nothing after a retreat, not even for the monsters killed in that fight (`PARTY_AND_TURNS.md`, section 7.5). It **accumulates in the temporary cache** and is added to the character only on victory over the boss or on a peaceful exit (`PARTY_AND_TURNS.md`, section 7).
 - On **escape**, the accumulated experience is lost.
 - After a **peaceful exit**, a penalty to the experience received applies to the next dungeon.
 - A character whose level is noticeably higher than the map tier gets **less experience or none**, and rewards are not rolled for them.
