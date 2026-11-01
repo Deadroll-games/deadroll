@@ -1,5 +1,6 @@
 //! Turn changes: the first turn after the initiative roll, the advance shared by `end_turn`,
-//! `flee` and `start_turn`, the start of a turn, and the escape rule.
+//! `flee`, `retreat` and `start_turn`, the start of a turn, and the monsters' last turns after a
+//! Retreat or Escape vote.
 //!
 //! Arena update (docs/PARTY_AND_TURNS.md 4.1, 6): on the map the players move in a circle (the
 //! order of the initiative roll); in an arena every unit is on the initiative timeline
@@ -9,7 +10,8 @@ use deadroll_combat::TimedMods;
 use deadroll_rules::arena::{
     delay, next_unit, round_at, start_time, turn_delay, FirstSide, TimelineUnit,
 };
-use deadroll_types::TURN_ORDER_MAX;
+use deadroll_rules::exit::{after_last_move, ExitKind, Vote};
+use deadroll_types::{SessionStatus, TURN_ORDER_MAX};
 
 /// The start of a unit's own turn lives in `deadroll-rules` (shared with `tools/balance`).
 pub use deadroll_rules::turn::{start_of_turn, start_of_turn_with, TurnStart};
@@ -33,17 +35,56 @@ pub fn advance(session: &mut GameSession, session_key: Pubkey, monsters: &Monste
         ArenaMode::Arena => {
             // `start_turn` added the delay under the turn's buffs and debuffs; a turn passed
             // without it (a timeout) takes the delay of the bare initiative.
-            if let Some(unit) = session.current_unit() {
+            let current = session.current_unit();
+            if let Some(unit) = current {
                 if !session.turn_started() {
                     let id = unit.id() as usize;
                     let step = delay(initiative_of(session, unit), &BALANCE.arena);
                     session.unit_time[id] = session.unit_time[id].saturating_add(step);
                 }
             }
+            if session.leaving() {
+                // Patch B: the monsters' last turns (docs/PARTY_AND_TURNS.md 7.5).
+                let ended = match current {
+                    Some(Unit::Monster(i)) => Some(i),
+                    _ => None,
+                };
+                session.last_moves = after_last_move(session.last_moves, ended, living(monsters)?);
+                if !session.leaving() {
+                    return leave(session, session_key);
+                }
+            }
             next_on_timeline(session, session_key, monsters)
         }
-        ArenaMode::Engaged | ArenaMode::Won => Ok(()),
+        ArenaMode::Engaged | ArenaMode::Won | ArenaMode::Retreated => Ok(()),
     }
+}
+
+/// Bit per living arena slot.
+pub fn living(monsters: &Monsters) -> Result<u8> {
+    let mut out = 0u8;
+    for i in 0..monsters.count()? {
+        if monsters.get(i)?.alive {
+            out |= 1 << i;
+        }
+    }
+    Ok(out)
+}
+
+/// The monsters took their last turns: an Escape ends the party with nothing (docs/PARTY_AND_TURNS.md
+/// 7.3), a Retreat waits for `leave_arena` to bring the party back to the map.
+fn leave(session: &mut GameSession, session_key: Pubkey) -> Result<()> {
+    let kind = ExitKind::from_u8(session.exit_kind);
+    session.set_exit_vote(Vote::NONE);
+    match kind {
+        Some(ExitKind::Escape) => {
+            session.core.status = SessionStatus::Fled;
+            crate::outcomes::emit_if_ended(session, session_key)?;
+        }
+        Some(ExitKind::Retreat) => session.mode = ArenaMode::Retreated,
+        None => return err!(SessionError::InvalidExit),
+    }
+    Ok(())
 }
 
 /// The next living player of the map circle.
@@ -209,9 +250,12 @@ fn next_on_timeline(
         let Some(unit) = Unit::from_id(id) else {
             continue;
         };
+        // Patch B: during the monsters' last turns only those still owed one move.
         let alive = match unit {
-            Unit::Player(s) => session.player_alive(s),
-            Unit::Monster(m) => monsters.get(m)?.alive,
+            Unit::Player(s) => !session.leaving() && session.player_alive(s),
+            Unit::Monster(m) => {
+                monsters.get(m)?.alive && (!session.leaving() || session.last_moves & (1 << m) != 0)
+            }
         };
         *u = TimelineUnit {
             id,
@@ -251,12 +295,6 @@ pub fn enter_timeline(
     }
     session.turn_order_len = len as u8;
     next_on_timeline(session, session_key, monsters)
-}
-
-/// The party flees when every living player has the escape intent (docs/PARTY_AND_TURNS.md,
-/// section 7.3: the dead do not vote, unanimity is the check).
-pub fn everyone_flees(flee_mask: u8, alive_mask: u8) -> bool {
-    alive_mask != 0 && flee_mask & alive_mask == alive_mask
 }
 
 #[cfg(test)]
@@ -438,16 +476,5 @@ mod tests {
         let before = s.unit_time[0];
         add_turn_delay(&mut s, Unit::Player(0), &haste);
         assert_eq!(s.unit_time[0], before + delay(10, &BALANCE.arena));
-    }
-
-    #[test]
-    fn flee_needs_every_living_player() {
-        assert!(!everyone_flees(0b0001, 0b0011));
-        assert!(everyone_flees(0b0011, 0b0011));
-        // The tank died: the other three decide.
-        assert!(everyone_flees(0b1110, 0b1110));
-        assert!(everyone_flees(0b1111, 0b1110));
-        assert!(!everyone_flees(0b0110, 0b1110));
-        assert!(!everyone_flees(0, 0));
     }
 }

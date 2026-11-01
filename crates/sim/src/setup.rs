@@ -142,10 +142,17 @@ pub struct Fight {
     pub first: FirstSide,
     /// The packs fought after this one, the party carried over (`EncounterPreset::then`).
     pub then: Vec<Fight>,
+    /// Patch B: the party retreated from this pack before: its monsters start with the retreat
+    /// buff (`deadroll_rules::exit::retreat_buff`).
+    pub guarded: bool,
 }
 
-/// The side that moves first coming from `approach`.
-pub fn first_side(approach: Approach) -> FirstSide {
+/// The side that moves first coming from `approach`; a pack on guard (the party retreated from it)
+/// moves first from any side (`deadroll_rules::exit::first_side_guarded`).
+pub fn first_side(approach: Approach, guarded: bool) -> FirstSide {
+    if guarded {
+        return FirstSide::Monsters;
+    }
     match approach {
         Approach::Back => FirstSide::Party,
         Approach::Front => FirstSide::Monsters,
@@ -316,7 +323,8 @@ pub fn resolve_fight(presets: &Presets, id: &str, cfg: &BalanceConfig) -> (Optio
         issues.extend(more);
         match next {
             Some(mut next) => {
-                next.first = first_side(step.approach);
+                next.first = first_side(step.approach, step.guarded);
+                next.guarded = step.guarded;
                 fight.then.push(next);
             }
             None => issues.errors.push(format!(
@@ -387,8 +395,9 @@ fn resolve_pack(presets: &Presets, id: &str, cfg: &BalanceConfig) -> (Option<Fig
             spawns,
             arena,
             tables: presets.registry.tables,
-            first: first_side(e.approach),
+            first: first_side(e.approach, e.guarded),
             then: Vec::new(),
+            guarded: e.guarded,
         }),
         issues,
     )

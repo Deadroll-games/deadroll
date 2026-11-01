@@ -21,10 +21,12 @@ export const ArenaMode = {
   1: "Engaged",
   2: "Arena",
   3: "Won",
+  4: "Retreated",
   Map: 0,
   Engaged: 1,
   Arena: 2,
   Won: 3,
+  Retreated: 4,
 } as const;
 
 /** Arena update: where the party is. */

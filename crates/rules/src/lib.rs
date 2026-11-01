@@ -20,6 +20,7 @@
 pub mod arena;
 pub mod aura;
 pub mod config;
+pub mod exit;
 pub mod input;
 pub mod items;
 pub mod line;

@@ -4,7 +4,7 @@ import type { GameSessionAcc, Party, PartyPlayer } from "./game";
 import { errorName } from "./send";
 import { StateKind } from "./types";
 import { SessionStatus } from "@deadroll/sdk/session";
-import { cooldownLabel, skillCooldowns, skillUsedText, skipText, arenaStepFor, startTurnFor, tickText, turnActed, turnStarted } from "./turns";
+import { cooldownLabel, exitVoteView, skillCooldowns, skillUsedText, skipText, arenaStepFor, startTurnFor, tickText, turnActed, turnStarted } from "./turns";
 
 const A = (n: number) => getAddressDecoder().decode(new Uint8Array(32).fill(n)) as Address;
 const DM = A(1);
@@ -129,7 +129,7 @@ describe("log texts", () => {
 
 describe("arenaStepFor (arena update)", () => {
   it("any party member enters an engaged pack's arena and leaves a won one; nothing on the map or in play", () => {
-    for (const [mode, step] of [[0, null], [1, "enter"], [2, null], [3, "leave"]] as const) {
+    for (const [mode, step] of [[0, null], [1, "enter"], [2, null], [3, "leave"], [4, "leave"]] as const) {
       expect(arenaStepFor(party(0, { mode }), BOB)).toBe(step);
     }
     // Not a member, a pending roll, deaths waiting: nothing.
@@ -140,5 +140,22 @@ describe("arenaStepFor (arena update)", () => {
   it("between the map and an arena no turn starts, but the deaths are finalized", () => {
     expect(startTurnFor(party(0, { mode: 1, startedSeq: 6 }), ALICE)).toBeNull();
     expect(startTurnFor(party(0, { mode: 3, pendingDeaths: 1 }), ALICE)?.finalize).toBe(true);
+    // Patch B: after a retreat too.
+    expect(startTurnFor(party(0, { mode: 4, startedSeq: 6 }), ALICE)).toBeNull();
+  });
+});
+
+describe("exitVoteView (patch B)", () => {
+  const view = (over: Partial<GameSessionAcc>) =>
+    exitVoteView(party(0, { exitKind: 0, fleeMask: 0, lastMoves: 0, retreats: 0, aliveMask: 0b11, ...over }, { playerCount: 2 }).session);
+  it("no proposal: nobody voted, every retreat left", () => {
+    expect(view({})).toEqual({ kind: null, voted: [], waiting: [], leaving: false, retreatsLeft: 2 });
+  });
+  it("a retreat proposal: who confirmed and who is still to vote; the dead do not vote", () => {
+    expect(view({ exitKind: 1, fleeMask: 0b01, retreats: 1 })).toEqual({ kind: "retreat", voted: [0], waiting: [1], leaving: false, retreatsLeft: 1 });
+    expect(view({ exitKind: 2, fleeMask: 0b10, aliveMask: 0b10 })).toMatchObject({ kind: "escape", voted: [1], waiting: [] });
+  });
+  it("the vote passed: the monsters take their last moves; no retreat below zero", () => {
+    expect(view({ exitKind: 1, fleeMask: 0b11, lastMoves: 0b1, retreats: 5 })).toMatchObject({ leaving: true, retreatsLeft: 0 });
   });
 });

@@ -227,6 +227,10 @@ pub struct EncounterPreset {
     pub approach: Approach,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub then: Vec<PackStep>,
+    /// Patch B: the party retreated from this pack before (docs/PARTY_AND_TURNS.md 7.5): it moves
+    /// first from any side and starts with the retreat buff (`deadroll_rules::exit`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub guarded: bool,
 }
 
 /// Arena update: where the party came from, seen from the pack. From the back the party moves
@@ -246,12 +250,15 @@ impl Approach {
 }
 
 /// One more pack of an encounter: another encounter preset, entered from `approach` (its own
-/// `approach` and `then` are not used).
+/// `approach`, `guarded` and `then` are not used).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PackStep {
     pub encounter: String,
     #[serde(default, skip_serializing_if = "Approach::is_front")]
     pub approach: Approach,
+    /// Patch B: the party retreated from this pack before (`EncounterPreset::guarded`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub guarded: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

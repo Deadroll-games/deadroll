@@ -67,6 +67,8 @@ import {
   getLeavePartyInstruction,
   getConsumeRandomnessInstruction,
   getEndTurnInstruction,
+  getFleeInstruction,
+  getRetreatInstruction,
   getEscrowDecoder,
   getGameSessionDecoder,
   getJoinSessionInstruction,
@@ -768,6 +770,19 @@ export async function endTurnIx(actor: Actor, session: Address, character: Addre
   });
 }
 
+/** Patch B: "Escape" or "Retreat" in an arena (docs/PARTY_AND_TURNS.md 7.5): proposes it, or
+ * confirms the proposal on the table, and ends the turn. */
+export async function exitVoteIx(kind: "flee" | "retreat", actor: Actor, session: Address, character: Address): Promise<Instruction> {
+  const accounts = {
+    signer: actor.signer,
+    session,
+    monsters: await monstersPda(session),
+    participation: await participationPda(session, character),
+    sessionToken: opt(actor.token),
+  };
+  return kind === "flee" ? getFleeInstruction(accounts) : getRetreatInstruction(accounts);
+}
+
 /**
  * The accounts that finalize the pending deaths (`GameSession.pending_deaths`): each queued slot's
  * Character, SkillSet and Bag, writable, in slot order. The programs check them and refuse
@@ -1098,8 +1113,13 @@ type LayoutExtras = { points: GridPoint[]; spawns: Spawn[]; arenas: { cells: Uin
 const LAYOUT_EXTRAS = new WeakMap<Uint8Array, LayoutExtras>();
 
 /** Arena update: where the party is (`GameSession.mode`). */
-export type ArenaModeName = "map" | "engaged" | "arena" | "won";
-const ARENA_MODES: ArenaModeName[] = ["map", "engaged", "arena", "won"];
+export type ArenaModeName = "map" | "engaged" | "arena" | "won" | "retreated";
+const ARENA_MODES: ArenaModeName[] = ["map", "engaged", "arena", "won", "retreated"];
+/** The party stands on an arena's cells (`GameSession::ground`). */
+export function inArena(s: GameSessionAcc): boolean {
+  const mode = arenaMode(s);
+  return mode === "arena" || mode === "won" || mode === "retreated";
+}
 export function arenaMode(s: GameSessionAcc): ArenaModeName {
   return ARENA_MODES[s.mode as number] ?? "map";
 }
@@ -1109,8 +1129,7 @@ const ARENA_STRIDE = 12;
 /** The cells the units stand on, at the map's stride (32): the map's, or in an arena its pack's
  * (`GameSession::ground`). */
 export function groundTiles(p: Pick<Party, "session" | "tiles" | "arenas">): Uint8Array | null {
-  const mode = arenaMode(p.session);
-  if (mode !== "arena" && mode !== "won") return p.tiles;
+  if (!inArena(p.session)) return p.tiles;
   const cells = p.arenas?.cells[p.session.arenaPack];
   if (!cells) return null;
   const out = new Uint8Array(MAP_CELLS).fill(cellByte(Tile.Wall));
@@ -1120,7 +1139,7 @@ export function groundTiles(p: Pick<Party, "session" | "tiles" | "arenas">): Uin
 
 /** On the map: each living pack's visible monster, its template and its cell (it stands still). */
 export function visiblePacks(p: Pick<Party, "session" | "spawns">): { pack: number; bestiaryId: number; x: number; y: number; facing: number }[] {
-  if (arenaMode(p.session) === "arena" || arenaMode(p.session) === "won") return [];
+  if (inArena(p.session)) return [];
   return p.session.packs.flatMap((pk, pack) =>
     pk.width && p.session.packsAlive & (1 << pack) ? [{ pack, bestiaryId: p.spawns[pk.visible]?.bestiaryId ?? 0, x: pk.x, y: pk.y, facing: pk.facing as number }] : [],
   );

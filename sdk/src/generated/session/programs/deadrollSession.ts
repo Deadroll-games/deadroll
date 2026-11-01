@@ -66,6 +66,7 @@ import {
   getMovePathInstructionAsync,
   getOpenChestInstructionAsync,
   getOpenSessionInstructionAsync,
+  getRetreatInstruction,
   getSetReadyInstructionAsync,
   getSetSessionKeyInstruction,
   getSettlePartyInstructionAsync,
@@ -85,6 +86,7 @@ import {
   parseMovePathInstruction,
   parseOpenChestInstruction,
   parseOpenSessionInstruction,
+  parseRetreatInstruction,
   parseSetReadyInstruction,
   parseSetSessionKeyInstruction,
   parseSettlePartyInstruction,
@@ -118,11 +120,13 @@ import {
   type ParsedMovePathInstruction,
   type ParsedOpenChestInstruction,
   type ParsedOpenSessionInstruction,
+  type ParsedRetreatInstruction,
   type ParsedSetReadyInstruction,
   type ParsedSetSessionKeyInstruction,
   type ParsedSettlePartyInstruction,
   type ParsedStartSessionInstruction,
   type ParsedStartTurnInstruction,
+  type RetreatInput,
   type SetReadyAsyncInput,
   type SetSessionKeyInput,
   type SettlePartyAsyncInput,
@@ -229,77 +233,85 @@ export const DeadrollSessionEvent = {
   0: "ActionRequested",
   1: "ArenaEntered",
   2: "ArenaLeft",
-  3: "ArenaWon",
-  4: "AuraChanged",
-  5: "CacheClosed",
-  6: "CacheSettled",
-  7: "CellBurned",
-  8: "ChestOpenRequested",
-  9: "ChestOpened",
-  10: "ContributionRefunded",
-  11: "DeathFinalized",
-  12: "EffectResolved",
-  13: "EscrowClaimed",
-  14: "FleeVoted",
-  15: "HitResolved",
-  16: "InitiativeRolled",
-  17: "ModsTicked",
-  18: "MonsterAuraChanged",
-  19: "MonsterKilled",
-  20: "MonsterReactiveTriggered",
-  21: "Moved",
-  22: "PackEngaged",
-  23: "PartyLeft",
-  24: "PlayerDied",
-  25: "PlayerJoined",
-  26: "PlayerReady",
-  27: "ReactiveTriggered",
-  28: "ResonanceSpread",
-  29: "RewardsRolled",
-  30: "SessionEnded",
-  31: "SessionKeyChanged",
-  32: "SessionOpened",
-  33: "SkillUsed",
-  34: "TurnSkipped",
-  35: "TurnStarted",
-  36: "TurnTicked",
+  3: "ArenaRetreated",
+  4: "ArenaWon",
+  5: "AuraChanged",
+  6: "CacheClosed",
+  7: "CacheSettled",
+  8: "CellBurned",
+  9: "ChestOpenRequested",
+  10: "ChestOpened",
+  11: "ContributionRefunded",
+  12: "DeathFinalized",
+  13: "EffectResolved",
+  14: "EscrowClaimed",
+  15: "ExitCancelled",
+  16: "ExitPassed",
+  17: "FleeVoted",
+  18: "HitResolved",
+  19: "InitiativeRolled",
+  20: "ModsTicked",
+  21: "MonsterAuraChanged",
+  22: "MonsterKilled",
+  23: "MonsterReactiveTriggered",
+  24: "Moved",
+  25: "PackEngaged",
+  26: "PartyLeft",
+  27: "PlayerDied",
+  28: "PlayerJoined",
+  29: "PlayerReady",
+  30: "ReactiveTriggered",
+  31: "ResonanceSpread",
+  32: "RetreatVoted",
+  33: "RewardsRolled",
+  34: "SessionEnded",
+  35: "SessionKeyChanged",
+  36: "SessionOpened",
+  37: "SkillUsed",
+  38: "TurnSkipped",
+  39: "TurnStarted",
+  40: "TurnTicked",
   ActionRequested: 0,
   ArenaEntered: 1,
   ArenaLeft: 2,
-  ArenaWon: 3,
-  AuraChanged: 4,
-  CacheClosed: 5,
-  CacheSettled: 6,
-  CellBurned: 7,
-  ChestOpenRequested: 8,
-  ChestOpened: 9,
-  ContributionRefunded: 10,
-  DeathFinalized: 11,
-  EffectResolved: 12,
-  EscrowClaimed: 13,
-  FleeVoted: 14,
-  HitResolved: 15,
-  InitiativeRolled: 16,
-  ModsTicked: 17,
-  MonsterAuraChanged: 18,
-  MonsterKilled: 19,
-  MonsterReactiveTriggered: 20,
-  Moved: 21,
-  PackEngaged: 22,
-  PartyLeft: 23,
-  PlayerDied: 24,
-  PlayerJoined: 25,
-  PlayerReady: 26,
-  ReactiveTriggered: 27,
-  ResonanceSpread: 28,
-  RewardsRolled: 29,
-  SessionEnded: 30,
-  SessionKeyChanged: 31,
-  SessionOpened: 32,
-  SkillUsed: 33,
-  TurnSkipped: 34,
-  TurnStarted: 35,
-  TurnTicked: 36,
+  ArenaRetreated: 3,
+  ArenaWon: 4,
+  AuraChanged: 5,
+  CacheClosed: 6,
+  CacheSettled: 7,
+  CellBurned: 8,
+  ChestOpenRequested: 9,
+  ChestOpened: 10,
+  ContributionRefunded: 11,
+  DeathFinalized: 12,
+  EffectResolved: 13,
+  EscrowClaimed: 14,
+  ExitCancelled: 15,
+  ExitPassed: 16,
+  FleeVoted: 17,
+  HitResolved: 18,
+  InitiativeRolled: 19,
+  ModsTicked: 20,
+  MonsterAuraChanged: 21,
+  MonsterKilled: 22,
+  MonsterReactiveTriggered: 23,
+  Moved: 24,
+  PackEngaged: 25,
+  PartyLeft: 26,
+  PlayerDied: 27,
+  PlayerJoined: 28,
+  PlayerReady: 29,
+  ReactiveTriggered: 30,
+  ResonanceSpread: 31,
+  RetreatVoted: 32,
+  RewardsRolled: 33,
+  SessionEnded: 34,
+  SessionKeyChanged: 35,
+  SessionOpened: 36,
+  SkillUsed: 37,
+  TurnSkipped: 38,
+  TurnStarted: 39,
+  TurnTicked: 40,
 } as const;
 
 export type DeadrollSessionEvent = (typeof DeadrollSessionEvent)[Exclude<
@@ -343,6 +355,17 @@ export function identifyDeadrollSessionEvent(
     )
   ) {
     return DeadrollSessionEvent.ArenaLeft;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([74, 227, 42, 75, 201, 86, 158, 209]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionEvent.ArenaRetreated;
   }
   if (
     containsBytes(
@@ -464,6 +487,28 @@ export function identifyDeadrollSessionEvent(
     )
   ) {
     return DeadrollSessionEvent.EscrowClaimed;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([88, 212, 4, 149, 172, 64, 137, 232]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionEvent.ExitCancelled;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([11, 150, 104, 66, 37, 19, 227, 29]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionEvent.ExitPassed;
   }
   if (
     containsBytes(
@@ -634,6 +679,17 @@ export function identifyDeadrollSessionEvent(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([46, 98, 189, 214, 33, 241, 97, 213]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionEvent.RetreatVoted;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([160, 209, 32, 22, 55, 150, 108, 241]),
       ),
       0,
@@ -738,11 +794,12 @@ export const DeadrollSessionInstruction = {
   11: "MovePath",
   12: "OpenChest",
   13: "OpenSession",
-  14: "SetReady",
-  15: "SetSessionKey",
-  16: "SettleParty",
-  17: "StartSession",
-  18: "StartTurn",
+  14: "Retreat",
+  15: "SetReady",
+  16: "SetSessionKey",
+  17: "SettleParty",
+  18: "StartSession",
+  19: "StartTurn",
   Act: 0,
   ClaimAfterTimeout: 1,
   CloseCache: 2,
@@ -757,11 +814,12 @@ export const DeadrollSessionInstruction = {
   MovePath: 11,
   OpenChest: 12,
   OpenSession: 13,
-  SetReady: 14,
-  SetSessionKey: 15,
-  SettleParty: 16,
-  StartSession: 17,
-  StartTurn: 18,
+  Retreat: 14,
+  SetReady: 15,
+  SetSessionKey: 16,
+  SettleParty: 17,
+  StartSession: 18,
+  StartTurn: 19,
 } as const;
 
 export type DeadrollSessionInstruction =
@@ -932,6 +990,17 @@ export function identifyDeadrollSessionInstruction(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([182, 111, 131, 72, 138, 20, 35, 55]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionInstruction.Retreat;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([105, 78, 7, 162, 181, 167, 186, 43]),
       ),
       0,
@@ -1034,6 +1103,9 @@ export type ParsedDeadrollSessionInstruction<
   | ({
       instructionType: typeof DeadrollSessionInstruction.OpenSession;
     } & ParsedOpenSessionInstruction<TProgram>)
+  | ({
+      instructionType: typeof DeadrollSessionInstruction.Retreat;
+    } & ParsedRetreatInstruction<TProgram>)
   | ({
       instructionType: typeof DeadrollSessionInstruction.SetReady;
     } & ParsedSetReadyInstruction<TProgram>)
@@ -1151,6 +1223,13 @@ export function parseDeadrollSessionInstruction<TProgram extends string>(
       return {
         instructionType: DeadrollSessionInstruction.OpenSession,
         ...parseOpenSessionInstruction(instruction),
+      };
+    }
+    case DeadrollSessionInstruction.Retreat: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: DeadrollSessionInstruction.Retreat,
+        ...parseRetreatInstruction(instruction),
       };
     }
     case DeadrollSessionInstruction.SetReady: {
@@ -1273,6 +1352,9 @@ export type DeadrollSessionPluginInstructions = {
     input: OpenSessionAsyncInput,
   ) => ReturnType<typeof getOpenSessionInstructionAsync> &
     SelfPlanAndSendFunctions;
+  retreat: (
+    input: RetreatInput,
+  ) => ReturnType<typeof getRetreatInstruction> & SelfPlanAndSendFunctions;
   setReady: (
     input: SetReadyAsyncInput,
   ) => ReturnType<typeof getSetReadyInstructionAsync> &
@@ -1393,6 +1475,8 @@ export function deadrollSessionProgram() {
               client,
               getOpenSessionInstructionAsync(input),
             ),
+          retreat: (input) =>
+            addSelfPlanAndSendFunctions(client, getRetreatInstruction(input)),
           setReady: (input) =>
             addSelfPlanAndSendFunctions(
               client,

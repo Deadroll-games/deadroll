@@ -222,8 +222,9 @@ pub fn handler(ctx: Context<MovePath>, unit: u8, path: Vec<Cell>) -> Result<()> 
             p.core.y = walked.end.y;
             p.core.action_points = walked.ap_left;
             session.player_pos[slot as usize] = walked.end;
-            // Moving is another action: every escape intent resets (docs/PARTY_AND_TURNS.md, 7.3).
-            session.flee_mask = 0;
+            // Moving is another action: it cancels a Retreat or Escape proposal
+            // (docs/PARTY_AND_TURNS.md 7.5).
+            crate::exit_vote::cancel(session, session_key, slot);
             emit!(Moved {
                 session: session_key,
                 unit,

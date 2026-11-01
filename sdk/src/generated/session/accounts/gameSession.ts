@@ -264,6 +264,21 @@ export type GameSession = {
   unitTime: Array<number>;
   /** Each player's Dexterity, set at `set_ready(true)`: it wins a tie on the timeline. */
   playerDex: Array<number>;
+  /** The proposal on the table (`deadroll_rules::exit::ExitKind` as `u8`, `NO_EXIT` = none). */
+  exitKind: number;
+  /**
+   * The vote passed: bit per arena slot whose last turn is still to come. While it is not
+   * empty only those monsters move; when it empties the party leaves.
+   */
+  lastMoves: number;
+  /** Retreats this party made (`ArenaTuning::retreats_max`). */
+  retreats: number;
+  /** Bit per pack number the party retreated from: on guard, it moves first from any side. */
+  packsGuarded: number;
+  /** Bit per pack number whose next fight starts with the retreat buff (cleared when it starts). */
+  packsBuffed: number;
+  /** Bit per layout spawn killed in an arena the party retreated from: it stays dead. */
+  deadSpawns: number;
 };
 
 export type GameSessionArgs = {
@@ -432,6 +447,21 @@ export type GameSessionArgs = {
   unitTime: Array<number>;
   /** Each player's Dexterity, set at `set_ready(true)`: it wins a tie on the timeline. */
   playerDex: Array<number>;
+  /** The proposal on the table (`deadroll_rules::exit::ExitKind` as `u8`, `NO_EXIT` = none). */
+  exitKind: number;
+  /**
+   * The vote passed: bit per arena slot whose last turn is still to come. While it is not
+   * empty only those monsters move; when it empties the party leaves.
+   */
+  lastMoves: number;
+  /** Retreats this party made (`ArenaTuning::retreats_max`). */
+  retreats: number;
+  /** Bit per pack number the party retreated from: on guard, it moves first from any side. */
+  packsGuarded: number;
+  /** Bit per pack number whose next fight starts with the retreat buff (cleared when it starts). */
+  packsBuffed: number;
+  /** Bit per layout spawn killed in an arena the party retreated from: it stays dead. */
+  deadSpawns: number;
 };
 
 /** Gets the encoder for {@link GameSessionArgs} account data. */
@@ -507,6 +537,12 @@ export function getGameSessionEncoder(): FixedSizeEncoder<GameSessionArgs> {
       ["mapRound", getU16Encoder()],
       ["unitTime", getArrayEncoder(getU32Encoder(), { size: 12 })],
       ["playerDex", getArrayEncoder(getU16Encoder(), { size: 4 })],
+      ["exitKind", getU8Encoder()],
+      ["lastMoves", getU8Encoder()],
+      ["retreats", getU8Encoder()],
+      ["packsGuarded", getU8Encoder()],
+      ["packsBuffed", getU8Encoder()],
+      ["deadSpawns", getU32Encoder()],
     ]),
     (value) => ({ ...value, discriminator: GAME_SESSION_DISCRIMINATOR }),
   );
@@ -584,6 +620,12 @@ export function getGameSessionDecoder(): FixedSizeDecoder<GameSession> {
     ["mapRound", getU16Decoder()],
     ["unitTime", getArrayDecoder(getU32Decoder(), { size: 12 })],
     ["playerDex", getArrayDecoder(getU16Decoder(), { size: 4 })],
+    ["exitKind", getU8Decoder()],
+    ["lastMoves", getU8Decoder()],
+    ["retreats", getU8Decoder()],
+    ["packsGuarded", getU8Decoder()],
+    ["packsBuffed", getU8Decoder()],
+    ["deadSpawns", getU32Decoder()],
   ]);
 }
 
@@ -649,5 +691,5 @@ export async function fetchAllMaybeGameSession(
 }
 
 export function getGameSessionSize(): number {
-  return 1206;
+  return 1215;
 }

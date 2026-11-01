@@ -715,7 +715,7 @@ const FAR = [
 const ARENA_SIDE = 12;
 /** Offset of a bestiary record's `xp` (u32, `deadroll_rules::monster::record::XP`). */
 const WOLF_XP_AT = 34;
-const ArenaMode = { map: "map", engaged: "engaged", arena: "arena", won: "won" };
+const ArenaMode = { map: "map", engaged: "engaged", arena: "arena", won: "won", retreated: "retreated" };
 const modeOf = (s: any) => Object.keys(s.mode)[0];
 
 interface MapFixture {
@@ -1473,8 +1473,14 @@ class Party {
     return assert.fail("no VRF value gave the wanted rolls");
   }
   flee(who: number, signer: Keypair, token: PublicKey | null = null) {
-    return program.methods
-      .flee()
+    return this.exitVote("flee", who, signer, token);
+  }
+  /** Patch B: "Retreat" from the arena (docs/PARTY_AND_TURNS.md 7.5). */
+  retreat(who: number, signer: Keypair, token: PublicKey | null = null) {
+    return this.exitVote("retreat", who, signer, token);
+  }
+  exitVote(kind: "flee" | "retreat", who: number, signer: Keypair, token: PublicKey | null) {
+    return program.methods[kind]()
       .accountsStrict({
         signer: signer.publicKey,
         session: this.acc.session,
@@ -1483,7 +1489,40 @@ class Party {
         sessionToken: token,
       })
       .signers([signer])
-      .rpc();
+      .rpc({ commitment: "confirmed" });
+  }
+  /**
+   * Patch B: every living player votes for `kind` on their turns, the DM ends the monsters' turns,
+   * until the party left the arena (retreated, fled, or the pack died). Returns the state, the
+   * last moves the vote passed with and the monster units that moved after it.
+   */
+  async voteAll(kind: "flee" | "retreat", max = 60) {
+    let lastMoves = 0;
+    const after: number[] = [];
+    let voteSig = "";
+    for (let i = 0; i < max; i++) {
+      await this.settle();
+      const s = await this.state();
+      if (!s.core.status.active || modeOf(s) !== ArenaMode.arena) return { s, lastMoves, after, voteSig };
+      const cur = s.core.turnOrder[s.core.turnIndex];
+      if (s.startedSeq !== s.turnSeq) {
+        await this.begin();
+        continue;
+      }
+      if (cur < MONSTER_BASE) {
+        assert.equal(s.lastMoves, 0, "no player's turn during the monsters' last moves");
+        const sig = await this.exitVote(kind, cur, this.players[cur].wallet, null);
+        const passed = eventsNamed(await eventsOf(sig), "exitPassed");
+        if (passed.length) {
+          lastMoves = passed[0].lastMoves;
+          voteSig = sig;
+        }
+      } else {
+        if (lastMoves) after.push(cur);
+        await this.endTurn(this.dm, null);
+      }
+    }
+    return assert.fail("the party never left the arena");
   }
   /** Patch 11: each player's `(Participation, RewardCache, Character)`, writable, in slot order. */
   settleAccounts() {
@@ -2059,10 +2098,21 @@ describe("deadroll_session: a session key for one party (patch 10)", { skip: SKI
 
   it("after the party the key passes no game instruction; leaving revokes it and refunds the key", async () => {
     const p0 = party.players[0];
+    // Patch B: Escape is decided in an arena; the session key votes, the wolves move once more.
+    await party.engage(1);
+    await party.skipTo(0);
     await party.flee(0, key, token);
-    assert.ok((await party.state()).core.status.fled);
-    await rejects(party.move(0, key, [N], token), "NotActive");
-    await rejects(party.endTurn(key, 0, token), "NotActive");
+    assert.ok((await party.voteAll("flee")).s.core.status.fled);
+    // The party ended on the last wolf's turn: the key is refused, by the ended party or by the
+    // session-key check that runs first.
+    for (const call of [() => party.move(0, key, [N], token), () => party.endTurn(key, 0, token)]) {
+      const err = await call().then(
+        () => null,
+        (e: any) => [e?.message ?? String(e), ...(e?.logs ?? [])].join(" "),
+      );
+      assert.ok(err && /NotActive|InvalidToken/.test(err), `refused: ${err}`);
+    }
+    await rejects(party.flee(0, key, token), "NotActive");
     await rejects(setKey(p0.wallet, 0, Keypair.generate().publicKey).signers([p0.wallet]).rpc(), "PartyEnded");
     // Patch 11: the DM settles with the main wallet only; a player's key cannot close the cache.
     await rejects(party.settleParty(party.dmActor), "DmMainWalletOnly");
@@ -3344,6 +3394,148 @@ describe("deadroll_session: from a pack's front the monsters move first (arena u
   });
 });
 
+describe("deadroll_session: Retreat and Escape from an arena (patch B)", { skip: SKIP_PARTY }, () => {
+  let party: Party;
+  /** The arena slot of the wolf killed before the first retreat, and its layout spawn. */
+  let killed = -1;
+  const RETREAT = 1;
+  const ESCAPE = 2;
+
+  /** Player 0 (back on the map next to the wolves after a retreat) steps away and back: the
+   * wolves engage again, `enter_arena` takes the party in. */
+  async function reengage() {
+    await party.skipTo(0);
+    const p0 = party.players[0];
+    await party.movePath(p0.wallet, 0, [{ x: 2, y: 1 }, { x: 2, y: 2 }], p0.participation);
+    assert.equal(modeOf(await party.state()), ArenaMode.engaged);
+    const sig = await (await party.enterArena()).rpc({ commitment: "confirmed" });
+    await party.settle();
+    return sig;
+  }
+
+  before(async () => {
+    party = await Party.create(["warrior", "mage"]);
+    await party.startAll(true);
+  });
+
+  it("Retreat and Escape are decided in an arena only", async () => {
+    const p0 = party.players[0];
+    await rejects(party.retreat(0, p0.wallet), "NotInArena");
+    await rejects(party.flee(0, p0.wallet), "NotInArena");
+    // Player 0 steps next to the wolves from their back: the party moves first.
+    await party.move(0, p0.wallet, [STEP_SE]);
+    await (await party.enterArena()).rpc({ commitment: "confirmed" });
+    await party.begin();
+    assert.equal((await party.state()).core.turnOrder[(await party.state()).core.turnIndex], 0);
+  });
+
+  it("only the player whose turn it is votes, with their own wallet or key", async () => {
+    const [p0, p1] = party.players;
+    await rejects(party.retreat(1, p1.wallet), "NotYourTurn");
+    await rejects(party.retreat(0, p1.wallet), "Unauthorized");
+    await rejects(party.retreat(0, party.dm), "Unauthorized");
+    await rejects(party.flee(0, p1.wallet), "Unauthorized");
+    const sig = await party.retreat(0, p0.wallet);
+    console.log(`    CU, retreat (a proposal, the next turn starts): ${await unitsOf(sig)}`);
+    const ev = await eventOf(sig, "retreatVoted");
+    assert.deepEqual([ev.slot, ev.voteMask, ev.aliveMask, ev.retreats], [0, 0b01, 0b11, 0]);
+    const s = await party.state();
+    assert.deepEqual([s.exitKind, s.fleeMask, s.lastMoves], [RETREAT, 0b01, 0]);
+    assert.notEqual(s.core.turnOrder[s.core.turnIndex], 0, "the vote spent the turn");
+  });
+
+  it("any other action on a player's turn cancels the proposal", async () => {
+    const p1 = party.players[1];
+    await party.skipTo(1);
+    assert.equal((await party.state()).exitKind, RETREAT, "a skip or a monster's turn is not a cancel");
+    const sig = await party.move(1, p1.wallet, [S]);
+    const ev = await eventOf(sig, "exitCancelled");
+    assert.deepEqual([ev.kind, ev.slot], [RETREAT, 1]);
+    const s = await party.state();
+    assert.deepEqual([s.exitKind, s.fleeMask], [0, 0]);
+    // A new proposal of the other kind starts from its own vote.
+    await party.flee(1, p1.wallet);
+    assert.deepEqual([(await party.state()).exitKind, (await party.state()).fleeMask], [ESCAPE, 0b10]);
+  });
+
+  it("everyone votes: the wolves move once more, no player acts, then the party waits for leave_arena", async () => {
+    // One wolf dies first; its kill pays a body reward but no experience.
+    const s0 = await party.play({ playerSeed: CRIT, monsterSeed: () => MISS, steps: 400, until: (_s, ms) => ms.some((m: any) => !m.alive) });
+    const ms0 = (await party.monsters()).core;
+    assert.equal(modeOf(s0), ArenaMode.arena, "one wolf is still alive");
+    killed = ms0.monsters.slice(0, ms0.count).findIndex((m: any) => !m.alive);
+    assert.ok(killed >= 0);
+    const xpBefore = [(await party.part(0)).cacheXp, (await party.part(1)).cacheXp];
+
+    const { s, lastMoves, after, voteSig } = await party.voteAll("retreat");
+    assert.equal(lastMoves, 0b11 & ~(1 << killed), "the living wolf owes its last move");
+    assert.deepEqual(after, [MONSTER_BASE + (1 - killed)], "it moved once, nobody else did");
+    assert.ok(voteSig);
+    assert.equal(modeOf(s), ArenaMode.retreated);
+    assert.deepEqual([s.exitKind, s.fleeMask, s.lastMoves], [0, 0, 0]);
+    // Nothing goes on until leave_arena.
+    const cur = s.core.turnOrder[s.core.turnIndex];
+    await rejects(party.startTurn(cur < MONSTER_BASE ? cur : null), "ArenaTransition");
+    await rejects(party.retreat(0, party.players[0].wallet), cur === 0 ? "ArenaTransition" : "NotYourTurn");
+    await rejects((await party.enterArena()).rpc(), "NotEngaged");
+
+    const sig = await (await party.leaveArena()).rpc({ commitment: "confirmed" });
+    console.log(`    CU, leave_arena after a retreat, 2 players: ${await unitsOf(sig)}`);
+    const ev = await eventOf(sig, "arenaRetreated");
+    const left = await eventOf(sig, "arenaLeft");
+    assert.deepEqual(left.xp.slice(0, 2), [0, 0], "no experience for the fight, not even the kill");
+    const m = await party.monsters();
+    const spawn = 1 << killed; // the wolves of pack 1 are layout spawns 0 and 1, in arena slot order
+    assert.deepEqual([ev.pack, ev.retreats, ev.deadSpawns], [1, 1, spawn]);
+    const after1 = await party.state();
+    assert.equal(modeOf(after1), ArenaMode.map);
+    assert.deepEqual(
+      [after1.retreats, after1.packsGuarded, after1.packsBuffed, after1.deadSpawns, after1.packsAlive & 0b10],
+      [1, 0b10, 0b10, spawn, 0b10],
+      "the pack stays, on guard and buffed",
+    );
+    assert.deepEqual(after1.playerPos[0], { x: 2, y: 2 }, "back on the cell before the fight");
+    assert.equal(m.core.count, 0);
+    assert.deepEqual([(await party.part(0)).cacheXp, (await party.part(1)).cacheXp], xpBefore);
+  });
+
+  it("the next fight: the killed wolf stays dead, the other comes back healed and buffed, and moves first from the back", async () => {
+    const sig = await reengage();
+    console.log(`    CU, enter_arena of a guarded, buffed pack (1 wolf, 2 players): ${await unitsOf(sig)}`);
+    const ev = await eventOf(sig, "arenaEntered");
+    assert.deepEqual([ev.pack, ev.partyFirst, ev.monsters], [1, false, 1]);
+    assert.equal(ev.spawns[0], 1 - killed, "only the surviving spawn");
+    const m = await party.monsters();
+    const wolf = m.core.monsters[0];
+    assert.ok(wolf.alive && wolf.hp === wolf.hpMax);
+    const kinds = m.mods[0].filter((x: any) => x.turns > 0).map((x: any) => Object.keys(x.kind)[0]).sort();
+    assert.deepEqual(kinds, ["empowerment", "protection"]);
+    const s = await party.state();
+    assert.equal(s.packsBuffed, 0, "the buff is for the next fight only");
+    assert.equal(s.packsGuarded, 0b10, "on guard stays");
+    assert.equal(s.unitTime[MONSTER_BASE], 0);
+    assert.ok(s.unitTime[0] > 0 && s.unitTime[1] > 0);
+  });
+
+  it("retreats are limited per party; Escape still works and ends the party after the last moves", async () => {
+    let r = await party.voteAll("retreat");
+    assert.equal(modeOf(r.s), ArenaMode.retreated);
+    await (await party.leaveArena()).rpc({ commitment: "confirmed" });
+    assert.equal((await party.state()).retreats, 2);
+    await reengage();
+    await party.begin();
+    const s = await party.skipTo(0);
+    assert.equal(s.retreats, 2);
+    await rejects(party.retreat(0, party.players[0].wallet), "RetreatLimit");
+    const f = await party.voteAll("flee");
+    assert.ok(f.s.core.status.fled);
+    assert.equal(f.lastMoves, 0b01);
+    assert.deepEqual(f.after, [MONSTER_BASE], "the wolf moved once more before the party fled");
+    const settled = eventsNamed(await eventsOf(await party.settleParty()), "cacheSettled");
+    assert.deepEqual(settled.map((e) => [e.slot, e.granted, e.xp]), [[0, false, 0], [1, false, 0]]);
+  });
+});
+
 // ---------------------------------------------------------------------------------------------
 // Patch 6: monster skills from the registry (docs/BESTIARY.md 3, 5, 8.1, 12)
 
@@ -3962,8 +4154,9 @@ describe("deadroll_session: at most 3 parties wait for one character's rewards (
   /** Plays \`party\` to its end (the lone player flees) and frees the character. */
   async function endAndLeave(party: Party) {
     await party.startAll();
-    await party.flee(0, party.players[0].wallet);
-    assert.ok((await party.state()).core.status.fled);
+    // Patch B: the wolves move once more, then the party flees.
+    const { s } = await party.voteAll("flee");
+    assert.ok(s.core.status.fled);
     await party.leave(0);
   }
 

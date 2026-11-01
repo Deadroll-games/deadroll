@@ -81,8 +81,10 @@ pub fn handler(ctx: Context<EndTurn>) -> Result<()> {
                 &participation.player,
                 &participation.core.session_key,
             )?;
-            // Any other action on a player's turn resets every escape intent (PARTY_AND_TURNS 7.3).
-            session.flee_mask = 0;
+            // Any other action on a player's turn cancels a Retreat or Escape proposal
+            // (docs/PARTY_AND_TURNS.md 7.5).
+            let key = session.key();
+            crate::exit_vote::cancel(session, key, slot);
         }
         Unit::Monster(_) => {
             auth::check_bound(accounts.signer.key, &session.core.dm, &session.dm_actor)?;

@@ -259,6 +259,9 @@ export const PROGRAM_ERRORS = {
     6098: ["InArena", "Not in an arena: chests are on the map"],
     6099: ["InvalidArenaAccounts", "The remaining accounts are not the Participation of each living player, in slot order"],
     6100: ["TooManyTemplates", "Too many distinct monster templates for one party"],
+    6101: ["NotInArena", "Retreat and Escape are decided in an arena"],
+    6102: ["RetreatLimit", "The party used all its retreats"],
+    6103: ["InvalidExit", "No Retreat or Escape vote has passed"],
   },
   city: {
     6000: ["Unauthorized", "Caller is not authorized for this instruction"],

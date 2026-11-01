@@ -40,6 +40,7 @@ import {
   consumeIx,
   currentUnit,
   endTurnIx,
+  exitVoteIx,
   getAccount,
   joinRent,
   joinSessionIx,
@@ -90,7 +91,7 @@ import {
 import { ACTIVE_SLOTS, REACTIVE_SLOT, kinOf, monsterBearersOf, sizeOf, squareOf, monsterSkillName, monsterSkillsOf, skillAction, useBuilderRegistry, useMonsterSkillTable, type MonsterSkill } from "../chain/monsters";
 import { errorName } from "../chain/send";
 import { statusLabel, type SubStatus } from "../chain/subscribe";
-import { cooldownLabel, skillCooldowns, skillUsedText, skipText, arenaStepFor, startTurnFor, takenOntoMap, tickText, turnActed, turnStarted } from "../chain/turns";
+import { cooldownLabel, exitVoteView, skillCooldowns, skillUsedText, skipText, arenaStepFor, startTurnFor, takenOntoMap, tickText, turnActed, turnStarted } from "../chain/turns";
 import { skillSetPda } from "../chain/pda";
 import { affordable, cheb, extendPath, pathCost, reachable, route, type Step } from "../chain/route";
 import { cellsOf, covers, footprint, lineEnds, squareDistance, type Footprint } from "../chain/footprint";
@@ -129,9 +130,11 @@ function arenaTitle(p: Party): string {
     case "engaged":
       return `Map: entering the arena of pack ${p.session.arenaPack}`;
     case "arena":
-      return `Arena: pack ${p.session.arenaPack}`;
+      return p.session.lastMoves ? `Arena: pack ${p.session.arenaPack}, the monsters take their last moves` : `Arena: pack ${p.session.arenaPack}`;
     case "won":
       return `Arena won: back to the map`;
+    case "retreated":
+      return `Retreat: back to the map`;
     default:
       return "Map";
   }
@@ -600,6 +603,8 @@ export function PartyView({ address }: { address: Address }) {
   // One attack or active skill per turn; movement spends the AP left before or after it.
   const acted = !!s && turnActed(s);
   const canAttack = canMove && !acted;
+  // Patch B: the Retreat or Escape proposal on the table.
+  const exitView = s ? exitVoteView(s) : null;
   // Active skills the current player took onto the map; one on cooldown cannot be picked, the
   // weapon never is.
   const activeSkills = activePlayer ? (skillNames[activePlayer.character] ?? []).filter((k) => k.usable && takenOntoMap(activePlayer.part, k.slot)) : [];
@@ -720,6 +725,12 @@ export function PartyView({ address }: { address: Address }) {
       const actor = actorFor(s.dmActor);
       void act("end monster turn", actor?.signer ?? null, async () => [await endTurnIx(actor!, address, null)], false);
     }
+  };
+  /** Patch B: propose or confirm Retreat ("retreat") or Escape ("flee"); the vote ends the turn. */
+  const exitVote = (kind: "flee" | "retreat") => {
+    if (!activePlayer) return;
+    const actor = actorFor(activePlayer.part.core.sessionKey);
+    void act(kind === "flee" ? "escape" : "retreat", actor?.signer ?? null, async () => [await exitVoteIx(kind, actor!, address, activePlayer.character)], false);
   };
   const monsterAttack = (slot: number) => {
     const target = party?.players.find((p) => p.slot === slot);
@@ -1307,6 +1318,13 @@ export function PartyView({ address }: { address: Address }) {
                   )}
                 </>
               )}
+              {exitView && arenaMode(s) === "arena" && (exitView.kind || exitView.leaving) && (
+                <p className="muted" aria-label="Exit vote">
+                  {exitView.leaving
+                    ? `${exitView.kind === "escape" ? "Escape" : "Retreat"} agreed: the monsters take their last moves.`
+                    : `${exitView.kind === "escape" ? "Escape" : "Retreat"} proposed. Confirmed: ${exitView.voted.map(label).join(", ") || "nobody"}. Waiting for: ${exitView.waiting.map(label).join(", ")}. Any other action cancels it.`}
+                </p>
+              )}
               <div className="row">
                 {(myTurn || (monsterTurn && isDm)) && planned.length > 0 && (
                   <>
@@ -1322,6 +1340,16 @@ export function PartyView({ address }: { address: Address }) {
                   <button className="btn" disabled={busy !== null || !canMove} onClick={endTurn}>
                     End turn
                   </button>
+                )}
+                {myTurn && exitView && arenaMode(s) === "arena" && !exitView.leaving && (
+                  <>
+                    <button className="btn" disabled={busy !== null || !canMove || exitView.retreatsLeft === 0} onClick={() => exitVote("retreat")}>
+                      {exitView.kind === "retreat" ? "Confirm retreat" : "Retreat"} ({exitView.retreatsLeft} left)
+                    </button>
+                    <button className="btn" disabled={busy !== null || !canMove} onClick={() => exitVote("flee")}>
+                      {exitView.kind === "escape" ? "Confirm escape" : "Escape"}
+                    </button>
+                  </>
                 )}
                 {monsterTurn && isDm && (
                   <button className="btn" disabled={busy !== null || s.core.pendingVrf} onClick={() => void autoMonsterTurn()}>
@@ -1647,7 +1675,15 @@ function describe(e: PartyEvent, label: (u: number) => string, skillName: SkillN
     case "EscrowClaimed":
       return `escrow claimed by the DM: ${formatSol(BigInt(d.amount))}`;
     case "FleeVoted":
-      return `slot ${d.slot} votes to flee`;
+      return `${label(d.slot)} votes to escape`;
+    case "RetreatVoted":
+      return `${label(d.slot)} votes to retreat`;
+    case "ExitPassed":
+      return `${d.kind === 1 ? "retreat" : "escape"} agreed: the monsters move once more`;
+    case "ExitCancelled":
+      return `${label(d.slot)} acts: the ${d.kind === 1 ? "retreat" : "escape"} is off`;
+    case "ArenaRetreated":
+      return `retreated from pack ${d.pack}: it heals, is on guard and stronger (retreats used: ${d.retreats})`;
     case "ReactiveTriggered":
       return `${label(d.bearer)} reacts (${triggerText(d.trigger)}): ${skillName(d.bearer, d.skillSlot)}, ${variantKey(ReactionKind, d.reaction)} on ${label(d.target)}, cooldown ${d.cooldownLeft}`;
     case "AuraChanged":

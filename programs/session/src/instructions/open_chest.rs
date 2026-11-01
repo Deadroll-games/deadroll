@@ -149,8 +149,9 @@ pub fn handler(ctx: Context<OpenChest>, chest: u8) -> Result<()> {
         .action_points
         .checked_sub(BALANCE.loot.chest_open_ap)
         .ok_or(SessionError::NotEnoughActionPoints)?;
-    // Any action resets every escape intent (docs/PARTY_AND_TURNS.md, 7.3).
-    session.flee_mask = 0;
+    // Any other action cancels a Retreat or Escape proposal (docs/PARTY_AND_TURNS.md 7.5).
+    let key = session.key();
+    crate::exit_vote::cancel(session, key, slot);
 
     session.pending = PendingAction {
         attacker: Unit::Player(slot).id(),

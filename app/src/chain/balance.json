@@ -929,6 +929,10 @@
     "time_scale": 1200,
     "initiative_base": 6,
     "round_time": 100,
-    "slow_initiative_bp": 10000
+    "slow_initiative_bp": 10000,
+    "retreats_max": 2,
+    "retreat_empower_bp": 2000,
+    "retreat_protect_bp": 2000,
+    "retreat_buff_turns": 10
   }
 }
