@@ -35,6 +35,7 @@ cargo test -p deadroll-combat-wasm --test ts_fixtures
 cargo test -p deadroll-mapcheck-wasm --test ts_fixtures
 cargo test -p deadroll-rules --features serde --test registry
 cargo test -p deadroll-rules --features serde --test arena_ts_fixtures
+cargo test -p deadroll-rules --features serde --test timeout_ts_fixtures
 ```
 
 WASM the site ships (`crates.yml`, needs Docker Desktop; if it is not running, ask the user):

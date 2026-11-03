@@ -104,6 +104,8 @@ pub fn handler(ctx: Context<MonsterAct>, monster: u8, action: u8, target: u8) ->
     // Patch 6: a player down in the last callback is finalized first (`start_turn`).
     require!(session.pending_deaths == 0, SessionError::DeathsPending);
     session.require_no_reveals()?;
+    // Stuck party: the unit acts, so its turn timeout counts from now.
+    session.touch_turn(Clock::get()?.unix_timestamp);
     require!(
         action as usize <= MONSTER_SLOTS,
         SessionError::InvalidAction
@@ -232,7 +234,7 @@ pub fn handler(ctx: Context<MonsterAct>, monster: u8, action: u8, target: u8) ->
             slot_hashes: &accounts.slot_hashes,
         },
         ctx.bumps.program_identity,
-        vrf::caller_seed(&session_key, session.core.action_counter),
+        vrf::next_request(session, &session_key)?,
         &CallbackAccounts {
             session: session_key,
             monsters: accounts.monsters.key(),

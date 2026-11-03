@@ -14,6 +14,8 @@ import {
   getBytesEncoder,
   getStructDecoder,
   getStructEncoder,
+  getU32Decoder,
+  getU32Encoder,
   SOLANA_ERROR__PROGRAM_CLIENTS__INSUFFICIENT_ACCOUNT_METAS,
   SolanaError,
   transformEncoder,
@@ -115,10 +117,12 @@ export type ConsumeRandomnessInstruction<
 export type ConsumeRandomnessInstructionData = {
   discriminator: ReadonlyUint8Array;
   randomness: ReadonlyUint8Array;
+  request: number;
 };
 
 export type ConsumeRandomnessInstructionDataArgs = {
   randomness: ReadonlyUint8Array;
+  request: number;
 };
 
 export function getConsumeRandomnessInstructionDataEncoder(): FixedSizeEncoder<ConsumeRandomnessInstructionDataArgs> {
@@ -126,6 +130,7 @@ export function getConsumeRandomnessInstructionDataEncoder(): FixedSizeEncoder<C
     getStructEncoder([
       ["discriminator", fixEncoderSize(getBytesEncoder(), 8)],
       ["randomness", fixEncoderSize(getBytesEncoder(), 32)],
+      ["request", getU32Encoder()],
     ]),
     (value) => ({ ...value, discriminator: CONSUME_RANDOMNESS_DISCRIMINATOR }),
   );
@@ -135,6 +140,7 @@ export function getConsumeRandomnessInstructionDataDecoder(): FixedSizeDecoder<C
   return getStructDecoder([
     ["discriminator", fixDecoderSize(getBytesDecoder(), 8)],
     ["randomness", fixDecoderSize(getBytesDecoder(), 32)],
+    ["request", getU32Decoder()],
   ]);
 }
 
@@ -172,6 +178,8 @@ export type ConsumeRandomnessInput<
   /**
    * State checks run here, before the pending-accounts checks below: once a roll is resolved
    * `pending` is cleared, and a late callback must read `NoRollPending`, not a wrong account.
+   * Stuck party: after a `retry_vrf` the callback of the older request reads
+   * `StaleRandomness`.
    */
   session: TAccountSession;
   monsters: TAccountMonsters;
@@ -198,6 +206,7 @@ export type ConsumeRandomnessInput<
   /** need the walls. Address pinned at `open_session`, read by `MapLayoutView`. */
   layout: TAccountLayout;
   randomness: ConsumeRandomnessInstructionDataArgs["randomness"];
+  request: ConsumeRandomnessInstructionDataArgs["request"];
 };
 
 export function getConsumeRandomnessInstruction<
@@ -448,6 +457,8 @@ export type ParsedConsumeRandomnessInstruction<
     /**
      * State checks run here, before the pending-accounts checks below: once a roll is resolved
      * `pending` is cleared, and a late callback must read `NoRollPending`, not a wrong account.
+     * Stuck party: after a `retry_vrf` the callback of the older request reads
+     * `StaleRandomness`.
      */
     session: TAccountMetas[1];
     monsters: TAccountMetas[2];

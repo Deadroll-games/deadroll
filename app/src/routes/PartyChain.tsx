@@ -34,6 +34,14 @@ import {
   variantKey,
   bytesText,
   claimAfterTimeoutIx,
+  confirmDmReturnIx,
+  currentSlot,
+  dmReturnIx,
+  markDmMissingIx,
+  retryVrfIx,
+  settleUnconfirmedIx,
+  skipTurnIx,
+  type PartyPlayer,
   settlePartyIx,
   computeLimitIx,
   deathAccountsOf,
@@ -98,7 +106,8 @@ import {
 import { ACTIVE_SLOTS, REACTIVE_SLOT, kinOf, monsterBearersOf, sizeOf, squareOf, monsterSkillName, monsterSkillsOf, skillAction, useBuilderRegistry, useMonsterSkillTable, type MonsterSkill } from "../chain/monsters";
 import { errorName } from "../chain/send";
 import { statusLabel, type SubStatus } from "../chain/subscribe";
-import { auditLeft, cooldownLabel, exitVoteView, revealStepFor, skillCooldowns, skillUsedText, skipText, arenaStepFor, startTurnFor, takenOntoMap, tickText, turnActed, turnStarted } from "../chain/turns";
+import { auditLeft, cooldownLabel, exitVoteView, revealStepFor, skillCooldowns, skillUsedText, skipText, arenaStepFor, startTurnFor, stuckView, takenOntoMap, tickText, turnActed, turnStarted, type StuckActor } from "../chain/turns";
+import { countdown } from "../chain/timeouts";
 import { skillSetPda } from "../chain/pda";
 import { affordable, cheb, extendPath, pathCost, reachable, route, type Step } from "../chain/route";
 import { cellsOf, covers, footprint, lineEnds, squareDistance, type Footprint } from "../chain/footprint";
@@ -397,7 +406,7 @@ export function PartyView({ address }: { address: Address }) {
       const pl = p.players.find((x) => x.participation === pend);
       if (!pl) return;
       const seed = await pickSeed(kind);
-      const res = await send("VRF roll (localnet oracle)", payer, async () => [await consumeIx(address, pend, pl.character, seed, p.session.layout, partyAccountsOf(p.session, pend))], {
+      const res = await send("VRF roll (localnet oracle)", payer, async () => [await consumeIx(address, pend, pl.character, seed, p.session.layout, partyAccountsOf(p.session, pend), p.session.vrfRequest)], {
         quiet: true,
         silent: quietFail,
       });
@@ -1310,6 +1319,7 @@ export function PartyView({ address }: { address: Address }) {
           </p>
         </div>
         <div style={{ flex: "1 1 380px", display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 12, minWidth: 320 }}>
+          {!ended && <StuckParty party={party} me={me ?? null} actorFor={actorFor} wallet={wallet.signer} send={send} ingest={ingest} busy={busy} label={label} />}
           {!ended && (
             <div className="panel">
               <p className="turn-banner">
@@ -1561,6 +1571,8 @@ export function Claims({
   const deadline = settleDeadline(s.endedAt, s.settleTimeoutSecs);
   const left = Math.max(0, deadline - now);
   const dmSettled = party.escrow?.claimed ?? false;
+  // Stuck party: a party the DM left pays no escrow (`settle_unconfirmed` or the claims).
+  const abandoned = status(s) === "abandoned";
   const run = (what: string, ix: () => Promise<Instruction>) =>
     void send(what, payer, async () => [computeLimitIx(SETTLE_CU), await ix()]).then((r) => r && ingest(r.signature, r.events as never[]));
   // Patch C: the escrow waits for the audit (docs/PARTY_AND_TURNS.md 3.2).
@@ -1570,11 +1582,13 @@ export function Claims({
   };
   return (
     <div className="panel">
-      <h3>{status(s) === "victory" ? "Victory" : "The party is over"}</h3>
+      <h3>{status(s) === "victory" ? "Victory" : abandoned ? "The DM left the party" : "The party is over"}</h3>
       <p className="muted">
         {status(s) === "victory"
           ? "Each living hero keeps the cache filled during the party; a tombstone's cache burned."
-          : "Nobody won: the caches are lost. The heroes who live are released."}
+          : abandoned
+            ? "Each living hero keeps the cache, every player gets their contribution back, the DM gets no escrow."
+            : "Nobody won: the caches are lost. The heroes who live are released."}
       </p>
       <ul>
         {party.players.map((p) => {
@@ -1607,7 +1621,7 @@ export function Claims({
           The DM has {formatDuration(left)} to hand out the rewards; after that each player claims their own and gets their contribution back.
         </p>
       )}
-      {isDm && party.escrow && !dmSettled && left > 0 && (
+      {isDm && party.escrow && !dmSettled && !abandoned && left > 0 && (
         <>
           {audit && (
             <p className="muted">
@@ -1623,9 +1637,149 @@ export function Claims({
           </button>
         </>
       )}
-      {dmSettled && <p className="ok">The DM handed out the rewards and took {formatSol(party.escrow!.collected)}; the map is finished.</p>}
+      {dmSettled && (abandoned ? <p className="ok">The DM settled the party: the caches and the contributions went to the players; the map is finished.</p> : <p className="ok">The DM handed out the rewards and took {formatSol(party.escrow!.collected)}; the map is finished.</p>)}
     </div>
   );
+}
+
+/**
+ * Stuck party (docs/PARTY_AND_TURNS.md 3.2, 5.3): "DM is missing" once a reveal is overdue, the
+ * countdown, "I'm back" for the DM, "Return to the party" for the players, the DM's settlement when
+ * not everyone confirmed, the claims once the DM's deadline passed, "Skip turn" for an idle unit and
+ * "Retry the roll" when the VRF oracle is silent. Nothing when none applies.
+ */
+export function StuckParty({
+  party,
+  me,
+  actorFor,
+  wallet,
+  send,
+  ingest,
+  busy,
+  label,
+}: {
+  party: Party;
+  me: Address | null;
+  actorFor: (actor: Address) => Actor | null;
+  /** The main wallet: the DM's settlement and the claims move lamports. */
+  wallet: TransactionSigner | null;
+  send: ReturnType<typeof useTx>["send"];
+  ingest: (sig: string, evs: never[]) => void;
+  busy: string | null;
+  label: (u: number) => string;
+}) {
+  const s = party.session;
+  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
+  useEffect(() => {
+    const t = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
+    return () => clearInterval(t);
+  }, []);
+  // The cluster's slot, only while a roll waits: a retry counts slots.
+  const [slot, setSlot] = useState<bigint | null>(null);
+  const pending = s.core.pendingVrf;
+  useEffect(() => {
+    if (!pending) return;
+    let live = true;
+    const tick = () => void currentSlot().then((x) => live && setSlot(x), () => undefined);
+    tick();
+    const t = setInterval(tick, 4_000);
+    return () => {
+      live = false;
+      clearInterval(t);
+    };
+  }, [pending, s.vrfRequest]);
+  const v = stuckView(party, me, now, pending ? slot : null);
+  const run = (what: string, signer: TransactionSigner | null, ix: () => Promise<Instruction>, cu?: number) =>
+    void send(what, signer, async () => (cu ? [computeLimitIx(cu), await ix()] : [await ix()])).then((r) => r && ingest(r.signature, r.events as never[]));
+  const playerActor = (p: PartyPlayer) => actorFor(p.part.core.sessionKey);
+  /** The actor and character of a skip or a retry. */
+  const who = (a: StuckActor): [Actor | null, Address | null] => (a.kind === "dm" ? [actorFor(s.dmActor), null] : [playerActor(a.player), a.player.character]);
+  const name = (p: PartyPlayer) => bytesText(p.char.name);
+  const lines: ReactNode[] = [];
+
+  if (v.markFrom !== null && v.mark.length === 0 && now < v.markFrom) {
+    lines.push(<p key="owed" className="muted">If the DM does not reveal within {countdown(v.markFrom - now)}, a player can mark the DM as missing.</p>);
+  }
+  for (const p of v.mark) {
+    const a = playerActor(p);
+    lines.push(
+      <button key={`mark${p.slot}`} className="btn" disabled={busy !== null || !a} onClick={() => run(`DM is missing (${name(p)})`, a?.signer ?? null, () => markDmMissingIx(a!, party.address, p.character))}>
+        DM is missing
+      </button>,
+    );
+  }
+  if (v.phase.kind === "missing") {
+    lines.push(
+      <p key="missing">
+        The DM is marked missing: the party waits. The DM can come back for {countdown(v.phase.until - now)}; after that each player claims their cache and contribution.
+      </p>,
+    );
+    if (v.dmReturn) {
+      const a = actorFor(s.dmActor);
+      lines.push(
+        <button key="back" className="btn primary" disabled={busy !== null || !a} onClick={() => run("I'm back", a?.signer ?? null, async () => dmReturnIx(a!, party.address))}>
+          I'm back
+        </button>,
+      );
+    }
+  }
+  if (v.phase.kind === "back") {
+    lines.push(
+      <p key="backinfo">
+        The DM is back. Every living hero confirms within {countdown(v.phase.until - now)}: {v.confirmed.map(label).join(", ") || "nobody"} confirmed
+        {v.waiting.length > 0 && <>, waiting for {v.waiting.map(label).join(", ")}</>}.
+      </p>,
+    );
+    for (const p of v.confirm) {
+      const a = playerActor(p);
+      lines.push(
+        <button key={`confirm${p.slot}`} className="btn primary" disabled={busy !== null || !a} onClick={() => run(`return to the party (${name(p)})`, a?.signer ?? null, () => confirmDmReturnIx(a!, party.address, p.character))}>
+          Return to the party{v.confirm.length > 1 ? ` (${name(p)})` : ""}
+        </button>,
+      );
+    }
+  }
+  if (v.claimFrom !== null) {
+    const gone = v.phase.kind === "gone";
+    lines.push(
+      <p key="left">
+        {gone ? "The DM did not come back." : "Not every hero confirmed the DM's return."} Each living hero keeps the cache, every contribution goes back, the DM gets no escrow.
+        {now <= v.claimFrom && <> {gone ? "" : `The DM settles it within ${countdown(v.claimFrom - now)}; after that `}each player claims their own.</>}
+      </p>,
+    );
+    if (v.dmSettle) {
+      lines.push(
+        <button key="settle" className="btn primary" disabled={busy !== null || !wallet} onClick={() => run("settle the party (no escrow)", wallet, () => settleUnconfirmedIx(wallet!, party.address, s), SETTLE_CU)}>
+          Settle: rewards and contributions to the players
+        </button>,
+      );
+    }
+    for (const p of v.claim) {
+      lines.push(
+        <button key={`claim${p.slot}`} className="btn" disabled={busy !== null || !wallet} onClick={() => run(`claim_after_timeout ${name(p)}`, wallet, () => claimAfterTimeoutIx(wallet!, party.address, s, p.character), SETTLE_CU)}>
+          Claim {name(p)}'s cache and contribution
+        </button>,
+      );
+    }
+  }
+  const unit = currentUnit(s);
+  if (v.skip && unit !== null) {
+    const [a, character] = who(v.skip);
+    lines.push(
+      <button key="skip" className="btn" disabled={busy !== null || !a} onClick={() => run(`skip turn ${label(unit)}`, a?.signer ?? null, () => skipTurnIx(a!, party.address, character))}>
+        Skip turn ({label(unit)} is idle)
+      </button>,
+    );
+  }
+  if (v.retry) {
+    const [a, character] = who(v.retry);
+    lines.push(
+      <button key="retry" className="btn" disabled={busy !== null || !a} onClick={() => run("retry the VRF roll", a?.signer ?? null, () => retryVrfIx(a!, party.address, character))}>
+        Retry the roll (the VRF oracle is silent)
+      </button>,
+    );
+  }
+  return lines.length ? <div className="panel">{lines}</div> : null;
 }
 
 /** Patch C: `SecretTuning.examine_ap` (balance.json, the program defaults). */

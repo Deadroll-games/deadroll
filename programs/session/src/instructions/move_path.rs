@@ -140,6 +140,8 @@ pub fn handler(ctx: Context<MovePath>, unit: u8, path: Vec<Cell>) -> Result<()> 
     let bump = ctx.bumps.program_identity;
     let monsters_key = accounts.monsters.key();
     let session = &mut accounts.session;
+    // Stuck party: the unit acts, so its turn timeout counts from now.
+    session.touch_turn(Clock::get()?.unix_timestamp);
 
     match mover {
         Unit::Player(slot) => {
@@ -249,9 +251,12 @@ pub fn handler(ctx: Context<MovePath>, unit: u8, path: Vec<Cell>) -> Result<()> 
             });
             if let Some(pack) = engaged {
                 // The map waits: `enter_arena` takes the party into the pack's arena.
+                let was_owed = session.owes_reveal();
                 session.mode = ArenaMode::Engaged;
                 session.arena_pack = pack;
                 session.engaged_by = slot;
+                // Stuck party: the DM owes the pack's composition from now on (MAP 8.4).
+                session.note_owed(was_owed, Clock::get()?.unix_timestamp);
                 emit!(PackEngaged {
                     session: session_key,
                     pack,

@@ -428,9 +428,11 @@ function consume(
   seed: Buffer,
   /** Patch 5: every other living player's Participation and Character (`partyAccounts`). */
   party: { pubkey: PublicKey; isSigner: boolean; isWritable: boolean }[] = [],
+  /** Stuck party: the number of the request it answers (`GameSession.vrf_request`). */
+  request = 0,
 ) {
   return program.methods
-    .consumeRandomness([...seed])
+    .consumeRandomness([...seed], request)
     .accountsStrict({
       vrfProgramIdentity: identity.publicKey,
       targetParticipation: null,
@@ -1350,10 +1352,11 @@ class Party {
     // Simulated through the connection (no signature check): Anchor's `simulate()` re-signs with
     // the extra signer after the wallet and loses the fee payer's signature.
     const { blockhash } = await connection.getLatestBlockhash();
+    const request = (await this.state()).vrfRequest;
     let best: { seed: Buffer; score: number } | null = null;
     for (let i = 0; i < tries; i++) {
       const seed = nextSeed();
-      const tx = await consume(MOCK_VRF, a, seed, await this.partyOf(who)).transaction();
+      const tx = await consume(MOCK_VRF, a, seed, await this.partyOf(who), request).transaction();
       tx.feePayer = provider.wallet.publicKey;
       tx.recentBlockhash = blockhash;
       tx.partialSign(MOCK_VRF);
@@ -1581,6 +1584,7 @@ class Party {
       },
       seed,
       party ?? (await this.partyOf(who)),
+      (await this.state()).vrfRequest,
     );
   }
   /** The events the callback would emit with `seed` (simulated, nothing sent); `null` on an error. */
@@ -3146,7 +3150,7 @@ describe("deadroll_session: resonances on the map", { skip: SKIP_PARTY }, () => 
       bag: mage.bag,
       layout: other.layout,
     };
-    await rejects(consume(MOCK_VRF, a, CRIT).rpc(), "InvalidLayout");
+    await rejects(consume(MOCK_VRF, a, CRIT, [], (await party.state()).vrfRequest).rpc(), "InvalidLayout");
 
     const done = await party.consumeWhere(MAGE, (r) => r.knockback > 0 && r.ignitePower > 0 && r.damage < before.hp, 2_000);
     assert.ok(done, "no VRF value triggers Blasting Flame");
@@ -4743,5 +4747,268 @@ describe("deadroll_session: an ambush trap takes the party to its hidden pack, t
     await party.revealPackCall(2);
     const entered = await eventOf(await (await enterArenaRaw(party)).rpc({ commitment: "confirmed" }), "arenaEntered");
     assert.deepEqual([entered.pack, entered.partyFirst, entered.monsters], [2, false, 2]);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Stuck party (docs/PARTY_AND_TURNS.md 3.2, 5.3; MAP_DESCRIPTION.md 8.5). Needs the mock-vrf build:
+// it waits `TimeoutTuning::LOCALNET` (reveal 3 s, confirm 6 s, turn 3 s, VRF retry 5 slots).
+
+const LOCALNET_WAIT = { reveal: 3, confirm: 6, turn: 3, vrfSlots: 5 };
+/** `mark_dm_missing` or `confirm_dm_return` for player `who` (its participation), signed by `signer`. */
+function stuckCall(party: Party, name: "markDmMissing" | "confirmDmReturn", who: number, signer: Keypair = party.players[who].wallet) {
+  return (program.methods as any)
+    [name]()
+    .accountsStrict({ signer: signer.publicKey, session: party.acc.session, participation: party.players[who].participation, sessionToken: null })
+    .signers([signer])
+    .rpc({ commitment: "confirmed" });
+}
+function dmReturn(party: Party, signer: Keypair = party.dm) {
+  return program.methods
+    .dmReturn()
+    .accountsStrict({ signer: signer.publicKey, session: party.acc.session, sessionToken: null })
+    .signers([signer])
+    .rpc({ commitment: "confirmed" });
+}
+/** `skip_turn` by player `who` (its participation) or the DM (`who` null). */
+function skipTurn(party: Party, who: number | null, signer: Keypair = who === null ? party.dm : party.players[who].wallet) {
+  return program.methods
+    .skipTurn()
+    .accountsStrict({
+      signer: signer.publicKey,
+      session: party.acc.session,
+      monsters: party.acc.monsters,
+      participation: who === null ? null : party.players[who].participation,
+      sessionToken: null,
+    })
+    .signers([signer])
+    .rpc({ commitment: "confirmed" });
+}
+/** `retry_vrf` by player `who` or the DM (`who` null); the signer pays. */
+function retryVrf(party: Party, who: number | null, signer: Keypair = who === null ? party.dm : party.players[who].wallet) {
+  return program.methods
+    .retryVrf()
+    .accountsStrict({
+      signer: signer.publicKey,
+      session: party.acc.session,
+      monsters: party.acc.monsters,
+      participation: who === null ? null : party.players[who].participation,
+      sessionToken: null,
+      ...vrfAccounts,
+    })
+    .signers([signer])
+    .rpc({ commitment: "confirmed" });
+}
+/** `settle_unconfirmed`: the pending deaths, then each player's accounts and wallet. */
+async function settleUnconfirmed(party: Party, signer: Keypair = party.dm) {
+  const queue = deathAccounts(await party.state());
+  const players = party.players.flatMap((pl) =>
+    [pl.participation, pl.rewardCache, pl.character, pl.wallet.publicKey].map((pubkey) => ({ pubkey, isSigner: false, isWritable: true })),
+  );
+  return program.methods
+    .settleUnconfirmed()
+    .accountsStrict({ dm: signer.publicKey, ...party.endAccounts() })
+    .remainingAccounts([...queue, ...players])
+    .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 1_000_000 })])
+    .signers([signer])
+    .rpc({ commitment: "confirmed" });
+}
+/** A two-player party on the map whose player 0 stepped next to the front pack; the DM owes the
+ * reveals of the step and the pack, and has not sent them. */
+async function owingParty(settleTimeoutSecs = SHORT_SETTLE_SECS) {
+  const party = await Party.create(["warrior", "mage"], { loot: { settleTimeoutSecs } });
+  await party.startAll(true);
+  party.autoReveal = false;
+  await party.move(0, party.players[0].wallet, [STEP_SE]);
+  const s = await party.state();
+  assert.ok(s.obligationCount > 0 || modeOf(s) === ArenaMode.engaged, "the DM owes a reveal");
+  return party;
+}
+/** Waits past the reveal timeout and marks the DM as missing (player 1). */
+async function markMissing(party: Party) {
+  await untilChainTime((await party.state()).revealsOwedAt.toNumber() + LOCALNET_WAIT.reveal);
+  return stuckCall(party, "markDmMissing", 1);
+}
+
+describe("deadroll_session: a missing DM comes back (stuck party)", { skip: SKIP_PARTY }, () => {
+  let party: Party;
+  before(async () => {
+    party = await owingParty();
+  });
+
+  it("mark_dm_missing: a living player, once the reveal is overdue; the party freezes", async () => {
+    await rejects(stuckCall(party, "markDmMissing", 1), "TooEarly");
+    await rejects(dmReturn(party), "WrongDmPhase");
+    // Someone else's participation: not a participant.
+    await rejects(stuckCall(party, "markDmMissing", 0, party.players[1].wallet), "NotParticipant");
+    const sig = await markMissing(party);
+    const ev = await eventOf(sig, "dmMarkedMissing");
+    assert.equal(ev.slot, 1);
+    console.log(`mark_dm_missing: ${await unitsOf(sig)} CU`);
+    const s = await party.state();
+    assert.equal(ev.until.toNumber(), s.dmMissingAt.toNumber() + SHORT_SETTLE_SECS);
+    await rejects(stuckCall(party, "markDmMissing", 0), "WrongDmPhase");
+    // Frozen: no turn, no reveal, no skip.
+    await rejects(party.endTurn(party.players[0].wallet, 0), "PartyFrozen");
+    await rejects(party.revealOwed(), "PartyFrozen");
+    await rejects(skipTurn(party, 1), "PartyFrozen");
+  });
+
+  it("dm_return, then every living player confirms: the party goes on", async () => {
+    await rejects(dmReturn(party, party.players[0].wallet), "Unauthorized");
+    await rejects(stuckCall(party, "confirmDmReturn", 0), "WrongDmPhase");
+    const back = await dmReturn(party);
+    assert.ok(await eventOf(back, "dmReturned"));
+    console.log(`dm_return: ${await unitsOf(back)} CU`);
+    await rejects(dmReturn(party), "WrongDmPhase");
+    const first = await stuckCall(party, "confirmDmReturn", 0);
+    assert.equal((await eventOf(first, "dmReturnConfirmed")).confirmed, 0b01);
+    await rejects(stuckCall(party, "confirmDmReturn", 0), "AlreadyConfirmed");
+    await rejects(party.endTurn(party.players[0].wallet, 0), "PartyFrozen");
+    const last = await stuckCall(party, "confirmDmReturn", 1);
+    assert.ok(await eventOf(last, "partyResumed"));
+    console.log(`confirm_dm_return (the last one): ${await unitsOf(last)} CU`);
+    const s = await party.state();
+    assert.deepEqual([s.dmMissingAt.toNumber(), s.dmBackAt.toNumber(), s.dmConfirmMask], [0, 0, 0]);
+    // The DM reveals what is owed, and the party plays on.
+    await party.revealOwed();
+    await (await party.enterArena()).rpc({ commitment: "confirmed" });
+    await party.begin();
+    assert.ok((await party.state()).core.status.active);
+  });
+});
+
+describe("deadroll_session: the players do not let the DM back; the DM settles (stuck party)", { skip: SKIP_PARTY }, () => {
+  let party: Party;
+  before(async () => {
+    party = await owingParty();
+    await markMissing(party);
+    await dmReturn(party);
+    await stuckCall(party, "confirmDmReturn", 0);
+  });
+
+  it("settle_unconfirmed: after the window, the DM's main wallet; caches and contributions to the players", async () => {
+    await rejects(settleUnconfirmed(party), "WrongDmPhase");
+    await untilChainTime((await party.state()).dmBackAt.toNumber() + LOCALNET_WAIT.confirm);
+    await rejects(stuckCall(party, "confirmDmReturn", 1), "WrongDmPhase");
+    await rejects(settleUnconfirmed(party, party.dmActor), "DmMainWalletOnly");
+    await rejects(settleUnconfirmed(party, party.players[0].wallet), "NotDm");
+    await rejects(party.settleParty(party.dm, party.settleAccounts(), false), "NotFinished");
+    const p0 = party.players[0];
+    const before = await connection.getBalance(p0.wallet.publicKey);
+    const dmBefore = await connection.getBalance(party.dm.publicKey);
+    const sig = await settleUnconfirmed(party);
+    console.log(`settle_unconfirmed (2 players): ${await unitsOf(sig)} CU`);
+    const ev = await eventOf(sig, "partySettledWithoutEscrow");
+    assert.equal(ev.refunded.toString(), PRICE.toString());
+    assert.ok((await connection.getBalance(p0.wallet.publicKey)) >= before + PRICE.toNumber());
+    const s = await party.state();
+    assert.ok(s.core.status.abandoned, "the party ended abandoned");
+    assert.equal(s.settledMask, 0b11);
+    assert.ok((await party.entry(0)).status.claimed !== undefined, "the living keep their cache");
+    assert.equal(await connection.getAccountInfo(party.fixture.map, "confirmed"), null, "the map closed");
+    // The deposits, not the escrow: the DM gets less than the price back on top.
+    assert.ok((await connection.getBalance(party.dm.publicKey)) < dmBefore + PRICE.toNumber());
+    await rejects(settleUnconfirmed(party), "NotActive");
+    await rejects(party.claimAfterTimeout(1), "AlreadyClaimed");
+  });
+});
+
+describe("deadroll_session: the DM never comes back; each player claims (stuck party)", { skip: SKIP_PARTY }, () => {
+  let party: Party;
+  before(async () => {
+    party = await owingParty();
+    await markMissing(party);
+  });
+
+  it("claim_after_timeout ends the party abandoned once the countdown passed", async () => {
+    await rejects(party.claimAfterTimeout(0), "NotFinished");
+    await untilChainTime((await party.state()).dmMissingAt.toNumber() + SHORT_SETTLE_SECS + 1);
+    await rejects(dmReturn(party), "WrongDmPhase");
+    await rejects(settleUnconfirmed(party), "WrongDmPhase");
+    const p0 = party.players[0];
+    const xp = (await party.character(0)).core.xp;
+    const cacheXp = (await party.part(0)).cacheXp;
+    const before = await connection.getBalance(p0.wallet.publicKey);
+    const sig = await party.claimAfterTimeout(0);
+    assert.ok((await eventOf(sig, "sessionEnded")).status.abandoned !== undefined);
+    assert.ok((await connection.getBalance(p0.wallet.publicKey)) > before + PRICE.toNumber() - 20_000);
+    assert.equal((await party.character(0)).core.xp, xp + cacheXp, "the cache as on a peaceful exit");
+    const s = await party.state();
+    assert.equal(s.endedAt.toNumber(), s.dmMissingAt.toNumber(), "ended at the mark");
+    await rejects(party.settleParty(party.dm, party.settleAccounts(), false), "WrongDmPhase");
+    await party.claimAfterTimeout(1);
+    assert.equal(await connection.getAccountInfo(party.fixture.map, "confirmed"), null, "the last claim closed the map");
+  });
+});
+
+describe("deadroll_session: the turn timeout (stuck party)", { skip: SKIP_PARTY }, () => {
+  it("on the map: any participant skips an idle player after the timeout", async () => {
+    const party = await Party.create(["warrior", "mage"]);
+    await party.startAll(true);
+    const s = await party.state();
+    const unit = s.core.turnOrder[s.core.turnIndex];
+    const other = unit === 0 ? 1 : 0;
+    await rejects(skipTurn(party, other), "TooEarly");
+    await rejects(skipTurn(party, null, await funded(1)), "NotParticipant");
+    await rejects(skipTurn(party, unit, party.players[other].wallet), "NotParticipant");
+    await untilChainTime(s.turnClock.toNumber() + LOCALNET_WAIT.turn);
+    const sig = await skipTurn(party, other);
+    const ev = await eventOf(sig, "turnTimedOut");
+    assert.deepEqual([ev.unit, ev.started], [unit, true]);
+    console.log(`skip_turn (map): ${await unitsOf(sig)} CU`);
+    const next = await party.state();
+    assert.notEqual(next.core.turnOrder[next.core.turnIndex], unit, "the next player's turn");
+  });
+
+  it("in an arena: the DM skips an idle unit; a turn that never started takes the bare delay", async () => {
+    const party = await Party.create(["warrior", "mage"]);
+    await party.startAll();
+    // End the started turn without acting, so the next one is not started.
+    const s0 = await party.state();
+    const unit0 = s0.core.turnOrder[s0.core.turnIndex];
+    await party.endTurn(unit0 < MONSTER_BASE ? party.players[unit0].wallet : party.dm, unit0 < MONSTER_BASE ? unit0 : null);
+    const s = await party.state();
+    const unit = s.core.turnOrder[s.core.turnIndex];
+    assert.notEqual(s.startedSeq, s.turnSeq, "not started");
+    await untilChainTime(s.turnClock.toNumber() + LOCALNET_WAIT.turn);
+    const time = s.unitTime[unit];
+    const sig = await skipTurn(party, null);
+    const ev = await eventOf(sig, "turnTimedOut");
+    assert.deepEqual([ev.unit, ev.started], [unit, false]);
+    console.log(`skip_turn (arena): ${await unitsOf(sig)} CU`);
+    assert.ok((await party.state()).unitTime[unit] > time, "the bare delay");
+  });
+});
+
+describe("deadroll_session: a silent VRF oracle (stuck party)", { skip: SKIP_PARTY }, () => {
+  it("retry_vrf: any participant after the wait; the older callback is stale", async () => {
+    const party = await Party.create(["warrior", "mage"]);
+    await party.open().rpc();
+    for (let i = 0; i < 2; i++) await party.join(i, party.players[i].wallet, i === 0 ? PRICE : new BN(0));
+    await rejects(retryVrf(party, 0), "NotActive");
+    for (let i = 0; i < 2; i++) await party.ready(i, party.players[i].wallet, true);
+    await party.start(party.dm);
+    // The initiative roll waits.
+    const first = await party.state();
+    assert.ok(first.core.pendingVrf);
+    await rejects(retryVrf(party, 1), "TooEarly");
+    await rejects(retryVrf(party, null, await funded(1)), "NotParticipant");
+    for (let i = 0; i < 60; i++) {
+      if ((await connection.getSlot("confirmed")) >= first.vrfRequestedSlot.toNumber() + LOCALNET_WAIT.vrfSlots) break;
+      await sleep(500);
+    }
+    const sig = await retryVrf(party, 1);
+    const ev = await eventOf(sig, "vrfRetried");
+    assert.equal(ev.request, first.vrfRequest + 1);
+    console.log(`retry_vrf: ${await unitsOf(sig)} CU`);
+    const pl = party.players[0];
+    const accounts = { session: party.acc.session, monsters: party.acc.monsters, participation: pl.participation, character: pl.character, skillSet: pl.skillSet, bag: pl.bag, layout: party.fixture.layout };
+    await rejects(consume(MOCK_VRF, accounts, MISS, [], first.vrfRequest).rpc(), "StaleRandomness");
+    await party.rollInitiative();
+    const s = await party.state();
+    assert.ok(!s.core.pendingVrf && s.turnOrderLen > 0, "resolved once, from the new request");
+    await rejects(consume(MOCK_VRF, accounts, MISS, [], s.vrfRequest).rpc(), "NoRollPending");
+    await rejects(retryVrf(party, 0), "NoRollPending");
   });
 });

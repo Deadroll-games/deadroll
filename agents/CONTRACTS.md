@@ -1370,3 +1370,28 @@ Map program, new instructions:
 CPI surface (section 5) gains: session → `map::close_map` from `settle_party` and the last `claim_after_timeout`, in place of `set_status(Finished)`.
 
 Session: new account `SessionBoard` `["board", session]` (revealed leaves, found secrets, revealed spawns), created at `open_session`. `GameSession` fields widened in place (packs 40, chest slots 32, threats 40, pack masks `u64`, `dead_spawns` `u128`, `chests_opened` `u32`), `revealed`, `found`, `found_count`, `spawns`, `spawn_count` moved to the board, `map_class` appended. `open_session`, `move_path`, `examine`, `enter_arena`, `reveal_cell`, `reveal_pack` take `board`; `settle_party` takes `layout`; `claim_after_timeout` takes `layout` and `dm`. Sessions opened before the upgrade cannot be read after it.
+
+## 33. Stuck party: a missing DM, the turn timeout, the VRF retry
+
+Docs: `docs/PARTY_AND_TURNS.md` 3.2, 5.3, 6.2; `docs/MAP_DESCRIPTION.md` 8.4, 8.5.
+
+`crates/types`: nothing added. `SessionStatus::Abandoned` (already there, unused until now) is the end of a party its DM left: the DM was marked missing and never came back, or came back without every living player's confirmation in time. It counts as ended everywhere (`leave_party`, the settlements); the living get their cache as on a peaceful exit (no peaceful-exit penalty), the DM gets no escrow.
+
+`deadroll_rules`, added: `BalanceConfig.timeouts: TimeoutTuning { reveal_timeout_secs, dm_return_confirm_secs, turn_timeout_secs, vrf_retry_slots }` (defaults 300 s, 86 400 s, 300 s, 75 slots; `TimeoutTuning::LOCALNET` in a `mock-vrf` build), and `timeout::{DmWatch, DmPhase, reveal_overdue, turn_overdue, vrf_retry_due}`.
+
+VRF callback: **`consume_randomness(randomness: [u8; 32], request: u32)`**. Every request sends `callback_args = request.to_le_bytes()`; the oracle calls back with `discriminator ‖ randomness ‖ callback_args`. `request` must equal `GameSession.vrf_request` (`StaleRandomness` otherwise). `caller_seed = sha256(session ‖ action_counter LE ‖ request LE)`. The callback account list is unchanged.
+
+Session, new instructions:
+
+| Instruction | Signer | Accounts | What |
+| --- | --- | --- | --- |
+| `mark_dm_missing` | a living player, main wallet or session key | `signer, session (w), participation, session_token?` | the DM owes a reveal (cells, or the engaged pack's composition) for `reveal_timeout_secs`, no roll pending: the party freezes; the DM may come back until `dm_missing_at + settle_timeout_secs` |
+| `dm_return` | DM, main wallet or session key | `signer, session (w), session_token?` | "I'm back" before the countdown ends; the living players confirm within `dm_return_confirm_secs` |
+| `confirm_dm_return` | a living player, main wallet or session key | `signer, session (w), participation, session_token?` | when every living player confirmed, the party goes on (the watch clears) |
+| `settle_unconfirmed` | DM main wallet only | as `settle_party` (`dm, session, escrow, monsters, map, session_authority, config, map_program, character_program, layout`); remaining: death triples, then `(Participation, RewardCache, Character, player wallet)` per slot, all writable | the window closed without everyone, before `ended_at + settle_timeout_secs`: status `Abandoned`, caches to the living, every contribution to its player, the map closes (deposits to the DM) |
+| `skip_turn` | any participant: a player (with `participation`) or the DM (without), main wallet or session key | `signer, session (w), monsters (w), participation?, session_token?` | the current unit did nothing for `turn_timeout_secs` (the clock is `GameSession.turn_clock`); not while frozen, a reveal is owed, a roll or a death is pending, or between the map and an arena |
+| `retry_vrf` | any participant, as `skip_turn`; pays the fee | `signer (w), session (w), monsters (seeds ["monsters", session]), participation?, session_token?, program_identity, oracle_queue (w), vrf_program, slot_hashes, system_program` | a roll pending for `vrf_retry_slots`: the same action is requested again with the same callback accounts and the next `request` |
+
+`claim_after_timeout`: on an `Active` party whose DM left (`DmPhase::Gone` or `Unconfirmed`) the first claim ends it `Abandoned` with `ended_at` = the mark (Gone) or the end of the confirm window (Unconfirmed); the claims then work as after any end. `settle_party` refuses an `Abandoned` party (`WrongDmPhase`). While `dm_missing_at` is set every turn instruction fails `PartyFrozen` (`GameSession::require_no_reveals`), and so do `reveal_cell` and `reveal_pack` during the party.
+
+`GameSession`, appended: `reveals_owed_at: i64`, `dm_missing_at: i64`, `dm_back_at: i64`, `dm_confirm_mask: u8`, `turn_clock: i64`, `vrf_request: u32`, `vrf_requested_slot: u64`. Errors appended: `PartyFrozen`, `NoRevealOwed`, `TooEarly`, `WrongDmPhase`, `AlreadyConfirmed`, `NotParticipant`, `StaleRandomness`. Events: `DmMarkedMissing`, `DmReturned`, `DmReturnConfirmed`, `PartyResumed`, `PartySettledWithoutEscrow`, `TurnTimedOut`, `VrfRetried`. Sessions opened before the upgrade cannot be read after it.

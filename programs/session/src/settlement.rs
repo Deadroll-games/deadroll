@@ -4,6 +4,8 @@
 //!
 //! - victory, alive: the cache in `Participation` becomes the player's (its `RewardCache` entry
 //!   turns `Claimed`) and its experience goes to the character (`character.grant_xp`);
+//! - abandoned by the DM (stuck party), alive: the same, as on a peaceful exit; the DM gets no
+//!   escrow (`settle_unconfirmed`, `claim_after_timeout`);
 //! - fled, alive: the cache is abandoned (the entry empties);
 //! - dead: the cache burned (the entry empties); the tombstone stays locked.
 //!
@@ -87,7 +89,14 @@ pub fn settle_player<'info>(
     // Alive in this party and still alive (it may have died in a later one).
     let alive = session.player_alive(slot) && character.alive;
     let entry = p.cache.entry_mut(&session_key, CacheStatus::Open);
-    let granted = alive && session.core.status == SessionStatus::Victory && entry.is_some();
+    // Stuck party: a party the DM left gives the living their cache too, as a peaceful exit
+    // (docs/PARTY_AND_TURNS.md 3.2).
+    let granted = alive
+        && matches!(
+            session.core.status,
+            SessionStatus::Victory | SessionStatus::Abandoned
+        )
+        && entry.is_some();
     let xp = if granted { p.participation.cache_xp } else { 0 };
     if let Some(e) = entry {
         *e = if granted {
@@ -126,14 +135,80 @@ pub fn deadline(session: &GameSession) -> i64 {
         .saturating_add(session.settle_timeout_secs as i64)
 }
 
-/// The party is over: Victory, Wiped or Fled.
+/// The party is over: Victory, Wiped, Fled, or Abandoned by its DM.
 pub fn require_ended(session: &GameSession) -> Result<()> {
     require!(
         matches!(
             session.core.status,
-            SessionStatus::Victory | SessionStatus::Fled | SessionStatus::Wiped
+            SessionStatus::Victory
+                | SessionStatus::Fled
+                | SessionStatus::Wiped
+                | SessionStatus::Abandoned
         ),
         SessionError::NotFinished
     );
     Ok(())
+}
+
+/// Stuck party (docs/PARTY_AND_TURNS.md 3.2): a party whose DM was marked missing and never came
+/// back, or came back without every living player's confirmation in time, ends `Abandoned` at the
+/// time the missing-DM watch names (`deadroll_rules::timeout::DmPhase::ended_at`). The DM's
+/// deadline counts from there as after any end. Nothing for any other party.
+pub fn end_if_dm_left(session: &mut GameSession, session_key: Pubkey, now: i64) -> Result<()> {
+    if session.core.status != SessionStatus::Active {
+        return Ok(());
+    }
+    if let Some(ended_at) = session.dm_phase(now).ended_at() {
+        session.core.status = SessionStatus::Abandoned;
+        session.ended_at = ended_at;
+        crate::outcomes::emit_if_ended(session, session_key)?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{rules::TIMEOUTS, state::test_support::session};
+    use deadroll_types::Cell;
+
+    /// Stuck party: a party whose DM left ends `Abandoned` at the time the watch names; the
+    /// deadline counts from there as after any end.
+    #[test]
+    fn a_party_the_dm_left_ends_abandoned() {
+        let key = Pubkey::new_unique();
+        let mut s = session(&[Cell::default()]);
+        s.settle_timeout_secs = 600;
+        s.dm_missing_at = 1_000;
+        // Still counting down: nothing.
+        end_if_dm_left(&mut s, key, 1_600).unwrap();
+        assert_eq!(s.core.status, SessionStatus::Active);
+        assert!(require_ended(&s).is_err());
+        // Never came back: ended at the mark, the claims open after the countdown.
+        end_if_dm_left(&mut s, key, 1_601).unwrap();
+        assert_eq!(
+            (s.core.status, s.ended_at),
+            (SessionStatus::Abandoned, 1_000)
+        );
+        assert_eq!(deadline(&s), 1_600);
+        require_ended(&s).unwrap();
+
+        // Came back, the window closed without everyone: ended at the window's end.
+        let mut s = session(&[Cell::default()]);
+        s.settle_timeout_secs = 600;
+        s.dm_missing_at = 1_000;
+        s.dm_back_at = 1_100;
+        let end = 1_100 + TIMEOUTS.dm_return_confirm_secs as i64;
+        end_if_dm_left(&mut s, key, end).unwrap();
+        assert_eq!(s.core.status, SessionStatus::Active, "the window is open");
+        end_if_dm_left(&mut s, key, end + 1).unwrap();
+        assert_eq!((s.core.status, s.ended_at), (SessionStatus::Abandoned, end));
+
+        // A party that ended on its own stays as it ended.
+        let mut s = session(&[Cell::default()]);
+        s.core.status = SessionStatus::Victory;
+        s.dm_missing_at = 1_000;
+        end_if_dm_left(&mut s, key, 99_999).unwrap();
+        assert_eq!(s.core.status, SessionStatus::Victory);
+    }
 }

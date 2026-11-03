@@ -77,6 +77,20 @@ The DM can publish a quest with a **private party code**. Such a quest is not vi
 - If the DM abandons the party (reveal timeouts, no audit, or no issue before the deadline), the contributions are **returned to the players** proportionally, and the DM loses reputation.
 - If the party is never filled, the contributions are returned.
 
+#### 3.2.1 A missing DM
+
+The secrets open only with the DM's wallet (`MAP_DESCRIPTION.md`, section 17.5), so a party never goes on without its DM. When the DM stops answering during the party:
+
+1. **Mark.** The DM owes a reveal (`MAP_DESCRIPTION.md`, section 8.5: a cell a step or a look uncovered, or the composition of the pack the party engaged) for longer than the reveal timeout (`BalanceConfig`). Any living player can then mark the DM as missing. Not while a roll is pending: the DM cannot reveal until it resolves.
+2. **Freeze.** Nothing is paid at that moment. The mark starts the countdown of the map's issue deadline (the same interval the DM has to issue the rewards after a party, section 2, step 10). While it runs the party is frozen: no moves, no turns, no reveals.
+3. **The DM comes back** before the countdown ends and signs "I'm back". Every living player then has the return confirmation time (`BalanceConfig`) to press "Return to the party".
+   - If all living players confirm, the party goes on where it stopped: the DM reveals what is owed, and the reveal timeout counts again from that moment.
+   - If not all confirm in time, the party ends. The DM settles it with the main wallet before the map's issue deadline, counted from the end of the confirmation time: every living character gets their whole temporary cache (experience and rewards, as on a peaceful exit, without its penalty), every player gets their contribution back, the DM gets **no escrow**, only the map's deposits back. After that deadline each player claims their own, as below.
+4. **The DM does not come back** before the countdown ends: the party ends. Each player claims with their main wallet: the living character's whole temporary cache, as on a peaceful exit without its penalty, and their contribution back. The DM gets no escrow; the map's deposits go back to the DM with the last claim.
+5. Dead characters are finalized as usual on every path (tombstone, their cache burns).
+6. The final audit is not needed on these paths: it is the condition of the DM's payment, and the DM is not paid.
+7. **Later:** the DM's reputation (section 3.3) is not built yet; a party the DM left will cost reputation.
+
 ### 3.3 DM reputation
 
 The DM gains reputation for every party completed honestly. Reputation is visible in the Tavern when choosing quests. In phase 1 a DM stake will be added to it.
@@ -180,9 +194,17 @@ The same AP apply, but without damage skills: steps, interactions, searching, bu
 
 ### 5.3 Turn timeout
 
-- If a player does not act for N seconds, **any participant** can call a skip of their turn.
+- If a player does not act for the turn timeout (`BalanceConfig`), **any participant** (a player of the party or the DM) can call a skip of their turn.
 - The DM's monsters follow the same rule: if the DM does not move a monster, its turn is skipped.
+- The timeout counts from the start of the turn or the unit's last action. Waiting for a VRF value or for the DM's reveals does not count: the timeout starts again when the wait ends.
+- A skip is not the player's action: a Retreat or Escape proposal on the table stays (section 7.5).
+- No skip while a roll is pending, while the DM owes a reveal, while the party is frozen by a missing DM (section 3.2.1), or between the map and an arena.
 - Without this, one player who stepped away would hold up the whole party.
+
+#### 5.3.1 A silent VRF oracle
+
+- Every action with dice waits for one VRF value (`GAME_COMMISSIONS.md`). If the oracle does not answer for the VRF retry wait (`BalanceConfig`, in slots), **any participant** can request a new value for the same action and pays its fee.
+- Each request has a number; the answer to an older request is refused, so an action resolves once, from one value.
 
 ---
 
@@ -205,7 +227,7 @@ The timeline runs in the arena (section 4.1). The side that moves first is set b
 - Effects on initiative change the delay starting from the **next** turn. The delay is taken at the **start** of the unit's turn, under its effects and auras at that moment; an effect that lands later in the same turn changes only the delay after its next turn.
 - **Slow** divides the bearer's initiative as a counterweight (`COMBAT_MATH.md`, section 3), so its turns come less often. The share of the Slow that counts is `slow_initiative_bp` in `BalanceConfig.arena`. Haste does not change the order of turns (section 5.1). Chill acts through speed only.
 - Stun and Freeze: the participant loses their turn, and the delay is added to their time as after a played turn.
-- A turn skipped by the timeout (section 5.3) adds the bare delay, without the unit's effects, because its turn never started.
+- A turn skipped by the timeout (section 5.3) adds the bare delay, without the unit's effects, because its turn never started. If the turn's start already ran, its delay was taken then, under the unit's effects, and the skip adds nothing more.
 - Skill cooldowns and state durations are counted in the participant's **own turns**.
 
 ### 6.3 Speed and initiative together
@@ -229,6 +251,7 @@ Mage: low speed, high initiative (Intelligence). Acts often, but does not go far
 | **Peaceful exit**    | outside combat, living characters on the exit cell, "Leave" button | all accumulated | the entire temporary cache               | penalty on the next dungeons (section 7.2)     |
 | **Escape**           | in an arena, all living participants chose "Escape" (section 7.5)  | **nothing**     | **nothing**, temporary cache abandoned   | none                                           |
 | **Retreat**          | from the arena back to the map (section 7.5)                       | none for this fight | the cache stays                      | the pack heals, is on guard and stronger       |
+| **DM left**          | the DM was marked missing and did not come back, or came back without every living player's confirmation (section 3.2.1) | all accumulated | the entire temporary cache, contributions back | none for the players; the DM gets no escrow |
 | **Death**            | HP = 0                                                             |                 |                                          | tombstone, items burn                          |
 
 The party ends when there are no living characters left on the map (all died, escaped or exited) or the boss is killed.
@@ -292,7 +315,7 @@ After a **retreat**:
 
 - Each character in the party has their own **temporary cache** in `Participation`.
 - What accumulates there: experience for each **won arena** (section 4.1.4), and rewards from chests, hidden stashes and monsters.
-- The contents become the character's property only on **victory** or **peaceful exit**, after the DM's final audit.
+- The contents become the character's property only on **victory** or **peaceful exit**, after the DM's final audit, or when the DM left the party (section 3.2.1), without the audit.
 
 ### 8.1 After the party ends
 
@@ -389,8 +412,10 @@ If the **base level** of the table dropped on the boss reward for the party, eve
 | Exits        | the open Retreat or Escape proposal and who voted, retreats used, packs on guard and buffed, killed spawns |
 | Participants | characters and their positions, monsters (template, HP, position, skills)           |
 | Map          | `explored`, `revealed`, revealed secrets, opened doors, DM obligations              |
-| Time         | turn number, timestamp of the current turn's start (for the timeout)                |
-| Status       | in progress / victory / finished                                                    |
+| Time         | turn number, timestamp of the current turn's start, the turn timeout's clock (the start or the unit's last action), when the DM's reveals became owed |
+| Missing DM   | when the DM was marked missing, when the DM came back, who confirmed (section 3.2.1) |
+| VRF          | the number and slot of the latest request (section 5.3.1)                           |
+| Status       | in progress / victory / finished / abandoned by the DM                              |
 
 ### 10.2 `Participation`
 

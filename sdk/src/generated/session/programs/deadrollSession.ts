@@ -58,7 +58,9 @@ import {
   getActInstructionAsync,
   getClaimAfterTimeoutInstructionAsync,
   getCloseCacheInstructionAsync,
+  getConfirmDmReturnInstruction,
   getConsumeRandomnessInstruction,
+  getDmReturnInstruction,
   getEndTurnInstruction,
   getEnterArenaInstructionAsync,
   getExamineInstructionAsync,
@@ -66,22 +68,28 @@ import {
   getJoinSessionInstructionAsync,
   getLeaveArenaInstruction,
   getLeavePartyInstructionAsync,
+  getMarkDmMissingInstruction,
   getMonsterActInstructionAsync,
   getMovePathInstructionAsync,
   getOpenChestInstructionAsync,
   getOpenSessionInstructionAsync,
   getRetreatInstruction,
+  getRetryVrfInstructionAsync,
   getRevealCellInstructionAsync,
   getRevealPackInstructionAsync,
   getSetReadyInstructionAsync,
   getSetSessionKeyInstruction,
   getSettlePartyInstructionAsync,
+  getSettleUnconfirmedInstructionAsync,
+  getSkipTurnInstruction,
   getStartSessionInstructionAsync,
   getStartTurnInstructionAsync,
   parseActInstruction,
   parseClaimAfterTimeoutInstruction,
   parseCloseCacheInstruction,
+  parseConfirmDmReturnInstruction,
   parseConsumeRandomnessInstruction,
+  parseDmReturnInstruction,
   parseEndTurnInstruction,
   parseEnterArenaInstruction,
   parseExamineInstruction,
@@ -89,22 +97,28 @@ import {
   parseJoinSessionInstruction,
   parseLeaveArenaInstruction,
   parseLeavePartyInstruction,
+  parseMarkDmMissingInstruction,
   parseMonsterActInstruction,
   parseMovePathInstruction,
   parseOpenChestInstruction,
   parseOpenSessionInstruction,
   parseRetreatInstruction,
+  parseRetryVrfInstruction,
   parseRevealCellInstruction,
   parseRevealPackInstruction,
   parseSetReadyInstruction,
   parseSetSessionKeyInstruction,
   parseSettlePartyInstruction,
+  parseSettleUnconfirmedInstruction,
+  parseSkipTurnInstruction,
   parseStartSessionInstruction,
   parseStartTurnInstruction,
   type ActAsyncInput,
   type ClaimAfterTimeoutAsyncInput,
   type CloseCacheAsyncInput,
+  type ConfirmDmReturnInput,
   type ConsumeRandomnessInput,
+  type DmReturnInput,
   type EndTurnInput,
   type EnterArenaAsyncInput,
   type ExamineAsyncInput,
@@ -112,6 +126,7 @@ import {
   type JoinSessionAsyncInput,
   type LeaveArenaInput,
   type LeavePartyAsyncInput,
+  type MarkDmMissingInput,
   type MonsterActAsyncInput,
   type MovePathAsyncInput,
   type OpenChestAsyncInput,
@@ -119,7 +134,9 @@ import {
   type ParsedActInstruction,
   type ParsedClaimAfterTimeoutInstruction,
   type ParsedCloseCacheInstruction,
+  type ParsedConfirmDmReturnInstruction,
   type ParsedConsumeRandomnessInstruction,
+  type ParsedDmReturnInstruction,
   type ParsedEndTurnInstruction,
   type ParsedEnterArenaInstruction,
   type ParsedExamineInstruction,
@@ -127,24 +144,31 @@ import {
   type ParsedJoinSessionInstruction,
   type ParsedLeaveArenaInstruction,
   type ParsedLeavePartyInstruction,
+  type ParsedMarkDmMissingInstruction,
   type ParsedMonsterActInstruction,
   type ParsedMovePathInstruction,
   type ParsedOpenChestInstruction,
   type ParsedOpenSessionInstruction,
   type ParsedRetreatInstruction,
+  type ParsedRetryVrfInstruction,
   type ParsedRevealCellInstruction,
   type ParsedRevealPackInstruction,
   type ParsedSetReadyInstruction,
   type ParsedSetSessionKeyInstruction,
   type ParsedSettlePartyInstruction,
+  type ParsedSettleUnconfirmedInstruction,
+  type ParsedSkipTurnInstruction,
   type ParsedStartSessionInstruction,
   type ParsedStartTurnInstruction,
   type RetreatInput,
+  type RetryVrfAsyncInput,
   type RevealCellAsyncInput,
   type RevealPackAsyncInput,
   type SetReadyAsyncInput,
   type SetSessionKeyInput,
   type SettlePartyAsyncInput,
+  type SettleUnconfirmedAsyncInput,
+  type SkipTurnInput,
   type StartSessionAsyncInput,
   type StartTurnAsyncInput,
 } from "../instructions/index.js";
@@ -275,37 +299,44 @@ export const DeadrollSessionEvent = {
   13: "ChestOpened",
   14: "ContributionRefunded",
   15: "DeathFinalized",
-  16: "EffectResolved",
-  17: "EscrowClaimed",
-  18: "ExitCancelled",
-  19: "ExitPassed",
-  20: "FleeVoted",
-  21: "HitResolved",
-  22: "InitiativeRolled",
-  23: "ModsTicked",
-  24: "MonsterAuraChanged",
-  25: "MonsterKilled",
-  26: "MonsterReactiveTriggered",
-  27: "Moved",
-  28: "PackEngaged",
-  29: "PackRevealed",
-  30: "PartyLeft",
-  31: "PlayerDied",
-  32: "PlayerJoined",
-  33: "PlayerReady",
-  34: "ReactiveTriggered",
-  35: "ResonanceSpread",
-  36: "RetreatVoted",
-  37: "RevealsOwed",
-  38: "RewardsRolled",
-  39: "SessionEnded",
-  40: "SessionKeyChanged",
-  41: "SessionOpened",
-  42: "SkillUsed",
-  43: "TrapTriggered",
-  44: "TurnSkipped",
-  45: "TurnStarted",
-  46: "TurnTicked",
+  16: "DmMarkedMissing",
+  17: "DmReturnConfirmed",
+  18: "DmReturned",
+  19: "EffectResolved",
+  20: "EscrowClaimed",
+  21: "ExitCancelled",
+  22: "ExitPassed",
+  23: "FleeVoted",
+  24: "HitResolved",
+  25: "InitiativeRolled",
+  26: "ModsTicked",
+  27: "MonsterAuraChanged",
+  28: "MonsterKilled",
+  29: "MonsterReactiveTriggered",
+  30: "Moved",
+  31: "PackEngaged",
+  32: "PackRevealed",
+  33: "PartyLeft",
+  34: "PartyResumed",
+  35: "PartySettledWithoutEscrow",
+  36: "PlayerDied",
+  37: "PlayerJoined",
+  38: "PlayerReady",
+  39: "ReactiveTriggered",
+  40: "ResonanceSpread",
+  41: "RetreatVoted",
+  42: "RevealsOwed",
+  43: "RewardsRolled",
+  44: "SessionEnded",
+  45: "SessionKeyChanged",
+  46: "SessionOpened",
+  47: "SkillUsed",
+  48: "TrapTriggered",
+  49: "TurnSkipped",
+  50: "TurnStarted",
+  51: "TurnTicked",
+  52: "TurnTimedOut",
+  53: "VrfRetried",
   ActionRequested: 0,
   AmbushSprung: 1,
   ArenaEntered: 2,
@@ -322,37 +353,44 @@ export const DeadrollSessionEvent = {
   ChestOpened: 13,
   ContributionRefunded: 14,
   DeathFinalized: 15,
-  EffectResolved: 16,
-  EscrowClaimed: 17,
-  ExitCancelled: 18,
-  ExitPassed: 19,
-  FleeVoted: 20,
-  HitResolved: 21,
-  InitiativeRolled: 22,
-  ModsTicked: 23,
-  MonsterAuraChanged: 24,
-  MonsterKilled: 25,
-  MonsterReactiveTriggered: 26,
-  Moved: 27,
-  PackEngaged: 28,
-  PackRevealed: 29,
-  PartyLeft: 30,
-  PlayerDied: 31,
-  PlayerJoined: 32,
-  PlayerReady: 33,
-  ReactiveTriggered: 34,
-  ResonanceSpread: 35,
-  RetreatVoted: 36,
-  RevealsOwed: 37,
-  RewardsRolled: 38,
-  SessionEnded: 39,
-  SessionKeyChanged: 40,
-  SessionOpened: 41,
-  SkillUsed: 42,
-  TrapTriggered: 43,
-  TurnSkipped: 44,
-  TurnStarted: 45,
-  TurnTicked: 46,
+  DmMarkedMissing: 16,
+  DmReturnConfirmed: 17,
+  DmReturned: 18,
+  EffectResolved: 19,
+  EscrowClaimed: 20,
+  ExitCancelled: 21,
+  ExitPassed: 22,
+  FleeVoted: 23,
+  HitResolved: 24,
+  InitiativeRolled: 25,
+  ModsTicked: 26,
+  MonsterAuraChanged: 27,
+  MonsterKilled: 28,
+  MonsterReactiveTriggered: 29,
+  Moved: 30,
+  PackEngaged: 31,
+  PackRevealed: 32,
+  PartyLeft: 33,
+  PartyResumed: 34,
+  PartySettledWithoutEscrow: 35,
+  PlayerDied: 36,
+  PlayerJoined: 37,
+  PlayerReady: 38,
+  ReactiveTriggered: 39,
+  ResonanceSpread: 40,
+  RetreatVoted: 41,
+  RevealsOwed: 42,
+  RewardsRolled: 43,
+  SessionEnded: 44,
+  SessionKeyChanged: 45,
+  SessionOpened: 46,
+  SkillUsed: 47,
+  TrapTriggered: 48,
+  TurnSkipped: 49,
+  TurnStarted: 50,
+  TurnTicked: 51,
+  TurnTimedOut: 52,
+  VrfRetried: 53,
 } as const;
 
 export type DeadrollSessionEvent = (typeof DeadrollSessionEvent)[Exclude<
@@ -544,6 +582,39 @@ export function identifyDeadrollSessionEvent(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([210, 179, 165, 128, 241, 15, 127, 41]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionEvent.DmMarkedMissing;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([43, 4, 76, 79, 113, 229, 176, 221]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionEvent.DmReturnConfirmed;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([221, 11, 107, 218, 6, 177, 124, 219]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionEvent.DmReturned;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([122, 47, 143, 56, 64, 145, 122, 184]),
       ),
       0,
@@ -704,6 +775,28 @@ export function identifyDeadrollSessionEvent(
     )
   ) {
     return DeadrollSessionEvent.PartyLeft;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([185, 58, 88, 118, 132, 235, 134, 102]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionEvent.PartyResumed;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([173, 8, 212, 43, 161, 143, 217, 155]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionEvent.PartySettledWithoutEscrow;
   }
   if (
     containsBytes(
@@ -881,6 +974,28 @@ export function identifyDeadrollSessionEvent(
   ) {
     return DeadrollSessionEvent.TurnTicked;
   }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([205, 113, 84, 61, 54, 85, 56, 77]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionEvent.TurnTimedOut;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([112, 27, 117, 61, 20, 52, 85, 206]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionEvent.VrfRetried;
+  }
   throw new Error(
     "The provided event could not be identified as a deadrollSession event.",
   );
@@ -890,49 +1005,61 @@ export const DeadrollSessionInstruction = {
   0: "Act",
   1: "ClaimAfterTimeout",
   2: "CloseCache",
-  3: "ConsumeRandomness",
-  4: "EndTurn",
-  5: "EnterArena",
-  6: "Examine",
-  7: "Flee",
-  8: "JoinSession",
-  9: "LeaveArena",
-  10: "LeaveParty",
-  11: "MonsterAct",
-  12: "MovePath",
-  13: "OpenChest",
-  14: "OpenSession",
-  15: "Retreat",
-  16: "RevealCell",
-  17: "RevealPack",
-  18: "SetReady",
-  19: "SetSessionKey",
-  20: "SettleParty",
-  21: "StartSession",
-  22: "StartTurn",
+  3: "ConfirmDmReturn",
+  4: "ConsumeRandomness",
+  5: "DmReturn",
+  6: "EndTurn",
+  7: "EnterArena",
+  8: "Examine",
+  9: "Flee",
+  10: "JoinSession",
+  11: "LeaveArena",
+  12: "LeaveParty",
+  13: "MarkDmMissing",
+  14: "MonsterAct",
+  15: "MovePath",
+  16: "OpenChest",
+  17: "OpenSession",
+  18: "Retreat",
+  19: "RetryVrf",
+  20: "RevealCell",
+  21: "RevealPack",
+  22: "SetReady",
+  23: "SetSessionKey",
+  24: "SettleParty",
+  25: "SettleUnconfirmed",
+  26: "SkipTurn",
+  27: "StartSession",
+  28: "StartTurn",
   Act: 0,
   ClaimAfterTimeout: 1,
   CloseCache: 2,
-  ConsumeRandomness: 3,
-  EndTurn: 4,
-  EnterArena: 5,
-  Examine: 6,
-  Flee: 7,
-  JoinSession: 8,
-  LeaveArena: 9,
-  LeaveParty: 10,
-  MonsterAct: 11,
-  MovePath: 12,
-  OpenChest: 13,
-  OpenSession: 14,
-  Retreat: 15,
-  RevealCell: 16,
-  RevealPack: 17,
-  SetReady: 18,
-  SetSessionKey: 19,
-  SettleParty: 20,
-  StartSession: 21,
-  StartTurn: 22,
+  ConfirmDmReturn: 3,
+  ConsumeRandomness: 4,
+  DmReturn: 5,
+  EndTurn: 6,
+  EnterArena: 7,
+  Examine: 8,
+  Flee: 9,
+  JoinSession: 10,
+  LeaveArena: 11,
+  LeaveParty: 12,
+  MarkDmMissing: 13,
+  MonsterAct: 14,
+  MovePath: 15,
+  OpenChest: 16,
+  OpenSession: 17,
+  Retreat: 18,
+  RetryVrf: 19,
+  RevealCell: 20,
+  RevealPack: 21,
+  SetReady: 22,
+  SetSessionKey: 23,
+  SettleParty: 24,
+  SettleUnconfirmed: 25,
+  SkipTurn: 26,
+  StartSession: 27,
+  StartTurn: 28,
 } as const;
 
 export type DeadrollSessionInstruction =
@@ -982,12 +1109,34 @@ export function identifyDeadrollSessionInstruction(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([200, 64, 197, 196, 108, 96, 139, 16]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionInstruction.ConfirmDmReturn;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([190, 217, 49, 162, 99, 26, 73, 234]),
       ),
       0,
     )
   ) {
     return DeadrollSessionInstruction.ConsumeRandomness;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([64, 168, 5, 217, 151, 200, 117, 107]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionInstruction.DmReturn;
   }
   if (
     containsBytes(
@@ -1070,6 +1219,17 @@ export function identifyDeadrollSessionInstruction(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([106, 205, 66, 103, 200, 77, 169, 20]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionInstruction.MarkDmMissing;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([23, 161, 226, 80, 154, 123, 9, 112]),
       ),
       0,
@@ -1120,6 +1280,17 @@ export function identifyDeadrollSessionInstruction(
     )
   ) {
     return DeadrollSessionInstruction.Retreat;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([247, 198, 70, 200, 136, 177, 124, 197]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionInstruction.RetryVrf;
   }
   if (
     containsBytes(
@@ -1180,6 +1351,28 @@ export function identifyDeadrollSessionInstruction(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([7, 140, 34, 234, 131, 58, 62, 233]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionInstruction.SettleUnconfirmed;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([165, 254, 71, 23, 126, 139, 241, 164]),
+      ),
+      0,
+    )
+  ) {
+    return DeadrollSessionInstruction.SkipTurn;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([23, 227, 111, 142, 212, 230, 3, 175]),
       ),
       0,
@@ -1217,8 +1410,14 @@ export type ParsedDeadrollSessionInstruction<
       instructionType: typeof DeadrollSessionInstruction.CloseCache;
     } & ParsedCloseCacheInstruction<TProgram>)
   | ({
+      instructionType: typeof DeadrollSessionInstruction.ConfirmDmReturn;
+    } & ParsedConfirmDmReturnInstruction<TProgram>)
+  | ({
       instructionType: typeof DeadrollSessionInstruction.ConsumeRandomness;
     } & ParsedConsumeRandomnessInstruction<TProgram>)
+  | ({
+      instructionType: typeof DeadrollSessionInstruction.DmReturn;
+    } & ParsedDmReturnInstruction<TProgram>)
   | ({
       instructionType: typeof DeadrollSessionInstruction.EndTurn;
     } & ParsedEndTurnInstruction<TProgram>)
@@ -1241,6 +1440,9 @@ export type ParsedDeadrollSessionInstruction<
       instructionType: typeof DeadrollSessionInstruction.LeaveParty;
     } & ParsedLeavePartyInstruction<TProgram>)
   | ({
+      instructionType: typeof DeadrollSessionInstruction.MarkDmMissing;
+    } & ParsedMarkDmMissingInstruction<TProgram>)
+  | ({
       instructionType: typeof DeadrollSessionInstruction.MonsterAct;
     } & ParsedMonsterActInstruction<TProgram>)
   | ({
@@ -1256,6 +1458,9 @@ export type ParsedDeadrollSessionInstruction<
       instructionType: typeof DeadrollSessionInstruction.Retreat;
     } & ParsedRetreatInstruction<TProgram>)
   | ({
+      instructionType: typeof DeadrollSessionInstruction.RetryVrf;
+    } & ParsedRetryVrfInstruction<TProgram>)
+  | ({
       instructionType: typeof DeadrollSessionInstruction.RevealCell;
     } & ParsedRevealCellInstruction<TProgram>)
   | ({
@@ -1270,6 +1475,12 @@ export type ParsedDeadrollSessionInstruction<
   | ({
       instructionType: typeof DeadrollSessionInstruction.SettleParty;
     } & ParsedSettlePartyInstruction<TProgram>)
+  | ({
+      instructionType: typeof DeadrollSessionInstruction.SettleUnconfirmed;
+    } & ParsedSettleUnconfirmedInstruction<TProgram>)
+  | ({
+      instructionType: typeof DeadrollSessionInstruction.SkipTurn;
+    } & ParsedSkipTurnInstruction<TProgram>)
   | ({
       instructionType: typeof DeadrollSessionInstruction.StartSession;
     } & ParsedStartSessionInstruction<TProgram>)
@@ -1303,11 +1514,25 @@ export function parseDeadrollSessionInstruction<TProgram extends string>(
         ...parseCloseCacheInstruction(instruction),
       };
     }
+    case DeadrollSessionInstruction.ConfirmDmReturn: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: DeadrollSessionInstruction.ConfirmDmReturn,
+        ...parseConfirmDmReturnInstruction(instruction),
+      };
+    }
     case DeadrollSessionInstruction.ConsumeRandomness: {
       assertIsInstructionWithAccounts(instruction);
       return {
         instructionType: DeadrollSessionInstruction.ConsumeRandomness,
         ...parseConsumeRandomnessInstruction(instruction),
+      };
+    }
+    case DeadrollSessionInstruction.DmReturn: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: DeadrollSessionInstruction.DmReturn,
+        ...parseDmReturnInstruction(instruction),
       };
     }
     case DeadrollSessionInstruction.EndTurn: {
@@ -1359,6 +1584,13 @@ export function parseDeadrollSessionInstruction<TProgram extends string>(
         ...parseLeavePartyInstruction(instruction),
       };
     }
+    case DeadrollSessionInstruction.MarkDmMissing: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: DeadrollSessionInstruction.MarkDmMissing,
+        ...parseMarkDmMissingInstruction(instruction),
+      };
+    }
     case DeadrollSessionInstruction.MonsterAct: {
       assertIsInstructionWithAccounts(instruction);
       return {
@@ -1394,6 +1626,13 @@ export function parseDeadrollSessionInstruction<TProgram extends string>(
         ...parseRetreatInstruction(instruction),
       };
     }
+    case DeadrollSessionInstruction.RetryVrf: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: DeadrollSessionInstruction.RetryVrf,
+        ...parseRetryVrfInstruction(instruction),
+      };
+    }
     case DeadrollSessionInstruction.RevealCell: {
       assertIsInstructionWithAccounts(instruction);
       return {
@@ -1427,6 +1666,20 @@ export function parseDeadrollSessionInstruction<TProgram extends string>(
       return {
         instructionType: DeadrollSessionInstruction.SettleParty,
         ...parseSettlePartyInstruction(instruction),
+      };
+    }
+    case DeadrollSessionInstruction.SettleUnconfirmed: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: DeadrollSessionInstruction.SettleUnconfirmed,
+        ...parseSettleUnconfirmedInstruction(instruction),
+      };
+    }
+    case DeadrollSessionInstruction.SkipTurn: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: DeadrollSessionInstruction.SkipTurn,
+        ...parseSkipTurnInstruction(instruction),
       };
     }
     case DeadrollSessionInstruction.StartSession: {
@@ -1490,10 +1743,17 @@ export type DeadrollSessionPluginInstructions = {
     input: CloseCacheAsyncInput,
   ) => ReturnType<typeof getCloseCacheInstructionAsync> &
     SelfPlanAndSendFunctions;
+  confirmDmReturn: (
+    input: ConfirmDmReturnInput,
+  ) => ReturnType<typeof getConfirmDmReturnInstruction> &
+    SelfPlanAndSendFunctions;
   consumeRandomness: (
     input: ConsumeRandomnessInput,
   ) => ReturnType<typeof getConsumeRandomnessInstruction> &
     SelfPlanAndSendFunctions;
+  dmReturn: (
+    input: DmReturnInput,
+  ) => ReturnType<typeof getDmReturnInstruction> & SelfPlanAndSendFunctions;
   endTurn: (
     input: EndTurnInput,
   ) => ReturnType<typeof getEndTurnInstruction> & SelfPlanAndSendFunctions;
@@ -1518,6 +1778,10 @@ export type DeadrollSessionPluginInstructions = {
     input: LeavePartyAsyncInput,
   ) => ReturnType<typeof getLeavePartyInstructionAsync> &
     SelfPlanAndSendFunctions;
+  markDmMissing: (
+    input: MarkDmMissingInput,
+  ) => ReturnType<typeof getMarkDmMissingInstruction> &
+    SelfPlanAndSendFunctions;
   monsterAct: (
     input: MonsterActAsyncInput,
   ) => ReturnType<typeof getMonsterActInstructionAsync> &
@@ -1537,6 +1801,10 @@ export type DeadrollSessionPluginInstructions = {
   retreat: (
     input: RetreatInput,
   ) => ReturnType<typeof getRetreatInstruction> & SelfPlanAndSendFunctions;
+  retryVrf: (
+    input: RetryVrfAsyncInput,
+  ) => ReturnType<typeof getRetryVrfInstructionAsync> &
+    SelfPlanAndSendFunctions;
   revealCell: (
     input: RevealCellAsyncInput,
   ) => ReturnType<typeof getRevealCellInstructionAsync> &
@@ -1557,6 +1825,13 @@ export type DeadrollSessionPluginInstructions = {
     input: SettlePartyAsyncInput,
   ) => ReturnType<typeof getSettlePartyInstructionAsync> &
     SelfPlanAndSendFunctions;
+  settleUnconfirmed: (
+    input: SettleUnconfirmedAsyncInput,
+  ) => ReturnType<typeof getSettleUnconfirmedInstructionAsync> &
+    SelfPlanAndSendFunctions;
+  skipTurn: (
+    input: SkipTurnInput,
+  ) => ReturnType<typeof getSkipTurnInstruction> & SelfPlanAndSendFunctions;
   startSession: (
     input: StartSessionAsyncInput,
   ) => ReturnType<typeof getStartSessionInstructionAsync> &
@@ -1612,11 +1887,18 @@ export function deadrollSessionProgram() {
               client,
               getCloseCacheInstructionAsync(input),
             ),
+          confirmDmReturn: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getConfirmDmReturnInstruction(input),
+            ),
           consumeRandomness: (input) =>
             addSelfPlanAndSendFunctions(
               client,
               getConsumeRandomnessInstruction(input),
             ),
+          dmReturn: (input) =>
+            addSelfPlanAndSendFunctions(client, getDmReturnInstruction(input)),
           endTurn: (input) =>
             addSelfPlanAndSendFunctions(client, getEndTurnInstruction(input)),
           enterArena: (input) =>
@@ -1652,6 +1934,11 @@ export function deadrollSessionProgram() {
               client,
               getLeavePartyInstructionAsync(input),
             ),
+          markDmMissing: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getMarkDmMissingInstruction(input),
+            ),
           monsterAct: (input) =>
             addSelfPlanAndSendFunctions(
               client,
@@ -1674,6 +1961,11 @@ export function deadrollSessionProgram() {
             ),
           retreat: (input) =>
             addSelfPlanAndSendFunctions(client, getRetreatInstruction(input)),
+          retryVrf: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getRetryVrfInstructionAsync(input),
+            ),
           revealCell: (input) =>
             addSelfPlanAndSendFunctions(
               client,
@@ -1699,6 +1991,13 @@ export function deadrollSessionProgram() {
               client,
               getSettlePartyInstructionAsync(input),
             ),
+          settleUnconfirmed: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getSettleUnconfirmedInstructionAsync(input),
+            ),
+          skipTurn: (input) =>
+            addSelfPlanAndSendFunctions(client, getSkipTurnInstruction(input)),
           startSession: (input) =>
             addSelfPlanAndSendFunctions(
               client,

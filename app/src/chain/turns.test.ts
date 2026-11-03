@@ -4,7 +4,8 @@ import type { GameSessionAcc, Party, PartyPlayer } from "./game";
 import { errorName } from "./send";
 import { StateKind } from "./types";
 import { SessionStatus } from "@deadroll/sdk/session";
-import { auditLeft, cooldownLabel, exitVoteView, revealStepFor, skillCooldowns, skillUsedText, skipText, arenaStepFor, startTurnFor, tickText, turnActed, turnStarted } from "./turns";
+import { auditLeft, cooldownLabel, exitVoteView, revealStepFor, skillCooldowns, skillUsedText, skipText, arenaStepFor, startTurnFor, stuckView, tickText, turnActed, turnStarted } from "./turns";
+import { TIMEOUTS } from "./timeouts";
 
 const A = (n: number) => getAddressDecoder().decode(new Uint8Array(32).fill(n)) as Address;
 const DM = A(1);
@@ -23,6 +24,14 @@ function party(turn: number, over: Partial<GameSessionAcc> = {}, core: Partial<G
     obligationCount: 0,
     packsRevealed: 0xffn,
     arenaPack: 0,
+    // Stuck party: the DM present, nothing timed yet.
+    dmMissingAt: 0n,
+    dmBackAt: 0n,
+    dmConfirmMask: 0,
+    revealsOwedAt: 0n,
+    turnClock: 0n,
+    vrfRequest: 0,
+    vrfRequestedSlot: 0n,
     ...over,
   } as unknown as GameSessionAcc;
   const player = (slot: number, owner: Address) =>
@@ -187,5 +196,77 @@ describe("patch C: the DM's reveals", () => {
     const board = { revealed: (leaf: number) => leaf === 65 };
     expect(auditLeft(s, board, [65, 66, 300], [1, 3])).toEqual({ cells: [66, 300], packs: [3] });
     expect(auditLeft(s, null, [65], [])).toEqual({ cells: [65], packs: [] });
+  });
+});
+
+describe("stuck party (docs/PARTY_AND_TURNS.md 3.2, 5.3)", () => {
+  const T0 = 1_000_000;
+  /** Two living players, a 600 s issue deadline, Alice's turn (index 0). */
+  const stuck = (over: Record<string, unknown> = {}, core: Record<string, unknown> = {}) =>
+    party(0, { aliveMask: 0b11, settledMask: 0, settleTimeoutSecs: 600, mode: 0, ...over } as never, { playerCount: 2, ...core } as never);
+
+  it("a reveal owed long enough: the living players may mark the DM as missing", () => {
+    const p = stuck({ obligationCount: 1, revealsOwedAt: BigInt(T0) });
+    const due = T0 + TIMEOUTS.revealTimeoutSecs;
+    expect(stuckView(p, ALICE, due - 1, null)).toMatchObject({ markFrom: due, mark: [] });
+    expect(stuckView(p, ALICE, due, null).mark.map((x) => x.slot)).toEqual([0]);
+    expect(stuckView(p, DM, due, null).mark).toEqual([]);
+    // Not during a roll, nor for a tombstone.
+    expect(stuckView(stuck({ obligationCount: 1, revealsOwedAt: BigInt(T0) }, { pendingVrf: true }), ALICE, due, null).mark).toEqual([]);
+    expect(stuckView(stuck({ obligationCount: 1, revealsOwedAt: BigInt(T0), aliveMask: 0b10 }), ALICE, due, null).mark).toEqual([]);
+    // Nothing owed: nothing to mark.
+    expect(stuckView(stuck(), ALICE, due, null).markFrom).toBeNull();
+  });
+
+  it("frozen: no turn start, no reveal, no arena step; the DM may come back, then the players confirm", () => {
+    const p = stuck({ obligationCount: 1, dmMissingAt: BigInt(T0) });
+    expect([startTurnFor(p, ALICE), revealStepFor(p, DM), arenaStepFor(p, ALICE)]).toEqual([null, null, null]);
+    expect(stuckView(p, DM, T0 + 600, null)).toMatchObject({ phase: { kind: "missing", until: T0 + 600 }, dmReturn: true, skip: null });
+    expect(stuckView(p, ALICE, T0 + 600, null).dmReturn).toBe(false);
+    const back = stuck({ obligationCount: 1, dmMissingAt: BigInt(T0), dmBackAt: BigInt(T0 + 10), dmConfirmMask: 0b10 });
+    const v = stuckView(back, ALICE, T0 + 20, null);
+    expect(v).toMatchObject({ phase: { kind: "back" }, confirmed: [1], waiting: [0] });
+    expect(v.confirm.map((x) => x.slot)).toEqual([0]);
+    expect(stuckView(back, BOB, T0 + 20, null).confirm).toEqual([]);
+  });
+
+  it("the DM left: the DM settles before the deadline, the players claim after", () => {
+    const never = stuck({ dmMissingAt: BigInt(T0) });
+    expect(stuckView(never, ALICE, T0 + 600, null).claimFrom).toBeNull();
+    const gone = stuckView(never, ALICE, T0 + 601, null);
+    expect(gone).toMatchObject({ phase: { kind: "gone", endedAt: T0 }, claimFrom: T0 + 600, dmSettle: false });
+    expect(gone.claim.map((x) => x.slot)).toEqual([0]);
+    const end = T0 + 10 + TIMEOUTS.dmReturnConfirmSecs;
+    const left = stuck({ dmMissingAt: BigInt(T0), dmBackAt: BigInt(T0 + 10), dmConfirmMask: 0b01 });
+    expect(stuckView(left, DM, end + 1, null)).toMatchObject({ phase: { kind: "unconfirmed", endedAt: end }, dmSettle: true, claim: [] });
+    expect(stuckView(left, DM, end + 601, null).dmSettle).toBe(false);
+    expect(stuckView(left, BOB, end + 601, null).claim.map((x) => x.slot)).toEqual([1]);
+    // A settled player has nothing to claim.
+    expect(stuckView(stuck({ dmMissingAt: BigInt(T0), settledMask: 0b01 }), ALICE, T0 + 601, null).claim).toEqual([]);
+  });
+
+  it("an idle unit's turn may be skipped by any participant once the timeout passed", () => {
+    const p = stuck({ turnClock: BigInt(T0) });
+    const due = T0 + TIMEOUTS.turnTimeoutSecs;
+    expect(stuckView(p, BOB, due - 1, null)).toMatchObject({ skipFrom: due, skip: null });
+    expect(stuckView(p, BOB, due, null).skip).toMatchObject({ kind: "player", player: { slot: 1 } });
+    expect(stuckView(p, DM, due, null).skip).toEqual({ kind: "dm" });
+    expect(stuckView(p, A(99), due, null).skip).toBeNull();
+    // Not while a reveal is owed, a roll is pending, or between the map and an arena.
+    expect(stuckView(stuck({ turnClock: BigInt(T0), obligationCount: 1 }), BOB, due, null).skip).toBeNull();
+    expect(stuckView(stuck({ turnClock: BigInt(T0) }, { pendingVrf: true }), BOB, due, null).skip).toBeNull();
+    expect(stuckView(stuck({ turnClock: BigInt(T0), mode: 1, packsRevealed: 0xffn }), BOB, due, null).skip).toBeNull();
+    // In an arena too.
+    expect(stuckView(stuck({ turnClock: BigInt(T0), mode: 2 }), BOB, due, null).skip).not.toBeNull();
+  });
+
+  it("a silent oracle: any participant may retry once the slots passed", () => {
+    const p = stuck({ vrfRequestedSlot: 500n }, { pendingVrf: true });
+    const due = 500n + BigInt(TIMEOUTS.vrfRetrySlots);
+    expect(stuckView(p, ALICE, T0, due - 1n).retry).toBeNull();
+    expect(stuckView(p, ALICE, T0, due).retry).toMatchObject({ kind: "player" });
+    expect(stuckView(p, DM, T0, due).retry).toEqual({ kind: "dm" });
+    expect(stuckView(p, ALICE, T0, null).retry).toBeNull();
+    expect(stuckView(stuck({ vrfRequestedSlot: 500n }), ALICE, T0, due).retry).toBeNull();
   });
 });

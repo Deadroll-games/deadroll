@@ -301,6 +301,13 @@ export const PROGRAM_ERRORS = {
     6116: ["NotAdjacent", "Only a cell next to the character can be examined"],
     6117: ["MapWithoutSizes", "The map was finalized before the map sizes update"],
     6118: ["InvalidBoard", "Not the party board account"],
+    6119: ["PartyFrozen", "The DM is marked missing: the party is frozen until the DM is back and confirmed"],
+    6120: ["NoRevealOwed", "The DM owes no reveal"],
+    6121: ["TooEarly", "Too early: the wait has not passed yet"],
+    6122: ["WrongDmPhase", "This step of the missing-DM flow does not fit where the party stands"],
+    6123: ["AlreadyConfirmed", "This player already confirmed the DM's return"],
+    6124: ["NotParticipant", "Only a participant of this party can do this"],
+    6125: ["StaleRandomness", "This VRF value answers an older request"],
   },
   city: {
     6000: ["Unauthorized", "Caller is not authorized for this instruction"],

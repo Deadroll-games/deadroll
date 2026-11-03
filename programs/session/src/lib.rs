@@ -119,12 +119,14 @@ pub mod deadroll_session {
     }
 
     /// VRF callback: resolves the pending attack through `deadroll_combat`, applies HP and
-    /// states, death (`character.mark_dead`), boss victory and wipe.
+    /// states, death (`character.mark_dead`), boss victory and wipe. Stuck party: `request` is
+    /// the number of the request it answers (its callback argument); an older one is refused.
     pub fn consume_randomness<'info>(
         ctx: Context<'info, ConsumeRandomness<'info>>,
         randomness: [u8; 32],
+        request: u32,
     ) -> Result<()> {
-        consume_randomness::handler(ctx, randomness)
+        consume_randomness::handler(ctx, randomness, request)
     }
 
     /// Player proposes or confirms "Escape" in an arena on their turn; when every living player
@@ -205,5 +207,38 @@ pub mod deadroll_session {
     /// Patch C: a player examines the cell next to them on their turn (AP); the DM must reveal it.
     pub fn examine(ctx: Context<Examine>, x: u8, y: u8) -> Result<()> {
         examine::handler(ctx, x, y)
+    }
+
+    /// Stuck party: a living player marks the DM as missing once a reveal is overdue; the party
+    /// freezes and the map's issue deadline counts down.
+    pub fn mark_dm_missing(ctx: Context<MarkDmMissing>) -> Result<()> {
+        mark_dm_missing::handler(ctx)
+    }
+
+    /// Stuck party: the DM marked missing says "I'm back" before the countdown ends.
+    pub fn dm_return(ctx: Context<DmReturn>) -> Result<()> {
+        dm_return::handler(ctx)
+    }
+
+    /// Stuck party: a living player confirms the DM's return; when all did, the party goes on.
+    pub fn confirm_dm_return(ctx: Context<ConfirmDmReturn>) -> Result<()> {
+        confirm_dm_return::handler(ctx)
+    }
+
+    /// Stuck party: the DM settles a party the players did not let them back into: caches and
+    /// contributions to the players, only the map's deposits to the DM.
+    pub fn settle_unconfirmed<'info>(ctx: Context<'info, SettleUnconfirmed<'info>>) -> Result<()> {
+        settle_unconfirmed::handler(ctx)
+    }
+
+    /// Stuck party: any participant skips the turn of a unit idle for the turn timeout.
+    pub fn skip_turn(ctx: Context<SkipTurn>) -> Result<()> {
+        skip_turn::handler(ctx)
+    }
+
+    /// Stuck party: any participant sends the pending roll's VRF request again after the retry
+    /// wait; the older request's callback is refused from then on.
+    pub fn retry_vrf(ctx: Context<RetryVrf>) -> Result<()> {
+        retry_vrf::handler(ctx)
     }
 }

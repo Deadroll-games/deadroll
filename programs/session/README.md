@@ -31,9 +31,15 @@ All of them are created at `open_session` / `join_session` (the reward cache onc
 | `flee`, `retreat` | owner / key | patch B: in an arena, proposes or confirms Escape (leave the dungeon, nothing kept) or Retreat (back to the map); the vote ends the turn, any other action cancels it; when every living player voted the monsters move once more |
 | `open_chest` | owner / key | patch 11: opens a visible chest next to the player (AP); requests a VRF value |
 | `settle_party` | DM main wallet | patch 11: every cache becomes its player's, XP and unlock (CPI character), the escrow for the DM, the map Finished |
-| `claim_after_timeout` | player main wallet | patch 11: after the DM's deadline, the same for one character and its contribution back |
+| `claim_after_timeout` | player main wallet | patch 11: after the DM's deadline, the same for one character and its contribution back; stuck party: also ends a party the DM left (`Abandoned`) |
 | `leave_party` | owner main wallet | patch 11: frees a living character from its ended party; its rewards keep waiting |
 | `close_cache` | owner main wallet | patch 11: "Done": the bag layout (CPI character `apply_bag`), the cache closes |
+| `mark_dm_missing` | living player: owner / key | stuck party: a reveal the DM owes is overdue; the party freezes, the map's issue deadline counts down |
+| `dm_return` | DM / its key | stuck party: "I'm back" before the countdown ends; the living players confirm in time |
+| `confirm_dm_return` | living player: owner / key | stuck party: when every living player confirmed, the party goes on |
+| `settle_unconfirmed` | DM main wallet | stuck party: not everyone confirmed; caches to the living, contributions back, no escrow, the map closes |
+| `skip_turn` | any participant | stuck party: skips an idle unit's turn after the turn timeout |
+| `retry_vrf` | any participant | stuck party: sends the pending roll's VRF request again; the older callback is refused |
 
 The temporary cache fills during the party in `Participation.cache` (`src/loot.rs`: kills pay out at the end of each VRF callback, chests in their own callback); `src/settlement.rs` ends the party for each player.
 

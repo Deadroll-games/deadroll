@@ -45,6 +45,7 @@ pub fn oblige_cells(
     cells: &[Cell],
 ) -> Result<()> {
     let before = session.obligation_count;
+    let was_owed = session.owes_reveal();
     for &c in cells {
         let leaf = session.leaf_here(c).ok_or(SessionError::OutOfBounds)?;
         require!(
@@ -53,6 +54,8 @@ pub fn oblige_cells(
         );
     }
     if session.obligation_count != before {
+        // Stuck party: the DM's reveal clock starts with the debt.
+        session.note_owed(was_owed, Clock::get()?.unix_timestamp);
         session.obliged_by = slot;
         emit!(RevealsOwed {
             session: session_key,

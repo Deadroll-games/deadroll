@@ -252,12 +252,27 @@ export const DEADROLL_SESSION_ERROR__NOT_ADJACENT = 0x17e4; // 6116
 export const DEADROLL_SESSION_ERROR__MAP_WITHOUT_SIZES = 0x17e5; // 6117
 /** InvalidBoard: Not the party board account */
 export const DEADROLL_SESSION_ERROR__INVALID_BOARD = 0x17e6; // 6118
+/** PartyFrozen: The DM is marked missing: the party is frozen until the DM is back and confirmed */
+export const DEADROLL_SESSION_ERROR__PARTY_FROZEN = 0x17e7; // 6119
+/** NoRevealOwed: The DM owes no reveal */
+export const DEADROLL_SESSION_ERROR__NO_REVEAL_OWED = 0x17e8; // 6120
+/** TooEarly: Too early: the wait has not passed yet */
+export const DEADROLL_SESSION_ERROR__TOO_EARLY = 0x17e9; // 6121
+/** WrongDmPhase: This step of the missing-DM flow does not fit where the party stands */
+export const DEADROLL_SESSION_ERROR__WRONG_DM_PHASE = 0x17ea; // 6122
+/** AlreadyConfirmed: This player already confirmed the DM's return */
+export const DEADROLL_SESSION_ERROR__ALREADY_CONFIRMED = 0x17eb; // 6123
+/** NotParticipant: Only a participant of this party can do this */
+export const DEADROLL_SESSION_ERROR__NOT_PARTICIPANT = 0x17ec; // 6124
+/** StaleRandomness: This VRF value answers an older request */
+export const DEADROLL_SESSION_ERROR__STALE_RANDOMNESS = 0x17ed; // 6125
 
 export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__ACTOR_MISMATCH
   | typeof DEADROLL_SESSION_ERROR__ALLY_ACCOUNT_MISSING
   | typeof DEADROLL_SESSION_ERROR__ALREADY_ACTED
   | typeof DEADROLL_SESSION_ERROR__ALREADY_CLAIMED
+  | typeof DEADROLL_SESSION_ERROR__ALREADY_CONFIRMED
   | typeof DEADROLL_SESSION_ERROR__ALREADY_REVEALED
   | typeof DEADROLL_SESSION_ERROR__ALREADY_SETTLED
   | typeof DEADROLL_SESSION_ERROR__ARENA_NOT_WON
@@ -314,6 +329,7 @@ export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__MONSTER_NEAR_CHEST
   | typeof DEADROLL_SESSION_ERROR__MONSTER_SKILL_MISSING
   | typeof DEADROLL_SESSION_ERROR__NO_PLAYERS
+  | typeof DEADROLL_SESSION_ERROR__NO_REVEAL_OWED
   | typeof DEADROLL_SESSION_ERROR__NO_ROLL_PENDING
   | typeof DEADROLL_SESSION_ERROR__NOT_ACTIVE
   | typeof DEADROLL_SESSION_ERROR__NOT_ADJACENT
@@ -329,6 +345,7 @@ export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__NOT_IN_LOBBY
   | typeof DEADROLL_SESSION_ERROR__NOT_LOCKED_HERE
   | typeof DEADROLL_SESSION_ERROR__NOT_OBLIGATED
+  | typeof DEADROLL_SESSION_ERROR__NOT_PARTICIPANT
   | typeof DEADROLL_SESSION_ERROR__NOT_PLAYER
   | typeof DEADROLL_SESSION_ERROR__NOT_REWARD_OWNER
   | typeof DEADROLL_SESSION_ERROR__NOT_SAME_KIN
@@ -340,6 +357,7 @@ export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__PACK_NOT_TO_REVEAL
   | typeof DEADROLL_SESSION_ERROR__PARTICIPATION_MISSING
   | typeof DEADROLL_SESSION_ERROR__PARTY_ENDED
+  | typeof DEADROLL_SESSION_ERROR__PARTY_FROZEN
   | typeof DEADROLL_SESSION_ERROR__PARTY_FULL
   | typeof DEADROLL_SESSION_ERROR__PATH_NOT_ADJACENT
   | typeof DEADROLL_SESSION_ERROR__PRICE_NOT_COLLECTED
@@ -360,7 +378,9 @@ export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__SILENCED
   | typeof DEADROLL_SESSION_ERROR__SKILL_NOT_SELECTED
   | typeof DEADROLL_SESSION_ERROR__SKILL_ON_COOLDOWN
+  | typeof DEADROLL_SESSION_ERROR__STALE_RANDOMNESS
   | typeof DEADROLL_SESSION_ERROR__THREAT_MISMATCH
+  | typeof DEADROLL_SESSION_ERROR__TOO_EARLY
   | typeof DEADROLL_SESSION_ERROR__TOO_MANY_LOOT_TABLES
   | typeof DEADROLL_SESSION_ERROR__TOO_MANY_MONSTER_SKILLS
   | typeof DEADROLL_SESSION_ERROR__TOO_MANY_OBLIGATIONS
@@ -372,7 +392,8 @@ export type DeadrollSessionError =
   | typeof DEADROLL_SESSION_ERROR__UNAUTHORIZED
   | typeof DEADROLL_SESSION_ERROR__UNEXPECTED_ALLY_ACCOUNT
   | typeof DEADROLL_SESSION_ERROR__UNIT_DEAD
-  | typeof DEADROLL_SESSION_ERROR__UNKNOWN_MONSTER;
+  | typeof DEADROLL_SESSION_ERROR__UNKNOWN_MONSTER
+  | typeof DEADROLL_SESSION_ERROR__WRONG_DM_PHASE;
 
 let deadrollSessionErrorMessages:
   Record<DeadrollSessionError, string> | undefined;
@@ -382,6 +403,7 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__ALLY_ACCOUNT_MISSING]: `A heal or buff on another ally needs that ally's participation`,
     [DEADROLL_SESSION_ERROR__ALREADY_ACTED]: `Only one attack or active skill per turn`,
     [DEADROLL_SESSION_ERROR__ALREADY_CLAIMED]: `Escrow is already claimed`,
+    [DEADROLL_SESSION_ERROR__ALREADY_CONFIRMED]: `This player already confirmed the DM's return`,
     [DEADROLL_SESSION_ERROR__ALREADY_REVEALED]: `This cell is already revealed`,
     [DEADROLL_SESSION_ERROR__ALREADY_SETTLED]: `Rewards of this character are already settled`,
     [DEADROLL_SESSION_ERROR__ARENA_NOT_WON]: `The arena's pack is not dead yet`,
@@ -438,6 +460,7 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__MONSTER_NEAR_CHEST]: `A living monster is too close to the chest or to you`,
     [DEADROLL_SESSION_ERROR__MONSTER_SKILL_MISSING]: `This monster has no active skill in that slot`,
     [DEADROLL_SESSION_ERROR__NO_PLAYERS]: `Party has no players`,
+    [DEADROLL_SESSION_ERROR__NO_REVEAL_OWED]: `The DM owes no reveal`,
     [DEADROLL_SESSION_ERROR__NO_ROLL_PENDING]: `No dice roll is pending`,
     [DEADROLL_SESSION_ERROR__NOT_ACTIVE]: `Session is not active`,
     [DEADROLL_SESSION_ERROR__NOT_ADJACENT]: `Only a cell next to the character can be examined`,
@@ -453,6 +476,7 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__NOT_IN_LOBBY]: `Session is not in the lobby`,
     [DEADROLL_SESSION_ERROR__NOT_LOCKED_HERE]: `The character is not locked in this party`,
     [DEADROLL_SESSION_ERROR__NOT_OBLIGATED]: `Nothing obliges the DM to reveal this cell now`,
+    [DEADROLL_SESSION_ERROR__NOT_PARTICIPANT]: `Only a participant of this party can do this`,
     [DEADROLL_SESSION_ERROR__NOT_PLAYER]: `Only the player who joined with this character can do this`,
     [DEADROLL_SESSION_ERROR__NOT_REWARD_OWNER]: `Only the character's owner or their session key can claim its rewards`,
     [DEADROLL_SESSION_ERROR__NOT_SAME_KIN]: `A kin-only monster skill reaches allies of its own kin only`,
@@ -464,6 +488,7 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__PACK_NOT_TO_REVEAL]: `This pack is already revealed, or not the one to reveal now`,
     [DEADROLL_SESSION_ERROR__PARTICIPATION_MISSING]: `Participation account is required on a player's turn`,
     [DEADROLL_SESSION_ERROR__PARTY_ENDED]: `The party is over: its session key can no longer be set`,
+    [DEADROLL_SESSION_ERROR__PARTY_FROZEN]: `The DM is marked missing: the party is frozen until the DM is back and confirmed`,
     [DEADROLL_SESSION_ERROR__PARTY_FULL]: `Party is full`,
     [DEADROLL_SESSION_ERROR__PATH_NOT_ADJACENT]: `A cell of the path is not next to the one before it`,
     [DEADROLL_SESSION_ERROR__PRICE_NOT_COLLECTED]: `Party price is not collected yet`,
@@ -484,7 +509,9 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__SILENCED]: `The unit is silenced: it can only use its basic attack`,
     [DEADROLL_SESSION_ERROR__SKILL_NOT_SELECTED]: `This skill was not taken onto the map (set_ready selection)`,
     [DEADROLL_SESSION_ERROR__SKILL_ON_COOLDOWN]: `Skill is on cooldown`,
+    [DEADROLL_SESSION_ERROR__STALE_RANDOMNESS]: `This VRF value answers an older request`,
     [DEADROLL_SESSION_ERROR__THREAT_MISMATCH]: `The revealed pack does not give its declared threat`,
+    [DEADROLL_SESSION_ERROR__TOO_EARLY]: `Too early: the wait has not passed yet`,
     [DEADROLL_SESSION_ERROR__TOO_MANY_LOOT_TABLES]: `Too many different reward tables for one party`,
     [DEADROLL_SESSION_ERROR__TOO_MANY_MONSTER_SKILLS]: `Too many different monster skills for one party`,
     [DEADROLL_SESSION_ERROR__TOO_MANY_OBLIGATIONS]: `Too many cells to reveal at once`,
@@ -497,6 +524,7 @@ if ((typeof process === "undefined" ? "production" : process.env["NODE_ENV"]) !=
     [DEADROLL_SESSION_ERROR__UNEXPECTED_ALLY_ACCOUNT]: `target_participation is only for a heal or buff on another ally`,
     [DEADROLL_SESSION_ERROR__UNIT_DEAD]: `Unit is dead`,
     [DEADROLL_SESSION_ERROR__UNKNOWN_MONSTER]: `Monster is not in the registry bestiary`,
+    [DEADROLL_SESSION_ERROR__WRONG_DM_PHASE]: `This step of the missing-DM flow does not fit where the party stands`,
   };
 }
 

@@ -279,6 +279,13 @@ pub fn session(players: &[Cell]) -> GameSession {
         roster_totals: [0; 4],
         visible_chests: 0,
         map_class: 0,
+        reveals_owed_at: 0,
+        dm_missing_at: 0,
+        dm_back_at: 0,
+        dm_confirm_mask: 0,
+        turn_clock: 0,
+        vrf_request: 0,
+        vrf_requested_slot: 0,
     }
 }
 

@@ -98,7 +98,7 @@ pub fn handler(ctx: Context<StartSession>) -> Result<()> {
             slot_hashes: &accounts.slot_hashes,
         },
         ctx.bumps.program_identity,
-        vrf::caller_seed(&session_key, session.core.action_counter),
+        vrf::next_request(session, &session_key)?,
         &CallbackAccounts {
             session: session_key,
             monsters: accounts.monsters.key(),

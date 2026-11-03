@@ -192,7 +192,7 @@ async function openParty(specs: Spec[]) {
       const p = (await readParty(acc.session, party.tiles))!;
       const pendingPart = p.session.pending.participation;
       const pl = p.players.find((x) => x.participation === pendingPart)!;
-      return send(dmKey, [await consumeIx(acc.session, pendingPart, pl.character, seed, p.session.layout, partyAccountsOf(p.session, pendingPart))]);
+      return send(dmKey, [await consumeIx(acc.session, pendingPart, pl.character, seed, p.session.layout, partyAccountsOf(p.session, pendingPart), p.session.vrfRequest)]);
     };
     /** Patch 6: anyone sends start_turn to finalize the deaths a callback queued (with the
      * current player's accounts when the turn has not started). */
