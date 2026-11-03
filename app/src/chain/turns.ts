@@ -7,6 +7,7 @@ import { ACTIVE_MAX, NO_SKILL } from "./skillcheck";
 import { StateKind } from "@deadroll/sdk/session";
 import balance from "./balance.json";
 import { hasBit } from "./types";
+import { dmPhase, revealOverdue, TIMEOUTS, turnOverdue, vrfRetryDue, type DmPhase } from "./timeouts";
 import { MONSTER_BASE, currentUnit, status, variantKey, type GameSessionAcc, type Party, type ParticipationAcc, type PartyPlayer } from "./game";
 
 /** start_turn ran for the current turn (states ticked, cooldowns counted down, AP granted). */
@@ -27,7 +28,7 @@ export type TurnStart = { unit: number; turnSeq: number; player: PartyPlayer | n
  */
 export function startTurnFor(p: Party, me: Address | null): TurnStart | null {
   const s = p.session;
-  if (!me || status(s) !== "active" || s.core.pendingVrf) return null;
+  if (!me || status(s) !== "active" || s.core.pendingVrf || frozen(s)) return null;
   // Arena update: between the map and an arena only the deaths are finalized.
   const between = arenaMode(s) === "engaged" || arenaMode(s) === "won" || arenaMode(s) === "retreated";
   if (between && !s.pendingDeaths) return null;
@@ -55,7 +56,7 @@ export function startTurnFor(p: Party, me: Address | null): TurnStart | null {
  * deaths are final. */
 export function arenaStepFor(p: Party, me: Address | null): "enter" | "leave" | null {
   const s = p.session;
-  if (!me || status(s) !== "active" || s.core.pendingVrf || s.pendingDeaths) return null;
+  if (!me || status(s) !== "active" || s.core.pendingVrf || s.pendingDeaths || frozen(s)) return null;
   const inParty = s.core.dm === me || p.players.some((x) => x.part.player === me);
   if (!inParty) return null;
   const mode = arenaMode(s);
@@ -69,10 +70,88 @@ export function arenaStepFor(p: Party, me: Address | null): "enter" | "leave" | 
 export type RevealStep = { kind: "cell"; leaf: number; by: number } | { kind: "pack"; pack: number };
 export function revealStepFor(p: Party, me: Address | null): RevealStep | null {
   const s = p.session;
-  if (!me || s.core.dm !== me || status(s) !== "active" || s.core.pendingVrf) return null;
+  // Stuck party: a DM marked missing comes back with "I'm back" and the players' confirmation.
+  if (!me || s.core.dm !== me || status(s) !== "active" || s.core.pendingVrf || frozen(s)) return null;
   if (s.obligationCount > 0) return { kind: "cell", leaf: s.obligations[0]!, by: s.obligedBy };
   if (arenaMode(s) === "engaged" && !hasBit(s.packsRevealed, s.arenaPack)) return { kind: "pack", pack: s.arenaPack };
   return null;
+}
+
+/** Stuck party: the DM is marked missing; no move, no turn, no reveal goes through. */
+export const frozen = (s: GameSessionAcc): boolean => BigInt(s.dmMissingAt) !== 0n;
+
+/** `GameSession::owes_reveal`: a cell a step or a look uncovered, or the engaged pack's composition. */
+export const owesReveal = (s: GameSessionAcc): boolean =>
+  s.obligationCount > 0 || (arenaMode(s) === "engaged" && !hasBit(s.packsRevealed, s.arenaPack));
+
+/** Who sends a stuck-party step for `me`: the DM, or one of `me`'s characters (living first). */
+export type StuckActor = { kind: "dm" } | { kind: "player"; player: PartyPlayer };
+
+/** The stuck-party steps `me` may take now (docs/PARTY_AND_TURNS.md 3.2, 5.3), as the program
+ * checks them; `now` in unix seconds, `slot` the cluster's slot (null: not known yet). */
+export interface StuckView {
+  phase: DmPhase;
+  /** When a living player may mark the DM as missing (a reveal is owed), null when nothing is owed. */
+  markFrom: number | null;
+  /** `me`'s living characters that may mark the DM as missing now. */
+  mark: PartyPlayer[];
+  /** `me` is the DM and may say "I'm back". */
+  dmReturn: boolean;
+  /** `me`'s living characters that still have to confirm the DM's return. */
+  confirm: PartyPlayer[];
+  /** Living player slots that confirmed, and those still to. */
+  confirmed: number[];
+  waiting: number[];
+  /** `me` is the DM and may settle the party the players did not let them back into. */
+  dmSettle: boolean;
+  /** The players claim their own after this (the DM left), null otherwise. */
+  claimFrom: number | null;
+  /** `me`'s characters that may claim now. */
+  claim: PartyPlayer[];
+  /** When the current unit's turn may be skipped, and who of `me` may skip it now. */
+  skipFrom: number | null;
+  skip: StuckActor | null;
+  /** Who of `me` may send the pending roll's VRF request again now. */
+  retry: StuckActor | null;
+}
+
+export function stuckView(p: Party, me: Address | null, now: number, slot: bigint | null): StuckView {
+  const s = p.session;
+  const alive = (i: number) => (s.aliveMask & (1 << i)) !== 0;
+  const active = status(s) === "active";
+  const phase = active ? dmPhase({ missingAt: Number(s.dmMissingAt), backAt: Number(s.dmBackAt) }, now, s.settleTimeoutSecs) : ({ kind: "present" } as DmPhase);
+  const mine = me ? p.players.filter((x) => x.part.player === me) : [];
+  const mineLiving = mine.filter((x) => alive(x.slot));
+  const participant: StuckActor | null = me && s.core.dm === me ? { kind: "dm" } : (mineLiving[0] ?? mine[0]) ? { kind: "player", player: (mineLiving[0] ?? mine[0])! } : null;
+  const living = Array.from({ length: s.core.playerCount }, (_, i) => i).filter(alive);
+
+  const owed = active && phase.kind === "present" && owesReveal(s);
+  const markFrom = owed ? Number(s.revealsOwedAt) + TIMEOUTS.revealTimeoutSecs : null;
+  const canMark = owed && !s.core.pendingVrf && revealOverdue(Number(s.revealsOwedAt), now);
+
+  const endedAt = phase.kind === "gone" || phase.kind === "unconfirmed" ? phase.endedAt : null;
+  const claimFrom = endedAt === null ? null : endedAt + s.settleTimeoutSecs;
+  const unsettled = mine.filter((x) => (s.settledMask & (1 << x.slot)) === 0);
+
+  const playing =
+    active && phase.kind === "present" && !s.core.pendingVrf && !s.pendingDeaths && !owesReveal(s) && (arenaMode(s) === "map" || arenaMode(s) === "arena") && currentUnit(s) !== null;
+  const skipFrom = playing ? Number(s.turnClock) + TIMEOUTS.turnTimeoutSecs : null;
+
+  return {
+    phase,
+    markFrom,
+    mark: canMark ? mineLiving : [],
+    dmReturn: phase.kind === "missing" && !!me && s.core.dm === me,
+    confirm: phase.kind === "back" ? mineLiving.filter((x) => (s.dmConfirmMask & (1 << x.slot)) === 0) : [],
+    confirmed: living.filter((i) => s.dmConfirmMask & (1 << i)),
+    waiting: phase.kind === "back" ? living.filter((i) => !(s.dmConfirmMask & (1 << i))) : [],
+    dmSettle: phase.kind === "unconfirmed" && !!me && s.core.dm === me && claimFrom !== null && now <= claimFrom,
+    claimFrom,
+    claim: claimFrom !== null && now > claimFrom ? unsettled : [],
+    skipFrom,
+    skip: skipFrom !== null && turnOverdue(Number(s.turnClock), now) ? participant : null,
+    retry: active && s.core.pendingVrf && !frozen(s) && slot !== null && vrfRetryDue(s.vrfRequestedSlot, slot) ? participant : null,
+  };
 }
 
 /** Patch C: the DM's final audit (docs/PARTY_AND_TURNS.md 3.2): the secret leaves and the packs not

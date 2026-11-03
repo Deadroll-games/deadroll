@@ -11,6 +11,8 @@ use anchor_lang::prelude::*;
 use deadroll_combat::RollSource;
 use ephemeral_vrf_sdk::types::SerializableAccountMeta;
 
+use crate::state::GameSession;
+
 /// `scoped_vrf_identity(&crate::ID)`: `PDA(["identity", session program], VRF program)`, the
 /// signer of every real callback (checked against the SDK in the tests).
 pub const VRF_IDENTITY: Pubkey = pubkey!("Bj7XBktwDmAg6J4FohS6oRHbevD6MMd8jnCZKvzKPiKV");
@@ -82,9 +84,86 @@ impl RollSource for SyscallRoll {
     }
 }
 
-/// Unique per request: `sha256(session ‖ action_counter LE)`.
-pub fn caller_seed(session: &Pubkey, action_counter: u32) -> [u8; 32] {
-    solana_sha256_hasher::hashv(&[session.as_ref(), &action_counter.to_le_bytes()]).to_bytes()
+/// Unique per request: `sha256(session ‖ action_counter LE ‖ request LE)` (stuck party: a retry of
+/// the same action gets a fresh seed).
+pub fn caller_seed(session: &Pubkey, action_counter: u32, request: u32) -> [u8; 32] {
+    solana_sha256_hasher::hashv(&[
+        session.as_ref(),
+        &action_counter.to_le_bytes(),
+        &request.to_le_bytes(),
+    ])
+    .to_bytes()
+}
+
+/// Stuck party: one VRF request, numbered. The oracle calls back with
+/// `discriminator ‖ randomness ‖ callback_args` (MagicBlock VRF program, `provide_randomness`), so
+/// the number travels as the callback's `request` argument and the callback of any older request
+/// is refused (`GameSession.vrf_request`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Ticket {
+    pub seed: [u8; 32],
+    pub number: u32,
+}
+
+/// Numbers the next request of the pending action and records its slot (a retry waits
+/// `vrf_retry_slots` from it).
+pub fn next_request(session: &mut GameSession, session_key: &Pubkey) -> Result<Ticket> {
+    let number = session.vrf_request.wrapping_add(1);
+    session.vrf_request = number;
+    session.vrf_requested_slot = Clock::get()?.slot;
+    Ok(Ticket {
+        seed: caller_seed(session_key, session.core.action_counter, number),
+        number,
+    })
+}
+
+/// Stuck party: the callback accounts of the roll pending in `session`, rebuilt from the session
+/// as every request site builds them (`retry_vrf` sends the same action again).
+pub fn pending_callback(
+    session: &GameSession,
+    session_key: Pubkey,
+    monsters: Pubkey,
+) -> Result<CallbackAccounts> {
+    use deadroll_types::seeds;
+    let participation = session.pending.participation;
+    let slot = session
+        .participations
+        .iter()
+        .take(session.core.player_count as usize)
+        .position(|p| *p == participation)
+        .ok_or(crate::errors::SessionError::InvalidPendingAccounts)?;
+    let character = session.core.players[slot];
+    if session.pending.is_initiative() {
+        // `start_session`: the first player, no party accounts (nobody dies of it).
+        return Ok(CallbackAccounts {
+            session: session_key,
+            monsters,
+            participation,
+            character,
+            skill_set: character,
+            bag: character,
+            target_participation: None,
+            layout: session.layout,
+            party: Default::default(),
+            party_len: 0,
+        });
+    }
+    let pda = |seed: &[u8]| {
+        Pubkey::find_program_address(&[seed, character.as_ref()], &deadroll_character::ID).0
+    };
+    let (party, party_len) = crate::party::party_keys(session, slot as u8);
+    Ok(CallbackAccounts {
+        session: session_key,
+        monsters,
+        participation,
+        character,
+        skill_set: pda(seeds::SKILLS),
+        bag: pda(seeds::BAG),
+        target_participation: None,
+        layout: session.layout,
+        party,
+        party_len,
+    })
 }
 
 /// The accounts the callback gets after the VRF identity, in `ConsumeRandomness` order.
@@ -148,12 +227,13 @@ pub struct RequestAccounts<'a, 'info> {
     pub slot_hashes: &'a AccountInfo<'info>,
 }
 
-/// Requests one VRF value whose callback is `consume_randomness` with `callback`.
+/// Requests one VRF value whose callback is `consume_randomness` with `callback` and the
+/// ticket's number.
 #[cfg(not(feature = "mock-vrf"))]
 pub fn request(
     accounts: RequestAccounts,
     identity_bump: u8,
-    caller_seed: [u8; 32],
+    ticket: Ticket,
     callback: &CallbackAccounts,
 ) -> Result<()> {
     use anchor_lang::{solana_program::program::invoke_signed, Discriminator};
@@ -166,8 +246,8 @@ pub fn request(
         callback_program_id: sdk(&crate::ID),
         callback_discriminator: crate::instruction::ConsumeRandomness::DISCRIMINATOR.to_vec(),
         accounts_metas: Some(callback_metas(callback)),
-        caller_seed,
-        callback_args: None,
+        caller_seed: ticket.seed,
+        callback_args: Some(callback_args(ticket.number)),
     });
     invoke_signed(
         &ix,
@@ -188,10 +268,16 @@ pub fn request(
 pub fn request(
     _accounts: RequestAccounts,
     _identity_bump: u8,
-    _caller_seed: [u8; 32],
+    _ticket: Ticket,
     _callback: &CallbackAccounts,
 ) -> Result<()> {
     Ok(())
+}
+
+/// The bytes the oracle appends after the randomness: `consume_randomness`'s `request: u32`
+/// (Borsh, little endian).
+pub fn callback_args(request: u32) -> Vec<u8> {
+    request.to_le_bytes().to_vec()
 }
 
 #[cfg(test)]
@@ -283,6 +369,27 @@ mod tests {
             assert_eq!(ours.last().unwrap().pubkey.to_bytes(), keys[7].to_bytes());
             assert!(!ours.last().unwrap().is_writable);
         }
+    }
+
+    /// Stuck party: the oracle calls back with `discriminator ‖ randomness ‖ callback_args`
+    /// (MagicBlock VRF `provide_randomness`); that is exactly `consume_randomness(randomness,
+    /// request)`. Each request gets its own seed.
+    #[test]
+    fn the_oracles_callback_data_is_our_instruction() {
+        use anchor_lang::{Discriminator, InstructionData};
+        let randomness = [7u8; 32];
+        let ours = crate::instruction::ConsumeRandomness {
+            randomness,
+            request: 0x0102_0304,
+        }
+        .data();
+        let mut oracle = crate::instruction::ConsumeRandomness::DISCRIMINATOR.to_vec();
+        oracle.extend_from_slice(&randomness);
+        oracle.extend_from_slice(&callback_args(0x0102_0304));
+        assert_eq!(ours, oracle);
+        let s = Pubkey::new_unique();
+        assert_ne!(caller_seed(&s, 5, 1), caller_seed(&s, 5, 2));
+        assert_ne!(caller_seed(&s, 5, 1), caller_seed(&s, 6, 1));
     }
 
     #[test]

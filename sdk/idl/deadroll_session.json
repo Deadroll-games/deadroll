@@ -654,10 +654,103 @@
       ]
     },
     {
+      "name": "confirm_dm_return",
+      "docs": [
+        "Stuck party: a living player confirms the DM's return; when all did, the party goes on."
+      ],
+      "discriminator": [
+        200,
+        64,
+        197,
+        196,
+        108,
+        96,
+        139,
+        16
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "docs": [
+            "A living player's main wallet or session key."
+          ],
+          "signer": true
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.core.map",
+                "account": "GameSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "participation",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  114,
+                  116,
+                  105,
+                  99,
+                  105,
+                  112,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              },
+              {
+                "kind": "account",
+                "path": "participation.core.character",
+                "account": "Participation"
+              }
+            ]
+          }
+        },
+        {
+          "name": "session_token",
+          "docs": [
+            "MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs."
+          ],
+          "optional": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "consume_randomness",
       "docs": [
         "VRF callback: resolves the pending attack through `deadroll_combat`, applies HP and",
-        "states, death (`character.mark_dead`), boss victory and wipe."
+        "states, death (`character.mark_dead`), boss victory and wipe. Stuck party: `request` is",
+        "the number of the request it answers (its callback argument); an older one is refused."
       ],
       "discriminator": [
         190,
@@ -682,7 +775,9 @@
           "name": "session",
           "docs": [
             "State checks run here, before the pending-accounts checks below: once a roll is resolved",
-            "`pending` is cleared, and a late callback must read `NoRollPending`, not a wrong account."
+            "`pending` is cleared, and a late callback must read `NoRollPending`, not a wrong account.",
+            "Stuck party: after a `retry_vrf` the callback of the older request reads",
+            "`StaleRandomness`."
           ],
           "writable": true,
           "pda": {
@@ -780,8 +875,70 @@
               32
             ]
           }
+        },
+        {
+          "name": "request",
+          "type": "u32"
         }
       ]
+    },
+    {
+      "name": "dm_return",
+      "docs": [
+        "Stuck party: the DM marked missing says \"I'm back\" before the countdown ends."
+      ],
+      "discriminator": [
+        64,
+        168,
+        5,
+        217,
+        151,
+        200,
+        117,
+        107
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "docs": [
+            "The DM's main wallet or session key."
+          ],
+          "signer": true
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.core.map",
+                "account": "GameSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "session_token",
+          "docs": [
+            "MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs."
+          ],
+          "optional": true
+        }
+      ],
+      "args": []
     },
     {
       "name": "end_turn",
@@ -1542,6 +1699,99 @@
         {
           "name": "character_program",
           "address": "9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "mark_dm_missing",
+      "docs": [
+        "Stuck party: a living player marks the DM as missing once a reveal is overdue; the party",
+        "freezes and the map's issue deadline counts down."
+      ],
+      "discriminator": [
+        106,
+        205,
+        66,
+        103,
+        200,
+        77,
+        169,
+        20
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "docs": [
+            "A living player's main wallet or session key."
+          ],
+          "signer": true
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.core.map",
+                "account": "GameSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "participation",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  114,
+                  116,
+                  105,
+                  99,
+                  105,
+                  112,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              },
+              {
+                "kind": "account",
+                "path": "participation.core.character",
+                "account": "Participation"
+              }
+            ]
+          }
+        },
+        {
+          "name": "session_token",
+          "docs": [
+            "MagicBlock `SessionTokenV2` of the session key; none when the main wallet signs."
+          ],
+          "optional": true
         }
       ],
       "args": []
@@ -2606,6 +2856,166 @@
       "args": []
     },
     {
+      "name": "retry_vrf",
+      "docs": [
+        "Stuck party: any participant sends the pending roll's VRF request again after the retry",
+        "wait; the older request's callback is refused from then on."
+      ],
+      "discriminator": [
+        247,
+        198,
+        70,
+        200,
+        136,
+        177,
+        124,
+        197
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "docs": [
+            "Any participant: a player's main wallet or session key (with its `participation`), or the",
+            "DM's (without one). Pays the VRF fee."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.core.map",
+                "account": "GameSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "monsters",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  111,
+                  110,
+                  115,
+                  116,
+                  101,
+                  114,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              }
+            ]
+          }
+        },
+        {
+          "name": "participation",
+          "docs": [
+            "The signer's participation in this party; none when the DM signs."
+          ],
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  114,
+                  116,
+                  105,
+                  99,
+                  105,
+                  112,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              },
+              {
+                "kind": "account",
+                "path": "participation.core.character",
+                "account": "Participation"
+              }
+            ]
+          }
+        },
+        {
+          "name": "session_token",
+          "docs": [
+            "MagicBlock `SessionTokenV2` of the session key; none when a main wallet signs."
+          ],
+          "optional": true
+        },
+        {
+          "name": "program_identity",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "oracle_queue",
+          "writable": true,
+          "address": "Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh"
+        },
+        {
+          "name": "vrf_program",
+          "address": "Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz"
+        },
+        {
+          "name": "slot_hashes",
+          "address": "SysvarS1otHashes111111111111111111111111111"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "reveal_cell",
       "docs": [
         "Patch C: the DM (main wallet or session key) reveals a leaf of the map's secrets with its",
@@ -3449,6 +3859,288 @@
       "args": []
     },
     {
+      "name": "settle_unconfirmed",
+      "docs": [
+        "Stuck party: the DM settles a party the players did not let them back into: caches and",
+        "contributions to the players, only the map's deposits to the DM."
+      ],
+      "discriminator": [
+        7,
+        140,
+        34,
+        234,
+        131,
+        58,
+        62,
+        233
+      ],
+      "accounts": [
+        {
+          "name": "dm",
+          "docs": [
+            "DM main wallet only: this moves lamports and closes the map (docs/GAME_COMMISSIONS.md 7);",
+            "the DM's session key is refused."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.core.map",
+                "account": "GameSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              }
+            ]
+          }
+        },
+        {
+          "name": "monsters",
+          "docs": [
+            "waiting for their rewards are paid from it."
+          ]
+        },
+        {
+          "name": "map",
+          "writable": true
+        },
+        {
+          "name": "session_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                9,
+                93,
+                27,
+                37,
+                218,
+                79,
+                221,
+                125,
+                83,
+                7,
+                123,
+                151,
+                252,
+                231,
+                65,
+                177,
+                65,
+                225,
+                242,
+                116,
+                20,
+                215,
+                178,
+                225,
+                173,
+                88,
+                9,
+                192,
+                113,
+                184,
+                209,
+                219
+              ]
+            }
+          }
+        },
+        {
+          "name": "map_program",
+          "address": "2YeyBfQ5xkRKD2kagxRS2yZYCQdWt5qidikaKfQhLBXH"
+        },
+        {
+          "name": "character_program",
+          "address": "9uVNvkt5kTMad65GtdqQmBb3X1JQMWwQ985qLwTCdqfL"
+        },
+        {
+          "name": "layout",
+          "docs": [
+            "by the map CPI."
+          ],
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "skip_turn",
+      "docs": [
+        "Stuck party: any participant skips the turn of a unit idle for the turn timeout."
+      ],
+      "discriminator": [
+        165,
+        254,
+        71,
+        23,
+        126,
+        139,
+        241,
+        164
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "docs": [
+            "Any participant: a player's main wallet or session key (with its `participation`), or the",
+            "DM's (without one)."
+          ],
+          "signer": true
+        },
+        {
+          "name": "session",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session.core.map",
+                "account": "GameSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "monsters",
+          "docs": [
+            "next monster's AP)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "participation",
+          "docs": [
+            "The signer's participation in this party; none when the DM signs."
+          ],
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  114,
+                  116,
+                  105,
+                  99,
+                  105,
+                  112,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "session"
+              },
+              {
+                "kind": "account",
+                "path": "participation.core.character",
+                "account": "Participation"
+              }
+            ]
+          }
+        },
+        {
+          "name": "session_token",
+          "docs": [
+            "MagicBlock `SessionTokenV2` of the session key; none when a main wallet signs."
+          ],
+          "optional": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "start_session",
       "docs": [
         "DM starts the party once everyone is ready and the price is collected: requests the",
@@ -4025,6 +4717,45 @@
       ]
     },
     {
+      "name": "DmMarkedMissing",
+      "discriminator": [
+        210,
+        179,
+        165,
+        128,
+        241,
+        15,
+        127,
+        41
+      ]
+    },
+    {
+      "name": "DmReturnConfirmed",
+      "discriminator": [
+        43,
+        4,
+        76,
+        79,
+        113,
+        229,
+        176,
+        221
+      ]
+    },
+    {
+      "name": "DmReturned",
+      "discriminator": [
+        221,
+        11,
+        107,
+        218,
+        6,
+        177,
+        124,
+        219
+      ]
+    },
+    {
       "name": "EffectResolved",
       "discriminator": [
         122,
@@ -4217,6 +4948,32 @@
         208,
         84,
         178
+      ]
+    },
+    {
+      "name": "PartyResumed",
+      "discriminator": [
+        185,
+        58,
+        88,
+        118,
+        132,
+        235,
+        134,
+        102
+      ]
+    },
+    {
+      "name": "PartySettledWithoutEscrow",
+      "discriminator": [
+        173,
+        8,
+        212,
+        43,
+        161,
+        143,
+        217,
+        155
       ]
     },
     {
@@ -4425,6 +5182,32 @@
         100,
         18,
         49
+      ]
+    },
+    {
+      "name": "TurnTimedOut",
+      "discriminator": [
+        205,
+        113,
+        84,
+        61,
+        54,
+        85,
+        56,
+        77
+      ]
+    },
+    {
+      "name": "VrfRetried",
+      "discriminator": [
+        112,
+        27,
+        117,
+        61,
+        20,
+        52,
+        85,
+        206
       ]
     }
   ],
@@ -5023,6 +5806,41 @@
       "code": 6118,
       "name": "InvalidBoard",
       "msg": "Not the party board account"
+    },
+    {
+      "code": 6119,
+      "name": "PartyFrozen",
+      "msg": "The DM is marked missing: the party is frozen until the DM is back and confirmed"
+    },
+    {
+      "code": 6120,
+      "name": "NoRevealOwed",
+      "msg": "The DM owes no reveal"
+    },
+    {
+      "code": 6121,
+      "name": "TooEarly",
+      "msg": "Too early: the wait has not passed yet"
+    },
+    {
+      "code": 6122,
+      "name": "WrongDmPhase",
+      "msg": "This step of the missing-DM flow does not fit where the party stands"
+    },
+    {
+      "code": 6123,
+      "name": "AlreadyConfirmed",
+      "msg": "This player already confirmed the DM's return"
+    },
+    {
+      "code": 6124,
+      "name": "NotParticipant",
+      "msg": "Only a participant of this party can do this"
+    },
+    {
+      "code": 6125,
+      "name": "StaleRandomness",
+      "msg": "This VRF value answers an older request"
     }
   ],
   "types": [
@@ -6065,6 +6883,72 @@
           {
             "name": "slot",
             "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DmMarkedMissing",
+      "docs": [
+        "A living player marked the DM as missing: the party is frozen; the DM may come back until",
+        "`until`, after it each player claims their own."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "slot",
+            "type": "u8"
+          },
+          {
+            "name": "until",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DmReturnConfirmed",
+      "docs": [
+        "Player `slot` confirmed the DM's return; `confirmed`: bit per slot so far."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "slot",
+            "type": "u8"
+          },
+          {
+            "name": "confirmed",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DmReturned",
+      "docs": [
+        "The DM said \"I'm back\": every living player confirms until `until`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "until",
+            "type": "i64"
           }
         ]
       }
@@ -7212,6 +8096,54 @@
               "The map's size class (`deadroll_rules::BalanceConfig.map_size`, the layout's `class`)."
             ],
             "type": "u8"
+          },
+          {
+            "name": "reveals_owed_at",
+            "docs": [
+              "Unix time the DM's current reveal debt began (`owes_reveal`); its age lets a living player",
+              "mark the DM as missing."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "dm_missing_at",
+            "docs": [
+              "The missing-DM watch (`deadroll_rules::timeout::DmWatch`): when a player marked the DM as",
+              "missing, when the DM came back, and a bit per player slot that confirmed the return. `0` =",
+              "not set. While `dm_missing_at` is set the party is frozen."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "dm_back_at",
+            "type": "i64"
+          },
+          {
+            "name": "dm_confirm_mask",
+            "type": "u8"
+          },
+          {
+            "name": "turn_clock",
+            "docs": [
+              "Unix time of the current turn's start or its unit's last action, or the end of the last",
+              "wait on the oracle or the DM: the turn timeout counts from here."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "vrf_request",
+            "docs": [
+              "Number of the latest VRF request, sent as its callback argument: the callback of any other",
+              "request is stale."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "vrf_requested_slot",
+            "docs": [
+              "Slot of the latest VRF request: a retry is allowed `vrf_retry_slots` after it."
+            ],
+            "type": "u64"
           }
         ]
       }
@@ -9562,6 +10494,45 @@
       }
     },
     {
+      "name": "PartyResumed",
+      "docs": [
+        "Every living player confirmed the DM's return: the party goes on where it stopped."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PartySettledWithoutEscrow",
+      "docs": [
+        "The DM settled a party they had left (`settle_unconfirmed`): the players got their caches and",
+        "contributions, the DM only the map's deposits."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "dm",
+            "type": "pubkey"
+          },
+          {
+            "name": "refunded",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
       "name": "PendingAction",
       "docs": [
         "The roll waiting for its VRF value (`core.pending_vrf`), resolved by `consume_randomness`:",
@@ -11510,6 +12481,58 @@
             "docs": [
               "Patch 4: the part of `dot_damage` from a Freeze that thawed (Burning Frost)."
             ],
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TurnTimedOut",
+      "docs": [
+        "The unit's turn was skipped after the turn timeout; `started`: its `start_turn` had run (its",
+        "delay was already taken), else the bare delay was added."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "unit",
+            "type": "u8"
+          },
+          {
+            "name": "turn_seq",
+            "type": "u32"
+          },
+          {
+            "name": "started",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "VrfRetried",
+      "docs": [
+        "A participant sent the pending roll's VRF request again; the callback of `request - 1` and",
+        "older is refused from now on."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "action",
+            "type": "u32"
+          },
+          {
+            "name": "request",
             "type": "u32"
           }
         ]

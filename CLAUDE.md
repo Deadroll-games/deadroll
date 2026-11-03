@@ -145,7 +145,7 @@ Keep command output short, it fills the context:
 
 ## 8. What is live
 
-Devnet matches `main` (upgrade 20.10). On devnet and on the public site:
+Devnet matches `main` (upgrade U14, 03.11). On devnet and on the public site:
 
 - rasterizer, palette 2 and sprites loaded from the chain; characters drawn as body plus equipped gear;
 - character creation with the skill builder, Core NFT, class starter kit, gear in the character account, equip and unequip outside a party;
@@ -156,9 +156,12 @@ Devnet matches `main` (upgrade 20.10). On devnet and on the public site:
 - Ready: 4 active + 1 reactive + 1 passive selection, locks the character and its gear;
 - turns: one action per turn, cooldowns, automatic `start_turn`, Freeze and Stun skip a turn, Burning and Bleeding tick, all dice through VRF;
 - death finalized by the programs: skill mechanics, bag and starter items burn, skill names stay on the tombstone (no NFT freeze yet);
-- victory, XP, DM claims the escrow.
+- victory, XP, DM claims the escrow;
+- map and arenas: one pack per arena, the initiative timeline, 2x2 monsters, retreat and escape;
+- fog of war: secrets under the Merkle root, the DM's reveals and final audit;
+- map sizes (Small to Dungeon), one-use maps.
 
-Next: session key in one transaction, loot, craft, city.
+Next: the stuck-party exits (missing DM, turn timeout, VRF retry; on `main`, waiting for a devnet upgrade), session key in one transaction, loot, craft, city.
 
 ## 9. How to work
 

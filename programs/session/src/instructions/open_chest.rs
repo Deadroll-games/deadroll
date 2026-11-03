@@ -102,6 +102,8 @@ pub fn handler(ctx: Context<OpenChest>, chest: u8) -> Result<()> {
     require!(!session.core.pending_vrf, SessionError::RollPending);
     require!(session.pending_deaths == 0, SessionError::DeathsPending);
     session.require_no_reveals()?;
+    // Stuck party: the unit acts, so its turn timeout counts from now.
+    session.touch_turn(Clock::get()?.unix_timestamp);
     let slot = participation.core.slot;
     require!(
         session.current_unit() == Some(Unit::Player(slot)),
@@ -175,7 +177,7 @@ pub fn handler(ctx: Context<OpenChest>, chest: u8) -> Result<()> {
             slot_hashes: &accounts.slot_hashes,
         },
         ctx.bumps.program_identity,
-        vrf::caller_seed(&session_key, session.core.action_counter),
+        vrf::next_request(session, &session_key)?,
         &CallbackAccounts {
             session: session_key,
             monsters: accounts.monsters.key(),

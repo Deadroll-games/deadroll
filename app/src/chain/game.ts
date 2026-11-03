@@ -68,6 +68,12 @@ import {
   SessionStatus,
   getActInstruction,
   getClaimAfterTimeoutInstruction,
+  getConfirmDmReturnInstruction,
+  getDmReturnInstruction,
+  getMarkDmMissingInstruction,
+  getRetryVrfInstruction,
+  getSettleUnconfirmedInstruction,
+  getSkipTurnInstruction,
   getCloseCacheInstruction,
   getLeavePartyInstruction,
   getConsumeRandomnessInstruction,
@@ -295,6 +301,11 @@ export function decodeAccount<K extends AccountName>(name: K, raw: ReadonlyUint8
     return decoder.decode(padded) as AccountOf<K>;
   }
   return decoder.decode(raw) as AccountOf<K>;
+}
+
+/** The cluster's current slot (stuck party: when a VRF request may be sent again). */
+export async function currentSlot(): Promise<bigint> {
+  return client.rpc.getSlot({ commitment: "confirmed" }).send();
 }
 
 export async function getAccounts(addresses: Address[]): Promise<(Uint8Array | null)[]> {
@@ -867,6 +878,61 @@ export async function exitVoteIx(kind: "flee" | "retreat", actor: Actor, session
   return kind === "flee" ? getFleeInstruction(accounts) : getRetreatInstruction(accounts);
 }
 
+// Stuck party (docs/PARTY_AND_TURNS.md 3.2, 5.3; MAP_DESCRIPTION.md 8.5).
+
+/** "DM is missing": a living player (main wallet or session key), once a reveal is overdue. */
+export async function markDmMissingIx(actor: Actor, session: Address, character: Address): Promise<Instruction> {
+  return getMarkDmMissingInstruction({ signer: actor.signer, session, participation: await participationPda(session, character), sessionToken: opt(actor.token) });
+}
+
+/** "I'm back": the DM (main wallet or session key) before the countdown ends. */
+export function dmReturnIx(actor: Actor, session: Address): Instruction {
+  return getDmReturnInstruction({ signer: actor.signer, session, sessionToken: opt(actor.token) });
+}
+
+/** "Return to the party": a living player confirms the DM's return. */
+export async function confirmDmReturnIx(actor: Actor, session: Address, character: Address): Promise<Instruction> {
+  return getConfirmDmReturnInstruction({ signer: actor.signer, session, participation: await participationPda(session, character), sessionToken: opt(actor.token) });
+}
+
+/** The DM's settlement when the players did not confirm the return: the DM's main wallet. Remaining:
+ * the pending deaths, then each player's accounts and wallet. */
+export async function settleUnconfirmedIx(dm: TransactionSigner, session: Address, s: GameSessionAcc): Promise<Instruction> {
+  const ix = getSettleUnconfirmedInstruction({ dm, ...(await endAccounts(session, s.core.map)) });
+  const players: RemainingAccount[] = [];
+  const raws = await getAccounts(s.participations.slice(0, s.core.playerCount));
+  for (let slot = 0; slot < s.core.playerCount; slot++) {
+    const raw = raws[slot];
+    if (!raw) throw new Error(`no participation for slot ${slot}`);
+    const owner = decodeAccount("Participation", raw).player;
+    players.push(...(await playerSettleAccounts(session, s.core.players[slot]!)), { address: owner, writable: true });
+  }
+  return withRemaining(ix, [...(await deathAccountsOf(s)), ...players]);
+}
+
+/** "Skip turn" after the turn timeout: a player (with its character) or the DM (`character` null). */
+export async function skipTurnIx(actor: Actor, session: Address, character: Address | null): Promise<Instruction> {
+  return getSkipTurnInstruction({
+    signer: actor.signer,
+    session,
+    monsters: await monstersPda(session),
+    participation: character ? await participationPda(session, character) : undefined,
+    sessionToken: opt(actor.token),
+  });
+}
+
+/** "Retry the roll": a new VRF request for the pending action; the signer pays the fee. */
+export async function retryVrfIx(actor: Actor, session: Address, character: Address | null): Promise<Instruction> {
+  return getRetryVrfInstruction({
+    signer: actor.signer,
+    session,
+    monsters: await monstersPda(session),
+    participation: character ? await participationPda(session, character) : undefined,
+    sessionToken: opt(actor.token),
+    ...(await vrfAccounts()),
+  });
+}
+
 /**
  * The accounts that finalize the pending deaths (`GameSession.pending_deaths`): each queued slot's
  * Character, SkillSet and Bag, writable, in slot order. The programs check them and refuse
@@ -1090,7 +1156,8 @@ export const registryTileset = () => registryTable(tilesetPda);
  * consume_randomness for the pending action: the callback gets the pending participation's player,
  * the session's map layout (`GameSession.layout`: a resonance's knockback and burning cells, a
  * line's walls) and the other living players (`partyAccountsOf`: reactive skills, lines, buffs on
- * an ally).
+ * an ally). Stuck party: `request` is the number of the request it answers
+ * (`GameSession.vrf_request`), the argument the real oracle appends.
  */
 export async function consumeIx(
   session: Address,
@@ -1099,6 +1166,7 @@ export async function consumeIx(
   seed: Uint8Array,
   layout: Address,
   party: readonly RemainingAccount[],
+  request: number,
 ): Promise<Instruction> {
   const ix = getConsumeRandomnessInstruction({
     vrfProgramIdentity: await mockVrfSigner(),
@@ -1115,6 +1183,7 @@ export async function consumeIx(
     targetParticipation: undefined,
     layout,
     randomness: seed,
+    request,
   });
   return withRemaining(ix, party);
 }

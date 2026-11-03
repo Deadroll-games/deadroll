@@ -1097,7 +1097,7 @@ pub fn request_reactive_roll(
     vrf::request(
         accounts,
         identity_bump,
-        vrf::caller_seed(&session_key, session.core.action_counter),
+        vrf::next_request(session, &session_key)?,
         &vrf::CallbackAccounts {
             session: session_key,
             monsters,

@@ -824,7 +824,7 @@ pub fn request_monster_reactive_roll(
     crate::vrf::request(
         accounts,
         identity_bump,
-        crate::vrf::caller_seed(&session_key, session.core.action_counter),
+        crate::vrf::next_request(session, &session_key)?,
         &crate::vrf::CallbackAccounts {
             session: session_key,
             monsters,

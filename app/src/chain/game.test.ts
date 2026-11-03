@@ -383,8 +383,9 @@ describe("session builders", () => {
 
   it("consume_randomness is signed by the mock-vrf identity of programs/session/src/vrf.rs", async () => {
     expect((await mockVrfSigner()).address).toBe("5RotSMue7vx9xBPp3L8iQEKbKSc3ezbY4GqiJxDEe6sN");
-    const ix = await consumeIx(session, addrOf(12), character, A(0x5a), addrOf(13), []);
-    expect(toHex(ix.data as Uint8Array)).toBe(toHex(concat(ixDisc("consume_randomness"), A(0x5a))));
+    const ix = await consumeIx(session, addrOf(12), character, A(0x5a), addrOf(13), [], 0x01020304);
+    // Stuck party: the request number after the randomness, as the oracle appends `callback_args`.
+    expect(toHex(ix.data as Uint8Array)).toBe(toHex(concat(ixDisc("consume_randomness"), A(0x5a), Uint8Array.of(4, 3, 2, 1))));
     expect(ix.accounts![0]!.role).toBe(AccountRole.READONLY_SIGNER);
     expect(ix.accounts![3]!.address).toBe(addrOf(12));
     // skill_set and bag of that character: burned by mark_dead if the roll kills it.
@@ -407,7 +408,7 @@ describe("session builders", () => {
       [parts[3], true],
       [chars[3], false],
     ]);
-    const ix = await consumeIx(session, parts[1]!, chars[1]!, A(1), addrOf(13), party);
+    const ix = await consumeIx(session, parts[1]!, chars[1]!, A(1), addrOf(13), party, 1);
     // Since patch 5 an ally comes with the party accounts: the optional is None.
     expect(ix.accounts![10]).toEqual({ address: PROGRAMS.session, role: AccountRole.READONLY });
     expect(ix.accounts!.slice(12).map((a) => [a.address, a.role])).toEqual([
@@ -573,11 +574,29 @@ describe("decoders", () => {
       v.packsRevealed = 0b110n;
       v.visibleChests = 3;
       v.mapClass = 2;
+      v.revealsOwedAt = 0x11n;
+      v.dmMissingAt = 0x22n;
+      v.dmBackAt = 0x33n;
+      v.dmConfirmMask = 0b11;
+      v.turnClock = 0x44n;
+      v.vrfRequest = 0x0102;
+      v.vrfRequestedSlot = 0x0304n;
     });
     // Patch D: map_class appended; the packs (40), the chests (32 slots), the threats (40) and
     // the masks (packs u64, dead spawns u128, chests opened u32) grew in place; the revealed
-    // leaves, the found secrets and the revealed spawns moved to the SessionBoard.
-    expect(s.bytes.subarray(-1)[0]).toBe(2);
+    // leaves, the found secrets and the revealed spawns moved to the SessionBoard. Stuck party:
+    // 45 bytes after it, the VRF request's slot last.
+    expect(s.bytes.subarray(-46)[0]).toBe(2);
+    expect(Array.from(s.bytes.subarray(-8))).toEqual([4, 3, 0, 0, 0, 0, 0, 0]);
+    expect([s.back.revealsOwedAt, s.back.dmMissingAt, s.back.dmBackAt, s.back.dmConfirmMask, s.back.turnClock, s.back.vrfRequest, s.back.vrfRequestedSlot]).toEqual([
+      0x11n,
+      0x22n,
+      0x33n,
+      0b11,
+      0x44n,
+      0x0102,
+      0x0304n,
+    ]);
     expect([s.back.leafCount, s.back.obligationCount, s.back.obligedBy, s.back.packsRevealed, s.back.visibleChests]).toEqual([0x0304, 1, 2, 0b110n, 3]);
     expect([s.back.exitKind, s.back.lastMoves, s.back.retreats, s.back.packsGuarded, s.back.packsBuffed, s.back.deadSpawns]).toEqual([1, 0b101, 2, 0b10n, 0b100n, 0x0102_0304n]);
     expect([s.back.mode, s.back.arenaPack, s.back.packs[3].y, s.back.packs.length, s.back.packsAlive, s.back.unitTime[11], s.back.playerDex[3]]).toEqual([2, 3, 13, 40, 0b1110n, 0x0201, 0x0403]);
@@ -591,8 +610,8 @@ describe("decoders", () => {
     // map_width, map_height, map_pos 8, map_order 4, map_order_len, map_turn_index, map_round 2,
     // unit_time 48, player_dex 8; patch 13: tile_cost 32; patch 11: tier, min_players, chests 128,
     // chest_count, boss_table, chests_opened 4, pending_chest, xp_bp 8, loot_mask, unpaid_kills 4,
-    // ended_at 8, chest_radius, settle_timeout_secs 4.
-    const appended = 1 + 129 + 35 + 325 + 32 + 163;
+    // ended_at 8, chest_radius, settle_timeout_secs 4; stuck party: 45 after map_class.
+    const appended = 45 + 1 + 129 + 35 + 325 + 32 + 163;
     // Patch 11 ends with chest_radius and settle_timeout_secs (600).
     expect(Array.from(s.bytes.subarray(-appended + 158, -appended + 163))).toEqual([4, 0x58, 0x02, 0, 0]);
     s.bytes = s.bytes.subarray(0, -appended);

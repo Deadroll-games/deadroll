@@ -257,4 +257,31 @@ pub enum SessionError {
     MapWithoutSizes,
     #[msg("Not the party board account")]
     InvalidBoard,
+    // Stuck party (docs/PARTY_AND_TURNS.md 3.2, 5.3; MAP_DESCRIPTION.md 8.5).
+    #[msg("The DM is marked missing: the party is frozen until the DM is back and confirmed")]
+    PartyFrozen,
+    #[msg("The DM owes no reveal")]
+    NoRevealOwed,
+    #[msg("Too early: the wait has not passed yet")]
+    TooEarly,
+    #[msg("This step of the missing-DM flow does not fit where the party stands")]
+    WrongDmPhase,
+    #[msg("This player already confirmed the DM's return")]
+    AlreadyConfirmed,
+    #[msg("Only a participant of this party can do this")]
+    NotParticipant,
+    #[msg("This VRF value answers an older request")]
+    StaleRandomness,
+}
+
+impl From<deadroll_rules::timeout::DmWatchError> for SessionError {
+    fn from(e: deadroll_rules::timeout::DmWatchError) -> Self {
+        use deadroll_rules::timeout::DmWatchError::*;
+        match e {
+            NothingOwed => SessionError::NoRevealOwed,
+            TooEarly => SessionError::TooEarly,
+            WrongPhase => SessionError::WrongDmPhase,
+            AlreadyConfirmed => SessionError::AlreadyConfirmed,
+        }
+    }
 }

@@ -92,6 +92,8 @@ pub fn handler(
     let audit = audit_mode(session)?;
     if !audit {
         require!(!session.core.pending_vrf, SessionError::RollPending);
+        // Stuck party: a DM marked missing comes back through "I'm back" and the players.
+        require!(session.dm_missing_at == 0, SessionError::PartyFrozen);
         require!(
             session.obligation_list().contains(&leaf),
             SessionError::NotObligated
@@ -231,6 +233,11 @@ pub fn handler(
             // happens.
             _ => {}
         }
+        // Stuck party: the DM is here: what is still owed (an ambush's pack too) and the turn
+        // count from now.
+        let now = Clock::get()?.unix_timestamp;
+        session.reveals_owed_at = now;
+        session.touch_turn(now);
     }
     emit!(CellRevealed {
         session: session_key,

@@ -54,6 +54,10 @@ pub struct BalanceConfig {
     /// (`MapSizeTuning`). Missing in a bench file saved before it: the defaults.
     #[cfg_attr(feature = "serde", serde(default))]
     pub map_size: MapSizeTuning,
+    /// Stuck party: the waits after which a missing DM, an idle unit or a silent VRF oracle can
+    /// be got past (`crate::timeout`). Missing in a bench file saved before it: the defaults.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub timeouts: TimeoutTuning,
 }
 
 impl BalanceConfig {
@@ -69,6 +73,7 @@ impl BalanceConfig {
         arena: ArenaTuning::DEFAULT,
         secrets: SecretTuning::DEFAULT,
         map_size: MapSizeTuning::DEFAULT,
+        timeouts: TimeoutTuning::DEFAULT,
     };
 }
 
@@ -827,6 +832,46 @@ impl MapSizeTuning {
 }
 
 impl Default for MapSizeTuning {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
+/// Stuck party (docs/PARTY_AND_TURNS.md 3.2, 5.3; docs/MAP_DESCRIPTION.md 8.5): how long a party
+/// waits before a player may get past a missing DM, an idle unit or a silent VRF oracle
+/// (`crate::timeout`).
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TimeoutTuning {
+    /// A reveal the DM owes this long lets any living player mark the DM as missing, seconds.
+    pub reveal_timeout_secs: u32,
+    /// After the DM's "I'm back" the living players confirm within this, seconds.
+    pub dm_return_confirm_secs: u32,
+    /// A unit that does nothing this long has its turn skipped by any participant, seconds.
+    pub turn_timeout_secs: u32,
+    /// A VRF request unanswered this long may be sent again by any participant, slots.
+    pub vrf_retry_slots: u32,
+}
+
+impl TimeoutTuning {
+    pub const DEFAULT: TimeoutTuning = TimeoutTuning {
+        reveal_timeout_secs: 5 * 60,
+        dm_return_confirm_secs: 24 * 60 * 60,
+        turn_timeout_secs: 5 * 60,
+        // About 30 seconds.
+        vrf_retry_slots: 75,
+    };
+
+    /// What a `mock-vrf` session build (localnet tests only) uses, so the tests wait seconds.
+    pub const LOCALNET: TimeoutTuning = TimeoutTuning {
+        reveal_timeout_secs: 3,
+        dm_return_confirm_secs: 6,
+        turn_timeout_secs: 3,
+        vrf_retry_slots: 5,
+    };
+}
+
+impl Default for TimeoutTuning {
     fn default() -> Self {
         Self::DEFAULT
     }

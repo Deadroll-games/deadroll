@@ -55,23 +55,28 @@ pub struct ClaimAfterTimeout<'info> {
 /// (`crate::settlement`) and takes their contribution back from the escrow, a dead character's
 /// owner too (docs/PARTY_AND_TURNS.md 3.2: the DM did not finish the party). The DM can no longer
 /// settle. Patch D: the last claim closes the map; its deposits go back to the DM
-/// (docs/MAP_DESCRIPTION.md 17.7).
+/// (docs/MAP_DESCRIPTION.md 17.7). Stuck party: a party whose DM was marked missing and never came
+/// back, or came back without every living player's confirmation, ends `Abandoned` with the first
+/// claim (`settlement::end_if_dm_left`); the living get their cache as on a peaceful exit.
 ///
 /// `remaining_accounts`: the player's writable `(Participation, RewardCache, Character)`, then a
 /// `(Character, SkillSet, Bag)` triple per pending death (finalized first).
 pub fn handler<'info>(ctx: Context<'info, ClaimAfterTimeout<'info>>) -> Result<()> {
     let accounts = ctx.accounts;
     let session = &mut accounts.session;
+    let key = session.key();
+    let now = Clock::get()?.unix_timestamp;
+    // Stuck party: a party the DM left ends here first.
+    settlement::end_if_dm_left(session, key, now)?;
     settlement::require_ended(session)?;
     let escrow = &mut accounts.escrow;
     // The DM settled in time: everything is done.
     require!(!escrow.claimed, SessionError::AlreadyClaimed);
     require!(
-        Clock::get()?.unix_timestamp > settlement::deadline(session),
+        now > settlement::deadline(session),
         SessionError::SettleDeadlineNotPassed
     );
 
-    let key = session.key();
     let remaining = ctx.remaining_accounts;
     require!(remaining.len() >= 3, SessionError::InvalidSettleAccounts);
     let slot = session

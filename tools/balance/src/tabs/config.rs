@@ -970,5 +970,44 @@ pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
                             );
                         });
                 });
+
+            egui::CollapsingHeader::new("Stuck party (TimeoutTuning)")
+                .default_open(false)
+                .show(ui, |ui| {
+                    let (t, dt) = (&mut c.timeouts, &d.timeouts);
+                    egui::Grid::new("timeouts")
+                        .num_columns(2)
+                        .striped(true)
+                        .show(ui, |ui| {
+                            int_row(
+                                ui,
+                                "Reveal owed before the DM can be marked missing, s",
+                                &mut t.reveal_timeout_secs,
+                                dt.reveal_timeout_secs,
+                                1..=86_400,
+                            );
+                            int_row(
+                                ui,
+                                "Players confirm the DM's return within, s",
+                                &mut t.dm_return_confirm_secs,
+                                dt.dm_return_confirm_secs,
+                                1..=7 * 86_400,
+                            );
+                            int_row(
+                                ui,
+                                "Idle unit before its turn can be skipped, s",
+                                &mut t.turn_timeout_secs,
+                                dt.turn_timeout_secs,
+                                1..=86_400,
+                            );
+                            int_row(
+                                ui,
+                                "VRF request unanswered before a retry, slots",
+                                &mut t.vrf_retry_slots,
+                                dt.vrf_retry_slots,
+                                1..=100_000,
+                            );
+                        });
+                });
         });
 }

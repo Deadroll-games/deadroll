@@ -21,6 +21,14 @@ pub use deadroll_rules::MonsterProfile;
 /// The numbers the program plays with.
 pub const BALANCE: &BalanceConfig = &BalanceConfig::DEFAULT;
 
+/// The stuck-party waits: `BALANCE.timeouts`, or seconds in a `mock-vrf` build (localnet tests
+/// only, never deployed to devnet).
+pub const TIMEOUTS: &deadroll_rules::TimeoutTuning = if cfg!(feature = "mock-vrf") {
+    &deadroll_rules::TimeoutTuning::LOCALNET
+} else {
+    &BALANCE.timeouts
+};
+
 /// Minimum party price: 0.01 SOL (docs/PARTY_AND_TURNS.md, section 3.1).
 pub const MIN_PRICE_LAMPORTS: u64 = 10_000_000;
 /// Most cells one `move_path` walks (`deadroll_mapcheck::walk`).

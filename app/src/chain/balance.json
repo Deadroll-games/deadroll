@@ -1027,5 +1027,11 @@
       5,
       8
     ]
+  },
+  "timeouts": {
+    "reveal_timeout_secs": 300,
+    "dm_return_confirm_secs": 86400,
+    "turn_timeout_secs": 300,
+    "vrf_retry_slots": 75
   }
 }

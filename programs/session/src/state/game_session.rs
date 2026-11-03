@@ -3,6 +3,7 @@ use deadroll_mapcheck::secrets::{Board, Leaves};
 use deadroll_rules::{
     aura::{Aura, AuraField, MonsterAuraField, PartyAuras, PlayerAuras, AURAS_PER_PLAYER},
     exit::Vote,
+    timeout::{DmPhase, DmWatch},
 };
 use deadroll_types::{
     Aspect, Cell, GameSessionData, MapPoint, PackLayout, ARENA_MONSTERS_MAX, CHESTS_CAP,
@@ -231,6 +232,24 @@ pub struct GameSession {
     // spawns moved to the `SessionBoard`, so the account stays small enough for the stack.
     /// The map's size class (`deadroll_rules::BalanceConfig.map_size`, the layout's `class`).
     pub map_class: u8,
+    // Stuck party (docs/PARTY_AND_TURNS.md 3.2, 5.3; MAP_DESCRIPTION.md 8.5; `deadroll_rules::timeout`).
+    /// Unix time the DM's current reveal debt began (`owes_reveal`); its age lets a living player
+    /// mark the DM as missing.
+    pub reveals_owed_at: i64,
+    /// The missing-DM watch (`deadroll_rules::timeout::DmWatch`): when a player marked the DM as
+    /// missing, when the DM came back, and a bit per player slot that confirmed the return. `0` =
+    /// not set. While `dm_missing_at` is set the party is frozen.
+    pub dm_missing_at: i64,
+    pub dm_back_at: i64,
+    pub dm_confirm_mask: u8,
+    /// Unix time of the current turn's start or its unit's last action, or the end of the last
+    /// wait on the oracle or the DM: the turn timeout counts from here.
+    pub turn_clock: i64,
+    /// Number of the latest VRF request, sent as its callback argument: the callback of any other
+    /// request is stale.
+    pub vrf_request: u32,
+    /// Slot of the latest VRF request: a retry is allowed `vrf_retry_slots` after it.
+    pub vrf_requested_slot: u64,
 }
 
 /// `found_counts` index of the secret doors (`SecretKind::counted`).
@@ -421,13 +440,65 @@ impl GameSession {
     }
 
     /// Patch C: the DM owes no reveal (docs/MAP_DESCRIPTION.md 8.5: until the obligations are
-    /// fulfilled, the party's next turn does not go through).
+    /// fulfilled, the party's next turn does not go through). Stuck party: nor does it while the
+    /// DM is marked missing.
     pub fn require_no_reveals(&self) -> Result<()> {
+        require!(
+            self.dm_missing_at == 0,
+            crate::errors::SessionError::PartyFrozen
+        );
         require!(
             self.obligation_count == 0,
             crate::errors::SessionError::RevealsPending
         );
         Ok(())
+    }
+
+    /// Stuck party: the DM owes a reveal: a cell a step or a look uncovered, or the composition of
+    /// the pack the party engaged (docs/MAP_DESCRIPTION.md 8.4, 8.5).
+    pub fn owes_reveal(&self) -> bool {
+        let engaged = 1u64.checked_shl(self.arena_pack as u32).unwrap_or(0);
+        self.obligation_count != 0
+            || (self.mode == ArenaMode::Engaged && self.packs_revealed & engaged == 0)
+    }
+
+    /// Stuck party: starts the reveal clock when a debt begins (`was_owed`: before the change).
+    pub fn note_owed(&mut self, was_owed: bool, now: i64) {
+        if !was_owed && self.owes_reveal() {
+            self.reveals_owed_at = now;
+        }
+    }
+
+    /// Stuck party: the missing-DM watch.
+    pub fn dm_watch(&self) -> DmWatch {
+        DmWatch {
+            missing_at: self.dm_missing_at,
+            back_at: self.dm_back_at,
+            confirmed: self.dm_confirm_mask,
+        }
+    }
+
+    pub fn set_dm_watch(&mut self, w: DmWatch) {
+        self.dm_missing_at = w.missing_at;
+        self.dm_back_at = w.back_at;
+        self.dm_confirm_mask = w.confirmed;
+    }
+
+    /// Stuck party: where the party stands with its DM at `now`.
+    pub fn dm_phase(&self, now: i64) -> DmPhase {
+        self.dm_watch()
+            .phase(now, self.settle_timeout_secs, crate::rules::TIMEOUTS)
+    }
+
+    /// Living players, bit per slot.
+    pub fn living_mask(&self) -> u8 {
+        self.alive_mask & self.full_mask()
+    }
+
+    /// Stuck party: the current unit did something, or a wait on the oracle or the DM ended: the
+    /// turn timeout counts from `now`.
+    pub fn touch_turn(&mut self, now: i64) {
+        self.turn_clock = now;
     }
 
     /// Patch C: the DM must reveal `leaf` (once; a leaf revealed on the `board` needs nothing).
@@ -694,6 +765,36 @@ mod tests {
         );
         assert_eq!(s.pack_next_to(Cell { x: 6, y: 6 }), None);
         assert_eq!(s.used_packs(), 0b1010);
+    }
+
+    /// Stuck party: a reveal debt (cells, or the engaged pack) starts its clock once.
+    #[test]
+    fn a_reveal_debt_starts_its_clock_once() {
+        let mut s = with_packs();
+        assert!(!s.owes_reveal());
+        s.obligations[0] = 9;
+        s.obligation_count = 1;
+        s.note_owed(false, 100);
+        assert_eq!(s.reveals_owed_at, 100);
+        s.note_owed(true, 200);
+        assert_eq!(s.reveals_owed_at, 100, "already owed");
+        s.obligation_count = 0;
+        s.note_owed(false, 300);
+        assert_eq!(s.reveals_owed_at, 100, "nothing owed");
+        // The engaged pack's composition is owed until revealed.
+        s.mode = super::ArenaMode::Engaged;
+        s.arena_pack = 3;
+        assert!(s.owes_reveal());
+        s.note_owed(false, 400);
+        assert_eq!(s.reveals_owed_at, 400);
+        s.packs_revealed = 1 << 3;
+        assert!(!s.owes_reveal());
+        // A missing DM freezes the party before any reveal check.
+        s.dm_missing_at = 1;
+        assert_eq!(
+            s.require_no_reveals().unwrap_err(),
+            anchor_lang::error!(crate::errors::SessionError::PartyFrozen)
+        );
     }
 
     /// Patch C: the obligations, the revealed leaves, a found door, the audit.

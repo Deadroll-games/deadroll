@@ -633,3 +633,63 @@ pub struct AmbushSprung {
     pub pack: u8,
     pub slot: u8,
 }
+
+// Stuck party (docs/PARTY_AND_TURNS.md 3.2, 5.3; MAP_DESCRIPTION.md 8.5).
+
+/// A living player marked the DM as missing: the party is frozen; the DM may come back until
+/// `until`, after it each player claims their own.
+#[event]
+pub struct DmMarkedMissing {
+    pub session: Pubkey,
+    pub slot: u8,
+    pub until: i64,
+}
+
+/// The DM said "I'm back": every living player confirms until `until`.
+#[event]
+pub struct DmReturned {
+    pub session: Pubkey,
+    pub until: i64,
+}
+
+/// Player `slot` confirmed the DM's return; `confirmed`: bit per slot so far.
+#[event]
+pub struct DmReturnConfirmed {
+    pub session: Pubkey,
+    pub slot: u8,
+    pub confirmed: u8,
+}
+
+/// Every living player confirmed the DM's return: the party goes on where it stopped.
+#[event]
+pub struct PartyResumed {
+    pub session: Pubkey,
+}
+
+/// The DM settled a party they had left (`settle_unconfirmed`): the players got their caches and
+/// contributions, the DM only the map's deposits.
+#[event]
+pub struct PartySettledWithoutEscrow {
+    pub session: Pubkey,
+    pub dm: Pubkey,
+    pub refunded: u64,
+}
+
+/// The unit's turn was skipped after the turn timeout; `started`: its `start_turn` had run (its
+/// delay was already taken), else the bare delay was added.
+#[event]
+pub struct TurnTimedOut {
+    pub session: Pubkey,
+    pub unit: u8,
+    pub turn_seq: u32,
+    pub started: bool,
+}
+
+/// A participant sent the pending roll's VRF request again; the callback of `request - 1` and
+/// older is refused from now on.
+#[event]
+pub struct VrfRetried {
+    pub session: Pubkey,
+    pub action: u32,
+    pub request: u32,
+}

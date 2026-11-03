@@ -320,6 +320,31 @@ export type GameSession = {
   visibleChests: number;
   /** The map's size class (`deadroll_rules::BalanceConfig.map_size`, the layout's `class`). */
   mapClass: number;
+  /**
+   * Unix time the DM's current reveal debt began (`owes_reveal`); its age lets a living player
+   * mark the DM as missing.
+   */
+  revealsOwedAt: bigint;
+  /**
+   * The missing-DM watch (`deadroll_rules::timeout::DmWatch`): when a player marked the DM as
+   * missing, when the DM came back, and a bit per player slot that confirmed the return. `0` =
+   * not set. While `dm_missing_at` is set the party is frozen.
+   */
+  dmMissingAt: bigint;
+  dmBackAt: bigint;
+  dmConfirmMask: number;
+  /**
+   * Unix time of the current turn's start or its unit's last action, or the end of the last
+   * wait on the oracle or the DM: the turn timeout counts from here.
+   */
+  turnClock: bigint;
+  /**
+   * Number of the latest VRF request, sent as its callback argument: the callback of any other
+   * request is stale.
+   */
+  vrfRequest: number;
+  /** Slot of the latest VRF request: a retry is allowed `vrf_retry_slots` after it. */
+  vrfRequestedSlot: bigint;
 };
 
 export type GameSessionArgs = {
@@ -540,6 +565,31 @@ export type GameSessionArgs = {
   visibleChests: number;
   /** The map's size class (`deadroll_rules::BalanceConfig.map_size`, the layout's `class`). */
   mapClass: number;
+  /**
+   * Unix time the DM's current reveal debt began (`owes_reveal`); its age lets a living player
+   * mark the DM as missing.
+   */
+  revealsOwedAt: number | bigint;
+  /**
+   * The missing-DM watch (`deadroll_rules::timeout::DmWatch`): when a player marked the DM as
+   * missing, when the DM came back, and a bit per player slot that confirmed the return. `0` =
+   * not set. While `dm_missing_at` is set the party is frozen.
+   */
+  dmMissingAt: number | bigint;
+  dmBackAt: number | bigint;
+  dmConfirmMask: number;
+  /**
+   * Unix time of the current turn's start or its unit's last action, or the end of the last
+   * wait on the oracle or the DM: the turn timeout counts from here.
+   */
+  turnClock: number | bigint;
+  /**
+   * Number of the latest VRF request, sent as its callback argument: the callback of any other
+   * request is stale.
+   */
+  vrfRequest: number;
+  /** Slot of the latest VRF request: a retry is allowed `vrf_retry_slots` after it. */
+  vrfRequestedSlot: number | bigint;
 };
 
 /** Gets the encoder for {@link GameSessionArgs} account data. */
@@ -633,6 +683,13 @@ export function getGameSessionEncoder(): FixedSizeEncoder<GameSessionArgs> {
       ["rosterTotals", fixEncoderSize(getBytesEncoder(), 4)],
       ["visibleChests", getU8Encoder()],
       ["mapClass", getU8Encoder()],
+      ["revealsOwedAt", getI64Encoder()],
+      ["dmMissingAt", getI64Encoder()],
+      ["dmBackAt", getI64Encoder()],
+      ["dmConfirmMask", getU8Encoder()],
+      ["turnClock", getI64Encoder()],
+      ["vrfRequest", getU32Encoder()],
+      ["vrfRequestedSlot", getU64Encoder()],
     ]),
     (value) => ({ ...value, discriminator: GAME_SESSION_DISCRIMINATOR }),
   );
@@ -728,6 +785,13 @@ export function getGameSessionDecoder(): FixedSizeDecoder<GameSession> {
     ["rosterTotals", fixDecoderSize(getBytesDecoder(), 4)],
     ["visibleChests", getU8Decoder()],
     ["mapClass", getU8Decoder()],
+    ["revealsOwedAt", getI64Decoder()],
+    ["dmMissingAt", getI64Decoder()],
+    ["dmBackAt", getI64Decoder()],
+    ["dmConfirmMask", getU8Decoder()],
+    ["turnClock", getI64Decoder()],
+    ["vrfRequest", getU32Decoder()],
+    ["vrfRequestedSlot", getU64Decoder()],
   ]);
 }
 
@@ -793,5 +857,5 @@ export async function fetchAllMaybeGameSession(
 }
 
 export function getGameSessionSize(): number {
-  return 1685;
+  return 1730;
 }

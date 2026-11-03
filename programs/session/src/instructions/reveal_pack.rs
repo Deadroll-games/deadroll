@@ -110,6 +110,8 @@ pub fn handler(
     );
     if !audit {
         require!(!session.core.pending_vrf, SessionError::RollPending);
+        // Stuck party: a DM marked missing comes back through "I'm back" and the players.
+        require!(session.dm_missing_at == 0, SessionError::PartyFrozen);
         require!(
             session.mode == ArenaMode::Engaged && session.arena_pack == pack,
             SessionError::PackNotToReveal
@@ -165,6 +167,10 @@ pub fn handler(
             copy_skills(&monsters, spawn, &template, &accounts.monster_skills)?;
             copy_loot_table(&monsters, &accounts.rewards, template.loot_table)?;
         }
+        // Stuck party: the DM is here: what is still owed and the turn count from now.
+        let now = Clock::get()?.unix_timestamp;
+        session.reveals_owed_at = now;
+        session.touch_turn(now);
     }
     emit!(PackRevealed {
         session: session_key,

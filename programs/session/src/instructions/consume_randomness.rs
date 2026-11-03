@@ -19,18 +19,22 @@ use crate::{
 /// The VRF callback (CONTRACTS.md, section 6). Account order is fixed: `vrf::callback_metas`
 /// builds the same list for the request, and a unit test checks they match.
 #[derive(Accounts)]
+#[instruction(randomness: [u8; 32], request: u32)]
 pub struct ConsumeRandomness<'info> {
     /// The VRF program's identity for this program (`mock-vrf`: the fixed test identity).
     #[account(address = vrf::identity())]
     pub vrf_program_identity: Signer<'info>,
     /// State checks run here, before the pending-accounts checks below: once a roll is resolved
     /// `pending` is cleared, and a late callback must read `NoRollPending`, not a wrong account.
+    /// Stuck party: after a `retry_vrf` the callback of the older request reads
+    /// `StaleRandomness`.
     #[account(
         mut,
         seeds = [seeds::SESSION, session.core.map.as_ref()],
         bump = session.core.bump,
         constraint = session.core.status == SessionStatus::Active @ SessionError::NotActive,
         constraint = session.core.pending_vrf @ SessionError::NoRollPending,
+        constraint = session.vrf_request == request @ SessionError::StaleRandomness,
     )]
     pub session: Box<Account<'info, GameSession>>,
     /// CHECK: `MonsterState` of this session, checked by `Monsters::load` (written in place).
@@ -75,6 +79,8 @@ pub struct ConsumeRandomness<'info> {
 pub fn handler<'info>(
     ctx: Context<'info, ConsumeRandomness<'info>>,
     randomness: [u8; 32],
+    // Checked by the `session` constraint.
+    _request: u32,
 ) -> Result<()> {
     let remaining = ctx.remaining_accounts;
     let accounts = ctx.accounts;
@@ -252,9 +258,16 @@ pub fn handler<'info>(
     Ok(())
 }
 
-/// Clears the pending roll and counts the action; returns its number.
+/// Clears the pending roll and counts the action; returns its number. Stuck party: the wait on
+/// the oracle is over, so the turn timeout and a reveal still owed (the DM could not reveal
+/// meanwhile) count from now.
 fn settle(session: &mut GameSession, randomness: [u8; 32]) -> Result<u32> {
     let action = session.core.action_counter;
+    let now = Clock::get()?.unix_timestamp;
+    session.touch_turn(now);
+    if session.owes_reveal() {
+        session.reveals_owed_at = now;
+    }
     session.core.pending_vrf = false;
     session.pending = PendingAction::default();
     session.pending_target = Pubkey::default();

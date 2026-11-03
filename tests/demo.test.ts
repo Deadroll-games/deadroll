@@ -666,9 +666,10 @@ class Demo {
   /** The oracle's callback for the pending action of player `who` (attacker or target). */
   async consume(who: number, seed: Buffer) {
     const pl = this.players[who];
-    const remaining = partyAccounts(await this.state(), pl.participation);
+    const state = await this.state();
+    const remaining = partyAccounts(state, pl.participation);
     return session.methods
-      .consumeRandomness([...seed])
+      .consumeRandomness([...seed], state.vrfRequest)
       .accountsStrict({
         vrfProgramIdentity: MOCK_VRF.publicKey,
         session: this.acc.session,

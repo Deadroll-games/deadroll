@@ -125,6 +125,7 @@ fn start_unit(session: &mut GameSession, session_key: Pubkey, monsters: &Monster
         .checked_add(1)
         .ok_or(SessionError::Overflow)?;
     session.turn_started_at = Clock::get()?.unix_timestamp;
+    session.touch_turn(session.turn_started_at);
 
     let unit = session.core.turn_order[index as usize];
     if let Some(Unit::Monster(i)) = Unit::from_id(unit) {
@@ -177,6 +178,7 @@ pub fn begin(
     session.core.round = 1;
     session.turn_seq = 1;
     session.turn_started_at = Clock::get()?.unix_timestamp;
+    session.touch_turn(session.turn_started_at);
 
     emit!(InitiativeRolled {
         session: session_key,
