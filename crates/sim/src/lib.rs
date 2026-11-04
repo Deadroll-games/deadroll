@@ -28,6 +28,4 @@ pub use deadroll_rules::BalanceConfig;
 pub use presets::{Arena, EncounterPreset, EncounterSlot, HeroPreset, Kind, Presets, SkillPreset};
 pub use run::{random_builds, run_batch, BuildScore, Progress, RandomBuilds};
 pub use setup::{resolve_fight, resolve_party, Fight, Fighter, Issues};
-pub use stats::{
-    Histogram, Labels, MonsterReport, Percentiles, Report, SkillReport, SlotReport,
-};
+pub use stats::{Histogram, Labels, MonsterReport, Percentiles, Report, SkillReport, SlotReport};

@@ -115,7 +115,12 @@ pub fn metrics(report: &Report) -> Vec<Metric> {
         rows.add(g, name, "healed", ratio(t.healed as f64, n));
         rows.add(g, name, "turns skipped", ratio(t.turns_skipped as f64, n));
         rows.add(g, name, "kills of heroes", ratio(t.hero_kills as f64, n));
-        rows.add(g, name, "death rate %", pct(t.died as f64, t.spawned as f64));
+        rows.add(
+            g,
+            name,
+            "death rate %",
+            pct(t.died as f64, t.spawned as f64),
+        );
     }
     rows.0
 }
@@ -162,7 +167,12 @@ fn hero_rows(rows: &mut Rows, who: &str, s: &SlotReport, n: f64) {
     rows.add(g, who, "crits", per(s.crits));
     rows.add(g, who, "crit rate %", s.crit_rate * 100.0);
     rows.add(g, who, "total damage", per(s.damage));
-    rows.add(g, who, "damage per turn", ratio(s.damage as f64, s.turns as f64));
+    rows.add(
+        g,
+        who,
+        "damage per turn",
+        ratio(s.damage as f64, s.turns as f64),
+    );
     rows.add(
         g,
         who,
@@ -185,7 +195,12 @@ fn hero_rows(rows: &mut Rows, who: &str, s: &SlotReport, n: f64) {
         rows.add(g, &who, "misses", per(k.misses));
         rows.add(g, &who, "crits", per(k.crits));
         rows.add(g, &who, "damage", per(k.damage));
-        rows.add(g, &who, "damage per use", ratio(k.damage as f64, k.uses as f64));
+        rows.add(
+            g,
+            &who,
+            "damage per use",
+            ratio(k.damage as f64, k.uses as f64),
+        );
         rows.add(g, &who, "effects landed", per(k.effects));
     }
 }
@@ -203,7 +218,12 @@ fn aspect_rows(
         let a = *aspect as usize;
         let who = format!("{owner} / {}", aspect.name());
         rows.add("aspect", &who, "damage", ratio(damage[a] as f64, n));
-        rows.add("aspect", &who, "share %", pct(damage[a] as f64, total as f64));
+        rows.add(
+            "aspect",
+            &who,
+            "share %",
+            pct(damage[a] as f64, total as f64),
+        );
         rows.add(
             "aspect",
             &who,
@@ -271,13 +291,19 @@ mod tests {
         let rows = metrics(&report());
         assert_eq!(find(&rows, "party", "party", "win rate %").value, 50.0);
         assert_eq!(find(&rows, "hero", "mage #1", "total damage").value, 40.0);
-        assert_eq!(find(&rows, "hero", "mage #2", "damage per turn").value, 10.0);
+        assert_eq!(
+            find(&rows, "hero", "mage #2", "damage per turn").value,
+            10.0
+        );
         assert_eq!(
             find(&rows, "hero", "mage #1", "average damage per hit").value,
             9.0
         );
         assert_eq!(find(&rows, "hero", "mage #1", "hit rate %").value, 80.0);
-        assert_eq!(find(&rows, "skill", "mage #1 / Bolt", "damage per use").value, 15.0);
+        assert_eq!(
+            find(&rows, "skill", "mage #1 / Bolt", "damage per use").value,
+            15.0
+        );
         assert_eq!(find(&rows, "monster", "wolf", "death rate %").value, 50.0);
         assert_eq!(find(&rows, "monster", "wolf", "damage dealt").value, 10.0);
     }
@@ -286,10 +312,15 @@ mod tests {
     fn aspects_are_per_hero_and_for_the_party_and_shares_add_up() {
         let rows = metrics(&report());
         assert_eq!(find(&rows, "aspect", "party / Fire", "damage").value, 60.0);
-        assert_eq!(find(&rows, "aspect", "mage #1 / Fire", "share %").value, 75.0);
+        assert_eq!(
+            find(&rows, "aspect", "mage #1 / Fire", "share %").value,
+            75.0
+        );
         let shares: f64 = rows
             .iter()
-            .filter(|m| m.group == "aspect" && m.who.starts_with("party / ") && m.metric == "share %")
+            .filter(|m| {
+                m.group == "aspect" && m.who.starts_with("party / ") && m.metric == "share %"
+            })
             .map(|m| m.value)
             .sum();
         assert!((shares - 100.0).abs() < 1e-9);

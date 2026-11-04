@@ -42,13 +42,21 @@ fn aspect_shares_skills_and_monsters_add_up() {
                     assert_eq!(slot.by_aspect.iter().sum::<u64>(), slot.damage, "{ctx}");
                     assert_eq!(slot.attacks, slot.hits + slot.misses, "{ctx}");
                     let tallies = &slot.skills;
-                    assert_eq!(slot.hits, tallies.iter().map(|t| t.hits).sum::<u32>(), "{ctx}");
+                    assert_eq!(
+                        slot.hits,
+                        tallies.iter().map(|t| t.hits).sum::<u32>(),
+                        "{ctx}"
+                    );
                     assert_eq!(
                         slot.misses,
                         tallies.iter().map(|t| t.misses).sum::<u32>(),
                         "{ctx}"
                     );
-                    assert_eq!(slot.crits, tallies.iter().map(|t| t.crits).sum::<u32>(), "{ctx}");
+                    assert_eq!(
+                        slot.crits,
+                        tallies.iter().map(|t| t.crits).sum::<u32>(),
+                        "{ctx}"
+                    );
                     assert!(slot.largest_hit as u64 <= slot.hit_damage, "{ctx}");
                     assert!(slot.hit_damage <= slot.damage, "{ctx}");
                 }

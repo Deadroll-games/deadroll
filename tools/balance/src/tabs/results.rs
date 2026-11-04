@@ -1,6 +1,7 @@
 //! Results: win rate, rounds and hits to kill (p10 / p50 / p90), damage per turn by hero, crit and
 //! effect shares, control uptime, histograms, problems found in the selection, random builds.
 use deadroll_sim::{
+    metrics::{metrics, Metric},
     named::Named,
     presets::{HeroPreset, SkillPreset},
     BuildScore, Histogram, Percentiles,
@@ -58,11 +59,115 @@ fn histogram(ui: &mut Ui, id: &str, title: &str, h: &Histogram, x: &str) {
     });
 }
 
+/// The rows of one metric group as a table: `who` down the side, one column per metric. Rows that
+/// are all zero are left out.
+fn breakdown(ui: &mut Ui, id: &str, title: &str, rows: &[Metric], group: &str) {
+    let mut columns: Vec<&str> = Vec::new();
+    let mut table: Vec<(&str, Vec<f64>)> = Vec::new();
+    for m in rows.iter().filter(|m| m.group == group) {
+        if !columns.contains(&m.metric.as_str()) {
+            columns.push(&m.metric);
+        }
+    }
+    for m in rows.iter().filter(|m| m.group == group) {
+        let at = columns.iter().position(|c| *c == m.metric).unwrap_or(0);
+        let row = match table.iter().position(|(who, _)| *who == m.who) {
+            Some(i) => i,
+            None => {
+                table.push((&m.who, vec![0.0; columns.len()]));
+                table.len() - 1
+            }
+        };
+        table[row].1[at] = m.value;
+    }
+    table.retain(|(_, values)| values.iter().any(|v| *v != 0.0));
+    if table.is_empty() {
+        return;
+    }
+    egui::CollapsingHeader::new(title)
+        .id_salt(id)
+        .default_open(true)
+        .show(ui, |ui| {
+            egui::Grid::new(id).striped(true).show(ui, |ui| {
+                ui.strong("who");
+                for c in &columns {
+                    ui.strong(*c);
+                }
+                ui.end_row();
+                for (who, values) in &table {
+                    ui.label(*who);
+                    for v in values {
+                        ui.label(format!("{v:.2}"));
+                    }
+                    ui.end_row();
+                }
+            });
+        });
+}
+
+/// The send status of the run history and the largest changes of the last Run.
+fn history(app: &BalanceApp, ui: &mut Ui) {
+    ui.add_space(8.0);
+    ui.strong("History");
+    if !app.history.enabled() {
+        ui.label("history off");
+        return;
+    }
+    if let Some(status) = app.history.status() {
+        let text = if status.busy {
+            format!("sending... ({} queued)", status.queued)
+        } else {
+            format!("{} sent, {} queued", status.sent, status.queued)
+        };
+        ui.label(text);
+        if let Some(warning) = &status.warning {
+            ui.colored_label(widgets::ERROR, format!("⚠ {warning}"));
+        }
+    }
+    let Some(last) = &app.history.last else {
+        return;
+    };
+    ui.label(format!(
+        "Run {}{}",
+        last.run_id,
+        if last.compared {
+            ": largest changes against the previous Run with the same party, encounter, fights and seed"
+        } else {
+            ": no previous Run with this party, encounter, fights and seed to compare with"
+        }
+    ));
+    if let Some(warning) = &last.warning {
+        ui.colored_label(widgets::ERROR, format!("⚠ {warning}"));
+    }
+    if !last.changes.is_empty() {
+        ui.label(format!("Changed since the last Run: {}", last.changes));
+    }
+    if last.top.is_empty() {
+        return;
+    }
+    egui::Grid::new("history_top").striped(true).show(ui, |ui| {
+        for h in ["group", "who", "metric", "previous", "value", "delta %"] {
+            ui.strong(h);
+        }
+        ui.end_row();
+        for r in &last.top {
+            ui.label(&r.group);
+            ui.label(&r.who);
+            ui.label(&r.metric);
+            ui.label(r.previous.map_or("-".into(), |p| format!("{p:.2}")));
+            ui.label(format!("{:.2}", r.value));
+            ui.label(r.delta_pct.map_or("-".into(), |p| format!("{p:+.1}%")));
+            ui.end_row();
+        }
+    });
+}
+
 pub fn show(app: &mut BalanceApp, ui: &mut Ui) {
     egui::ScrollArea::vertical()
         .id_salt("results")
         .show(ui, |ui| {
             batch(app, ui);
+            history(app, ui);
             ui.add_space(12.0);
             ui.separator();
             builds(app, ui);
@@ -181,6 +286,23 @@ fn batch(app: &mut BalanceApp, ui: &mut Ui) {
             ui.end_row();
         }
     });
+    ui.add_space(8.0);
+    let rows = metrics(r);
+    breakdown(ui, "by_skill", "By skill (per fight)", &rows, "skill");
+    breakdown(
+        ui,
+        "by_aspect",
+        "By aspect (per fight; share of the owner's damage)",
+        &rows,
+        "aspect",
+    );
+    breakdown(
+        ui,
+        "by_monster",
+        "By monster kind (per fight)",
+        &rows,
+        "monster",
+    );
     ui.add_space(8.0);
     ui.horizontal_wrapped(|ui| {
         histogram(ui, "h_rounds", "Rounds to win", &r.rounds_hist, "rounds");

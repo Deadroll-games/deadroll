@@ -387,12 +387,7 @@ impl Report {
                 fights.iter().map(|f| f.hp_max).sum(),
             ),
             ops_per_fight: (0..OpKind::COUNT as usize)
-                .map(|k| {
-                    ratio(
-                        fights.iter().map(|f| f.ops_acted[k] as u64).sum(),
-                        n as u64,
-                    )
-                })
+                .map(|k| ratio(fights.iter().map(|f| f.ops_acted[k] as u64).sum(), n as u64))
                 .collect(),
             deaths_per_fight: ratio(
                 fights

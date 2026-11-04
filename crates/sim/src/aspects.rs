@@ -72,7 +72,10 @@ pub fn split_hit(result: &HitResult, input: &HitInput, balance: &Balance) -> Hit
         let Some(res) = res.filter(|r| r.active) else {
             continue;
         };
-        for op in result.ops(slot).filter(|o| o.acted && o.kind == OpKind::TickNow) {
+        for op in result
+            .ops(slot)
+            .filter(|o| o.acted && o.kind == OpKind::TickNow)
+        {
             owners.push(res.base);
             amounts.push(op.amount as u64);
         }
@@ -233,7 +236,10 @@ mod tests {
         let r = result(&[p], 5);
         let s = split_hit(&r, &HitInput::default(), &b);
         let after = resist_cut(10 * bp, BP / 2, b.resist_cap_bp);
-        assert_eq!(s.resisted[Aspect::Fire as usize], (10 * bp - after + bp / 2) / bp);
+        assert_eq!(
+            s.resisted[Aspect::Fire as usize],
+            (10 * bp - after + bp / 2) / bp
+        );
         assert!(s.resisted[Aspect::Fire as usize] > 0);
     }
 
@@ -261,8 +267,7 @@ mod tests {
         };
         let mut live = states;
         let tick = tick_turn_start_with(&mut live, &b);
-        let (burning, bleeding, thaw) =
-            split_dot(&states, tick.dot_damage, tick.thaw_damage, &b);
+        let (burning, bleeding, thaw) = split_dot(&states, tick.dot_damage, tick.thaw_damage, &b);
         assert_eq!((burning, bleeding, thaw), (7, 4, 5));
         assert_eq!(burning + bleeding + thaw, tick.dot_damage);
     }

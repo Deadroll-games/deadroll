@@ -906,12 +906,8 @@ impl<'a> Battle<'a> {
         }
         match source {
             Some(Unit::Player(s)) => {
-                let (burning, bleeding, thaw) = split_dot(
-                    states_before,
-                    total,
-                    start.thaw_damage,
-                    &self.cfg.combat,
-                );
+                let (burning, bleeding, thaw) =
+                    split_dot(states_before, total, start.thaw_damage, &self.cfg.combat);
                 let owners = self.dot_aspects;
                 if let Some(slot) = self.stats.slots.get_mut(s as usize) {
                     slot.by_aspect[owners.burning as usize] += burning as u64;

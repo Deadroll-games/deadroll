@@ -3,6 +3,7 @@
 //! Presets are read from `tools/balance/presets` (or the folder given as the first argument, or
 //! `DEADROLL_PRESETS`). Fights run on `deadroll-sim`, which calls the session program's rules.
 mod app;
+mod history;
 mod tabs;
 mod widgets;
 
