@@ -13,7 +13,10 @@ use deadroll_sim::{
 use deadroll_types::{Class, PARTY_MAX};
 use eframe::egui::{self, Ui};
 
-use crate::{tabs, widgets};
+use crate::{
+    history::{History, RunInput},
+    tabs, widgets,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tab {
@@ -102,10 +105,30 @@ pub struct BalanceApp {
     job: Option<Job>,
     /// Issues and label of the running job, moved into its result.
     batch_meta: Option<(Issues, String)>,
+    /// The run history (the sheet log) and its note.
+    pub history: History,
+    /// What the running batch was set to, for the history log.
+    run_meta: Option<RunMeta>,
+}
+
+/// A batch as it was when it started: the party and settings may change while it runs.
+struct RunMeta {
+    party: Vec<String>,
+    encounter: String,
+    fights: u32,
+    seed: u64,
+    settings: Settings,
+    note: String,
+    /// `None` when the history is off.
+    snapshot: Option<serde_json::Value>,
 }
 
 impl BalanceApp {
     pub fn new(root: PathBuf) -> Self {
+        Self::with_history(root, History::new(|| {}))
+    }
+
+    pub fn with_history(root: PathBuf, history: History) -> Self {
         let (presets, load_errors) = Presets::load(&root);
         let heroes: Vec<String> = presets.heroes.keys().take(2).cloned().collect();
         let encounter = presets
@@ -148,7 +171,30 @@ impl BalanceApp {
             status,
             job: None,
             batch_meta: None,
+            history,
+            run_meta: None,
         }
+    }
+
+    /// The whole state a Run depends on, for the history's list of changes. The monsters are
+    /// the registry files the fights were built from.
+    fn snapshot(&self) -> serde_json::Value {
+        let dir = deadroll_sim::presets::registry_dir(&self.root);
+        let bestiary = deadroll_rules::registry::read_bestiary_json(&dir)
+            .ok()
+            .and_then(|b| serde_json::to_value(b).ok())
+            .unwrap_or(serde_json::Value::Null);
+        let pool = std::fs::read_to_string(dir.join("monster_skills.json"))
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or(serde_json::Value::Null);
+        crate::history::snapshot::snapshot(
+            &self.cfg,
+            &self.presets.heroes,
+            &self.presets.skills,
+            &self.presets.encounters,
+            serde_json::json!({"bestiary": bestiary, "skills": pool}),
+        )
     }
 
     pub fn running(&self) -> bool {
@@ -195,6 +241,15 @@ impl BalanceApp {
         };
         let (cfg, settings, fights, seed) = (self.cfg, self.settings, self.fights, self.seed);
         let label = self.party_label();
+        self.run_meta = Some(RunMeta {
+            party: self.party.clone(),
+            encounter: self.encounter.clone(),
+            fights,
+            seed,
+            settings,
+            note: self.history.note.trim().to_string(),
+            snapshot: self.history.enabled().then(|| self.snapshot()),
+        });
         self.spawn("fights", ctx, move |progress| {
             JobResult::Batch(
                 run_batch(&cfg, &team, &fight, settings, fights, seed, progress).map(Box::new),
@@ -279,6 +334,20 @@ impl BalanceApp {
                         String::new()
                     }
                 );
+                if let Some(meta) = self.run_meta.take() {
+                    if let Some(snapshot) = meta.snapshot {
+                        self.history.record(RunInput {
+                            party: &meta.party,
+                            encounter: &meta.encounter,
+                            fights: meta.fights,
+                            seed: meta.seed,
+                            settings: meta.settings,
+                            snapshot,
+                            note: &meta.note,
+                            report: &report,
+                        });
+                    }
+                }
                 self.batch = Some(BatchResult {
                     report: *report,
                     issues,
@@ -298,6 +367,8 @@ impl BalanceApp {
                 self.tab = Tab::Results;
             }
             JobResult::Batch(None) | JobResult::Builds(None) => {
+                // A cancelled Run is not logged.
+                self.run_meta = None;
                 self.status = format!("{what} cancelled");
             }
         }
@@ -371,6 +442,13 @@ impl BalanceApp {
             {
                 self.start_batch(&ctx);
             }
+            ui.label("Note:");
+            ui.add(
+                egui::TextEdit::singleline(&mut self.history.note)
+                    .desired_width(220.0)
+                    .hint_text("sent with each Run to the history sheet"),
+            )
+            .on_hover_text("one line, kept until you change it");
             ui.separator();
             let dirty = self.presets != self.saved;
             let save = if dirty {
@@ -421,6 +499,10 @@ impl eframe::App for BalanceApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.poll(&ctx);
+        // The history sender works on its own thread: keep drawing while it sends.
+        if self.history.status().is_some_and(|s| s.busy) {
+            ctx.request_repaint_after(Duration::from_millis(200));
+        }
         egui::Panel::top("run_bar").show(ui, |ui| {
             ui.add_space(4.0);
             self.run_bar(ui);
@@ -457,7 +539,7 @@ mod tests {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("presets");
         Harness::builder()
             .with_size(egui::vec2(1500.0, 1000.0))
-            .build_eframe(move |_| BalanceApp::new(root))
+            .build_eframe(move |_| BalanceApp::with_history(root, History::off()))
     }
 
     /// Steps until the background job is done (the window keeps drawing meanwhile).
@@ -554,6 +636,8 @@ mod tests {
         assert_eq!(h.state().tab, Tab::Results);
         h.get_by_label("Win rate");
         h.get_by_label("Hits to kill");
+        h.get_by_label("history off");
+        h.get_by_label("By aspect (per fight; share of the owner's damage)");
 
         h.state_mut().random.count = 30;
         h.state_mut().random.fights_each = 3;

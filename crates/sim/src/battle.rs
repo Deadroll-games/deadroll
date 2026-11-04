@@ -42,14 +42,18 @@ use deadroll_rules::{
     resolve,
     spread::{spread, spreads, step_into, BurningCell, Field, BURNING_CELLS_MAX},
     units::cooldown_after_use,
-    BalanceConfig, Footprint, MonsterDefense, MonsterProfile, MonsterSkillStats, Unit,
+    BalanceConfig, Footprint, MonsterDefense, MonsterProfile, MonsterSkillStats, TurnStart, Unit,
 };
 use deadroll_skillcheck::{Purpose, Target, ACTIVE_MAX};
 use deadroll_types::{
-    ActiveState, Cell, Monster, Stat, StateKind, BP, MONSTER_SLOTS, PARTY_MAX, STATES_MAX,
+    ActiveState, Aspect, Cell, Monster, Stat, StateKind, BP, MONSTER_SLOTS, PARTY_MAX, STATES_MAX,
 };
+use std::collections::BTreeMap;
 
-use crate::setup::{Fight, Fighter};
+use crate::{
+    aspects::{split_dot, split_hit, ByAspect, DotAspects},
+    setup::{Fight, Fighter},
+};
 
 /// Knobs of a fight that are not game rules.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -76,11 +80,89 @@ pub enum Outcome {
     Draw,
 }
 
+/// Which of a hero's skills acted: the weapon, an active skill by slot, or the reactive skill.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SkillRef {
+    Weapon,
+    Active(usize),
+    Reactive,
+}
+
+/// Entries of [`SlotStats::skills`]: weapon, the actives, the reactive.
+pub const SKILL_SLOTS: usize = ACTIVE_MAX + 2;
+
+impl SkillRef {
+    pub fn index(self) -> usize {
+        match self {
+            SkillRef::Weapon => 0,
+            SkillRef::Active(k) => 1 + k.min(ACTIVE_MAX - 1),
+            SkillRef::Reactive => 1 + ACTIVE_MAX,
+        }
+    }
+}
+
+/// What one skill of a hero did in one fight. Damage is the skill's direct damage (hits, splash,
+/// instant ticks); over-time damage has no skill owner.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SkillTally {
+    pub uses: u32,
+    pub hits: u32,
+    pub misses: u32,
+    pub crits: u32,
+    pub damage: u64,
+    pub effects: u32,
+}
+
+/// What the monsters of one kind (bestiary id) did in one fight. Damage counts the full hit,
+/// overkill included, like the heroes' damage.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MonsterTally {
+    pub spawned: u32,
+    pub died: u32,
+    pub damage_dealt: u64,
+    pub damage_taken: u64,
+    pub hits: u32,
+    pub crits: u32,
+    pub skills: u32,
+    pub reactions: u32,
+    pub healed: u64,
+    pub turns_skipped: u32,
+    pub hero_kills: u32,
+}
+
+impl MonsterTally {
+    fn add(&mut self, o: &MonsterTally) {
+        self.spawned += o.spawned;
+        self.died += o.died;
+        self.damage_dealt += o.damage_dealt;
+        self.damage_taken += o.damage_taken;
+        self.hits += o.hits;
+        self.crits += o.crits;
+        self.skills += o.skills;
+        self.reactions += o.reactions;
+        self.healed += o.healed;
+        self.turns_skipped += o.turns_skipped;
+        self.hero_kills += o.hero_kills;
+    }
+}
+
 /// What one hero did in one fight.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SlotStats {
     /// Hit damage plus over-time damage from the hero's states.
     pub damage: u64,
+    /// Counters for the history log; they only read what the fight did.
+    pub misses: u32,
+    /// The sum of `HitResult::damage` over the hero's hits (no splash, no over-time damage).
+    pub hit_damage: u64,
+    pub largest_hit: u32,
+    /// Damage the hero took (hits and over time, overkill included).
+    pub damage_taken: u64,
+    /// `damage` by aspect (over-time damage under the aspect of its state), adding up to it.
+    pub by_aspect: ByAspect,
+    /// What resistance cut from the hero's hits, by aspect.
+    pub resisted: ByAspect,
+    pub skills: [SkillTally; SKILL_SLOTS],
     /// The part of hit damage that crits added.
     pub crit_extra: u64,
     /// Over-time damage (Burning, Bleeding) from the hero's states.
@@ -138,6 +220,8 @@ pub struct BattleStats {
     pub xp: u32,
     pub hp_left: u64,
     pub hp_max: u64,
+    /// By bestiary id.
+    pub monsters: BTreeMap<u8, MonsterTally>,
 }
 
 impl BattleStats {
@@ -156,6 +240,27 @@ impl BattleStats {
             a.crits += b.crits;
             a.effects_landed += b.effects_landed;
             a.died |= b.died;
+            a.misses += b.misses;
+            a.hit_damage += b.hit_damage;
+            a.largest_hit = a.largest_hit.max(b.largest_hit);
+            a.damage_taken += b.damage_taken;
+            for (x, y) in a.by_aspect.iter_mut().zip(b.by_aspect) {
+                *x += y;
+            }
+            for (x, y) in a.resisted.iter_mut().zip(b.resisted) {
+                *x += y;
+            }
+            for (x, y) in a.skills.iter_mut().zip(b.skills) {
+                x.uses += y.uses;
+                x.hits += y.hits;
+                x.misses += y.misses;
+                x.crits += y.crits;
+                x.damage += y.damage;
+                x.effects += y.effects;
+            }
+        }
+        for (kind, tally) in &o.monsters {
+            self.monsters.entry(*kind).or_default().add(tally);
         }
         self.kills.extend(o.kills);
         self.monster_turns += o.monster_turns;
@@ -220,6 +325,15 @@ pub(crate) struct Foe {
     pub auras: MonsterAuras,
     /// Patch B: cells per side (`MonsterTemplate::size`).
     pub size: u8,
+    /// The registry record it was spawned from (`Spawn::bestiary_id`), for the history counters.
+    pub kind: u8,
+}
+
+/// Who an over-time tick hurt.
+#[derive(Clone, Copy)]
+enum Victim {
+    Hero(usize),
+    Foe(usize),
 }
 
 /// A hero's action this turn.
@@ -251,6 +365,8 @@ pub(crate) struct Battle<'a> {
     boss_dead: bool,
     /// Arena update: who starts the timeline.
     first: FirstSide,
+    /// Which aspect owns each over-time state, for the damage-by-aspect counters.
+    dot_aspects: DotAspects,
 }
 
 const NO_MODS: TimedMods = [deadroll_combat::TimedMod {
@@ -445,9 +561,14 @@ impl<'a> Battle<'a> {
                     cooldowns: [0; MONSTER_SLOTS],
                     auras,
                     size: t.size,
+                    kind: s.bestiary_id,
                 }
             })
             .collect();
+        let mut monsters: BTreeMap<u8, MonsterTally> = BTreeMap::new();
+        for s in &fight.spawns {
+            monsters.entry(s.bestiary_id).or_default().spawned += 1;
+        }
         Battle {
             cfg,
             party,
@@ -488,9 +609,11 @@ impl<'a> Battle<'a> {
                 xp: 0,
                 hp_left: 0,
                 hp_max: 0,
+                monsters,
             },
             boss_dead: false,
             first: fight.first,
+            dot_aspects: DotAspects::of(&fight.tables),
         }
     }
 
@@ -654,6 +777,7 @@ impl<'a> Battle<'a> {
                 let s = s as usize;
                 let h = &mut self.heroes[s];
                 let before = h.hp;
+                let states_before = h.states;
                 let start = deadroll_rules::start_of_turn_with(
                     &mut h.states,
                     &mut h.mods,
@@ -667,10 +791,11 @@ impl<'a> Battle<'a> {
                 h.reactive_cd = h.reactive_cd.saturating_sub(1);
                 tick_auras(&mut h.auras);
                 self.stats.slots[s].turns += 1;
-                self.credit_dot(start.dot_source, start.dot_damage);
+                self.credit_dot(Victim::Hero(s), &states_before, &start);
                 let delay_mods = self.hero_mods(s, false);
                 if start.died {
                     self.hero_died(s);
+                    self.hero_killed_by(Unit::from_id(start.dot_source));
                     return delay_mods;
                 }
                 self.note_aura_reach(s);
@@ -695,6 +820,7 @@ impl<'a> Battle<'a> {
                 let i = i as usize;
                 let f = &mut self.foes[i];
                 let before = f.m.hp;
+                let states_before = f.m.states;
                 // Skill cooldowns (the reactive's too) and the temporary aura count own turns.
                 let start = deadroll_rules::start_of_turn_with(
                     &mut f.m.states,
@@ -706,7 +832,7 @@ impl<'a> Battle<'a> {
                 f.m.hp = start.hp;
                 tick_auras(&mut f.auras);
                 self.stats.monster_turns += 1;
-                self.credit_dot(start.dot_source, start.dot_damage);
+                self.credit_dot(Victim::Foe(i), &states_before, &start);
                 let delay_mods = self.foe_mods(i, false);
                 if start.died {
                     self.foe_died(i);
@@ -726,6 +852,7 @@ impl<'a> Battle<'a> {
                 if start.skip.is_some() || !self.foes[i].m.alive || self.ended().is_some() {
                     if start.skip.is_some() {
                         self.stats.monster_turns_skipped += 1;
+                        self.monster_tally(i).turns_skipped += 1;
                     }
                     return delay_mods;
                 }
@@ -760,11 +887,54 @@ impl<'a> Battle<'a> {
         self.stats.aura_reach += reach as u32;
     }
 
-    fn credit_dot(&mut self, source: u8, damage: u32) {
-        if let Some(Unit::Player(s)) = Unit::from_id(source) {
+    /// Over-time damage of one turn start (`states_before`: the victim's states before the tick),
+    /// credited to the hero that applied the strongest state, and to the counters.
+    fn credit_dot(&mut self, victim: Victim, states_before: &States, start: &TurnStart) {
+        let (total, source) = (start.dot_damage, Unit::from_id(start.dot_source));
+        if let Some(Unit::Player(s)) = source {
             if let Some(slot) = self.stats.slots.get_mut(s as usize) {
-                slot.damage += damage as u64;
-                slot.dot_damage += damage as u64;
+                slot.damage += total as u64;
+                slot.dot_damage += total as u64;
+            }
+        }
+        if total == 0 {
+            return;
+        }
+        match victim {
+            Victim::Hero(s) => self.stats.slots[s].damage_taken += total as u64,
+            Victim::Foe(i) => self.monster_tally(i).damage_taken += total as u64,
+        }
+        match source {
+            Some(Unit::Player(s)) => {
+                let (burning, bleeding, thaw) =
+                    split_dot(states_before, total, start.thaw_damage, &self.cfg.combat);
+                let owners = self.dot_aspects;
+                if let Some(slot) = self.stats.slots.get_mut(s as usize) {
+                    slot.by_aspect[owners.burning as usize] += burning as u64;
+                    slot.by_aspect[owners.bleeding as usize] += bleeding as u64;
+                    slot.by_aspect[owners.thaw as usize] += thaw as u64;
+                }
+            }
+            Some(Unit::Monster(i)) => {
+                if (i as usize) < self.foes.len() {
+                    self.monster_tally(i as usize).damage_dealt += total as u64;
+                }
+            }
+            None => {}
+        }
+    }
+
+    /// The tally of monster `i`'s kind.
+    fn monster_tally(&mut self, i: usize) -> &mut MonsterTally {
+        let kind = self.foes[i].kind;
+        self.stats.monsters.entry(kind).or_default()
+    }
+
+    /// A hero fell to `by` (a monster index), for the monster kinds' kill counters.
+    fn hero_killed_by(&mut self, by: Option<Unit>) {
+        if let Some(Unit::Monster(i)) = by {
+            if (i as usize) < self.foes.len() {
+                self.monster_tally(i as usize).hero_kills += 1;
             }
         }
     }
@@ -782,6 +952,7 @@ impl<'a> Battle<'a> {
         if f.boss {
             self.boss_dead = true;
         }
+        self.monster_tally(i).died += 1;
     }
 
     pub(crate) fn foe_cell_of(&self, i: usize) -> Cell {
@@ -852,16 +1023,19 @@ impl<'a> Battle<'a> {
         let fighter = &party[self.heroes[s].fighter];
         let skill_of = |k: usize| fighter.skills[k].stats;
         let mut src = self.action_rolls();
-        if let Some(k) = match action {
+        let used = match action {
             Action::Attack { skill, .. } => skill,
             Action::Debuff { skill, .. } | Action::Support { skill, .. } => Some(skill),
-        } {
+        };
+        if let Some(k) = used {
             self.heroes[s].cooldowns[k] = cooldown_after_use(skill_of(k).cooldown);
         }
+        let by = used.map_or(SkillRef::Weapon, SkillRef::Active);
+        self.stats.slots[s].skills[by.index()].uses += 1;
         match action {
             Action::Attack { skill, target } => {
                 let skill = skill.map(skill_of);
-                let (moves, foe_events) = self.strike(s, skill.as_ref(), target, &mut src);
+                let (moves, foe_events) = self.strike(s, skill.as_ref(), by, target, &mut src);
                 let events = self.moved_events(&moves);
                 self.react(&events, &mut src);
                 self.react_foes(&foe_events, &mut src);
@@ -869,14 +1043,14 @@ impl<'a> Battle<'a> {
             Action::Debuff { skill, target } => {
                 let stats = skill_of(skill);
                 if let Some(effect) = effect_action(stats.blocks.effect) {
-                    let foe_events = self.debuff(s, &stats, effect, target, &mut src);
+                    let foe_events = self.debuff(s, &stats, by, effect, target, &mut src);
                     self.react_foes(&foe_events, &mut src);
                 }
             }
             Action::Support { skill, ally } => {
                 let stats = skill_of(skill);
                 if let Some(effect) = effect_action(stats.blocks.effect) {
-                    self.buff(s, &stats, effect, ally, &mut src);
+                    self.buff(s, &stats, by, effect, ally, &mut src);
                 }
             }
         }
@@ -888,6 +1062,7 @@ impl<'a> Battle<'a> {
         &mut self,
         s: usize,
         skill: Option<&SkillStats>,
+        by: SkillRef,
         target: usize,
         src: &mut SeededRoll,
     ) -> (Vec<(usize, Cell, Cell)>, Vec<FoeEvent>) {
@@ -903,7 +1078,7 @@ impl<'a> Battle<'a> {
                 continue;
             }
             let before = self.foes[i].m.hp;
-            let moved = self.hit_foe(s, skill, i, src);
+            let moved = self.hit_foe(s, skill, by, i, src);
             if let Some((from, to)) = moved {
                 moves.push((i, from, to));
             }
@@ -917,6 +1092,7 @@ impl<'a> Battle<'a> {
         &mut self,
         s: usize,
         skill: Option<&SkillStats>,
+        by: SkillRef,
         target: usize,
         src: &mut SeededRoll,
     ) -> Option<(Cell, Cell)> {
@@ -945,27 +1121,44 @@ impl<'a> Battle<'a> {
             &mut self.result,
             src,
         );
+        let kind = self.foes[target].kind;
         let slot = &mut self.stats.slots[s];
         slot.attacks += 1;
+        let tally = &mut slot.skills[by.index()];
         if self.result.outcome == HitOutcome::Hit {
             let damage = self.result.damage as u64;
             slot.hits += 1;
             slot.damage += damage;
+            slot.hit_damage += damage;
+            slot.largest_hit = slot.largest_hit.max(self.result.damage);
+            tally.hits += 1;
+            tally.damage += damage;
             if self.result.crit {
                 slot.crits += 1;
+                tally.crits += 1;
                 let more = cfg.combat.crit_more_bp as u64;
                 slot.crit_extra += damage - damage * BP as u64 / (BP as u64 + more);
             }
+            let split = split_hit(&self.result, &self.input, &cfg.combat);
+            for a in 0..Aspect::COUNT {
+                slot.by_aspect[a] += split.damage[a];
+                slot.resisted[a] += split.resisted[a];
+            }
+            self.stats.monsters.entry(kind).or_default().damage_taken += damage;
+        } else {
+            slot.misses += 1;
+            tally.misses += 1;
         }
         if out.rider.is_some_and(|r| r.roll.outcome == HitOutcome::Hit) {
             slot.effects_landed += 1;
+            tally.effects += 1;
         }
         self.heroes[s].accuracy = accuracy;
         note_states(&mut self.stats, &self.result);
         if out.died {
             self.foe_died(target);
         }
-        self.spread(s, target, caster)
+        self.spread(s, target, by, caster)
     }
 
     /// Hero `s`'s debuff on monster `target` (every monster of its line for a line). Returns
@@ -974,6 +1167,7 @@ impl<'a> Battle<'a> {
         &mut self,
         s: usize,
         stats: &SkillStats,
+        by: SkillRef,
         effect: EffectAction,
         target: usize,
         src: &mut SeededRoll,
@@ -1006,6 +1200,7 @@ impl<'a> Battle<'a> {
             );
             if out.roll.outcome == HitOutcome::Hit {
                 self.stats.slots[s].effects_landed += 1;
+                self.stats.slots[s].skills[by.index()].effects += 1;
             }
             if controls(effect, out.applied) {
                 events.push(FoeEvent {
@@ -1023,6 +1218,7 @@ impl<'a> Battle<'a> {
         &mut self,
         s: usize,
         stats: &SkillStats,
+        by: SkillRef,
         effect: EffectAction,
         ally: usize,
         src: &mut SeededRoll,
@@ -1059,6 +1255,7 @@ impl<'a> Battle<'a> {
                 EffectAction::Mod(_) | EffectAction::Stun | EffectAction::Freeze => {
                     if out.roll.outcome == HitOutcome::Hit {
                         slot.effects_landed += 1;
+                        slot.skills[by.index()].effects += 1;
                     }
                 }
             }
@@ -1071,6 +1268,7 @@ impl<'a> Battle<'a> {
         if let (Some(k), Some(s)) = (c.slot, skill.as_ref()) {
             self.foes[i].cooldowns[k as usize] = cooldown_after_use(s.stats.cooldown);
             self.stats.monster_skills += 1;
+            self.monster_tally(i).skills += 1;
         }
         let mut src = self.action_rolls();
         match c.target {
@@ -1147,8 +1345,18 @@ impl<'a> Battle<'a> {
             );
             let after = h.hp;
             let hp_max = h.hp_max;
+            let kind = foe.kind;
+            if self.result.outcome == HitOutcome::Hit {
+                let damage = self.result.damage as u64;
+                let tally = self.stats.monsters.entry(kind).or_default();
+                tally.hits += 1;
+                tally.crits += self.result.crit as u32;
+                tally.damage_dealt += damage;
+                self.stats.slots[s].damage_taken += damage;
+            }
             if out.died {
                 self.hero_died(s);
+                self.hero_killed_by(Some(Unit::Monster(i as u8)));
             }
             note_states(&mut self.stats, &self.result);
             let rider_controls = out
@@ -1266,7 +1474,9 @@ impl<'a> Battle<'a> {
                 &mut f.mods,
                 src,
             );
-            self.stats.monster_healed += (self.foes[j].m.hp - before) as u64;
+            let healed = (self.foes[j].m.hp - before) as u64;
+            self.stats.monster_healed += healed;
+            self.monster_tally(i).healed += healed;
         }
     }
 
@@ -1426,20 +1636,22 @@ impl<'a> Battle<'a> {
         };
         self.heroes[b].reactive_cd = cooldown_after_use(skill.cooldown);
         self.stats.reactions += 1;
+        let by = SkillRef::Reactive;
+        self.stats.slots[b].skills[by.index()].uses += 1;
         let effect = effect_action(skill.blocks.effect);
         match r {
             Reaction::Strike { monster } => {
                 // What a reaction does triggers no further reactions.
-                self.strike(b, Some(&skill), monster as usize, src);
+                self.strike(b, Some(&skill), by, monster as usize, src);
             }
             Reaction::Debuff { monster } => {
                 if let Some(effect) = effect {
-                    self.debuff(b, &skill, effect, monster as usize, src);
+                    self.debuff(b, &skill, by, effect, monster as usize, src);
                 }
             }
             Reaction::Buff { slot } => {
                 if let Some(effect) = effect {
-                    self.buff(b, &skill, effect, slot as usize, src);
+                    self.buff(b, &skill, by, effect, slot as usize, src);
                 }
             }
             Reaction::Aura => {
@@ -1447,6 +1659,7 @@ impl<'a> Battle<'a> {
                 if let Some(a) = aura {
                     self.heroes[b].auras[REACTIVE_AURA] = a;
                     self.stats.slots[b].effects_landed += 1;
+                    self.stats.slots[b].skills[by.index()].effects += 1;
                 }
             }
         }
@@ -1511,6 +1724,7 @@ impl<'a> Battle<'a> {
                 self.foes[b].cooldowns[REACTIVE_SLOT] = cooldown_after_use(skill.stats.cooldown);
                 self.stats.reactions += 1;
                 self.stats.monster_reactions += 1;
+                self.monster_tally(b).reactions += 1;
                 let effect = effect_action(skill.stats.blocks.effect);
                 match r {
                     Reaction::Strike { monster: slot } => {
@@ -1542,7 +1756,13 @@ impl<'a> Battle<'a> {
 
     /// The jumps, knockback and burning cells of hero `s`'s last hit on monster `target`
     /// (`deadroll_rules::spread`, the code the program runs). Returns the knockback.
-    fn spread(&mut self, s: usize, target: usize, caster: u8) -> Option<(Cell, Cell)> {
+    fn spread(
+        &mut self,
+        s: usize,
+        target: usize,
+        by: SkillRef,
+        caster: u8,
+    ) -> Option<(Cell, Cell)> {
         let r = &self.result;
         if !spreads(r) {
             return None;
@@ -1592,8 +1812,14 @@ impl<'a> Battle<'a> {
                 apply_mod(&mut self.foes[h.monster as usize].mods, *m);
             }
         }
+        let splash_aspect = self.result.splash.aspect as usize;
         for h in out.splashes() {
-            self.stats.slots[s].damage += h.damage as u64;
+            let slot = &mut self.stats.slots[s];
+            slot.damage += h.damage as u64;
+            slot.by_aspect[splash_aspect] += h.damage as u64;
+            slot.skills[by.index()].damage += h.damage as u64;
+            let kind = self.foes[h.monster as usize].kind;
+            self.stats.monsters.entry(kind).or_default().damage_taken += h.damage as u64;
             if h.died {
                 self.foe_died(h.monster as usize);
             }

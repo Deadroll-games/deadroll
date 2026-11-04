@@ -1,7 +1,50 @@
 //! Aggregates over many fights. Floats only here, for the report: the fights are integers.
+use std::collections::BTreeMap;
+
+use deadroll_combat::OpKind;
 use deadroll_types::StateKind;
 
-use crate::battle::{BattleStats, Outcome};
+use crate::{
+    aspects::ByAspect,
+    battle::{BattleStats, MonsterTally, Outcome, SlotStats, SKILL_SLOTS},
+};
+
+/// The name of a skill entry when nobody gave one.
+fn default_skill_name(k: usize) -> String {
+    match k {
+        0 => "Weapon".into(),
+        k if k == SKILL_SLOTS - 1 => "Reactive".into(),
+        k => format!("Skill {k}"),
+    }
+}
+
+/// Names for the breakdowns: the skills of each hero (weapon, actives, reactive) and the monster
+/// kinds by bestiary id. Anything missing gets a placeholder.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Labels {
+    pub skills: Vec<[String; SKILL_SLOTS]>,
+    pub monsters: BTreeMap<u8, String>,
+}
+
+/// One skill of one hero over all fights (totals).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SkillReport {
+    pub name: String,
+    pub uses: u64,
+    pub hits: u64,
+    pub misses: u64,
+    pub crits: u64,
+    pub damage: u64,
+    pub effects: u64,
+}
+
+/// One monster kind over all fights (totals).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MonsterReport {
+    pub id: u8,
+    pub name: String,
+    pub tally: MonsterTally,
+}
 
 /// p10 / p50 / p90 (nearest rank) and the mean; all 0 without samples.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -86,6 +129,25 @@ pub struct SlotReport {
     pub healed_per_turn: f64,
     pub effects_per_fight: f64,
     pub death_rate: f64,
+    /// Totals over all fights, for the history log (the rates above come from them).
+    pub fights: u64,
+    pub attacks: u64,
+    pub hits: u64,
+    pub misses: u64,
+    pub crits: u64,
+    pub hit_damage: u64,
+    pub largest_hit: u32,
+    pub crit_extra: u64,
+    pub dot_damage: u64,
+    pub healed: u64,
+    pub effects: u64,
+    pub damage_taken: u64,
+    pub deaths: u64,
+    /// Skills that acted at least once.
+    pub skills: Vec<SkillReport>,
+    /// `damage` by aspect, adding up to it, and what resistance cut from the hero's hits.
+    pub by_aspect: ByAspect,
+    pub resisted: ByAspect,
 }
 
 /// A batch of fights.
@@ -136,6 +198,12 @@ pub struct Report {
     pub packs_won_per_fight: f64,
     pub xp_per_fight: f64,
     pub hp_left_share: f64,
+    /// History log: ops of the resonances that acted per fight, by `OpKind`; heroes lost and
+    /// monsters killed per fight; the monster kinds' totals.
+    pub ops_per_fight: Vec<f64>,
+    pub deaths_per_fight: f64,
+    pub kills_per_fight: f64,
+    pub monsters: Vec<MonsterReport>,
 }
 
 fn ratio(a: u64, b: u64) -> f64 {
@@ -148,6 +216,11 @@ fn ratio(a: u64, b: u64) -> f64 {
 
 impl Report {
     pub fn of(names: &[String], fights: &[BattleStats]) -> Self {
+        Self::with_labels(names, &Labels::default(), fights)
+    }
+
+    /// [`Report::of`] with the names of skills and monster kinds for the breakdowns.
+    pub fn with_labels(names: &[String], labels: &Labels, fights: &[BattleStats]) -> Self {
         let n = fights.len();
         let count = |o: Outcome| fights.iter().filter(|f| f.outcome == o).count() as u32;
         let rounds: Vec<f64> = fights
@@ -176,12 +249,65 @@ impl Report {
                     .iter()
                     .map(|s| ratio(s.damage, s.turns as u64))
                     .collect();
-                let sum = |g: fn(&&crate::battle::SlotStats) -> u64| per.iter().map(g).sum::<u64>();
+                let sum = |g: fn(&&SlotStats) -> u64| per.iter().map(g).sum::<u64>();
                 let damage = sum(|s| s.damage);
                 let turns = sum(|s| s.turns as u64);
                 let attacks = sum(|s| s.attacks as u64);
                 let hits = sum(|s| s.hits as u64);
+                let mut by_aspect = ByAspect::default();
+                let mut resisted = ByAspect::default();
+                let mut tallies = [crate::battle::SkillTally::default(); SKILL_SLOTS];
+                for s in &per {
+                    for (a, b) in by_aspect.iter_mut().zip(s.by_aspect) {
+                        *a += b;
+                    }
+                    for (a, b) in resisted.iter_mut().zip(s.resisted) {
+                        *a += b;
+                    }
+                    for (a, b) in tallies.iter_mut().zip(s.skills) {
+                        a.uses += b.uses;
+                        a.hits += b.hits;
+                        a.misses += b.misses;
+                        a.crits += b.crits;
+                        a.damage += b.damage;
+                        a.effects += b.effects;
+                    }
+                }
+                let skills = tallies
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, t)| t.uses > 0)
+                    .map(|(k, t)| SkillReport {
+                        name: labels
+                            .skills
+                            .get(i)
+                            .map(|names| names[k].clone())
+                            .unwrap_or_else(|| default_skill_name(k)),
+                        uses: t.uses as u64,
+                        hits: t.hits as u64,
+                        misses: t.misses as u64,
+                        crits: t.crits as u64,
+                        damage: t.damage,
+                        effects: t.effects as u64,
+                    })
+                    .collect();
                 SlotReport {
+                    fights: per.len() as u64,
+                    attacks,
+                    hits,
+                    misses: sum(|s| s.misses as u64),
+                    crits: sum(|s| s.crits as u64),
+                    hit_damage: sum(|s| s.hit_damage),
+                    largest_hit: per.iter().map(|s| s.largest_hit).max().unwrap_or(0),
+                    crit_extra: sum(|s| s.crit_extra),
+                    dot_damage: sum(|s| s.dot_damage),
+                    healed: sum(|s| s.healed),
+                    effects: sum(|s| s.effects_landed as u64),
+                    damage_taken: sum(|s| s.damage_taken),
+                    deaths: per.iter().filter(|s| s.died).count() as u64,
+                    skills,
+                    by_aspect,
+                    resisted,
                     name: name.clone(),
                     dpt: Percentiles::of(&dpt),
                     dpt_hist: Histogram::of(&dpt),
@@ -260,6 +386,49 @@ impl Report {
                 fights.iter().map(|f| f.hp_left).sum(),
                 fights.iter().map(|f| f.hp_max).sum(),
             ),
+            ops_per_fight: (0..OpKind::COUNT as usize)
+                .map(|k| ratio(fights.iter().map(|f| f.ops_acted[k] as u64).sum(), n as u64))
+                .collect(),
+            deaths_per_fight: ratio(
+                fights
+                    .iter()
+                    .flat_map(|f| f.slots.iter())
+                    .filter(|s| s.died)
+                    .count() as u64,
+                n as u64,
+            ),
+            kills_per_fight: ratio(fights.iter().map(|f| f.kills.len() as u64).sum(), n as u64),
+            monsters: {
+                let mut kinds: BTreeMap<u8, MonsterTally> = BTreeMap::new();
+                for f in fights {
+                    for (kind, t) in &f.monsters {
+                        let total = kinds.entry(*kind).or_default();
+                        total.spawned += t.spawned;
+                        total.died += t.died;
+                        total.damage_dealt += t.damage_dealt;
+                        total.damage_taken += t.damage_taken;
+                        total.hits += t.hits;
+                        total.crits += t.crits;
+                        total.skills += t.skills;
+                        total.reactions += t.reactions;
+                        total.healed += t.healed;
+                        total.turns_skipped += t.turns_skipped;
+                        total.hero_kills += t.hero_kills;
+                    }
+                }
+                kinds
+                    .into_iter()
+                    .map(|(id, tally)| MonsterReport {
+                        id,
+                        name: labels
+                            .monsters
+                            .get(&id)
+                            .cloned()
+                            .unwrap_or_else(|| format!("monster {id}")),
+                        tally,
+                    })
+                    .collect()
+            },
         }
     }
 }

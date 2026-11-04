@@ -9,8 +9,10 @@
 //!   checked with `deadroll_skillcheck` exactly like the in-game builder ([`setup`]).
 //! - Enum lists come from each enum's `ALL` ([`named`]).
 pub mod ai;
+pub mod aspects;
 pub mod battle;
 pub mod config_io;
+pub mod metrics;
 pub mod named;
 pub mod presets;
 pub mod randgen;
@@ -18,9 +20,12 @@ pub mod run;
 pub mod setup;
 pub mod stats;
 
-pub use battle::{fight, BattleStats, Outcome, Settings, SlotStats};
+pub use battle::{
+    fight, BattleStats, MonsterTally, Outcome, Settings, SkillRef, SkillTally, SlotStats,
+    SKILL_SLOTS,
+};
 pub use deadroll_rules::BalanceConfig;
 pub use presets::{Arena, EncounterPreset, EncounterSlot, HeroPreset, Kind, Presets, SkillPreset};
 pub use run::{random_builds, run_batch, BuildScore, Progress, RandomBuilds};
 pub use setup::{resolve_fight, resolve_party, Fight, Fighter, Issues};
-pub use stats::{Histogram, Percentiles, Report, SlotReport};
+pub use stats::{Histogram, Labels, MonsterReport, Percentiles, Report, SkillReport, SlotReport};
