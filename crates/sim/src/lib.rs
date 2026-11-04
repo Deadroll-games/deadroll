@@ -12,6 +12,7 @@ pub mod ai;
 pub mod aspects;
 pub mod battle;
 pub mod config_io;
+pub mod metrics;
 pub mod named;
 pub mod presets;
 pub mod randgen;
