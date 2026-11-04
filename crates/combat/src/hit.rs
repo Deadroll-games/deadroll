@@ -1466,7 +1466,7 @@ fn blind_d20(d20: u8, blinded_bp: u32) -> u32 {
 }
 
 /// The armor a packet of `aspect` meets: Sundered cuts the armor against Piercing.
-fn armor_vs(d: &Defender, aspect: Aspect) -> u32 {
+pub fn armor_vs(d: &Defender, aspect: Aspect) -> u32 {
     if aspect == Aspect::Piercing {
         counter(d.armor as u64, d.sunder_bp) as u32
     } else {

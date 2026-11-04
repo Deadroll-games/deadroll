@@ -4,15 +4,16 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use deadroll_combat::{RollSource, SeededRoll};
 use deadroll_rules::BalanceConfig;
+use deadroll_skillcheck::ACTIVE_MAX;
 use deadroll_types::{Class, PARTY_MAX};
 use rayon::prelude::*;
 
 use crate::{
-    battle::{fight, BattleStats, Outcome, Settings},
+    battle::{fight, BattleStats, Outcome, Settings, SkillRef, SKILL_SLOTS},
     presets::{HeroPreset, Presets},
     randgen::random_hero,
     setup::{fighter, Fight, Fighter, Issues},
-    stats::Report,
+    stats::{Labels, Report},
 };
 
 /// Shared with the UI thread: fights done, fights planned, a cancel flag.
@@ -72,7 +73,42 @@ pub fn run_batch(
         .collect();
     let results: Option<Vec<BattleStats>> = results.into_iter().collect();
     let names: Vec<String> = party.iter().map(|f| f.name.clone()).collect();
-    results.map(|r| Report::of(&names, &r))
+    results.map(|r| Report::with_labels(&names, &labels(party, encounter), &r))
+}
+
+/// The names of the party's skills and the encounter's monsters, for the report's breakdowns.
+fn labels(party: &[Fighter], encounter: &Fight) -> Labels {
+    let skills = party
+        .iter()
+        .map(|f| {
+            let mut names: [String; SKILL_SLOTS] = std::array::from_fn(|_| String::new());
+            names[SkillRef::Weapon.index()] = "Weapon".into();
+            for (k, skill) in f.skills.iter().take(ACTIVE_MAX).enumerate() {
+                names[SkillRef::Active(k).index()] = skill.name.clone();
+            }
+            names[SkillRef::Reactive.index()] = f
+                .reactive
+                .as_ref()
+                .map_or_else(|| "Reactive".into(), |r| r.name.clone());
+            for (k, name) in names.iter_mut().enumerate() {
+                if name.is_empty() {
+                    *name = format!("Skill {k}");
+                }
+            }
+            names
+        })
+        .collect();
+    let mut monsters = std::collections::BTreeMap::new();
+    let mut stack = vec![encounter];
+    while let Some(fight) = stack.pop() {
+        for spawn in &fight.spawns {
+            monsters
+                .entry(spawn.bestiary_id)
+                .or_insert_with(|| spawn.name.clone());
+        }
+        stack.extend(&fight.then);
+    }
+    Labels { skills, monsters }
 }
 
 /// What random builds to try.
